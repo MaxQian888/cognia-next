@@ -1,5 +1,5 @@
 /**
- * BridgeClient — the brain's side of `/ws/v1/bridge` (ADR-0059 W3 / T-B1).
+ * BridgeClient — the brain's side of `/internal/bridge` (ADR-0059 W3 / T-B1).
  *
  * Implements the `RuntimeBridge` shape the three data-plane installers
  * accept (`listen` + `invoke`), so `installDesktopSyncSource({ bridge })`
@@ -35,14 +35,19 @@ export interface WebSocketLike {
   close(code?: number, reason?: string): void
   addEventListener(
     type: "open" | "message" | "close" | "error",
-    listener: (event: { data?: unknown }) => void
+    listener: (event: {
+      data?: unknown
+      error?: unknown
+      message?: unknown
+      code?: unknown
+    }) => void
   ): void
 }
 
 type Handler = (e: { payload: unknown }) => void
 
 export interface BridgeClientOptions {
-  /** `wss://127.0.0.1:<port>/ws/v1/bridge` (no query — the token is appended). */
+  /** `wss://127.0.0.1:<port>/internal/bridge` (no query — the token is appended). */
   url: string
   /** Initial service token; refreshed by `token_refresh` frames. */
   token: string
@@ -68,6 +73,37 @@ export interface BridgeClientOptions {
 
 /** Reconnect backoff table (ms), jittered ±50%. */
 const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000, 16_000, 30_000]
+
+function redactBridgeErrorDetail(value: string): string {
+  return value
+    .replace(/([?&]token=)[^&\s]+/gi, "$1[redacted]")
+    .replace(/(authorization:\s*(?:bearer\s+)?)[^\s,;]+/gi, "$1[redacted]")
+}
+
+function describeBridgeSocketError(event: {
+  error?: unknown
+  message?: unknown
+  code?: unknown
+}): string | null {
+  const parts: string[] = []
+  let current = event.error
+  for (let depth = 0; current != null && depth < 3; depth += 1) {
+    if (current instanceof Error) {
+      if (current.message) parts.push(current.message)
+      current = current.cause
+      continue
+    }
+    if (typeof current === "string") parts.push(current)
+    break
+  }
+  if (parts.length === 0 && typeof event.message === "string" && event.message) {
+    parts.push(event.message)
+  }
+  if (parts.length === 0 && (typeof event.code === "string" || typeof event.code === "number")) {
+    parts.push(`code ${event.code}`)
+  }
+  return parts.length > 0 ? redactBridgeErrorDetail(parts.join(": ")) : null
+}
 
 function defaultWsFactory(url: string): WebSocketLike {
   const ctor = (globalThis as { WebSocket?: new (url: string) => WebSocketLike }).WebSocket
@@ -285,9 +321,10 @@ export class BridgeClient implements RuntimeBridge {
       cancelAckTimeout?.()
       this.onDisconnect(new Error("bridge socket closed"))
     })
-    socket.addEventListener("error", () => {
+    socket.addEventListener("error", (event) => {
       // The close event follows; nothing to do here beyond logging.
-      this.log("warn", "bridge socket error")
+      const detail = describeBridgeSocketError(event)
+      this.log("warn", detail ? `bridge socket error: ${detail}` : "bridge socket error")
     })
   }
 

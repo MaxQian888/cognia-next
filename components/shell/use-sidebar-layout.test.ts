@@ -21,7 +21,7 @@ interface SavePatch {
 const saveMock = jest.fn(async (_patch?: SavePatch) => {})
 
 beforeEach(() => {
-  saveMock.mockClear()
+  saveMock.mockReset().mockResolvedValue(undefined)
   useSettingsStore.setState({
     settings: { sidebarLayout: { pinned: ["workflows", "inbox"], hidden: [] } } as never,
     save: saveMock as never,
@@ -104,6 +104,26 @@ describe("useSidebarLayout", () => {
     expect(lastSaved().pinned).toEqual(["workflows", "inbox"])
   })
 
+  it("serializes rapid pins against the latest persisted layout", async () => {
+    useSettingsStore.setState({
+      settings: {
+        sidebarLayout: { pinned: ["workflows"], hidden: ["logs", "me"] },
+      } as never,
+    })
+    saveMock.mockImplementation(async (patch?: SavePatch) => {
+      await Promise.resolve()
+      const current = useSettingsStore.getState().settings
+      useSettingsStore.setState({ settings: { ...current, ...patch } as never })
+    })
+    const { result } = renderHook(() => useSidebarLayout())
+
+    await act(async () => {
+      await Promise.all([result.current.pin("logs"), result.current.pin("me")])
+    })
+
+    expect(lastSaved()).toEqual({ pinned: ["workflows", "logs", "me"], hidden: [] })
+  })
+
   it("unpins an item (it drops to overflow)", async () => {
     const { result } = renderHook(() => useSidebarLayout())
     await act(async () => {
@@ -113,20 +133,26 @@ describe("useSidebarLayout", () => {
   })
 
   it("does not recompute layout/callbacks when an unrelated setting changes", () => {
-    const { result, rerender } = renderHook(() => useSidebarLayout())
+    let renderCount = 0
+    const { result } = renderHook(() => {
+      renderCount += 1
+      return useSidebarLayout()
+    })
     const firstLayout = result.current.layout
     const firstPin = result.current.pin
-    // An unrelated settings write swaps in a fresh `settings` object reference
-    // but keeps the SAME `sidebarLayout` reference — the memo (keyed on
-    // `settings.sidebarLayout`, not the whole object) must hold its identity.
-    const existingLayout = (useSettingsStore.getState().settings as { sidebarLayout: unknown })
-      .sidebarLayout
+    const initialRenderCount = renderCount
+    // The persisted settings path may hydrate fresh objects and arrays even
+    // when the layout values did not change. Content-stable selectors must
+    // still prevent the always-mounted rail from rendering again.
     act(() => {
       useSettingsStore.setState({
-        settings: { theme: "dark", sidebarLayout: existingLayout } as never,
+        settings: {
+          theme: "dark",
+          sidebarLayout: { pinned: ["workflows", "inbox"], hidden: [] },
+        } as never,
       })
     })
-    rerender()
+    expect(renderCount).toBe(initialRenderCount)
     expect(result.current.layout).toBe(firstLayout)
     expect(result.current.pin).toBe(firstPin)
   })

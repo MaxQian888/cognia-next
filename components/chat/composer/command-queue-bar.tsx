@@ -15,7 +15,14 @@
 
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, XIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import {
+  Queue,
+  QueueItem,
+  QueueItemAction,
+  QueueItemActions,
+  QueueItemContent,
+  QueueItemIndicator,
+} from "@/components/ai-elements/queue"
 import { cn } from "@/lib/utils"
 import type { InputSegment } from "@/lib/slash-commands/parse-segments"
 import type { CommandError } from "@/lib/slash-commands/run-segments"
@@ -45,57 +52,61 @@ export function CommandQueueBar({ segments, errors = [], onRemove }: CommandQueu
 
   return (
     <Collapse>
-      <div
+      <Queue
         role="group"
         aria-label={t("ariaLabel")}
-        className="flex flex-wrap items-center gap-1.5 px-2 has-[>*]:pt-2"
+        className="flex-row flex-wrap items-center gap-1.5 border-0 bg-transparent px-2 pt-2 pb-0 shadow-none"
       >
         <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           {t("label", { count: commands.length })}
         </span>
-        {commands.map((cmd, index) => {
-          const didFail = failed.has(cmd.name)
-          return (
-            <div
-              key={`${cmd.start}-${cmd.name}`}
-              data-testid={`command-queue-pill-${cmd.name}`}
-              data-failed={didFail || undefined}
-              title={didFail ? t("failedTooltip", { name: cmd.name }) : cmd.raw}
-              className={cn(
-                "group flex items-center gap-1 rounded-md border px-2 py-1 text-xs",
-                didFail
-                  ? "border-destructive/50 bg-destructive/10"
-                  : "border-primary/30 bg-primary/5"
-              )}
-            >
-              <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
-                {index + 1}
-              </span>
-              {didFail ? (
-                <AlertTriangleIcon className="size-3.5 text-destructive" aria-hidden />
-              ) : null}
-              <span className="max-w-[min(200px,calc(100vw-8rem))] truncate font-mono font-medium">
-                /{cmd.name}
-              </span>
-              {cmd.args ? (
-                <span className="max-w-[min(160px,40vw)] truncate text-[10px] text-muted-foreground">
-                  {cmd.args}
-                </span>
-              ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t("removeAria", { name: cmd.name })}
-                onClick={() => onRemove(cmd.start, cmd.end)}
-                className="size-5 opacity-60 transition-opacity hover:opacity-100"
+        <ol className="contents">
+          {commands.map((cmd, index) => {
+            const didFail = failed.has(cmd.name)
+            return (
+              <QueueItem
+                key={`${cmd.start}-${cmd.name}`}
+                data-testid={`command-queue-pill-${cmd.name}`}
+                data-failed={didFail || undefined}
+                title={didFail ? t("failedTooltip", { name: cmd.name }) : cmd.raw}
+                className={cn(
+                  "flex-row items-center gap-1 border px-2 py-1 text-xs",
+                  didFail
+                    ? "border-destructive/50 bg-destructive/10"
+                    : "border-primary/30 bg-primary/5"
+                )}
               >
-                <XIcon className="size-3" />
-              </Button>
-            </div>
-          )
-        })}
-      </div>
+                <QueueItemIndicator
+                  className={didFail ? "border-destructive bg-destructive" : ""}
+                />
+                <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                  {index + 1}
+                </span>
+                {didFail ? (
+                  <AlertTriangleIcon className="size-3.5 text-destructive" aria-hidden />
+                ) : null}
+                <QueueItemContent className="max-w-[min(200px,calc(100vw-8rem))] grow-0 font-mono font-medium text-foreground">
+                  /{cmd.name}
+                </QueueItemContent>
+                {cmd.args ? (
+                  <span className="max-w-[min(160px,40vw)] truncate text-[10px] text-muted-foreground">
+                    {cmd.args}
+                  </span>
+                ) : null}
+                <QueueItemActions>
+                  <QueueItemAction
+                    aria-label={t("removeAria", { name: cmd.name })}
+                    onClick={() => onRemove(cmd.start, cmd.end)}
+                    className="size-5 opacity-60 hover:opacity-100"
+                  >
+                    <XIcon className="size-3" />
+                  </QueueItemAction>
+                </QueueItemActions>
+              </QueueItem>
+            )
+          })}
+        </ol>
+      </Queue>
     </Collapse>
   )
 }

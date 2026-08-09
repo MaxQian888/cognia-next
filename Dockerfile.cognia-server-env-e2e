@@ -1,0 +1,2 @@
+FROM cognia-server:ci-full
+ENV COGNIA_SIDECAR_SCRIPT=/app/brain/sidecar/claude-host.mjs

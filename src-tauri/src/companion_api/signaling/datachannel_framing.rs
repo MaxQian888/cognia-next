@@ -11,6 +11,11 @@ pub const MAX_REASSEMBLIES: usize = 8;
 pub const MAX_REASSEMBLY_BYTES: usize = 4 * 1024 * 1024;
 pub const CHUNK_TIMEOUT_MS: i64 = 15_000;
 const CHUNK_DATA_BYTES: usize = 23 * 1024;
+pub const BINARY_RESOURCE_MAGIC: &[u8; 4] = b"CGM1";
+pub const BINARY_RESOURCE_ID_BYTES: usize = 36;
+pub const BINARY_RESOURCE_HEADER_BYTES: usize =
+    BINARY_RESOURCE_MAGIC.len() + BINARY_RESOURCE_ID_BYTES + 4 + 4;
+pub const BINARY_RESOURCE_CHUNK_BYTES: usize = MAX_FRAME_BYTES - BINARY_RESOURCE_HEADER_BYTES;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -257,6 +262,32 @@ pub fn cancel(message_id: &str, reason: &str) -> Vec<u8> {
     .unwrap_or_default()
 }
 
+/// Encode one raw binary resource chunk. Unlike logical RPC framing, the
+/// payload stays binary and is never expanded through JSON/base64.
+pub fn encode_binary_resource_chunk(
+    request_id: &str,
+    index: u32,
+    total_chunks: u32,
+    payload: &[u8],
+) -> Result<Vec<u8>, &'static str> {
+    if request_id.len() != BINARY_RESOURCE_ID_BYTES
+        || !request_id.is_ascii()
+        || uuid::Uuid::parse_str(request_id).is_err()
+        || total_chunks == 0
+        || index >= total_chunks
+        || payload.len() > BINARY_RESOURCE_CHUNK_BYTES
+    {
+        return Err("invalid_binary_resource_chunk");
+    }
+    let mut frame = Vec::with_capacity(BINARY_RESOURCE_HEADER_BYTES + payload.len());
+    frame.extend_from_slice(BINARY_RESOURCE_MAGIC);
+    frame.extend_from_slice(request_id.as_bytes());
+    frame.extend_from_slice(&index.to_be_bytes());
+    frame.extend_from_slice(&total_chunks.to_be_bytes());
+    frame.extend_from_slice(payload);
+    Ok(frame)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,6 +306,21 @@ mod tests {
             }
         }
         assert_eq!(completed, Some(bytes));
+    }
+
+    #[test]
+    fn binary_resource_chunk_keeps_payload_raw_and_bounded() {
+        let request_id = "550e8400-e29b-41d4-a716-446655440000";
+        let payload = vec![0_u8, 255, 17, 99];
+        let frame = encode_binary_resource_chunk(request_id, 1, 3, &payload).unwrap();
+
+        assert_eq!(&frame[..4], BINARY_RESOURCE_MAGIC);
+        assert_eq!(
+            std::str::from_utf8(&frame[4..4 + BINARY_RESOURCE_ID_BYTES]).unwrap(),
+            request_id
+        );
+        assert_eq!(&frame[BINARY_RESOURCE_HEADER_BYTES..], payload.as_slice());
+        assert!(frame.len() <= MAX_FRAME_BYTES);
     }
 
     #[test]

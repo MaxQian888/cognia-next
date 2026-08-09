@@ -25,6 +25,7 @@ export interface LocalRecordingRow {
   id: RecordingId
   status: LocalRecordingStatus
   updatedAt: number
+  source?: { kind: "session" | "run" }
 }
 
 export type RecoveryPlan =
@@ -104,5 +105,5 @@ export function danglingRows(
   bundles: readonly RecoverableBundle[]
 ): LocalRecordingRow[] {
   const present = new Set(bundles.map((bundle) => bundle.recordingId))
-  return rows.filter((row) => row.status !== "saved" && !present.has(row.id))
+  return rows.filter((row) => !row.source && row.status !== "saved" && !present.has(row.id))
 }

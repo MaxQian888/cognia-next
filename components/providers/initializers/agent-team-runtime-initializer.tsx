@@ -10,8 +10,9 @@
  */
 
 import { useEffect, useRef } from "react"
-import { configureAgentTeamRuntime } from "@/lib/ai/agent/agent-team"
+import { configureAgentTeamRuntime, recoverDurableAgentTeams } from "@/lib/ai/agent/agent-team"
 import { buildAgentTeamRuntimeDeps } from "@/lib/ai/agent/agent-team-runtime-deps"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 
 export function AgentTeamRuntimeInitializer() {
   const hasInitialized = useRef(false)
@@ -20,6 +21,9 @@ export function AgentTeamRuntimeInitializer() {
     if (hasInitialized.current) return
     hasInitialized.current = true
     configureAgentTeamRuntime(buildAgentTeamRuntimeDeps())
+    const recover = () => void recoverDurableAgentTeams().catch(() => undefined)
+    if (useAgentTeamStore.persist.hasHydrated()) recover()
+    else return useAgentTeamStore.persist.onFinishHydration(recover)
   }, [])
 
   return null

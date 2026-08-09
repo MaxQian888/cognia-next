@@ -7,20 +7,17 @@
  *
  *   1. **Discover** — auto-scan the LAN for cognia desktops via mDNS, with
  *      an IP-segment fallback driven by the WebRTC ICE-candidate trick.
- *      Tapping a server prefills its baseUrl on step 2.
- *   2. **Pair** — QR scanner + manual baseUrl/JWT form. POSTs to
- *      `/api/v1/auth/pair`, persists the device JWT through
- *      `companion-storage` (SecureStorage on Capacitor, localStorage on web).
+ *      Discovery remains informational because registration requires a fresh
+ *      one-shot Owner invitation.
+ *   2. **Pair** — scans or pastes a cgnp3 payload, registers an ES256 device
+ *      identity, and persists only its private key in secure storage.
  *   3. **Paired** — connection-health card with refresh probe, diagnostics
  *      collapsible, and a sign-out trigger guarded by biometrics.
  *
  * The coordinator owns the step state and a small set of navigation
  * callbacks; every other piece of behavior lives inside the matching
- * step component (`components/mobile/pair/*`). The validation /
- * error-formatting helpers used to live here directly — they were moved
- * to `pair-helpers.ts` and are re-exported below to keep
- * `import { validateBaseUrl } from "@/components/mobile/pair-onboarding-client"`
- * working for the existing test suite.
+ * step component (`components/mobile/pair/*`). Pairing accepts only a complete
+ * cgnp3 invitation payload; the legacy URL + JWT form is intentionally absent.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -32,7 +29,6 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { usePlatform } from "@/hooks/use-platform"
 import { mobileTransition } from "@/lib/ui/motion"
-import { buildTimeServerUrl } from "@/lib/platform/web-companion"
 import { hydrateCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 import {
@@ -46,13 +42,6 @@ import { PairStep } from "./pair/pair-step"
 import { PairedStep } from "./pair/paired-step"
 import { PairStepper, type PairStep as PairStepName } from "./pair/pair-stepper"
 
-export {
-  describeHttpError,
-  describeNetworkError,
-  validateBaseUrl,
-  validatePairJwt,
-} from "./pair/pair-helpers"
-
 type PhaseLoading = { kind: "loading" }
 type PhaseUnpaired = { kind: "unpaired" }
 type PhasePaired = {
@@ -64,18 +53,12 @@ type PhasePaired = {
 type Phase = PhaseLoading | PhaseUnpaired | PhasePaired
 
 export interface Selection {
-  baseUrl: string
-  pairJwt: string
-  fingerprint: string
-  locked: boolean
+  pairPayload: string
   autoScan: boolean
 }
 
 const EMPTY_SELECTION: Selection = {
-  baseUrl: "",
-  pairJwt: "",
-  fingerprint: "",
-  locked: false,
+  pairPayload: "",
   autoScan: false,
 }
 
@@ -115,36 +98,12 @@ export function readPairParams(search?: string): PairPageParams {
  * `switchTo` for a device we have no recent-server record of).
  */
 export function resolveParamSelection(
-  params: PairPageParams,
-  recents: RecentServer[]
+  _params: PairPageParams,
+  _recents: RecentServer[]
 ): Selection | null {
-  if (params.baseUrl) {
-    return {
-      baseUrl: params.baseUrl,
-      pairJwt: "",
-      fingerprint: params.fingerprint ?? "",
-      locked: true,
-      autoScan: false,
-    }
-  }
-  if (params.switchTo) {
-    // Prefer the exact deviceId recorded at pair time; fall back to the
-    // legacy label match (`deviceId.slice(0, 8)`) for entries persisted
-    // before `deviceId` was added to the recent-server record.
-    const label = params.switchTo.slice(0, 8)
-    const match =
-      recents.find((r) => r.deviceId === params.switchTo) ??
-      recents.find((r) => r.label === label)
-    if (match) {
-      return {
-        baseUrl: match.baseUrl,
-        pairJwt: "",
-        fingerprint: match.fingerprint ?? "",
-        locked: true,
-        autoScan: false,
-      }
-    }
-  }
+  // Owner invitations are one-shot and never stored in recent-server
+  // records or query parameters. Re-pairing always requires a fresh cgnp3
+  // payload from the host.
   return null
 }
 
@@ -156,18 +115,12 @@ const CEILING_MS = 8000
 export function PairOnboardingClient() {
   const router = useRouter()
   const t = useTranslations("mobile.pair")
-  // ADR-0059 C2 — a plain browser has no camera plugin and no LAN to scan:
-  // skip the Discover step, land straight on the manual pair form, and
-  // pre-fill (and lock) the server URL when the deployment baked one in via
-  // NEXT_PUBLIC_COGNIA_SERVER_URL.
+  // A plain browser has no camera plugin or LAN discovery, so it lands on the
+  // form where the user pastes the complete one-shot cgnp3 payload.
   const platform = usePlatform()
   const isWebHost = platform === "web"
   const unpairedStep: PairStepName = isWebHost ? "pair" : "discover"
-  const unpairedSelection = useMemo<Selection>(() => {
-    if (!isWebHost) return EMPTY_SELECTION
-    const envUrl = buildTimeServerUrl()
-    return { ...EMPTY_SELECTION, baseUrl: envUrl ?? "", locked: envUrl !== null }
-  }, [isWebHost])
+  const unpairedSelection = useMemo<Selection>(() => EMPTY_SELECTION, [])
 
   const [phase, setPhase] = useState<Phase>({ kind: "loading" })
   const [step, setStep] = useState<PairStepName>("discover")
@@ -243,7 +196,7 @@ export function PairOnboardingClient() {
           const alreadyOnTarget =
             switchToParam !== null
               ? cfg.deviceId === switchToParam
-              : paramSelection === null || paramSelection.baseUrl === cfg.baseUrl
+              : true
           if (alreadyOnTarget) {
             setStep("paired")
           } else if (paramSelection) {
@@ -289,13 +242,8 @@ export function PairOnboardingClient() {
   }, [unpairedStep, unpairedSelection])
 
   const onSelectServer = useCallback((server: DiscoveredServer) => {
-    setSelection({
-      baseUrl: server.baseUrl,
-      pairJwt: "",
-      fingerprint: server.fingerprint ?? "",
-      locked: true,
-      autoScan: false,
-    })
+    void server
+    setSelection(EMPTY_SELECTION)
     setStep("pair")
   }, [])
 
@@ -404,11 +352,8 @@ export function PairOnboardingClient() {
 
           {step === "pair" ? (
             <PairStep
-              key={`${selection.baseUrl}|${selection.pairJwt}|${selection.fingerprint}`}
-              prefilledBaseUrl={selection.baseUrl}
-              prefilledPairJwt={selection.pairJwt}
-              prefilledFingerprint={selection.fingerprint}
-              lockBaseUrl={selection.locked}
+              key={selection.pairPayload}
+              prefilledPairPayload={selection.pairPayload}
               autoScan={selection.autoScan}
               webMode={isWebHost}
               onPaired={onPaired}

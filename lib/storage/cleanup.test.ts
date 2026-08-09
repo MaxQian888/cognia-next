@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import {
   cleanupCategories,
   clearCategory,
@@ -10,13 +8,14 @@ import {
   __TESTING__,
 } from "./cleanup"
 import { appendBackupHistory } from "@/lib/db/backup-history"
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
 
 async function seedHistory(rows: number, baseAt = Date.now()) {
@@ -30,6 +29,8 @@ async function seedHistory(rows: number, baseAt = Date.now()) {
     })
   }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("previewCleanup", () => {
   it("returns zeroes for an empty bucket", async () => {
@@ -108,6 +109,24 @@ describe("quickCleanup", () => {
     expect(result.errors).toEqual([])
     expect(await getDb().backupHistory.count()).toBe(3)
   })
+
+  it("cleans governed cache tables in other without deleting authoritative other data", async () => {
+    await getDb().chatSearchState.put({ id: "cache", sessionId: "s1" } as never)
+    await getDb().chatGoals.put({
+      id: "goal",
+      sessionId: "s1",
+      title: "keep",
+      status: "active",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+
+    const result = await quickCleanup()
+
+    expect(result.deletedItems).toBeGreaterThanOrEqual(1)
+    expect(await getDb().chatSearchState.get("cache")).toBeUndefined()
+    expect(await getDb().chatGoals.get("goal")).toBeDefined()
+  })
 })
 
 describe("deepCleanup", () => {
@@ -137,6 +156,31 @@ describe("selectableCategories", () => {
     expect(set).not.toContain("settings")
     expect(set).not.toContain("character")
     expect(set).toContain("backupHistory")
+  })
+})
+
+describe("governed other table plan", () => {
+  it("includes safe governed tables and excludes protected tables", () => {
+    const names = __TESTING__.cleanupTableNames("other", ["agentTraces", "agentTasks", "chatGoals"])
+    expect(names).toContain("agentTraces")
+    expect(names).not.toContain("agentTasks")
+    expect(names).not.toContain("chatGoals")
+  })
+
+  it("fails closed for an unknown runtime table", () => {
+    expect(__TESTING__.cleanupTableNames("other", ["unknown-table"])).toEqual([])
+  })
+
+  it("does not infer generic deletion safety from a queue or audit-shaped name", () => {
+    expect(
+      __TESTING__.cleanupTableNames("other", ["agentTasks", "browserRecordings", "hostSyncCursors"])
+    ).toEqual([])
+  })
+
+  it("fails closed for undated rows during age-based cleanup", () => {
+    expect(__TESTING__.isEligibleForCleanup({ id: "undated" }, Date.now())).toBe(false)
+    expect(__TESTING__.isEligibleForCleanup({ id: "trace", startTime: 10 }, 20)).toBe(true)
+    expect(__TESTING__.isEligibleForCleanup({ id: "trace", startTime: 30 }, 20)).toBe(false)
   })
 })
 

@@ -1574,8 +1574,8 @@ pub async fn desktop_pick_at_point(
 // ─────────────────────────────────────────────────────────────────────────────
 // Consent response. The renderer-side overlay invokes this when the user
 // clicks Allow once / Always allow this session / Reject. `prompt` is
-// optional — only used when `allow && persist` so the broker can register
-// the session grant against the same tuple as the original request.
+// optional for wire compatibility with older clients. The broker deliberately
+// ignores this untrusted copy and derives grants from the registered request.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -1599,14 +1599,18 @@ pub async fn automation_consent_respond(
     state: State<'_, AutomationState>,
     args: ConsentRespondArgs,
 ) -> std::result::Result<(), String> {
-    state.consent.resolve(
-        &args.id,
-        args.allow,
-        args.persist,
-        args.grant_duration_ms,
-        args.prompt.as_ref(),
-    );
+    state
+        .consent
+        .resolve_registered(&args.id, args.allow, args.persist, args.grant_duration_ms);
     Ok(())
+}
+
+/// Host-neutral response path used by cognia-server.
+pub fn automation_consent_respond_for_broker(
+    broker: &super::consent::ConsentBroker,
+    args: ConsentRespondArgs,
+) {
+    broker.resolve_registered(&args.id, args.allow, args.persist, args.grant_duration_ms);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

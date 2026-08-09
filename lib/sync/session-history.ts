@@ -1,5 +1,7 @@
 import type { StoredMessage } from "@cognia/agent-config-types"
 
+import { normalizeStoredMessageMedia } from "@/lib/chat/media/normalize-message-media"
+import { collectUnreferencedMessageMedia, messageMediaRefRows } from "@/lib/db/message-media-refs"
 import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
 
@@ -16,10 +18,33 @@ interface SessionHistoryPage {
 export interface SessionHistoryHydration {
   applied: number
   total: number
+  mode: "timeline" | "legacy"
 }
 
-const hydrated = new Set<string>()
+const hydrated = new Map<string, SessionHistoryHydration["mode"]>()
 const inflight = new Map<string, Promise<SessionHistoryHydration>>()
+const modeListeners = new Map<string, Set<() => void>>()
+
+function publishMode(sessionId: string, mode: SessionHistoryHydration["mode"]): void {
+  hydrated.set(sessionId, mode)
+  for (const listener of modeListeners.get(sessionId) ?? []) listener()
+}
+
+export function getSessionHistoryMode(
+  sessionId: string | null
+): SessionHistoryHydration["mode"] | null {
+  return sessionId ? (hydrated.get(sessionId) ?? null) : null
+}
+
+export function subscribeSessionHistoryMode(sessionId: string, listener: () => void): () => void {
+  const listeners = modeListeners.get(sessionId) ?? new Set<() => void>()
+  listeners.add(listener)
+  modeListeners.set(sessionId, listeners)
+  return () => {
+    listeners.delete(listener)
+    if (listeners.size === 0) modeListeners.delete(sessionId)
+  }
+}
 
 /**
  * Materialize one selected cloud session's complete transcript into local
@@ -31,20 +56,56 @@ export function hydrateSessionHistory(
   sessionId: string,
   options: { pageSize?: number } = {}
 ): Promise<SessionHistoryHydration> {
-  if (hydrated.has(sessionId)) {
-    return Promise.resolve({ applied: 0, total: 0 })
+  const completedMode = hydrated.get(sessionId)
+  if (completedMode) {
+    return Promise.resolve({ applied: 0, total: 0, mode: completedMode })
   }
   const existing = inflight.get(sessionId)
   if (existing) return existing
 
   const pageSize = Math.min(Math.max(1, options.pageSize ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE)
-  const task = drainSessionHistory(transport, sessionId, pageSize)
+  const task = negotiateAndHydrate(transport, sessionId, pageSize)
   inflight.set(sessionId, task)
   void task.then(
     () => inflight.delete(sessionId),
     () => inflight.delete(sessionId)
   )
   return task
+}
+
+function isMethodNotFound(error: unknown): boolean {
+  const record = error && typeof error === "object" ? (error as Record<string, unknown>) : undefined
+  const code = record?.code
+  const status = record?.status ?? record?.statusCode
+  const message = error instanceof Error ? error.message : String(record?.message ?? "")
+  return (
+    code === -32601 ||
+    code === "METHOD_NOT_FOUND" ||
+    status === 404 ||
+    status === 405 ||
+    /\bmethod not found\b/i.test(message)
+  )
+}
+
+async function negotiateAndHydrate(
+  transport: Transport,
+  sessionId: string,
+  pageSize: number
+): Promise<SessionHistoryHydration> {
+  try {
+    const capability = await transport.call<{ version?: unknown }>("transcript_capabilities", {})
+    if (capability?.version === 1) {
+      publishMode(sessionId, "timeline")
+      return { applied: 0, total: 0, mode: "timeline" }
+    }
+    throw new Error("invalid transcript capability response")
+  } catch (error) {
+    // Only protocol absence may enter the legacy full-history path. A timeout,
+    // auth failure, or server error must remain visible instead of triggering
+    // an unexpectedly large background download.
+    if (!isMethodNotFound(error)) throw error
+  }
+  return drainSessionHistory(transport, sessionId, pageSize)
 }
 
 async function drainSessionHistory(
@@ -65,19 +126,39 @@ async function drainSessionHistory(
     assertPage(page, sessionId, offset)
 
     if (page.rows.length > 0) {
-      await getDb().messages.bulkPut(page.rows)
+      await persistHistoryPage(page.rows)
       applied += page.rows.length
     }
     total = Math.max(total, page.total ?? applied)
 
     if (page.next_offset === undefined) {
-      hydrated.add(sessionId)
-      return { applied, total }
+      publishMode(sessionId, "legacy")
+      return { applied, total, mode: "legacy" }
     }
     offset = page.next_offset
   }
 
   throw new Error(`session history hydration exceeded ${MAX_PAGES} pages`)
+}
+
+async function persistHistoryPage(rows: StoredMessage[]): Promise<void> {
+  const normalized = await Promise.all(rows.map(normalizeStoredMessageMedia))
+  const db = getDb()
+  const messageIds = normalized.map((message) => message.id)
+  const orphanCandidates = new Set<string>()
+  await db.transaction("rw", db.messages, db.messageMediaRefs, async () => {
+    const oldRefs = await db.messageMediaRefs.where("messageId").anyOf(messageIds).toArray()
+    for (const ref of oldRefs) orphanCandidates.add(ref.hash)
+    await db.messages.bulkPut(normalized)
+    await db.messageMediaRefs.where("messageId").anyOf(messageIds).delete()
+    const replacementRefs = normalized.flatMap((message) =>
+      messageMediaRefRows(message.id, message.sessionId, message.parts)
+    )
+    if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
+  })
+  if (orphanCandidates.size > 0) {
+    await collectUnreferencedMessageMedia(orphanCandidates)
+  }
 }
 
 function assertPage(page: SessionHistoryPage, sessionId: string, offset: number): void {
@@ -108,4 +189,5 @@ function assertPage(page: SessionHistoryPage, sessionId: string, offset: number)
 export function __resetHydratedSessionHistoryForTests(): void {
   hydrated.clear()
   inflight.clear()
+  modeListeners.clear()
 }

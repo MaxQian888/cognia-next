@@ -154,3 +154,29 @@ transparently to the historic scrollback model everywhere else. New pure modules
 `ScrollView` component are fully unit-tested; the reducer gains a `SET_LAYOUT`
 action and the command surface a `/layout` command. No sidecar, Rust, or desktop
 code is touched.
+
+## 2026-08 follow-up — virtualized viewport and measured chrome
+
+The previously deferred per-cell virtualization is now implemented. A pure
+variable-height block index, exact terminal-row counts, two-viewport overscan,
+and block-id/intra-row anchoring replace whole-transcript rendering. Append,
+resize, and height correction preserve the reader's anchor; `End`/`G` restores
+follow-tail. Chrome is budgeted across the 100/60/40-column and 12-row breakpoints.
+`COGNIA_TUI_RENDERER=legacy` is the one-release rollback; virtualized is default.
+
+Native-scrollback resize replay is capped at 10,000 rendered rows by default
+(`render.terminalResizeReplayMaxRows`; `0` means unlimited). This limits terminal
+repaint only: `/transcript`, export, and session storage remain complete.
+
+## 2026-08 correctness follow-up — authoritative viewports and input ownership
+
+Fullscreen overlays now consume the region height measured by Ink/Yoga after the
+fixed bottom chrome is allocated. Panel bodies derive content rows from that
+viewport, dynamic lists keep their active row visible, the multiline composer
+uses its existing row budget, and width-dependent transcript rendering receives
+the root's reactive columns. Unicode editing is grapheme-safe and `useCursor`
+anchors IME at the painted caret. A single active input provider dispatches by
+priority and stops on handled input, preventing modal keys from leaking into the
+composer. Jest component tests remain fast, while a child-process probe imports
+real Ink/Yoga and the production `TuiViewportFrame`; the PTY harness mounts the
+production `App` with a deterministic agent session.

@@ -133,6 +133,10 @@ export async function ensureDispatcherConfigured(): Promise<void> {
     // from the unified field.
     const { initLspSettingsMigration } = await import("@/lib/lsp/migrate-settings-initializer")
     initLspSettingsMigration()
+    const workspaceManager = await import("@/lib/plugin/vscode-shim/lsp-workspace-manager")
+    workspaceManager.configureLspWorkspaceManager(
+      await workspaceManager.createDefaultTauriFsAdapter()
+    )
     const { bootstrapLspRegistry } = await import("@/lib/plugin/lsp/lsp-bootstrap")
     bootstrapLspRegistry()
   } catch (error) {

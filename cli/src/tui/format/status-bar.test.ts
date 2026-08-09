@@ -3,6 +3,7 @@
  */
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../../config/schema"
 import type { UsageInfo } from "../state/types"
+import { stringWidth } from "../markdown/width"
 
 import {
   buildStatusBar,
@@ -69,7 +70,9 @@ describe("buildStatusBar", () => {
 
   it("names the hosting agent once one is active", () => {
     const segs = buildStatusBar({ config: { ...base, agentBackend: "codex" }, usage })
-    expect(Object.fromEntries(segs.map((s) => [s.id, s])).backend.text).toBe("codex")
+    const byId = Object.fromEntries(segs.map((s) => [s.id, s]))
+    expect(byId.backend.text).toBe("codex")
+    expect(byId.provider.text).toBe("codex")
   })
 
   it("hides the gauge and cost rather than pricing an external agent with the wrong model", () => {
@@ -373,6 +376,13 @@ describe("fitStatusSegments", () => {
     const out = fitStatusSegments(segs, 6)
     expect(out.truncated).toBe(true)
     expect(out.segments.map((s) => s.id)).toEqual(["model"])
+    expect(out.segments[0].text).toBe("son…")
+  })
+
+  it("truncates one long CJK-aware segment instead of wrapping", () => {
+    const out = fitStatusSegments([seg("model", "deepseek-模型名称")], 10)
+    expect(out.truncated).toBe(true)
+    expect(stringWidth(out.segments[0].text)).toBeLessThanOrEqual(8)
   })
 
   it("returns nothing for non-positive columns", () => {

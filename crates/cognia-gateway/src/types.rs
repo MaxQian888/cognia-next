@@ -28,6 +28,22 @@ fn default_retry_status_codes() -> Vec<u16> {
     vec![408, 409, 429, 500, 502, 503, 504]
 }
 
+fn default_retry_backoff_base_ms() -> u32 {
+    250
+}
+
+fn default_retry_backoff_max_ms() -> u32 {
+    4_000
+}
+
+fn default_max_retry_wait_ms() -> u32 {
+    60_000
+}
+
+fn default_true() -> bool {
+    true
+}
+
 fn default_cooldown_fallback_secs() -> u32 {
     20
 }
@@ -122,6 +138,16 @@ pub struct GatewayConfig {
     /// candidate instead of surfacing immediately (transient / upstream-side).
     #[serde(default = "default_retry_status_codes")]
     pub retry_status_codes: Vec<u16>,
+    #[serde(default = "default_retry_backoff_base_ms")]
+    pub retry_backoff_base_ms: u32,
+    #[serde(default = "default_retry_backoff_max_ms")]
+    pub retry_backoff_max_ms: u32,
+    #[serde(default = "default_max_retry_wait_ms")]
+    pub max_retry_wait_ms: u32,
+    #[serde(default = "default_true")]
+    pub respect_retry_after: bool,
+    #[serde(default = "default_true")]
+    pub gateway_local_routing_v2: bool,
     /// Allowlist of model/alias ids the gateway advertises AND serves. Empty =
     /// expose everything. A request for a model outside this list resolves to
     /// no candidate (404).
@@ -200,6 +226,11 @@ impl Default for GatewayConfig {
             request_timeout_secs: default_request_timeout_secs(),
             max_retries: 0,
             retry_status_codes: default_retry_status_codes(),
+            retry_backoff_base_ms: default_retry_backoff_base_ms(),
+            retry_backoff_max_ms: default_retry_backoff_max_ms(),
+            max_retry_wait_ms: default_max_retry_wait_ms(),
+            respect_retry_after: true,
+            gateway_local_routing_v2: true,
             exposed_models: Vec::new(),
             hide_raw_provider_models: false,
             cooldown_fallback_secs: default_cooldown_fallback_secs(),
@@ -217,7 +248,7 @@ impl Default for GatewayConfig {
 
 impl GatewayConfig {
     pub fn validate(&self) -> Result<(), GatewayError> {
-        cognia_remote_control::allowlist::ParsedAllowlist::parse(&self.allowlist)
+        cognia_net::inbound_policy::ParsedAllowlist::parse(&self.allowlist)
             .map_err(GatewayError::InvalidConfig)?;
         if self.rate_limit_per_min == 0 {
             return Err(GatewayError::InvalidConfig(
@@ -227,6 +258,11 @@ impl GatewayConfig {
         if self.connect_timeout_secs == 0 {
             return Err(GatewayError::InvalidConfig(
                 "connect timeout must be greater than zero".into(),
+            ));
+        }
+        if self.retry_backoff_base_ms > self.retry_backoff_max_ms {
+            return Err(GatewayError::InvalidConfig(
+                "retry backoff base must not exceed retry backoff max".into(),
             ));
         }
         Ok(())
@@ -285,6 +321,10 @@ pub struct GatewayStatus {
     pub snapshot_generated_at_ms: Option<i64>,
     pub snapshot_provider_count: u32,
     pub snapshot_alias_count: u32,
+    pub routing_policy_revision: Option<String>,
+    pub routing_strategy: Option<String>,
+    pub routing_strategy_unavailable: Option<String>,
+    pub local_routing_enabled: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -329,6 +369,10 @@ mod tests {
         assert_eq!(cfg.request_timeout_secs, 300);
         assert_eq!(cfg.max_retries, 0);
         assert!(cfg.retry_status_codes.contains(&429));
+        assert_eq!(cfg.retry_backoff_base_ms, 250);
+        assert_eq!(cfg.retry_backoff_max_ms, 4_000);
+        assert_eq!(cfg.max_retry_wait_ms, 60_000);
+        assert!(cfg.respect_retry_after);
         assert!(cfg.exposed_models.is_empty());
         assert!(!cfg.hide_raw_provider_models);
         assert_eq!(cfg.cooldown_fallback_secs, 20);
@@ -360,6 +404,11 @@ mod tests {
             request_timeout_secs: 0,
             max_retries: 2,
             retry_status_codes: vec![429, 503],
+            retry_backoff_base_ms: 100,
+            retry_backoff_max_ms: 2_000,
+            max_retry_wait_ms: 30_000,
+            respect_retry_after: true,
+            gateway_local_routing_v2: false,
             exposed_models: vec!["fast".into()],
             hide_raw_provider_models: true,
             cooldown_fallback_secs: 15,
@@ -378,6 +427,7 @@ mod tests {
         assert_eq!(json["connectTimeoutSecs"], 10);
         assert_eq!(json["requestTimeoutSecs"], 0);
         assert_eq!(json["maxRetries"], 2);
+        assert_eq!(json["gatewayLocalRoutingV2"], false);
         assert_eq!(json["hideRawProviderModels"], true);
         assert_eq!(json["cooldownFallbackSecs"], 15);
         assert_eq!(json["overloadCooldownSecs"], 300);
@@ -391,6 +441,7 @@ mod tests {
         assert_eq!(back.bind_interface, BindInterface::Lan);
         assert_eq!(back.exposed_models, vec!["fast".to_string()]);
         assert_eq!(back.max_concurrent_per_key, 4);
+        assert!(!back.gateway_local_routing_v2);
         assert_eq!(
             back.stripped_request_fields,
             vec!["service_tier".to_string()]

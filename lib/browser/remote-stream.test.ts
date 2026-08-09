@@ -54,7 +54,7 @@ it("rejects malformed or unsupported media frames", () => {
 
 it("builds a ticket-only browser stream URL", () => {
   const url = remoteBrowserWebSocketUrl("https://cloud.example.com/", "session/a", "one shot")
-  expect(url).toBe("wss://cloud.example.com/ws/v1/browser/session%2Fa?ticket=one+shot")
+  expect(url).toBe("wss://cloud.example.com/ws/browser/session%2Fa?ticket=one+shot")
   expect(url).not.toContain("jwt")
 })
 

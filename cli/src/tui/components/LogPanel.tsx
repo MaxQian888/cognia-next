@@ -14,7 +14,8 @@
  * buffer and the clear/copy/close/inject effects.
  */
 import React, { useMemo, useRef, useState } from "react"
-import { Box, Text, useInput, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
+import { useModalInput } from "../input/input-router"
 
 import { useTheme } from "../theme/context"
 import { isMouseSequence } from "../input/mouse"
@@ -124,7 +125,7 @@ export function LogPanel({
     onWheel: (dir) => scrollTo(dir === "up" ? selected - 1 : selected + 1),
   })
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (handleMouse(input)) return
       if (key.escape) {

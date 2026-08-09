@@ -16,6 +16,7 @@ export {
   ALL_BRIDGE_SCOPES,
   DEFAULT_ENABLED_SCOPES,
   DEFAULT_EXTERNAL_BRIDGE_SETTINGS,
+  WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES,
 } from "@/types/wiki"
 
 import type { BridgeScope } from "@/types/wiki"
@@ -50,6 +51,7 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   // runtime / teams / plugin tools (Thread D). Default OFF; outward text is
   // PII-gated and plugin tools keep their own consent gate.
   agent_dispatch: "agent:dispatch",
+  spawn_task: "agent:dispatch",
   team_run: "agent:team",
   team_list: "agent:team",
   plugin_tool_invoke: "plugin:tools",
@@ -68,6 +70,10 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   memory_store: "memory:write",
   memory_update: "memory:write",
   memory_forget: "memory:write",
+  workflow_list: "workflow:run",
+  workflow_status: "workflow:run",
+  workflow_events: "workflow:run",
+  workflow_cancel: "workflow:run",
 }
 
 /**

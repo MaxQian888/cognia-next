@@ -83,6 +83,23 @@ function makeStorage(): Storage {
   } as Storage
 }
 
+function installStorageShim(g: Record<string, unknown>, key: "localStorage" | "sessionStorage") {
+  const descriptor = Object.getOwnPropertyDescriptor(g, key)
+  if (descriptor && "value" in descriptor && descriptor.value) {
+    return
+  }
+
+  // Node 26 exposes localStorage through a warning-producing accessor unless
+  // --localstorage-file is set. Inspecting the descriptor avoids invoking that
+  // getter; defineProperty replaces the configurable accessor atomically.
+  Object.defineProperty(g, key, {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: makeStorage(),
+  })
+}
+
 const PLUGIN_POLICY_KEY = "cognia.plugins.policy"
 
 /**
@@ -107,8 +124,8 @@ export function pluginDiscoveryRoots(
 export function installPluginRuntimeShims(
   g: Record<string, unknown> = globalThis as unknown as Record<string, unknown>
 ): void {
-  if (!g.localStorage) g.localStorage = makeStorage()
-  if (!g.sessionStorage) g.sessionStorage = makeStorage()
+  installStorageShim(g, "localStorage")
+  installStorageShim(g, "sessionStorage")
   if (typeof g.CustomEvent !== "function") {
     g.CustomEvent = class {
       type: string
@@ -196,6 +213,15 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
               return transport.call<T>(command, args)
             }
           : undefined
+        const nodeHostSubscriber = headless
+          ? async <T>(event: string, handler: (payload: T) => void): Promise<() => void> => {
+              // Importing from the same CLI bundle module as nodeHostInvoker
+              // keeps calls and subscriptions on the transport instance that
+              // serve-command configured after the bridge handshake.
+              const { transport } = await import("@/lib/tauri")
+              return transport.subscribe<T>(event, handler)
+            }
+          : undefined
         await initializePluginManager({
           pluginDirectory: "",
           runtimeProfile: headless ? "headless" : "browser",
@@ -207,6 +233,7 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
           // Tauri/fetch/eval strategies in the loader don't exist here.
           frontendImporter: makeNodeFrontendImporter(),
           nodeHostInvoker,
+          nodeHostSubscriber,
         })
       })
     await initManager()

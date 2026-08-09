@@ -292,6 +292,21 @@ describe("buildConversationSections", () => {
     expect(today && today.sessions.map((s) => s.id)).toEqual(["b", "c", "a"])
   })
 
+  it("uses message activity instead of metadata-write time for bucketing and recency", () => {
+    const sessions = [
+      session("metadata-new", { updatedAt: NOW, lastMessageAt: NOW - 40 * DAY }),
+      session("active", { updatedAt: NOW - DAY, lastMessageAt: NOW - DAY }),
+    ]
+
+    const { sections } = buildConversationSections(sessions, [], opts())
+
+    expect(sections.map((section) => conversationSectionKey(section))).toEqual([
+      "date:yesterday",
+      "date:older",
+    ])
+    expect(sections[0].sessions.map((candidate) => candidate.id)).toEqual(["active"])
+  })
+
   it("keeps an equal-recency bucket ordered across live-query refreshes", () => {
     const a = session("a", { createdAt: NOW - 2_000, updatedAt: NOW })
     const b = session("b", { createdAt: NOW - 1_000, updatedAt: NOW })

@@ -39,6 +39,8 @@ interface Props {
    * is derived from this prop.
    */
   documentId?: string
+  /** Real bundle-relative path used by the shared multi-file LSP workspace. */
+  path?: string
 }
 
 export function SkillMonacoEditor({
@@ -48,6 +50,7 @@ export function SkillMonacoEditor({
   readOnly,
   skillId,
   documentId,
+  path,
 }: Props) {
   const { resolvedTheme } = useTheme()
   const handleRef = useRef<MonacoWorkbenchHandle | null>(null)
@@ -124,6 +127,7 @@ export function SkillMonacoEditor({
         surface: "skill",
         skillId,
         documentId,
+        pathSegments: path?.split("/").filter(Boolean),
         language,
         initialContent: value,
       }

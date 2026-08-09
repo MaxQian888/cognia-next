@@ -159,7 +159,7 @@ export function groupByFile(lines) {
   return out
 }
 
-async function execWithRipgrep(args, { root, rgPath }) {
+async function execWithRipgrep(args, { root, target, rgPath }) {
   const rgArgs = ["--no-config", "--no-heading", "--glob", "!.git/**"]
   if (args.case_insensitive) rgArgs.push("-i")
   if (args.multiline) rgArgs.push("-U", "--multiline-dotall")
@@ -176,7 +176,7 @@ async function execWithRipgrep(args, { root, rgPath }) {
     if (before) rgArgs.push("--before-context", String(before))
     if (after) rgArgs.push("--after-context", String(after))
   }
-  rgArgs.push("--regexp", args.pattern, "--", ".")
+  rgArgs.push("--regexp", args.pattern, "--", target)
 
   const {
     stdout,
@@ -197,11 +197,11 @@ async function execWithRipgrep(args, { root, rgPath }) {
   return { lines, streamTruncated }
 }
 
-async function execWithJsFallback(args, { root }) {
+async function execWithJsFallback(args, { root, target }) {
   const { matches, truncated } = await jsGrep({
     pattern: args.pattern,
     root,
-    glob: args.glob,
+    glob: target === "." ? args.glob : target,
     ignoreCase: args.case_insensitive,
     multiline: args.multiline,
   })
@@ -258,11 +258,15 @@ async function execWithJsFallback(args, { root }) {
 export function createGrepTool({ cwd }) {
   async function execGrep(args) {
     try {
-      const root = resolveToolPath(cwd, args.path ?? ".")
+      const resolvedPath = resolveToolPath(cwd, args.path ?? ".")
+      const stat = await fsp.stat(resolvedPath)
+      const isFile = stat.isFile()
+      const root = isFile ? path.dirname(resolvedPath) : resolvedPath
+      const target = isFile ? path.basename(resolvedPath) : "."
       const rgPath = await detectRipgrep()
       const { lines, streamTruncated } = rgPath
-        ? await execWithRipgrep(args, { root, rgPath })
-        : await execWithJsFallback(args, { root })
+        ? await execWithRipgrep(args, { root, target, rgPath })
+        : await execWithJsFallback(args, { root, target })
 
       if (lines.length === 0) return toolText("No matches found.")
 

@@ -89,7 +89,7 @@ test("stripReasoningParts removes reasoning parts from assistant messages only",
   assert.equal(out[2], messages[2])
 })
 
-test("toAiSdkUserContent converts an Anthropic base64 image to AI SDK v6 shape", () => {
+test("toAiSdkUserContent converts an Anthropic base64 image to AI SDK 7 shape", () => {
   const { toAiSdkUserContent } = __testing__
   const out = toAiSdkUserContent([
     { type: "text", text: "what is this?" },
@@ -97,18 +97,18 @@ test("toAiSdkUserContent converts an Anthropic base64 image to AI SDK v6 shape",
   ])
   assert.deepEqual(out[0], { type: "text", text: "what is this?" })
   assert.deepEqual(out[1], {
-    type: "image",
-    image: "data:image/png;base64,AAAA",
+    type: "file",
     mediaType: "image/png",
+    data: "data:image/png;base64,AAAA",
   })
 })
 
-test("toAiSdkUserContent maps a url image source to { image: url }", () => {
+test("toAiSdkUserContent maps a URL image source to a file part", () => {
   const { toAiSdkUserContent } = __testing__
   const out = toAiSdkUserContent([
     { type: "image", source: { type: "url", url: "https://x/y.jpg" } },
   ])
-  assert.deepEqual(out[0], { type: "image", image: "https://x/y.jpg" })
+  assert.deepEqual(out[0], { type: "file", mediaType: "image", data: "https://x/y.jpg" })
 })
 
 test("toAiSdkUserContent converts document/file base64 blocks to AI SDK file parts", () => {
@@ -135,8 +135,12 @@ test("toAiSdkUserContent passes through AI-SDK-shaped and unknown blocks", () =>
   const alreadyFile = { type: "file", data: "data:text/plain;base64,aGk=", mediaType: "text/plain" }
   const unknown = { type: "custom", foo: 1 }
   const out = toAiSdkUserContent([alreadyImage, alreadyFile, unknown, "raw string"])
-  // Already-converted parts and unrecognised blocks are returned untouched.
-  assert.deepEqual(out[0], alreadyImage)
+  // Legacy image parts are normalized; file and unrecognised blocks pass through.
+  assert.deepEqual(out[0], {
+    type: "file",
+    mediaType: "image",
+    data: "data:image/png;base64,AAAA",
+  })
   assert.deepEqual(out[1], alreadyFile)
   assert.deepEqual(out[2], unknown)
   assert.equal(out[3], "raw string")
@@ -145,8 +149,7 @@ test("toAiSdkUserContent passes through AI-SDK-shaped and unknown blocks", () =>
 test("toAiSdkUserContent tolerates a missing media_type on a base64 image", () => {
   const { toAiSdkUserContent } = __testing__
   const out = toAiSdkUserContent([{ type: "image", source: { type: "base64", data: "AAAA" } }])
-  // No mediaType key is emitted when the source omits media_type.
-  assert.deepEqual(out[0], { type: "image", image: "data:;base64,AAAA" })
+  assert.deepEqual(out[0], { type: "file", mediaType: "image", data: "data:;base64,AAAA" })
 })
 
 test("toAiSdkUserContent passes a non-array argument straight through", () => {
@@ -252,6 +255,37 @@ test("AI SDK dispatch wires ToolSearch into prepareStep and retains discoveries"
 
   await call.tools.ToolSearch.execute({ query: "select:write" })
   assert.ok(call.prepareStep().activeTools.includes("write"), "discovery persists for later steps")
+})
+
+test("AI SDK dispatch keeps a disabled tool surface empty after MCP and ToolSearch overlays", async () => {
+  const { events, emit } = captureEmit()
+  const captured = capturingStream([{ type: "finish", finishReason: "stop" }])
+  let mcpBuilds = 0
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "zero-tool-session",
+    firstPrompt: "answer from documentation",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      toolSurface: "none",
+      toolSearchEnabled: true,
+      mcpServers: { unsafe: { command: "unsafe-server" } },
+    },
+    emit,
+    log: () => {},
+    streamText: captured.fn,
+    buildMcpTools: async () => {
+      mcpBuilds += 1
+      return { tools: { mcp__unsafe__write: {} }, close: async () => {} }
+    },
+  })
+
+  await waitForEvent(events, (event) => event.type === "session_ended")
+  const call = captured.calls[0]
+  assert.equal(call.tools, undefined)
+  assert.equal(call.prepareStep, undefined)
+  assert.equal(mcpBuilds, 0)
 })
 
 test("refuses to dispatch an OpenRouter key with no base URL (credential-leak guard)", async () => {
@@ -462,7 +496,7 @@ test("maybeCompact: caps the summary call output, reuses frozen summaries, emits
   assert.ok(boundaries.length >= 1, "at least one compaction boundary emitted")
   // The summary call is capped to maxSummaryTokens and uses the summary prompt.
   const summaryCall = calls.find(
-    (a) => a.maxOutputTokens === 64 && a.messages?.[0]?.content === "SUMMARIZE"
+    (a) => a.maxOutputTokens === 64 && a.instructions?.[0]?.content === "SUMMARIZE"
   )
   assert.ok(summaryCall, "summary call carries the maxOutputTokens cap + prompt")
   // Every boundary that produced a summary reuses the frozen prefix (never
@@ -519,7 +553,7 @@ test("maybeCompact: the summary call inherits the turn's providerId (codex relay
   session.closeInput()
 
   const summaryCall = calls.find(
-    (a) => a.maxOutputTokens === 64 && a.messages?.[0]?.content === "SUMMARIZE"
+    (a) => a.maxOutputTokens === 64 && a.instructions?.[0]?.content === "SUMMARIZE"
   )
   assert.ok(summaryCall, "summary call happened")
   assert.equal(summaryCall.model.provider, "openai.responses")
@@ -573,7 +607,7 @@ test("maybeCompact: a DISTINCT summary provider keeps its own id, not the turn's
   session.closeInput()
 
   const summaryCall = calls.find(
-    (a) => a.maxOutputTokens === 64 && a.messages?.[0]?.content === "SUMMARIZE"
+    (a) => a.maxOutputTokens === 64 && a.instructions?.[0]?.content === "SUMMARIZE"
   )
   assert.ok(summaryCall, "summary call happened")
   assert.equal(summaryCall.model.provider, "openai.chat")
@@ -677,7 +711,7 @@ test("maybeCompact: optical strategy renders the middle to image frames and emit
   assert.ok(meta.optical.frames[0].base64.length > 0, "rendered frame is carried on the event")
   assert.ok(meta.optical.estImageTokens < meta.optical.estTextTokens, "cheaper than text")
   // No text-summary call was made (no summarizer prompt message).
-  assert.ok(!calls.some((a) => a.messages?.[0]?.content === "SUMMARIZE"))
+  assert.ok(!calls.some((a) => a.instructions?.[0]?.content === "SUMMARIZE"))
 })
 
 test("maybeCompact: captures a pre-compaction snapshot when undo is enabled", async () => {
@@ -872,10 +906,10 @@ test("systemPrompt and appendSystemPrompt concatenate into a single system messa
     tick()
   })
   assert.ok(captured, "streamText invoked")
-  assert.equal(captured.messages[0].role, "system")
+  assert.equal(captured.instructions[0].role, "system")
   // Previously appendSystemPrompt was silently dropped when systemPrompt was
   // set — both must reach the model, append last.
-  assert.equal(captured.messages[0].content, "BASE_SYSTEM\n\nAPPENDED_DYNAMIC_TAIL")
+  assert.equal(captured.instructions[0].content, "BASE_SYSTEM\n\nAPPENDED_DYNAMIC_TAIL")
 })
 
 test("@agent overlay: prepends the routed subagent's system prompt (ai-sdk fallback)", async () => {
@@ -908,9 +942,9 @@ test("@agent overlay: prepends the routed subagent's system prompt (ai-sdk fallb
     tick()
   })
   assert.ok(captured, "streamText invoked")
-  assert.equal(captured.messages[0].role, "system")
+  assert.equal(captured.instructions[0].role, "system")
   // Agent identity leads; the app base prompt is kept beneath it.
-  assert.equal(captured.messages[0].content, "YOU ARE A REVIEWER\n\nBASE_SYSTEM")
+  assert.equal(captured.instructions[0].content, "YOU ARE A REVIEWER\n\nBASE_SYSTEM")
 })
 
 test("@agent overlay: no-op when the agent id is not in the agents map", async () => {
@@ -943,7 +977,7 @@ test("@agent overlay: no-op when the agent id is not in the agents map", async (
     tick()
   })
   assert.ok(captured, "streamText invoked")
-  assert.equal(captured.messages[0].content, "BASE_SYSTEM")
+  assert.equal(captured.instructions[0].content, "BASE_SYSTEM")
 })
 
 test("@agent overlay: unions the routed agent's disallowedTools onto the deny-list", async () => {
@@ -1044,7 +1078,7 @@ test("anthropic protocol + cacheOptimizationEnabled splits system at the stable 
     }
     tick()
   })
-  const systems = captured.messages.filter((m) => m.role === "system")
+  const systems = captured.instructions
   assert.equal(systems.length, 2)
   assert.equal(systems[0].content, "STABLE_PREFIX")
   assert.deepEqual(systems[0].providerOptions, {
@@ -1084,7 +1118,7 @@ test("anthropic + cacheOptimizationEnabled splits appendSystemPrompt at the dyna
     }
     tick()
   })
-  const systems = captured.messages.filter((m) => m.role === "system")
+  const systems = captured.instructions
   // base (cached) + stable head of append (cached) + dynamic tail (uncached).
   assert.equal(systems.length, 3)
   assert.equal(systems[0].content, "BASE")
@@ -1193,7 +1227,7 @@ test("cacheOptimizationEnabled without the anthropic protocol keeps the single c
     }
     tick()
   })
-  const systems = captured.messages.filter((m) => m.role === "system")
+  const systems = captured.instructions
   assert.equal(systems.length, 1)
   assert.equal(systems[0].content, "STABLE_PREFIX\n\nDYNAMIC_TAIL")
   assert.equal(systems[0].providerOptions, undefined)
@@ -1226,8 +1260,8 @@ test("appendSystemPrompt alone still produces a system message", async () => {
     }
     tick()
   })
-  assert.equal(captured.messages[0].role, "system")
-  assert.equal(captured.messages[0].content, "ONLY_APPEND")
+  assert.equal(captured.instructions[0].role, "system")
+  assert.equal(captured.instructions[0].content, "ONLY_APPEND")
 })
 
 test("dispatchAiSdk emits session_ended error when provider has no resolvable protocol", () => {
@@ -2047,7 +2081,7 @@ test("system prefix + tools map stay byte-stable across turns (prompt-cache pref
   )
   assert.ok(calls.length >= 2, "two turns streamed")
 
-  const systemHead = (args) => (args.messages ?? []).filter((m) => m.role === "system")
+  const systemHead = (args) => args.instructions ?? []
   assert.ok(systemHead(calls[0]).length > 0, "system prompt present in the prefix")
   assert.deepEqual(
     systemHead(calls[1]),

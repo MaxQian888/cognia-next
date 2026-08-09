@@ -4,7 +4,7 @@
  * right credentials without each one having to spin up its own server.
  *
  * Mocks booted here:
- *   - MockV2Server         (mobile companion API — pair / status / events / sidecar RPC)
+ *   - MockCompanionServer  (cgnp3 + DPoP Companion API and RPC)
  *   - MockAnthropicServer  (AI nodes: /v1/messages, /v1/embeddings)
  *   - MockLarkServer       (action.connector.send/draft with Lark adapter)
  *   - MockVectorDbServer   (twin RAG, plugin vector ops)
@@ -23,14 +23,14 @@
  */
 
 import type { FullConfig } from "@playwright/test"
-import { createMockV2Server, type MockV2Server } from "./mobile/mock-v2-server"
+import { createMockCompanionServer, type MockCompanionServer } from "./mobile/mock-v2-server"
 import { createMockAnthropicServer, type MockAnthropicServer } from "./mocks/anthropic/server"
 import { createMockLarkServer, type MockLarkServer } from "./mocks/lark/server"
 import { createMockVectorDbServer, type MockVectorDbServer } from "./mocks/vector-db/server"
 import { launchTauriCdp, type TauriCdpHandle } from "./helpers/tauri-cdp-launch"
 
 interface Booted {
-  v2?: MockV2Server
+  v2?: MockCompanionServer
   anthropic?: MockAnthropicServer
   lark?: MockLarkServer
   vectorDb?: MockVectorDbServer
@@ -55,7 +55,7 @@ async function startOrFallback<
 async function globalSetup(_config: FullConfig): Promise<() => Promise<void>> {
   if (!process.env.E2E_DISABLE_V2) {
     state.v2 = await startOrFallback(
-      createMockV2Server(),
+      createMockCompanionServer(),
       Number(process.env.E2E_V2_PORT ?? "7891")
     )
     process.env.E2E_V2_BASE_URL = state.v2.baseUrl

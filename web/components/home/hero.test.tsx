@@ -60,9 +60,10 @@ describe("Hero", () => {
   })
 
   it("puts a product stage in the first screen with a described visual", () => {
-    renderHero()
+    const { container } = renderHero()
     expect(screen.getByRole("img", { name: en.home.hero.stageAlt })).toBeInTheDocument()
     expect(screen.getByText(en.home.hero.stageCaption)).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="interactive-grid-pattern"]')).toBeInTheDocument()
   })
 
   it("localises the whole hero", () => {

@@ -49,7 +49,8 @@ interface AgentSessionSourceAdapter {
 - Claude Code、Codex和OpenCode历史作为一流、可连续的对话导入，由现有流水线渲染，无需更改渲染器。
 - 添加新代理是一个静态适配器（或一个调用`ctx.import.registerSessionSource`的插件）——注册表、规范目标、持久化汇、FS和UI共享。
 - 续写通过标准`branchSeed`路径，因此在第一次发送时有**PII编辑门禁**。
-- 超出范围（未来）：incremental/watch重新导入，声明式`sessionImporters`显现字段+模块桥（目前双船仅有命令式`ctx`），Cursor/Cline/Gemini-CLI第一方适配器，导入sidechain/subagent树作为嵌套线程。
+- 增量/监听重新导入、声明式 `sessionImporters` 清单桥接以及子智能体树重建现已交付。仍不在范围内的是 Cursor/Cline/Gemini-CLI 第一方适配器，以及无法映射到 Cognia 规范模型的来源私有运行时状态。
+- ADR-0107 将本会话导入器与设置、技能、子智能体、MCP、命令和记忆组合到统一迁移向导中；本注册表仍是会话导入的权威实现。
 
 ## 验证
 

@@ -1,8 +1,6 @@
-/** @jest-environment jsdom */
 // Certification projection: rebuild-from-files authority, per-deployment
 // lookups, and full-clear semantics on rebuild.
 
-import "fake-indexeddb/auto"
 import type { CompatibilityManifest } from "@cognia/agent-config-types/compatibility-manifest"
 
 import {
@@ -15,7 +13,7 @@ import {
   rebuildCompatibilityProjection,
   recordsForDeployment,
 } from "./agent-compatibility"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 function manifest(bundleId: string, deploymentRef: string): CompatibilityManifest {
   return {
@@ -69,12 +67,11 @@ function memStore(manifests: CompatibilityManifest[]): CertificationStore {
   return new CertificationStore(fs, "/root")
 }
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("rebuildCompatibilityProjection", () => {
   it("indexes every valid manifest and clears rows the files no longer contain", async () => {

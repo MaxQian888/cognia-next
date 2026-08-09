@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "routes": [
+    { "path": "/healthz", "method": "get", "document": "public" },
+    { "path": "/livez", "method": "get", "document": "public" },
+    { "path": "/readyz", "method": "get", "document": "public" },
+    { "path": "/.well-known/agent-card.json", "method": "get", "document": "public" },
+
+    { "path": "/api/auth/config", "method": "get", "document": "public" },
+    { "path": "/api/auth/device/challenge", "method": "post", "document": "public" },
+    { "path": "/api/auth/device/register", "method": "post", "document": "public" },
+    { "path": "/api/auth/token", "method": "post", "document": "public" },
+    { "path": "/api/auth/socket-ticket", "method": "post", "document": "public" },
+    { "path": "/api/whoami", "method": "get", "document": "public" },
+    { "path": "/api/_rpc/{name}", "method": "post", "document": "public" },
+    { "path": "/api/operations/{operation_id}", "method": "get", "document": "public" },
+    { "path": "/api/sessions/{session_id}/media/{hash}", "method": "get", "document": "public" },
+    {
+      "path": "/api/workflow-deployments/{deployment_id}/runs",
+      "method": "post",
+      "document": "public"
+    },
+    { "path": "/api/workflow-runs/{run_id}", "method": "get", "document": "public" },
+    { "path": "/api/workflow-runs/{run_id}/events", "method": "get", "document": "public" },
+    { "path": "/api/workflow-runs/{run_id}/cancel", "method": "post", "document": "public" },
+    { "path": "/api/devices", "method": "get", "document": "public" },
+    { "path": "/api/devices/{device_id}", "method": "delete", "document": "public" },
+    {
+      "path": "/api/devices/{device_id}/capabilities",
+      "method": "put",
+      "document": "public"
+    },
+    { "path": "/api/invitations", "method": "post", "document": "public" },
+    { "path": "/api/policies", "method": "get", "document": "public" },
+    { "path": "/api/policies", "method": "post", "document": "public" },
+
+    { "path": "/ws/events", "method": "get", "document": "public" },
+    { "path": "/ws/terminal", "method": "get", "document": "public" },
+    { "path": "/ws/browser/{session_id}", "method": "get", "document": "public" },
+    { "path": "/ws/acp", "method": "get", "document": "public" },
+    { "path": "/a2a", "method": "post", "document": "public" },
+    { "path": "/ide/relay/{relay_id}", "method": "get", "document": "public" },
+    { "path": "/ide/relay/{relay_id}/", "method": "get", "document": "none" },
+    {
+      "path": "/ide/relay/{relay_id}/{tail}",
+      "runtimePath": "/ide/relay/{relay_id}/{*tail}",
+      "method": "get",
+      "document": "public"
+    },
+
+    { "path": "/internal/_rpc/{name}", "method": "post", "document": "headless" },
+    { "path": "/internal/events", "method": "get", "document": "headless" },
+    { "path": "/internal/bridge", "method": "get", "document": "headless" },
+    { "path": "/ide/content", "method": "post", "document": "headless" },
+    { "path": "/ide/content/{handle_id}", "method": "get", "document": "headless" },
+
+    { "path": "/metrics", "method": "get", "document": "none" },
+    { "path": "/operator/maintenance/backups", "method": "post", "document": "none" },
+    { "path": "/operator/lark/admin", "method": "post", "document": "none" },
+    { "path": "/operator/lark/admin/{request_id}", "method": "get", "document": "none" }
+  ]
+}

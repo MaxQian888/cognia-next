@@ -376,6 +376,8 @@ describe("Permission API", () => {
     // compile time: adding a union member without listing it here (and
     // mapping it in permissionMapping) is a typecheck error.
     const ALL_API_PERMISSIONS = [
+      "filesystem:read",
+      "filesystem:write",
       "session:read",
       "session:write",
       "session:delete",
@@ -394,6 +396,7 @@ describe("Permission API", () => {
       "ai:chat",
       "ai:embed",
       "agent:control",
+      "builtin-skills:invoke",
       "agent:dispatch-external",
       "agent:dispatch",
       "agent:shared-memory:read",
@@ -412,6 +415,7 @@ describe("Permission API", () => {
       "media:video:write",
       "media:video:export",
       "extension:ui",
+      "extension:workflow",
       "notification:show",
       "ipc:call",
       "ipc:expose",

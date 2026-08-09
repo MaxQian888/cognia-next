@@ -37,6 +37,12 @@ pub fn resolve_model_dir() -> Result<PathBuf, NativeOcrError> {
     if let Ok(override_path) = std::env::var("COGNIA_OCRS_MODEL_DIR") {
         return Ok(PathBuf::from(override_path));
     }
+    if let Ok(data_dir) = std::env::var("COGNIA_DATA_DIR") {
+        return Ok(PathBuf::from(data_dir)
+            .join("cognia")
+            .join("ocr")
+            .join("ocrs"));
+    }
     dirs::data_dir()
         .map(|d| d.join("cognia").join("ocr").join("ocrs"))
         .ok_or_else(|| {
@@ -287,6 +293,7 @@ mod tests {
                 bytes: vec![],
                 mime_type: "image/png".to_string(),
                 languages: vec!["en".to_string()],
+                model_variant: None,
             })
             .unwrap_err();
         match err {

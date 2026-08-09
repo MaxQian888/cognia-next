@@ -25,6 +25,14 @@ export function RoutingRuntimeInitializer() {
     if (hasInitialized.current) return
     hasInitialized.current = true
     setProviderRoutingRuntimeAdapters(buildRoutingRuntimeAdapters())
+    void import("@/lib/ai/agent/execution/certification-store")
+      .then(async ({ installDesktopCertificationRuntime }) => {
+        const store = await installDesktopCertificationRuntime()
+        if (!store) return
+        const { rebuildCompatibilityProjection } = await import("@/lib/db/agent-compatibility")
+        await rebuildCompatibilityProjection(store)
+      })
+      .catch(() => undefined)
   }, [])
 
   return null

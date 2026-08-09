@@ -1,20 +1,17 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 jest.mock("@cognia/vector/dimension-guard", () => ({
   ensureCollectionDimensionCompatible: jest.fn(async () => undefined),
 }))
 
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { countProjectChunksByFile, listProjectChunksByFile } from "@/lib/db/project-chunks"
 import { persistProjectChunks, projectVectorCollectionName } from "./persist"
 import type { IVectorStore } from "@cognia/vector/store"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 }, 30000)
 
 interface AddCall {
@@ -52,6 +49,8 @@ function chunk(content: string, redacted = content) {
     metadata: {},
   }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("persistProjectChunks", () => {
   it("throws on chunks/embeddings length mismatch", async () => {

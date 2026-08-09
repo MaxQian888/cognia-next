@@ -111,11 +111,27 @@ export async function loadBundle(input: BundleInput): Promise<BundleResult> {
     skillMd: archive.skillMd,
     openaiYaml: archive.openaiYaml,
     fallbackName,
+    directoryName: archive.rootDirName,
   })
+  let inlinePaths = new Set<string>()
+  const inlineMetadata = parsed.draft.metadata?.["cognia.inline-resources"]
+  if (inlineMetadata) {
+    try {
+      const value: unknown = JSON.parse(inlineMetadata)
+      if (Array.isArray(value)) {
+        inlinePaths = new Set(value.filter((item): item is string => typeof item === "string"))
+      }
+    } catch {
+      parsed.warnings.push("cognia.inline-resources metadata is not a valid JSON string array.")
+    }
+  }
 
   return {
     draft: parsed.draft,
-    resources: archive.resources,
+    resources: archive.resources.map((resource) => ({
+      ...resource,
+      inline: inlinePaths.has(resource.path) || undefined,
+    })),
     flavor: parsed.flavor,
     codexMeta: parsed.codexMeta,
     rootDirName: archive.rootDirName,

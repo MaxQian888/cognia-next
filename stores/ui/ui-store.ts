@@ -3,7 +3,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 
 /** Conversation-sidebar (ChannelList) width bounds, in px. Shared by the

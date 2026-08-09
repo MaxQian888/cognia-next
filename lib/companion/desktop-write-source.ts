@@ -30,6 +30,14 @@ import {
   handleTeamTaskCreate,
   handleTeamTaskMove,
 } from "@/lib/companion/agent-team-write-handlers"
+import {
+  handleAgentTaskCancel,
+  handleAgentTaskComment,
+  handleAgentTaskMove,
+  handleAgentTaskPause,
+  handleAgentTaskResume,
+  handleAgentTaskStart,
+} from "@/lib/companion/agent-task-write-handlers"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getDb } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
@@ -171,6 +179,16 @@ export async function dispatchCommand(
   command: string,
   payload: Record<string, unknown>
 ): Promise<unknown> {
+  if (
+    command === "workflow_api_run_create" ||
+    command === "workflow_api_run_get" ||
+    command === "workflow_api_events_list" ||
+    command === "workflow_api_run_cancel"
+  ) {
+    const { dispatchWorkflowApiBridgeCommand } =
+      await import("@/lib/workflow/api/workflow-api-service")
+    return dispatchWorkflowApiBridgeCommand(command, payload)
+  }
   if (isScheduledTaskRpc(command)) {
     return dispatchScheduledTaskRpc(command, payload)
   }
@@ -274,6 +292,20 @@ export async function dispatchCommand(
       return handleTeamRunResume(payload)
     case "team_run_stop":
       return handleTeamRunStop(payload)
+    // Single-Agent task board control. Task ownership is revalidated against
+    // the live Dexie row before every Scheduler or state-machine action.
+    case "agent_task_start":
+      return handleAgentTaskStart(payload)
+    case "agent_task_pause":
+      return handleAgentTaskPause(payload)
+    case "agent_task_resume":
+      return handleAgentTaskResume(payload)
+    case "agent_task_cancel":
+      return handleAgentTaskCancel(payload)
+    case "agent_task_comment":
+      return handleAgentTaskComment(payload)
+    case "agent_task_move":
+      return handleAgentTaskMove(payload)
     // Workflow CRUD (ADR-0027 Wave 4.1). Definitions live in Dexie; these
     // mirror the desktop editor's create/update/delete + schedule pause/resume
     // and a run listing + remote cancel.
@@ -796,9 +828,98 @@ async function hostFeatureManifest(payload: Record<string, unknown>): Promise<un
     callerDeviceGrants.every((grant) => typeof grant === "string" && grant.length > 0)
       ? callerDeviceGrants
       : undefined
+  const platform = detectPlatform()
+  const operationHealth: Record<string, boolean | { healthy: boolean; reason?: string }> = {}
+  const ocrOperations = [
+    "ocr_list_native_backends",
+    "ocr_list_available_backends",
+    "ocr_extract_native",
+    "ocr_model_status",
+    "ocr_download_model",
+    "ocr_cancel_model_download",
+  ]
+  if (platform === "tauri" || platform === "headless") {
+    try {
+      const available =
+        platform === "headless"
+          ? await (
+              await import("@/lib/tauri")
+            ).transport.call<string[]>("ocr_list_available_backends")
+          : await (
+              await import("@tauri-apps/api/core")
+            ).invoke<string[]>("ocr_list_available_backends")
+      for (const operation of ocrOperations) operationHealth[operation] = true
+      if (available.length === 0) {
+        operationHealth.ocr_extract_native = {
+          healthy: false,
+          reason: "no native OCR backend is callable in this host build",
+        }
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      for (const operation of ocrOperations) {
+        operationHealth[operation] = { healthy: false, reason }
+      }
+    }
+  }
+  if (platform === "headless") {
+    const browserOperations = [
+      "browser_capability",
+      "browser_session_ensure",
+      "browser_session_get",
+      "browser_session_close",
+      "browser_navigate",
+      "browser_snapshot",
+      "browser_act",
+      "browser_press_key",
+      "browser_scroll",
+      "browser_evaluate",
+      "browser_read_console",
+      "browser_read_network",
+      "browser_back",
+      "browser_forward",
+      "browser_reload",
+      "browser_stop",
+      "browser_get_page",
+      "browser_pages",
+      "browser_switch_page",
+      "browser_close_page",
+      "browser_wait_for",
+      "browser_wait_for_load",
+      "browser_screenshot",
+      "browser_set_files",
+      "browser_downloads",
+      "browser_set_zoom",
+      "browser_find",
+      "browser_find_clear",
+    ]
+    try {
+      const status = await (
+        await import("@/lib/tauri")
+      ).transport.call<{
+        healthy?: boolean
+        reason?: string
+      }>("browser_runtime_status", {
+        ...(typeof payload.workspaceId === "string" ? { workspaceId: payload.workspaceId } : {}),
+      })
+      operationHealth.browser_runtime_status = true
+      for (const operation of browserOperations) {
+        operationHealth[operation] = status.healthy
+          ? true
+          : { healthy: false, reason: status.reason ?? "browser runtime probe failed" }
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      operationHealth.browser_runtime_status = { healthy: false, reason }
+      for (const operation of browserOperations) {
+        operationHealth[operation] = { healthy: false, reason }
+      }
+    }
+  }
   return buildLocalHostFeatureManifest({
-    platform: detectPlatform(),
+    platform,
     deviceGrants,
+    operationHealth,
   })
 }
 
@@ -878,7 +999,7 @@ async function workflowTriggerManual(payload: Record<string, unknown>): Promise<
   const workflowId = payload.workflowId as string | undefined
   if (!workflowId) throw new Error("workflow_trigger_manual.workflowId is required")
   // `callerDeviceId` is injected by the Rust RPC layer from the verified
-  // device JWT (ADR-0060) — never trusted from the raw client payload.
+  // verified DPoP device context (ADR-0060) — never trusted from the raw client payload.
   const deviceId = payload.callerDeviceId as string | undefined
   await dispatchTrigger(
     {

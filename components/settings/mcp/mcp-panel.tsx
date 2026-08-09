@@ -103,9 +103,11 @@ export function McpPanel({ className }: { className?: string }) {
       const seed = await blankServerSeed()
       await createMcpServer({
         name: preset.id,
+        displayName: preset.name,
+        origin: "preset",
         transport: preset.transport,
         config: applyPresetFields(preset, values),
-        enabled: true,
+        enabled: false,
         appsEnabled: seed.appsEnabled,
       })
       loggers.mcp.info("settings.serverCreatedFromPreset", { presetId: preset.id })
@@ -246,7 +248,7 @@ function McpEditorHost() {
           name: "",
           transport: "stdio",
           config: { ...BLANK_CONFIG },
-          enabled: true,
+          enabled: false,
           appsEnabled: {},
         })
 

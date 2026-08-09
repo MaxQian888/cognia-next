@@ -53,6 +53,14 @@ test("bash runs a command and returns its output", async () => {
   assert.match(textOf(res), /core-bash-ok/)
 })
 
+test("bash connects child stdin to a pipe instead of the null device", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const command = `${JSON.stringify(process.execPath)} -e "process.stdout.write(String(require('node:fs').fstatSync(0).isCharacterDevice()))"`
+  const res = await tool.handler({ command }, {})
+  assert.ok(!res.isError, textOf(res))
+  assert.equal(textOf(res), "false")
+})
+
 test("bash surfaces non-zero exit codes as errors", async () => {
   const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
   const res = await tool.handler({ command: "exit 3" }, {})
@@ -73,6 +81,7 @@ test("bash hard-rejects destructive chaining patterns", async () => {
   const res = await tool.handler({ command: "echo hi && rm -rf /" }, {})
   assert.equal(res.isError, true)
   assert.match(textOf(res), /rejected/)
+  assert.match(textOf(res), /&& rm/)
 })
 
 test("bash redirects an interactive command to a PTY and never spawns it", async () => {

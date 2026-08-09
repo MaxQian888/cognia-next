@@ -41,7 +41,7 @@ import {
 import { builtinSkillId, getCatalogSkill } from "@/lib/skills/built-in-catalog"
 import { selectSurfaceSkills, renderSurfaceSkillsSection } from "@/lib/skills/surface-activation"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
-import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
+import { buildMcpServerMapResolved, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
@@ -66,17 +66,24 @@ import type {
   Team,
   TeamMember,
 } from "@cognia/agent-config-types"
+import type { AgentExecutionIdentity } from "@cognia/agent-config-types/agent-execution"
 import type { Project } from "@/types"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { resolveMemoryConfig } from "@/types/memory/memory"
-import { resolveMemoryTurnPolicy } from "@/lib/memory/control-plane/policy"
+import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
 import { resolveProjectKnowledgeSettings } from "@/types/project-knowledge"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
-import { buildAgentModeSessionUpdate } from "@/lib/agent"
+import { buildAgentModeSessionUpdate } from "@/lib/agent/mode-session-update"
+import {
+  resolveAgentEnvironment,
+  resolveAgentExecutionPolicy,
+  resolveAgentModel,
+} from "@/lib/agent/agent-profile-policy"
+import { loadAgentEnvSecret } from "@/lib/agent/agent-env-keyring"
 import { namespacedA2UIToolNames } from "@/lib/a2ui/mcp-tool-schemas"
 import { A2UI_SYSTEM_PROMPT } from "@/lib/ai/prompts/a2ui-prompts"
 import {
@@ -85,6 +92,7 @@ import {
 } from "@/lib/ai/provider-consumption"
 import { isLocalProvider } from "@cognia/provider-core/providers/local-providers"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
+import { isUltracodeLevel, resolveThinkingLevel } from "@/lib/ai/thinking-level"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { resolveCodexVaultCredential } from "@/lib/subscription/codex/chat-bridge"
 import {
@@ -113,6 +121,12 @@ import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
 import { resolveProviderAttemptOptions } from "./provider-attempt-options"
+import {
+  applySupportAgentSafety,
+  buildSupportAgentContext,
+  isSupportAgentId,
+  isSupportDiagnosticsEnabled,
+} from "@/lib/support-agent/context"
 
 /**
  * Snippet appended to `appendSystemPrompt` when brief mode is on. Exported so
@@ -166,10 +180,11 @@ function buildProtocolAdapterSpec(
 
 async function resolveSubscriptionBackedSummaryCredentials(
   providerId: string,
-  resolved?: { apiKey?: string; baseURL?: string }
+  resolved?: { apiKey?: string; baseURL?: string },
+  accountId?: string | null
 ): Promise<SummaryCredentials | null> {
   if (isOpencodeChatProviderId(providerId) && !resolved?.apiKey) {
-    const vaultCred = await resolveOpencodeVaultCredential(providerId)
+    const vaultCred = await resolveOpencodeVaultCredential(providerId, accountId)
     if (!vaultCred) return null
     return {
       apiKey: vaultCred.apiKey,
@@ -178,7 +193,7 @@ async function resolveSubscriptionBackedSummaryCredentials(
   }
 
   if (isCodexChatProviderId(providerId)) {
-    const vaultCred = await resolveCodexVaultCredential(providerId)
+    const vaultCred = await resolveCodexVaultCredential(providerId, accountId)
     if (!vaultCred) return null
     if (!resolved?.apiKey) {
       return {
@@ -207,6 +222,7 @@ async function resolveSummaryProviderForCompaction(args: {
   summaryModel?: string
   appSettings: AppSettings
 }): Promise<SummaryProviderResolution | null> {
+  const accountId = resolveAccountId(args.providerId, null, null, args.appSettings)
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: args.appSettings.defaultProvider,
     providerSettings: args.appSettings.providerSettings as
@@ -226,10 +242,11 @@ async function resolveSummaryProviderForCompaction(args: {
   )
 
   if (r.kind === "resolved") {
-    const vaultCredentials = await resolveSubscriptionBackedSummaryCredentials(args.providerId, {
-      apiKey: r.apiKey,
-      baseURL: r.baseURL,
-    })
+    const vaultCredentials = await resolveSubscriptionBackedSummaryCredentials(
+      args.providerId,
+      { apiKey: r.apiKey, baseURL: r.baseURL },
+      accountId
+    )
     const credentials: SummaryCredentials = vaultCredentials ?? {
       apiKey: r.apiKey,
       baseURL: r.baseURL,
@@ -258,7 +275,11 @@ async function resolveSummaryProviderForCompaction(args: {
   if (r.nextAction === "enable_provider") return null
 
   if (isOpencodeChatProviderId(args.providerId) || isCodexChatProviderId(args.providerId)) {
-    const credentials = await resolveSubscriptionBackedSummaryCredentials(args.providerId)
+    const credentials = await resolveSubscriptionBackedSummaryCredentials(
+      args.providerId,
+      undefined,
+      accountId
+    )
     if (!credentials) return null
     const protocolAdapterSpec = await buildProtocolAdapterSpec("openai")
     return {
@@ -344,6 +365,13 @@ export interface BuildOptionsContext {
    */
   workspaceRestricted?: boolean
   /**
+   * Workspace roots with an explicit Workspace Trust grant. Native Claude SDK
+   * skills/plugins are local provider-visible content, so the sidecar enables
+   * them only when this proof accompanies the send. That trust grant is the
+   * explicit disclosure boundary; native file contents are not PII-rewritten.
+   */
+  trustedWorkspaceRoots?: string[]
+  /**
    * Per-team-slot override applied on top of the character defaults. Only set
    * by the team chat hook; ignored when undefined. Override fields that are
    * left undefined fall through to the character's value as usual.
@@ -420,6 +448,8 @@ export interface BuildOptionsContext {
    * affinity, and traces stay attributed to the immutable Agent ticket.
    */
   routingSurface?: import("@cognia/provider-types/auto-router").RoutingSurface
+  /** Semantic Agent model role. Normal chat/dispatch defaults to `execute`. */
+  modelRole?: import("@cognia/agent-config-types").AgentModelRole
   /**
    * Optional long-term memory runtime dependencies (ADR — autonomous memory).
    * When supplied AND `memoryUserMessage` is set AND `appSettings.memory` is
@@ -470,7 +500,7 @@ export interface BuildOptionsContext {
    *     demand. The CLI sets this so a session with many enabled skills doesn't
    *     pay their full token weight every turn. Desktop callers leave it absent.
    */
-  skillRenderMode?: "full" | "name"
+  skillRenderMode?: "full" | "name" | "hybrid"
   /**
    * Active `/goal` for this session (ADR-0019). When set AND
    * `activeGoal.status === "active"`, the resolver appends a
@@ -596,6 +626,8 @@ export interface BuildOptionsContext {
    * "workflow", team member sends "agent-team".
    */
   traceSurface?: SpanSurface
+  /** Final per-run identity supplied by durable execution owners before minting. */
+  executionIdentity?: Partial<AgentExecutionIdentity>
   /**
    * Pre-minted parent trace. When set (and `emitTrace`), `resolveSendOptions`
    * does NOT mint a new root span; it stamps these ids onto `SendOptions`
@@ -945,6 +977,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // without a Dexie row.
     character = (await resolveCharacterById(session.characterId)) ?? null
   }
+  const supportAgent = isSupportAgentId(character?.id)
+  const agentExecutionPolicy = resolveAgentExecutionPolicy(
+    character?.executionPolicy,
+    session?.executionPolicy
+  )
+  if (agentExecutionPolicy.maxTurns !== undefined) {
+    opts.maxTurns = agentExecutionPolicy.maxTurns
+  }
 
   // --- Resolve skills: character.skillIds ∪ ephemeralSkillIds, minus session-disables.
   // Honour the per-skill `status` flag — disabled skills don't get appended,
@@ -974,10 +1014,22 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (session?.trialSkillId) {
     skills = await listSkillsByIds([session.trialSkillId])
   }
+  const explicitSkillIds = new Set(
+    session?.trialSkillId ? [session.trialSkillId] : (ctx.ephemeralSkillIds ?? [])
+  )
+  const explicitSkills = skills.filter((skill) => explicitSkillIds.has(skill.id))
+  const implicitSkills = skills.filter(
+    (skill) => !explicitSkillIds.has(skill.id) && skill.invocationPolicy !== "explicit"
+  )
+  // An explicit-only character skill is intentionally absent from both the
+  // catalog and the tool whitelist. An ephemeral attachment remains explicit.
+  skills = [...implicitSkills, ...explicitSkills]
   // Bump usage counters for the skills that actually made it into the prompt.
   // Fire-and-forget: a failed write here shouldn't block the send.
-  if (skills.length > 0) {
-    void recordSkillUsage(skills.map((s) => s.id)).catch(() => undefined)
+  const immediatelyInjectedSkills =
+    ctx.skillRenderMode === "hybrid" ? explicitSkills : ctx.skillRenderMode === "name" ? [] : skills
+  if (immediatelyInjectedSkills.length > 0) {
+    void recordSkillUsage(immediatelyInjectedSkills.map((s) => s.id)).catch(() => undefined)
   }
 
   // --- Agent Mode (built-in / custom / plugin) ----------------------------
@@ -1056,14 +1108,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // persona declares one (D1). Explicit `/model` and per-session choices
   // still win. Alias-valued defaults resolve through the alias engine below
   // like every other source.
+  const agentModel = resolveAgentModel(
+    ctx.modelRole ?? "execute",
+    character,
+    appSettings?.defaultModel
+  )
   let model: string | undefined =
     imModelOverride ??
     session?.model ??
     memberOverride?.modelOverride ??
     modeUpdate?.model ??
     imDefaultModel ??
-    character?.model ??
-    appSettings?.defaultModel
+    agentModel
 
   // --- Provider: IM channel override > per-session override > bot default > character > app default > "anthropic" -----
   // The sidecar uses `provider` to pick which dispatcher (`anthropic` vs the
@@ -1082,7 +1138,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const requestedEffort =
     imOverrideRow?.reasoningOverride ??
     session?.effort ??
+    session?.executionPolicy?.effort ??
     imAdapterRow?.defaultReasoning ??
+    character?.executionPolicy?.effort ??
     appSettings?.defaultEffort
 
   // Rough text of the outgoing prompt (CJK-aware sizing happens later). Only the
@@ -1226,11 +1284,32 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  const accountId = resolveAccountId(
+    providerId,
+    session ?? null,
+    character ?? null,
+    appSettings ?? null
+  )
+  // Validate and resolve the selected account before provider-specific bridge
+  // credentials. This guarantees stale/mismatched explicit references surface
+  // as SubscriptionAccountResolutionError instead of a generic bridge error.
+  let accountEnv: Record<string, string>
+  let proxyEnv: Record<string, string>
+  if (ctx.preloadedEnv !== undefined) {
+    accountEnv = ctx.preloadedEnv ?? {}
+    proxyEnv = {}
+  } else {
+    ;[accountEnv, proxyEnv] = await Promise.all([
+      resolveAccountEnv(providerId, accountId),
+      resolveProxyEnv(session?.id ?? null),
+    ])
+  }
+
   if (model) opts.model = model
   if (providerId) {
     opts.provider = providerId
     if (appSettings) {
-      const attemptOptions = await resolveProviderAttemptOptions(providerId, appSettings)
+      const attemptOptions = await resolveProviderAttemptOptions(providerId, appSettings, accountId)
       opts.providerCredentials = attemptOptions.providerCredentials
       opts.protocolAdapterSpec = attemptOptions.protocolAdapterSpec
       opts.modelParams = attemptOptions.modelParams
@@ -1350,9 +1429,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   let memorySection = ""
   if (ctx.memoryDeps && ctx.memoryUserMessage && ctx.memoryUserMessage.trim()) {
     const memoryConfig = resolveMemoryConfig(appSettings?.memory)
-    const memoryPolicy = resolveMemoryTurnPolicy({
+    const memoryPolicy = resolveAgentMemoryPolicy({
       config: memoryConfig,
       session: session ?? undefined,
+      agentPolicy: character?.memoryPolicy,
     })
     await import("@/lib/db/memory-governance")
       .then(({ appendMemoryAuditEvent }) =>
@@ -1367,6 +1447,22 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       try {
         const { applyMemoryContext } = await import("@/lib/memory/runtime/apply-memory-context")
         const twinChunkTexts = opts.twinContext?.retrievedChunks.map((c) => c.chunk.content) ?? []
+        const readableScopes = new Set(memoryPolicy.readableScopes)
+        const scopedMemoryDeps = {
+          ...ctx.memoryDeps,
+          loadCandidates: async (
+            reader?: Parameters<NonNullable<typeof ctx.memoryDeps>["loadCandidates"]>[0]
+          ) =>
+            (await ctx.memoryDeps!.loadCandidates(reader)).filter((memory) =>
+              readableScopes.has(memory.scope)
+            ),
+          loadProcedural: async (
+            reader?: Parameters<NonNullable<typeof ctx.memoryDeps>["loadProcedural"]>[0]
+          ) =>
+            (await ctx.memoryDeps!.loadProcedural(reader)).filter((memory) =>
+              readableScopes.has(memory.scope)
+            ),
+        }
         const result = await applyMemoryContext({
           userMessage: ctx.memoryUserMessage,
           reader: {
@@ -1385,7 +1481,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           // Reuse the turn's query embedding (memory's vector backend shares the
           // twin embedding model via resolveMemoryBackend) — no re-embed.
           precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
-          deps: ctx.memoryDeps,
+          deps: scopedMemoryDeps,
         })
         if (result.systemPromptSection) {
           if (cacheOptimizationEnabled) {
@@ -1470,6 +1566,47 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // --- Reusable Agent Knowledge Base injection -----------------------------
+  // Bound libraries are independent of Project/Twin ownership and are queried
+  // in parallel. The shared vector backend is reused, while each library keeps
+  // its own collection and failure boundary.
+  let agentKnowledgeSection = ""
+  if (
+    (character?.knowledgeBaseIds?.length ?? 0) > 0 &&
+    ctx.projectKnowledgeDeps?.vectorBackend &&
+    ctx.projectKnowledgeUserMessage?.trim()
+  ) {
+    try {
+      const { applyAgentKnowledgeContextFromDb } =
+        await import("@/lib/knowledge-base/runtime/apply-agent-knowledge-context")
+      const result = await applyAgentKnowledgeContextFromDb({
+        knowledgeBaseIds: character?.knowledgeBaseIds ?? [],
+        userMessage: ctx.projectKnowledgeUserMessage,
+        topKPerBase: 5,
+        tokenBudget: 2_000,
+        precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
+        runtimeDeps: ctx.projectKnowledgeDeps as Parameters<
+          typeof applyAgentKnowledgeContextFromDb
+        >[0]["runtimeDeps"],
+      })
+      if (result.systemPromptSection) {
+        if (cacheOptimizationEnabled) dynamicTailSections.push(result.systemPromptSection)
+        else agentKnowledgeSection = result.systemPromptSection
+      }
+      if (result.retrievedChunks.length > 0 || result.degraded) {
+        opts.agentKnowledgeContext = {
+          retrievedChunks: result.retrievedChunks,
+          citations: result.citations,
+          failures: result.failures,
+          budget: result.budget,
+          degraded: result.degraded,
+        }
+      }
+    } catch {
+      // Reusable Knowledge Base retrieval is best-effort and never blocks send.
+    }
+  }
+
   // --- Working directory ---------------------------------------------------
   // Shared chain (see lib/workspace/effective-cwd.ts): per-session override →
   // active workspace root → character default → app default. Resolved here
@@ -1515,8 +1652,43 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // instead of every skill's full body — the agent pulls a skill's instructions
   // on demand via the caller's load tool. Absent / "full" keeps the legacy
   // whole-body append, so desktop behaviour is unchanged.
-  const skillSection =
-    ctx.skillRenderMode === "name" ? renderSkillsCatalog(skills) : renderSkillsSection(skills)
+  let skillSection = ""
+  if (ctx.skillRenderMode === "name") {
+    skillSection = renderSkillsCatalog(skills)
+  } else if (ctx.skillRenderMode === "hybrid") {
+    const [{ listResourcesForSkill }, runtime, tools] = await Promise.all([
+      import("@/lib/db/skill-resources"),
+      import("@/lib/skills/runtime-loader"),
+      import("@/lib/claude/skill-builtin-tools"),
+    ])
+    const resourcesById = new Map(
+      await Promise.all(
+        skills.map(async (skill) => [skill.id, await listResourcesForSkill(skill.id)] as const)
+      )
+    )
+    const explicitSection = explicitSkills
+      .map((skill) => runtime.renderSkillWithResources(skill, resourcesById.get(skill.id) ?? []))
+      .join("\n\n")
+    const catalogSection = renderSkillsCatalog(implicitSkills)
+    skillSection = [explicitSection, catalogSection].filter(Boolean).join("\n\n")
+    if (session?.id && skills.length > 0) {
+      runtime.registerSkillLoadContext(session.id, {
+        skills,
+        explicitSkillIds: explicitSkills.map((skill) => skill.id),
+      })
+      opts.pluginTools = [
+        ...(opts.pluginTools ?? []),
+        ...tools.buildProgressiveSkillManifestEntries(
+          skills,
+          [...resourcesById.values()].some((resources) => resources.length > 0)
+        ),
+      ]
+    } else if (session?.id) {
+      runtime.clearSkillLoadContext(session.id)
+    }
+  } else {
+    skillSection = renderSkillsSection(skills)
+  }
   // Substitute agent-mode prompt template variables ({{date}} / {{tools_list}} /
   // {{mode_name}} / …) the custom-mode editor advertises — without this the
   // literal `{{…}}` tokens are sent to the model verbatim.
@@ -1604,6 +1776,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     instructionSection,
     memorySection,
     projectKnowledgeSection,
+    agentKnowledgeSection,
     modeSection,
     skillSection,
     pluginSkillSection,
@@ -1907,7 +2080,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   try {
     // CLI / headless callers inject `preloadedMcpServers` (incl. `[]`) so the
     // resolver never touches Dexie; desktop leaves it undefined → Dexie lookup.
-    const enabled = ctx.preloadedMcpServers ?? (await listEnabledMcpServers())
+    const enabled = supportAgent ? [] : (ctx.preloadedMcpServers ?? (await listEnabledMcpServers()))
     let chosen = enabled
     const memberMcp = memberOverride?.mcpServerIdsOverride
 
@@ -1949,10 +2122,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           import("@/lib/mcp/oauth-tauri"),
         ])
         opts.mcpServers = await buildMcpServerMapWithAuth(chosen, {
-          loadEntry: mcpOAuthLoadEntry,
+          loadEntry: (serverId, legacyName) => mcpOAuthLoadEntry(serverId, legacyName),
         })
       } else {
-        opts.mcpServers = buildMcpServerMap(chosen)
+        opts.mcpServers = await buildMcpServerMapResolved(chosen)
       }
     }
   } catch (err) {
@@ -1983,7 +2156,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // `<cwd>/.cognia/lsp.json` for the project layer.
   {
     const lspEnabled = appSettings?.lsp?.enabled ?? appSettings?.builtinTools?.lsp ?? false
-    if (lspEnabled && opts.cwd) {
+    if (!supportAgent && lspEnabled && opts.cwd) {
       const servers = await resolveLspServers({
         rootDir: opts.cwd,
         userServers: appSettings?.lsp?.servers,
@@ -2103,6 +2276,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             )
         )
       }
+      // The capability-filtered manifest BEFORE semantic pruning. The ultracode
+      // tier below re-attaches workflow entries from it, so that tier's tool
+      // guarantee holds even when pruning would have dropped them for being a
+      // poor semantic match for this particular prompt.
+      const unprunedManifest = manifest
       // Semantic tool routing (opt-in, default OFF): when MORE plugin tools
       // than the activation threshold are exposed, keep only the top-K
       // semantic matches for the current prompt plus pinned tools. Only the
@@ -2180,6 +2358,39 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           WORKFLOW_AI_PLUGIN_ID,
         } = await import("@/lib/workflow/publish/runner-tool")
         if (!combined.some((entry) => entry.name === WORKFLOW_RUNNER_TOOL_NAME)) {
+          combined.push({
+            name: WORKFLOW_RUNNER_TOOL_NAME,
+            description: WORKFLOW_RUNNER_TOOL_DEFINITION.description,
+            jsonSchema: WORKFLOW_RUNNER_TOOL_DEFINITION.parametersSchema,
+            pluginId: WORKFLOW_AI_PLUGIN_ID,
+          })
+        }
+      }
+      // `ultracode` is the composite top thinking tier: `"xhigh"` effort (which
+      // the tier persists as `ChatSession.effort`, so the effort chain below
+      // needs no special case) PLUS the dynamic-workflow `wf_*` suite. The CLI
+      // expresses that second half through its `config.pluginTools` gate; this
+      // is the desktop/web equivalent.
+      //
+      // Two steps, both appended AFTER pruning so neither can be pruned away:
+      // re-attach the workflow plugin's own entries when it IS enabled, and
+      // fall back to the shared typed runner when it is not — the same seam,
+      // and the same `plugin-tool-ipc.ts` executor, as the graph-bodied-skills
+      // branch above. Choosing the tier is the opt-in; nothing here overrides a
+      // per-character `disablePluginTools` (we are already inside that guard).
+      if (isUltracodeLevel(resolveThinkingLevel(session))) {
+        const {
+          WORKFLOW_RUNNER_TOOL_NAME,
+          WORKFLOW_RUNNER_TOOL_DEFINITION,
+          WORKFLOW_AI_PLUGIN_ID,
+        } = await import("@/lib/workflow/publish/runner-tool")
+        const present = new Set(combined.map((entry) => entry.name))
+        for (const entry of unprunedManifest) {
+          if (entry.pluginId !== WORKFLOW_AI_PLUGIN_ID || present.has(entry.name)) continue
+          present.add(entry.name)
+          combined.push(entry)
+        }
+        if (!present.has(WORKFLOW_RUNNER_TOOL_NAME)) {
           combined.push({
             name: WORKFLOW_RUNNER_TOOL_NAME,
             description: WORKFLOW_RUNNER_TOOL_DEFINITION.description,
@@ -2321,6 +2532,31 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       ]
     } catch (err) {
       loggers.app.warn("failed to append SlashCommand built-in tool", { error: String(err) })
+    }
+  }
+  // User-started sidechat handoff. Native mobile has no sidechat host, so do
+  // not advertise a tool that could only create an unreachable embedded row.
+  if (appSettings?.selfInvokeTools?.spawnTask === true) {
+    try {
+      const { isNativeMobile } = await import("@/lib/platform/detect")
+      if (!isNativeMobile()) {
+        const { buildSpawnTaskManifestEntries } =
+          await import("@/lib/claude/spawn-task-builtin-tools")
+        opts.pluginTools = [...(opts.pluginTools ?? []), ...buildSpawnTaskManifestEntries()]
+      }
+    } catch (err) {
+      loggers.app.warn("failed to append spawn_task built-in tool", { error: String(err) })
+    }
+  }
+  if (appSettings?.selfInvokeTools?.sessionMessaging === true) {
+    try {
+      const { buildSessionPeerManifestEntries } =
+        await import("@/lib/claude/session-peer-builtin-tools")
+      opts.pluginTools = [...(opts.pluginTools ?? []), ...buildSessionPeerManifestEntries()]
+    } catch (err) {
+      loggers.app.warn("failed to append session messaging built-in tools", {
+        error: String(err),
+      })
     }
   }
   // Project-scoped vector memory (vector_search / vector_add_document /
@@ -2622,20 +2858,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   //
   // Runs BEFORE the convenience-modes block below so `debugMode` can layer
   // `DEBUG=*` / `CLAUDE_CODE_DEBUG=1` on top.
-  const accountId = resolveAccountId(session ?? null, character ?? null, appSettings ?? null)
-  let accountEnv: Record<string, string>
-  let proxyEnv: Record<string, string>
-  if (ctx.preloadedEnv !== undefined) {
-    // Standalone CLI path: env comes from config, not the desktop's Rust
-    // account/proxy resolvers (which require Tauri IPC). `null` means "no env".
-    accountEnv = ctx.preloadedEnv ?? {}
-    proxyEnv = {}
-  } else {
-    ;[accountEnv, proxyEnv] = await Promise.all([
-      resolveAccountEnv(providerId, accountId),
-      resolveProxyEnv(session?.id ?? null),
-    ])
+  if (!supportAgent && agentExecutionPolicy.envBindings?.length) {
+    const agentEnv = await resolveAgentEnvironment(
+      agentExecutionPolicy.envBindings,
+      loadAgentEnvSecret
+    )
+    opts.env = { ...(opts.env ?? {}), ...agentEnv }
   }
+
+  // Standalone callers use their preloaded env; desktop callers resolved and
+  // validated account/proxy env before provider bridge credentials above.
   if (Object.keys(accountEnv).length > 0 || Object.keys(proxyEnv).length > 0) {
     opts.env = { ...(opts.env ?? {}), ...accountEnv, ...proxyEnv }
   }
@@ -3343,7 +3575,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       await import("@/lib/ai/agent/execution/feature-flags")
     if (
       isAgentExecutionFlagEnabled("agentExecutionResolverV2") ||
-      isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")
+      isAgentExecutionFlagEnabled("gatewayAgentRouteTickets") ||
+      isAgentExecutionFlagEnabled("claudeSdkParityV1")
     ) {
       const { resolveAgentExecutionSpec, sendSpecFromResolved } =
         await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
@@ -3356,7 +3589,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         // provider id still drives the runtime mapping.
         policy: { executionKind: "agent" },
         legacy: { providerId: opts.provider, modelId: opts.model },
-        identity: session?.id ? { sessionId: session.id } : undefined,
+        identity:
+          session?.id || ctx.executionIdentity
+            ? { ...(session?.id ? { sessionId: session.id } : {}), ...ctx.executionIdentity }
+            : undefined,
       })
       // A gateway route is only real once a ticket exists: without one
       // `sendSpecFromResolved` degrades to `direct`, which is why the route
@@ -3389,9 +3625,58 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       } else {
         opts.execution = sendSpecFromResolved(spec)
       }
+      if (spec.runtimeAdapter === "claude-agent-sdk") {
+        const { claudeSdkRolloutOptions } = await import("./claude-sdk-rollout")
+        const rollout = claudeSdkRolloutOptions(getAgentExecutionFlags())
+        if (rollout) opts.claudeAgentSdk = { ...opts.claudeAgentSdk, ...rollout }
+      }
     }
   } catch {
     // Never fail the send over spec stamping.
+  }
+
+  // Trust proof is host-owned and stamped after plugin option transforms, so a
+  // plugin cannot mint or widen the authority used to load provider-visible
+  // local SDK skills/plugins.
+  if (ctx.trustedWorkspaceRoots?.length) {
+    opts.trustedWorkspaceRoots = [...new Set(ctx.trustedWorkspaceRoots)]
+  } else {
+    delete opts.trustedWorkspaceRoots
+  }
+
+  if (supportAgent) {
+    const supportContext = await buildSupportAgentContext({
+      locale: appSettings?.language,
+      userText: ctx.routingContextHint?.promptText ?? ctx.twinUserMessage,
+      diagnosticsEnabled: isSupportDiagnosticsEnabled(),
+    })
+    const safe = applySupportAgentSafety({
+      ...opts,
+      systemPrompt: `${character?.systemPrompt ?? ""}\n\n${supportContext}`.trim(),
+      appendSystemPrompt: undefined,
+      dynamicSystemPrompt: undefined,
+    }) as SendOptions
+    for (const key of Object.keys(opts) as Array<keyof SendOptions>) delete opts[key]
+    Object.assign(opts, safe)
+    delete opts.appendSystemPrompt
+    delete opts.dynamicSystemPrompt
+  }
+
+  if (opts.claudeAgentSdk) {
+    const { validateClaudeAgentSdkOptions } =
+      await import("@cognia/agent-config-types/claude-agent-sdk-options")
+    const validation = validateClaudeAgentSdkOptions(opts.claudeAgentSdk, {
+      resume: opts.resumeSessionId,
+      forkSession: opts.forkFromSessionId !== undefined,
+      permissionMode: opts.permissionMode,
+      bypassConfirmed: opts.bypassPermissionsConfirmed === true,
+    })
+    if (!validation.ok) {
+      throw new Error(`invalid claudeAgentSdk options: ${validation.errors.join("; ")}`)
+    }
+    for (const warning of validation.warnings) {
+      loggers.app.warn("Claude Agent SDK option warning", { warning })
+    }
   }
 
   return opts

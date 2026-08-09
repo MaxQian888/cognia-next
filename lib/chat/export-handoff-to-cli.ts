@@ -50,13 +50,15 @@ function boundedDetail(value: unknown, max = 96): string {
   return detail.length <= max ? detail : `${detail.slice(0, max - 1)}…`
 }
 
-function toolMarker(part: Record<string, unknown>, type: string): string {
+function toolMarker(part: Record<string, unknown>, type: string, includeDetails: boolean): string {
   const name =
     type === "dynamic-tool"
       ? stringValue(part.toolName) || "tool"
       : type.startsWith("tool-")
         ? type.slice("tool-".length)
         : stringValue(part.name) || "tool"
+  if (!includeDetails) return `[tool: ${name}]`
+
   const details: string[] = []
   if (part.input !== undefined) details.push(`input: ${boundedDetail(part.input)}`)
   if (part.output !== undefined) details.push(`result: ${boundedDetail(part.output)}`)
@@ -72,7 +74,15 @@ function toolMarker(part: Record<string, unknown>, type: string): string {
  * future parts receive a type marker, so handoff never loses their existence
  * silently. Tool/reasoning markers are bounded; code remains fenced verbatim.
  */
-export function serializeHandoffParts(parts: unknown): string {
+export interface HandoffSerializationOptions {
+  includeReasoningDetails?: boolean
+  includeToolDetails?: boolean
+}
+
+export function serializeHandoffParts(
+  parts: unknown,
+  options: HandoffSerializationOptions = {}
+): string {
   if (!Array.isArray(parts)) return ""
   const rendered: string[] = []
   for (const raw of parts) {
@@ -92,11 +102,21 @@ export function serializeHandoffParts(parts: unknown): string {
       if (code) rendered.push(`\`\`\`${stringValue(raw.language)}\n${code}\n\`\`\``)
     } else if (type === "reasoning" || type === "thinking") {
       const reasoning = stringValue(raw.text) || stringValue(raw.thinking)
-      rendered.push(boundedMarker("[reasoning]", reasoning || undefined))
+      rendered.push(
+        boundedMarker(
+          "[reasoning]",
+          options.includeReasoningDetails === false ? undefined : reasoning || undefined
+        )
+      )
     } else if (type.startsWith("tool-") || type === "dynamic-tool" || type === "tool_use") {
-      rendered.push(toolMarker(raw, type))
+      rendered.push(toolMarker(raw, type, options.includeToolDetails !== false))
     } else if (type === "tool_result") {
-      rendered.push(boundedMarker("[tool result]", raw.content ?? raw.output))
+      rendered.push(
+        boundedMarker(
+          "[tool result]",
+          options.includeToolDetails === false ? undefined : (raw.content ?? raw.output)
+        )
+      )
     } else if (type === "file") {
       const filename =
         stringValue(raw.filename) ||

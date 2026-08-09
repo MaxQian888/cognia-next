@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
-import type { McpServer } from "@cognia/agent-config-types"
+import type { McpServerSummary } from "@cognia/agent-config-types"
 
 import type { SyncCursor, SyncOutcome } from "../types"
 import { runSyncHandler } from "./base"
@@ -14,12 +14,30 @@ import { runSyncHandler } from "./base"
  * list (name / transport / enabled state) — it never writes back.
  */
 export function syncMcpServers(transport: Transport, cursor: SyncCursor): Promise<SyncOutcome> {
-  return runSyncHandler<McpServer>(
+  return runSyncHandler<McpServerSummary>(
     {
       table: "mcpServers",
-      // `mcpServers` is `Table<McpServer, string>`; the row carries `updatedAt`
-      // (set by every create/update), so the desktop projector cursors on it.
-      getTable: () => getDb().mcpServers,
+      // The RPC keeps its compatibility table name, but only redacted summaries
+      // are accepted into the paired-mobile database.
+      getTable: () => getDb().mcpServerSummaries,
+      applyRows: async (rows) => {
+        await getDb().mcpServerSummaries.bulkPut(
+          rows.map((row) => {
+            const legacy = row as McpServerSummary & {
+              name?: string
+              trust?: { state?: McpServerSummary["trustState"] }
+            }
+            return {
+              id: row.id,
+              displayName: row.displayName || legacy.name || row.id,
+              transport: row.transport,
+              enabled: Boolean(row.enabled),
+              trustState: row.trustState ?? legacy.trust?.state ?? "legacy",
+              updatedAt: Number(row.updatedAt ?? 0),
+            }
+          })
+        )
+      },
     },
     transport,
     cursor

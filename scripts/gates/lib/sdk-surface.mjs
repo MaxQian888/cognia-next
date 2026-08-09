@@ -198,6 +198,81 @@ export function extractMessageTypes(source) {
     .filter(Boolean)
 }
 
+/** Dedupe + sort, so every extracted list diffs stably against the manifest. */
+const sortUnique = (xs) => [...new Set(xs)].sort()
+
+/**
+ * Wire discriminants (`type`, plus every `subtype` literal) for one
+ * `SDKMessage` union member.
+ *
+ * The union has 39 members but only 11 distinct `type` values — 28 of them are
+ * `type: 'system'`, separated solely by `subtype`. A mapping keyed on interface
+ * NAMES would therefore not be checkable against anything that ships on the
+ * wire, so the manifest records the discriminants and this reads them back out
+ * of the `.d.ts` to prove they still match.
+ *
+ * Resolves one level of alias union (`SDKResultMessage = SDKResultSuccess |
+ * SDKResultError`) so `result`'s five subtypes are covered rather than the
+ * first one that happens to appear.
+ *
+ * @param {string} source
+ * @param {string} name
+ * @param {number} [depth]
+ * @returns {{ type: string, subtypes: string[] }}
+ */
+export function extractMessageDiscriminant(source, name, depth = 0) {
+  const marker = `export declare type ${name} = `
+  const idx = source.indexOf(marker)
+  if (idx === -1) throw new Error(`sdk.d.ts: \`${name}\` declaration not found`)
+
+  const start = idx + marker.length
+  // An object literal ends at `\n};`; a bare alias ends at its first `;`.
+  // Choosing by shape rather than by whichever terminator comes first matters:
+  // an object body is full of `;` and an alias would otherwise swallow the
+  // declaration that follows it.
+  const isObjectLiteral = source[start] === "{"
+  const end = isObjectLiteral ? source.indexOf("\n};", start) : source.indexOf(";", start)
+  if (end === -1) throw new Error(`sdk.d.ts: unterminated declaration for \`${name}\``)
+  const body = source.slice(start, end)
+
+  const type = body.match(/^\s{4}type: '([^']+)';/m)?.[1]
+  if (type) {
+    const raw = body.match(/^\s{4}subtype: ([^;]+);/m)?.[1] ?? ""
+    return { type, subtypes: [...raw.matchAll(/'([^']+)'/g)].map((m) => m[1]) }
+  }
+
+  // Alias to a union of other declared members — resolve it once.
+  const refs = body
+    .split("|")
+    .map((s) => s.trim())
+    .filter((s) => /^[A-Za-z_$][\w$]*$/.test(s))
+  if (depth > 0 || refs.length === 0) {
+    throw new Error(`sdk.d.ts: \`${name}\` has no resolvable \`type\` discriminant`)
+  }
+
+  const resolved = refs.map((ref) => extractMessageDiscriminant(source, ref, depth + 1))
+  const types = [...new Set(resolved.map((r) => r.type))]
+  if (types.length !== 1) {
+    throw new Error(`sdk.d.ts: \`${name}\` mixes wire types (${types.join(", ")})`)
+  }
+  return { type: types[0], subtypes: sortUnique(resolved.flatMap((r) => r.subtypes)) }
+}
+
+/**
+ * `extractMessageDiscriminant` over every union member, keyed by member name.
+ *
+ * @param {string} source
+ * @returns {Record<string, { type: string, subtypes: string[] }>}
+ */
+export function extractMessageDiscriminants(source) {
+  /** @type {Record<string, { type: string, subtypes: string[] }>} */
+  const out = {}
+  for (const name of extractMessageTypes(source)) {
+    out[name] = extractMessageDiscriminant(source, name)
+  }
+  return out
+}
+
 /**
  * String literals of `export declare const HOOK_EVENTS: readonly [ … ]`.
  *
@@ -239,7 +314,6 @@ export function extractExports(source) {
  * @returns {Record<string, string[]>}
  */
 export function extractSurface(source) {
-  const sortUnique = (xs) => [...new Set(xs)].sort()
   return {
     options: sortUnique(extractOptionsFields(source)),
     queryMethods: sortUnique(extractQueryMethods(source)),

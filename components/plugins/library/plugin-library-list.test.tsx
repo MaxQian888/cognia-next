@@ -19,9 +19,11 @@ jest.mock("../plugin-panel-grid", () => ({
 }))
 
 // Avoid Dexie writes in toggle handlers.
-jest.mock("@/lib/db/plugins", () => ({
-  setPluginEnabled: jest.fn(),
+jest.mock("@/lib/plugin/core/toggle-plugin-enabled", () => ({
+  togglePluginEnabled: jest.fn(async () => ({ ok: true })),
 }))
+
+jest.mock("@/lib/db/plugins", () => ({}))
 
 let mockState = {
   filtered: [] as PluginRow[],

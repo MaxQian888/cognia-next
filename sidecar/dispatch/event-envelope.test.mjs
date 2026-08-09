@@ -4,12 +4,16 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 
-import { canonicalEventFromWireMessage, createEnvelopeEmitter } from "./event-envelope.mjs"
+import {
+  canonicalEventFromWireMessage,
+  canonicalEventsFromWireMessage,
+  createEnvelopeEmitter,
+} from "./event-envelope.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const fixture = JSON.parse(readFileSync(join(here, "agent-event-envelope.fixture.json"), "utf8"))
 
-function collectEmitter() {
+function collectEmitter(extra = {}) {
   const out = []
   const emitter = createEnvelopeEmitter({
     sessionId: fixture.context.sessionId,
@@ -19,6 +23,7 @@ function collectEmitter() {
     runtime: fixture.context.runtime,
     turnRef: { id: fixture.context.turnId },
     emit: (msg) => out.push(msg),
+    ...extra,
   })
   return { out, emitter }
 }
@@ -77,12 +82,6 @@ test("canonicalEventFromWireMessage maps the remaining kinds", () => {
   )
   assert.equal(canonicalEventFromWireMessage(null), null)
   assert.equal(canonicalEventFromWireMessage({ type: "ready" }), null)
-  const diag = canonicalEventFromWireMessage({
-    type: "event",
-    sessionId: "s1",
-    event: { type: "assistant", message: {} },
-  })
-  assert.equal(diag.kind, "diagnostic")
   const interrupted = canonicalEventFromWireMessage({
     type: "permission_interrupted",
     sessionId: "s1",
@@ -94,4 +93,108 @@ test("canonicalEventFromWireMessage maps the remaining kinds", () => {
     code: "permission_interrupted",
     message: "closed",
   })
+})
+
+test("a raw SDK message is projected semantically, not swallowed as a diagnostic", () => {
+  // Before the exhaustive mapping every `type: "event"` except compact_boundary
+  // became `{ kind: "diagnostic" }`, which is how 30 of the 39 union members
+  // reached consumers as opaque blobs.
+  const events = canonicalEventsFromWireMessage({
+    type: "event",
+    sessionId: "s1",
+    event: {
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }],
+      },
+    },
+  })
+  assert.deepEqual(events, [
+    { kind: "tool-call", toolName: "Bash", input: { command: "ls" }, toolCallId: "t1" },
+  ])
+})
+
+test("one SDK message can produce several envelopes, each with its own sequence", () => {
+  const { out, emitter } = collectEmitter()
+  emitter({
+    type: "event",
+    sessionId: "s1",
+    event: {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "checking" },
+          { type: "tool_use", id: "t1", name: "Bash", input: {} },
+        ],
+      },
+    },
+  })
+
+  const envelopes = out.filter((m) => m.type === "agent_event").map((m) => m.envelope)
+  assert.deepEqual(
+    envelopes.map((e) => e.event.kind),
+    ["text-delta", "tool-call"]
+  )
+  assert.deepEqual(
+    envelopes.map((e) => e.sequence),
+    [0, 1]
+  )
+})
+
+test("the partial-stream latch is per emitter, so attempts do not leak into each other", () => {
+  const assistant = {
+    type: "event",
+    sessionId: "s1",
+    event: { type: "assistant", message: { content: [{ type: "text", text: "hi" }] } },
+  }
+  const streamed = {
+    type: "event",
+    sessionId: "s1",
+    event: {
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "h" } },
+    },
+  }
+
+  const first = collectEmitter()
+  first.emitter(streamed)
+  first.emitter(assistant)
+  assert.deepEqual(
+    first.out.filter((m) => m.type === "agent_event").map((m) => m.envelope.event.kind),
+    ["text-delta"],
+    "the assistant echo must not duplicate the streamed text"
+  )
+
+  // A fresh emitter (a new attempt) starts unlatched.
+  const second = collectEmitter()
+  second.emitter(assistant)
+  assert.deepEqual(
+    second.out.filter((m) => m.type === "agent_event").map((m) => m.envelope.event.kind),
+    ["text-delta"]
+  )
+})
+
+test("the structured-output expectation reaches the mapper, per emitter", () => {
+  const result = {
+    type: "event",
+    sessionId: "s1",
+    event: { type: "result", subtype: "success", is_error: false, result: "prose" },
+  }
+
+  const expecting = collectEmitter({ expectStructuredOutput: true })
+  expecting.emitter(result)
+  assert.deepEqual(
+    expecting.out.filter((m) => m.type === "agent_event").map((m) => m.envelope.event.kind),
+    ["structured-output", "failure"],
+    "a schema was requested and none came back"
+  )
+
+  // The default must stay OFF: a session that never asked for a schema would
+  // otherwise have every successful turn rewritten into a failure.
+  const plain = collectEmitter()
+  plain.emitter(result)
+  assert.deepEqual(
+    plain.out.filter((m) => m.type === "agent_event").map((m) => m.envelope.event.kind),
+    ["lifecycle"]
+  )
 })

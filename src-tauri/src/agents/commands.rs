@@ -2,11 +2,12 @@
 //
 //   read_agent_config(agent)            -> { path, exists, raw, parsed, parseError? }
 //   write_agent_config(agent, value)    -> { path, backupPath? }
+//   agent_vendor_roots()                -> { claudeConfigDir, codexHome, ... }
 
 use serde::{Deserialize, Serialize};
 
 use super::io::{read_file, write_file};
-use super::paths::spec_for;
+use super::paths::{spec_for, vendor_roots, VendorRoots};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentReadResult {
@@ -90,4 +91,93 @@ pub fn write_agent_config(
             .backup_path
             .map(|p| p.to_string_lossy().into_owned()),
     })
+}
+
+/// Resolve where Claude Code / Codex / OpenCode keep their config and data
+/// trees on this host, honouring `$CLAUDE_CONFIG_DIR` / `$CODEX_HOME` /
+/// `$XDG_CONFIG_HOME` / `$XDG_DATA_HOME`. Every importer takes its scan roots
+/// from this one answer — see `lib/agent-roots/`.
+#[tauri::command]
+pub fn agent_vendor_roots() -> VendorRoots {
+    vendor_roots()
+}
+
+/// Read a workspace's project-scoped MCP config — the `.mcp.json` file Claude
+/// Code checks into the repo, which the standalone CLI already loads
+/// (`cli/src/mcp/load-mcp-config.ts`) but the desktop could not see.
+///
+/// Read-only on purpose: `.mcp.json` is usually version-controlled and shared
+/// with the user's teammates, so Cognia imports from it but never projects
+/// back into it (unlike the user-scope agent files in [`write_agent_config`]).
+#[tauri::command]
+pub fn read_project_mcp_config(cwd: String) -> Result<AgentReadResult, String> {
+    let trimmed = cwd.trim();
+    if trimmed.is_empty() {
+        return Err("a workspace directory is required".to_string());
+    }
+    let path = std::path::Path::new(trimmed).join(".mcp.json");
+    let outcome = read_file(&path, super::paths::AgentFormat::Json);
+    Ok(AgentReadResult {
+        path: Some(path.to_string_lossy().into_owned()),
+        exists: outcome.exists,
+        writable: false,
+        format: "json".to_string(),
+        raw: outcome.raw,
+        parsed: outcome.parsed,
+        parse_error: outcome.parse_error,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_agent_config_rejects_unknown_agent() {
+        let err = read_agent_config("not-an-agent".to_string()).expect_err("unknown agent");
+        assert!(err.contains("not-an-agent"));
+    }
+
+    #[test]
+    fn write_agent_config_rejects_read_only_agent() {
+        // cline is declared read-only in paths.rs.
+        let err = write_agent_config("cline".to_string(), serde_json::json!({}))
+            .expect_err("read-only agent");
+        assert!(err.contains("read-only"));
+    }
+
+    #[test]
+    fn agent_vendor_roots_matches_the_pure_resolver() {
+        assert_eq!(agent_vendor_roots(), vendor_roots());
+    }
+
+    #[test]
+    fn read_project_mcp_config_requires_a_workspace() {
+        assert!(read_project_mcp_config("   ".to_string()).is_err());
+    }
+
+    #[test]
+    fn read_project_mcp_config_reports_a_missing_file_without_erroring() {
+        let out = read_project_mcp_config("/nonexistent-workspace-xyz".to_string())
+            .expect("missing file is not an error");
+        assert!(!out.exists);
+        assert!(!out.writable);
+        assert_eq!(out.format, "json");
+        assert!(out.path.expect("path").ends_with(".mcp.json"));
+    }
+
+    #[test]
+    fn read_project_mcp_config_parses_a_real_file() {
+        let dir = std::env::temp_dir().join("cognia-project-mcp-test");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(
+            dir.join(".mcp.json"),
+            r#"{"mcpServers":{"docs":{"command":"npx","args":["-y","docs"]}}}"#,
+        )
+        .expect("write");
+        let out = read_project_mcp_config(dir.to_string_lossy().into_owned()).expect("read");
+        assert!(out.exists);
+        assert_eq!(out.parsed["mcpServers"]["docs"]["command"], "npx");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

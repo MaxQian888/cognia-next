@@ -9,7 +9,6 @@ export type CommandTransport = "http" | "websocket" | "webrtc" | "internal"
 
 export interface CommandDescriptor {
   name: string
-  since: 1 | 2
   target: CommandTarget
   operation: CommandOperation
   capability: string

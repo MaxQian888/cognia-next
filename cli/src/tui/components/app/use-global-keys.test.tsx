@@ -19,6 +19,7 @@ import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { AskUserOverlayApi } from "../../hooks/use-ask-user-overlay"
 import type { SelectionController } from "../../selection/selection-controller"
+import { TuiInputProvider, useModalInput } from "../../input/input-router"
 
 jest.mock("../../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
 const mockPos = absoluteTopLeft as jest.Mock
@@ -45,6 +46,7 @@ function buildDeps(over: Partial<GlobalKeysDeps> = {}): GlobalKeysDeps {
     now: () => 1000,
     doExit: jest.fn(),
     cancelBackendConnect: jest.fn(),
+    cancelBackendInstall: jest.fn(),
     agent: { abort: jest.fn(), switchMode: jest.fn() } as unknown as AgentSessionApi,
     abortRuntime: jest.fn(),
     askUser: { resolve: jest.fn() } as unknown as AskUserOverlayApi,
@@ -74,6 +76,11 @@ function buildDeps(over: Partial<GlobalKeysDeps> = {}): GlobalKeysDeps {
 
 function Harness({ deps }: { deps: GlobalKeysDeps }) {
   useGlobalKeys(deps)
+  return null
+}
+
+function ModalHarness({ onInput }: { onInput: () => void }) {
+  useModalInput(onInput)
   return null
 }
 
@@ -149,6 +156,61 @@ describe("useGlobalKeys", () => {
     act(() => __fireInput("", { escape: true }))
     expect(deps.agent.abort).toHaveBeenCalled()
     expect(deps.abortRuntime).toHaveBeenCalled()
+  })
+
+  it("interrupts a live turn on Ctrl+C even when the composer has a draft", () => {
+    const initial = createInitialState(config, "s1", true, [])
+    const deps = buildDeps({
+      busy: true,
+      state: {
+        ...initial,
+        turnStatus: "streaming",
+        input: { ...initial.input, buffer: bufferFromText("queued draft") },
+      } as TuiState,
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("c", { ctrl: true }))
+    expect(deps.agent.abort).toHaveBeenCalled()
+    expect(deps.dispatch).not.toHaveBeenCalledWith({ type: "INPUT_CLEAR" })
+  })
+
+  it("routes Ctrl+C through the critical path before a modal exactly once", () => {
+    const deps = buildDeps({ busy: true, overlayOpen: true })
+    const onModalInput = jest.fn()
+    render(
+      <TuiInputProvider>
+        <Harness deps={deps} />
+        <ModalHarness onInput={onModalInput} />
+      </TuiInputProvider>
+    )
+
+    act(() => __fireInput("c", { ctrl: true }))
+
+    expect(deps.agent.abort).toHaveBeenCalledTimes(1)
+    expect(deps.abortRuntime).toHaveBeenCalledTimes(1)
+    expect(onModalInput).not.toHaveBeenCalled()
+  })
+
+  it("interrupts a live turn on Esc while a permission overlay is open", () => {
+    const initial = createInitialState(config, "s1", true, [])
+    const deps = buildDeps({
+      busy: true,
+      overlayOpen: true,
+      state: {
+        ...initial,
+        turnStatus: "streaming",
+        overlay: {
+          kind: "permission",
+          req: { requestId: "req-1", toolName: "bash", input: {} },
+          choices: [{ label: "Allow once", value: "allow" }],
+          index: 0,
+        },
+      } as unknown as TuiState,
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("", { escape: true }))
+    expect(deps.agent.abort).toHaveBeenCalled()
+    expect(deps.dispatch).toHaveBeenCalledWith({ type: "OVERLAY_CLOSE" })
   })
 
   it("toggles all collapse on the collapseAll chord (Ctrl+T)", () => {

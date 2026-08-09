@@ -503,6 +503,85 @@ export async function verifyDetachedBundleSignature(args: {
   }
 }
 
+/** Verdict for one Character Pack signature check. Mirrors the Rust struct. */
+export interface PackSignatureVerdict {
+  requestId: string
+  verified: boolean
+  packId: string
+  packVersion: string
+  /** sha256 hex of the raw public-key bytes. Empty when the key was unusable. */
+  fingerprint: string
+  payloadBytes: number
+  /**
+   * `undefined` on success. Stable machine codes on failure:
+   * `payload-too-large` | `bad-public-key` | `bad-signature-encoding` |
+   * `signature-mismatch` | `host-unavailable`.
+   */
+  reason?: string
+}
+
+/**
+ * Verify a Character Pack signature over its canonical payload.
+ *
+ * Unlike {@link verifyDetachedBundleSignature}, this takes the bytes rather
+ * than a path: the signed content is the RFC 8785 canonical JSON of the pack
+ * object (`lib/plugin/character-pack/canonical-json.ts`), which exists only in
+ * memory. Taking the payload here is what makes "the bytes verified are the
+ * bytes registered" a local invariant instead of a hope.
+ *
+ * Fails closed off-Tauri: a pack that CARRIES a signature we cannot check must
+ * never be treated as unsigned.
+ */
+export async function verifyPackPayloadSignature(args: {
+  requestId?: string
+  packId: string
+  packVersion: string
+  payload: string
+  signatureBase64: string
+  publicKeyBase64: string
+  maxPayloadBytes?: number
+}): Promise<PackSignatureVerdict> {
+  const requestId = args.requestId ?? crypto.randomUUID()
+  const base: PackSignatureVerdict = {
+    requestId,
+    verified: false,
+    packId: args.packId,
+    packVersion: args.packVersion,
+    fingerprint: "",
+    payloadBytes: args.payload.length,
+  }
+
+  if (!isTauriRuntimeAvailable()) {
+    return { ...base, reason: "host-unavailable" }
+  }
+
+  try {
+    // The literal command name is required by `pnpm audit:command-parity`,
+    // which parses `invoke("...")` call sites statically.
+    return await invoke<PackSignatureVerdict>("plugin_verify_pack_signature", {
+      requestId,
+      packId: args.packId,
+      packVersion: args.packVersion,
+      payload: args.payload,
+      maxPayloadBytes: args.maxPayloadBytes,
+      signatureBase64: args.signatureBase64,
+      publicKeyBase64: args.publicKeyBase64,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    recordSilentFailure(
+      "",
+      {
+        site: "plugin.security.verifyPackPayloadSignature",
+        message,
+        expected: !isTauriRuntimeAvailable(),
+      },
+      error
+    )
+    return { ...base, reason: message }
+  }
+}
+
 /**
  * Human-friendly fingerprint slice for the install dialog: shows
  * `ed25519:9f:3a:...` (the first 8 hex pairs of the sha256).

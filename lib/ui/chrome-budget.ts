@@ -134,7 +134,7 @@ export const CHROME_BUDGET = {
   /** `components/shell/guild-rail.tsx` — no teams, no plugin view containers. */
   guildRail: 9,
   /** `components/chat/chat-header.tsx` */
-  chatHeader: 2,
+  chatHeader: 3,
   /**
    * `components/chat/composer/bottom-toolbar.tsx` — wide (non-compact) branch.
    * Six intentionally includes the Agent runtime selector: model + runtime are

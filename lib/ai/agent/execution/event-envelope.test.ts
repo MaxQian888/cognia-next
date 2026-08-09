@@ -4,10 +4,17 @@ import { join } from "node:path"
 import { isAgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
 import {
+  canonicalEventFromCaptureEvent,
   canonicalEventFromExternalEvent,
   captureEventFromCanonical,
   createEnvelopeSequencer,
+  isKnownCanonicalAgentEventKind,
 } from "./event-envelope"
+
+it("re-exports the canonical event-kind guard at the execution boundary", () => {
+  expect(isKnownCanonicalAgentEventKind("text-delta")).toBe(true)
+  expect(isKnownCanonicalAgentEventKind("future-event")).toBe(false)
+})
 
 // The cross-language contract: the sidecar emitter and this module must
 // produce identical envelope shapes for the same context.
@@ -106,6 +113,46 @@ describe("canonicalEventFromExternalEvent", () => {
   })
 })
 
+describe("canonicalEventFromCaptureEvent", () => {
+  it("preserves text and tool identities for the durable recovery log", () => {
+    expect(canonicalEventFromCaptureEvent({ type: "text-delta", delta: "partial" })).toEqual({
+      kind: "text-delta",
+      delta: "partial",
+    })
+    expect(
+      canonicalEventFromCaptureEvent({
+        type: "tool-call",
+        toolName: "Read",
+        input: { path: "a.ts" },
+        id: "call-1",
+      })
+    ).toEqual({
+      kind: "tool-call",
+      toolName: "Read",
+      input: { path: "a.ts" },
+      toolCallId: "call-1",
+    })
+    expect(
+      canonicalEventFromCaptureEvent({
+        type: "tool-result",
+        toolName: "Read",
+        id: "call-1",
+        result: "ok",
+      })
+    ).toMatchObject({ kind: "tool-result", toolCallId: "call-1", result: "ok" })
+  })
+
+  it("omits the legacy-only tool summary event", () => {
+    expect(
+      canonicalEventFromCaptureEvent({
+        type: "tool-summary",
+        summary: "done",
+        toolCallIds: ["call-1"],
+      })
+    ).toBeNull()
+  })
+})
+
 describe("captureEventFromCanonical", () => {
   it("narrows stream kinds to the legacy capture union", () => {
     expect(captureEventFromCanonical({ kind: "text-delta", delta: "x" })).toEqual({
@@ -131,6 +178,13 @@ describe("captureEventFromCanonical", () => {
       messageId: "c1",
       done: true,
     })
+    expect(
+      captureEventFromCanonical({
+        kind: "tool-summary",
+        summary: "Read two files",
+        toolCallIds: ["t1", "t2"],
+      })
+    ).toEqual({ type: "tool-summary", summary: "Read two files", toolCallIds: ["t1", "t2"] })
   })
 
   it("returns null for envelope-only kinds", () => {

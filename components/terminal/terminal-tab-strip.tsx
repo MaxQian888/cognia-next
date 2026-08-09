@@ -69,6 +69,8 @@ export interface TerminalTabStripProps {
   renderTabWrapper?: (row: TerminalSessionRow, tab: ReactNode) => ReactNode
   /** Sessions under renderer backpressure; forwarded to each tab. */
   throttledIds?: ReadonlySet<string>
+  /** Sessions with new output while in background (activity badge). */
+  activityIds?: ReadonlySet<string>
   /** Enables drag-to-reorder. Receives the complete new anchor-id order. */
   onReorder?: (orderedIds: string[]) => void
   /** Optional className override for the outer strip container. */
@@ -87,6 +89,7 @@ export function TerminalTabStrip({
   trailing,
   renderTabWrapper,
   throttledIds,
+  activityIds,
   onReorder,
   className,
   testId = "terminal-tab-strip",
@@ -137,12 +140,13 @@ export function TerminalTabStrip({
           onSelect={onSelect}
           onClose={onClose}
           throttled={throttledIds?.has(row.id)}
+          hasActivity={activityIds?.has(row.id)}
           onContextMenu={onContextMenu ? (e) => onContextMenu(row, e) : undefined}
           {...extra}
         />
       )
     },
-    [renderTabWrapper, activeId, onSelect, onClose, throttledIds, onContextMenu]
+    [renderTabWrapper, activeId, onSelect, onClose, throttledIds, activityIds, onContextMenu]
   )
 
   const hiddenRows = tabs.filter((row) => hidden.includes(row.id))

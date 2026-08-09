@@ -45,7 +45,7 @@ jest.mock("@cognia/logging", () => ({
 // The plugin runtime is reachable via getPluginEventHooks. Stub it with a
 // no-op surface so the shortcut wiring doesn't drag the real plugin store
 // (and its Tauri bindings) into the zoom-shortcuts test environment.
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({
     dispatchShortcut: jest.fn().mockResolvedValue(false),
   }),

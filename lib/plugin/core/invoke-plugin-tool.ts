@@ -36,6 +36,7 @@ import type {
 } from "@/types/plugin"
 import { TimeoutError } from "@cognia/primitives"
 
+import { ensureBootCapability, getBootProfile } from "@/lib/boot/capabilities"
 import { breakerKey, getOrCreateBreaker } from "@/lib/plugin/resilience/breaker-registry"
 import { resolveResilienceConfig } from "@/lib/plugin/resilience/config"
 import { CircuitOpenError, runResilient } from "@/lib/plugin/resilience/run-resilient"
@@ -210,6 +211,10 @@ export async function invokePluginTool(
 ): Promise<InvokePluginToolResult> {
   if (options.signal?.aborted) {
     throw abortedError(pluginId, toolName, options.signal.reason)
+  }
+
+  if (getBootProfile() === "main") {
+    await ensureBootCapability("plugin-runtime")
   }
 
   const deps = depsOverride ?? (await defaultDeps())

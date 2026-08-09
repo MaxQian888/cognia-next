@@ -110,6 +110,27 @@ describe("SourcesPart", () => {
     expect(screen.getByTestId("sources-part-origin")).toHaveTextContent("Style")
   })
 
+  it("renders reusable Agent Knowledge Base citations in their own section", () => {
+    render(
+      <SourcesPart
+        part={{
+          type: "sources",
+          sources: [
+            {
+              id: "kb-1",
+              title: "Product / Guide",
+              origin: "agent-knowledge-base",
+              snippet: "Grounded context",
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByTestId("sources-part-section-agent-knowledge-base")).toBeTruthy()
+    expect(screen.getByText("Agent KB")).toBeTruthy()
+  })
+
   it("renders a View source link for twin-rag items with chunkRef", () => {
     const part: SourcesPartType = {
       type: "sources",

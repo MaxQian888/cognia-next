@@ -25,6 +25,8 @@ const KNOWN_PROVIDERS: &[&str] = &[
     "deepgram",
     "xiaomi",
     "mistral",
+    "local-openai-compatible",
+    "xai",
 ];
 
 fn validate_provider(provider: &str) -> Result<(), String> {

@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import {
   createWorkflow,
   deleteWorkflow,
@@ -10,16 +8,18 @@ import {
   replaceWorkflow,
 } from "@/lib/db/workflows"
 import { createSkill } from "@/lib/db/skills"
-import { publishWorkflow, workflowSkillCanonicalId } from "./publish-workflow"
+import { createResource } from "@/lib/db/skill-resources"
+import { publishWorkflow, unpublishWorkflow, workflowSkillCanonicalId } from "./publish-workflow"
 import { reconcileWorkflowPublications } from "./publication-lifecycle"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function nodesWithInputSchema(inputSchema: Record<string, unknown>): VisualWorkflow["nodes"] {
   return [
@@ -34,7 +34,7 @@ function nodesWithInputSchema(inputSchema: Record<string, unknown>): VisualWorkf
 }
 
 describe("workflow publication lifecycle", () => {
-  it("invalidates publication when an editor save changes the callable contract", async () => {
+  it("keeps the deployed version active when an editor save changes the draft contract", async () => {
     const originalSchema = {
       type: "object",
       properties: { topic: { type: "string" } },
@@ -56,15 +56,14 @@ describe("workflow publication lifecycle", () => {
       }),
     })
 
-    expect(result.publicationInvalidated).toBe(true)
-    expect(result.workflow.published).toBeUndefined()
-    expect(result.workflow.interface).toBeUndefined()
-    expect((await getWorkflow(workflow.id))?.published).toBeUndefined()
-    expect(await getDb().skills.get(published.skillId)).toBeUndefined()
-    const matching = (await getDb().skills.toArray()).filter(
-      (skill) => skill.canonicalId === workflowSkillCanonicalId(workflow.id)
-    )
-    expect(matching).toHaveLength(0)
+    expect(result.publicationInvalidated).toBe(false)
+    expect(result.workflow.published?.versionId).toBe(published.versionId)
+    expect(result.workflow.interface).toEqual({ inputSchema: originalSchema })
+    expect((await getWorkflow(workflow.id))?.published?.versionId).toBe(published.versionId)
+    expect(await getDb().skills.get(published.skillId)).toBeDefined()
+    expect((await getDb().workflowVersions.get(published.versionId))?.interface).toEqual({
+      inputSchema: originalSchema,
+    })
   })
 
   it("deletes the generated skill with its published workflow", async () => {
@@ -74,10 +73,33 @@ describe("workflow publication lifecycle", () => {
       edges: [],
     })
     const published = await publishWorkflow(workflow.id, 123)
+    await getDb().workflows.update(workflow.id, { published: undefined })
 
     await deleteWorkflow(workflow.id)
 
     expect(await getWorkflow(workflow.id)).toBeUndefined()
+    expect(await getDb().skills.get(published.skillId)).toBeUndefined()
+    expect(await getDb().workflowDeployments.get(published.deploymentId)).toMatchObject({
+      status: "disabled",
+      revision: 2,
+    })
+  })
+
+  it("disables the deployment even when the legacy publication projection is missing", async () => {
+    const workflow = await createWorkflow({
+      name: "Projectionless",
+      nodes: nodesWithInputSchema({ type: "object" }),
+      edges: [],
+    })
+    const published = await publishWorkflow(workflow.id, 123)
+    await getDb().workflows.update(workflow.id, { published: undefined })
+
+    await unpublishWorkflow(workflow.id)
+
+    expect(await getDb().workflowDeployments.get(published.deploymentId)).toMatchObject({
+      status: "disabled",
+      revision: 2,
+    })
     expect(await getDb().skills.get(published.skillId)).toBeUndefined()
   })
 
@@ -126,7 +148,7 @@ describe("workflow publication lifecycle", () => {
     })
 
     expect(result.publicationInvalidated).toBe(false)
-    expect(result.workflow.published).toEqual({ at: 123, toolName: "wf_stable_contract" })
+    expect(result.workflow.published).toMatchObject({ at: 123, toolName: "wf_stable_contract" })
     expect(await getDb().skills.get(published.skillId)).toBeDefined()
   })
 
@@ -155,7 +177,10 @@ describe("workflow publication lifecycle", () => {
     })
 
     expect(result.publicationInvalidated).toBe(false)
-    expect(result.workflow.published).toEqual({ at: 123, toolName: "wf_stable_implementation" })
+    expect(result.workflow.published).toMatchObject({
+      at: 123,
+      toolName: "wf_stable_implementation",
+    })
     expect(await getDb().skills.get(published.skillId)).toEqual(originalSkill)
   })
 
@@ -211,7 +236,7 @@ describe("workflow publication lifecycle", () => {
 
     expect(await reconcileWorkflowPublications()).toEqual({
       synchronized: 2,
-      invalidated: 1,
+      invalidated: 0,
       removedSkills: 1,
     })
 
@@ -231,9 +256,9 @@ describe("workflow publication lifecycle", () => {
       usageCount: 7,
     })
 
-    expect((await getWorkflow(drifted.id))?.published).toBeUndefined()
-    expect((await getWorkflow(drifted.id))?.interface).toBeUndefined()
-    expect(await getDb().skills.get(driftedPublication.skillId)).toBeUndefined()
+    expect((await getWorkflow(drifted.id))?.published?.versionId).toBe(driftedPublication.versionId)
+    expect((await getWorkflow(drifted.id))?.interface).toEqual({ inputSchema: schema })
+    expect(await getDb().skills.get(driftedPublication.skillId)).toBeDefined()
     expect(await getDb().skills.get(orphan.id)).toBeUndefined()
 
     expect(await reconcileWorkflowPublications()).toEqual({
@@ -261,5 +286,29 @@ describe("workflow publication lifecycle", () => {
 
     expect(await getWorkflow(workflow.id)).toEqual(beforeWorkflow)
     expect(await getDb().skills.get(first.skillId)).toEqual(beforeSkill)
+  })
+
+  it("re-publishes an existing generated Skill without escaping the resource transaction", async () => {
+    const workflow = await createWorkflow({
+      name: "Resource transaction",
+      nodes: nodesWithInputSchema({ type: "object" }),
+      edges: [],
+    })
+    const first = await publishWorkflow(workflow.id, 10)
+    const resource = await createResource({
+      skillId: first.skillId,
+      kind: "reference",
+      name: "notes.md",
+      path: "references/notes.md",
+      content: "keep me",
+    })
+
+    const second = await publishWorkflow(workflow.id, 20)
+
+    expect(second.skillId).toBe(first.skillId)
+    expect(await getDb().skillResources.get(resource.id)).toMatchObject({
+      skillId: first.skillId,
+      content: "keep me",
+    })
   })
 })

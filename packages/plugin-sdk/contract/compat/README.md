@@ -17,4 +17,16 @@ Verify it with:
 cognia plugin verify github-delivery-2.0.0.zip
 ```
 
+`github-delivery-3.0.0.zip` is generated from the maintained source at
+`plugins/github-delivery/src/index.ts`. Regenerate and verify source parity with:
+
+```bash
+pnpm exec tsx scripts/plugin/build-github-delivery.ts
+pnpm exec tsx scripts/plugin/build-github-delivery.ts --check
+```
+
+The release pipeline signs the generated v3 ZIP with the same official key;
+the private signing key remains outside the repository. The signed v2 bundle
+and detached signature remain available for one-major rollback compatibility.
+
 The private development publisher key is not stored in this repository.

@@ -5,7 +5,7 @@ description: "赋予Agent-Team任务模型看板接口并在应用中拆除孤�
 
 # ADR-0066 — Agent 团队任务看板与跨界面集成（CQRS）
 
-**状态**：已接受（2026-07-08）**作者**：Max Qian + Claude Fable 5 **基于**团队运行时（ADR-0022）、插件集成（ADR-0032）、移动同步编排器（ADR-0027）、配套远程控制接口（ADR-0005 / ADR-0060）以及双子 运行时 胶水（`lib/ai/agent/team/twin-context.ts`、ADR-0003）。
+**状态**：已接受（2026-07-08）**作者**：Max Qian + Claude Fable 5 **基于**团队运行时（ADR-0022）、插件集成（ADR-0032）、移动同步编排器（ADR-0027）、Companion 控制面（ADR-0061）以及双子 运行时 胶水（`lib/ai/agent/team/twin-context.ts`、ADR-0003）。
 
 ## 背景
 

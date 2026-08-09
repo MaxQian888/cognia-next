@@ -145,6 +145,26 @@ const targets: MentionTarget[] = [
 ]
 
 describe("AgentTeamChat unread divider", () => {
+  it("uses the matching agent portrait for virtual-agent messages", () => {
+    render(
+      <AgentTeamChat
+        teamId="t1"
+        messages={[
+          makeMessage("codex-message", {
+            senderId: "__virtual_codex__",
+            senderName: "codex",
+          }),
+        ]}
+        mentionables={targets}
+      />
+    )
+
+    expect(screen.getByTestId("agent-team-avatar-__virtual_codex__")).toHaveAttribute(
+      "data-avatar-id",
+      "coder"
+    )
+  })
+
   it("anchors the divider above the first unread message", () => {
     render(
       <AgentTeamChat

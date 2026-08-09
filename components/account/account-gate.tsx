@@ -83,6 +83,7 @@ export function AccountGate({ children }: AccountGateProps) {
             <Checkbox
               id={recoverySavedId}
               checked={recoverySaved}
+              disabled={submitting}
               onCheckedChange={(checked) => setRecoverySaved(checked === true)}
             />
             <Label htmlFor={recoverySavedId}>{t("recoverySaved")}</Label>
@@ -90,7 +91,7 @@ export function AccountGate({ children }: AccountGateProps) {
           <Button
             type="button"
             data-testid="account-vault-recovery-continue"
-            disabled={!recoverySaved}
+            disabled={submitting || !recoverySaved}
             onClick={() => acknowledgeRecoveryKey()}
           >
             {t("recoveryContinue")}

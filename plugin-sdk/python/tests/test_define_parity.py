@@ -26,6 +26,8 @@ _DEFINE_REL = Path("packages/plugin-sdk/src/define")
 # fetch-read-write methods). These have NO declarative manifest form a pure /
 # hybrid Python plugin can construct, so they are intentionally not mirrored.
 JS_RUNTIME_ONLY: dict[str, str] = {
+    "extension": "loads a React component from extensions[].entry",
+    "tool-renderer": "loads a React component from toolRenderers[].entry",
     "agent-tool": "carries an execute() function (ctx.agent.run tool)",
     "guardrail": "carries a run() tripwire function",
     "workflow-node": "carries an execute() node function",

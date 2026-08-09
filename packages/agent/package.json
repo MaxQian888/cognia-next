@@ -9,6 +9,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./rpc": {
+      "types": "./dist/rpc/index.d.ts",
+      "import": "./dist/rpc/index.js",
+      "default": "./dist/rpc/index.js"
+    },
     "./package.json": "./package.json"
   },
   "main": "./dist/index.js",

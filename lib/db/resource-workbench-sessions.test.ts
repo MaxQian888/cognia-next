@@ -1,10 +1,10 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { ChatSession, SessionSurfaceBinding } from "@cognia/agent-config-types"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { persistMessages, listMessages } from "./messages"
 import {
   clearResourceWorkbenchSession,
+  createResourceSessionRepository,
   createResourceWorkbenchSession,
   deleteResourceWorkbenchSession,
   listResourceWorkbenchSessions,
@@ -15,13 +15,22 @@ import { resourceWorkbenchSessionId } from "@/lib/context-workbench/resource-ses
 import { isSessionExposed } from "@/lib/chat/session-exposure"
 import type { UIMessage } from "ai"
 
+// Session deletion dynamically imports the artifact Zustand store for a
+// best-effort cleanup. This DB suite does not exercise that store, and paying
+// its full transform graph inside a 5s test obscures the database behavior.
+jest.mock("@/stores/artifact/artifact-store", () => ({
+  useArtifactStore: {
+    getState: () => ({ clearSessionData: jest.fn() }),
+  },
+}))
+
 const binding: SessionSurfaceBinding = { kind: "session", sessionId: "main-1" }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().sessions.put({
     id: "main-1",
     title: "Main",
@@ -31,6 +40,7 @@ beforeEach(async () => {
     updatedAt: 1,
   } as ChatSession)
 })
+afterAll(dbFixture.dispose)
 
 /** The aside `ensureResourceWorkbenchSession` auto-creates on first open. */
 async function seedPrimary(): Promise<string> {
@@ -53,6 +63,15 @@ const uiMsg = (id: string, text: string): UIMessage =>
   ({ id, role: "user", parts: [{ type: "text", text }] }) as UIMessage
 
 describe("createResourceWorkbenchSession", () => {
+  it("shares the indexed repository used by ensure and migration callers", async () => {
+    await seedPrimary()
+    const repository = createResourceSessionRepository()
+    await expect(repository.findByBinding?.(binding)).resolves.toMatchObject({
+      surfaceBindingKey: "session:main-1",
+    })
+    await expect(repository.resolveProjectId?.(binding)).resolves.toBe("proj-main")
+  })
+
   it("mints a distinct row that still shares the binding key", async () => {
     const primaryId = await seedPrimary()
     const extra = await createResourceWorkbenchSession(binding, "Check the versions")

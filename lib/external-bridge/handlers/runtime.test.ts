@@ -1,23 +1,24 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for the `runtime_query` MCP handler. Drives Dexie via
  * fake-indexeddb against the seeded built-ins so the tests exercise real
  * row shapes instead of a parallel mock.
  */
 
-import "fake-indexeddb/auto"
 import { runtimeQuery } from "./runtime"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listSkills } from "@/lib/db/skills"
 import { listCharacters } from "@/lib/db/characters"
 import { listTeams } from "@/lib/db/teams"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 }, 30_000)
+
+afterAll(dbFixture.dispose)
 
 describe("runtimeQuery — list", () => {
   it("lists seeded skills with name + meta", async () => {

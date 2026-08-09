@@ -13,20 +13,26 @@ import { isTauri } from "@/lib/tauri"
 import {
   bulkImportMcpServers,
   listMcpServers,
-  updateMcpServer,
   type McpBulkImportResult,
   type McpImportDraft,
   type McpImportStrategy,
 } from "@/lib/db/mcp-servers"
 import {
   readAgentConfig,
+  readProjectMcpConfig,
   writeAgentConfig,
   type AgentReadResult,
   type AgentWriteResult,
 } from "./ipc"
-import { getAgentAdapter, requireAgentAdapter } from "./agents"
+import {
+  CLAUDE_CODE_AGENT,
+  MCP_AGENT_ADAPTERS,
+  getAgentAdapter,
+  requireAgentAdapter,
+} from "./agents"
 import { resolveBuiltinMcpConfig } from "./builtin-mcp/resolve"
 import { getBuiltinMcpRuntimeContext } from "./builtin-mcp/runtime-context"
+import { resolveMcpSecrets } from "@/lib/mcp/credentials"
 
 // ---- Sync (Cognia → Agent) ----------------------------------------------
 
@@ -76,7 +82,11 @@ export async function syncToAgent(
   if (!adapter.writable) return { ok: false, skipped: true, reason: "read-only" }
 
   const all = await listMcpServers()
-  const targets = all.filter((s) => s.appsEnabled?.[agentId] === true)
+  const targets = all.filter(
+    (s) =>
+      s.appsEnabled?.[agentId] === true &&
+      (s.trust?.state === "trusted" || s.trust?.state === "legacy" || !s.trust)
+  )
   const managedNames: ReadonlySet<string> = new Set([...all.map((s) => s.name), ...tombstones])
 
   // Resolve `${COGNIA_SIDECAR_DIR}` placeholders + inject the bridge socket
@@ -89,6 +99,17 @@ export async function syncToAgent(
     if (ctx) {
       resolvedTargets = targets.map((s) => resolveBuiltinMcpConfig(s, ctx))
     }
+  } catch (err) {
+    return { ok: false, skipped: false, error: errMessage(err) }
+  }
+
+  try {
+    resolvedTargets = await Promise.all(
+      resolvedTargets.map(async (server) => ({
+        ...server,
+        config: (await resolveMcpSecrets(server.config)) as never,
+      }))
+    )
   } catch (err) {
     return { ok: false, skipped: false, error: errMessage(err) }
   }
@@ -130,6 +151,26 @@ export async function syncToAgent(
 
   try {
     const result = await writeAgentConfig(agentId, nextTree)
+    const verified = await readAgentConfig(agentId)
+    if (verified.parseError || verified.parsed == null) {
+      return {
+        ok: false,
+        skipped: false,
+        error: `Agent projection verification failed for ${agentId}`,
+      }
+    }
+    const projectedNames = new Set(adapter.parse(verified.parsed).map((draft) => draft.name))
+    const missing = targets.find((server) => !projectedNames.has(server.name))
+    const stale = tombstones.find((name) => projectedNames.has(name))
+    if (missing || stale) {
+      return {
+        ok: false,
+        skipped: false,
+        error: missing
+          ? `Agent projection verification missing namespace ${missing.name}`
+          : `Agent projection verification retained tombstone ${stale}`,
+      }
+    }
     return { ok: true, result, count: targets.length }
   } catch (err) {
     const msg = errMessage(err)
@@ -144,16 +185,9 @@ export async function syncToAgent(
 /** Run `syncToAgent` for every writable agent in parallel. */
 export async function syncAll(): Promise<Record<string, SyncResult>> {
   const out: Record<string, SyncResult> = {}
-  const writable: AgentId[] = [
-    "cognia",
-    "claude-code",
-    "claude-desktop",
-    "cursor",
-    "vscode",
-    "codex",
-    "gemini",
-    "windsurf",
-  ]
+  const writable = MCP_AGENT_ADAPTERS.filter((adapter) => adapter.writable).map(
+    (adapter) => adapter.id
+  )
   const results = await Promise.all(writable.map((id) => syncToAgent(id)))
   writable.forEach((id, i) => {
     out[id] = results[i]
@@ -170,6 +204,11 @@ interface PendingSync {
 
 const pendingSyncs = new Map<AgentId, PendingSync>()
 const SYNC_DEBOUNCE_MS = 250
+
+export function __resetScheduledSyncsForTesting(): void {
+  for (const pending of pendingSyncs.values()) clearTimeout(pending.handle)
+  pendingSyncs.clear()
+}
 
 /**
  * Schedule a sync for the given agent in the near future, coalescing
@@ -255,19 +294,60 @@ export async function importFromAgent(
   strategy: McpImportStrategy = "skip"
 ): Promise<McpBulkImportResult & { previewed: number }> {
   const preview = await previewAgentImport(agentId)
-  const result = await bulkImportMcpServers(preview.drafts, strategy)
+  const result = await bulkImportMcpServers(preview.drafts, strategy, "agent-import")
 
-  // After import, flip `appsEnabled[agentId]=true` for every successfully
-  // imported / matched name. This is the "is in this agent" pivot.
-  const all = await listMcpServers()
-  const importedNames = new Set(preview.drafts.map((d) => d.name))
-  for (const server of all) {
-    if (!importedNames.has(server.name)) continue
-    const apps = { ...(server.appsEnabled ?? {}) }
-    if (apps[agentId] === true) continue
-    apps[agentId] = true
-    await updateMcpServer(server.id, { appsEnabled: apps })
+  return { ...result, previewed: preview.drafts.length }
+}
+
+// ---- Import (project-scoped `.mcp.json` → Cognia) ------------------------
+//
+// `<cwd>/.mcp.json` is Claude Code's committed, team-shared MCP file. The
+// standalone CLI has always loaded it (`cli/src/mcp/load-mcp-config.ts`); the
+// desktop only ever read the user-scope `~/.claude.json`, so a repo's servers
+// were invisible here. Import only — Cognia never writes into a file the
+// user's teammates share.
+
+/** Result of previewing the active workspace's `.mcp.json`. */
+export interface ProjectMcpImportPreview {
+  /** Absolute path probed, for the UI to show. */
+  path?: string
+  exists: boolean
+  parseError?: string
+  drafts: McpImportDraft[]
+}
+
+/**
+ * Read `<cwd>/.mcp.json` and return the drafts it would import. The file uses
+ * the same `{ mcpServers: … }` shape as `~/.claude.json`, so it reuses the
+ * Claude Code adapter's parser rather than duplicating it.
+ */
+export async function previewProjectMcpImport(cwd: string): Promise<ProjectMcpImportPreview> {
+  if (!isTauri() || !cwd.trim()) return { exists: false, drafts: [] }
+  try {
+    const cfg = await readProjectMcpConfig(cwd)
+    return {
+      path: cfg.path ?? undefined,
+      exists: cfg.exists,
+      parseError: cfg.parseError ?? undefined,
+      drafts: cfg.parsed != null ? CLAUDE_CODE_AGENT.parse(cfg.parsed) : [],
+    }
+  } catch (err) {
+    return { exists: false, drafts: [], parseError: errMessage(err) }
   }
+}
+
+/**
+ * Import the active workspace's `.mcp.json` into Dexie. Unlike
+ * {@link importFromAgent} this flips `appsEnabled["claude-code"]` — the
+ * servers came from Claude Code's convention and belong to that agent — but it
+ * never projects anything back to disk.
+ */
+export async function importFromProjectMcp(
+  cwd: string,
+  strategy: McpImportStrategy = "skip"
+): Promise<McpBulkImportResult & { previewed: number }> {
+  const preview = await previewProjectMcpImport(cwd)
+  const result = await bulkImportMcpServers(preview.drafts, strategy, "project-import")
 
   return { ...result, previewed: preview.drafts.length }
 }

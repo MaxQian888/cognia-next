@@ -69,6 +69,30 @@ TTS 引擎用、成本约 5×。桌宠有完整 Live2D/SVG rig 却从不说话�
   缓存管理 API（`clear`/`getStats`/`getCacheSize`）暂无 UI 消费者。
   `TTSNormalizedError` 未使用，已被 `TTSResponse` 上的结构化字段取代。
 
+### 提供商与传输修复（2026-08-08）
+
+- `local-openai-compatible` 是唯一稳定的本地提供商 ID，不捆绑任何引擎。LocalAI、
+  Kokoro-FastAPI、Piper 或其他服务只有在实现 OpenAI 兼容的 `POST /audio/speech`
+  时才能使用。该协议没有通用音色发现接口，因此模型与音色手动填写；可选 API key
+  存在 TTS 密钥环中，也不会进入缓存标识。
+- 宿主传输仅接受 HTTP(S) 回环目标（`localhost`、`127.0.0.0/8`、`::1`），且禁止
+  重定向。桌面端普通云 TTS 也由宿主注入凭据；渲染器只获得当前提供商的凭据存在状态，
+  不读取保存的密钥。纯 Web 调用仍是受 CORS 与安全警告约束的尽力模式。
+- 文本进入任何云 TTS 适配器前，应用宿主都会执行共享的出站 PII 门禁；不安全文本返回
+  结构化 `pii-blocked` 失败。设备系统 TTS 与仅允许回环的本地提供商不会离开设备，因此
+  不经过该云端边界。
+- 缓冲式适配器接受 `AbortSignal` 与原生请求 ID。`stop()` 会通过 `tts_proxy_cancel`
+  取消当前合成、重试退避和预取；取消或过期结果不能播放，也不能写入缓存。缓存边界保留
+  完整的结构化 `TTSResponse`，且只缓存成功音频。
+- 缓冲式 HTTP 提供商不再宣称传输流式。为兼容旧设置保留 `ttsStreamingEnabled`，但其
+  含义是“预加载下一段”。移动端播放始终解析为设备系统 TTS；移动端选择云提供商只配置
+  桌面宿主。
+- 普通缓冲式选择器移除 raw PCM。旧 PCM 设置归一化为 MP3；无头 PCM 返回结构化的
+  不支持格式错误。MIME 从 `Content-Type` 归一化并移除参数；只有通用二进制响应才回退
+  到所选格式。
+- ElevenLabs 加载真实账户 voice ID，同时保留手动 ID 输入。旧名称只有在唯一匹配已发现
+  音色时才迁移。提供商测试禁用回退，测试请求期间按钮变为“取消”。
+
 ## 影响
 
 朗读念出干净散文且更早开始。两个结构上站不住脚的 provider 不再被提供，且不破坏既有

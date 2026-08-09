@@ -503,7 +503,7 @@ fn prepare_node_launch(
     let declares = |permission: &str| {
         declared_permissions.iter().any(|value| value == permission) && granted.contains(permission)
     };
-    if declares("network:fetch") || declares("network:websocket") {
+    if declares("network:fetch") || declares("network:upload") || declares("network:websocket") {
         return Err(PluginError::InvalidArgument(
             "Node network grants require a scoped host broker and cannot run in-process".into(),
         ));
@@ -1355,7 +1355,16 @@ pub async fn plugin_set_status(
     plugin_id: String,
     status: String,
 ) -> Result<()> {
-    upsert_status(&state, &plugin_id, &status)
+    plugin_set_status_for_state(state.inner(), plugin_id, status)
+}
+
+/// Host-neutral status ledger update used by Tauri and the headless service.
+pub fn plugin_set_status_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    status: String,
+) -> Result<()> {
+    upsert_status(state, &plugin_id, &status)
 }
 
 #[tauri::command]
@@ -1828,15 +1837,14 @@ mod tests {
         )
         .await
         .unwrap();
-        // plugin_set_status delegates to upsert_status — non-enable/disable
-        // statuses are preserved verbatim (not collapsed), which
-        // syncBackendStatus relies on.
-        upsert_status(&state, "demo", "installed").unwrap();
+        // The host-neutral entry point preserves non-enable/disable statuses
+        // verbatim (not collapsed), which syncBackendStatus relies on.
+        plugin_set_status_for_state(&state, "demo".into(), "installed".into()).unwrap();
         assert_eq!(
             state.plugins.read().get("demo").unwrap().snapshot.status,
             "installed"
         );
-        upsert_status(&state, "demo", "error").unwrap();
+        plugin_set_status_for_state(&state, "demo".into(), "error".into()).unwrap();
         assert_eq!(
             state.plugins.read().get("demo").unwrap().snapshot.status,
             "error"

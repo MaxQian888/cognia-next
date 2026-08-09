@@ -1,0 +1,29 @@
+{
+  "id": "cognia-documents",
+  "name": "Cognia Documents",
+  "version": "0.1.0",
+  "description": "Plugin-owned native DOCX authoring, import, editing, review, preview, validation, and export.",
+  "type": "frontend",
+  "capabilities": ["tools", "importers", "exporters"],
+  "main": "src/index.ts",
+  "author": { "name": "cognia-next" },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": { "cognia": ">=0.1.0" },
+  "permissions": ["artifact:read", "artifact:write", "filesystem:read", "filesystem:write"],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "headless": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Authoring and validation are available; interactive preview and file pickers require a UI shell."
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Authoring, preview, and download are available; native file dialogs depend on the connected shell."
+    }
+  }
+}

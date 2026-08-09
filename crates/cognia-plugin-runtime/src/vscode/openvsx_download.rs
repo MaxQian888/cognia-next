@@ -132,6 +132,9 @@ pub enum DownloadError {
     #[error("could not build http client: {0}")]
     Client(reqwest::Error),
 
+    #[error("outbound proxy policy rejected the download: {0}")]
+    Policy(String),
+
     #[error("the .vsix declares {declared} bytes, over the {max}-byte marketplace cap")]
     DeclaredTooLarge { declared: u64, max: u64 },
 
@@ -156,6 +159,7 @@ impl DownloadError {
             DownloadError::OffsiteRedirect { .. } => "offsite_redirect",
             DownloadError::Http { .. } => "http_error",
             DownloadError::Client(_) => "client_error",
+            DownloadError::Policy(_) => "proxy_policy",
             DownloadError::DeclaredTooLarge { .. } | DownloadError::StreamTooLarge { .. } => {
                 "vsix_too_large"
             }
@@ -209,7 +213,7 @@ pub async fn download_vsix_to_temp(
     let download = check_url(download_url, policy)?;
     let digest_url = check_url(sha256_url, policy)?;
 
-    let client = build_client(policy)?;
+    let client = build_client(policy, download_url)?;
 
     // The digest comes first, deliberately: a missing or malformed digest file
     // must abort before we spend up to 80 MB of the user's bandwidth on bytes
@@ -278,7 +282,10 @@ fn url_allowed(url: &Url, scheme: &str, allowed_hosts: &[&str]) -> bool {
 
 /// Build a client that refuses to be redirected off the allowlist, and that
 /// routes through the user's proxy when one is configured.
-fn build_client(policy: &DownloadPolicy) -> Result<reqwest::Client, DownloadError> {
+fn build_client(
+    policy: &DownloadPolicy,
+    target_url: &str,
+) -> Result<reqwest::Client, DownloadError> {
     let scheme = policy.scheme;
     let allowed_hosts = policy.allowed_hosts;
     let redirect = reqwest::redirect::Policy::custom(move |attempt| {
@@ -293,7 +300,7 @@ fn build_client(policy: &DownloadPolicy) -> Result<reqwest::Client, DownloadErro
         }
     });
 
-    let mut builder = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .user_agent("cognia-desktop")
         .redirect(redirect)
         // No total timeout: an 80 MB download over a slow link is legitimate
@@ -302,15 +309,8 @@ fn build_client(policy: &DownloadPolicy) -> Result<reqwest::Client, DownloadErro
         .connect_timeout(Duration::from_secs(30))
         .read_timeout(Duration::from_secs(60));
 
-    // Honour the user's proxy — the whole reason this download is in Rust.
-    // `build_reqwest_proxy` returns a `Proxy::custom` that already applies the
-    // bypass list per request, so no outer `should_bypass` check is needed.
-    let proxy_cfg = cognia_net::proxy_config::current();
-    if proxy_cfg.is_active() {
-        if let Some(proxy) = proxy_cfg.build_reqwest_proxy() {
-            builder = builder.proxy(proxy);
-        }
-    }
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, target_url)
+        .map_err(|error| DownloadError::Policy(error.to_string()))?;
 
     builder.build().map_err(DownloadError::Client)
 }

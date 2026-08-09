@@ -39,6 +39,37 @@ describe("createRecording", () => {
     expect(row.edits).toEqual({ bySeq: {}, manual: [] })
     expect(await getRecording(ID_A)).toEqual(row)
   })
+
+  it("persists conversation provenance without storing raw source content", async () => {
+    const row = await createRecording({
+      id: ID_A,
+      status: "drafting",
+      source: { kind: "session", sessionId: "session-1" },
+    })
+
+    expect(row.source).toEqual({ kind: "session", sessionId: "session-1" })
+    expect(row).not.toHaveProperty("transcript")
+  })
+})
+
+describe("conversation-derived recordings", () => {
+  it("never treats a source-only timeline as a missing native bundle", async () => {
+    await createRecording({
+      id: ID_A,
+      status: "drafting",
+      source: { kind: "session", sessionId: "session-1" },
+    })
+    await expect(listRecordingsMissingBundles([])).resolves.toEqual([])
+  })
+
+  it("never asks native storage to delete a source-only timeline", async () => {
+    await createRecording({
+      id: ID_A,
+      source: { kind: "run", runId: "run-1" },
+    })
+    await deleteRecording(ID_A, { deleteBundle: true })
+    expect(deleteBundle).not.toHaveBeenCalled()
+  })
 })
 
 describe("checkpointRecording", () => {

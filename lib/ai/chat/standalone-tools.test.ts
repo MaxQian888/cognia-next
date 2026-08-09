@@ -47,6 +47,16 @@ describe("isUsableStandaloneToolName", () => {
 })
 
 describe("buildStandaloneTools", () => {
+  it("exposes no executable tools when the runtime tool surface is disabled", () => {
+    expect(
+      buildStandaloneTools(
+        { toolSurface: "none", pluginTools: [entry("web_search")] },
+        "support-session"
+      )
+    ).toBeUndefined()
+    expect(handlePluginToolExec).not.toHaveBeenCalled()
+  })
+
   it("returns undefined when the turn carries no tool manifest", () => {
     expect(buildStandaloneTools({}, "s1")).toBeUndefined()
     expect(buildStandaloneTools({ pluginTools: [] }, "s1")).toBeUndefined()
@@ -114,6 +124,19 @@ describe("buildStandaloneTools", () => {
       name: "web_search",
       args: { q: "cognia" },
     })
+  })
+
+  it("projects spawn_task through the same renderer executor", async () => {
+    handlePluginToolExec.mockResolvedValue({ result: { ok: true, taskSessionId: "task-1" } })
+    const result = buildStandaloneTools({ pluginTools: [entry("spawn_task")] }, "parent-1")
+
+    await expect(runTool(result!.tools.spawn_task, { title: "Fix cleanup" })).resolves.toEqual({
+      ok: true,
+      taskSessionId: "task-1",
+    })
+    expect(handlePluginToolExec).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "parent-1", name: "spawn_task" })
+    )
   })
 
   it("normalises missing args to an empty object", async () => {

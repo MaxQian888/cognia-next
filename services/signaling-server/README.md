@@ -108,8 +108,9 @@ verification does not depend on JSON property order.
   `SIGNALING_MAX_DESKTOPS`, default `1`. Rejections return stable
   `room_full` or `role_taken` error frames.
 - Origin allowlist: `SIGNALING_ALLOWED_ORIGINS` is a comma-separated list.
-  Blank/unset allows all origins; missing `Origin` remains allowed for native
-  desktop clients.
+  Blank/unset permits same-origin browsers only; missing `Origin` remains
+  allowed for native desktop clients. Cross-origin entries must be exact
+  HTTPS origins; wildcard, plaintext, credential, and path values fail startup.
 - Frame size cap: 8 KiB per WS frame, enforced in `ws::handle_socket`
   (oversized frames get a graceful `error{code:"frame_too_large"}`), backed by
   a hard 64 KiB `max_message_size` on the upgrade as a memory bound.

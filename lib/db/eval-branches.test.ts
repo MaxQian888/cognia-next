@@ -1,10 +1,8 @@
-/** @jest-environment jsdom */
 /**
  * Branch coverage for the eval Dexie CRUD guards + optional-field paths that
  * the happy-path suites don't exercise (empty-id early returns, missing-row
  * updates, optional case fields, list limits).
  */
-import "fake-indexeddb/auto"
 import {
   createDataset,
   getDataset,
@@ -30,14 +28,13 @@ import {
   deleteAnnotation,
   upsertAnnotation,
 } from "./trace-annotations"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("eval-datasets guards + optional fields", () => {
   it("returns falsy for empty ids and missing rows", async () => {

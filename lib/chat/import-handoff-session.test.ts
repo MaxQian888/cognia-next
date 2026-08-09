@@ -1,18 +1,19 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import { importHandoffSession } from "./import-handoff-session"
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getSession } from "@/lib/db/sessions"
 import { listMessages } from "@/lib/db/messages"
 import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 import type { ChatSession } from "@cognia/agent-config-types"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+
+afterAll(dbFixture.dispose)
 
 describe("importHandoffSession", () => {
   it("creates a continuable session from a CLI transcript", async () => {

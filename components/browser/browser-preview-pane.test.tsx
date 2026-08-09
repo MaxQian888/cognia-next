@@ -91,6 +91,7 @@ const mockBeginLoad = jest.fn()
 let mockRegionVisible = true
 let mockWebviewReady = true
 let mockReadyCallback: (() => void) | undefined
+let mockWebviewErrorCallback: ((error: unknown) => void) | undefined
 let mockWebviewVisible: boolean | undefined
 let mockPaneUrl: string | null | undefined
 const mockRefreshBounds = jest.fn()
@@ -108,6 +109,7 @@ jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
       url?: string | null
       visible?: boolean
       onReady?: () => void
+      onError?: (error: unknown) => void
       onRectChange?: (r: ElementRect) => void
     }
   ) => {
@@ -116,6 +118,7 @@ jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
     mockPaneUrl = opts?.url
     mockOnRectChange = opts?.onRectChange
     mockReadyCallback = onReady
+    mockWebviewErrorCallback = opts.onError
     useEffect(() => {
       if (mockWebviewReady) onReady?.()
     }, [onReady])
@@ -213,6 +216,7 @@ beforeEach(() => {
   mockRegionVisible = true
   mockWebviewReady = true
   mockReadyCallback = undefined
+  mockWebviewErrorCallback = undefined
   mockWebviewVisible = undefined
   mockPaneUrl = undefined
   mockRefreshBounds.mockClear()
@@ -238,6 +242,20 @@ beforeEach(() => {
   ;(browserClient.embedSetPanelLabels as jest.Mock).mockClear()
   ;(toast.success as jest.Mock).mockClear()
   ;(toast.error as jest.Mock).mockClear()
+})
+
+it("shows a localized error when the embedded WebView rejects an HTTPS proxy", () => {
+  renderPane(<BrowserPreviewPane initialUrl="https://example.com" />)
+
+  act(() => {
+    mockWebviewErrorCallback?.(
+      new Error("PROXY_TRANSPORT_UNSUPPORTED: embedded browser does not support HTTPS proxy")
+    )
+  })
+
+  expect(toast.error).toHaveBeenCalledWith(
+    "Embedded preview does not support HTTPS proxy endpoints. Use an HTTP or SOCKS5 proxy, or open the page in an external browser."
+  )
 })
 
 it("replaces the web iframe with remote Canvas after explicit opt-in", () => {

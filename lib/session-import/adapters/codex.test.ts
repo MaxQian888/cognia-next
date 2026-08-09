@@ -233,6 +233,20 @@ describe("codexSessionSource", () => {
     expect(codexSessionSource.scanRoots("")).toEqual([])
   })
 
+  it("prefers the resolved $CODEX_HOME root over <home>/.codex", () => {
+    const roots = {
+      claudeConfigDir: "",
+      codexHome: "/relocated/codex",
+      opencodeConfigDir: "",
+      opencodeDataDir: "",
+    }
+    expect(codexSessionSource.scanRoots("/home/u", roots)).toEqual(["/relocated/codex/sessions"])
+    // A blank override falls back to the home-relative default.
+    expect(codexSessionSource.scanRoots("/home/u", { ...roots, codexHome: "" })).toEqual([
+      "/home/u/.codex/sessions",
+    ])
+  })
+
   it("detects by rollout filename and path hint", () => {
     expect(
       codexSessionSource.detect([

@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/platform-identities.ts — CRUD for platformIdentities table.
  */
 
-import "fake-indexeddb/auto"
 import {
   upsertIdentity,
   mergeIdentities,
@@ -12,14 +10,16 @@ import {
   listByAdapter,
   getByPlatformUser,
 } from "./platform-identities"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function baseInput() {
   return {

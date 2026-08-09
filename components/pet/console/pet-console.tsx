@@ -7,7 +7,7 @@
 
 "use client"
 
-import { useState } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -24,9 +24,13 @@ import {
   usePluginSlotHasExtensions,
 } from "@/components/plugins/plugin-extension-slot"
 import { DEFAULT_PET_SETTINGS } from "@/types/pet"
+import type { PetAssetDiagnostic } from "@/types/pet"
 import { PET_CONSOLE_TABS, type PetConsoleTab } from "@/lib/pet/console-tabs"
-import { resolveEffectiveSkin } from "../skins/resolve-effective-skin"
+import { toPetAssetDiagnostics } from "@/lib/pet/live2d/compatibility-diagnostics"
+import { getPetSkinRuntime } from "@/lib/pet/skin-runtime"
+import { resolveEffectiveSkinSelection } from "../skins/resolve-effective-skin"
 import { PetRenderer } from "../pet-renderer"
+import { PetSkinStatus } from "../settings/pet-skin-status"
 import { PetNameEditor } from "../pet-name-editor"
 import { NurtureTab } from "./nurture-tab"
 import { ChatTab } from "./chat-tab"
@@ -66,13 +70,31 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
   // sprite (Live2D when picked + ready, otherwise SVG) — same resolution as
   // the popup's stat-card avatar.
   const pet = appSettings?.petSettings ?? DEFAULT_PET_SETTINGS
-  const { modelId, coreReady } = useActiveLive2dModel(pet)
+  const { modelId, row: activeModel, coreReady } = useActiveLive2dModel(pet)
   const { row: activeSpritePack } = useActiveSpritePack(pet)
-  const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
-    coreReady,
-    hasActiveModel: Boolean(modelId),
-    hasActiveSpritePack: Boolean(activeSpritePack),
-  })
+  const skinResolution = resolveEffectiveSkinSelection(
+    pet.skinId,
+    {
+      coreReady,
+      hasActiveModel: Boolean(modelId),
+      modelReady: activeModel?.compatibility?.status !== "invalid",
+      hasActiveSpritePack: Boolean(activeSpritePack),
+    },
+    { modelId, packId: activeSpritePack?.id }
+  )
+  const effectiveSkin = skinResolution.selection.skinId
+  const selection = skinResolution.selection
+  const runtime = getPetSkinRuntime()
+  useSyncExternalStore(runtime.subscribe, runtime.snapshotRevision, runtime.snapshotRevision)
+  const assetKey = modelId ? `live2d:${modelId}` : undefined
+  const diagnostics: PetAssetDiagnostic[] = [
+    ...skinResolution.diagnostics,
+    ...(activeModel?.compatibility
+      ? toPetAssetDiagnostics(activeModel.compatibility.diagnostics)
+      : []),
+  ]
+  const runtimeDiagnostic = assetKey ? runtime.assetDiagnostic(assetKey) : undefined
+  if (runtimeDiagnostic) diagnostics.push(runtimeDiagnostic)
 
   // The "Plugins" tab is host-owned and appears only while ≥1 plugin has
   // registered a `pet.console.tab` extension.
@@ -102,6 +124,9 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
           state="idle"
           size={48}
           skinId={effectiveSkin}
+          selection={selection}
+          renderPriority="console"
+          lowPower={pet.lowPower}
           flavor={profile.evolutionFlavor}
         />
         <div className="min-w-0">
@@ -115,11 +140,13 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
             <h1 className="text-xl font-semibold">{t("console.title")}</h1>
           )}
           <p className="truncate text-sm text-muted-foreground">{t("console.subtitle")}</p>
-          {pet.skinId === "live2d" && effectiveSkin !== "live2d" && (
-            <p className="truncate text-xs text-amber-600 dark:text-amber-500" role="status">
-              {t("console.live2dFallback")}
-            </p>
-          )}
+          <PetSkinStatus
+            requestedSkinId={pet.skinId ?? "svg"}
+            effectiveSkinId={effectiveSkin}
+            diagnostics={diagnostics}
+            onRetry={runtimeDiagnostic && assetKey ? () => runtime.retryAsset(assetKey) : undefined}
+            onConfigure={pet.skinId !== "svg" ? () => setTab("customize") : undefined}
+          />
         </div>
       </header>
 
@@ -150,6 +177,7 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
               profile={profile}
               view={view}
               skinId={effectiveSkin}
+              selection={selection}
               onFeed={feed}
               onPlay={play}
               onPet={petStroke}
@@ -167,6 +195,8 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
                 state="idle"
                 size={120}
                 skinId={effectiveSkin}
+                selection={selection}
+                renderPriority="console"
               />
               <p className="text-sm text-muted-foreground">{t("console.hatchPrompt")}</p>
               <Button onClick={() => void hatch()}>{t("console.hatch")}</Button>

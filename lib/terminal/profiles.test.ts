@@ -2,9 +2,11 @@ import {
   findProfile,
   formatProfileArgs,
   formatProfileEnv,
+  formatStartupCommands,
   nextProfileId,
   parseProfileArgs,
   parseProfileEnv,
+  parseStartupCommands,
   profileToSpawnFields,
   type TerminalProfile,
 } from "./profiles"
@@ -89,5 +91,30 @@ describe("terminal profiles", () => {
     // Gap / out-of-order ids still resolve to an unused id.
     const gapped: TerminalProfile[] = [{ id: "profile-3", name: "x", shell: "sh" }]
     expect(nextProfileId(gapped)).toBe("profile-2")
+  })
+
+  it("parseStartupCommands splits lines, trims, and drops blanks", () => {
+    expect(parseStartupCommands("source ~/.env\n\ncd project\n")).toEqual([
+      "source ~/.env",
+      "cd project",
+    ])
+    expect(parseStartupCommands("")).toBeUndefined()
+    expect(parseStartupCommands("  \n  \n")).toBeUndefined()
+  })
+
+  it("formatStartupCommands round-trips with parseStartupCommands", () => {
+    expect(formatStartupCommands(["nvm use 18", "clear"])).toBe("nvm use 18\nclear")
+    expect(formatStartupCommands(undefined)).toBe("")
+    expect(parseStartupCommands(formatStartupCommands(["echo hello"]))).toEqual(["echo hello"])
+  })
+
+  it("TerminalProfile supports startupCommands field", () => {
+    const profile: TerminalProfile = {
+      id: "profile-99",
+      name: "Dev",
+      shell: "zsh",
+      startupCommands: ["nvm use 20", "cd ~/project"],
+    }
+    expect(profile.startupCommands).toHaveLength(2)
   })
 })

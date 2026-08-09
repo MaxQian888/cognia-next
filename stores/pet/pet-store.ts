@@ -9,7 +9,13 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
-import type { PetOneShot, PetStatKey, PetVisualState } from "@/types/pet"
+import type {
+  PetLookTarget,
+  PetOneShot,
+  PetSkinSelection,
+  PetStatKey,
+  PetVisualState,
+} from "@/types/pet"
 
 export interface PetBubble {
   /** Rendered text (already localized). */
@@ -50,6 +56,10 @@ interface PetStoreState {
   /** Per-interaction cooldown deadlines (event kind → epoch-ms "ready at").
    *  Transient UI gate so action buttons can't be spammed; never persisted. */
   actionCooldowns: Record<string, number>
+  /** Effective main-window appearance mirrored to overlay/popup windows. */
+  appearanceSelection: PetSkinSelection | null
+  /** Transient local-only gaze sample for cross-window presentation parity. */
+  lookTarget: PetLookTarget | null
 
   setVisualState: (state: PetVisualState) => void
   enqueueOneShot: (shot: PetOneShot) => void
@@ -62,6 +72,8 @@ interface PetStoreState {
   setCareAlert: (alert: PetCareAlert | null) => void
   /** Start a cooldown for an interaction kind, ready again at `until` (epoch ms). */
   setActionCooldown: (kind: string, until: number) => void
+  setAppearanceSelection: (selection: PetSkinSelection | null) => void
+  setLookTarget: (target: PetLookTarget | null) => void
 }
 
 export const usePetStore = create<PetStoreState>()(
@@ -75,6 +87,8 @@ export const usePetStore = create<PetStoreState>()(
       lastGrewStats: [],
       careAlert: null,
       actionCooldowns: {},
+      appearanceSelection: null,
+      lookTarget: null,
 
       setVisualState: (visualState) => set({ visualState }),
       enqueueOneShot: (shot) => set((s) => ({ oneShotQueue: [...s.oneShotQueue, shot] })),
@@ -92,6 +106,8 @@ export const usePetStore = create<PetStoreState>()(
       setCareAlert: (careAlert) => set({ careAlert }),
       setActionCooldown: (kind, until) =>
         set((s) => ({ actionCooldowns: { ...s.actionCooldowns, [kind]: until } })),
+      setAppearanceSelection: (appearanceSelection) => set({ appearanceSelection }),
+      setLookTarget: (lookTarget) => set({ lookTarget }),
     }),
     {
       name: "cognia-pet-ui",

@@ -59,6 +59,7 @@ import type { SessionUsageRow } from "@/lib/db/session-usage"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 import { loggers } from "@cognia/logging"
+import { SdkSessionManager } from "@/components/settings/agent-runtime/sdk-session-manager"
 
 interface RowSummary {
   session: ChatSession
@@ -227,6 +228,7 @@ export function SessionsTab() {
   return (
     <div className="min-w-0" data-testid="sessions-tab">
       <SettingsStack>
+        <SdkSessionManager />
         <SettingsBlock
           title={t("title")}
           description={t("description")}

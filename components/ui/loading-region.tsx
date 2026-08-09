@@ -22,10 +22,25 @@
 import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
 import { useDeferredLoading } from "@/hooks/ui/use-deferred-loading"
 import { useLoadingI18n } from "@/hooks/ui/use-loading-i18n"
 import { useLoadingPhase } from "@/hooks/ui/use-loading-phase"
 import { cn } from "@/lib/utils"
+
+/**
+ * Determinate progress for a loading region.
+ *
+ * Pass this ONLY when the count is real. A determinate 0% bar is a claim; a
+ * spinner is the truth. `total <= 0` is treated as "unknown" and falls back to
+ * the indeterminate path rather than rendering an invented zero.
+ */
+export interface LoadingRegionProgress {
+  processed: number
+  total: number
+  /** Localized phase text, folded into the single status message. */
+  phaseLabel?: string
+}
 
 export interface LoadingRegionProps {
   /** True while the region's content is still being fetched. */
@@ -49,6 +64,12 @@ export interface LoadingRegionProps {
    * keeps running is worse than offering nothing.
    */
   onCancel?: () => void
+  /**
+   * Determinate progress, when the operation genuinely reports one. Folded into
+   * the region's single status message and rendered as a bar beside it — never
+   * as a second announcement.
+   */
+  progress?: LoadingRegionProgress | null
   children?: ReactNode
   className?: string
 }
@@ -59,6 +80,7 @@ export function LoadingRegion({
   label,
   fallback,
   onCancel,
+  progress,
   children,
   className,
 }: LoadingRegionProps) {
@@ -72,7 +94,9 @@ export function LoadingRegion({
       aria-busy={loading || undefined}
       className={className}
     >
-      {showIndicator ? <LoadingRegionStatus label={label} onCancel={onCancel} /> : null}
+      {showIndicator ? (
+        <LoadingRegionStatus label={label} onCancel={onCancel} progress={progress} />
+      ) : null}
       {showIndicator ? fallback : children}
     </div>
   )
@@ -81,6 +105,7 @@ export function LoadingRegion({
 interface LoadingRegionStatusProps {
   label?: string
   onCancel?: () => void
+  progress?: LoadingRegionProgress | null
 }
 
 /**
@@ -91,21 +116,61 @@ interface LoadingRegionStatusProps {
  * prolonged threshold re-announces once — which is the whole point of
  * escalating — without interrupting whatever the user is doing.
  */
-function LoadingRegionStatus({ label, onCancel }: LoadingRegionStatusProps) {
+function LoadingRegionStatus({ label, onCancel, progress }: LoadingRegionStatusProps) {
   const t = useLoadingI18n()
   const { phase, elapsedMs, offline } = useLoadingPhase({ canEscalate: Boolean(onCancel) })
 
   const base = label ?? t.loading
   const prolonged = phase === "prolonged" || phase === "escalated"
-  const detail = offline ? t.offline : t.stillWorking(Math.round(elapsedMs / 1000))
+
+  // A caller that cannot supply a real total gets the indeterminate path. The
+  // lesson from the local-provider model pull: inventing a 0% is a claim the
+  // data does not support.
+  const determinate = Boolean(progress && progress.total > 0)
+  const percent = determinate
+    ? Math.min(100, Math.max(0, Math.round((progress!.processed / progress!.total) * 100)))
+    : 0
+
+  // Offline still wins — it is the more actionable thing to say. Otherwise a
+  // determinate region REPLACES the elapsed-seconds detail with the phase and
+  // count: "Still working… (23s)" alongside a 4/7 bar is two voices saying the
+  // same thing, less precisely.
+  const progressDetail = determinate
+    ? [progress!.phaseLabel, `${progress!.processed}/${progress!.total}`]
+        .filter(Boolean)
+        .join(" — ")
+    : null
+  const detail = offline
+    ? t.offline
+    : (progressDetail ?? t.stillWorking(Math.round(elapsedMs / 1000)))
+
+  // Determinate regions speak on every phase boundary (at most 7 times); the
+  // indeterminate ones only once the wait becomes prolonged.
+  const announceDetail = determinate || prolonged
+  const showDetailRow = prolonged || determinate
 
   return (
     <>
       <span role="status" aria-live="polite" className="sr-only">
-        {prolonged ? `${base} — ${detail}` : base}
+        {announceDetail ? `${base} — ${detail}` : base}
       </span>
-      {prolonged ? (
-        <div className="flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground">
+      {determinate ? (
+        // A SIBLING of the status element, never a descendant: Radix gives this
+        // an implicit role="progressbar", and inside a live region every value
+        // change would be announced on top of the polite message above.
+        <Progress
+          value={percent}
+          aria-label={base}
+          aria-valuetext={detail}
+          className="h-1 w-full"
+        />
+      ) : null}
+      {showDetailRow ? (
+        <div
+          className={cn(
+            "flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground"
+          )}
+        >
           {/* aria-hidden: the live region above already said this. */}
           <span aria-hidden="true">{detail}</span>
           {phase === "escalated" && onCancel ? (

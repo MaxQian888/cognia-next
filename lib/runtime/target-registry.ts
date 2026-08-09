@@ -141,6 +141,23 @@ export class RuntimeTargetRegistry {
     return row
   }
 
+  /** Atomically write and activate a Companion target for a completed pair. */
+  async upsertAndActivateCompanionTarget(
+    input: UpsertCompanionTargetInput
+  ): Promise<RuntimeTargetRecord> {
+    const accountId = assertAccountId(input.accountId)
+    const id = assertTargetId(input.id)
+    const now = input.now ?? Date.now()
+    let activated: RuntimeTargetRecord | undefined
+    await this.db.transaction("rw", this.db.targets, this.db.activeTargets, async () => {
+      const existing = await this.db.targets.get([accountId, id])
+      activated = companionTargetRow(input, accountId, id, now, existing)
+      await this.db.targets.put(activated)
+      await this.db.activeTargets.put({ accountId, targetId: id, updatedAt: now })
+    })
+    return activated as RuntimeTargetRecord
+  }
+
   async activateTarget(
     accountId: string,
     targetId: string,
@@ -189,6 +206,30 @@ export class RuntimeTargetRegistry {
       await this.db.targets.where("accountId").equals(accountId).delete()
       await this.db.activeTargets.delete(accountId)
     })
+  }
+}
+
+function companionTargetRow(
+  input: UpsertCompanionTargetInput,
+  accountId: string,
+  id: string,
+  now: number,
+  existing?: RuntimeTargetRecord
+): RuntimeTargetRecord {
+  return {
+    accountId,
+    id,
+    kind: "companion",
+    label: normalizeLabel(input.label),
+    hostKind: input.hostKind,
+    baseUrl: normalizeHttpsUrl(input.baseUrl),
+    deviceId: input.deviceId,
+    serverVersion: input.serverVersion,
+    serverFingerprint: input.serverFingerprint,
+    credentialRef: input.credentialRef,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    lastUsedAt: now,
   }
 }
 

@@ -1,10 +1,18 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useSyncExternalStore } from "react"
 
 import { detectPlatform } from "@/lib/platform/detect"
+import { installPackWarningRefreshWiring } from "@/lib/plugin/character-pack/warning-refresh-wiring"
 import { loggers } from "@cognia/logging"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
+import {
+  markBootCapabilityFailed,
+  markBootCapabilityReady,
+  getBootCapabilitySnapshot,
+  isBootCapabilityRequested,
+  subscribeBootCapabilities,
+} from "@/lib/boot/capabilities"
 
 const log = loggers.plugin
 
@@ -36,10 +44,36 @@ declare global {
  * Following the `LocalCharacterPackInitializer` shape so the entry under
  * `app/layout.tsx` stays homogeneous.
  */
-export function PluginRuntimeInitializer() {
+export interface PluginRuntimeInitializerProps {
+  /** Keep the pre-account E2E initializer off unrelated real-browser lanes. */
+  onlyForPluginSurfaceE2E?: boolean
+}
+
+export function PluginRuntimeInitializer({
+  onlyForPluginSurfaceE2E = false,
+}: PluginRuntimeInitializerProps = {}) {
   const hasInitialized = useRef(false)
+  useSyncExternalStore(
+    subscribeBootCapabilities,
+    getBootCapabilitySnapshot,
+    getBootCapabilitySnapshot
+  )
+  const requested = isBootCapabilityRequested("plugin-runtime")
+  const isAllowedRoute =
+    !onlyForPluginSurfaceE2E ||
+    (typeof window !== "undefined" &&
+      window.location.pathname.startsWith("/e2e/plugin-ui-surfaces"))
+
+  // Dependency warnings involving theme packs must stay current in every
+  // runtime profile. Theme packs are contributed by regular plugins, while
+  // local character-pack scanning only runs in the desktop shell.
+  useEffect(() => {
+    if (!requested || !isAllowedRoute) return
+    return installPackWarningRefreshWiring()
+  }, [isAllowedRoute, requested])
 
   useEffect(() => {
+    if (!requested || !isAllowedRoute) return
     if (hasInitialized.current) return
     hasInitialized.current = true
     window.__cogniaPluginRuntimeReady = false
@@ -76,6 +110,7 @@ export function PluginRuntimeInitializer() {
         })
         if (!resolution.shouldInitialize) {
           log.debug("plugin-runtime: boot skipped", { reason: resolution.reason })
+          markBootCapabilityReady("plugin-runtime")
           return
         }
 
@@ -92,28 +127,32 @@ export function PluginRuntimeInitializer() {
         const { initializePluginManager } = await import("@/lib/plugin/core/manager")
         await initializePluginManager(resolution.config)
         window.__cogniaPluginRuntimeReady = true
+        markBootCapabilityReady("plugin-runtime")
         log.info("plugin-runtime: initialized", { profile: resolution.config.runtimeProfile })
         // Announce boot completion on the plugin message bus so plugins can run
         // post-ready work (the catalog declared `APP_READY` but nothing emitted
         // it). Best-effort; no payload (ids-only convention, nothing to carry).
         emitSystemBusEvent(SystemEvents.APP_READY, {})
       } catch (err) {
+        hasInitialized.current = false
+        markBootCapabilityFailed("plugin-runtime", err)
         log.warn("plugin-runtime: boot threw", { err })
       }
     }
 
     void initialize()
-  }, [])
+  }, [isAllowedRoute, requested])
 
   // Emit `APP_CLOSING` on page unload so plugins can flush state / cancel
   // in-flight work. The handler must be synchronous (a dynamic import wouldn't
   // resolve before the page is gone), hence the static `emitSystemBusEvent`
   // import above. Best-effort: a no-op when no plugin subscribed.
   useEffect(() => {
+    if (!requested || !isAllowedRoute) return
     const handleBeforeUnload = () => emitSystemBusEvent(SystemEvents.APP_CLOSING, {})
     window.addEventListener("beforeunload", handleBeforeUnload)
     return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [])
+  }, [isAllowedRoute, requested])
 
   return null
 }

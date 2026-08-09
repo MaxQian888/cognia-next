@@ -8,6 +8,10 @@ describe("selectRole", () => {
     expect(selectRole({ COGNIA_ROLE: "sidecar" })).toBe("sidecar")
   })
 
+  it("returns 'mcp-relay' for the packaged guarded relay", () => {
+    expect(selectRole({ COGNIA_ROLE: "mcp-relay" })).toBe("mcp-relay")
+  })
+
   it("defaults to 'cli' when COGNIA_ROLE is unset", () => {
     expect(selectRole({})).toBe("cli")
   })

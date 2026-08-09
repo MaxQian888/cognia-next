@@ -416,6 +416,39 @@
       "remoteQueueEntriesDesc": "远程重试队列允许缓存的最大日志条目数",
       "title": "高级控制"
     },
+    "behaviorTelemetry": {
+      "categories": {
+        "agentTeam": "Agent Team 执行",
+        "chat": "聊天生命周期",
+        "connector": "连接器消息",
+        "description": "可以关闭不希望采集的产品领域。",
+        "system": "遥测偏好",
+        "title": "事件分类",
+        "workflow": "工作流运行"
+      },
+      "clear": "清除本地事件",
+      "destinations": {
+        "description": "选择符合条件的事件写入位置。远程导出还需要启用 OTLP 导出器。",
+        "local": {
+          "description": "在当前设备的本地数据库中保留有上限的事件历史。",
+          "label": "保存在本地"
+        },
+        "remote": {
+          "description": "把采样后的事件发送到已配置的 OTLP Logs 端点。",
+          "label": "远程导出"
+        },
+        "title": "写入目标"
+      },
+      "disclosure": "开启后，Cognia 会在本地保存已注册的交互事件，并可发送到你配置的 OTLP 端点。不会采集消息内容、提示词、响应内容或密钥。",
+      "exportCsv": "导出 CSV",
+      "exportJson": "导出 JSON",
+      "maxStoredEvents": "本地事件数量上限",
+      "optIn": "共享行为事件",
+      "optInDesc": "默认关闭。工程链路追踪与行为事件使用相互独立的开关。",
+      "retentionDays": "本地保留天数",
+      "sampleRate": "采样率",
+      "title": "行为遥测"
+    },
     "logLevel": {
       "debug": "调试",
       "debugDesc": "开发调试信息",
@@ -500,39 +533,6 @@
       "title": "采样规则"
     },
     "save": "保存",
-    "behaviorTelemetry": {
-      "title": "行为遥测",
-      "disclosure": "开启后，Cognia 会在本地保存已注册的交互事件，并可发送到你配置的 OTLP 端点。不会采集消息内容、提示词、响应内容或密钥。",
-      "optIn": "共享行为事件",
-      "optInDesc": "默认关闭。工程链路追踪与行为事件使用相互独立的开关。",
-      "destinations": {
-        "title": "写入目标",
-        "description": "选择符合条件的事件写入位置。远程导出还需要启用 OTLP 导出器。",
-        "local": {
-          "label": "保存在本地",
-          "description": "在当前设备的本地数据库中保留有上限的事件历史。"
-        },
-        "remote": {
-          "label": "远程导出",
-          "description": "把采样后的事件发送到已配置的 OTLP Logs 端点。"
-        }
-      },
-      "categories": {
-        "title": "事件分类",
-        "description": "可以关闭不希望采集的产品领域。",
-        "chat": "聊天生命周期",
-        "workflow": "工作流运行",
-        "connector": "连接器消息",
-        "agentTeam": "Agent Team 执行",
-        "system": "遥测偏好"
-      },
-      "sampleRate": "采样率",
-      "retentionDays": "本地保留天数",
-      "maxStoredEvents": "本地事件数量上限",
-      "exportJson": "导出 JSON",
-      "exportCsv": "导出 CSV",
-      "clear": "清除本地事件"
-    },
     "saveError": "保存设置失败",
     "saved": "已保存！",
     "saving": "保存中...",
@@ -547,6 +547,7 @@
       "agentTraceDesc": "每个聊天回合、工具调用、队友派发记一条 span，写入本地 Dexie。驱动 /logs 的 Agent 追踪标签页。",
       "agentTraceOtlp": "OTLP 导出（Grafana）",
       "agentTraceOtlpDesc": "把 Agent 追踪 span 推到 OTel 兼容后端（Grafana Cloud、Tempo、Honeycomb、Datadog 或自部署 collector）。",
+      "clearStoredSecret": "清除已保存密钥",
       "console": "控制台输出",
       "consoleDesc": "将日志输出到浏览器控制台",
       "consoleDetail": "始终把日志同步输出到当前运行时控制台。",
@@ -563,8 +564,6 @@
       "langfusePublicKeyPlaceholder": "pk-live-...",
       "langfuseSecretKey": "Secret Key",
       "langfuseSecretKeyPlaceholder": "sk-live-...",
-      "secretConfiguredPlaceholder": "已安全保存——输入新值可替换",
-      "clearStoredSecret": "清除已保存密钥",
       "native": "平台日志",
       "nativeBatchSize": "批量大小",
       "nativeDesc": "把 warn/error/fatal 级别日志转发到操作系统原生诊断系统。",
@@ -578,12 +577,14 @@
       "remoteFlushInterval": "刷新间隔",
       "remoteMaxRetries": "最大重试次数",
       "remoteRetryDelay": "重试延迟",
+      "secretConfiguredPlaceholder": "已安全保存——输入新值可替换",
       "title": "日志传输"
     },
     "unsavedChanges": "有未保存的修改"
   },
   "settingsDescription": "配置日志级别、传输方式和保留策略",
   "settingsTitle": "日志配置",
+  "statusSr": "状态：{status}",
   "timeline": {
     "clear": "清除",
     "empty": "暂无数据",
@@ -612,7 +613,6 @@
     "toolName": "工具",
     "totalTokens": "总计"
   },
-  "statusSr": "状态：{status}",
   "workspace": {
     "advanced": {
       "capabilities": {

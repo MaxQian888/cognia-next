@@ -4,7 +4,7 @@
 
 import "fake-indexeddb/auto"
 import { DEFAULT_UPDATE_SETTINGS } from "@cognia/agent-config-types"
-import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "./settings"
+import { DEFAULTS, addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "./settings"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
 beforeEach(async () => {
@@ -33,6 +33,12 @@ describe("getSettings", () => {
     expect(s.mistralResponseFormat).toBe("mp3")
     expect(s.xiaomiModel).toBe("mimo-v2-tts")
     expect(s.realtimeModel).toBe("gpt-realtime-2.1")
+    expect(s.localOpenaiBaseUrl).toBe("")
+    expect(s.localOpenaiModel).toBe("")
+    expect(s.localOpenaiVoice).toBe("")
+    expect(s.localOpenaiSpeed).toBe(1)
+    expect(s.localOpenaiResponseFormat).toBe("mp3")
+    expect(s.localOpenaiTimeoutMs).toBe(60_000)
     expect(s.customLimitsSources).toEqual([])
     expect(s.limitsQueryEnabledAccounts).toEqual([])
     expect(s.behaviorTelemetry).toMatchObject({
@@ -55,6 +61,19 @@ describe("getSettings", () => {
     const s = await getSettings()
     expect(s.updates).toEqual({ ...DEFAULT_UPDATE_SETTINGS, autoCheck: false })
   })
+
+  it.each(["edge", "openai-realtime", "removed-provider"])(
+    "normalizes an unavailable persisted TTS provider (%s)",
+    async (ttsProvider) => {
+      await getDb().settings.put({
+        id: "singleton",
+        permissionMode: "default",
+        alwaysAllowTools: [],
+        ttsProvider,
+      } as unknown as Awaited<ReturnType<typeof getSettings>>)
+      expect((await getSettings()).ttsProvider).toBe("system")
+    }
+  )
 
   it("fills appearance defaults when missing", async () => {
     const s = await getSettings()
@@ -151,6 +170,50 @@ describe("getSettings", () => {
     expect(s.ocrSettings?.defaultFormat).toBe("markdown")
   })
 
+  it("ships live voice off with no deployments on a fresh install", async () => {
+    const s = await getSettings()
+    expect(s.liveVoice?.enabled).toBe(false)
+    expect(s.liveVoice?.region).toBe("global")
+    expect(s.liveVoice?.deployments).toEqual([])
+  })
+
+  it("merges live-voice defaults under a row saved before a field existed", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      liveVoice: {
+        enabled: true,
+        region: "cn",
+        deployments: [{ id: "d1", provider: "qwen", region: "cn", enabled: true }],
+      },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+    const s = await getSettings()
+
+    // Persisted fields win.
+    expect(s.liveVoice?.enabled).toBe(true)
+    expect(s.liveVoice?.region).toBe("cn")
+    // Missing nested fields filled from defaults.
+    expect(s.liveVoice?.maxCandidates).toBe(3)
+    expect(s.liveVoice?.connectTimeoutMs).toBe(10_000)
+    expect(s.liveVoice?.historyTurnLimit).toBe(12)
+    expect(s.liveVoice?.historyCharacterLimit).toBe(16_000)
+  })
+
+  it("keeps a user's deployment list exactly as saved", async () => {
+    // An emptied list must stay empty: a defaults-spread would resurrect
+    // deployments the user deliberately removed.
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      liveVoice: { enabled: true, deployments: [] },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+    const s = await getSettings()
+
+    expect(s.liveVoice?.deployments).toEqual([])
+  })
+
   it("defaults onboardingDismissedAt to undefined for fresh installs", async () => {
     const s = await getSettings()
     expect(s.onboardingDismissedAt).toBeUndefined()
@@ -220,6 +283,49 @@ describe("getSettings", () => {
 })
 
 describe("saveSettings", () => {
+  it("migrates the legacy default account into the matching provider map on write", async () => {
+    await getDb().settings.put({
+      ...DEFAULTS,
+      id: "singleton",
+      defaultProvider: "anthropic",
+      defaultAccountId: "legacy-account",
+    })
+
+    const saved = await saveSettings({ reduceMotion: true })
+
+    expect(saved.defaultAccountIds).toEqual({ anthropic: "legacy-account" })
+    expect(saved.defaultAccountId).toBeUndefined()
+  })
+
+  it("keeps a legacy account bound to its original provider when the default provider changes", async () => {
+    await getDb().settings.put({
+      ...DEFAULTS,
+      id: "singleton",
+      defaultProvider: "anthropic",
+      defaultAccountId: "legacy-claude",
+    })
+
+    const saved = await saveSettings({ defaultProvider: "codex" })
+
+    expect(saved.defaultAccountIds).toEqual({ anthropic: "legacy-claude" })
+    expect(saved.defaultProvider).toBe("codex")
+    expect(saved.defaultAccountId).toBeUndefined()
+  })
+
+  it("normalizes a legacy OpenCode Go default into the OpenCode account map", async () => {
+    await getDb().settings.put({
+      ...DEFAULTS,
+      id: "singleton",
+      defaultProvider: "opencode-go",
+      defaultAccountId: "legacy-go",
+    })
+
+    const saved = await saveSettings({ reduceMotion: true })
+
+    expect(saved.defaultAccountIds).toEqual({ opencode: "legacy-go" })
+    expect(saved.defaultAccountId).toBeUndefined()
+  })
+
   it("persists the patch and returns the merged row", async () => {
     const out = await saveSettings({ theme: "dark", apiKey: "sk-test" })
     expect(out.theme).toBe("dark")

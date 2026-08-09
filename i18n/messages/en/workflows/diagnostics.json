@@ -17,6 +17,7 @@
   "flowOutsideLoop": "{kind} must live inside a loop body.",
   "graphCycle": "Part of a cycle ({nodes}). Back-edges never re-execute — move the nodes that should repeat inside a Loop container instead.",
   "joinPolicyInLoop": "Join policy \"{policy}\" is ignored inside a loop body — loop subgraphs always wait for ALL branches. Move the join to the top level for any/race semantics.",
+  "kindRetired": "This node ({kind}) was removed in {removedIn} and can no longer run. Re-author this step, or install the compatibility plugin that provides it.",
   "missingParent": "Belongs to a container ({parentId}) that no longer exists.",
   "missingTrigger": "No trigger node — this workflow can only be started manually.",
   "orphanNode": "Not reachable from any trigger; it will never run.",
@@ -26,6 +27,5 @@
   "runWithWarnings": "Running with {count} warning(s).",
   "savedWithWarnings": "Saved with {count} warning(s).",
   "selfParent": "A node can't be its own container.",
-  "title": "Problems",
-  "kindRetired": "This node ({kind}) was removed in {removedIn} and can no longer run. Re-author this step, or install the compatibility plugin that provides it."
+  "title": "Problems"
 }

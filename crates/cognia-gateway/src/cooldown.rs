@@ -125,11 +125,9 @@ pub fn record_permanent(map: &KeyCooldownMap, provider_id: &str, api_key: &str, 
 /// Filter a provider's ordered key pool down to the keys usable RIGHT NOW.
 ///
 /// Permanently-disabled keys are dropped unconditionally. Cooling keys are
-/// dropped too — UNLESS every remaining key is cooling, in which case the
-/// single earliest-recovering key is kept so a fully-cooling pool degrades to
-/// "try the least-bad one" rather than collapsing the candidate to a hard
-/// failure. Order of the surviving keys is preserved (the rotation strategy
-/// then picks the starting slot).
+/// dropped too. A fully cooling pool returns no usable key, preventing the
+/// gateway from hammering the earliest-recovering account before its provider
+/// supplied recovery window has elapsed.
 pub fn usable_pool(
     map: &KeyCooldownMap,
     provider_id: &str,
@@ -138,28 +136,37 @@ pub fn usable_pool(
 ) -> Vec<String> {
     let guard = map.lock();
     let mut usable: Vec<String> = Vec::with_capacity(pool.len());
-    let mut earliest: Option<(i64, String)> = None;
     for key in pool {
         match guard.get(&(provider_id.to_string(), key.clone())) {
             Some(s) if s.permanent => {} // never usable
-            Some(s) if s.until_ms > now_ms => {
-                let sooner = earliest
-                    .as_ref()
-                    .map(|(t, _)| s.until_ms < *t)
-                    .unwrap_or(true);
-                if sooner {
-                    earliest = Some((s.until_ms, key.clone()));
-                }
-            }
+            Some(s) if s.until_ms > now_ms => {}
             _ => usable.push(key.clone()),
         }
     }
-    if usable.is_empty() {
-        if let Some((_, key)) = earliest {
-            usable.push(key);
+    usable
+}
+
+/// Earliest temporary recovery when every non-permanently-disabled key in a
+/// pool is cooling. Returns `None` when any key is usable now or the pool has
+/// no recoverable key.
+pub fn all_cooling_retry_after_ms(
+    map: &KeyCooldownMap,
+    provider_id: &str,
+    pool: &[String],
+    now_ms: i64,
+) -> Option<i64> {
+    let guard = map.lock();
+    let mut earliest: Option<i64> = None;
+    for key in pool {
+        match guard.get(&(provider_id.to_string(), key.clone())) {
+            Some(state) if state.permanent => {}
+            Some(state) if state.until_ms > now_ms => {
+                earliest = Some(earliest.map_or(state.until_ms, |value| value.min(state.until_ms)));
+            }
+            _ => return None,
         }
     }
-    usable
+    earliest.map(|until| until.saturating_sub(now_ms))
 }
 
 /// A cooling/disabled key surfaced to the status UI (W3.1 visibility).
@@ -182,7 +189,7 @@ pub fn snapshot_rows(map: &KeyCooldownMap, now_ms: i64) -> Vec<CooldownRow> {
         .filter(|(_, s)| s.permanent || s.until_ms > now_ms)
         .map(|((provider_id, key), s)| CooldownRow {
             provider_id: provider_id.clone(),
-            key_hint: fingerprint(key),
+            key_hint: key_fingerprint(key),
             until_ms: s.until_ms,
             permanent: s.permanent,
             reason: s.reason.clone(),
@@ -190,7 +197,7 @@ pub fn snapshot_rows(map: &KeyCooldownMap, now_ms: i64) -> Vec<CooldownRow> {
         .collect()
 }
 
-fn fingerprint(key: &str) -> String {
+pub fn key_fingerprint(key: &str) -> String {
     let n = key.chars().count();
     if n <= 4 {
         "…".to_string()
@@ -273,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn usable_pool_skips_parked_but_keeps_earliest_when_all_cool() {
+    fn usable_pool_skips_parked_and_fails_fast_when_all_cool() {
         let map = KeyCooldownMap::default();
         let pool = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         // b cooling until 100, c cooling until 50 → a usable.
@@ -281,10 +288,9 @@ mod tests {
         record_cooldown(&map, "p", "c", 50, "x");
         assert_eq!(usable_pool(&map, "p", &pool, 0), vec!["a".to_string()]);
 
-        // Now a permanently disabled AND still within cool windows → only the
-        // earliest-recovering cooling key (c @ 50) survives.
+        // Now a permanently disabled AND still within cool windows → fail fast.
         record_permanent(&map, "p", "a", "quota");
-        assert_eq!(usable_pool(&map, "p", &pool, 0), vec!["c".to_string()]);
+        assert!(usable_pool(&map, "p", &pool, 0).is_empty());
 
         // After the cool windows expire, the two cooling keys are usable again;
         // the permanent one stays dropped.
@@ -301,6 +307,16 @@ mod tests {
         record_permanent(&map, "p", "a", "quota");
         record_permanent(&map, "p", "b", "401");
         assert!(usable_pool(&map, "p", &pool, 0).is_empty());
+    }
+
+    #[test]
+    fn all_cooling_reports_earliest_recovery_only_when_exhausted() {
+        let map = KeyCooldownMap::default();
+        let pool = vec!["a".to_string(), "b".to_string()];
+        record_cooldown(&map, "p", "a", 300, "rate limit");
+        record_cooldown(&map, "p", "b", 100, "rate limit");
+        assert_eq!(all_cooling_retry_after_ms(&map, "p", &pool, 0), Some(100));
+        assert_eq!(all_cooling_retry_after_ms(&map, "p", &pool, 150), None);
     }
 
     #[test]

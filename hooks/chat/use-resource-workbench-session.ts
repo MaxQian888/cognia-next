@@ -7,9 +7,8 @@ import {
   ensureResourceWorkbenchSession,
   migrateResourceSessionBinding,
   surfaceBindingForContextResource,
-  surfaceBindingKey,
 } from "@/lib/context-workbench/resource-session"
-import { resolveScopeProjectId } from "@/lib/db/project-scope"
+import { createResourceSessionRepository } from "@/lib/db/resource-workbench-sessions"
 import { getContextResourceKey, type ContextResource } from "@/types/context-workbench"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
@@ -37,23 +36,7 @@ export function useResourceWorkbenchSession(
     if (!enabled || !binding || resource.kind === "workflow") return
     let cancelled = false
     const db = getDb()
-    const repository = {
-      get: (id: string) => db.sessions.get(id),
-      // Indexed since Dexie v131. This used to be `db.sessions.toArray()` plus
-      // a `JSON.stringify` compare per row — a full scan of every session in
-      // the profile on every workbench open.
-      findByBinding: async (target: SessionSurfaceBinding) =>
-        db.sessions.where("surfaceBindingKey").equals(surfaceBindingKey(target)).first(),
-      put: (row: ChatSession) => db.sessions.put(row).then(() => undefined),
-      update: (id: string, patch: Partial<ChatSession>) => db.sessions.update(id, patch),
-      // A sidechat belongs to the workspace of the conversation it is an aside
-      // to; every other binding is scoped to whatever is active.
-      resolveProjectId: async (target: SessionSurfaceBinding) =>
-        target.kind === "session"
-          ? ((await db.sessions.get(target.sessionId))?.projectId ??
-            (await resolveScopeProjectId()))
-          : resolveScopeProjectId(),
-    }
+    const repository = createResourceSessionRepository()
     const ensure = async () => {
       if (sessionOverrideId) {
         const overridden = await db.sessions.get(sessionOverrideId)

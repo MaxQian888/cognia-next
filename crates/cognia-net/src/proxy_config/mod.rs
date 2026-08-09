@@ -1,10 +1,10 @@
 //! Centralized proxy configuration for outbound HTTP & WebSocket traffic.
 //!
-//! The frontend writes a config via the `proxy_set` Tauri command (app-side
-//! shell), which persists into the `OnceLock<RwLock<ProxyConfig>>`
-//! below. Every reqwest builder in the crate consults this module to decide
-//! whether to wrap a `Proxy` and what URL to target. WSS connections route
-//! through `wsproxy::connect_via_proxy` when the user opts in.
+//! The frontend submits sanitized settings via the app-side `proxy_apply`
+//! command. After keyring hydration, the command installs the runtime config
+//! below. Every managed reqwest builder consults this module to decide whether
+//! to attach a proxy connector or explicitly disable ambient proxy handling.
+//! WSS connections route through `wsproxy::connect_via_proxy` when enabled.
 //!
 //! Companion of `lib/network/proxy-config.ts` on the TS side. The two
 //! representations stay in sync because the frontend is the only writer and
@@ -13,6 +13,8 @@ pub mod clients;
 pub mod detect;
 pub mod wsproxy;
 
+use std::fmt;
+use std::net::IpAddr;
 use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
@@ -45,7 +47,7 @@ impl Default for ProxyMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
     #[serde(default)]
     pub mode: ProxyMode,
@@ -64,6 +66,94 @@ pub struct ProxyConfig {
     /// When false, the WSS dialer skips the proxy even when `mode != Off`.
     #[serde(default = "default_proxy_websockets")]
     pub proxy_websockets: bool,
+}
+
+impl fmt::Debug for ProxyConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProxyConfig")
+            .field("mode", &self.mode)
+            .field("protocol", &self.protocol)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("bypass", &self.bypass)
+            .field("proxy_websockets", &self.proxy_websockets)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProxyErrorCode {
+    ProxyNotInitialized,
+    ProxyInvalidConfig,
+    ProxyCredentialUnavailable,
+    ProxyConnectFailed,
+    ProxyTransportUnsupported,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyError {
+    pub code: ProxyErrorCode,
+    pub message: String,
+}
+
+impl ProxyError {
+    pub fn new(code: ProxyErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for ProxyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{:?}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for ProxyError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DirectReason {
+    Off,
+    Bypass,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum ProxyRouteSummary {
+    Direct {
+        reason: DirectReason,
+    },
+    Proxy {
+        protocol: ProxyProtocol,
+        host: String,
+        port: u16,
+    },
+}
+
+#[derive(Debug, Clone)]
+enum ProxyRuntimeState {
+    Uninitialized,
+    Ready(ProxyConfig),
+    Blocked(ProxyError),
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyRuntimeStatus {
+    pub state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<ProxyRouteSummary>,
+    pub credential_configured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<ProxyErrorCode>,
 }
 
 fn default_proxy_websockets() -> bool {
@@ -94,16 +184,43 @@ impl ProxyConfig {
         !matches!(self.mode, ProxyMode::Off) && !self.host.trim().is_empty() && self.port > 0
     }
 
-    /// `http://user:pass@host:port` (or `socks5://...`). Returns `None` when
-    /// the config isn't actionable.
-    pub fn proxy_url(&self) -> Option<String> {
-        if !self.is_active() {
-            return None;
+    pub fn validate(&self) -> Result<(), ProxyError> {
+        if matches!(self.mode, ProxyMode::Off) {
+            return Ok(());
         }
+        if self.host.trim().is_empty() || self.port == 0 {
+            return Err(ProxyError::new(
+                ProxyErrorCode::ProxyInvalidConfig,
+                "enabled proxy requires a host and non-zero port",
+            ));
+        }
+        if self
+            .username
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+            && self.password.as_deref().is_none_or(str::is_empty)
+        {
+            return Err(ProxyError::new(
+                ProxyErrorCode::ProxyCredentialUnavailable,
+                "proxy username is configured but its keyring password is unavailable",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Credential-bearing URL for native connector construction only. Never
+    /// return this value over IPC or include it in logs/errors.
+    pub fn credentialed_proxy_url(&self) -> Result<Option<String>, ProxyError> {
+        if !self.is_active() {
+            self.validate()?;
+            return Ok(None);
+        }
+        self.validate()?;
         let scheme = match self.protocol {
             ProxyProtocol::Http => "http",
             ProxyProtocol::Https => "https",
-            ProxyProtocol::Socks5 => "socks5",
+            // reqwest interprets socks5h as proxy-side DNS resolution.
+            ProxyProtocol::Socks5 => "socks5h",
         };
         let auth = match (self.username.as_deref(), self.password.as_deref()) {
             (Some(u), Some(p)) if !u.is_empty() && !p.is_empty() => {
@@ -111,7 +228,40 @@ impl ProxyConfig {
             }
             _ => String::new(),
         };
-        Some(format!("{scheme}://{auth}{}:{}", self.host, self.port))
+        Ok(Some(format!(
+            "{scheme}://{auth}{}:{}",
+            self.host, self.port
+        )))
+    }
+
+    pub fn route_for(&self, target_url: &str) -> Result<ProxyRouteSummary, ProxyError> {
+        self.validate()?;
+        if matches!(self.mode, ProxyMode::Off) {
+            return Ok(ProxyRouteSummary::Direct {
+                reason: DirectReason::Off,
+            });
+        }
+        if self.should_bypass(target_url) {
+            return Ok(ProxyRouteSummary::Direct {
+                reason: DirectReason::Bypass,
+            });
+        }
+        Ok(ProxyRouteSummary::Proxy {
+            protocol: self.protocol,
+            host: self.host.clone(),
+            port: self.port,
+        })
+    }
+
+    pub fn websocket_route_for(&self, target_url: &str) -> Result<ProxyRouteSummary, ProxyError> {
+        let route = self.route_for(target_url)?;
+        if matches!(route, ProxyRouteSummary::Proxy { .. }) && !self.proxy_websockets {
+            return Err(ProxyError::new(
+                ProxyErrorCode::ProxyConnectFailed,
+                "public WebSocket traffic is blocked because WebSocket proxying is disabled",
+            ));
+        }
+        Ok(route)
     }
 
     /// True when the host portion of `target_url` matches a bypass entry.
@@ -127,12 +277,15 @@ impl ProxyConfig {
         if host.is_empty() {
             return false;
         }
+        let target_ip = host.trim_matches(['[', ']']).parse::<IpAddr>().ok();
         self.bypass.iter().any(|raw| {
             let entry = raw.trim().to_lowercase();
             if entry.is_empty() {
                 return false;
             }
-            if let Some(suffix) = entry.strip_prefix('.') {
+            if let Some((network, prefix)) = parse_cidr(&entry) {
+                target_ip.is_some_and(|target| ip_in_cidr(target, network, prefix))
+            } else if let Some(suffix) = entry.strip_prefix('.') {
                 host == suffix || host.ends_with(&entry)
             } else {
                 host == entry
@@ -140,22 +293,29 @@ impl ProxyConfig {
         })
     }
 
-    /// Build a `reqwest::Proxy` honouring the bypass list. Returns `None`
-    /// when the config is inactive.
-    pub fn build_reqwest_proxy(&self) -> Option<reqwest::Proxy> {
-        let url = self.proxy_url()?;
+    /// Build a `reqwest::Proxy` honouring the bypass list.
+    pub fn build_reqwest_proxy(&self) -> Result<Option<reqwest::Proxy>, ProxyError> {
+        let Some(url) = self.credentialed_proxy_url()? else {
+            return Ok(None);
+        };
+        let parsed_url = url.parse::<reqwest::Url>().map_err(|_| {
+            ProxyError::new(
+                ProxyErrorCode::ProxyInvalidConfig,
+                "proxy endpoint could not be parsed",
+            )
+        })?;
         let bypass = self.bypass.clone();
         let proxy = reqwest::Proxy::custom(move |target| {
-            let target_str = target.as_str();
-            // Reuse `should_bypass` shape inline — the closure captures only
-            // bypass + url (proxy_url already encodes auth).
             let host = target.host_str().unwrap_or("").to_lowercase();
+            let target_ip = host.trim_matches(['[', ']']).parse::<IpAddr>().ok();
             for raw in &bypass {
                 let entry = raw.trim().to_lowercase();
                 if entry.is_empty() {
                     continue;
                 }
-                let matches = if let Some(suffix) = entry.strip_prefix('.') {
+                let matches = if let Some((network, prefix)) = parse_cidr(&entry) {
+                    target_ip.is_some_and(|target| ip_in_cidr(target, network, prefix))
+                } else if let Some(suffix) = entry.strip_prefix('.') {
                     host == suffix || host.ends_with(&entry)
                 } else {
                     host == entry
@@ -164,23 +324,50 @@ impl ProxyConfig {
                     return None;
                 }
             }
-            let _ = target_str; // unused beyond host extraction
-            url.parse::<reqwest::Url>().ok()
+            Some(parsed_url.clone())
         });
-        Some(proxy)
+        Ok(Some(proxy))
+    }
+
+    pub fn apply_reqwest_policy(
+        &self,
+        builder: reqwest::ClientBuilder,
+        target_url: &str,
+    ) -> Result<(reqwest::ClientBuilder, ProxyRouteSummary), ProxyError> {
+        let route = self.route_for(target_url)?;
+        let builder = match route {
+            ProxyRouteSummary::Direct { .. } => builder.no_proxy(),
+            ProxyRouteSummary::Proxy { .. } => {
+                let proxy = self.build_reqwest_proxy()?.ok_or_else(|| {
+                    ProxyError::new(
+                        ProxyErrorCode::ProxyInvalidConfig,
+                        "active proxy did not produce a connector",
+                    )
+                })?;
+                builder.proxy(proxy)
+            }
+        };
+        Ok((builder, route))
     }
 
     /// Env vars suitable for spawning a child process. Mirrors the TS
     /// `proxyEnvVars` helper so the Node sidecar sees the same proxy.
     pub fn env_vars(&self) -> Vec<(String, String)> {
-        let Some(url) = self.proxy_url() else {
+        let Ok(Some(mut url)) = self.credentialed_proxy_url() else {
             return Vec::new();
         };
+        // Node/undici resolves SOCKS destinations through the proxy but only
+        // accepts the standard socks5 scheme. `socks5h` is reqwest-specific.
+        if url.starts_with("socks5h://") {
+            url.replace_range(..9, "socks5://");
+        }
         let mut out = vec![
             ("HTTP_PROXY".to_string(), url.clone()),
             ("HTTPS_PROXY".to_string(), url.clone()),
+            ("ALL_PROXY".to_string(), url.clone()),
             ("http_proxy".to_string(), url.clone()),
             ("https_proxy".to_string(), url.clone()),
+            ("all_proxy".to_string(), url.clone()),
         ];
         if !self.bypass.is_empty() {
             let no_proxy = self.bypass.join(",");
@@ -204,29 +391,159 @@ impl ProxyConfig {
     }
 }
 
+fn parse_cidr(entry: &str) -> Option<(IpAddr, u8)> {
+    let (network, prefix) = entry.rsplit_once('/')?;
+    let network = network.parse::<IpAddr>().ok()?;
+    let prefix = prefix.parse::<u8>().ok()?;
+    let max = if network.is_ipv4() { 32 } else { 128 };
+    (prefix <= max).then_some((network, prefix))
+}
+
+fn ip_in_cidr(target: IpAddr, network: IpAddr, prefix: u8) -> bool {
+    if prefix == 0 {
+        return target.is_ipv4() == network.is_ipv4();
+    }
+    match (target, network) {
+        (IpAddr::V4(target), IpAddr::V4(network)) => {
+            let shift = 32 - u32::from(prefix);
+            (u32::from(target) >> shift) == (u32::from(network) >> shift)
+        }
+        (IpAddr::V6(target), IpAddr::V6(network)) => {
+            let shift = 128 - u32::from(prefix);
+            (u128::from(target) >> shift) == (u128::from(network) >> shift)
+        }
+        _ => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Process-wide state — populated by the `proxy_set` command, read by every
+// Process-wide state — populated by the `proxy_apply` command, read by every
 // outbound HTTP/WS call site.
 // ---------------------------------------------------------------------------
 
-static CURRENT: OnceLock<RwLock<ProxyConfig>> = OnceLock::new();
+static CURRENT: OnceLock<RwLock<ProxyRuntimeState>> = OnceLock::new();
 
-fn slot() -> &'static RwLock<ProxyConfig> {
-    CURRENT.get_or_init(|| RwLock::new(ProxyConfig::default()))
+fn slot() -> &'static RwLock<ProxyRuntimeState> {
+    CURRENT.get_or_init(|| RwLock::new(ProxyRuntimeState::Uninitialized))
 }
 
-/// Snapshot of the live config. Cheap clone — fields are short strings.
-pub fn current() -> ProxyConfig {
-    slot().read().expect("proxy config lock poisoned").clone()
+/// Snapshot of initialized live config. Never substitutes a direct default.
+pub fn current() -> Result<ProxyConfig, ProxyError> {
+    match slot().read().expect("proxy config lock poisoned").clone() {
+        ProxyRuntimeState::Ready(config) => Ok(config),
+        ProxyRuntimeState::Uninitialized => Err(ProxyError::new(
+            ProxyErrorCode::ProxyNotInitialized,
+            "network proxy policy has not been initialized",
+        )),
+        ProxyRuntimeState::Blocked(error) => Err(error),
+    }
 }
 
-/// Replace the live config. The renderer is the only writer: it calls the
-/// `proxy_set` Tauri command after every settings save, and once on startup
-/// after it loads the persisted proxy config. There is no Rust-side boot
-/// initialization, so the process default stays [`ProxyMode::Off`] until that
-/// first renderer push lands.
-pub fn set_current(cfg: ProxyConfig) {
-    *slot().write().expect("proxy config lock poisoned") = cfg;
+pub fn apply_current(config: ProxyConfig) -> Result<(), ProxyError> {
+    if let Err(error) = config.validate() {
+        *slot().write().expect("proxy config lock poisoned") =
+            ProxyRuntimeState::Blocked(error.clone());
+        return Err(error);
+    }
+    *slot().write().expect("proxy config lock poisoned") = ProxyRuntimeState::Ready(config);
+    Ok(())
+}
+
+pub fn block_current(error: ProxyError) {
+    *slot().write().expect("proxy config lock poisoned") = ProxyRuntimeState::Blocked(error);
+}
+
+pub fn runtime_status() -> ProxyRuntimeStatus {
+    match slot().read().expect("proxy config lock poisoned").clone() {
+        ProxyRuntimeState::Uninitialized => ProxyRuntimeStatus {
+            state: "uninitialized",
+            route: None,
+            credential_configured: false,
+            error_code: Some(ProxyErrorCode::ProxyNotInitialized),
+        },
+        ProxyRuntimeState::Blocked(error) => ProxyRuntimeStatus {
+            state: "blocked",
+            route: None,
+            credential_configured: false,
+            error_code: Some(error.code),
+        },
+        ProxyRuntimeState::Ready(config) => ProxyRuntimeStatus {
+            state: "ready",
+            route: if matches!(config.mode, ProxyMode::Off) {
+                Some(ProxyRouteSummary::Direct {
+                    reason: DirectReason::Off,
+                })
+            } else {
+                Some(ProxyRouteSummary::Proxy {
+                    protocol: config.protocol,
+                    host: config.host.clone(),
+                    port: config.port,
+                })
+            },
+            credential_configured: config.password.is_some(),
+            error_code: None,
+        },
+    }
+}
+
+pub fn apply_reqwest_policy(
+    builder: reqwest::ClientBuilder,
+    target_url: &str,
+) -> Result<(reqwest::ClientBuilder, ProxyRouteSummary), ProxyError> {
+    current()?.apply_reqwest_policy(builder, target_url)
+}
+
+/// Remove ambient proxy routing before desktop services or plugins create
+/// clients. Cognia's initialized runtime policy is the sole routing authority;
+/// active clients receive an explicit connector and direct clients call
+/// `.no_proxy()`.
+pub fn clear_inherited_proxy_environment() {
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    ] {
+        std::env::remove_var(key);
+    }
+}
+
+/// Keep libraries outside the managed client factory fail-closed during the
+/// renderer hydration window. Loopback remains reachable for in-process RPC.
+pub fn install_uninitialized_proxy_environment() {
+    clear_inherited_proxy_environment();
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        std::env::set_var(key, "http://127.0.0.1:9");
+    }
+    for key in ["NO_PROXY", "no_proxy"] {
+        std::env::set_var(key, "localhost,127.0.0.1,::1");
+    }
+}
+
+/// Mirror an initialized policy into the process environment for native
+/// plugins whose HTTP stack is owned by Tauri (notably the updater). Managed
+/// reqwest clients still use explicit connectors or `.no_proxy()`.
+pub fn install_process_proxy_environment(config: &ProxyConfig) {
+    clear_inherited_proxy_environment();
+    for (key, value) in config.env_vars() {
+        std::env::set_var(key, value);
+    }
+}
+
+#[cfg(test)]
+fn reset_uninitialized() {
+    *slot().write().expect("proxy config lock poisoned") = ProxyRuntimeState::Uninitialized;
 }
 
 // `urlencoding` lives in the reqwest dep tree; expose a tiny shim so the
@@ -265,6 +582,10 @@ mod urlencoding {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    static NETWORK_ENV_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn manual(host: &str, port: u16) -> ProxyConfig {
         ProxyConfig {
@@ -280,7 +601,7 @@ mod tests {
     fn default_is_inactive() {
         let cfg = ProxyConfig::default();
         assert!(!cfg.is_active());
-        assert_eq!(cfg.proxy_url(), None);
+        assert_eq!(cfg.credentialed_proxy_url().unwrap(), None);
     }
 
     #[test]
@@ -294,7 +615,10 @@ mod tests {
     fn manual_with_host_port_is_active() {
         let cfg = manual("127.0.0.1", 7890);
         assert!(cfg.is_active());
-        assert_eq!(cfg.proxy_url(), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            cfg.credentialed_proxy_url().unwrap(),
+            Some("http://127.0.0.1:7890".to_string())
+        );
     }
 
     #[test]
@@ -303,7 +627,7 @@ mod tests {
         cfg.username = Some("alice".to_string());
         cfg.password = Some("secret".to_string());
         assert_eq!(
-            cfg.proxy_url(),
+            cfg.credentialed_proxy_url().unwrap(),
             Some("http://alice:secret@proxy.corp:8080".to_string())
         );
     }
@@ -313,24 +637,30 @@ mod tests {
         let mut cfg = manual("proxy.corp", 8080);
         cfg.username = Some("alice@corp".to_string());
         cfg.password = Some("p:w@rd!".to_string());
-        let url = cfg.proxy_url().unwrap();
+        let url = cfg.credentialed_proxy_url().unwrap().unwrap();
         assert!(url.contains("alice%40corp"));
         assert!(url.contains("p%3Aw%40rd!"));
     }
 
     #[test]
-    fn proxy_url_omits_auth_when_only_one_cred() {
+    fn proxy_url_rejects_a_username_without_keyring_password() {
         let mut cfg = manual("proxy.corp", 8080);
         cfg.username = Some("alice".to_string());
         cfg.password = None;
-        assert_eq!(cfg.proxy_url(), Some("http://proxy.corp:8080".to_string()));
+        assert_eq!(
+            cfg.credentialed_proxy_url().unwrap_err().code,
+            ProxyErrorCode::ProxyCredentialUnavailable
+        );
     }
 
     #[test]
     fn socks5_protocol_renders_socks_scheme() {
         let mut cfg = manual("127.0.0.1", 7891);
         cfg.protocol = ProxyProtocol::Socks5;
-        assert_eq!(cfg.proxy_url(), Some("socks5://127.0.0.1:7891".to_string()));
+        assert_eq!(
+            cfg.credentialed_proxy_url().unwrap(),
+            Some("socks5h://127.0.0.1:7891".to_string())
+        );
     }
 
     #[test]
@@ -347,6 +677,16 @@ mod tests {
         assert!(cfg.should_bypass("https://api.internal/foo"));
         assert!(cfg.should_bypass("https://internal/foo"));
         assert!(!cfg.should_bypass("https://api.example.com/foo"));
+    }
+
+    #[test]
+    fn should_bypass_matches_ipv4_and_ipv6_cidr() {
+        let mut cfg = ProxyConfig::default();
+        cfg.bypass = vec!["10.42.0.0/16".into(), "2001:db8::/32".into()];
+        assert!(cfg.should_bypass("https://10.42.9.8/path"));
+        assert!(!cfg.should_bypass("https://10.43.9.8/path"));
+        assert!(cfg.should_bypass("https://[2001:db8:abcd::1]/path"));
+        assert!(!cfg.should_bypass("https://[2001:db9::1]/path"));
     }
 
     #[test]
@@ -385,25 +725,39 @@ mod tests {
     }
 
     #[test]
-    fn current_starts_inactive_and_set_replaces_it() {
-        // Note: relies on test ordering not mattering — every test reads/writes
-        // the same OnceLock. We snapshot/restore around each mutation.
-        let prev = current();
-        set_current(manual("10.0.0.1", 1080));
-        assert_eq!(current().host, "10.0.0.1");
-        set_current(prev);
+    fn runtime_starts_fail_closed_and_apply_replaces_it() {
+        static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = TEST_STATE.lock().unwrap();
+        reset_uninitialized();
+        assert_eq!(
+            current().unwrap_err().code,
+            ProxyErrorCode::ProxyNotInitialized
+        );
+        apply_current(manual("10.0.0.1", 1080)).unwrap();
+        assert_eq!(current().unwrap().host, "10.0.0.1");
+        reset_uninitialized();
     }
 
     #[test]
     fn build_reqwest_proxy_returns_none_when_inactive() {
         let cfg = ProxyConfig::default();
-        assert!(cfg.build_reqwest_proxy().is_none());
+        assert!(cfg.build_reqwest_proxy().unwrap().is_none());
     }
 
     #[test]
     fn build_reqwest_proxy_returns_some_when_active() {
         let cfg = manual("127.0.0.1", 7890);
-        assert!(cfg.build_reqwest_proxy().is_some());
+        assert!(cfg.build_reqwest_proxy().unwrap().is_some());
+    }
+
+    #[test]
+    fn debug_output_redacts_password() {
+        let mut cfg = manual("proxy.corp", 8080);
+        cfg.username = Some("alice".into());
+        cfg.password = Some("super-secret".into());
+        let rendered = format!("{cfg:?}");
+        assert!(!rendered.contains("super-secret"));
+        assert!(rendered.contains("<redacted>"));
     }
 
     #[test]
@@ -416,5 +770,130 @@ mod tests {
     fn mode_default_is_off() {
         let m: ProxyMode = Default::default();
         assert_eq!(m, ProxyMode::Off);
+    }
+
+    async fn serve_captured_request(body: &'static str) -> (u16, tokio::task::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 512];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            String::from_utf8_lossy(&request).into_owned()
+        });
+        (port, handle)
+    }
+
+    #[tokio::test]
+    async fn reqwest_proxy_auth_stays_on_proxy_and_bypass_is_direct() {
+        let _guard = NETWORK_ENV_TEST.lock().unwrap();
+        let (proxy_port, proxy_request) = serve_captured_request("proxy").await;
+        let (origin_port, origin_request) = serve_captured_request("origin").await;
+        let mut cfg = manual("127.0.0.1", proxy_port);
+        cfg.username = Some("alice".into());
+        cfg.password = Some("secret".into());
+        cfg.bypass = vec!["127.0.0.1".into()];
+
+        let (builder, route) = cfg
+            .apply_reqwest_policy(reqwest::Client::builder(), "http://service.example/data")
+            .unwrap();
+        assert!(matches!(route, ProxyRouteSummary::Proxy { .. }));
+        let client = builder.build().unwrap();
+        assert_eq!(
+            client
+                .get("http://service.example/data")
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap(),
+            "proxy"
+        );
+        assert_eq!(
+            client
+                .get(format!("http://127.0.0.1:{origin_port}/bypass"))
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap(),
+            "origin"
+        );
+
+        let proxy_request = proxy_request.await.unwrap().to_ascii_lowercase();
+        let origin_request = origin_request.await.unwrap().to_ascii_lowercase();
+        assert!(proxy_request.contains("proxy-authorization: basic ywxpy2u6c2vjcmv0"));
+        assert!(!origin_request.contains("proxy-authorization"));
+    }
+
+    #[tokio::test]
+    async fn off_policy_ignores_ambient_proxy_environment() {
+        let _guard = NETWORK_ENV_TEST.lock().unwrap();
+        const KEYS: [&str; 6] = [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "NO_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "no_proxy",
+        ];
+        let saved: Vec<_> = KEYS
+            .iter()
+            .map(|key| ((*key).to_string(), std::env::var_os(key)))
+            .collect();
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+            std::env::set_var(key, "http://127.0.0.1:9");
+        }
+        for key in ["NO_PROXY", "no_proxy"] {
+            std::env::set_var(key, "");
+        }
+
+        let (origin_port, origin_request) = serve_captured_request("direct").await;
+        let url = format!("http://127.0.0.1:{origin_port}/off");
+        let (builder, route) = ProxyConfig::default()
+            .apply_reqwest_policy(reqwest::Client::builder(), &url)
+            .unwrap();
+        assert_eq!(
+            route,
+            ProxyRouteSummary::Direct {
+                reason: DirectReason::Off
+            }
+        );
+        let result = builder
+            .build()
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+
+        for (key, value) in saved {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        assert_eq!(result, "direct");
+        assert!(origin_request
+            .await
+            .unwrap()
+            .starts_with("GET /off HTTP/1.1"));
     }
 }

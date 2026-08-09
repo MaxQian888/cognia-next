@@ -28,9 +28,14 @@ jest.mock("@/lib/db/skills", () => ({
   activeEffectiveSkillIds: jest.requireActual("@/lib/db/skills").activeEffectiveSkillIds,
 }))
 
+jest.mock("@/lib/db/skill-resources", () => ({
+  listResourcesForSkill: jest.fn(),
+}))
+
 jest.mock("@/lib/db/mcp-servers", () => ({
   listEnabledMcpServers: jest.fn(),
   buildMcpServerMap: jest.fn(),
+  buildMcpServerMapResolved: jest.fn(),
 }))
 
 jest.mock("@/lib/db/teams", () => ({
@@ -63,7 +68,7 @@ jest.mock("@/stores/settings", () => ({
   },
 }))
 
-jest.mock("@/lib/agent", () => ({
+jest.mock("@/lib/agent/mode-session-update", () => ({
   buildAgentModeSessionUpdate: jest.fn(),
 }))
 
@@ -96,6 +101,11 @@ jest.mock("@/lib/claude/env-resolver", () => ({
   resolveProxyEnv: jest.fn(),
 }))
 
+const mockGetAgentEnvSecret = jest.fn()
+jest.mock("@/lib/agent/agent-env-keyring", () => ({
+  loadAgentEnvSecret: (...args: unknown[]) => mockGetAgentEnvSecret(...args),
+}))
+
 // Twin runtime is dynamically imported by resolveSendOptions; the mock only
 // kicks in when a test supplies twinId + twinDeps + twinUserMessage.
 const mApplyTwinContext = jest.fn()
@@ -117,6 +127,11 @@ jest.mock("@/lib/twin/runtime", () => ({
 const mApplyProjectKnowledge = jest.fn()
 jest.mock("@/lib/project-knowledge/runtime/apply-project-context", () => ({
   applyProjectKnowledgeContext: (...args: unknown[]) => mApplyProjectKnowledge(...args),
+}))
+
+const mApplyAgentKnowledge = jest.fn()
+jest.mock("@/lib/knowledge-base/runtime/apply-agent-knowledge-context", () => ({
+  applyAgentKnowledgeContextFromDb: (...args: unknown[]) => mApplyAgentKnowledge(...args),
 }))
 
 // skills-bridge is dynamically imported by resolveSendOptions when a character
@@ -147,15 +162,31 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => false),
 }))
 
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isNativeMobile: jest.fn(() => false),
+}))
+
+const mockBuildSupportContext = jest.fn(async (..._args: unknown[]) => "SUPPORT_CONTEXT")
+jest.mock("@/lib/support-agent/context", () => {
+  const actual = jest.requireActual("@/lib/support-agent/context")
+  return {
+    ...actual,
+    buildSupportAgentContext: (...args: unknown[]) => mockBuildSupportContext(...args),
+    isSupportDiagnosticsEnabled: () => true,
+  }
+})
+
 import { isTauri } from "@/lib/tauri"
-import { buildAgentModeSessionUpdate } from "@/lib/agent"
+import { isNativeMobile } from "@/lib/platform/detect"
+import { buildAgentModeSessionUpdate } from "@/lib/agent/mode-session-update"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import {
   __resetSandboxConfineStateForTesting,
   getActiveSandboxConfine,
 } from "@/lib/claude/sandbox-confine-state"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
-import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
+import { buildMcpServerMapResolved, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import {
   listEnabledSkillsByIds,
   listSkillsByIds,
@@ -163,6 +194,7 @@ import {
   renderSkillsCatalog,
   renderSkillsSection,
 } from "@/lib/db/skills"
+import { listResourcesForSkill } from "@/lib/db/skill-resources"
 import { getTeam } from "@/lib/db/teams"
 import { selectSurfaceSkills } from "@/lib/skills/surface-activation"
 import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
@@ -195,6 +227,7 @@ import type {
   Team,
   TeamMember,
 } from "@cognia/agent-config-types"
+import { RESOLVED_SPEC_VERSION } from "@cognia/agent-config-types/agent-execution"
 import type { Project } from "@/types"
 
 const mGetCharacter = resolveCharacterById as jest.Mock
@@ -204,8 +237,9 @@ const mListSkillsByIds = listSkillsByIds as jest.Mock
 const mRecordUsage = recordSkillUsage as jest.Mock
 const mRender = renderSkillsSection as jest.Mock
 const mRenderCatalog = renderSkillsCatalog as jest.Mock
+const mListSkillResources = listResourcesForSkill as jest.Mock
 const mListMcp = listEnabledMcpServers as jest.Mock
-const mBuildMap = buildMcpServerMap as jest.Mock
+const mBuildMap = buildMcpServerMapResolved as jest.Mock
 const mGetTeam = getTeam as jest.Mock
 const mRuntimeGet = (useAgentRuntimeStore as unknown as { getState: jest.Mock }).getState
 const mCustomGet = (useCustomModeStore as unknown as { getState: jest.Mock }).getState
@@ -266,6 +300,8 @@ beforeEach(() => {
   mListSkillsByIds.mockResolvedValue([])
   mRecordUsage.mockResolvedValue(undefined)
   mRender.mockReturnValue("")
+  mRenderCatalog.mockReturnValue("")
+  mListSkillResources.mockResolvedValue([])
   mListMcp.mockResolvedValue([])
   mBuildMap.mockReturnValue({})
   mGetTeam.mockResolvedValue(undefined)
@@ -301,6 +337,47 @@ describe("resolveSendOptions — editor workspace tool", () => {
       activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
     })
     expect(toolNames(withoutBackend)).not.toContain("read_active_editor")
+  })
+})
+
+describe("resolveSendOptions — Cognia Support safety", () => {
+  it("replaces normal Agent overlays with read-only docs and redacted diagnostics context", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "char_builtin_support",
+        systemPrompt: "SUPPORT_IDENTITY",
+        permissionMode: "bypassPermissions",
+        allowedTools: ["Bash", "Write"],
+        mcpServerIds: ["unsafe"],
+        executionPolicy: {
+          envBindings: [{ name: "TOKEN", kind: "secret", secretRef: "secret-ref" }],
+        },
+      }),
+      activeProject: makeProject([{ path: "/private/project", isPrimary: true }]),
+      trustedWorkspaceRoots: ["/private/project"],
+      preloadedMcpServers: [],
+      preloadedEnv: { SECRET: "value" },
+      twinUserMessage: "diagnose this runtime error",
+      appSettings: { id: "singleton", language: "en" } as AppSettings,
+    })
+
+    expect(mockGetAgentEnvSecret).not.toHaveBeenCalled()
+    expect(mockBuildSupportContext).toHaveBeenCalledWith(
+      expect.objectContaining({ userText: "diagnose this runtime error", diagnosticsEnabled: true })
+    )
+    expect(opts).toMatchObject({
+      permissionMode: "plan",
+      toolSurface: "none",
+      allowedTools: [],
+      mcpServers: {},
+      systemPrompt: "SUPPORT_IDENTITY\n\nSUPPORT_CONTEXT",
+    })
+    expect(opts).not.toHaveProperty("cwd")
+    expect(opts).not.toHaveProperty("env")
+    expect(opts).not.toHaveProperty("agents")
+    expect(opts).not.toHaveProperty("builtinTools")
+    expect(opts).not.toHaveProperty("pluginTools")
+    expect(opts).not.toHaveProperty("lsp")
   })
 })
 
@@ -1068,7 +1145,7 @@ describe("resolveSendOptions — compaction config", () => {
         },
       } as unknown as AppSettings,
     })
-    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex", null)
     expect(opts.compaction?.summary).toEqual({
       model: "gpt-5.2-codex",
       protocol: "openai",
@@ -1105,7 +1182,7 @@ describe("resolveSendOptions — compaction config", () => {
         },
       } as unknown as AppSettings,
     })
-    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex", null)
     expect(opts.compaction?.summary?.credentials).toEqual({
       apiKey: "chatgpt-bearer",
       baseURL: "https://chatgpt.com/backend-api/codex",
@@ -1129,7 +1206,7 @@ describe("resolveSendOptions — compaction config", () => {
         },
       } as unknown as AppSettings,
     })
-    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go")
+    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go", null)
     expect(opts.compaction?.summary).toEqual({
       model: "kimi-k2.6",
       protocol: "openai",
@@ -1232,7 +1309,7 @@ describe("resolveSendOptions — opencode vault auto-fallback", () => {
         providerSettings: {},
       } as unknown as AppSettings,
     })
-    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go")
+    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go", null)
     expect(opts.providerCredentials).toEqual({
       apiKey: "sk-go-vault",
       baseURL: "https://opencode.ai/zen/go/v1",
@@ -1313,7 +1390,7 @@ describe("resolveSendOptions — codex vault auto-fallback", () => {
         providerSettings: {},
       } as unknown as AppSettings,
     })
-    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex", null)
     expect(opts.providerCredentials).toEqual({
       apiKey: "chatgpt-bearer",
       baseURL: "https://chatgpt.com/backend-api/codex",
@@ -1322,6 +1399,21 @@ describe("resolveSendOptions — codex vault auto-fallback", () => {
     })
     // Model backfilled from the built-in catalog default.
     expect(opts.model).toBe("gpt-5.6-sol")
+  })
+
+  it("uses the session/default resolver's selected Codex account", async () => {
+    mResolveAccountId.mockReturnValueOnce("selected-account")
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "selected-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+    })
+
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "codex" }),
+      appSettings: { defaultProvider: "codex", providerSettings: {} } as unknown as AppSettings,
+    })
+
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex", "selected-account")
   })
 
   it("api_key mode carries no special headers", async () => {
@@ -1633,6 +1725,86 @@ describe("resolveSendOptions — character + skills", () => {
     expect(opts.systemPrompt).not.toContain("FULL BODY")
     // allowedTools still unions (a skill's declared tools must stay granted).
     expect(opts.allowedTools).toEqual(expect.arrayContaining(["X"]))
+  })
+
+  it("hybrid mode injects ephemeral skills fully and catalogs implicit character skills", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["implicit"] })
+    mListSkills.mockResolvedValueOnce([
+      {
+        id: "implicit",
+        slug: "implicit-skill",
+        name: "Implicit",
+        description: "Catalog only",
+        content: "HIDDEN BODY",
+        allowedTools: ["Read"],
+      } as Skill,
+      {
+        id: "explicit",
+        slug: "explicit-skill",
+        name: "Explicit",
+        description: "Attached",
+        content: "FULL BODY",
+        allowedTools: ["WebSearch"],
+      } as Skill,
+    ])
+    mRenderCatalog.mockReturnValueOnce("CATALOG: implicit-skill")
+    mListSkillResources.mockImplementation(async (id: string) =>
+      id === "explicit"
+        ? [
+            {
+              id: "r1",
+              skillId: id,
+              kind: "reference",
+              name: "notes.md",
+              path: "references/notes.md",
+              content: "INLINE NOTES",
+              encoding: "utf-8",
+              inline: true,
+              size: 12,
+            },
+          ]
+        : []
+    )
+
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "session-hybrid" }),
+      ephemeralSkillIds: ["explicit"],
+      skillRenderMode: "hybrid",
+    })
+
+    expect(opts.systemPrompt).toContain("FULL BODY")
+    expect(opts.systemPrompt).toContain("INLINE NOTES")
+    expect(opts.systemPrompt).toContain("CATALOG: implicit-skill")
+    expect(opts.systemPrompt).not.toContain("HIDDEN BODY")
+    expect(toolNames(opts)).toEqual(expect.arrayContaining(["load_skill", "load_skill_resource"]))
+    expect(mRecordUsage).toHaveBeenCalledWith(["explicit"])
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["Read", "WebSearch"]))
+  })
+
+  it("hybrid mode excludes explicit-only character skills from catalog and allowed tools", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["manual"] })
+    mListSkills.mockResolvedValueOnce([
+      {
+        id: "manual",
+        slug: "manual-only",
+        name: "Manual",
+        content: "manual body",
+        invocationPolicy: "explicit",
+        allowedTools: ["Bash"],
+      } as Skill,
+    ])
+
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "session-hybrid" }),
+      skillRenderMode: "hybrid",
+    })
+
+    expect(mRenderCatalog).toHaveBeenCalledWith([])
+    expect(opts.systemPrompt ?? "").not.toContain("manual body")
+    expect(opts.allowedTools ?? []).not.toContain("Bash")
+    expect(toolNames(opts)).not.toContain("load_skill")
   })
 
   it("recordSkillUsage failures are swallowed and don't propagate", async () => {
@@ -2449,6 +2621,21 @@ describe("resolveSendOptions — activeProject (workspace)", () => {
 })
 
 describe("resolveSendOptions — workspace Restricted Mode", () => {
+  it("carries only the caller's explicit trusted-root proof", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/a", isPrimary: true }]),
+      workspaceRestricted: false,
+      trustedWorkspaceRoots: ["/a", "/a"],
+    })
+    expect(opts.trustedWorkspaceRoots).toEqual(["/a"])
+
+    const withoutProof = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/a", isPrimary: true }]),
+      workspaceRestricted: false,
+    })
+    expect(withoutProof.trustedWorkspaceRoots).toBeUndefined()
+  })
+
   it("unions RESTRICTED_MODE_DENIED_TOOLS into disallowedTools when restricted", async () => {
     const opts = await resolveSendOptions({
       activeProject: makeProject([{ path: "/a", isPrimary: true }]),
@@ -3262,6 +3449,100 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     const names = (opts.pluginTools ?? []).map((t) => t.name)
     expect(names).toContain("web_search")
     expect(names).toContain("web_fetch")
+  })
+})
+
+describe("resolveSendOptions — the ultracode thinking tier", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sidecarBridge = require("@/lib/plugin/bridge/sidecar-tools-bridge")
+  const mBuildManifest = sidecarBridge.buildPluginToolsManifest as jest.Mock
+
+  const wfTool = (name: string) => ({
+    name,
+    description: `workflow tool ${name}`,
+    jsonSchema: {},
+    pluginId: "cognia-workflow-ai",
+  })
+  const unrelatedTool = {
+    name: "github_pr",
+    description: "open a PR",
+    jsonSchema: {},
+    pluginId: "cognia-github-delivery",
+  }
+
+  /** Tier as the composer persists it: the tier name plus the effort it maps to. */
+  const ultracodeSession = () =>
+    makeSession({ id: "s1", thinkingLevel: "ultracode", effort: "xhigh" })
+
+  beforeEach(() => {
+    mBuildManifest.mockReset().mockReturnValue([wfTool("wf_read_graph"), unrelatedTool])
+  })
+
+  it("still forwards xhigh effort — the tier maps down, it is not a new effort value", async () => {
+    const opts = await resolveSendOptions({
+      session: ultracodeSession(),
+      character: makeChar({ model: "claude-opus-4-8" }),
+    })
+    expect(opts.effort).toBe("xhigh")
+  })
+
+  it("exposes the workflow tool suite", async () => {
+    const opts = await resolveSendOptions({
+      session: ultracodeSession(),
+      character: makeChar(),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    expect(names).toContain("wf_read_graph")
+    expect(names).toContain("wf_run_workflow_typed")
+  })
+
+  it("adds the shared runner even when the workflow plugin contributes nothing", async () => {
+    // The plugin is disabled, so its own registration is absent; the tier's
+    // guarantee still holds through the `plugin-tool-ipc.ts` fallback executor.
+    mBuildManifest.mockReturnValue([unrelatedTool])
+    const opts = await resolveSendOptions({
+      session: ultracodeSession(),
+      character: makeChar(),
+    })
+    expect((opts.pluginTools ?? []).map((t) => t.name)).toContain("wf_run_workflow_typed")
+  })
+
+  it("never duplicates a workflow tool the manifest already carries", async () => {
+    mBuildManifest.mockReturnValue([wfTool("wf_run_workflow_typed"), wfTool("wf_read_graph")])
+    const opts = await resolveSendOptions({
+      session: ultracodeSession(),
+      character: makeChar(),
+    })
+    const runners = (opts.pluginTools ?? []).filter((t) => t.name === "wf_run_workflow_typed")
+    expect(runners).toHaveLength(1)
+  })
+
+  it("leaves the manifest alone on every other tier", async () => {
+    // `xhigh` persists the SAME effort as ultracode — only the tier differs, so
+    // this is the assertion that proves the coupling keys on the tier.
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", thinkingLevel: "xhigh", effort: "xhigh" }),
+      character: makeChar(),
+    })
+    expect((opts.pluginTools ?? []).map((t) => t.name)).not.toContain("wf_run_workflow_typed")
+  })
+
+  it("does not infer the tier from a legacy row that only carries xhigh effort", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "xhigh" }),
+      character: makeChar(),
+    })
+    expect((opts.pluginTools ?? []).map((t) => t.name)).not.toContain("wf_run_workflow_typed")
+  })
+
+  it("stays subject to the character's disablePluginTools opt-out", async () => {
+    // Picking the tier opts INTO tools; it does not override a character that
+    // has plugin tools switched off entirely.
+    const opts = await resolveSendOptions({
+      session: ultracodeSession(),
+      character: makeChar({ disablePluginTools: true }),
+    })
+    expect((opts.pluginTools ?? []).map((t) => t.name)).not.toContain("wf_run_workflow_typed")
   })
 })
 
@@ -4139,7 +4420,7 @@ describe("native Anthropic web tools (Tier C opt-in)", () => {
   })
 })
 
-describe("agent self-invocation tools (Skill / SlashCommand)", () => {
+describe("agent self-invocation tools (Skill / SlashCommand / spawn_task / session messaging)", () => {
   it("does not surface Skill / SlashCommand by default (opt-in)", async () => {
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
     expect(toolNames(opts)).not.toContain("Skill")
@@ -4160,6 +4441,42 @@ describe("agent self-invocation tools (Skill / SlashCommand)", () => {
       appSettings: { selfInvokeTools: { slashCommand: true } } as AppSettings,
     })
     expect(toolNames(opts)).toContain("SlashCommand")
+  })
+
+  it("appends spawn_task only when opted in and not on native mobile", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { spawnTask: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("spawn_task")
+
+    const mobile = isNativeMobile as jest.Mock
+    mobile.mockReturnValueOnce(true)
+    const mobileOpts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { spawnTask: true } } as AppSettings,
+    })
+    expect(toolNames(mobileOpts)).not.toContain("spawn_task")
+  })
+
+  it("appends independent-session discovery and messaging only when opted in", async () => {
+    const disabled = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      character: makeChar({ id: "c1" }),
+    })
+    expect(toolNames(disabled)).not.toContain("list_sessions")
+    expect(toolNames(disabled)).not.toContain("send_session_message")
+
+    const enabled = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { sessionMessaging: true } } as AppSettings,
+    })
+    expect(toolNames(enabled)).toEqual(
+      expect.arrayContaining(["list_sessions", "send_session_message"])
+    )
   })
 
   describe("project-scoped vector memory", () => {
@@ -4703,10 +5020,82 @@ describe("resolveSendOptions — project knowledge base (project-scoped RAG)", (
   })
 })
 
+describe("resolveSendOptions — reusable Agent Knowledge Bases", () => {
+  const deps = {
+    store: {},
+    embedding: {},
+    vectorBackend: "native",
+  } as never
+
+  it("appends bound-library context and preserves citation metadata", async () => {
+    mApplyAgentKnowledge.mockResolvedValue({
+      systemPromptSection: "## Agent knowledge bases\nanswer context",
+      retrievedChunks: [
+        {
+          chunk: {
+            id: "chunk-1",
+            knowledgeBaseId: "kb-1",
+            sourceId: "source-1",
+            content: "answer context",
+            vectorDocId: "vector-1",
+          },
+          score: 0.9,
+        },
+      ],
+      citations: [
+        {
+          scope: "agent-knowledge-base",
+          knowledgeBaseId: "kb-1",
+          knowledgeBaseName: "Product",
+          sourceId: "source-1",
+          sourceTitle: "Guide",
+          chunkId: "chunk-1",
+          charStart: 0,
+          charEnd: 14,
+          score: 0.9,
+        },
+      ],
+      failures: [],
+      degraded: false,
+      budget: { limit: 2000, used: 4, truncated: false },
+    })
+
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "agent-1",
+        systemPrompt: "base prompt",
+        knowledgeBaseIds: ["kb-1", "kb-2"],
+      }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "question",
+    })
+
+    expect(opts.systemPrompt).toContain("base prompt")
+    expect(opts.systemPrompt).toContain("## Agent knowledge bases")
+    expect(mApplyAgentKnowledge).toHaveBeenCalledWith(
+      expect.objectContaining({ knowledgeBaseIds: ["kb-1", "kb-2"], tokenBudget: 2000 })
+    )
+    expect(opts.agentKnowledgeContext?.citations[0]).toEqual(
+      expect.objectContaining({ knowledgeBaseId: "kb-1", sourceId: "source-1" })
+    )
+  })
+
+  it("skips unbound Agents", async () => {
+    await resolveSendOptions({
+      character: makeChar({ knowledgeBaseIds: [] }),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "question",
+    })
+    expect(mApplyAgentKnowledge).not.toHaveBeenCalled()
+  })
+})
+
 describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
     delete process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS
+    delete process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1
   })
 
   it("leaves SendOptions unstamped while both flags are off", async () => {
@@ -4724,19 +5113,133 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
     expect(opts.execution).toBeTruthy()
   })
 
+  it("applies Claude SDK rollout options to a direct send without a gateway ticket", async () => {
+    process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1 = "1"
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+
+    expect(opts.execution?.route.kind).toBe("direct")
+    expect(opts.claudeAgentSdk).toEqual({ version: 1 })
+  })
+
   it("stamps the frozen, secret-free execution spec when the flag is on (legacy fields intact)", async () => {
     process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
 
     const execution = opts.execution as unknown as Record<string, unknown>
     expect(execution).toBeTruthy()
-    expect(execution.specVersion).toBe(1)
+    // Tracked symbolically: the wire spec must advance with the contract, and
+    // hardcoding a literal here is what let the two drift apart silently.
+    expect(execution.specVersion).toBe(RESOLVED_SPEC_VERSION)
     expect(execution.executionKind).toBe("agent")
     expect(execution.runtimeAdapter).toBe("claude-agent-sdk")
     expect((execution.route as { kind: string }).kind).toBe("direct")
     expect(execution.executionFingerprint).toEqual(expect.any(String))
+
+    // v2 carries per-capability verdicts across the wire so the sidecar can
+    // fail closed on its own rather than trusting `effective` alone.
+    const capabilities = execution.capabilities as {
+      effective: string[]
+      support?: Record<string, { support: string }>
+    }
+    expect(capabilities.support).toBeDefined()
+    for (const id of capabilities.effective) {
+      expect(capabilities.support?.[id]?.support).toBe("native")
+    }
+
     // Legacy routing fields survive for rollback; no secret shapes in the spec.
     expect(opts.provider).toBeDefined()
     expect(JSON.stringify(execution)).not.toMatch(/sk-|api[_-]?key|bearer|token/i)
+  })
+
+  it("uses the durable caller's final run identity before fingerprinting", async () => {
+    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      executionIdentity: { runId: "execution:agent:session:message", attemptId: "recovery-2" },
+    })
+
+    expect(opts.execution?.identity).toEqual({
+      runId: "execution:agent:session:message",
+      attemptId: "recovery-2",
+    })
+  })
+})
+
+describe("resolveSendOptions — Agent profile routing and execution policy", () => {
+  it("uses execute by default and selects plan only when the caller requests it", async () => {
+    const character = makeChar({
+      model: "legacy-execute",
+      modelRouting: {
+        plan: "planner-alias",
+        execute: "executor-alias",
+        utility: "fast-alias",
+      },
+    })
+
+    const execute = await resolveSendOptions({ character })
+    const plan = await resolveSendOptions({ character, modelRole: "plan" })
+
+    expect(execute.model).toBe("executor-alias")
+    expect(plan.model).toBe("planner-alias")
+  })
+
+  it("keeps an explicit session model above the Agent semantic target", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ modelRouting: { execute: "agent-model" } }),
+      session: makeSession({ model: "session-model" }),
+    })
+
+    expect(opts.model).toBe("session-model")
+  })
+
+  it("applies session execution overrides and materializes keyring secrets only into env", async () => {
+    mockGetAgentEnvSecret.mockResolvedValue("secret-value")
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        executionPolicy: {
+          effort: "medium",
+          maxTurns: 20,
+          envBindings: [
+            { name: "SHARED", kind: "plain", value: "agent" },
+            { name: "TOKEN", kind: "secret", secretRef: "agent-1:TOKEN" },
+          ],
+        },
+      }),
+      session: makeSession({
+        executionPolicy: {
+          effort: "high",
+          maxTurns: 8,
+          envBindings: [{ name: "SHARED", kind: "plain", value: "session" }],
+        },
+      }),
+    })
+
+    expect(opts).toEqual(
+      expect.objectContaining({
+        effort: "high",
+        maxTurns: 8,
+        env: { SHARED: "session", TOKEN: "secret-value" },
+      })
+    )
+    expect(mockGetAgentEnvSecret).toHaveBeenCalledWith("agent-1:TOKEN")
+  })
+
+  it("fails before dispatch when a referenced secret is missing", async () => {
+    mockGetAgentEnvSecret.mockResolvedValue(null)
+
+    await expect(
+      resolveSendOptions({
+        character: makeChar({
+          executionPolicy: {
+            envBindings: [
+              { name: "MISSING_TOKEN", kind: "secret", secretRef: "agent-1:MISSING_TOKEN" },
+            ],
+          },
+        }),
+      })
+    ).rejects.toMatchObject({
+      code: "secret_missing",
+      variableName: "MISSING_TOKEN",
+    })
   })
 })

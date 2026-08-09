@@ -76,10 +76,15 @@ describe("OCR_PARAMETER_SCHEMAS", () => {
     expect(keys).toEqual(["format", "languages", "maxImageDimension", "pageRange"])
   })
 
-  it("paddle-ocr ships only the common parameter block (no dead model knob)", () => {
+  it("paddle-ocr exposes the supported PP-OCRv6 variants and defaults to small", () => {
     const schema = OCR_PARAMETER_SCHEMAS["paddle-ocr"]!
-    const keys = schema.parameters.map((p) => p.key).sort()
-    expect(keys).toEqual(["format", "languages", "maxImageDimension", "pageRange"])
+    const model = schema.parameters.find((p) => p.key === "model")
+    expect(model?.type).toBe("select")
+    expect(model?.defaultValue).toBe("v6-small")
+    expect(model?.validation?.options?.map((option) => option.value)).toEqual([
+      "v6-small",
+      "v6-tiny",
+    ])
   })
 
   it("ocr-space exposes the engine selector the provider reads", () => {
@@ -107,13 +112,14 @@ describe("OCR_PARAMETER_SCHEMAS", () => {
     expect(keys).toEqual(["format", "languages", "maxImageDimension", "pageRange"])
   })
 
-  it("local-http requires endpoint + dialect and offers an optional apiKey + timeout", () => {
+  it("local-http exposes endpoint, dialect, and timeout while keeping credentials out of config", () => {
     const schema = OCR_PARAMETER_SCHEMAS["local-http"]!
     const params = Object.fromEntries(schema.parameters.map((p) => [p.key, p]))
     expect(params["endpoint"]).toBeDefined()
     expect(params["dialect"]).toBeDefined()
-    expect(params["apiKey"]).toBeDefined()
+    expect(params["apiKey"]).toBeUndefined()
     expect(params["timeoutMs"]).toBeDefined()
+    expect(params["allowLan"]).toMatchObject({ type: "toggle", defaultValue: false })
     const dialect = params["dialect"]!
     expect(dialect.type).toBe("select")
     const optionValues = dialect.validation?.options?.map((o) => o.value).sort() ?? []

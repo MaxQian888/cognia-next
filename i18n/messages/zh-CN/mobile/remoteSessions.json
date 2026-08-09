@@ -13,13 +13,18 @@
   "detail": {
     "composerAria": "追问消息",
     "composerPlaceholder": "发送追问…",
+    "collapseTurn": "收起回合详情",
     "empty": "还没有消息。",
+    "expandTurn": "展开回合详情",
     "ended": "该会话已结束。",
     "endedBadge": "已结束",
     "interruptAria": "打断当前回合",
+    "loadOlder": "加载更早回合",
+    "loadingTranscript": "正在加载会话记录…",
     "notFound": "会话不存在或已不可用。",
     "observeOnly": "仅观察",
     "offlineHint": "桌面端已离线——重新连接后可继续跟随此会话。",
+    "retryTranscript": "重试加载会话记录",
     "sendAria": "发送",
     "streaming": "流式输出中",
     "title": "实时会话"

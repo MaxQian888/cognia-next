@@ -42,9 +42,9 @@ test("parseArgs defaults, overrides and rejects junk", () => {
   assert.equal(parseArgs(["--coverage", "c.json"]).coverage, "c.json")
   assert.equal(parseArgs(["--write"]).write, true)
   assert.equal(parseArgs(["--slack", "2"]).slack, 2)
-  assert.throws(() => parseArgs(["--coverage"]), /requires a path/)
+  assert.throws(() => parseArgs(["--coverage"]), /argument missing/i)
   assert.throws(() => parseArgs(["--slack", "abc"]), /requires a number/)
-  assert.throws(() => parseArgs(["--nope"]), /Unknown argument/)
+  assert.throws(() => parseArgs(["--nope"]), /unknown option/i)
 })
 
 test("proposeFloor raises a floor that has real headroom", () => {

@@ -44,8 +44,14 @@ export type IpInfoResult = { ok: true; info: IpInfo } | { ok: false; error: stri
 /** Shape of the `proxy_http_request` Tauri command output (subset). */
 interface ProxyHttpResponse {
   status: number
-  body: string
+  bodyBase64: string
   headers: Record<string, string>
+}
+
+function decodeBody(value: string): string {
+  const binary = atob(value)
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  return new TextDecoder().decode(bytes)
 }
 
 /** Coerce an unknown JSON blob into `IpInfo`, keeping only string fields. */
@@ -83,13 +89,15 @@ export async function fetchIpInfo(): Promise<IpInfoResult> {
     if (isTauri()) {
       const res = await invoke<ProxyHttpResponse>("proxy_http_request", {
         input: {
+          requestId: globalThis.crypto?.randomUUID?.() ?? `ip-info-${Date.now()}`,
           url: IP_INFO_URL,
           method: "GET",
           headers: { Accept: "application/json" },
-          timeout_secs: IP_INFO_TIMEOUT_SECS,
+          timeoutMs: IP_INFO_TIMEOUT_SECS * 1000,
+          redirect: "follow",
         },
       })
-      body = res.body
+      body = decodeBody(res.bodyBase64)
       status = res.status
     } else {
       const controller = new AbortController()

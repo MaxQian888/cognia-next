@@ -147,10 +147,21 @@ export async function probeMcpServer(
       }, timeoutMs)
     })
     try {
-      const opened = await Promise.race([
-        open(server, { signal: controller.signal, authProvider, onStderr: stderr.push }),
-        timeout,
-      ])
+      const opening = open(server, {
+        signal: controller.signal,
+        authProvider,
+        onStderr: stderr.push,
+      })
+      // Some transports cannot cancel their handshake immediately. If one wins
+      // the race only after our timeout aborted the attempt, close that late
+      // connection instead of leaking its child/session into the next retry.
+      void opening.then(
+        (late) => {
+          if (controller.signal.aborted) void late.close().catch(() => undefined)
+        },
+        () => undefined
+      )
+      const opened = await Promise.race([opening, timeout])
       return { ok: true, opened }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)

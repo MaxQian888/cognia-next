@@ -139,6 +139,21 @@ describe("paddleOcrExtract", () => {
     expect(invoker).not.toHaveBeenCalled()
   })
 
+  it("checks readiness for the same model variant it invokes", async () => {
+    const invoker = jest.fn(async () => ({ text: "ok", blocks: [] }))
+    const isReady = jest.fn(async () => true)
+    const ctx: OcrProviderContext = {
+      credentials: { secrets: {} },
+      config: { invoker, isReady, model: "v6-tiny" },
+      platform: "tauri",
+    }
+
+    await paddleOcrExtract(input, ctx)
+
+    expect(isReady).toHaveBeenCalledWith("v6-tiny")
+    expect(invoker).toHaveBeenCalledWith(expect.objectContaining({ modelVariant: "v6-tiny" }))
+  })
+
   it("wraps invoker exceptions into provider_failed", async () => {
     const invoker = jest.fn(async () => {
       throw new Error("ort binary missing")

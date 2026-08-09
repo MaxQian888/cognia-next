@@ -32,6 +32,7 @@ import {
   type CrashLogDirs,
   type CrashLogFs,
 } from "./crash-log-discovery"
+import { snapshotRenderDiagnostics } from "./render-diagnostics"
 
 export interface DoctorFacts {
   version: string
@@ -170,6 +171,7 @@ export function collectDoctorReport(deps: DoctorReportDeps): DoctorReport {
   return {
     ...facts,
     ...crashLogFacts,
+    tuiRenderer: snapshotRenderDiagnostics(deps.env),
     ...(parity ? { cogniaParity: parity } : {}),
   }
 }

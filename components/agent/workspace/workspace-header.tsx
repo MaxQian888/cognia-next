@@ -40,6 +40,7 @@ import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { formatNumber } from "./token-usage-line"
 import { TeamRunControls } from "./team-run-controls"
+import { AgentTeamAvatar } from "./agent-team-avatar"
 
 export interface WorkspaceHeaderProps {
   team: AgentTeam
@@ -96,17 +97,17 @@ export function WorkspaceHeader({
   const tokens = team.totalTokenUsage?.totalTokens ?? 0
   const animatedTokens = useCountUp(tokens, { disabled: reduce })
   const duration = team.totalDuration ?? 0
-  const initial = team.name.trim().charAt(0).toUpperCase() || "?"
+  const lead = teammates.find((teammate) => teammate.id === team.leadId)
+  const avatarSubject =
+    lead ?? ({ id: team.id, name: team.name || "Team Lead", role: "lead" } as const)
 
   return (
     <header data-testid="workspace-header">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-border/60 bg-card/60 p-4">
-        <span
-          className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/25 to-primary/5 text-lg font-semibold text-primary ring-1 ring-inset ring-primary/15"
-          aria-hidden
-        >
-          {initial}
-        </span>
+        <AgentTeamAvatar
+          subject={avatarSubject}
+          className="size-12 rounded-xl bg-gradient-to-br from-primary/25 to-primary/5 ring-1 ring-inset ring-primary/15"
+        />
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">

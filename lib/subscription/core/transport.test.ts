@@ -5,6 +5,7 @@ import {
   codexOauthRefresh,
   codexOauthRequestDeviceCode,
   codexOauthRevoke,
+  clearSubscriptionRuntime,
   deleteAccount,
   deleteProviderPreset,
   getAccount,
@@ -26,6 +27,7 @@ import {
 } from "./transport"
 import type { Account, AnthropicCredentialData } from "@/types/subscription"
 import { __resetVaultChangeTrackerForTesting } from "@/lib/subscription/sync/change-tracker"
+import { subscribeSubscriptionChanged } from "./subscription-events"
 
 jest.mock("@/lib/tauri", () => {
   return {
@@ -111,6 +113,8 @@ describe("subscription core transport", () => {
   })
 
   it("saveAccount forwards both args", async () => {
+    const changed = jest.fn()
+    const unsubscribe = subscribeSubscriptionChanged(changed)
     mockedCall.mockResolvedValueOnce(undefined)
     const account = sampleAccount()
     await saveAccount("anthropic", account)
@@ -119,6 +123,8 @@ describe("subscription core transport", () => {
       localAccountId: "local_acct_a",
       account,
     })
+    expect(changed).toHaveBeenCalledTimes(1)
+    unsubscribe()
   })
 
   it("deleteAccount forwards provider + accountId", async () => {
@@ -128,7 +134,31 @@ describe("subscription core transport", () => {
       provider: "codex",
       localAccountId: "local_acct_a",
       accountId: "id-2",
+      replacementAccountId: null,
     })
+  })
+
+  it("deleteAccount forwards the selected replacement", async () => {
+    mockedCall.mockResolvedValueOnce(undefined)
+    await deleteAccount("anthropic", "old", "replacement")
+    expect(mockedCall).toHaveBeenCalledWith("subscription_delete_account", {
+      provider: "anthropic",
+      localAccountId: "local_acct_a",
+      accountId: "old",
+      replacementAccountId: "replacement",
+    })
+  })
+
+  it("clearSubscriptionRuntime uses the explicit local-account scope", async () => {
+    const changed = jest.fn()
+    const unsubscribe = subscribeSubscriptionChanged(changed)
+    mockedCall.mockResolvedValueOnce(undefined)
+    await clearSubscriptionRuntime("local_acct_previous")
+    expect(mockedCall).toHaveBeenCalledWith("subscription_clear_runtime", {
+      localAccountId: "local_acct_previous",
+    })
+    expect(changed).not.toHaveBeenCalled()
+    unsubscribe()
   })
 
   it("renameAccount carries the label (including null to clear)", async () => {
@@ -266,6 +296,8 @@ describe("subscription core transport", () => {
   })
 
   it("anthropicOauthSavePkceResult dispatches the right command + label", async () => {
+    const changed = jest.fn()
+    const unsubscribe = subscribeSubscriptionChanged(changed)
     mockedCall.mockResolvedValueOnce(sampleAccount())
     const data = anthropicData()
     await anthropicOauthSavePkceResult(data, "My Alias")
@@ -274,6 +306,8 @@ describe("subscription core transport", () => {
       payload: data,
       label: "My Alias",
     })
+    expect(changed).not.toHaveBeenCalled()
+    unsubscribe()
   })
 
   it("anthropicOauthSavePkceResult defaults label to null", async () => {

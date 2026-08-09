@@ -8,13 +8,13 @@ description: 手机如何找到并信任桌面端 —— mDNS 订阅、LAN IP �
 <Status variant="beta" />
 
 <TLDR>
-  手机在发起任何调用之前，必须先 (a) 找到桌面端，(b) 建立信任关系。发现功能由两套独立系统组成：`lan-scanner.ts` 用于*发现未知*主机（并行 mDNS 订阅 + IP 段 probe，以 `/api/v1/whoami` 返回 `401` 作为 Cognia 服务器的证明）；而 `connection-strategy.ts` 用于*解析已知*配对设备的可达 URL，遍历一份按优先级排列的 candidate 列表（mDNS → tunnel → 缓存），并 probe `/api/v1/healthz`。信任关系通过三步配对向导建立：扫描 QR（或手动输入 6 位码）→ 兑换为设备 JWT → pin 住 TLS fingerprint → 将 `CompanionConfig` 持久化到 OS keystore。扫描所需的本地 IP 通过 WebRTC ICE 技巧（`local-ip.ts:50`）获取，因为移动端 WebView 无法直接读取网络接口。
+  手机在发起任何调用之前，必须先 (a) 找到桌面端，(b) 建立信任关系。发现功能由两套独立系统组成：`lan-scanner.ts` 用于*发现未知*主机（并行 mDNS 订阅 + IP 段 probe，以 `/api/whoami` 返回 `401` 作为 Cognia 服务器的证明）；而 `connection-strategy.ts` 用于*解析已知*配对设备的可达 URL，遍历一份按优先级排列的 candidate 列表（mDNS → tunnel → 缓存），并 probe `/healthz`。信任关系通过 canonical 配对流程建立：扫描或粘贴 `cgnp3`，校验 Host/tenant/过期时间/版本，使用 Owner invitation 或 OIDC session 注册独立的 P-256 设备与 signaling 密钥，再原子持久化公开目标和加密私钥。扫描所需的本地 IP 通过 WebRTC ICE 技巧（`local-ip.ts:50`）获取，因为移动端 WebView 无法直接读取网络接口。
 </TLDR>
 
 <StatGrid>
   <Stat label="mDNS 服务名" value="_cognia._tcp" hint="mdns-discovery.ts:42" />
   <Stat label="Probe 端口" value="27890·7890·7891·7900·8443" hint="lan-scanner.ts:119" />
-  <Stat label="Probe 目标" value="GET /api/v1/whoami → 401" hint="lan-scanner.ts:357" />
+  <Stat label="Probe 目标" value="GET /api/whoami → 401" hint="lan-scanner.ts:357" />
   <Stat label="Candidate 顺序" value="mDNS → tunnel → cache" hint="connection-strategy.ts:43" />
 </StatGrid>
 
@@ -37,7 +37,7 @@ flowchart TB
   TGT["pickProbeTargets<br/>:254 (emulator → 10.0.2.2)"]
   EXP["expandToPortTargets<br/>:290"]
   CONC["runWithConcurrency(8)<br/>probeServer :345"]
-  PROBE{"GET ip:port/api/v1/whoami<br/>== 401 ?  :357,:416"}
+  PROBE{"GET ip:port/api/whoami<br/>== 401 ?  :357,:416"}
   RANK["rankSource: paired>mdns>probe>history<br/>:309"]
   RESULT["DiscoveredServer[]"]
 
@@ -53,7 +53,7 @@ flowchart TB
   class PROBE,DROP q
 ```
 
-候选主机**仅在**返回 HTTP `401` 且携带 `{code,message}` 响应体时才被接受（`evaluateProbeResponse`，`:409-432`）——对 `/api/v1/whoami` 的未认证请求*应当*被拒绝，这恰好证明该主机是 Cognia 服务器。随后通过 `healthz` 补充 TLS fingerprint 信息。默认端口为 `27890`（`:110`）；额外端口 `[27890, 7890, 7891, 7900, 8443]`（`:119`）仅对已配对设备或模拟器 IP 尝试。
+候选主机**仅在**返回 HTTP `401` 且携带 `{code,message}` 响应体时才被接受（`evaluateProbeResponse`，`:409-432`）——对 `/api/whoami` 的未认证请求*应当*被拒绝，这恰好证明该主机是 Cognia 服务器。随后通过 `healthz` 补充 TLS fingerprint 信息。默认端口为 `27890`（`:110`）；额外端口 `[27890, 7890, 7891, 7900, 8443]`（`:119`）仅对已配对设备或模拟器 IP 尝试。
 
 ### 本地 IP 获取技巧 — `local-ip.ts:50`
 
@@ -67,7 +67,7 @@ flowchart TB
 2. **tunnel** — 若存在 cloudflared URL 则使用（`:62-68`）；
 3. **cache** — 上次成功使用的 `baseUrl`（`:71-80`）。
 
-`pickReachable(candidates, probe)`（`:90`）按序遍历，返回第一个响应 `GET /api/v1/healthz`（`healthz.ts:48`）的候选地址。
+`pickReachable(candidates, probe)`（`:90`）按序遍历，返回第一个响应 `GET /healthz`（`healthz.ts:48`）的候选地址。
 
 ## mDNS 订阅
 
@@ -82,7 +82,7 @@ flowchart TB
 **发现** — `discover-step.tsx` 运行 `scanLan`，以雷达样式展示发现的服务器（`scan-radar.tsx` + `server-card.tsx`）；点击某一结果会预填其 `baseUrl`。
 </Step>
 <Step>
-**配对** — `pair-step.tsx`。可以扫描 QR（`barcode.ts` → 解析载荷）或手动输入 6 位码。`pair-api.ts` 先生成 mobile P-256 角色 key，再向 `POST /api/v1/auth/pair`（QR）或 `/api/v1/auth/pair/redeem-code`（码）兑换，接收 `{ deviceJwt, deviceId, serverVersion, rendezvousId, roomDescriptor, fingerprint }`。私钥单独进入安全存储，不写入公开配对记录；校验逻辑位于 `pair-helpers.ts`。
+**配对** — `pair-step.tsx`。扫描或粘贴 canonical 载荷（`barcode.ts` → 严格解析）。`pair-api.ts` 读取 `GET /api/auth/config`，消费 Owner invitation 或完成 Logto popup PKCE，并把独立的设备认证与 signaling 公钥提交到 `POST /api/auth/device/register`。响应包含 `deviceId`、`tenantId`、`role`、`serverVersion`、`rendezvousId` 与 `roomDescriptor`。私钥只进入系统安全存储或 Browser Vault；注册失败不会留下目标记录或明文密钥。
 </Step>
 <Step>
 **已配对** — `paired-step.tsx` 执行只读冒烟测试（`claude_sidecar_status`），验证 WS 路径，并提供诊断面板（服务器版本、绑定地址、fingerprint 前缀、最后一次心跳）。`saveCompanionConfig(...)` 将配置写入 keystore。解除配对操作受[生物特征守卫](./capacitor-shell#biometric-guard)保护。
@@ -91,7 +91,7 @@ flowchart TB
 
 ## QR 载荷与 TLS Pinning
 
-QR 码编码了桌面端解析后的 `baseUrl`（优先级：tunnel > LAN > loopback）、5 分钟有效期的配对 JWT、服务器版本，以及 **TLS SPKI fingerprint**。手机解析后兑换 JWT，并将 fingerprint 存入 `CompanionConfig.serverFingerprint`。此后每次请求均经过 [TLS-pinned fetch](./transport-layer#tls-pinned-fetch)：手机将服务器实时证书的 SPKI 哈希与 pinned 值对比，不匹配则拒绝连接。由于桌面端跨重签名复用同一密钥，fingerprint 永远不变，手机无需重新配对。
+QR 码编码 canonical `base`、`host`、`tenant`、`exp`、`ver`、`fp` 与 `mode`；仅 `owner-invitation` 模式携带单次 invitation。客户端拒绝过期、Host 不匹配和所有旧版载荷，并将 fingerprint 存入 `CompanionConfig.serverFingerprint`。此后每次请求均经过 [TLS-pinned fetch](./transport-layer#tls-pinned-fetch)：手机将服务器实时证书的 SPKI 哈希与 pinned 值对比，不匹配则拒绝连接。由于桌面端跨重签名复用同一密钥，fingerprint 永远不变，手机无需重新配对。
 
 ## 最近连接的服务器
 

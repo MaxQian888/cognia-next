@@ -12,7 +12,7 @@ jest.mock("next-intl", () => ({
 // hand back a no-op for anything else rather than blanking the module. The spy
 // is built inside the factory — jest hoists this above any `const`, so a
 // module-scope one would be in its TDZ when the factory runs.
-jest.mock("@/lib/plugin", () => {
+jest.mock("@/lib/plugin/messaging/hooks-system", () => {
   const hooks = new Proxy({ dispatchContextMenuShow: jest.fn() } as Record<string, unknown>, {
     get: (target: Record<string, unknown>, key: string) =>
       key in target ? target[key] : () => Promise.resolve(),
@@ -47,7 +47,7 @@ jest.mock("@/components/ui/context-menu", () => {
 })
 
 import { ArtifactList, ArtifactListCompact } from "./artifact-list"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { selectActiveArtifactId, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 
 import { SessionReportView } from "./session-report-view"
 import type { SessionReport } from "@/lib/analysis/session-report"
@@ -71,6 +71,15 @@ describe("SessionReportView", () => {
     expect(screen.getByTestId("assessment-context")).toBeInTheDocument()
     expect(screen.getByTestId("signals-panel")).toHaveTextContent("signals.friction")
     expect(screen.getByTestId("signals-panel")).toHaveTextContent("signals.tests")
+  })
+
+  it("renders aggregate test snapshots as static summaries", () => {
+    render(<SessionReportView report={report()} />)
+
+    const results = within(screen.getByTestId("session-test-results"))
+    expect(results.queryByRole("button")).not.toBeInTheDocument()
+    expect(results.getByText(/tests\.snapshot/)).toBeInTheDocument()
+    expect(results.getByText(/tests\.counts/)).toBeInTheDocument()
   })
 
   it("renders the new speed / duration / reasoning / cache-hit KPIs and per-turn averages", () => {

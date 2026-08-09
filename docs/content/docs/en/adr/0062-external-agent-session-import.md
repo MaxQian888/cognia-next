@@ -51,7 +51,8 @@ interface AgentSessionSourceAdapter {
 - Claude Code, Codex, and OpenCode histories import as first-class, continuable conversations, rendered by the existing pipeline with no renderer changes.
 - Adding a new agent is one static adapter (or one plugin calling `ctx.import.registerSessionSource`) — the registry, canonical target, persistence sink, FS, and UI are shared.
 - Continuation flows through the standard `branchSeed` path and therefore the **PII redaction gate** on the first send.
-- Out of scope (future): incremental/watch re-import, a declarative `sessionImporters` manifest field + module bridge (only the imperative `ctx` twin ships now), Cursor/Cline/Gemini-CLI first-party adapters, importing sidechain/subagent trees as nested threads.
+- Incremental/watch re-import, the declarative `sessionImporters` manifest bridge, and subagent-tree reconstruction have since shipped. Remaining out of scope: Cursor/Cline/Gemini-CLI first-party adapters and preserving source-private runtime state that has no canonical Cognia representation.
+- ADR-0107 composes this session importer with settings, skills, subagents, MCP, commands, and memory behind one migration wizard; this registry remains the authoritative session implementation.
 
 ## Verification
 

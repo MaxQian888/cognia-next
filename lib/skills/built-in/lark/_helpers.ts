@@ -12,6 +12,7 @@
 
 import type { BuiltInSkillContext } from "../types"
 import { execLarkCli, type ExecLarkCliInput, type LarkCliResult } from "./exec-lark-cli"
+import { assertLarkCliCommandAvailable } from "./capabilities"
 
 // The confirm card moved to the shared tier when the platform-neutral `im.*`
 // family landed (W2) — re-exported here so every lark skill file keeps its
@@ -106,6 +107,7 @@ export function capLarkData(data: unknown): unknown {
  * tool-call.
  */
 export async function runLarkCli(input: ExecLarkCliInput): Promise<unknown> {
+  await assertLarkCliCommandAvailable(input.args)
   const result = await execLarkCli(input)
   if (result.status === "ok") return capLarkData(result.data)
   throw new Error(formatExecError(result))

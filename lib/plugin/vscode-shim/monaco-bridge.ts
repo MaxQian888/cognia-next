@@ -45,6 +45,8 @@ import {
   vscodeSemanticTokensToMonaco,
   vscodeSignatureHelpToMonaco,
   vscodeTextEditsToMonaco,
+  vscodeWorkspaceEditToMonaco,
+  type MonacoWorkspaceEdit,
   type VscodeCodeLens,
   type VscodeColorInformation,
   type VscodeCompletionResult,
@@ -60,6 +62,7 @@ import {
   type VscodeSemanticTokens,
   type VscodeSignatureHelp,
   type VscodeTextEdit,
+  type VscodeWorkspaceEdit,
 } from "./lsp-protocol-adapter"
 
 // ────────────────────────────────────────────────────────────────────────
@@ -365,7 +368,7 @@ export interface MonacoApi {
           model: MonacoTextModel,
           position: MonacoPosition,
           newName: string
-        ) => Promise<MonacoTextEdit[] | null | undefined>
+        ) => Promise<MonacoWorkspaceEdit | null | undefined>
       }
     ): Disposable
     registerDocumentSymbolProvider(
@@ -520,6 +523,7 @@ export interface Disposable {
 
 let monacoApi: MonacoApi | null = null
 let dispatchRpc: DispatchRpc | null = null
+const directDispatchRoutes = new Map<string, DispatchRpc>()
 
 const editors = new Map<string, MonacoEditor>()
 let activeEditorId: string | null = null
@@ -557,6 +561,28 @@ export function configureMonacoBridge(input: {
 }): void {
   monacoApi = input.monacoApi
   dispatchRpc = input.dispatchRpc
+}
+
+/**
+ * Register a renderer-local provider transport.
+ *
+ * VS Code extensions continue through the configured sidecar dispatcher;
+ * standalone LSP servers use this narrow route so they can reuse the exact
+ * same Monaco provider adapters without pretending to be an extension.
+ */
+export function registerProviderDispatchRoute(extensionId: string, route: DispatchRpc): () => void {
+  directDispatchRoutes.set(extensionId, route)
+  return () => {
+    if (directDispatchRoutes.get(extensionId) === route) directDispatchRoutes.delete(extensionId)
+  }
+}
+
+function dispatchProviderRpc<T>(extensionId: string, method: string, payload: unknown): Promise<T> {
+  const route = directDispatchRoutes.get(extensionId) ?? dispatchRpc
+  if (!route) {
+    return Promise.reject(new Error("monaco-bridge provider dispatcher is not configured"))
+  }
+  return route<T>(extensionId, method, payload)
 }
 
 /**
@@ -658,7 +684,7 @@ export function registerCompletionItemProvider(req: CompletionProviderRequest): 
   const disposable = monacoApi!.languages.registerCompletionItemProvider(req.selector, {
     triggerCharacters: req.triggerCharacters,
     provideCompletionItems: async (model, position) => {
-      const result = await dispatchRpc!<VscodeCompletionResult | null>(
+      const result = await dispatchProviderRpc<VscodeCompletionResult | null>(
         req.extensionId,
         "provideCompletionItems",
         { token, uri: model.uri, position: monacoPositionToVscode(position) }
@@ -674,11 +700,15 @@ export function registerHoverProvider(req: HoverProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerHoverProvider(req.selector, {
     provideHover: async (model, position) => {
-      const result = await dispatchRpc!<VscodeHover | null>(req.extensionId, "provideHover", {
-        token,
-        uri: model.uri,
-        position: monacoPositionToVscode(position),
-      })
+      const result = await dispatchProviderRpc<VscodeHover | null>(
+        req.extensionId,
+        "provideHover",
+        {
+          token,
+          uri: model.uri,
+          position: monacoPositionToVscode(position),
+        }
+      )
       return result ? vscodeHoverToMonaco(result) : null
     },
   })
@@ -690,7 +720,7 @@ export function registerDefinitionProvider(req: DefinitionProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerDefinitionProvider(req.selector, {
     provideDefinition: async (model, position) => {
-      const result = await dispatchRpc!<VscodeLocation[] | VscodeLocation | null>(
+      const result = await dispatchProviderRpc<VscodeLocation[] | VscodeLocation | null>(
         req.extensionId,
         "provideDefinition",
         { token, uri: model.uri, position: monacoPositionToVscode(position) }
@@ -708,7 +738,7 @@ export function registerReferenceProvider(req: ReferenceProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerReferenceProvider(req.selector, {
     provideReferences: async (model, position) => {
-      const result = await dispatchRpc!<VscodeLocation[] | null>(
+      const result = await dispatchProviderRpc<VscodeLocation[] | null>(
         req.extensionId,
         "provideReferences",
         { token, uri: model.uri, position: monacoPositionToVscode(position) }
@@ -724,7 +754,7 @@ export function registerDocumentFormattingProvider(req: FormattingProviderReques
   const token = nanoid()
   const disposable = monacoApi!.languages.registerDocumentFormattingEditProvider(req.selector, {
     provideDocumentFormattingEdits: async (model) => {
-      const result = await dispatchRpc!<VscodeTextEdit[] | null>(
+      const result = await dispatchProviderRpc<VscodeTextEdit[] | null>(
         req.extensionId,
         "provideDocumentFormattingEdits",
         { token, uri: model.uri }
@@ -742,7 +772,7 @@ export function registerDocumentRangeFormattingProvider(req: RangeFormattingProv
     req.selector,
     {
       provideDocumentRangeFormattingEdits: async (model, range) => {
-        const result = await dispatchRpc!<VscodeTextEdit[] | null>(
+        const result = await dispatchProviderRpc<VscodeTextEdit[] | null>(
           req.extensionId,
           "provideDocumentRangeFormattingEdits",
           { token, uri: model.uri, range: monacoRangeToVscode(range) }
@@ -759,7 +789,7 @@ export function registerCodeLensProvider(req: CodeLensProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerCodeLensProvider(req.selector, {
     provideCodeLenses: async (model) => {
-      const result = await dispatchRpc!<VscodeCodeLens[] | null>(
+      const result = await dispatchProviderRpc<VscodeCodeLens[] | null>(
         req.extensionId,
         "provideCodeLenses",
         { token, uri: model.uri }
@@ -778,7 +808,7 @@ export function registerCodeActionsProvider(req: CodeActionsProviderRequest) {
       // CodeActions ride through with their VS Code shape — Monaco accepts
       // any object with `title`/`kind`/`command`/`edit`. We only convert
       // ranges inside the action's edits if present; for now pass-through.
-      const result = await dispatchRpc!<MonacoCodeLens[] | null>(
+      const result = await dispatchProviderRpc<MonacoCodeLens[] | null>(
         req.extensionId,
         "provideCodeActions",
         { token, uri: model.uri, range: monacoRangeToVscode(range) }
@@ -794,7 +824,7 @@ export function registerRenameProvider(req: RenameProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerRenameProvider(req.selector, {
     provideRenameEdits: async (model, position, newName) => {
-      const result = await dispatchRpc!<VscodeTextEdit[] | null>(
+      const result = await dispatchProviderRpc<VscodeTextEdit[] | VscodeWorkspaceEdit | null>(
         req.extensionId,
         "provideRenameEdits",
         {
@@ -804,7 +834,10 @@ export function registerRenameProvider(req: RenameProviderRequest) {
           newName,
         }
       )
-      return result ? vscodeTextEditsToMonaco(result) : null
+      if (!result) return null
+      return Array.isArray(result)
+        ? vscodeWorkspaceEditToMonaco({ changes: { [model.uri]: result } })
+        : vscodeWorkspaceEditToMonaco(result)
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -815,7 +848,7 @@ export function registerDocumentSymbolProvider(req: DocumentSymbolProviderReques
   const token = nanoid()
   const disposable = monacoApi!.languages.registerDocumentSymbolProvider(req.selector, {
     provideDocumentSymbols: async (model) => {
-      const result = await dispatchRpc!<VscodeDocumentSymbol[] | null>(
+      const result = await dispatchProviderRpc<VscodeDocumentSymbol[] | null>(
         req.extensionId,
         "provideDocumentSymbols",
         { token, uri: model.uri }
@@ -838,7 +871,7 @@ export function registerInlineCompletionProvider(req: InlineCompletionProviderRe
   const disposable = monacoApi!.languages.registerInlineCompletionsProvider(req.selector, {
     triggerCharacters: req.triggerCharacters,
     provideInlineCompletions: async (model, position) => {
-      const result = await dispatchRpc!<VscodeInlineCompletionResult | null>(
+      const result = await dispatchProviderRpc<VscodeInlineCompletionResult | null>(
         req.extensionId,
         "provideInlineCompletionItems",
         { token, uri: model.uri, position: monacoPositionToVscode(position) }
@@ -859,7 +892,7 @@ export function registerSignatureHelpProvider(req: SignatureHelpProviderRequest)
     signatureHelpTriggerCharacters: req.triggerCharacters,
     signatureHelpRetriggerCharacters: req.retriggerCharacters,
     provideSignatureHelp: async (model, position) => {
-      const result = await dispatchRpc!<VscodeSignatureHelp | null>(
+      const result = await dispatchProviderRpc<VscodeSignatureHelp | null>(
         req.extensionId,
         "provideSignatureHelp",
         { token, uri: model.uri, position: monacoPositionToVscode(position) }
@@ -889,7 +922,10 @@ export function registerWorkspaceSymbolProvider(req: WorkspaceSymbolProviderRequ
   workspaceSymbolProviders.set(token, {
     extensionId: req.extensionId,
     invoke: (query) =>
-      dispatchRpc!<unknown[] | null>(req.extensionId, "provideWorkspaceSymbols", { token, query }),
+      dispatchProviderRpc<unknown[] | null>(req.extensionId, "provideWorkspaceSymbols", {
+        token,
+        query,
+      }),
   })
   return registerToken(token, req.extensionId, disposable)
 }
@@ -916,7 +952,7 @@ export function registerColorProvider(req: ColorProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerColorProvider(req.selector, {
     provideDocumentColors: async (model) => {
-      const result = await dispatchRpc!<VscodeColorInformation[] | null>(
+      const result = await dispatchProviderRpc<VscodeColorInformation[] | null>(
         req.extensionId,
         "provideDocumentColors",
         { token, uri: model.uri }
@@ -929,7 +965,7 @@ export function registerColorProvider(req: ColorProviderRequest) {
         range: monacoRangeToVscode(colorInfo.range),
         color: colorInfo.color,
       }
-      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+      const result = await dispatchProviderRpc<MonacoUnknownArray | null>(
         req.extensionId,
         "provideColorPresentations",
         { token, uri: model.uri, colorInfo: vscodeColorInfo }
@@ -945,7 +981,7 @@ export function registerFoldingRangeProvider(req: FoldingRangeProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerFoldingRangeProvider(req.selector, {
     provideFoldingRanges: async (model) => {
-      const result = await dispatchRpc!<VscodeFoldingRange[] | null>(
+      const result = await dispatchProviderRpc<VscodeFoldingRange[] | null>(
         req.extensionId,
         "provideFoldingRanges",
         { token, uri: model.uri }
@@ -961,7 +997,7 @@ export function registerSelectionRangeProvider(req: SelectionRangeProviderReques
   const token = nanoid()
   const disposable = monacoApi!.languages.registerSelectionRangeProvider(req.selector, {
     provideSelectionRanges: async (model, positions) => {
-      const result = await dispatchRpc!<VscodeSelectionRange[][] | null>(
+      const result = await dispatchProviderRpc<VscodeSelectionRange[][] | null>(
         req.extensionId,
         "provideSelectionRanges",
         {
@@ -981,7 +1017,7 @@ export function registerDocumentLinkProvider(req: DocumentLinkProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerLinkProvider(req.selector, {
     provideLinks: async (model) => {
-      const result = await dispatchRpc!<{ links: VscodeDocumentLink[] } | null>(
+      const result = await dispatchProviderRpc<{ links: VscodeDocumentLink[] } | null>(
         req.extensionId,
         "provideDocumentLinks",
         { token, uri: model.uri }
@@ -998,7 +1034,7 @@ export function registerOnTypeFormattingProvider(req: OnTypeFormattingProviderRe
   const disposable = monacoApi!.languages.registerOnTypeFormattingEditProvider(req.selector, {
     autoFormatTriggerCharacters: [req.firstTriggerCharacter, ...(req.moreTriggerCharacter ?? [])],
     provideOnTypeFormattingEdits: async (model, position, ch) => {
-      const result = await dispatchRpc!<VscodeTextEdit[] | null>(
+      const result = await dispatchProviderRpc<VscodeTextEdit[] | null>(
         req.extensionId,
         "provideOnTypeFormattingEdits",
         { token, uri: model.uri, position: monacoPositionToVscode(position), ch }
@@ -1015,7 +1051,7 @@ export function registerDocumentSemanticTokensProvider(req: SemanticTokensProvid
   const disposable = monacoApi!.languages.registerDocumentSemanticTokensProvider(req.selector, {
     getLegend: () => req.legend,
     provideDocumentSemanticTokens: async (model) => {
-      const result = await dispatchRpc!<VscodeSemanticTokens | null>(
+      const result = await dispatchProviderRpc<VscodeSemanticTokens | null>(
         req.extensionId,
         "provideDocumentSemanticTokens",
         { token, uri: model.uri }
@@ -1037,7 +1073,7 @@ export function registerDocumentRangeSemanticTokensProvider(req: SemanticTokensP
     {
       getLegend: () => req.legend,
       provideDocumentRangeSemanticTokens: async (model, range) => {
-        const result = await dispatchRpc!<VscodeSemanticTokens | null>(
+        const result = await dispatchProviderRpc<VscodeSemanticTokens | null>(
           req.extensionId,
           "provideDocumentRangeSemanticTokens",
           { token, uri: model.uri, range: monacoRangeToVscode(range) }
@@ -1054,7 +1090,7 @@ export function registerInlayHintsProvider(req: InlayHintsProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerInlayHintsProvider(req.selector, {
     provideInlayHints: async (model, range) => {
-      const result = await dispatchRpc!<{ hints: VscodeInlayHint[] } | null>(
+      const result = await dispatchProviderRpc<{ hints: VscodeInlayHint[] } | null>(
         req.extensionId,
         "provideInlayHints",
         { token, uri: model.uri, range: monacoRangeToVscode(range) }
@@ -1070,7 +1106,7 @@ export function registerCallHierarchyProvider(req: CallHierarchyProviderRequest)
   const token = nanoid()
   const disposable = monacoApi!.languages.registerCallHierarchyProvider(req.selector, {
     prepareCallHierarchy: async (model, position) => {
-      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+      const result = await dispatchProviderRpc<MonacoUnknownArray | null>(
         req.extensionId,
         "prepareCallHierarchy",
         { token, uri: model.uri, position: monacoPositionToVscode(position) }
@@ -1078,7 +1114,7 @@ export function registerCallHierarchyProvider(req: CallHierarchyProviderRequest)
       return result ?? null
     },
     provideIncomingCalls: async (item) => {
-      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+      const result = await dispatchProviderRpc<MonacoUnknownArray | null>(
         req.extensionId,
         "provideIncomingCalls",
         { token, item }
@@ -1086,7 +1122,7 @@ export function registerCallHierarchyProvider(req: CallHierarchyProviderRequest)
       return result ?? null
     },
     provideOutgoingCalls: async (item) => {
-      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+      const result = await dispatchProviderRpc<MonacoUnknownArray | null>(
         req.extensionId,
         "provideOutgoingCalls",
         { token, item }
@@ -1102,7 +1138,7 @@ export function registerTypeHierarchyProvider(req: TypeHierarchyProviderRequest)
   const token = nanoid()
   const disposable = monacoApi!.languages.registerTypeHierarchyProvider(req.selector, {
     prepareTypeHierarchy: async (model, position) => {
-      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+      const result = await dispatchProviderRpc<MonacoUnknownArray | null>(
         req.extensionId,
         "prepareTypeHierarchy",
         { token, uri: model.uri, position: monacoPositionToVscode(position) }
@@ -1110,7 +1146,7 @@ export function registerTypeHierarchyProvider(req: TypeHierarchyProviderRequest)
       return result ?? null
     },
     provideSupertypes: async (item) => {
-      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+      const result = await dispatchProviderRpc<MonacoUnknownArray | null>(
         req.extensionId,
         "provideSupertypes",
         { token, item }
@@ -1118,7 +1154,7 @@ export function registerTypeHierarchyProvider(req: TypeHierarchyProviderRequest)
       return result ?? null
     },
     provideSubtypes: async (item) => {
-      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+      const result = await dispatchProviderRpc<MonacoUnknownArray | null>(
         req.extensionId,
         "provideSubtypes",
         { token, item }
@@ -1134,7 +1170,7 @@ export function registerLinkedEditingRangeProvider(req: LinkedEditingRangeProvid
   const token = nanoid()
   const disposable = monacoApi!.languages.registerLinkedEditingRangeProvider(req.selector, {
     provideLinkedEditingRanges: async (model, position) => {
-      const result = await dispatchRpc!<{ ranges: AdapterVscodeRange[] } | null>(
+      const result = await dispatchProviderRpc<{ ranges: AdapterVscodeRange[] } | null>(
         req.extensionId,
         "provideLinkedEditingRanges",
         { token, uri: model.uri, position: monacoPositionToVscode(position) }

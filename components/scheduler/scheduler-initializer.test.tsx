@@ -9,6 +9,10 @@ const stopSchedulerSystem = jest.fn()
 jest.mock("@/lib/scheduler", () => ({
   stopSchedulerSystem: () => stopSchedulerSystem(),
 }))
+const reconcileAgentTaskRuntime = jest.fn(async () => ({ interrupted: [], settled: [] }))
+jest.mock("@/lib/agent-tasks/runtime", () => ({
+  reconcileAgentTaskRuntime: () => reconcileAgentTaskRuntime(),
+}))
 
 const logInfo = jest.fn()
 const logError = jest.fn()
@@ -66,6 +70,7 @@ beforeEach(() => {
     }),
   }
   stopSchedulerSystem.mockClear()
+  reconcileAgentTaskRuntime.mockClear()
   logInfo.mockClear()
   logError.mockClear()
   installBridgeMock.mockClear()
@@ -81,6 +86,7 @@ describe("SchedulerInitializer", () => {
     })
     expect(storeState.initialize).toHaveBeenCalledTimes(1)
     expect(storeState.setSchedulerStatus).toHaveBeenCalledWith("running")
+    expect(reconcileAgentTaskRuntime).toHaveBeenCalled()
     expect(logInfo).toHaveBeenCalled()
   })
 

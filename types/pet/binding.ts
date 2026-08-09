@@ -3,6 +3,7 @@
 // persona carry its own pet look without changing the global identity.
 
 import type { PetBodyType, PetEyes, PetHat, PetPalette, PetSpecies } from "./bones"
+import type { PetSkinSelection } from "./skin"
 
 export interface PetCharacterBinding {
   /** Primary key — the Character id this binding decorates. */
@@ -18,6 +19,8 @@ export interface PetCharacterBinding {
    * this over the global `PetSettings.activeLive2dModelId`.
    */
   live2dModelId?: string
+  /** Typed appearance override. Absent means inherit global appearance. */
+  skin?: PetSkinSelection
   /** ISO 8601. */
   updatedAt: string
 }

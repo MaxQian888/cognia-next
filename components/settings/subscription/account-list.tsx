@@ -3,9 +3,10 @@
 // Shared multi-account list with one-click switch + rename + delete. Reused
 // by the Claude / Codex / OpenCode provider tabs.
 
-import { useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2Icon, MoreVerticalIcon, RadioIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -20,6 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,9 +31,15 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 import { useAccounts } from "@/lib/subscription/core/hooks"
+import {
+  inspectProviderAccountReferences,
+  setProviderDefaultAccount,
+  type ProviderAccountReferences,
+} from "@/lib/subscription/core/account-lifecycle"
 import { accountExpiryState } from "@/lib/subscription/core/account-expiry"
 import { useSubscriptionNow } from "@/lib/subscription/core/now-ticker"
-import type { AccountSummary, ProviderId } from "@/types/subscription"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import type { Account, AccountSummary, ProviderId } from "@/types/subscription"
 
 import { AccountUsageChips, useAccountUsageIndex } from "./account-usage-chips"
 import { AccountPresetSelector, providerSupportsPresets } from "./account-preset-selector"
@@ -44,11 +52,27 @@ interface AccountListProps {
    * account" (e.g. "Adopt discovered" for OpenCode).
    */
   secondaryAction?: React.ReactNode
+  onUpdate?: (account: Account) => void
 }
 
-export function AccountList({ provider, onAdd, secondaryAction }: AccountListProps) {
+export function AccountList({ provider, onAdd, secondaryAction, onUpdate }: AccountListProps) {
   const t = useTranslations("subscription.common.accountList")
-  const { accounts, activeAccountId, loading, setActive, rename, remove } = useAccounts(provider)
+  const {
+    accounts,
+    activeAccountId,
+    loading,
+    error,
+    pendingAccountId,
+    reload,
+    setActive,
+    rename,
+    remove,
+    fetchFull,
+  } = useAccounts(provider)
+  const settings = useSettingsStore((state) => state.settings)
+  const defaultAccountId =
+    settings?.defaultAccountIds?.[provider] ??
+    (settings?.defaultProvider === provider ? settings.defaultAccountId : undefined)
   // Queried once for the whole list — see `useAccountUsageIndex`.
   const usageIndex = useAccountUsageIndex()
   // Shared ticker, so the expiry read-out doesn't go stale while the pane is open.
@@ -56,6 +80,15 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
 
   const [renameTarget, setRenameTarget] = useState<AccountSummary | null>(null)
   const [removeTarget, setRemoveTarget] = useState<AccountSummary | null>(null)
+
+  const reportFailure = useCallback(
+    (cause: unknown) => {
+      toast.error(
+        t("actionFailed", { error: cause instanceof Error ? cause.message : String(cause) })
+      )
+    },
+    [t]
+  )
 
   return (
     <Card>
@@ -71,6 +104,15 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
             )}
           </div>
         </div>
+
+        {error && (
+          <div className="flex items-center justify-between gap-2 text-xs text-destructive">
+            <span>{error}</span>
+            <Button size="sm" variant="outline" onClick={() => void reload().catch(reportFailure)}>
+              {t("retry")}
+            </Button>
+          </div>
+        )}
 
         {loading ? (
           <p className="text-xs text-muted-foreground">
@@ -93,7 +135,11 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                       ? "border-primary bg-primary/15 text-primary"
                       : "border-muted-foreground/40 text-muted-foreground"
                   }`}
-                  onClick={() => void setActive(account.id)}
+                  onClick={() =>
+                    void setActive(account.id)
+                      .then(() => toast.success(t("activated")))
+                      .catch(reportFailure)
+                  }
                   disabled={account.id === activeAccountId}
                 >
                   <RadioIcon className="size-3" />
@@ -116,6 +162,11 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                     {t("active")}
                   </Badge>
                 )}
+                {account.id === defaultAccountId && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    {t("default")}
+                  </Badge>
+                )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="size-7">
@@ -123,6 +174,31 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {onUpdate && (
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          void fetchFull(account.id)
+                            .then((full) => {
+                              if (!full) throw new Error(t("accountMissing"))
+                              onUpdate(full)
+                            })
+                            .catch(reportFailure)
+                        }}
+                      >
+                        {t("updateCredentials")}
+                      </DropdownMenuItem>
+                    )}
+                    {account.id !== defaultAccountId && (
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          void setProviderDefaultAccount(provider, account.id)
+                            .then(() => toast.success(t("defaultSet")))
+                            .catch(reportFailure)
+                        }
+                      >
+                        {t("setDefault")}
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onSelect={() => setRenameTarget(account)} disabled={loading}>
                       {t("rename")}
                     </DropdownMenuItem>
@@ -130,6 +206,7 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                     <DropdownMenuItem
                       onSelect={() => setRemoveTarget(account)}
                       className="text-destructive focus:text-destructive"
+                      disabled={pendingAccountId === account.id}
                     >
                       {account.variant === "opencode-discovered" ? t("unlink") : t("remove")}
                     </DropdownMenuItem>
@@ -146,18 +223,30 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
           account={renameTarget}
           onClose={() => setRenameTarget(null)}
           onSubmit={async (label) => {
-            await rename(renameTarget.id, label)
-            setRenameTarget(null)
+            try {
+              await rename(renameTarget.id, label)
+              toast.success(t("renamed"))
+              setRenameTarget(null)
+            } catch (cause) {
+              reportFailure(cause)
+            }
           }}
         />
       )}
       {removeTarget && (
         <RemoveDialog
+          provider={provider}
           account={removeTarget}
+          accounts={accounts}
           onClose={() => setRemoveTarget(null)}
-          onConfirm={async () => {
-            await remove(removeTarget.id)
-            setRemoveTarget(null)
+          onConfirm={async (replacementAccountId) => {
+            try {
+              await remove(removeTarget.id, replacementAccountId)
+              toast.success(t("removed"))
+              setRemoveTarget(null)
+            } catch (cause) {
+              reportFailure(cause)
+            }
           }}
         />
       )}
@@ -248,16 +337,63 @@ function RenameDialog({
 }
 
 function RemoveDialog({
+  provider,
   account,
+  accounts,
   onClose,
   onConfirm,
 }: {
+  provider: ProviderId
   account: AccountSummary
+  accounts: AccountSummary[]
   onClose: () => void
-  onConfirm: () => Promise<void>
+  onConfirm: (replacementAccountId: string | null) => Promise<void>
 }) {
   const t = useTranslations("subscription.common.accountList")
   const [busy, setBusy] = useState(false)
+  const [loadingReferences, setLoadingReferences] = useState(true)
+  const [referenceError, setReferenceError] = useState<string | null>(null)
+  const [references, setReferences] = useState<ProviderAccountReferences | null>(null)
+  const [replacementAccountId, setReplacementAccountId] = useState("")
+  const remainingAccounts = useMemo(
+    () => accounts.filter((candidate) => candidate.id !== account.id),
+    [account.id, accounts]
+  )
+  const hasReferences =
+    !!references &&
+    (references.sessions.length > 0 ||
+      references.characters.length > 0 ||
+      references.isDefault ||
+      references.isActive)
+  const requiresReplacement = remainingAccounts.length > 0 && hasReferences
+
+  const loadReferences = useCallback(async () => {
+    setLoadingReferences(true)
+    setReferenceError(null)
+    try {
+      const next = await inspectProviderAccountReferences(provider, account.id)
+      setReferences(next)
+      const referenced =
+        next.sessions.length > 0 || next.characters.length > 0 || next.isDefault || next.isActive
+      if (remainingAccounts.length > 0 && referenced) {
+        setReplacementAccountId(remainingAccounts[0].id)
+      }
+    } catch (cause) {
+      setReferenceError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setLoadingReferences(false)
+    }
+  }, [account.id, provider, remainingAccounts])
+
+  useEffect(() => {
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) void loadReferences()
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [loadReferences])
   // A "discovered" OpenCode row is only a pointer to an external auth.json —
   // removing it unlinks the pointer and never touches that file. Say so.
   const isDiscovered = account.variant === "opencode-discovered"
@@ -273,6 +409,67 @@ function RemoveDialog({
         <p className="text-sm text-muted-foreground">
           {t(isDiscovered ? "unlinkDialogBody" : "removeDialogBody")}
         </p>
+        {loadingReferences && (
+          <p className="text-xs text-muted-foreground">
+            <Loader2Icon className="mr-2 inline size-3 animate-spin" />
+            {t("checkingReferences")}
+          </p>
+        )}
+        {referenceError && (
+          <div className="space-y-2 text-xs text-destructive">
+            <p>{referenceError}</p>
+            <Button size="sm" variant="outline" onClick={() => void loadReferences()}>
+              {t("retry")}
+            </Button>
+          </div>
+        )}
+        {references && hasReferences && (
+          <div className="space-y-2 rounded-md border p-3 text-xs">
+            <p>
+              {t("referenceSummary", {
+                sessions: references.sessions.length,
+                characters: references.characters.length,
+              })}
+            </p>
+            {references.isActive && <p>{t("activeReference")}</p>}
+            {references.isDefault && <p>{t("defaultReference")}</p>}
+            {[
+              ...references.sessions.map((item) => item.title),
+              ...references.characters.map((item) => item.name),
+            ].filter(Boolean).length > 0 && (
+              <p className="text-muted-foreground">
+                {t("referenceNames", {
+                  names: [
+                    ...references.sessions.map((item) => item.title),
+                    ...references.characters.map((item) => item.name),
+                  ]
+                    .filter(Boolean)
+                    .join(", "),
+                })}
+              </p>
+            )}
+            {requiresReplacement ? (
+              <div className="space-y-1">
+                <Label htmlFor="account-replacement">{t("replacementLabel")}</Label>
+                <NativeSelect
+                  id="account-replacement"
+                  aria-label={t("replacementLabel")}
+                  className="w-full"
+                  value={replacementAccountId}
+                  onChange={(event) => setReplacementAccountId(event.target.value)}
+                >
+                  {remainingAccounts.map((candidate) => (
+                    <NativeSelectOption key={candidate.id} value={candidate.id}>
+                      {candidate.label || candidate.email || candidate.id.slice(0, 8)}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </div>
+            ) : remainingAccounts.length === 0 ? (
+              <p className="text-muted-foreground">{t("finalAccountReferencesCleared")}</p>
+            ) : null}
+          </div>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={busy}>
             {t("cancel")}
@@ -282,12 +479,17 @@ function RemoveDialog({
             onClick={async () => {
               setBusy(true)
               try {
-                await onConfirm()
+                await onConfirm(requiresReplacement ? replacementAccountId : null)
               } finally {
                 setBusy(false)
               }
             }}
-            disabled={busy}
+            disabled={
+              busy ||
+              loadingReferences ||
+              !!referenceError ||
+              (requiresReplacement && !replacementAccountId)
+            }
           >
             {busy && <Loader2Icon className="mr-2 size-4 animate-spin" />}
             {t(isDiscovered ? "unlinkConfirm" : "removeConfirm")}

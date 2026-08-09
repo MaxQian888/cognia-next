@@ -1,5 +1,13 @@
 mod a2ui_bridge;
 mod account_auth;
+mod agent_session_store;
+
+/// Configure the shared Claude Agent SDK session mirror before a host starts
+/// its sidecar. Desktop setup and `cognia-server` deliberately call the same
+/// narrow entry point so `sessionStore.*` host RPCs have identical storage.
+pub fn configure_agent_session_store_path(path: std::path::PathBuf) {
+    agent_session_store::configure_path(path);
+}
 mod agents;
 // ADR-0067 Tier B prep — extracted to `crates/cognia-secrets`; re-aliased so
 // `crate::api_key::ApiKeyState` (claude, subscription, companion_api, headless)
@@ -19,6 +27,7 @@ mod claude;
 mod cli_bridge;
 mod code_adoption;
 mod codeserver;
+mod codex_app_dispatch;
 // ADR-0067 Phase 6 — extracted to cognia-core; re-aliased so `crate::command_error`
 // (claude, logging, plugin_api/vscode, top-level) resolves unchanged.
 pub use cognia_core::command_error;
@@ -80,19 +89,19 @@ mod plugins;
 // (external agents, chat sidecar, ACP + PTY terminals, MCP server) for the
 // performance panel's "Managed Processes" tab and the graceful teardown arm.
 mod process_registry;
+mod project_environment;
 /// ADR-0090 Phase 1 — headless Provider Profile Store (SQLite mirror of the
 /// renderer's Dexie v121 tables).
 pub mod provider_profiles;
 mod proxy_config;
+pub use cognia_net::proxy_config::{
+    apply_current as apply_current_proxy_config, clear_inherited_proxy_environment,
+};
 mod recorder_window;
 /// ADR-0102 §4 — diagnostics-first safe mode. Owns `RecoveryStateV1`, its
 /// atomic persistence and the typed IPC the renderer's boot gate reads.
 pub mod recovery;
-// ADR-0067 follow-up — extracted to `crates/cognia-remote-control`;
-// re-aliased so `crate::remote_control::…` (gateway, generate_handler!)
-// resolves unchanged.
 pub use cognia_automation::sandbox;
-pub use cognia_remote_control as remote_control;
 // ADR-0067 Phase 6 — scheduler/workflow/timing extracted to the
 // cognia-scheduling cluster; re-aliased so all three module paths resolve.
 pub use cognia_scheduling::scheduler;
@@ -252,6 +261,9 @@ impl cognia_vector::CredentialStore for KeyringVectorCredentialStore {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(desktop)]
+    proxy_config::install_uninitialized_proxy_environment();
+
     // ADR-0067 Phase 4 — install the vector credential store before any command
     // (or the managed VectorRegistry) can touch provider credentials.
     vector::install_credential_store(Box::new(KeyringVectorCredentialStore));
@@ -400,6 +412,7 @@ pub fn run() {
         // setup() once the main window exists.
         .manage(webview_watchdog::WebviewWatchdog::new())
         .manage(browser::embedded::EmbeddedBrowserLease::default())
+        .manage(browser::cdp::NativeCdpGrants::default())
         // Arm the boot-time force-show safety net only after the initial main
         // document has finished loading. In dev, Next.js compiles `/` on its
         // first request and can legitimately take longer than the 8s grace;
@@ -452,7 +465,6 @@ pub fn run() {
         .manage(connectors::commands::ConnectorsServer(std::sync::Arc::new(
             tokio::sync::Mutex::new(None),
         )))
-        .manage(remote_control::RemoteControlState::new())
         .manage(gateway::GatewayState::new())
         .manage(mcp_server::McpServerState::new())
         .manage(companion_api::CompanionServerState::with_data_dir(
@@ -500,6 +512,26 @@ pub fn run() {
             // raw read/write/ensure_dir commands). Pure in-memory inserts — the
             // renderer extends it with the active workspace roots once it loads.
             files::seed_default_allowed_roots();
+
+            // Hand the WASM plugin host its Tauri-backed surfaces (ADR-0013,
+            // api-version 0.2). Clipboard and notifications are served
+            // in-process; AI and workflow go through the renderer bridge this
+            // also creates. Headless hosts (`cognia-server`) never run this, so
+            // their `WasmPluginState::services` stays `None` and every
+            // capability needing a backend answers HOST_UNAVAILABLE while
+            // logger / secrets / process keep working.
+            {
+                use tauri::Manager as _;
+                let wasm_state = app.state::<plugin_api::wasm::WasmPluginState>();
+                plugin_api::wasm::WasmPluginHost::install_host_services(
+                    &wasm_state,
+                    std::sync::Arc::new(
+                        plugin_api::wasm::services::tauri::TauriWasmHostServices::new(
+                            app.handle().clone(),
+                        ),
+                    ),
+                );
+            }
             let _ = app;
             Ok(())
         })
@@ -590,11 +622,11 @@ pub fn run() {
             claude::commands::claude_protocol_adapter_message,
             claude::commands::claude_close_session,
             claude::commands::claude_session_control,
+            claude::commands::agent_session_api,
             claude::commands::claude_feature_call,
             claude::commands::claude_feature_abort,
             claude::commands::claude_sidecar_status,
             claude::commands::sidecar_restart_count,
-            claude::mcp_test::test_mcp_server,
             // Hooks runtime bridge — external agents (claude-code/codex/opencode)
             // reach the settings.json hook runtime via run_agent_hook; the trust
             // gate for project/local-scope hooks is seeded by set_trusted_workspaces.
@@ -602,6 +634,13 @@ pub fn run() {
             hooks::commands::set_trusted_workspaces,
             agents::commands::read_agent_config,
             agents::commands::write_agent_config,
+            // Where Claude Code / Codex / OpenCode keep their trees on this
+            // host ($CLAUDE_CONFIG_DIR / $CODEX_HOME / $XDG_*). Every importer
+            // takes its scan roots from this one answer — see lib/agent-roots/.
+            agents::commands::agent_vendor_roots,
+            // Project-scoped `.mcp.json` (read-only — it's usually committed).
+            agents::commands::read_project_mcp_config,
+            codex_app_dispatch::codex_app_dispatch_conversation,
             // ADR-0062 — external-agent session-history import. Reads OpenCode's
             // local SQLite store read-only for the session importer.
             session_import::opencode_sessions_read,
@@ -620,6 +659,7 @@ pub fn run() {
             // ADR-0025 — unified subscription module. Provider-agnostic CRUD,
             // active-pointer management, and provider preset persistence.
             subscription::commands::subscription_init,
+            subscription::commands::subscription_clear_runtime,
             subscription::commands::subscription_list_accounts,
             subscription::commands::subscription_get_account,
             subscription::commands::subscription_save_account,
@@ -641,7 +681,6 @@ pub fn run() {
             subscription::volcengine::subscription_volcengine_usage,
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,
-            subscription::commands::claude_proxy_env_for_session,
             // ADR-0028 — sandbox dispatch + health probe. Phase 4.5
             // plugin consumes sandbox_exec via plugin_tool_exec → renderer
             // → Tauri.
@@ -657,7 +696,7 @@ pub fn run() {
             subscription::codex::commands::codex_oauth_revoke,
             subscription::opencode::commands::opencode_oauth_discover,
             subscription::opencode::commands::opencode_save_zen_key,
-            subscription::opencode::commands::opencode_adopt_discovered,
+            subscription::commands::opencode_adopt_discovered,
             claude_set_api_key,
             claude_set_provider_env,
             claude_set_oauth_bearer,
@@ -678,6 +717,7 @@ pub fn run() {
             pet_window::pet_window_set_ignore_cursor_events,
             pet_window::pet_window_set_position,
             pet_window::pet_window_get_position,
+            pet_window::pet_window_get_cursor_position,
             pet_window::pet_window_get_work_area,
             pet_window::pet_window_get_surfaces,
             pet_window::is_pet_window_open,
@@ -790,6 +830,7 @@ pub fn run() {
             task_workspace::task_workspace_record_tool_event,
             task_workspace::task_workspace_get_resource,
             task_workspace::task_workspace_get_patch_set,
+            task_workspace::task_workspace_restore_snapshot,
             task_workspace::task_resource_read_diff,
             task_workspace::task_resource_read_text,
             task_workspace::task_resource_download_open,
@@ -837,6 +878,7 @@ pub fn run() {
             settings::write_claude_project_settings,
             settings::write_claude_local_settings,
             shell::shell_exec,
+            project_environment::project_environment_execute,
             terminal_host_bridge::terminal_spawn,
             terminal_host_bridge::terminal_reattach,
             terminal_host_bridge::terminal_write,
@@ -870,6 +912,9 @@ pub fn run() {
             keyring_secrets::keyring_secret_get,
             keyring_secrets::keyring_secret_set,
             keyring_secrets::keyring_secret_clear,
+            keyring_secrets::secret_store_get,
+            keyring_secrets::secret_store_set,
+            keyring_secrets::secret_store_delete,
             turn_provision::turn_provision,
             telemetry::telemetry_secret_set,
             telemetry::telemetry_secret_has,
@@ -887,6 +932,7 @@ pub fn run() {
             cli_bridge::download::download_cognia_cli,
             tts::edge::tts_edge_synthesize,
             tts::proxy::tts_proxy_fetch,
+            tts::proxy::tts_proxy_cancel,
             tts::realtime::tts_realtime_synthesize,
             tts::realtime::tts_realtime_cancel,
             tts::live::voice_live_client_secret,
@@ -1007,7 +1053,7 @@ pub fn run() {
             companion_api::commands::companion_server_start,
             companion_api::commands::companion_server_stop,
             companion_api::commands::companion_server_status,
-            companion_api::commands::companion_issue_pair_jwt,
+            companion_api::commands::companion_create_owner_invitation,
             companion_api::commands::companion_seed_deny_list,
             companion_api::commands::companion_revoke_device,
             companion_api::commands::companion_unrevoke_device,
@@ -1021,6 +1067,7 @@ pub fn run() {
             companion_api::commands::companion_seed_locked_computer_use,
             companion_api::commands::companion_sync_pull_response,
             companion_api::commands::companion_message_response,
+            companion_api::commands::companion_media_response,
             companion_api::commands::companion_desktop_write_response,
             companion_api::commands::companion_get_tls_fingerprint,
             companion_api::commands::companion_tls_paths,
@@ -1046,12 +1093,13 @@ pub fn run() {
             companion_api::commands::companion_push_clear_apns,
             companion_api::commands::companion_push_status,
             companion_api::commands::companion_test_local_reachability,
-            proxy_config::commands::proxy_set,
+            proxy_config::commands::proxy_apply,
             proxy_config::commands::proxy_get_active,
             proxy_config::commands::proxy_detect,
             proxy_config::commands::proxy_identify_clash,
             proxy_config::commands::proxy_test,
             proxy_config::commands::proxy_http_request,
+            proxy_config::commands::proxy_http_cancel,
             ollama::ollama_pull_model_stream,
             connectors::commands::connectors_register_adapter,
             connectors::commands::connectors_unregister_adapter,
@@ -1088,15 +1136,6 @@ pub fn run() {
             connectors::commands::connectors_lark_upload_file,
             connectors::commands::connectors_lark_upload_image,
             connectors::commands::connectors_onebot_probe,
-            remote_control::commands::remote_control_get_status,
-            remote_control::commands::remote_control_start,
-            remote_control::commands::remote_control_stop,
-            remote_control::commands::remote_control_get_token,
-            remote_control::commands::remote_control_rotate_token,
-            remote_control::commands::remote_control_update_config,
-            remote_control::commands::remote_control_set_signing_secret,
-            remote_control::commands::remote_control_get_signing_secret,
-            remote_control::commands::remote_control_query_response,
             gateway::commands::gateway_get_status,
             gateway::commands::gateway_get_config,
             gateway::commands::gateway_update_config,
@@ -1128,6 +1167,9 @@ pub fn run() {
             workflow::commands::integration_ingress_poll,
             workflow::commands::integration_ingress_ack,
             workflow::commands::integration_ingress_nack,
+            workflow::commands::integration_ingress_deadletters,
+            workflow::commands::integration_ingress_deadletter,
+            workflow::commands::integration_ingress_requeue,
             plugin_api::scan::plugin_scan_directory,
             plugin_api::cli_exec::plugin_cli_exec,
             plugin_api::python::commands::plugin_python_initialize,
@@ -1189,6 +1231,7 @@ pub fn run() {
             plugin_api::signature::plugin_create_signature,
             plugin_api::signature::plugin_verify_signature,
             plugin_api::signature::plugin_verify_detached_signature,
+            plugin_api::signature::plugin_verify_pack_signature,
             plugin_api::signature::plugin_public_key_fingerprint,
             plugin_api::wasm::commands::plugin_wasm_load,
             plugin_api::wasm::commands::plugin_wasm_activate,
@@ -1196,6 +1239,7 @@ pub fn run() {
             plugin_api::wasm::commands::plugin_wasm_call,
             plugin_api::wasm::commands::plugin_wasm_unload,
             plugin_api::wasm::commands::plugin_wasm_list,
+            plugin_api::wasm::commands::plugin_wasm_renderer_response,
             plugin_api::wasm::installer::plugin_wasm_install_from_url,
             plugin_api::wasm::installer::plugin_wasm_install_from_git,
             plugin_api::github::installer::plugin_install_from_github,
@@ -1370,6 +1414,9 @@ pub fn run() {
             browser::embedded::browser_embed_has_text,
             browser::embedded::browser_embed_has_selector,
             browser::embedded::browser_embed_evaluate,
+            browser::cdp::browser_cdp_execute,
+            browser::cdp::browser_cdp_grant,
+            browser::cdp::browser_cdp_revoke,
             browser::embedded::browser_embed_network_state,
             // Action recording (ADR-0072).
             browser::embedded::browser_embed_ref_for,
@@ -1452,8 +1499,12 @@ pub fn run() {
             git::commands::git_watch_stop,
             ocr::native::ocr_extract_native,
             ocr::native::ocr_list_native_backends,
+            ocr::native::ocr_list_available_backends,
             ocr::native::ocr_model_status,
             ocr::native::ocr_download_model,
+            ocr::native::ocr_cancel_model_download,
+            ocr::native::ocr_http_fetch,
+            ocr::native::ocr_http_cancel,
             ocr::msix::ocr_msix_status,
             // Native document parsing (liteparse / PDFium) — feature-gated;
             // the default build answers `unsupported` and TS falls back.
@@ -1880,24 +1931,6 @@ pub fn run() {
                 });
             }
 
-            // Remote-control inbound listener auto-start. Per ADR-0005, only
-            // starts when `inbound.enabled` is persisted true AND the OS
-            // keyring still has a token — `RemoteControlState::new()` already
-            // clears `enabled` to false when the token is missing, so this
-            // spawn is a safe no-op on a fresh install.
-            {
-                let app = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let rc_state = app.state::<remote_control::RemoteControlState>();
-                    if rc_state.config().inbound.enabled {
-                        match rc_state.start(app.clone()).await {
-                            Ok(()) => log::info!("remote-control inbound listener started"),
-                            Err(e) => log::warn!("remote-control auto-start skipped: {e}"),
-                        }
-                    }
-                });
-            }
-
             // Background-job supervisor. Installed synchronously and BEFORE
             // the sidecar can serve its first `host_rpc`, because installation
             // is also boot reconcile: rows left `running` by a previous
@@ -1919,6 +1952,18 @@ pub fn run() {
                     }
                     Err(e) => log::warn!("background-job supervisor unavailable: {e}"),
                 }
+            }
+
+            // Where the Claude Agent SDK session mirror lives (ADR-0090 Stage
+            // 4). Only the PATH is set here: the database is opened on the
+            // first `sessionStore.*` host_rpc, so a user who never runs an
+            // agent session never gets the file. Same reason it sits beside
+            // the job supervisor — both must be configured before the sidecar
+            // can serve its first host_rpc.
+            if let Ok(dir) = app.path().app_data_dir() {
+                agent_session_store::configure_path(
+                    dir.join("cognia").join("agent-sessions.sqlite"),
+                );
             }
 
             // Inbound LLM gateway auto-start (ADR-0043 M3). Mirrors the

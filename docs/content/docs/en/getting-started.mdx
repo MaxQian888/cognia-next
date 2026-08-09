@@ -100,7 +100,9 @@ cargo --version
 ## Run in web mode
 
 ```bash
-pnpm dev
+pnpm dev          # Full eager startup (default)
+pnpm dev:main     # Main-flow startup; optional capabilities load on first use
+pnpm dev:cached   # Full startup with persistent Turbopack cache enabled
 ```
 
 Opens Next.js dev server at [http://localhost:3000](http://localhost:3000). Web mode is suitable for:
@@ -111,10 +113,15 @@ Opens Next.js dev server at [http://localhost:3000](http://localhost:3000). Web 
 
 In web mode, code paths that call `invoke()` are gated by `isTauri()` (`lib/tauri.ts`); they no-op in the browser. The native vector store option is hidden in twin settings (cloud backends only).
 
+`main` is development-only. Production static exports always use the complete `eager` profile and still emit every optional dynamic chunk. The default cache-off commands remove only `.next/dev/cache/turbopack` before startup; use a `:cached` command when warm-compile speed is more important than bounded disk and native RSS.
+
 ## Run in desktop mode
 
 ```bash
-pnpm tauri dev
+pnpm tauri:dev          # Full eager startup (default)
+pnpm tauri:dev:main     # Main-flow startup
+pnpm tauri:dev:cached   # Full startup with persistent Turbopack cache
+pnpm tauri:dev:full     # Full Rust debug symbols; independent of boot profile
 ```
 
 This runs `beforeDevCommand: pnpm dev` in parallel, then compiles and launches the Tauri window. The first compile takes minutes (downloads + compiles ~300 Rust crates); subsequent runs are seconds.
@@ -185,7 +192,7 @@ If any line shows ❌, fix it before continuing.
     ```bash
     rustup update stable
     cd src-tauri && cargo clean && cd ..
-    pnpm tauri dev
+    pnpm tauri:dev
     ```
 
     <Callout type="warn" title="sqlite-vec compile fails">
@@ -200,8 +207,10 @@ If any line shows ❌, fix it before continuing.
 ## Common scripts
 
 ```bash
-pnpm dev            # Next.js web dev (port 3000)
-pnpm tauri dev      # Desktop dev mode
+pnpm dev            # Full Next.js web dev (port 3000)
+pnpm dev:main       # Main-flow web dev
+pnpm tauri:dev      # Full desktop dev mode
+pnpm tauri:dev:main # Main-flow desktop dev mode
 pnpm build          # Static export → out/
 pnpm tauri build    # Desktop installer
 pnpm mobile:sync    # Capacitor sync (needs prior pnpm build)

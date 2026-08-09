@@ -74,12 +74,12 @@ pub async fn ws_upgrade(
     uri: Uri,
     ws: WebSocketUpgrade,
 ) -> Result<Response, (StatusCode, &'static str)> {
-    // Origin allowlist (opt-in). Empty allowlist or a missing Origin (native
-    // clients never send one) passes; only a present-but-unlisted browser
-    // Origin is refused. Checked before the per-IP gate so a cross-origin
-    // probe doesn't consume a connection slot.
+    // Native clients omit Origin. Browser clients must be same-origin or match
+    // the explicit HTTPS split-origin allowlist. Checked before the per-IP gate
+    // so a cross-origin probe doesn't consume a connection slot.
     let origin = headers.get("origin").and_then(|v| v.to_str().ok());
-    if !is_origin_allowed(origin, &state.allowed_origins) {
+    let request_origin = request_origin(&headers);
+    if !is_origin_allowed(origin, request_origin.as_deref(), &state.allowed_origins) {
         warn!(
             target: "signaling",
             origin = origin.unwrap_or("<none>"),
@@ -110,6 +110,22 @@ pub async fn ws_upgrade(
         .max_message_size(MAX_WS_MESSAGE_BYTES)
         .max_frame_size(MAX_WS_MESSAGE_BYTES)
         .on_upgrade(move |socket| handle_socket(state, socket, acquired, upgrade_rendezvous_id)))
+}
+
+fn request_origin(headers: &HeaderMap) -> Option<String> {
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| *value == "https" || *value == "http")
+        .unwrap_or("http");
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && !value.contains([',', '/', '\\', ' ']))?;
+    Some(format!("{scheme}://{host}"))
 }
 
 async fn handle_socket(
@@ -550,6 +566,28 @@ mod tests {
             allowed_origins: Arc::new(Vec::new()),
             trust_proxy_headers: false,
         }
+    }
+
+    #[test]
+    fn derives_same_origin_from_forwarded_https_host() {
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "signaling:7892".parse().unwrap());
+        headers.insert("x-forwarded-proto", "https".parse().unwrap());
+        headers.insert("x-forwarded-host", "brain.example".parse().unwrap());
+        assert_eq!(
+            request_origin(&headers).as_deref(),
+            Some("https://brain.example")
+        );
+    }
+
+    #[test]
+    fn refuses_malformed_forwarded_hosts() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-host",
+            "brain.example,evil.example".parse().unwrap(),
+        );
+        assert_eq!(request_origin(&headers), None);
     }
 
     /// Pre-seed a peer already sitting in `room` so its receiver can observe

@@ -1,17 +1,17 @@
-/** @jest-environment jsdom */
 // Coverage for the per-session unread tracker (session-state.ts).
 
-import "fake-indexeddb/auto"
 import { bumpUnread, getSessionState, listSessionStates, markSessionRead } from "./session-state"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().sessionState.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("markSessionRead", () => {
   it("creates a row with unreadCount=0 and a fresh lastReadAt", async () => {

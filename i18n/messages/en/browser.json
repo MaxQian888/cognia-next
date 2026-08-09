@@ -1,4 +1,15 @@
 {
+  "adjust": {
+    "accept": "Accept feedback",
+    "accepted": "Adjustment feedback is ready to send. The live preview was reverted.",
+    "color": "Color (for example, #2563eb)",
+    "font": "Font (for example, 16px Inter)",
+    "label": "Browser Adjust",
+    "preview": "Preview",
+    "revert": "Revert",
+    "spacing": "Spacing (for example, 8px 12px)",
+    "text": "Replacement text"
+  },
   "actions": {
     "back": "Back",
     "cancelSelect": "Cancel selection",
@@ -21,8 +32,8 @@
       "approve": "Approve",
       "change": "Change",
       "fix": "Fix",
-      "question": "Question",
-      "label": "Annotation intent"
+      "label": "Annotation intent",
+      "question": "Question"
     },
     "queued": "{count, plural, one {# annotation queued} other {# annotations queued}}",
     "remove": "Remove annotation",
@@ -32,8 +43,8 @@
     "severity": {
       "blocking": "Blocking",
       "important": "Important",
-      "suggestion": "Suggestion",
-      "label": "Annotation severity"
+      "label": "Annotation severity",
+      "suggestion": "Suggestion"
     },
     "status": {
       "acknowledged": "Acknowledged",
@@ -74,8 +85,8 @@
     "keychainHint": "macOS may ask for Keychain access. Denying the prompt leaves the preview unchanged.",
     "profileLabel": "Profile",
     "reason": {
-      "checking": "Checking local Chromium profiles…",
       "checkFailed": "Could not check local Chromium profiles. Restart the desktop app and try again.",
+      "checking": "Checking local Chromium profiles…",
       "featureDisabled": "Enable Chromium cookie import in Settings → Desktop first.",
       "noProfiles": "No compatible Chromium profiles were found on this Mac.",
       "openPage": "Open a public web page before importing cookies.",
@@ -105,7 +116,8 @@
     "title": "Preview a web page"
   },
   "errors": {
-    "navigate": "Could not navigate to that URL"
+    "navigate": "Could not navigate to that URL",
+    "httpsProxyUnsupported": "HTTPS proxying is not supported in this browser preview."
   },
   "find": {
     "close": "Close find",
@@ -135,6 +147,8 @@
     "addAssertion": "Expect text…",
     "assertionPlaceholder": "Text that should appear",
     "collapse": "Collapse recorder",
+    "delete": "Delete flow",
+    "deleted": "Flow deleted",
     "empty": "Interact with the page — your clicks, typing and key presses are captured here.",
     "expand": "Expand recorder",
     "export": "Export",
@@ -142,9 +156,8 @@
     "exportJson": "Flow JSON",
     "exportPlaywright": "Playwright test",
     "exported": "Copied to clipboard",
-    "delete": "Delete flow",
-    "deleted": "Flow deleted",
     "name": "Name",
+    "recording": "Recording — {count} steps",
     "removeStep": "Remove step",
     "rename": "Rename flow",
     "renameCancel": "Cancel",
@@ -153,8 +166,8 @@
     "renamed": "Flow renamed",
     "replay": "Replay",
     "replayFailed": "Step {index} failed: {error}",
-    "replaying": "Replaying…",
     "replaySucceeded": "Replayed {count} steps",
+    "replaying": "Replaying…",
     "save": "Save flow",
     "saved": "Flow saved",
     "savedSteps": "{count} steps",
@@ -165,25 +178,24 @@
     "startHint": "Load a page first",
     "step": {
       "click": "Click {target}",
-      "doubleClick": "Double-click {target}",
       "direction": {
         "down": "down",
         "left": "left",
         "right": "right",
         "up": "up"
       },
+      "doubleClick": "Double-click {target}",
       "fill": "Fill {target}",
       "hover": "Hover over {target}",
       "navigate": "Go to {url}",
       "pressKey": "Press {key}",
+      "scroll": "Scroll {direction} by {amount}px",
       "secret": "Fill {target} (secret)",
       "select": "Select {value} in {target}",
-      "scroll": "Scroll {direction} by {amount}px",
       "waitFor": "Expect \"{text}\""
     },
     "stop": "Stop",
     "stopReplay": "Stop replay",
-    "recording": "Recording — {count} steps",
     "title": "Record actions"
   },
   "remote": {

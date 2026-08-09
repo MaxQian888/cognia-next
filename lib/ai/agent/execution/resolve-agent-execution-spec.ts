@@ -89,8 +89,52 @@ export const RUNTIME_CAPABILITIES: Record<AgentRuntimeAdapterId, readonly AgentC
     "upstream-errors",
     "stream-interruption",
     "subagents.native",
+    // `steer` is real on this rail and only on this rail: `routeSteer()`
+    // (sidecar/agent-host.mjs) intercepts the control frame, refuses any
+    // non-anthropic provider outright, and pushes the prompt through the live
+    // input stream. Omitting it here meant a session with a frozen spec got a
+    // `capability_error` for steering while the same session steered fine
+    // through the live control path (`ipc.ts:steerSession`) — the fail-closed
+    // gate firing on a capability the runtime actually has.
+    "steer",
     "set-model",
     "compaction",
+    // Stage 3: each of these is now reachable as a live control method
+    // (see protocol/agent-control-methods.json) and is listed here only
+    // because of that. `commands.dynamic` is the odd one out — the
+    // supportedCommands control predates contract v2, but the capability was
+    // never in this table, so a spec-carrying session under-reported a control
+    // it could already serve.
+    "commands.dynamic",
+    "session.manage",
+    "plugins.native",
+    "skills.native",
+    "checkpoint",
+    "mcp.dynamic",
+    "subagents.manage",
+    "tasks.background",
+    // Stage 3, non-control half: these are session OPTIONS that now reach
+    // `query()` through the nested `claudeAgentSdk` block, plus the two
+    // callback surfaces the sidecar builds around it. No command gates on
+    // them, so they are absent from ADAPTER_CAPABILITIES — they are here so a
+    // caller can ask the frozen spec whether the session can do this before
+    // spending a turn discovering that it cannot.
+    "output.structured",
+    "sandbox.native",
+    "hooks.lifecycle",
+    "permissions.update-rules",
+    // Child-process OTel: the subprocess exports into the same collector as
+    // the sidecar, under the same trace. Gated on the host having an endpoint
+    // (see `childTelemetryEnv`), which is why the capability is a statement
+    // about the RAIL rather than about any one session.
+    "observability.child",
+    // Stage 4, stateful: the session mirror (Rust SQLite over host_rpc) and the
+    // warm-subprocess pool. Both are claims that CODE exists — the mirror is
+    // built in `sidecar/dispatch/session-store.mjs` and reaches `query()` as
+    // `options.sessionStore`; the pool is claimed and refilled around the
+    // `query()` call in `anthropic.mjs`.
+    "session.store",
+    "startup.prewarm",
   ],
   "ai-sdk": [
     "streaming",

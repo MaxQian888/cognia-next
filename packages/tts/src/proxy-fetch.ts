@@ -21,6 +21,12 @@ export interface ProxyFetchInit {
   json?: unknown
   /** Raw bytes (e.g., binary upload). Mutually exclusive with `json`. */
   body?: ArrayBuffer | Uint8Array | Blob
+  /** Provider keyring id for host-side credential injection. */
+  provider?: string
+  /** Stable request identity used by the native cancellation command. */
+  requestId?: string
+  signal?: AbortSignal
+  timeoutMs?: number
 }
 
 export interface ProxyFetchResult {
@@ -63,18 +69,33 @@ async function browserFetch(url: string, init: ProxyFetchInit): Promise<ProxyFet
           : new Blob([init.body as ArrayBuffer])
   }
 
-  const res = await fetch(url, {
-    method: init.method ?? "POST",
-    headers,
-    body,
-  })
-  const bytes = await res.arrayBuffer()
-  return {
-    status: res.status,
-    ok: res.ok,
-    mime: res.headers.get("content-type") ?? "application/octet-stream",
-    bytes,
-    text: async () => utf8Decoder.decode(bytes),
-    json: async () => JSON.parse(utf8Decoder.decode(bytes)),
+  const timeoutController = init.timeoutMs ? new AbortController() : null
+  const forwardAbort = () => timeoutController?.abort(init.signal?.reason)
+  if (timeoutController && init.signal) {
+    if (init.signal.aborted) forwardAbort()
+    else init.signal.addEventListener("abort", forwardAbort, { once: true })
+  }
+  const timeout = timeoutController
+    ? setTimeout(() => timeoutController.abort(), Math.max(1, init.timeoutMs!))
+    : undefined
+  try {
+    const res = await fetch(url, {
+      method: init.method ?? "POST",
+      headers,
+      body,
+      signal: timeoutController?.signal ?? init.signal,
+    })
+    const bytes = await res.arrayBuffer()
+    return {
+      status: res.status,
+      ok: res.ok,
+      mime: res.headers.get("content-type") ?? "application/octet-stream",
+      bytes,
+      text: async () => utf8Decoder.decode(bytes),
+      json: async () => JSON.parse(utf8Decoder.decode(bytes)),
+    }
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+    init.signal?.removeEventListener("abort", forwardAbort)
   }
 }

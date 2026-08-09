@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { VisualWorkflow, WorkflowNode } from "@/types/workflow/visual"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { appendEvent } from "./event-log"
 import { listPendingApprovals, respondToApproval } from "./approval-registry"
 import {
@@ -61,11 +59,11 @@ const workflow = (over: Partial<VisualWorkflow> = {}): VisualWorkflow =>
     ...over,
   }) as unknown as VisualWorkflow
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   notifyRequested.mockClear()
   seam.subscribeWake = null
   seam.listRunEvents = null
@@ -76,6 +74,7 @@ beforeEach(async () => {
       respondedBy: "cleanup",
     })
 })
+afterAll(dbFixture.dispose)
 
 describe("isRiskGatingEnabled — migration decision", () => {
   it("is OFF for a workflow with no field (authored before ADR-0070)", () => {

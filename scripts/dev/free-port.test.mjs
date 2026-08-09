@@ -1,23 +1,62 @@
 /**
  * Regression coverage for scripts/dev/free-port.mjs.
  *
- * The parsers and orchestration are exported with injectable exec/kill, so we
- * exercise them against canned command output — no real ports or processes.
+ * The parsers and orchestration are exported with injectable command execution
+ * and process termination, so tests never touch real ports or processes.
  *
  * Run with: node --test scripts/dev/free-port.test.mjs
  */
 
-import { test } from "node:test"
 import assert from "node:assert/strict"
+import { spawn } from "node:child_process"
+import { test } from "node:test"
+import { fileURLToPath } from "node:url"
 
 import {
-  parseUnixPids,
-  parseWindowsPids,
-  parseSsPids,
-  parseFuserPids,
   findListenerPids,
   freePort,
+  parseFuserPids,
+  parseSsPids,
+  parseUnixPids,
+  parseWindowsPids,
 } from "./free-port.mjs"
+
+const script = fileURLToPath(new URL("./free-port.mjs", import.meta.url))
+
+function run(args = []) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script, ...args], { stdio: ["ignore", "pipe", "pipe"] })
+    let stdout = ""
+    let stderr = ""
+    child.stdout.on("data", (chunk) => (stdout += chunk))
+    child.stderr.on("data", (chunk) => (stderr += chunk))
+    child.once("error", reject)
+    child.once("close", (code, signal) => resolve({ code, signal, stdout, stderr }))
+  })
+}
+
+test("documents the non-blocking port-release CLI", async () => {
+  const result = await run(["--help"])
+
+  assert.equal(result.code, 0, result.stderr)
+  assert.match(result.stdout, /free-port\.mjs/)
+  assert.match(result.stdout, /--port/)
+  assert.match(result.stdout, /without ever blocking development startup/i)
+})
+
+test("reports invalid ports without aborting the development command", async () => {
+  const result = await run(["--port", "not-a-port"])
+
+  assert.equal(result.code, 0)
+  assert.match(result.stderr, /skipped .*--port.*integer between 1 and 65535/i)
+})
+
+test("validates the legacy positional port accepted by Tauri's beforeDevCommand", async () => {
+  const result = await run(["70000"])
+
+  assert.equal(result.code, 0)
+  assert.match(result.stderr, /skipped .*integer between 1 and 65535/i)
+})
 
 test("parseUnixPids splits lines, dedupes, and drops non-numeric noise", () => {
   assert.deepEqual(parseUnixPids("123\n456\n123\n"), [123, 456])
@@ -33,7 +72,6 @@ test("parseWindowsPids keeps only LISTENING rows matching :port and reads the PI
     "  TCP    127.0.0.1:3000         127.0.0.1:55012       ESTABLISHED     7777",
     "  TCP    [::]:3000              [::]:0                LISTENING       4242",
   ].join("\r\n")
-  // 3000 listeners only, deduped across IPv4/IPv6; ESTABLISHED + 3001 excluded.
   assert.deepEqual(parseWindowsPids(stdout, 3000), [4242])
   assert.deepEqual(parseWindowsPids(stdout, 3001), [9999])
   assert.deepEqual(parseWindowsPids("", 3000), [])
@@ -54,62 +92,70 @@ test("parseFuserPids strips the port label and reads the pid list", () => {
   assert.deepEqual(parseFuserPids(""), [])
 })
 
-test("findListenerPids dispatches netstat on windows", () => {
+test("findListenerPids dispatches netstat on windows", async () => {
   const calls = []
-  const exec = (cmd) => {
-    calls.push(cmd)
+  const exec = async (command, args) => {
+    calls.push({ command, args })
     return "  TCP 0.0.0.0:3000 0.0.0.0:0 LISTENING 33"
   }
-  assert.deepEqual(findListenerPids(3000, { platform: "win32", exec }), [33])
-  assert.match(calls[0], /^netstat -ano -p tcp$/)
+
+  assert.deepEqual(await findListenerPids(3000, { platform: "win32", exec }), [33])
+  assert.deepEqual(calls, [{ command: "netstat", args: ["-ano", "-p", "tcp"] }])
 })
 
-test("findListenerPids returns lsof results without falling back when lsof finds pids", () => {
+test("findListenerPids returns lsof results without falling back when lsof finds pids", async () => {
   const calls = []
-  const exec = (cmd) => {
-    calls.push(cmd)
-    return cmd.startsWith("lsof") ? "11\n22\n" : ""
+  const exec = async (command, args) => {
+    calls.push({ command, args })
+    return command === "lsof" ? "11\n22\n" : ""
   }
-  assert.deepEqual(findListenerPids(3000, { platform: "linux", exec }), [11, 22])
-  assert.deepEqual(calls, ["lsof -ti tcp:3000 -sTCP:LISTEN"]) // ss/fuser never invoked
+
+  assert.deepEqual(await findListenerPids(3000, { platform: "linux", exec }), [11, 22])
+  assert.deepEqual(calls, [{ command: "lsof", args: ["-ti", "tcp:3000", "-sTCP:LISTEN"] }])
 })
 
-test("findListenerPids cascades lsof -> ss -> fuser on linux when earlier tools are absent", () => {
+test("findListenerPids cascades lsof -> ss -> fuser on linux when earlier tools are absent", async () => {
   const calls = []
-  const exec = (cmd) => {
-    calls.push(cmd)
-    if (cmd.startsWith("ss")) {
+  const exec = async (command, args) => {
+    calls.push({ command, args })
+    if (command === "ss") {
       return `LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("next-server",pid=4242,fd=23))`
     }
-    return "" // lsof missing, fuser not reached
+    return ""
   }
-  assert.deepEqual(findListenerPids(3000, { platform: "linux", exec }), [4242])
-  assert.deepEqual(calls, ["lsof -ti tcp:3000 -sTCP:LISTEN", "ss -lptnH sport = :3000"])
-})
 
-test("findListenerPids falls through to fuser when lsof and ss yield nothing", () => {
-  const calls = []
-  const exec = (cmd) => {
-    calls.push(cmd)
-    return cmd.startsWith("fuser") ? "3000/tcp: 9000" : ""
-  }
-  assert.deepEqual(findListenerPids(3000, { platform: "linux", exec }), [9000])
+  assert.deepEqual(await findListenerPids(3000, { platform: "linux", exec }), [4242])
   assert.deepEqual(calls, [
-    "lsof -ti tcp:3000 -sTCP:LISTEN",
-    "ss -lptnH sport = :3000",
-    "fuser 3000/tcp 2>&1",
+    { command: "lsof", args: ["-ti", "tcp:3000", "-sTCP:LISTEN"] },
+    { command: "ss", args: ["-lptnH", "sport", "=", ":3000"] },
   ])
 })
 
-test("freePort kills each discovered listener and reports them", () => {
+test("findListenerPids falls through to fuser when lsof and ss yield nothing", async () => {
+  const calls = []
+  const exec = async (command, args) => {
+    calls.push({ command, args })
+    return command === "fuser" ? "3000/tcp: 9000" : ""
+  }
+
+  assert.deepEqual(await findListenerPids(3000, { platform: "linux", exec }), [9000])
+  assert.deepEqual(calls, [
+    { command: "lsof", args: ["-ti", "tcp:3000", "-sTCP:LISTEN"] },
+    { command: "ss", args: ["-lptnH", "sport", "=", ":3000"] },
+    { command: "fuser", args: ["3000/tcp"] },
+  ])
+})
+
+test("freePort kills each discovered listener and reports them", async () => {
   const killed = []
   const logs = []
-  const result = freePort(3000, {
+  const result = await freePort(3000, {
     platform: "darwin",
-    exec: () => "100\n200\n",
-    kill: (pid, platform) => killed.push([pid, platform]),
-    log: (msg) => logs.push(msg),
+    exec: async () => "100\n200\n",
+    kill: async (pid, platform) => killed.push([pid, platform]),
+    log: (message) => logs.push(message),
   })
+
   assert.deepEqual(result.killed, [100, 200])
   assert.deepEqual(killed, [
     [100, "darwin"],
@@ -118,15 +164,16 @@ test("freePort kills each discovered listener and reports them", () => {
   assert.match(logs[0], /killed 2 stale listener\(s\) on :3000/)
 })
 
-test("freePort is a no-op when the port is already free", () => {
+test("freePort is a no-op when the port is already free", async () => {
   const killed = []
   const logs = []
-  const result = freePort(3000, {
+  const result = await freePort(3000, {
     platform: "darwin",
-    exec: () => "",
-    kill: (pid) => killed.push(pid),
-    log: (msg) => logs.push(msg),
+    exec: async () => "",
+    kill: async (pid) => killed.push(pid),
+    log: (message) => logs.push(message),
   })
+
   assert.deepEqual(result.killed, [])
   assert.deepEqual(killed, [])
   assert.match(logs[0], /:3000 is free/)

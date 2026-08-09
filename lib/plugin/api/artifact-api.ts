@@ -54,10 +54,16 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
       const store = useArtifactStore.getState()
       const sessionId = options.sessionId || ""
       const messageId = options.messageId || ""
-      const resolvedType =
-        options.type === "text"
-          ? "document"
-          : (options.type as "code" | "react" | "html" | "svg" | "mermaid" | "document") || "code"
+      const resolvedType = options.type === "text" ? "document" : options.type || "code"
+      const requestedKind = options.kind ?? `${pluginId}/artifact`
+      const kind = requestedKind.includes("/") ? requestedKind : `${pluginId}/${requestedKind}`
+      if (!kind.startsWith(`${pluginId}/`)) {
+        throw new Error(`artifact kind must be owned by plugin ${pluginId}`)
+      }
+      const schemaVersion = options.schemaVersion ?? 1
+      if (!Number.isInteger(schemaVersion) || schemaVersion < 1) {
+        throw new Error("artifact schemaVersion must be a positive integer")
+      }
       const artifact = store.createArtifact({
         sessionId,
         messageId,
@@ -77,6 +83,7 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
             metadata: options.metadata,
           }),
           ...options.metadata,
+          plugin: { kind, schemaVersion, ownerPluginId: pluginId },
         },
       })
       const id = typeof artifact === "string" ? artifact : artifact?.id || ""
@@ -84,16 +91,62 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
       return id
     },
 
-    updateArtifact: (id: string, updates: Partial<Artifact>) => {
+    updateArtifact: (id, updates) => {
       const store = useArtifactStore.getState()
-      store.updateArtifact(id, updates)
+      const artifact = store.artifacts[id]
+      assertOwnedArtifact(pluginId, artifact, id)
+      if (artifact.version !== updates.expectedVersion) {
+        throw new Error(
+          `artifact version conflict for ${id}: expected ${updates.expectedVersion}, current ${artifact.version}`
+        )
+      }
+      if (
+        updates.title === undefined &&
+        updates.content === undefined &&
+        updates.metadata === undefined
+      ) {
+        throw new Error("artifact update requires title, content, or metadata")
+      }
+      store.saveArtifactVersion(id, updates.changeDescription)
+      const patch: Partial<Artifact> = {}
+      if (updates.title !== undefined) patch.title = updates.title
+      if (updates.content !== undefined) patch.content = updates.content
+      if (updates.metadata !== undefined) {
+        patch.metadata = {
+          ...artifact.metadata,
+          ...updates.metadata,
+          plugin: artifact.metadata?.plugin,
+        }
+      }
+      store.updateArtifact(id, patch)
       logger.info(`Updated artifact: ${id}`)
+      return store.artifacts[id] ?? { ...artifact, ...patch, version: artifact.version + 1 }
     },
 
     deleteArtifact: (id: string) => {
       const store = useArtifactStore.getState()
+      assertOwnedArtifact(pluginId, store.artifacts[id], id)
       store.deleteArtifact(id)
       logger.info(`Deleted artifact: ${id}`)
+    },
+
+    listVersions: (id) => {
+      const store = useArtifactStore.getState()
+      assertOwnedArtifact(pluginId, store.artifacts[id], id)
+      return store.getArtifactVersions(id)
+    },
+
+    restoreVersion: (id, versionId, expectedVersion) => {
+      const store = useArtifactStore.getState()
+      const artifact = store.artifacts[id]
+      assertOwnedArtifact(pluginId, artifact, id)
+      if (artifact.version !== expectedVersion) {
+        throw new Error(
+          `artifact version conflict for ${id}: expected ${expectedVersion}, current ${artifact.version}`
+        )
+      }
+      store.restoreArtifactVersion(id, versionId)
+      return store.artifacts[id] ?? { ...artifact, version: artifact.version + 1 }
     },
 
     listArtifacts: (filter?: ArtifactFilter): Artifact[] => {
@@ -162,13 +215,16 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
     },
 
     registerRenderer: (type: string, renderer: ArtifactRenderer) => {
-      const rendererId = `${pluginId}:${type}`
+      const kind = type.includes("/") ? type : `${pluginId}/${type}`
+      if (!kind.startsWith(`${pluginId}/`)) {
+        throw new Error(`artifact renderer kind must be owned by plugin ${pluginId}`)
+      }
+      const rendererId = kind
       const unregister = registerArtifactRenderer(rendererId, {
         id: rendererId,
-        type: rendererId,
+        kind,
         name: renderer.name,
-        canRender: renderer.canRender,
-        render: renderer.render,
+        mount: renderer.mount,
       })
       logger.info(`Registered artifact renderer: ${type}`)
 
@@ -188,6 +244,8 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
       createArtifact: "artifact:write",
       updateArtifact: "artifact:write",
       deleteArtifact: "artifact:write",
+      listVersions: "artifact:read",
+      restoreVersion: "artifact:write",
       listArtifacts: "artifact:read",
       openArtifact: "artifact:write",
       closeArtifact: "artifact:write",
@@ -199,6 +257,17 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
       unguarded: ["registerRenderer"],
     }
   )
+}
+
+function assertOwnedArtifact(
+  pluginId: string,
+  artifact: Artifact | undefined,
+  id: string
+): asserts artifact is Artifact {
+  if (!artifact) throw new Error(`artifact "${id}" was not found`)
+  if (artifact.metadata?.plugin?.ownerPluginId !== pluginId) {
+    throw new Error(`plugin ${pluginId} does not own artifact ${id}`)
+  }
 }
 
 /**

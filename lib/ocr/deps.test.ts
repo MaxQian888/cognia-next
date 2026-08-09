@@ -1,18 +1,24 @@
 /** @jest-environment jsdom */
 
-import { buildOcrDeps, detectOcrOsTag } from "./deps"
+import { buildOcrDeps, createOcrRuntimeStatusResolver, detectOcrOsTag } from "./deps"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
+import type { OcrProvider } from "@/types/ocr"
+import { transport } from "@/lib/tauri"
+
+jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
 
 const fakeRegistry = { list: () => [], has: () => false } as unknown as ReturnType<
   typeof import("./registry").getSharedOcrRegistry
 >
 jest.mock("./registry", () => ({
   getSharedOcrRegistry: () => fakeRegistry,
+  shellAllows: () => true,
 }))
 
-let mockPlatform: "tauri" | "mobile" | "web" = "web"
+let mockPlatform: "tauri" | "mobile" | "web" | "headless" = "web"
 jest.mock("@/lib/platform/detect", () => ({
   detectPlatform: () => mockPlatform,
+  isHeadlessHost: () => mockPlatform === "headless",
 }))
 
 const sentinelResolver = jest.fn()
@@ -26,6 +32,7 @@ function setUserAgent(ua: string) {
 
 beforeEach(() => {
   mockPlatform = "web"
+  ;(transport.call as jest.Mock).mockReset()
 })
 
 describe("detectOcrOsTag", () => {
@@ -49,6 +56,12 @@ describe("detectOcrOsTag", () => {
     setUserAgent("Mozilla/5.0 (X11; Linux x86_64)")
     expect(detectOcrOsTag("tauri")).toBe("linux")
   })
+
+  it("uses the Node process OS instead of a synthetic browser UA in headless mode", () => {
+    const expected =
+      process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux"
+    expect(detectOcrOsTag("headless")).toBe(expected)
+  })
 })
 
 describe("buildOcrDeps", () => {
@@ -69,6 +82,7 @@ describe("buildOcrDeps", () => {
     const credentialsResolver = jest.fn()
     const attachmentResolver = jest.fn()
     const onResult = jest.fn()
+    const runtimeStatus = jest.fn()
     const deps = buildOcrDeps({
       settings,
       platform: "tauri",
@@ -76,6 +90,7 @@ describe("buildOcrDeps", () => {
       credentialsResolver,
       attachmentResolver,
       onResult,
+      runtimeStatus,
     })
     expect(deps.settings).toBe(settings)
     expect(deps.platform).toBe("tauri")
@@ -83,6 +98,28 @@ describe("buildOcrDeps", () => {
     expect(deps.credentialsResolver).toBe(credentialsResolver)
     expect(deps.attachmentResolver).toBe(attachmentResolver)
     expect(deps.onResult).toBe(onResult)
+    expect(deps.runtimeStatus).toBe(runtimeStatus)
+  })
+})
+
+describe("headless native OCR status", () => {
+  it("probes the server registry through the process transport", async () => {
+    mockPlatform = "headless"
+    ;(transport.call as jest.Mock).mockResolvedValue(["tesseract-native"])
+    const provider = {
+      id: "tesseract-native",
+      category: "local",
+      shells: { browser: false, tauri: true, capacitor: false },
+      credentialKeys: [],
+    } as unknown as OcrProvider
+    const resolve = createOcrRuntimeStatusResolver(DEFAULT_OCR_SETTINGS, jest.fn())
+
+    await expect(resolve(provider, "headless")).resolves.toMatchObject({
+      providerId: "tesseract-native",
+      backendBound: true,
+      ready: true,
+    })
+    expect(transport.call).toHaveBeenCalledWith("ocr_list_available_backends", undefined)
   })
 })
 /** @jest-environment jsdom */

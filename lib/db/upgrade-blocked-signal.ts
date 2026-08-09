@@ -19,6 +19,8 @@ export interface DbUpgradeBlockedDetail {
   databaseName: string
   /** How many yield nudges went unanswered before giving up. */
   attempts: number
+  /** Live CogniaDB owners visible in this renderer realm. */
+  connectionOwners?: string[]
 }
 
 export type DbUpgradeBlockedHandler = (detail: DbUpgradeBlockedDetail) => void

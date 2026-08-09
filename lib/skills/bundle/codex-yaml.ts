@@ -3,9 +3,9 @@
 //
 // The file is optional — Anthropic skill-creator bundles never have it.
 // When present, it carries Codex-specific UI hints and MCP tool
-// dependencies that the bundle loader folds into the cognia `Skill`
-// metadata. We don't try to round-trip the file; the cognia `Skill`
-// stays canonical, and the openai.yaml is read-only on import.
+// dependencies that the bundle loader exposes without installing. The raw
+// YAML is retained on `Skill.codexOpenAiYaml` for semantic round-tripping;
+// the strict editor parser below additionally synchronizes known policy fields.
 //
 // Unknown top-level keys produce warnings (loud, not silent) so future
 // Codex extensions don't slip past us, but the parse still succeeds.
@@ -38,6 +38,12 @@ export interface CodexOpenaiMeta {
   policy?: CodexPolicyMeta
   toolDependencies: CodexToolDependency[]
   warnings: string[]
+}
+
+export interface ParsedCodexOpenaiYamlForEdit {
+  /** Parsed root mapping. Unknown keys are intentionally retained. */
+  root: Record<string, unknown>
+  meta: CodexOpenaiMeta
 }
 
 const KNOWN_TOP_LEVEL = new Set(["interface", "policy", "dependencies"])
@@ -187,4 +193,35 @@ export function parseCodexOpenaiYaml(text: string): CodexOpenaiMeta {
   }
 
   return result
+}
+
+/**
+ * Strict editor boundary for `agents/openai.yaml`.
+ *
+ * Bundle import stays tolerant through `parseCodexOpenaiYaml`; an editor save
+ * must instead refuse malformed YAML/non-mapping roots so the last valid
+ * persisted configuration is never replaced by an unusable draft. Returning
+ * the root also gives future known-field editors a lossless semantic update
+ * seam: callers can mutate known properties and dump the whole mapping while
+ * retaining vendor extensions.
+ */
+export function parseCodexOpenaiYamlForEdit(text: string): ParsedCodexOpenaiYamlForEdit {
+  let parsed: unknown
+  try {
+    parsed = yaml.load(text)
+  } catch (error) {
+    throw new Error(
+      `agents/openai.yaml failed to parse as YAML: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    )
+  }
+  if (parsed === null || parsed === undefined) parsed = {}
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("agents/openai.yaml root must be a mapping.")
+  }
+  return {
+    root: parsed as Record<string, unknown>,
+    meta: parseCodexOpenaiYaml(text),
+  }
 }

@@ -81,7 +81,7 @@ export interface ApplyEffectDeps {
   cursor: TranscriptCursor
   copyClipboard: (text: string) => Promise<CopyResult>
   notices: ResolvedNotices
-  pushHandoff?: (sessionId: string) => void | Promise<void>
+  pushHandoff?: (sessionId: string) => boolean | Promise<boolean>
   openSessions: () => void
   /** Open the `/model` switcher — backend-aware, so it may query the external
    * agent for its own catalog before the overlay can be built. */
@@ -273,9 +273,31 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           )
           break
         case "handoff":
-          void Promise.resolve(pushHandoff?.(state.sessionId)).then(() =>
-            dispatch({ type: "NOTICE", message: "Pushed this session to the desktop app." })
-          )
+          if (!pushHandoff) {
+            dispatch({
+              type: "NOTICE",
+              message: "No running Cognia desktop found — open the app, then retry.",
+              severity: "warn",
+            })
+            break
+          }
+          void Promise.resolve(pushHandoff(state.sessionId))
+            .then((ok) =>
+              dispatch({
+                type: "NOTICE",
+                message: ok
+                  ? "Pushed this session to the desktop app."
+                  : "No running Cognia desktop found — open the app, then retry.",
+                ...(ok ? {} : { severity: "warn" as const }),
+              })
+            )
+            .catch((error: unknown) =>
+              dispatch({
+                type: "NOTICE",
+                message: `Handoff failed: ${error instanceof Error ? error.message : String(error)}`,
+                severity: "error",
+              })
+            )
           break
         case "modelPicker":
           openModelPicker()

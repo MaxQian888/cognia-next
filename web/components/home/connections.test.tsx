@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
 import { Connections } from "./connections"
@@ -44,6 +44,24 @@ describe("Connections", () => {
   it("defers the full catalogs to the documentation", () => {
     render(<Connections copy={en.home.connections} />)
     expect(screen.getByText(en.home.connections.catalogueNote)).toBeInTheDocument()
+  })
+
+  it("highlights the matching receipt when a flow source receives focus", () => {
+    render(<Connections copy={en.home.connections} flowCopy={en.home.connectionFlow} />)
+    const flow = screen.getByRole("group", { name: en.home.connectionFlow.label })
+    const source = within(flow).getByRole("button", { name: en.home.connections.items[0].name })
+    fireEvent.focus(source)
+
+    const receipt = within(screen.getAllByRole("list")[0]).getAllByRole("listitem")[0]
+    expect(receipt).toHaveAttribute("data-active", "true")
+    expect(screen.getAllByRole("list")[0]).toHaveStyle({
+      "--receipt-columns": "1.35fr 1fr 1fr 1fr",
+    })
+
+    fireEvent.blur(source)
+    expect(screen.getAllByRole("list")[0]).toHaveStyle({
+      "--receipt-columns": "1fr 1fr 1fr 1fr",
+    })
   })
 
   it("localises every receipt", () => {

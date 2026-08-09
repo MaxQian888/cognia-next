@@ -84,6 +84,17 @@ describe("ModelAliasEditor", () => {
     )
   })
 
+  it("switches distribution to round robin and saves it", async () => {
+    const user = userEvent.setup()
+    render(<ModelAliasEditor open onOpenChange={jest.fn()} mapping={existing} />)
+    await user.click(screen.getByRole("combobox", { name: "Distribution" }))
+    await user.click(await screen.findByRole("option", { name: "Round robin" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(upsertModelMapping).toHaveBeenCalledWith(
+      expect.objectContaining({ distribution: "round-robin" })
+    )
+  })
+
   it("reorders entries with move down / move up and removes one", async () => {
     const user = userEvent.setup()
     const twoEntries = {

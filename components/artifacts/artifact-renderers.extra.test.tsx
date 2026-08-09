@@ -37,25 +37,27 @@ const dummy: Artifact = {
 }
 
 describe("PluginArtifactRendererHost", () => {
-  it("invokes the renderer.render and reports 'ready'", () => {
+  it("mounts the renderer and reports 'ready'", () => {
     const onState = jest.fn()
+    const mount = jest.fn(() => ({ dispose: jest.fn() }))
     const r: PluginArtifactRenderer = {
       id: "x",
-      canRender: () => true,
-      render: () => null,
+      kind: "test/code",
+      mount,
     }
     render(
       <PluginArtifactRendererHost artifact={dummy} renderer={r} onRuntimeStateChange={onState} />
     )
+    expect(mount).toHaveBeenCalledWith(dummy, expect.any(HTMLElement))
     expect(onState).toHaveBeenCalledWith("ready")
   })
 
-  it("captures errors thrown by renderer.render and surfaces an alert", async () => {
+  it("captures errors thrown by renderer.mount and surfaces an alert", async () => {
     const onState = jest.fn()
     const r: PluginArtifactRenderer = {
       id: "boom",
-      canRender: () => true,
-      render: () => {
+      kind: "test/code",
+      mount: () => {
         throw new Error("kaboom")
       },
     }
@@ -74,15 +76,20 @@ describe("PluginArtifactRendererHost", () => {
   })
 
   it("cleans up the container on unmount", () => {
+    const dispose = jest.fn()
     const r: PluginArtifactRenderer = {
       id: "x",
-      canRender: () => true,
-      render: () => null,
+      kind: "test/code",
+      mount: (_artifact, container) => {
+        container.textContent = "mounted"
+        return { dispose }
+      },
     }
     const { unmount, container } = render(
       <PluginArtifactRendererHost artifact={dummy} renderer={r} />
     )
     unmount()
+    expect(dispose).toHaveBeenCalledTimes(1)
     expect(container.innerHTML).toBe("")
   })
 })

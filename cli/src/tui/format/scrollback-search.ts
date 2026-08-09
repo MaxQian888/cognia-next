@@ -63,6 +63,8 @@ export function cellToText(cell: Cell): string {
       return cell.raw
     case "thinking":
       return cell.text
+    case "commentary":
+      return cell.text
     case "tool":
       return toolToText(cell)
     case "todo":
@@ -71,6 +73,27 @@ export function cellToText(cell: Cell): string {
       return cell.message
     case "notice":
       return cell.message
+    case "canonical-event":
+      return `${cell.title}: ${cell.summary}`
+    case "content-part": {
+      const part = cell.part
+      switch (part.type) {
+        case "sources":
+          return part.sources
+            .map((source) => source.title ?? source.origin ?? source.url ?? source.id)
+            .join("\n")
+        case "file":
+          return [part.name, part.uri, part.preview].filter(Boolean).join("\n")
+        case "a2ui":
+          return `A2UI surface ${part.surfaceId}\n${part.source}`
+        case "artifact-ref":
+          return part.title ?? part.artifactId
+        case "canvas-ref":
+          return part.title ?? part.canvasId
+        case "custom":
+          return `${part.customType}\n${part.summary}`
+      }
+    }
     case "bash":
       return cell.output ? `${cell.command}\n${cell.output}` : cell.command
     case "plan":

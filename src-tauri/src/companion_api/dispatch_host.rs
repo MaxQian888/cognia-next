@@ -13,18 +13,21 @@
 //!   work as-is; arms that genuinely need the desktop reply with a per-arm
 //!   `503 headless_unsupported` via [`DispatchHost::tauri_app`].
 //!
-//! # Headless availability (Phase 1)
+//! # Headless availability
 //!
 //! | Family | Headless | Via |
 //! | --- | --- | --- |
 //! | `sync_pull`, `message_*`, `session_list` | ✅ | connected brain (`ws_bridge`) or degraded store |
 //! | desktop-write group (`character_*`, `workflow_*`, …) | ✅ | connected brain |
-//! | `claude_*` (send/interrupt/…, provider env) | R7 | `HeadlessServices` sidecar |
-//! | `spawn/send/kill/status_external_agent` | R11 | `ExecBackend` behind service scope |
-//! | `connectors_*` | R12 | `HeadlessServices.connectors` |
+//! | `claude_*` (send/interrupt/…, provider env) | ✅ | `HeadlessServices` sidecar |
+//! | `spawn/send/kill/status_external_agent` | ✅ | `ExecBackend` behind service scope |
+//! | `connectors_*` | ✅ | `HeadlessServices.connectors` |
 //! | `mcp_server_status` | ✅ | process-owned `McpServerState` |
-//! | `git_*`, `fs_*`, `skills_*`, agent-config, backup | ✅ | host-neutral command bodies / data plane |
-//! | live terminal registry, `plugin_*`, automation consent | ❌ | `headless_unsupported` (documented follow-up) |
+//! | `git_*`, workspace-confined `fs_*`, `skills_*`, agent-config, backup | ✅ | host-neutral command bodies / data plane |
+//! | live terminal registry and `plugin_*` | ✅ | process-owned registries |
+//! | automation consent / remote notifications | ✅ | shared broker + authenticated `EventBus` |
+//! | Server OCR | ✅ | lazy `NativeOcrRegistry`; progress through `EventBus` |
+//! | Remote Browser | dynamic | `browser_runtime_status` live workspace probe |
 
 use std::sync::Arc;
 

@@ -25,6 +25,13 @@ describe("screenColToBufferCol", () => {
     expect(screenColToBufferCol("🎉x", 2)).toBe(2) // before x
     expect(screenColToBufferCol("🎉x", 3)).toBe(3) // after x
   })
+
+  it("never places the cursor inside a grapheme cluster", () => {
+    expect(screenColToBufferCol("👩‍💻x", 0)).toBe(0)
+    expect(screenColToBufferCol("👩‍💻x", 1)).toBe(5)
+    expect(screenColToBufferCol("👩‍💻x", 2)).toBe(5)
+    expect(screenColToBufferCol("e\u0301x", 1)).toBe(2)
+  })
 })
 
 describe("clickToCursor", () => {

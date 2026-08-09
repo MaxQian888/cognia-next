@@ -1,9 +1,10 @@
-jest.mock("@tauri-apps/api/core", () => ({
-  invoke: jest.fn(),
+jest.mock("@/lib/tauri", () => ({
+  transport: { call: jest.fn() },
 }))
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }
+const { transport } = require("@/lib/tauri") as { transport: { call: jest.Mock } }
+const call = transport.call
 
 import {
   cloneToWorkspace,
@@ -17,13 +18,13 @@ import {
 } from "./workspace"
 
 beforeEach(() => {
-  invoke.mockReset()
+  call.mockReset()
   setE2BBackend(null)
 })
 
 describe("cloneToWorkspace — local backend", () => {
   it("invokes github_workspace_clone and synthesizes a WorkspaceHandle", async () => {
-    invoke.mockResolvedValueOnce({ path: "/tmp/ws/octocat_hello-world/abc", createdAt: 123 })
+    call.mockResolvedValueOnce({ path: "/tmp/ws/octocat_hello-world/abc", createdAt: 123 })
     const handle = await cloneToWorkspace({
       repoFullName: "octocat/hello-world",
       branch: "main",
@@ -31,7 +32,7 @@ describe("cloneToWorkspace — local backend", () => {
       backend: "local",
       baseDir: "/tmp/ws",
     })
-    expect(invoke).toHaveBeenCalledWith("github_workspace_clone", {
+    expect(call).toHaveBeenCalledWith("github_workspace_clone", {
       args: {
         repoFullName: "octocat/hello-world",
         branch: "main",
@@ -44,25 +45,46 @@ describe("cloneToWorkspace — local backend", () => {
       path: "/tmp/ws/octocat_hello-world/abc",
       repoFullName: "octocat/hello-world",
       branch: "main",
+      baseBranch: undefined,
       createdAt: 123,
     })
   })
 
   it("forwards baseDir undefined when not supplied", async () => {
-    invoke.mockResolvedValueOnce({ path: "/some/path", createdAt: 0 })
+    call.mockResolvedValueOnce({ path: "/some/path", createdAt: 0 })
     await cloneToWorkspace({
       repoFullName: "o/r",
       branch: "main",
       token: "tok",
       backend: "local",
     })
-    expect(invoke).toHaveBeenCalledWith("github_workspace_clone", {
+    expect(call).toHaveBeenCalledWith("github_workspace_clone", {
       args: { repoFullName: "o/r", branch: "main", token: "tok", baseDir: undefined },
     })
   })
 
+  it("clones a base branch and checks out an isolated target branch", async () => {
+    call.mockResolvedValueOnce({ path: "/some/path", createdAt: 0 })
+    await cloneToWorkspace({
+      repoFullName: "o/r",
+      branch: "cognia/issue-42",
+      baseBranch: "main",
+      token: "tok",
+      backend: "local",
+    })
+    expect(call).toHaveBeenCalledWith("github_workspace_clone", {
+      args: {
+        repoFullName: "o/r",
+        branch: "cognia/issue-42",
+        baseBranch: "main",
+        token: "tok",
+        baseDir: undefined,
+      },
+    })
+  })
+
   it("propagates a Rust-side clone failure", async () => {
-    invoke.mockRejectedValueOnce("git clone failed: branch not found")
+    call.mockRejectedValueOnce("git clone failed: branch not found")
     await expect(
       cloneToWorkspace({
         repoFullName: "o/r",
@@ -82,7 +104,7 @@ describe("cloneToWorkspace — local backend", () => {
         backend: "e2b",
       })
     ).rejects.toThrow(/e2b workspace backend not registered/)
-    expect(invoke).not.toHaveBeenCalled()
+    expect(call).not.toHaveBeenCalled()
   })
 
   it("delegates to the registered E2B backend when one is set", async () => {
@@ -110,7 +132,7 @@ describe("cloneToWorkspace — local backend", () => {
       branch: "main",
       token: "tok",
     })
-    expect(invoke).not.toHaveBeenCalled()
+    expect(call).not.toHaveBeenCalled()
   })
 })
 
@@ -124,38 +146,44 @@ describe("commitAndPush", () => {
   }
 
   it("invokes github_workspace_commit_and_push and returns the SHA", async () => {
-    invoke.mockResolvedValueOnce("deadbeef\n")
+    call.mockResolvedValueOnce("deadbeef\n")
     const sha = await commitAndPush({ workspace: handle, message: "Cognia: do the thing" })
     expect(sha).toBe("deadbeef\n")
-    expect(invoke).toHaveBeenCalledWith("github_workspace_commit_and_push", {
+    expect(call).toHaveBeenCalledWith("github_workspace_commit_and_push", {
       args: {
         workspacePath: handle.path,
+        repoFullName: "o/r",
         branch: "feat/x",
+        baseBranch: undefined,
         message: "Cognia: do the thing",
         remoteBranch: undefined,
+        token: undefined,
       },
     })
   })
 
   it("forwards remoteBranch when supplied", async () => {
-    invoke.mockResolvedValueOnce("sha")
+    call.mockResolvedValueOnce("sha")
     await commitAndPush({
       workspace: handle,
       message: "x",
       remoteBranch: "cognia/issue-5",
     })
-    expect(invoke).toHaveBeenCalledWith("github_workspace_commit_and_push", {
+    expect(call).toHaveBeenCalledWith("github_workspace_commit_and_push", {
       args: {
         workspacePath: handle.path,
+        repoFullName: "o/r",
         branch: "feat/x",
+        baseBranch: undefined,
         message: "x",
         remoteBranch: "cognia/issue-5",
+        token: undefined,
       },
     })
   })
 
   it("propagates the Rust 'no changes' error verbatim", async () => {
-    invoke.mockRejectedValueOnce("commitAndPush: no changes to commit")
+    call.mockRejectedValueOnce("commitAndPush: no changes to commit")
     await expect(commitAndPush({ workspace: handle, message: "x" })).rejects.toMatch(/no changes/)
   })
 
@@ -163,7 +191,7 @@ describe("commitAndPush", () => {
     await expect(
       commitAndPush({ workspace: { ...handle, backend: "e2b" }, message: "x" })
     ).rejects.toThrow(/e2b workspace backend not registered/)
-    expect(invoke).not.toHaveBeenCalled()
+    expect(call).not.toHaveBeenCalled()
   })
 
   it("delegates commitAndPush to the registered E2B backend", async () => {
@@ -184,7 +212,7 @@ describe("commitAndPush", () => {
       message: "msg",
       remoteBranch: "feat/x",
     })
-    expect(invoke).not.toHaveBeenCalled()
+    expect(call).not.toHaveBeenCalled()
   })
 })
 
@@ -198,15 +226,15 @@ describe("removeWorkspace + statWorkspace", () => {
   }
 
   it("returns the Rust bool for a successful local rm", async () => {
-    invoke.mockResolvedValueOnce(true)
+    call.mockResolvedValueOnce(true)
     const ok = await removeWorkspace(localHandle)
     expect(ok).toBe(true)
-    expect(invoke).toHaveBeenCalledWith("github_workspace_remove", { path: localHandle.path })
+    expect(call).toHaveBeenCalledWith("github_workspace_remove", { path: localHandle.path })
   })
 
   it("logs and returns false when the Rust command rejects", async () => {
     const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
-    invoke.mockRejectedValueOnce("rm failed")
+    call.mockRejectedValueOnce("rm failed")
     const ok = await removeWorkspace(localHandle)
     expect(ok).toBe(false)
     expect(errSpy).toHaveBeenCalled()
@@ -222,7 +250,7 @@ describe("removeWorkspace + statWorkspace", () => {
       createdAt: 0,
     })
     expect(ok).toBe(false)
-    expect(invoke).not.toHaveBeenCalled()
+    expect(call).not.toHaveBeenCalled()
   })
 
   it("delegates removal to the registered E2B backend", async () => {
@@ -263,14 +291,14 @@ describe("removeWorkspace + statWorkspace", () => {
   })
 
   it("statWorkspace returns the Rust shape on success", async () => {
-    invoke.mockResolvedValueOnce({ exists: true, mtime: 1234.5 })
+    call.mockResolvedValueOnce({ exists: true, mtime: 1234.5 })
     const s = await statWorkspace("/some/path")
     expect(s).toEqual({ exists: true, mtime: 1234.5 })
-    expect(invoke).toHaveBeenCalledWith("github_workspace_stat", { path: "/some/path" })
+    expect(call).toHaveBeenCalledWith("github_workspace_stat", { path: "/some/path" })
   })
 
   it("statWorkspace swallows command rejections as { exists: false }", async () => {
-    invoke.mockRejectedValueOnce("nope")
+    call.mockRejectedValueOnce("nope")
     const s = await statWorkspace("/some/path")
     expect(s).toEqual({ exists: false })
   })

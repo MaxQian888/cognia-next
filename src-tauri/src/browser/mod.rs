@@ -6,6 +6,7 @@
 //! P1 embeds the same webview into a side pane via the `unstable` multi-webview
 //! API. The page->Rust channel is documented in `overlay.rs`.
 
+pub mod cdp;
 pub mod commands;
 pub mod cookie_import;
 pub mod embedded;

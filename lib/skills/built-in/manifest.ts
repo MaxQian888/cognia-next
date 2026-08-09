@@ -36,6 +36,12 @@ import type { PlatformSkillCapability } from "@/types/connectors/skill-capabilit
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import { getSharedBuiltInSkillRegistry, platformAllows } from "./registry"
 import type { BuiltInSkill } from "./types"
+import {
+  getCachedLarkCliCapabilityDiagnostics,
+  isLarkSkillCapabilityAvailable,
+  LARK_CLI_CAPABILITY_MANIFEST,
+  probeLarkCliCapabilities,
+} from "./lark/capabilities"
 
 /**
  * Synthetic plugin id the sidecar uses to group built-in skill tools.
@@ -80,6 +86,10 @@ export function buildBuiltInSkillManifest(
 
   const isImSession = input.imBinding != null
   for (const skill of registry.list()) {
+    if (skill.id in LARK_CLI_CAPABILITY_MANIFEST) {
+      if (!getCachedLarkCliCapabilityDiagnostics()) void probeLarkCliCapabilities()
+      if (!isLarkSkillCapabilityAvailable(skill.id)) continue
+    }
     if (!passPlatformFilter(skill, input.imBinding?.platform, isImSession)) continue
     if (!passImAccessFilter(skill, isImSession, input.imOverrideRow)) continue
     if (!passAllowedListFilter(skill, input.imOverrideRow?.allowedBuiltInSkillIds)) continue
@@ -107,6 +117,10 @@ export function summariseSkillCapabilities(
 ): readonly PlatformSkillCapability[] {
   const byFamily = new Map<string, Set<BuiltInSkill["mutation"]>>()
   for (const skill of getSharedBuiltInSkillRegistry().listByPlatform(platform)) {
+    if (skill.id in LARK_CLI_CAPABILITY_MANIFEST) {
+      if (!getCachedLarkCliCapabilityDiagnostics()) void probeLarkCliCapabilities()
+      if (!isLarkSkillCapabilityAvailable(skill.id)) continue
+    }
     let bucket = byFamily.get(skill.family)
     if (!bucket) {
       bucket = new Set()

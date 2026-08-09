@@ -8,7 +8,12 @@
 
 import { getDb } from "@/lib/db/schema"
 import { getNativeVectorStoreSize } from "@cognia/vector"
-import { categoryForTable, CATEGORY_INFO, defaultDisplayName } from "./category-info"
+import {
+  categoryForTable,
+  CATEGORY_INFO,
+  defaultDisplayName,
+  tablesForCategory,
+} from "./category-info"
 import type {
   StorageCategory,
   StorageCategoryInfo,
@@ -82,7 +87,10 @@ async function buildBreakdown(): Promise<StorageCategoryInfo[]> {
       displayName: descriptor.defaultName,
       itemCount: 0,
       totalSize: 0,
-      sources: [...descriptor.tables],
+      sources: tablesForCategory(
+        category,
+        db.tables.map((table) => table.name)
+      ),
     })
   }
 

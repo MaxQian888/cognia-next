@@ -74,6 +74,13 @@ export class SynthesizeError extends Error {
   }
 }
 
+export function classifyTeamTaskAccess(task: AgentTeamTask): "read" | "write" {
+  const explicit = task.metadata?.access
+  if (explicit === "read" || explicit === "write") return explicit
+  const readOnlyTags = new Set(["research", "review", "read-only", "analysis", "verification"])
+  return task.tags.some((tag) => readOnlyTags.has(tag.toLowerCase())) ? "read" : "write"
+}
+
 export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult {
   if (input.tasks.length === 0) {
     throw new SynthesizeError("empty", "task list is empty")
@@ -150,6 +157,24 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
             // and injects them into the teammate prompt so the team builds on
             // prior work (deps are also encoded as edges for scheduling).
             ...(t.dependencies.length > 0 ? { dependencies: t.dependencies } : {}),
+            access: classifyTeamTaskAccess(t),
+            taskKind: t.tags?.some((tag) =>
+              ["ui", "frontend", "visual"].includes(tag.toLowerCase())
+            )
+              ? "ui"
+              : classifyTeamTaskAccess(t) === "write"
+                ? "code"
+                : "general",
+            ...(typeof t.metadata?.repositoryId === "string"
+              ? { repositoryId: t.metadata.repositoryId }
+              : {}),
+            ...(Array.isArray(t.metadata?.fileOwnership)
+              ? {
+                  fileOwnership: t.metadata.fileOwnership.filter(
+                    (path): path is string => typeof path === "string" && path.length > 0
+                  ),
+                }
+              : {}),
           },
         },
       }) as WorkflowNode
@@ -159,7 +184,10 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
   // dispatch. Emitted here rather than by the executor so the *scheduler*
   // enforces the gate — an unapproved task's dependents are simply not
   // runnable, instead of relying on downstream nodes to check a flag.
-  const reviewEnabled = isTaskReviewEnabled(input.team.config)
+  const integrationReviewRequired =
+    input.team.config.runtimeVersion === "durable-v2" &&
+    input.team.config.writeMode === "isolated-parallel"
+  const reviewEnabled = isTaskReviewEnabled(input.team.config) || integrationReviewRequired
   if (reviewEnabled) {
     const maxRevisions = resolveMaxRevisions(input.team.config)
     for (const t of input.tasks) {

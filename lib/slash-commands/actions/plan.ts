@@ -31,7 +31,7 @@ import {
   teamTaskInputsFromPlan,
 } from "@/lib/agent/plan/projections"
 import { decomposeIntoPlan } from "@/lib/agent/plan/planner"
-import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { buildAgentRoleLlmClient } from "@/lib/ai/generation/agent-role-client"
 import { redactText } from "@cognia/redact"
 import { ensureSoloTeam, soloTeamId } from "@/lib/agent/plan-mode-bridge"
 import { getGoalRuntime } from "@/lib/goal/runtime"
@@ -117,7 +117,8 @@ async function commandDecompose(ctx: SlashContext, objective: string): Promise<P
   const sessionId = ctx.activeSessionId!
   const session = await loadSession(sessionId)
   const appSettings = useSettingsStore.getState().settings ?? null
-  const client = buildUtilityLlmClient({
+  const client = await buildAgentRoleLlmClient({
+    role: "plan",
     session: session ?? null,
     appSettings,
     featureId: "plan-decompose",

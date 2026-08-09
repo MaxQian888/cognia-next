@@ -18,7 +18,7 @@ import { createAnthropic } from "@ai-sdk/anthropic"
 import { createAzure } from "@ai-sdk/azure"
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import { createCohere } from "@ai-sdk/cohere"
-import { createGoogleGenerativeAI } from "@ai-sdk/google"
+import { createGoogle } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createAlibaba } from "@ai-sdk/alibaba"
@@ -26,7 +26,7 @@ import { createXai } from "@ai-sdk/xai"
 import { createTogetherAI } from "@ai-sdk/togetherai"
 import { createFireworks } from "@ai-sdk/fireworks"
 import { createDeepInfra } from "@ai-sdk/deepinfra"
-import type { LanguageModelV3 } from "@ai-sdk/provider"
+import type { LanguageModelV4 } from "@ai-sdk/provider"
 
 import {
   LOCAL_PROVIDER_URLS,
@@ -501,7 +501,7 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
     case "anthropic":
       return createAnthropic(settings)
     case "google":
-      return createGoogleGenerativeAI(settings)
+      return createGoogle(settings)
     case "cohere":
       return createCohere(settings)
     case "mistral":
@@ -590,17 +590,17 @@ export function createFeatureProviderModel(
       providerId: resolved.providerId,
     })
     if (flavor === "responses" && typeof handle?.responses === "function") {
-      return protectRawAnalysis(handle.responses(modelId) as LanguageModelV3, modelId)
+      return protectRawAnalysis(handle.responses(modelId) as LanguageModelV4, modelId)
     }
     if (typeof handle?.chat === "function") {
-      return protectRawAnalysis(handle.chat(modelId) as LanguageModelV3, modelId)
+      return protectRawAnalysis(handle.chat(modelId) as LanguageModelV4, modelId)
     }
   }
   if (typeof handle === "function") {
-    return protectRawAnalysis(handle(modelId) as LanguageModelV3, modelId)
+    return protectRawAnalysis(handle(modelId) as LanguageModelV4, modelId)
   }
   if (typeof handle?.chat === "function") {
-    return protectRawAnalysis(handle.chat(modelId) as LanguageModelV3, modelId)
+    return protectRawAnalysis(handle.chat(modelId) as LanguageModelV4, modelId)
   }
   throw new Error(
     `createFeatureProviderModel: client for ${resolved.providerId} has no model entrypoint`

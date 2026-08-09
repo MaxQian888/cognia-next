@@ -361,6 +361,38 @@ describe("createSdkEventMapper", () => {
     expect(content).toEqual(expect.stringMatching(/denied/i))
   })
 
+  it("drops a v7 reasoning-file part without rendering or persisting it", () => {
+    // AI SDK 7 split files referenced inside a model's reasoning trace out of
+    // `file` into `reasoning-file`. Raw chain-of-thought artifacts must never
+    // reach the transcript, so this part is dropped on purpose — asserted here
+    // so a future "handle every part type" pass can't quietly start showing
+    // them. Mirrors the sidecar event-adapter test of the same name.
+    const m = createSdkEventMapper(ctx)
+    m.handle({ type: "start" } as never)
+    const out = m.handle({
+      type: "reasoning-file",
+      file: { base64: "U0VDUkVU", mediaType: "image/png" },
+      filename: "scratchpad.png",
+    } as never) as AnyMsg[]
+
+    expect(out).toEqual([])
+    expect(m.sealAssistant()).toEqual([])
+
+    // A genuine output file on the same turn is unaffected.
+    const after = m.handle({
+      type: "file",
+      file: { base64: "QUJD", mediaType: "image/png" },
+      filename: "chart.png",
+    }) as AnyMsg[]
+    expect(assistantContent(after)).toEqual([
+      {
+        type: "file",
+        source: { type: "base64", media_type: "image/png", data: "QUJD" },
+        filename: "chart.png",
+      },
+    ])
+  })
+
   it("emits a generated file part as its own one-shot assistant message", () => {
     const m = createSdkEventMapper(ctx)
     const out = m.handle({

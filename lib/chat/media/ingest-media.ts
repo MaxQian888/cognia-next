@@ -36,6 +36,9 @@ export const THUMBNAIL_MAX_LONG_EDGE = 512
 /** Below this the canonical image is already small; a thumbnail would be waste. */
 export const THUMBNAIL_MIN_SOURCE_BYTES = 64 * 1024
 
+/** Hard boundary for untrusted inline image payloads entering chat storage. */
+export const MAX_IMAGE_INPUT_BYTES = 10 * 1024 * 1024
+
 export interface IngestedMedia {
   /** `cognia-media:<hash>` — what the message part carries. */
   ref: string
@@ -73,6 +76,9 @@ export async function ingestImage({
   keepOriginal = false,
   now = Date.now,
 }: IngestImageInput): Promise<IngestedMedia> {
+  if (bytes.byteLength > MAX_IMAGE_INPUT_BYTES) {
+    throw new Error("Chat image exceeds the 10 MiB persistence limit")
+  }
   const hash = await sha256Hex(bytes)
 
   // Same source seen before: skip the decode, the re-encode and the write.

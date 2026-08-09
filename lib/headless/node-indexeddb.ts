@@ -35,6 +35,25 @@ function memoryStorage(): Storage {
   return storage as Storage
 }
 
+function installMemoryStorage(
+  g: Record<string, unknown>,
+  key: "localStorage" | "sessionStorage"
+): void {
+  const descriptor = Object.getOwnPropertyDescriptor(g, key)
+  if (descriptor && "value" in descriptor && descriptor.value) return
+
+  // Node 26's built-in localStorage is a configurable accessor whose getter
+  // emits an ExperimentalWarning unless --localstorage-file is configured.
+  // Headless state is persisted through Dexie, so replace that accessor with
+  // the existing in-memory shim without reading it first.
+  Object.defineProperty(g, key, {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: memoryStorage(),
+  })
+}
+
 /**
  * Install `fake-indexeddb` + a minimal `window` shim onto a global. Idempotent
  * and non-clobbering — a real jsdom window / indexedDB (tests) is left
@@ -49,8 +68,8 @@ export async function installFakeIndexedDb(
   g: Record<string, unknown> = globalThis as unknown as Record<string, unknown>
 ): Promise<void> {
   if (typeof g.window === "undefined") g.window = g
-  if (!g.localStorage) g.localStorage = memoryStorage()
-  if (!g.sessionStorage) g.sessionStorage = memoryStorage()
+  installMemoryStorage(g, "localStorage")
+  installMemoryStorage(g, "sessionStorage")
   if (!g.indexedDB) {
     const fake = await import("fake-indexeddb")
     g.indexedDB = new fake.IDBFactory()

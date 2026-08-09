@@ -2,7 +2,7 @@
  * Panels of the Settings → External Bridge master/detail pane, plus the scope
  * grouping the permissions panel renders.
  *
- * Replaces the six-card single scroll the section used to be. The 19 bridge
+ * Replaces the six-card single scroll the section used to be. The bridge
  * scopes were previously a flat list of raw `namespace:verb` strings (the
  * file's own header claimed nine); grouping them by namespace is what makes
  * that list scannable without renaming anything on the wire.
@@ -22,6 +22,7 @@ import {
   ShieldIcon,
   TerminalIcon,
   WebhookIcon,
+  WorkflowIcon,
   WrenchIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -83,7 +84,16 @@ export function resolveBridgePanel(raw: string | null | undefined): BridgePanelI
 // ---- Scope grouping ---------------------------------------------------------
 
 export type ScopeGroupId =
-  "wiki" | "rag" | "runtime" | "mcp" | "inbox" | "agent" | "plugin" | "inbound" | "memory"
+  | "wiki"
+  | "rag"
+  | "runtime"
+  | "mcp"
+  | "inbox"
+  | "agent"
+  | "plugin"
+  | "inbound"
+  | "memory"
+  | "workflow"
 
 export interface ScopeGroup {
   id: ScopeGroupId
@@ -101,6 +111,7 @@ const GROUP_ICONS: Record<ScopeGroupId, LucideIcon> = {
   plugin: PuzzleIcon,
   inbound: WebhookIcon,
   memory: BrainIcon,
+  workflow: WorkflowIcon,
 }
 
 const GROUP_ORDER: ScopeGroupId[] = [
@@ -109,6 +120,7 @@ const GROUP_ORDER: ScopeGroupId[] = [
   "runtime",
   "memory",
   "agent",
+  "workflow",
   "inbox",
   "plugin",
   "mcp",

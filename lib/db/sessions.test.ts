@@ -1,16 +1,15 @@
-/** @jest-environment jsdom */
 // Coverage for session creation, focused on the default-preset auto-apply
 // path added in v12 of the preset feature uplift. The non-preset behaviour
 // of `createSession` was tested implicitly through the broader app; we
 // exercise it directly here so the auto-apply branch can't regress.
 
-import "fake-indexeddb/auto"
 import { liveQuery } from "dexie"
 import type { ChatSession } from "@cognia/agent-config-types"
 import {
   createSession,
   getSession,
   updateSession,
+  setSessionActiveBranchSelection,
   listSessions,
   listScopedSessions,
   deleteSession,
@@ -23,13 +22,20 @@ import {
   unarchiveSession,
   bulkArchiveSessions,
   bulkUnarchiveSessions,
+  bulkSetSessionsPinned,
   setSessionOrder,
 } from "./sessions"
 import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { createLoop, getLoop, listLoopsBySession } from "./loops"
 import { createGoal, listGoalsBySession } from "./goals"
+import {
+  createSessionPeerMessage,
+  listSessionInbox,
+  listSessionOutbox,
+} from "./session-peer-messages"
 import { loggers } from "@cognia/logging"
 
 // The /loop cascade tears down backing scheduler tasks via a dynamic
@@ -54,16 +60,17 @@ jest.mock("@/lib/chat/search/indexer", () => ({
   markSessionRemoved: (sessionId: string) => markSessionRemovedMock(sessionId),
 }))
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
+  await dbFixture.restore()
   markSessionRemovedMock.mockClear()
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
   await getDb().promptPresets.clear()
   // Cold open builds the full Dexie schema (now v99); can exceed the default 5s
   // hook budget under fake-indexeddb on the first test.
-}, 30_000)
+})
+afterAll(dbFixture.dispose)
 
 /** Poll until `pred` is true (liveQuery emissions land on microtask timing). */
 async function waitUntil(pred: () => boolean, timeoutMs = 3000): Promise<void> {
@@ -117,6 +124,24 @@ describe("createSession — without default preset", () => {
     expect(session.integrationBinding).toEqual(integrationBinding)
     expect(session.platformBinding).toBeUndefined()
     await expect(getSession(session.id)).resolves.toMatchObject({ integrationBinding })
+  })
+
+  it("round-trips the durable execution context used by chat and scheduler runs", async () => {
+    const executionContext = {
+      location: "managedWorktree" as const,
+      projectId: "project-1",
+      projectRoot: "/repo",
+      environmentId: "env-1",
+      taskWorkspace: {
+        taskId: "task-workspace:session-1",
+        workspaceKey: "session-1",
+      },
+      baseRef: "main",
+    }
+    const session = await createSession({ title: "Managed", executionContext })
+
+    expect(session.executionContext).toEqual(executionContext)
+    await expect(getSession(session.id)).resolves.toMatchObject({ executionContext })
   })
 })
 
@@ -252,6 +277,19 @@ describe("createSession — default preset auto-apply", () => {
 })
 
 describe("updateSession + listSessions", () => {
+  it("persists branch selection and increments the transcript revision", async () => {
+    const session = await createSession({ title: "Branches" })
+
+    await setSessionActiveBranchSelection(session.id, "group-1", "message-2")
+
+    expect(await getSession(session.id)).toMatchObject({
+      activeBranchByGroup: { "group-1": "message-2" },
+      transcriptRevision: 1,
+    })
+    await setSessionActiveBranchSelection(session.id, "group-1", "message-2")
+    expect((await getSession(session.id))?.transcriptRevision).toBe(1)
+  })
+
   it("round-trips a patch", async () => {
     const session = await createSession({ title: "Test" })
     await updateSession(session.id, { title: "Renamed" })
@@ -275,6 +313,37 @@ describe("updateSession + listSessions", () => {
     await updateSession(session.id, { pinned: false })
     expect((await getSession(session.id))?.pinned).toBe(false)
   })
+
+  it("pins a batch atomically while preserving each session's activity time", async () => {
+    await getDb().sessions.bulkPut([
+      {
+        id: "pin-a",
+        title: "A",
+        createdAt: 10,
+        updatedAt: 100,
+        lastMessageAt: 80,
+      },
+      { id: "pin-b", title: "B", createdAt: 20, updatedAt: 90 },
+      { id: "pin-c", title: "C", createdAt: 30, updatedAt: 70, pinned: false },
+    ] as ChatSession[])
+
+    await bulkSetSessionsPinned(["pin-a", "pin-b"], true)
+
+    const [a, b, c] = await Promise.all([
+      getSession("pin-a"),
+      getSession("pin-b"),
+      getSession("pin-c"),
+    ])
+    expect(a).toMatchObject({ pinned: true, lastMessageAt: 80 })
+    expect(b).toMatchObject({ pinned: true, lastMessageAt: 90 })
+    expect(a!.updatedAt).toBeGreaterThan(100)
+    expect(b!.updatedAt).toBe(a!.updatedAt)
+    expect(c).toMatchObject({ pinned: false, updatedAt: 70 })
+  })
+
+  it("does not touch the database for an empty pin batch", async () => {
+    await expect(bulkSetSessionsPinned([], true)).resolves.toBeUndefined()
+  })
 })
 
 describe("bulkDeleteSessions", () => {
@@ -296,10 +365,89 @@ describe("bulkDeleteSessions", () => {
     await expect(bulkDeleteSessions([a.id, "s_missing"])).resolves.toBeUndefined()
   })
 
+  it("does not cascade from a missing root into a dangling attached child", async () => {
+    const child = await createSession({ title: "dangling attached child" })
+    await updateSession(child.id, {
+      parentSessionId: "s_missing",
+      attachedChild: {
+        parentSessionId: "s_missing",
+        lifecycleOwnerSessionId: "s_missing",
+        status: "running",
+        context: { mode: "none" },
+        workspace: "shared",
+        createdAt: 1,
+      },
+    })
+
+    await bulkDeleteSessions(["s_missing"])
+
+    expect(await getSession(child.id)).toBeDefined()
+  })
+
   it("is a no-op on an empty array (does not open a transaction)", async () => {
     const a = await createSession({ title: "A" })
     await bulkDeleteSessions([])
     expect(await getSession(a.id)).toBeDefined()
+  })
+
+  it("cascades attached descendants and their peer-message and goal state", async () => {
+    const parent = await createSession({ title: "parent" })
+    const child = await createSession({ title: "attached child" })
+    const grandchild = await createSession({ title: "attached grandchild" })
+    const branch = await createSession({ title: "ordinary branch" })
+    await updateSession(child.id, {
+      parentSessionId: parent.id,
+      attachedChild: {
+        parentSessionId: parent.id,
+        lifecycleOwnerSessionId: parent.id,
+        status: "running",
+        context: { mode: "none" },
+        workspace: "shared",
+        createdAt: 1,
+      },
+    })
+    await updateSession(grandchild.id, {
+      parentSessionId: child.id,
+      attachedChild: {
+        parentSessionId: child.id,
+        lifecycleOwnerSessionId: child.id,
+        status: "running",
+        context: { mode: "none" },
+        workspace: "shared",
+        createdAt: 2,
+      },
+    })
+    await updateSession(branch.id, { parentSessionId: parent.id })
+    await createGoal({
+      id: "goal-attached",
+      sessionId: child.id,
+      rawObjective: "finish child work",
+      safeObjective: "finish child work",
+      redactionMapEnc: "",
+      status: "stopped",
+      turnsUsed: 0,
+      tokensUsed: 0,
+      judgeFailureCount: 0,
+      config: { maxTurns: 20, maxTokens: 200_000, maxJudgeFailures: 3, timeoutMs: 1_800_000 },
+      generationId: "gen-attached",
+    })
+    await createSessionPeerMessage({
+      senderSessionId: parent.id,
+      receiverSessionId: child.id,
+      content: "parent to child",
+      intent: "note",
+      origin: "user",
+    })
+
+    await bulkDeleteSessions([parent.id])
+
+    expect(await getSession(parent.id)).toBeUndefined()
+    expect(await getSession(child.id)).toBeUndefined()
+    expect(await getSession(grandchild.id)).toBeUndefined()
+    expect((await getSession(branch.id))?.parentSessionId).toBeUndefined()
+    expect(await listGoalsBySession(child.id)).toEqual([])
+    expect(await listSessionOutbox(parent.id)).toEqual([])
+    expect(await listSessionInbox(child.id)).toEqual([])
   })
 })
 
@@ -506,6 +654,46 @@ describe("archive / unarchive", () => {
     expect(after?.updatedAt).toBe(before)
   })
 
+  it("recursively closes attached descendants when their parent is archived", async () => {
+    const parent = await createSession({ title: "parent" })
+    const child = await createSession({
+      title: "attached child",
+    })
+    await updateSession(child.id, {
+      parentSessionId: parent.id,
+      attachedChild: {
+        parentSessionId: parent.id,
+        lifecycleOwnerSessionId: parent.id,
+        status: "running",
+        context: { mode: "none" },
+        workspace: "shared",
+        createdAt: 1,
+      },
+    })
+    const grandchild = await createSession({ title: "attached grandchild" })
+    await updateSession(grandchild.id, {
+      parentSessionId: child.id,
+      attachedChild: {
+        parentSessionId: child.id,
+        lifecycleOwnerSessionId: child.id,
+        status: "running",
+        context: { mode: "none" },
+        workspace: "shared",
+        createdAt: 2,
+      },
+    })
+
+    const childBefore = (await getSession(child.id))!.updatedAt
+    const grandchildBefore = (await getSession(grandchild.id))!.updatedAt
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    await archiveSession(parent.id)
+
+    expect((await getSession(child.id))?.attachedChild?.status).toBe("closed")
+    expect((await getSession(grandchild.id))?.attachedChild?.status).toBe("closed")
+    expect((await getSession(child.id))!.updatedAt).toBeGreaterThan(childBefore)
+    expect((await getSession(grandchild.id))!.updatedAt).toBeGreaterThan(grandchildBefore)
+  })
+
   it("unarchiveSession deletes the archivedAt field outright", async () => {
     const s = await createSession({ title: "round trip" })
     await archiveSession(s.id)
@@ -524,6 +712,45 @@ describe("archive / unarchive", () => {
     await bulkArchiveSessions([a.id, b.id, "missing-id"])
     expect((await getSession(a.id))?.archivedAt).toEqual(expect.any(Number))
     expect((await getSession(b.id))?.archivedAt).toEqual(expect.any(Number))
+  })
+
+  it("bulkArchiveSessions recursively closes attached descendants", async () => {
+    const parent = await createSession({ title: "parent" })
+    const child = await createSession({ title: "child" })
+    await updateSession(child.id, {
+      parentSessionId: parent.id,
+      attachedChild: {
+        parentSessionId: parent.id,
+        lifecycleOwnerSessionId: parent.id,
+        status: "running",
+        context: { mode: "none" },
+        workspace: "shared",
+        createdAt: 1,
+      },
+    })
+
+    await bulkArchiveSessions([parent.id])
+
+    expect((await getSession(child.id))?.attachedChild?.status).toBe("closed")
+  })
+
+  it("does not close a dangling attached child when the requested root is missing", async () => {
+    const child = await createSession({ title: "dangling child" })
+    await updateSession(child.id, {
+      parentSessionId: "missing-parent",
+      attachedChild: {
+        parentSessionId: "missing-parent",
+        lifecycleOwnerSessionId: "missing-parent",
+        status: "running",
+        context: { mode: "none" },
+        workspace: "shared",
+        createdAt: 1,
+      },
+    })
+
+    await bulkArchiveSessions(["missing-parent"])
+
+    expect((await getSession(child.id))?.attachedChild?.status).toBe("running")
   })
 
   it("bulkUnarchiveSessions deletes archivedAt for every id in one pass and no-ops on empty", async () => {
@@ -630,5 +857,33 @@ describe("deleteSession — branch survival", () => {
     await deleteSession("parent")
 
     expect((await getDb().sessions.get("theirs"))?.parentSessionId).toBe("elsewhere")
+  })
+
+  it("cascades parent-owned attached children while preserving ordinary branches", async () => {
+    await mkSession("parent")
+    await mkSession("branch", "parent")
+    await getDb().sessions.put({
+      id: "attached",
+      title: "attached",
+      kind: "direct",
+      projectId: "p1",
+      parentSessionId: "parent",
+      attachedChild: {
+        parentSessionId: "parent",
+        lifecycleOwnerSessionId: "parent",
+        status: "running",
+        context: { mode: "full" },
+        workspace: "shared",
+        createdAt: 1,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    } as ChatSession)
+
+    await deleteSession("parent")
+
+    expect(await getDb().sessions.get("attached")).toBeUndefined()
+    expect(await getDb().sessions.get("branch")).toBeDefined()
+    expect((await getDb().sessions.get("branch"))?.parentSessionId).toBeUndefined()
   })
 })

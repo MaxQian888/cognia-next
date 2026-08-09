@@ -25,6 +25,23 @@ import { CONTEXT_ACTIVITY_RAIL_ORDER } from "@/types/context-workbench"
  */
 export const WORKBENCH_RAIL_WIDTH_PX = 48
 
+/**
+ * A user-defined group of panels that displays as a single activity rail item.
+ * Clicking the group shows a tab strip in the panel body to switch between its
+ * member panels. The group's id is used in `order`/`hidden` exactly like a
+ * canonical activity id.
+ */
+export interface WorkbenchRailGroup {
+  /** Unique group id, prefixed `group:` to avoid colliding with activity ids. */
+  id: string
+  /** User-chosen label shown in the customizer and as a tooltip on the rail. */
+  label: string
+  /** Lucide icon name string (resolved by the renderer). */
+  icon: string
+  /** Panel ids that belong to this group, in tab order. */
+  panelIds: string[]
+}
+
 /** User customization of the workbench activity rail. */
 export interface WorkbenchRailLayout {
   /**
@@ -34,6 +51,8 @@ export interface WorkbenchRailLayout {
   order: string[]
   /** Activity ids removed from the rail. Still carry a position in `order`. */
   hidden: string[]
+  /** User-defined panel groups that appear as single rail items. */
+  groups?: WorkbenchRailGroup[]
 }
 
 /**
@@ -47,4 +66,5 @@ export interface WorkbenchRailLayout {
 export const DEFAULT_WORKBENCH_RAIL_LAYOUT: WorkbenchRailLayout = {
   order: [...CONTEXT_ACTIVITY_RAIL_ORDER],
   hidden: [],
+  groups: [],
 }

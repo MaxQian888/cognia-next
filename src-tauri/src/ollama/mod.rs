@@ -24,11 +24,13 @@
 //! be a lie in the API surface — the front-end detaches its listener instead
 //! and tells the user the download continues in the background.
 
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 use tauri::Emitter;
 
-use cognia_net::ndjson_stream::stream_ndjson_post;
+use cognia_gateway::header_policy::validate_static_headers;
+use cognia_net::ndjson_stream::stream_ndjson_post_with_headers;
 
 /// Event name carrying pull progress to the renderer. Mirrors the literal in
 /// `packages/provider-core/src/providers/ollama-pull.ts`.
@@ -101,21 +103,55 @@ const PULL_READ_TIMEOUT: Duration = Duration::from_secs(300);
 /// — unrecoverable, since by design there is no cancel command and the abort
 /// path only detaches the progress listener.
 fn pull_client(url: &str) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .read_timeout(PULL_READ_TIMEOUT)
         .tcp_keepalive(Duration::from_secs(30));
-
-    let cfg = crate::proxy_config::current();
-    if !cfg.should_bypass(url) {
-        if let Some(proxy) = cfg.build_reqwest_proxy() {
-            builder = builder.proxy(proxy);
-        }
-    }
+    let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, url)
+        .map_err(|error| error.to_string())?;
 
     builder
         .build()
         .map_err(|e| format!("client build failed: {e}"))
+}
+
+fn build_pull_headers(
+    api_key: Option<&str>,
+    custom_headers: Option<&HashMap<String, String>>,
+) -> Result<HeaderMap, String> {
+    let mut headers = HeaderMap::new();
+
+    if let Some(custom_headers) = custom_headers {
+        let violations = validate_static_headers(
+            custom_headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        );
+        if !violations.is_empty() {
+            let details = violations
+                .into_iter()
+                .map(|(name, reason)| format!("{name}: {reason}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!("invalid custom headers ({details})"));
+        }
+
+        for (name, value) in custom_headers {
+            let name = HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| format!("invalid custom header name: {name}"))?;
+            let value = HeaderValue::from_str(value)
+                .map_err(|_| format!("invalid custom header value: {name}"))?;
+            headers.insert(name, value);
+        }
+    }
+
+    if let Some(api_key) = api_key.map(str::trim).filter(|key| !key.is_empty()) {
+        let value = HeaderValue::from_str(&format!("Bearer {api_key}"))
+            .map_err(|_| "invalid API key for Authorization header".to_string())?;
+        headers.insert(AUTHORIZATION, value);
+    }
+
+    Ok(headers)
 }
 
 /// Pull `model_name`, emitting one `ollama-pull-progress` event per NDJSON line.
@@ -134,9 +170,12 @@ pub async fn ollama_pull_model_stream(
     base_url: String,
     model_name: String,
     pull_id: String,
+    api_key: Option<String>,
+    custom_headers: Option<HashMap<String, String>>,
 ) -> Result<bool, String> {
     let url = format!("{}/api/pull", base_url.trim_end_matches('/'));
     let client = pull_client(&url)?;
+    let headers = build_pull_headers(api_key.as_deref(), custom_headers.as_ref())?;
     let body = serde_json::json!({ "name": model_name, "stream": true });
 
     // A mid-stream failure arrives as a line, not a status code, so the last
@@ -174,9 +213,15 @@ pub async fn ollama_pull_model_stream(
     // Two distinct failure shapes, both real: a pre-stream failure (bad model
     // name) is a genuine non-200 and lands here; a mid-stream failure keeps
     // HTTP 200 and is caught by `in_band_error` below.
-    let delivered = stream_ndjson_post::<OllamaPullProgress, _>(&client, &url, &body, &mut on_line)
-        .await
-        .map_err(|e| format!("ollama pull failed: {e}"))?;
+    let delivered = stream_ndjson_post_with_headers::<OllamaPullProgress, _>(
+        &client,
+        &url,
+        &body,
+        headers,
+        &mut on_line,
+    )
+    .await
+    .map_err(|e| format!("ollama pull failed: {e}"))?;
 
     decide_pull_outcome(&url, delivered, in_band_error, saw_success)
 }
@@ -224,6 +269,23 @@ fn decide_pull_outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pull_headers_keep_custom_values_and_reserve_authorization_for_the_api_key() {
+        let custom = HashMap::from([("X-Tenant".to_string(), "local".to_string())]);
+        let headers = build_pull_headers(Some(" secret "), Some(&custom)).unwrap();
+
+        assert_eq!(headers.get("x-tenant").unwrap(), "local");
+        assert_eq!(headers.get(AUTHORIZATION).unwrap(), "Bearer secret");
+    }
+
+    #[test]
+    fn pull_headers_reject_custom_auth_overrides() {
+        let custom = HashMap::from([("authorization".to_string(), "Bearer override".to_string())]);
+        let error = build_pull_headers(Some("secret"), Some(&custom)).unwrap_err();
+
+        assert!(error.contains("authorization: auth-header"), "got: {error}");
+    }
 
     #[test]
     fn progress_serializes_as_an_object_with_a_camel_case_pull_id() {

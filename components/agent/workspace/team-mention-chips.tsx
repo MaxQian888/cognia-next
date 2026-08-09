@@ -16,8 +16,8 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { senderColor } from "./sender-color"
 import { RuntimeBadge } from "./runtime-badge"
+import { AgentTeamAvatar, mentionTargetAvatarSubject } from "./agent-team-avatar"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import type { RuntimeAvailabilityMap } from "@/lib/agent-team/use-runtime-availability"
 
@@ -72,13 +72,10 @@ export function TeamMentionChips({
                   unavailable && "opacity-60"
                 )}
               >
-                <span
-                  aria-hidden
-                  className="flex size-4 items-center justify-center rounded-full text-[9px] font-semibold text-white"
-                  style={{ backgroundColor: senderColor(target.name) }}
-                >
-                  {target.name.charAt(0).toUpperCase() || "?"}
-                </span>
+                <AgentTeamAvatar
+                  subject={mentionTargetAvatarSubject(target)}
+                  className="size-4 rounded-full bg-muted ring-1 ring-inset ring-border/60"
+                />
                 <span className="font-medium">@{target.name}</span>
                 <RuntimeBadge runtime={target.runtime} iconOnly className="h-4 w-4 px-0" />
                 {unavailable && <AlertTriangleIcon className="size-3 text-amber-500" aria-hidden />}

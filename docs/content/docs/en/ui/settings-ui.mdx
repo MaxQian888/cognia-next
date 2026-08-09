@@ -88,7 +88,7 @@ export type SettingsSectionId =
   | "scheduled-tasks"
   | "logs"
   | "diagnostics"
-  | "remote-control"
+  | "webhooks"
   | "external-bridge"
   | "companion"
   | "network"
@@ -113,7 +113,7 @@ interface NavItem {
 }
 ```
 
-Entries with `desktopOnly: true` (e.g. `subscription`, `ccswitch`, `hooks`, `tools`, `connections`, `remote-control`, `companion`, `desktop`) are automatically filtered out by the sidebar when `usePlatform() === "web" | "mobile"`. This is a single toggle; the section itself does not need to repeat the check.
+Entries with `desktopOnly: true` (e.g. `subscription`, `ccswitch`, `hooks`, `tools`, `connections`, `webhooks`, `companion`, `desktop`) are automatically filtered out by the sidebar when `usePlatform() === "web" | "mobile"`. This is a single toggle; the section itself does not need to repeat the check.
 
 ## Group Semantics
 
@@ -124,7 +124,7 @@ Entries with `desktopOnly: true` (e.g. `subscription`, `ccswitch`, `hooks`, `too
 | `interface`     | Visuals and interaction           | appearance, speech, presets, artifacts, canvas                      |
 | `data`          | Data lifecycle                    | data (backup/export), workflows, scheduled-tasks                    |
 | `observability` | Troubleshooting and monitoring    | logs, diagnostics                                                   |
-| `system`        | System-level integrations         | remote-control, external-bridge, companion, network, desktop, about |
+| `system`        | System-level integrations         | webhooks, external-bridge, companion, network, desktop, about       |
 
 Order is controlled by `SETTINGS_GROUP_ORDER`, **not** alphabetical.
 
@@ -404,7 +404,7 @@ The Settings UI is the "entry panel" for nearly every subsystem. The table below
   <Card title="Plugin System" href="../subsystems/plugin-system" description="Local plugin installation under ?section=plugins" />
   <Card title="Scheduler" href="../subsystems/scheduler" description="Cron and history under ?section=scheduled-tasks" />
   <Card title="External Bridge" href="../subsystems/external-bridge" description="MCP server external exposure under ?section=external-bridge" />
-  <Card title="Remote Control" href="../subsystems/remote-control" description="Device linking under ?section=remote-control" />
+  <Card title="Webhooks" href="/settings?section=webhooks" description="Standard Webhooks signing and outbound endpoints" />
   <Card title="Companion API" href="../subsystems/companion-api" description="LAN bind / pair JWT management under ?section=companion" />
   <Card title="Claude Subscription OAuth" href="../chat/claude-subscription-oauth" description="Subscription login and quotas under ?section=subscription" />
   <Card

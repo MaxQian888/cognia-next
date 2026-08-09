@@ -68,6 +68,7 @@ const openPetPopup = jest.fn()
 let workAreaValue: unknown = { x: 0, y: 0, width: 1920, height: 1080, scaleFactor: 1 }
 jest.mock("@/lib/tauri/pet-window", () => ({
   getPetWindowPosition: () => getPetWindowPosition(),
+  getPetCursorPosition: jest.fn().mockResolvedValue(null),
   setPetWindowPosition: (x: number, y: number) => setPetWindowPosition(x, y),
   getPetWorkArea: () => Promise.resolve(workAreaValue),
   openPetPopup: (opts: unknown) => openPetPopup(opts),
@@ -310,6 +311,7 @@ describe("PetOverlayView", () => {
         mutedBubbles: false,
         size: 96,
         skinId: "live2d",
+        activeLive2dModelId: "m1",
         desktopPet: { enabled: true, clickThrough: false, size: 128, position: null },
       },
     }

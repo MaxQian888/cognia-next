@@ -50,6 +50,16 @@ import {
   type VectorToolRunDeps,
 } from "./vector-builtin-tools"
 import { getTeamDispatchContext } from "./agents/dispatch-context-registry"
+import {
+  isSpawnTaskBuiltinTool,
+  runSpawnTaskBuiltinTool,
+  type SpawnTaskToolRunDeps,
+} from "./spawn-task-builtin-tools"
+import {
+  isSessionPeerBuiltinTool,
+  runSessionPeerBuiltinTool,
+  type SessionPeerToolRunDeps,
+} from "./session-peer-builtin-tools"
 import type { RemoteExecutionContext } from "./remote-execution"
 
 const PLUGIN_TOOL_RESULT_PII_ERROR = "Plugin tool result blocked by the PII redaction gate"
@@ -110,6 +120,47 @@ let resolverOverride: PluginToolResolver | null = null
  * host overrides it from config. Swappable for tests.
  */
 let webToolDepsOverride: (() => Promise<WebToolRunDeps> | WebToolRunDeps) | null = null
+
+let spawnTaskDepsOverride: (() => Promise<SpawnTaskToolRunDeps> | SpawnTaskToolRunDeps) | null =
+  null
+let sessionPeerDepsOverride:
+  (() => Promise<SessionPeerToolRunDeps> | SessionPeerToolRunDeps) | null = null
+
+export function __setSpawnTaskToolDepsForTesting(
+  fn: (() => Promise<SpawnTaskToolRunDeps> | SpawnTaskToolRunDeps) | null
+): void {
+  spawnTaskDepsOverride = fn
+}
+
+async function resolveSpawnTaskToolDeps(): Promise<SpawnTaskToolRunDeps> {
+  if (spawnTaskDepsOverride) return spawnTaskDepsOverride()
+  const { dispatchSpawnTask } = await import("@/lib/tasks/spawn-task-dispatch")
+  return { gate: hasNoLeakingPiiDeep, dispatch: dispatchSpawnTask }
+}
+
+export function __setSessionPeerToolDepsForTesting(
+  fn: (() => Promise<SessionPeerToolRunDeps> | SessionPeerToolRunDeps) | null
+): void {
+  sessionPeerDepsOverride = fn
+}
+
+async function resolveSessionPeerToolDeps(): Promise<SessionPeerToolRunDeps> {
+  if (sessionPeerDepsOverride) return sessionPeerDepsOverride()
+  const [{ listReachableSessions, sendSessionPeerMessage }, { useChatStore }] = await Promise.all([
+    import("@/lib/chat/session-peer-messaging"),
+    import("@/stores/chat/chat-store"),
+  ])
+  return {
+    gate: hasNoLeakingPiiDeep,
+    listReachable: async (senderSessionId) =>
+      (await listReachableSessions(senderSessionId)).map((session) => ({
+        id: session.id,
+        title: session.title,
+        status: useChatStore.getState().sessions[session.id]?.status ?? "idle",
+      })),
+    send: sendSessionPeerMessage,
+  }
+}
 
 /** Inject web-tool deps (tests / CLI host). Pass `null` to restore default. */
 export function __setWebToolDepsForTesting(
@@ -436,6 +487,26 @@ export async function handlePluginToolExec(
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
+    // ── Promoted spawn_task built-in — stage a user-started sidechat ──────
+    if (isSpawnTaskBuiltinTool(request.name)) {
+      const result = await runSpawnTaskBuiltinTool(
+        request.name,
+        request.args,
+        await resolveSpawnTaskToolDeps(),
+        { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    // ── Independent-session discovery and messaging ──────────────────────
+    if (isSessionPeerBuiltinTool(request.name)) {
+      const result = await runSessionPeerBuiltinTool(
+        request.name,
+        request.args,
+        await resolveSessionPeerToolDeps(),
+        { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
     // ── Promoted vector built-ins — project-scoped vector memory ───────────
     // Host-routed: the native sqlite-vec store is a Tauri command surface and
     // the service reaches `@/stores` for the embedding config — neither is
@@ -457,7 +528,8 @@ export async function handlePluginToolExec(
       const result = await runSkillBuiltinTool(
         request.name,
         request.args,
-        await resolveSkillToolDeps()
+        await resolveSkillToolDeps(),
+        { sessionId: request.sessionId }
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }

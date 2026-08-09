@@ -133,6 +133,7 @@
   "cloneSuccess": "任务克隆成功",
   "cloneTask": "克隆任务",
   "close": "关闭",
+  "code": "代码：",
   "command": "命令",
   "commandArgs": "命令参数",
   "config": "配置",
@@ -353,8 +354,8 @@
   "kindFilter": {
     "all": "全部",
     "app": "应用",
-    "backup": "备份",
     "background-command": "后台命令",
+    "backup": "备份",
     "connector": "连接器",
     "plugin": "插件",
     "system": "系统",
@@ -782,6 +783,7 @@
       "unavailableOnWeb": "仅桌面版支持系统级调度器集成。"
     }
   },
+  "showLess": "显示更少",
   "showMore": "显示更多",
   "slashCommand": {
     "description": "创建定时任务或提醒"
@@ -793,6 +795,7 @@
     "nextRun": "下次运行"
   },
   "sourceConversationMissing": "来源 IM 会话已不再绑定聊天会话。",
+  "stackTrace": "堆栈跟踪",
   "startedAt": "开始时间",
   "statistics": "统计",
   "stats": {
@@ -894,6 +897,10 @@
   "timeoutMs": "超时（毫秒）",
   "timezone": "时区",
   "timing": "时间",
+  "occurrenceList": {
+    "moreTimes": "另有 {count} 次",
+    "rowAria": "{name}，未来 {count} 次执行"
+  },
   "title": "定时任务",
   "tools": {
     "createFailed": "定时任务创建失败",

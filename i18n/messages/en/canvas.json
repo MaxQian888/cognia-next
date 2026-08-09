@@ -125,6 +125,7 @@
   "errorDescription": "Something went wrong while rendering the editor. You can retry, or copy the error details to report it.",
   "errorTitle": "Canvas crashed",
   "errors": "Errors",
+  "input": "Input",
   "executing": "Executing…",
   "executingCode": "Executing code…",
   "executionFailed": "Execution failed",
@@ -199,6 +200,7 @@
   "online": "Online",
   "original": "Original",
   "output": "Output",
+  "rawErrorOutput": "Raw error output",
   "panels": {
     "accept": "Accept",
     "collabHint": "Real-time collaboration is disabled by default. Enable it in Settings → Canvas → Collaboration and provide a CRDT signalling URL.",

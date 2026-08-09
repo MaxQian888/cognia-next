@@ -7,7 +7,8 @@
  * component stays a pure presenter (same contract as {@link SelectList}).
  */
 import React from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { isMouseSequence } from "../../input/mouse"
 import { useTheme } from "../../theme/context"
@@ -50,7 +51,7 @@ export function ProviderKeyOverlay({
   const theme = useTheme()
   const label = credentialKind === "authToken" ? "token" : "API key"
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (key.escape) return onCancel()
       if (key.return) return onSubmit()

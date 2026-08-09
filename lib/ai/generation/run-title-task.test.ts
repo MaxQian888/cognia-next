@@ -1,17 +1,24 @@
 import {
   isPlaceholderTitle,
+  isInstantPreviewTitle,
   shouldGenerateTitle,
   titlesEquivalent,
+  isTitleInFlight,
   runTitleTask,
 } from "./run-title-task"
-import { buildUtilityLlmClient } from "./utility-client"
+import { buildAgentRoleLlmClient } from "./agent-role-client"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
-jest.mock("./utility-client", () => ({
-  buildUtilityLlmClient: jest.fn(),
+const mockHasNoLeakingPiiDeep = jest.fn(() => true)
+
+jest.mock("./agent-role-client", () => ({
+  buildAgentRoleLlmClient: jest.fn(),
+}))
+jest.mock("@cognia/redact", () => ({
+  hasNoLeakingPiiDeep: (...args: unknown[]) => mockHasNoLeakingPiiDeep(...args),
 }))
 
-const mockBuild = buildUtilityLlmClient as jest.MockedFunction<typeof buildUtilityLlmClient>
+const mockBuild = buildAgentRoleLlmClient as jest.MockedFunction<typeof buildAgentRoleLlmClient>
 
 function clientReturning(text: string): LlmClient {
   return { complete: jest.fn(async () => text) }
@@ -19,6 +26,7 @@ function clientReturning(text: string): LlmClient {
 
 beforeEach(() => {
   mockBuild.mockReset()
+  mockHasNoLeakingPiiDeep.mockReset().mockReturnValue(true)
 })
 
 describe("isPlaceholderTitle", () => {
@@ -29,8 +37,72 @@ describe("isPlaceholderTitle", () => {
     expect(isPlaceholderTitle("New conversation")).toBe(true)
   })
 
+  it("recognizes i18n placeholder variants", () => {
+    expect(isPlaceholderTitle("新对话")).toBe(true)
+    expect(isPlaceholderTitle("新聊天")).toBe(true)
+    expect(isPlaceholderTitle("新建会话")).toBe(true)
+    expect(isPlaceholderTitle("新しい会話")).toBe(true)
+    expect(isPlaceholderTitle("Nouvelle conversation")).toBe(true)
+    expect(isPlaceholderTitle("Neue Unterhaltung")).toBe(true)
+    expect(isPlaceholderTitle("Nueva conversación")).toBe(true)
+  })
+
   it("treats a real title as not a placeholder", () => {
     expect(isPlaceholderTitle("Refactor message list")).toBe(false)
+  })
+})
+
+describe("isInstantPreviewTitle", () => {
+  it("detects a title that is a prefix of the first message", () => {
+    expect(
+      isInstantPreviewTitle(
+        "help me refactor the message list comp",
+        "help me refactor the message list component to use Zustand instead of context"
+      )
+    ).toBe(true)
+  })
+
+  it("detects a title ending with ellipsis (…)", () => {
+    expect(
+      isInstantPreviewTitle(
+        "help me refactor the message list comp…",
+        "help me refactor the message list component to use Zustand instead of context"
+      )
+    ).toBe(true)
+  })
+
+  it("detects a title ending with triple dots (...)", () => {
+    expect(
+      isInstantPreviewTitle(
+        "help me refactor the message list...",
+        "help me refactor the message list component to use Zustand"
+      )
+    ).toBe(true)
+  })
+
+  it("returns false for a real LLM-generated title", () => {
+    expect(
+      isInstantPreviewTitle(
+        "Refactor message list",
+        "help me refactor the message list component to use Zustand"
+      )
+    ).toBe(false)
+  })
+
+  it("returns false for empty inputs", () => {
+    expect(isInstantPreviewTitle("", "some message")).toBe(false)
+    expect(isInstantPreviewTitle("title", "")).toBe(false)
+  })
+
+  it("returns false for titles longer than 45 chars (not an instant preview)", () => {
+    const longTitle = "a".repeat(46)
+    expect(isInstantPreviewTitle(longTitle, "a".repeat(100))).toBe(false)
+  })
+
+  it("is case-insensitive", () => {
+    expect(
+      isInstantPreviewTitle("Help Me Fix This", "help me fix this bug in the login flow")
+    ).toBe(true)
   })
 })
 
@@ -94,6 +166,23 @@ describe("runTitleTask", () => {
     const out = await runTitleTask({ ...base, sourceText: "   ", persist })
     expect(out).toBeNull()
     expect(mockBuild).not.toHaveBeenCalled()
+  })
+
+  it("fails closed before client resolution when the title payload does not pass the PII gate", async () => {
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    const persist = jest.fn()
+
+    const out = await runTitleTask({ ...base, resultText: "private result", persist })
+
+    expect(out).toBeNull()
+    expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith({
+      sourceText: base.sourceText,
+      resultText: "private result",
+      locale: "en",
+      kind: undefined,
+    })
+    expect(mockBuild).not.toHaveBeenCalled()
+    expect(persist).not.toHaveBeenCalled()
   })
 
   it("returns null when no client can be resolved", async () => {
@@ -164,5 +253,52 @@ describe("runTitleTask", () => {
     })
     const prompt = (client.complete as jest.Mock).mock.calls[0][0] as string
     expect(prompt).toContain("Task:")
+  })
+
+  it("dedupKey prevents concurrent calls for the same session", async () => {
+    let resolveFirst: (v: string) => void = () => {}
+    const slowClient: LlmClient = {
+      complete: jest.fn(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveFirst = resolve
+          })
+      ),
+    }
+    mockBuild.mockReturnValue(slowClient)
+    const persist = jest.fn()
+
+    // Start first call (will hang on complete).
+    const first = runTitleTask({ ...base, dedupKey: "s1", persist })
+    // Second call with same key should bail immediately.
+    const second = await runTitleTask({ ...base, dedupKey: "s1", persist })
+    expect(second).toBeNull()
+    expect(persist).not.toHaveBeenCalled()
+
+    // Resolve the first — it should succeed.
+    resolveFirst("Generated title")
+    const firstResult = await first
+    expect(firstResult).toBe("Generated title")
+    expect(persist).toHaveBeenCalledWith("Generated title")
+  })
+
+  it("dedupKey is cleared after completion so sequential calls work", async () => {
+    mockBuild.mockReturnValue(clientReturning("Title A"))
+    const persist = jest.fn()
+
+    await runTitleTask({ ...base, dedupKey: "s2", persist })
+    expect(persist).toHaveBeenCalledWith("Title A")
+
+    mockBuild.mockReturnValue(clientReturning("Title B"))
+    await runTitleTask({ ...base, dedupKey: "s2", persist })
+    expect(persist).toHaveBeenCalledWith("Title B")
+  })
+
+  it("dedupKey is cleared even on failure", async () => {
+    mockBuild.mockReturnValue(null) // will cause null return
+    const persist = jest.fn()
+
+    await runTitleTask({ ...base, dedupKey: "s3", persist })
+    expect(isTitleInFlight("s3")).toBe(false)
   })
 })

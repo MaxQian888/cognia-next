@@ -1,15 +1,15 @@
 # Logto IdP — self-host + seed guide (ADR-0059 multi-user OIDC)
 
 Logto is the OpenID Connect identity provider for the **cloud/headless multi-user**
-deployment. It is **not** used by the offline desktop app — that keeps its local
-account gate and HS256 device pairing. Logto only governs networked, multi-user
-identity: it mints the JWT **access tokens** that the companion gateway validates
-(`src-tauri/src/companion_api/oidc.rs`) and that the client obtains
-(`lib/logto/`).
+deployment. It is **not** used by the offline desktop app, which keeps its local
+account gate. Logto governs multi-tenant device registration: the browser uses
+PKCE, presents the organization-bound OIDC access token only to
+`POST /api/auth/device/register`, and then uses its registered P-256 key to mint
+five-minute DPoP-bound Companion access tokens. OIDC or device bearer tokens are
+not accepted as a steady-state Companion shortcut.
 
-The gateway consumes Logto tokens **only when `COGNIA_LOGTO_ISSUER` and
-`COGNIA_LOGTO_AUDIENCE` are both set** — so bringing Logto up is inert until you
-wire those two values (step 4).
+The browser registration flow is available only when `COGNIA_LOGTO_ISSUER`,
+`COGNIA_LOGTO_AUDIENCE`, and `COGNIA_LOGTO_WEB_CLIENT_ID` are all set.
 
 ---
 
@@ -81,6 +81,7 @@ In `.env`:
 ```dotenv
 COGNIA_LOGTO_ISSUER=https://auth.example.com/oidc     # == ${LOGTO_ENDPOINT}/oidc
 COGNIA_LOGTO_AUDIENCE=https://brain.example.com/api   # the API resource identifier
+COGNIA_LOGTO_WEB_CLIENT_ID=<Logto SPA App ID>          # returned by /api/auth/config
 COGNIA_LOGTO_REQUIRED_SCOPES=brain:rpc                # optional baseline scope
 # COGNIA_LOGTO_JWKS_TTL_SECS=600                       # optional (default 600)
 ```
@@ -91,12 +92,11 @@ Then restart with both profiles:
 docker compose --profile server --profile logto up -d --wait
 ```
 
-JWT-protected companion routes (`/api/v1/_rpc/*`, `/ws/v1/events`, `/a2a`)
-now accept Logto JWT access tokens **in addition to** local HS256 device tokens.
-Not on this list by design: `/connectors/webhook/*` sits OUTSIDE the JWT
-middleware (each platform's HMAC/signature is the auth), and `/ws/v1/bridge`
-additionally requires the loopback-minted service scope, which no Logto
-token carries.
+The OIDC token authorizes registration only. Steady-state HTTP calls use a
+five-minute DPoP-bound access token; `/ws/events` and the other public socket
+routes redeem a single-use ticket. `/connectors/webhook/*` keeps each
+platform's HMAC/signature, while `/internal/*` requires the loopback-minted
+service principal.
 
 ## 5. Wire the client (`lib/logto`)
 
@@ -112,16 +112,17 @@ const config = {
   organizationId: "<org id>", // optional (multi-tenant)
 }
 const session = await loginToLogto(config, { openUrl, waitForCode })
-// session.accessToken → send as `Authorization: Bearer …` to the gateway
+// session.accessToken is submitted only while registering the P-256 device.
 ```
 
 ## 6. Verify end-to-end
 
 ```bash
-# after a login, with the access token in $TOKEN:
-curl -kfsS -H "Authorization: Bearer $TOKEN" \
-  https://<gateway>/api/v1/whoami          # → 200
-# a token lacking the required scope, or with a wrong audience → 401
+# Public discovery exposes the exact browser PKCE configuration:
+curl -fsS https://<gateway>/api/auth/config
+# Complete PKCE + device registration in the Web /pair flow, then verify that
+# /api/whoami succeeds only with Bearer <5-minute access token> plus a DPoP
+# proof bound to GET /api/whoami.
 ```
 
 The gateway's own unit tests cover the validation matrix (signature, `iss`,

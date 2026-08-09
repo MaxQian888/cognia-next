@@ -1,14 +1,22 @@
 ---
-title: ADR-0005 — Remote Control Subsystem
-description: Complete the half-finished webhook + event-trigger story with a local 127.0.0.1 axum HTTP listener, HMAC-signed outbound deliveries, and a dedicated Settings section.
+title: ADR-0005 — Remote Control Subsystem (Superseded)
+description: Historical design for the retired Remote Control subsystem, superseded by the Companion control plane and canonical Webhooks settings.
 ---
 
-# Remote Control Subsystem
+# Remote Control Subsystem (Superseded)
 
-| Status   | Accepted · **Activated 2026-06-03**                                                                                    |
+| Status   | **Superseded 2026-08-09**                                                                                              |
 | -------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Date     | 2026-05-03                                                                                                             |
 | Replaces | The half-finished webhook channel + free-text event-trigger UI in `components/scheduler/task-form.tsx` (pre-this-ADR). |
+
+> **Historical record.** The standalone Remote Control listener, renderer receiver,
+> store, routes, and `?section=remote-control` UI were removed. Host control now uses
+> the authenticated [Companion API](../subsystems/companion-api) control plane and the
+> governed MCP/External Bridge surfaces described by
+> [ADR-0110](./0110-mcp-control-plane-governance). Outbound Standard Webhooks now live
+> in `lib/webhooks/`, `stores/webhooks/`, and the canonical `?section=webhooks`
+> settings page. The remainder of this ADR is preserved only to explain the retired design.
 
 ## Activation update (2026-06-03)
 

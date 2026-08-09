@@ -12,6 +12,8 @@ const setSkillToolEnabled = jest.fn()
 const setSlashCommandToolEnabled = jest.fn()
 const setTeamCollaborationToolEnabled = jest.fn()
 const setVectorToolEnabled = jest.fn()
+const setSpawnTaskToolEnabled = jest.fn()
+const setSessionMessagingToolEnabled = jest.fn()
 const toggleAlwaysAllow = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -50,6 +52,8 @@ const settingsState = {
   setSlashCommandToolEnabled,
   setTeamCollaborationToolEnabled,
   setVectorToolEnabled,
+  setSpawnTaskToolEnabled,
+  setSessionMessagingToolEnabled,
   toggleAlwaysAllow,
 }
 
@@ -68,6 +72,8 @@ describe("ToolSettingsSection", () => {
     setSlashCommandToolEnabled.mockClear()
     setTeamCollaborationToolEnabled.mockClear()
     setVectorToolEnabled.mockClear()
+    setSpawnTaskToolEnabled.mockClear()
+    setSessionMessagingToolEnabled.mockClear()
     toggleAlwaysAllow.mockClear()
     isTauriMock.mockReturnValue(true)
     settingsState.settings.webTools = { enabled: true }
@@ -106,12 +112,16 @@ describe("ToolSettingsSection", () => {
     expect(screen.queryByText("webAllowPrivateTitle")).not.toBeInTheDocument()
   })
 
-  it("toggles the Skill, SlashCommand and team-collaboration self-invocation tools", () => {
+  it("toggles Skill, SlashCommand, spawn-task, session-messaging, and team tools", () => {
     render(<ToolSettingsSection />)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:skillToolTitle"))
     expect(setSkillToolEnabled).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:slashToolTitle"))
     expect(setSlashCommandToolEnabled).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:spawnTaskToolTitle"))
+    expect(setSpawnTaskToolEnabled).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:sessionMessagingToolTitle"))
+    expect(setSessionMessagingToolEnabled).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:teamCollabToolTitle"))
     expect(setTeamCollaborationToolEnabled).toHaveBeenCalledWith(true)
   })
@@ -121,6 +131,7 @@ describe("ToolSettingsSection", () => {
     render(<ToolSettingsSection />)
     expect(screen.getByLabelText("toggleAriaLabel:skillToolTitle")).not.toBeDisabled()
     expect(screen.getByLabelText("toggleAriaLabel:slashToolTitle")).not.toBeDisabled()
+    expect(screen.getByLabelText("toggleAriaLabel:spawnTaskToolTitle")).not.toBeDisabled()
   })
 
   it("toggles the vector-memory tools", () => {

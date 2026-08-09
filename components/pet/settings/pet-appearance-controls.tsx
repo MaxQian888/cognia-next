@@ -8,14 +8,15 @@
 import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import { useCubismCoreAvailable } from "@/hooks/pet/use-active-live2d-model"
-import type { PetAnchor, PetMotionPreference, PetSettings } from "@/types/pet"
+import type { PetAnchor, PetMotionPreference, PetSettings, PetSkinId } from "@/types/pet"
 import { PetModelManager } from "@/components/settings/pet/pet-model-manager"
 import { PetSpritePackManager } from "@/components/settings/pet/pet-sprite-pack-manager"
 
 const ANCHORS: PetAnchor[] = ["bottom-right", "bottom-left", "top-right", "top-left"]
 const MOTIONS: PetMotionPreference[] = ["auto", "full", "reduced"]
-const SKINS: string[] = ["svg", "live2d", "sprite-v2"]
+const SKINS: PetSkinId[] = ["svg", "live2d", "sprite-v2"]
 
 export interface PetControlsProps {
   pet: PetSettings
@@ -27,6 +28,14 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
   const skinId = pet.skinId ?? "svg"
   // Only inject/probe the core when the user is actually configuring Live2D.
   const coreReady = useCubismCoreAvailable(skinId === "live2d")
+  const effectiveSkin =
+    skinId === "live2d"
+      ? coreReady === true && pet.activeLive2dModelId
+        ? "live2d"
+        : "svg"
+      : skinId === "sprite-v2" && !pet.activeSpritePackId
+        ? "svg"
+        : skinId
 
   return (
     <>
@@ -62,6 +71,18 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
         </select>
       </div>
 
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <Label htmlFor="pet-gaze-following">{t("gaze.label")}</Label>
+          <p className="text-xs text-muted-foreground">{t("gaze.description")}</p>
+        </div>
+        <Switch
+          id="pet-gaze-following"
+          checked={pet.gazeFollowing ?? true}
+          onCheckedChange={(gazeFollowing) => patch({ gazeFollowing })}
+        />
+      </div>
+
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-4">
           <Label htmlFor="pet-skin">{t("skin.label")}</Label>
@@ -69,7 +90,7 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
             id="pet-skin"
             className="rounded-md border bg-background px-2 py-1 text-sm"
             value={skinId}
-            onChange={(e) => patch({ skinId: e.target.value })}
+            onChange={(e) => patch({ skinId: e.target.value as PetSkinId })}
           >
             {SKINS.map((s) => (
               <option key={s} value={s}>
@@ -84,9 +105,18 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
         {skinId === "live2d" && coreReady === true && !pet.activeLive2dModelId && (
           <p className="text-sm text-muted-foreground">{t("live2d.noModelHint")}</p>
         )}
+        <p
+          className="flex flex-wrap gap-x-3 text-xs text-muted-foreground"
+          data-testid="pet-effective-skin"
+        >
+          <span>{t("skinStatus.requested", { skin: t(`skin.options.${skinId}`) })}</span>
+          <span>{t("skinStatus.effective", { skin: t(`skin.options.${effectiveSkin}`) })}</span>
+        </p>
       </div>
 
-      {skinId === "live2d" && <PetModelManager settings={pet} onPatch={patch} />}
+      {skinId === "live2d" && (
+        <PetModelManager settings={pet} onPatch={patch} coreReady={coreReady} />
+      )}
       {skinId === "sprite-v2" && <PetSpritePackManager settings={pet} onPatch={patch} />}
 
       <div className="space-y-2">

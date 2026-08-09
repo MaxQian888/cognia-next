@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 /**
  * Tests for ConnectorBus.applyMessageEdit / applyMessageDelete after the
  * v49 messages.platformMessageId index landed. These previously used
@@ -18,21 +17,22 @@
  *      uses the index (regression guard for "did the optimization survive?").
  */
 
-import "fake-indexeddb/auto"
 import { getBus, __resetBusForTesting } from "./bus"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { NormalizedInboundEvent } from "@/types/connectors"
 import type { StoredMessage } from "@cognia/agent-config-types"
 
 // 30s hook budget: the first cold open of the full schema (100+ Dexie
 // versions) can exceed jest's default 5s under parallel suite load.
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   __resetBusForTesting()
-}, 30_000)
+})
+afterAll(dbFixture.dispose)
 
 function makeStoredMessage(
   overrides: Partial<StoredMessage> & {

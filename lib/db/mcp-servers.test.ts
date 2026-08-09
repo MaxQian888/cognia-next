@@ -1,17 +1,11 @@
-/** @jest-environment jsdom */
 // Coverage for the MCP server CRUD module. Uses fake-indexeddb to hit the
 // Dexie store directly. We mock the lazy-imported sync module so we never
 // pull Tauri IPC into jsdom.
 
-import "fake-indexeddb/auto"
-
-// Mock the sync module so the CRUD tests don't touch the agents pipeline.
-// The mock is an ESM module (default + named export); register the named
-// `scheduleSync` export so the dynamic import() in mcp-servers.ts resolves.
-const scheduleSyncMock = jest.fn()
-jest.mock("@/lib/claude/sync", () => ({
+const scheduleMcpSyncDrainMock = jest.fn()
+jest.mock("@/lib/mcp/sync-coordinator", () => ({
   __esModule: true,
-  scheduleSync: scheduleSyncMock,
+  scheduleMcpSyncDrain: scheduleMcpSyncDrainMock,
 }))
 
 import {
@@ -21,29 +15,39 @@ import {
   getMcpServer,
   createMcpServer,
   updateMcpServer,
+  reviewMcpServer,
   deleteMcpServer,
   buildMcpServerMap,
+  buildMcpServerMapResolved,
   buildMcpServerMapWithAuth,
   bulkImportMcpServers,
   parseClaudeMcpConfig,
   MCP_TRANSPORTS,
   type McpImportDraft,
 } from "./mcp-servers"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  scheduleSyncMock.mockClear()
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  scheduleMcpSyncDrainMock.mockClear()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 async function flushDynamicImport() {
   // Allow the lazy `import("@/lib/claude/sync")` promise chain to settle.
   await Promise.resolve()
   await Promise.resolve()
   await Promise.resolve()
+}
+
+function createReviewed(
+  partial: Parameters<typeof createMcpServer>[0]
+): ReturnType<typeof createMcpServer> {
+  return createMcpServer({ ...partial, trust: { state: "trusted" } })
 }
 
 describe("createMcpServer", () => {
@@ -55,8 +59,10 @@ describe("createMcpServer", () => {
     })
     expect(server.id).toMatch(/^mcp_/)
     expect(server.name).toBe("filesystem")
-    expect(server.enabled).toBe(true)
+    expect(server.enabled).toBe(false)
     expect(server.appsEnabled).toEqual({})
+    expect(server.trust).toEqual({ state: "pending" })
+    expect(server.schemaVersion).toBe(1)
     expect(server.createdAt).toBeGreaterThan(0)
     expect(server.updatedAt).toBeGreaterThan(0)
 
@@ -64,25 +70,23 @@ describe("createMcpServer", () => {
     expect(read?.name).toBe("filesystem")
   })
 
-  it("respects explicit enabled=false and appsEnabled values", async () => {
+  it("honors explicit projection only for an already-reviewed definition", async () => {
     const server = await createMcpServer({
       name: "off",
       transport: "stdio",
       config: { command: "x" },
       enabled: false,
       appsEnabled: { "claude-code": true } as never,
+      trust: { state: "trusted" },
     })
     expect(server.enabled).toBe(false)
     expect(server.appsEnabled).toEqual({ "claude-code": true })
   })
 
-  it("falls back to 'unnamed' when name is whitespace-only", async () => {
-    const server = await createMcpServer({
-      name: "   ",
-      transport: "stdio",
-      config: {},
-    })
-    expect(server.name).toBe("unnamed")
+  it("rejects a missing namespace instead of persisting an ambiguous row", async () => {
+    await expect(
+      createMcpServer({ name: "   ", transport: "stdio", config: { command: "x" } })
+    ).rejects.toThrow(/namespace/i)
   })
 
   // §A-6 plugin extension: an MCP server contributed by a plugin carries
@@ -136,49 +140,88 @@ describe("createMcpServer", () => {
     expect(await listMcpServersByPlugin("nobody")).toEqual([])
   })
 
-  it("schedules a sync only for agents with appsEnabled=true", async () => {
-    await createMcpServer({
+  it("persists one durable sync job for each selected writable Agent", async () => {
+    const server = await createMcpServer({
       name: "foo",
       transport: "stdio",
-      config: {},
+      config: { command: "x" },
       appsEnabled: {
         "claude-code": true,
         vscode: false,
       } as never,
+      trust: { state: "trusted" },
     })
     await flushDynamicImport()
-    expect(scheduleSyncMock).toHaveBeenCalledWith("claude-code", undefined)
-    expect(scheduleSyncMock).not.toHaveBeenCalledWith("vscode", undefined)
+    expect(await getDb().mcpSyncJobs.get("claude-code")).toMatchObject({
+      desiredRevision: server.revision,
+      status: "pending",
+    })
+    expect(await getDb().mcpSyncJobs.get("vscode")).toBeUndefined()
   })
 
   it("does not schedule a sync when appsEnabled is empty", async () => {
     await createMcpServer({
       name: "bare",
       transport: "stdio",
-      config: {},
+      config: { command: "x" },
     })
     await flushDynamicImport()
-    expect(scheduleSyncMock).not.toHaveBeenCalled()
+    expect(await getDb().mcpSyncJobs.count()).toBe(0)
   })
 })
 
 describe("listMcpServers / listEnabledMcpServers / getMcpServer", () => {
   it("returns servers ordered by name", async () => {
-    await createMcpServer({ name: "zeta", transport: "stdio", config: {} })
-    await createMcpServer({ name: "alpha", transport: "http", config: {} })
+    await createMcpServer({ name: "zeta", transport: "stdio", config: { command: "x" } })
+    await createMcpServer({
+      name: "alpha",
+      transport: "http",
+      config: { url: "https://example.com/mcp" },
+    })
     const list = await listMcpServers()
     expect(list.map((s) => s.name)).toEqual(["alpha", "zeta"])
   })
 
   it("filters to only enabled servers via listEnabledMcpServers", async () => {
-    await createMcpServer({ name: "on", transport: "stdio", config: {}, enabled: true })
-    await createMcpServer({ name: "off", transport: "stdio", config: {}, enabled: false })
+    await createReviewed({
+      name: "on",
+      transport: "stdio",
+      config: { command: "x" },
+      enabled: true,
+    })
+    await createMcpServer({
+      name: "off",
+      transport: "stdio",
+      config: { command: "x" },
+      enabled: false,
+    })
     const enabled = await listEnabledMcpServers()
     expect(enabled.map((s) => s.name)).toEqual(["on"])
   })
 
+  it("fails closed for enabled pending or blocked rows", async () => {
+    const pending = await createMcpServer({
+      name: "pending",
+      transport: "stdio",
+      config: { command: "x" },
+    })
+    await getDb().mcpServers.update(pending.id, { enabled: true })
+    const blocked = await createReviewed({
+      name: "blocked",
+      transport: "stdio",
+      config: { command: "x" },
+    })
+    await reviewMcpServer(blocked.id, false)
+    await getDb().mcpServers.update(blocked.id, { enabled: true })
+    expect(await listEnabledMcpServers()).toEqual([])
+  })
+
   it("getMcpServer returns the row by id and undefined when missing", async () => {
-    const server = await createMcpServer({ name: "x", transport: "stdio", config: {} })
+    const server = await createMcpServer({
+      name: "x",
+      transport: "stdio",
+      config: { command: "x" },
+    })
     expect((await getMcpServer(server.id))?.name).toBe("x")
     expect(await getMcpServer("does-not-exist")).toBeUndefined()
   })
@@ -189,11 +232,12 @@ describe("updateMcpServer", () => {
     const server = await createMcpServer({
       name: "before",
       transport: "stdio",
-      config: {},
+      config: { command: "x" },
       appsEnabled: { "claude-code": true } as never,
+      trust: { state: "trusted" },
     })
     await flushDynamicImport()
-    scheduleSyncMock.mockClear()
+    await getDb().mcpSyncJobs.clear()
 
     // Wait one ms so updatedAt strictly increases.
     await new Promise((r) => setTimeout(r, 2))
@@ -206,15 +250,17 @@ describe("updateMcpServer", () => {
     const fresh = await getMcpServer(server.id)
     expect(fresh?.name).toBe("after")
     expect(fresh?.updatedAt).toBeGreaterThan(server.updatedAt)
-    // Both prior (claude-code) and new (vscode) appsEnabled get a sync request.
-    expect(scheduleSyncMock).toHaveBeenCalledWith("claude-code", undefined)
-    expect(scheduleSyncMock).toHaveBeenCalledWith("vscode", undefined)
+    expect(fresh).toMatchObject({ enabled: false, revision: 2, trust: { state: "pending" } })
+    expect(await getDb().mcpSyncJobs.get("claude-code")).toMatchObject({
+      tombstones: ["before"],
+    })
+    expect(await getDb().mcpSyncJobs.get("vscode")).toMatchObject({ tombstones: ["before"] })
   })
 
   it("survives an update against an unknown id without scheduling", async () => {
     await updateMcpServer("does-not-exist", { name: "x" })
     await flushDynamicImport()
-    expect(scheduleSyncMock).not.toHaveBeenCalled()
+    expect(await getDb().mcpSyncJobs.count()).toBe(0)
   })
 })
 
@@ -223,34 +269,37 @@ describe("deleteMcpServer", () => {
     const server = await createMcpServer({
       name: "to-delete",
       transport: "stdio",
-      config: {},
+      config: { command: "x" },
       appsEnabled: { "claude-code": true } as never,
+      trust: { state: "trusted" },
     })
     await flushDynamicImport()
-    scheduleSyncMock.mockClear()
+    await getDb().mcpSyncJobs.clear()
 
     await deleteMcpServer(server.id)
     await flushDynamicImport()
     expect(await getMcpServer(server.id)).toBeUndefined()
-    // Tombstone (the second arg is the deleted server name).
-    expect(scheduleSyncMock).toHaveBeenCalledWith("claude-code", "to-delete")
+    expect(await getDb().mcpServerSummaries.get(server.id)).toBeUndefined()
+    expect(await getDb().mcpSyncJobs.get("claude-code")).toMatchObject({
+      tombstones: ["to-delete"],
+    })
   })
 
   it("is a no-op when the id is missing", async () => {
     await deleteMcpServer("nope")
     await flushDynamicImport()
-    expect(scheduleSyncMock).not.toHaveBeenCalled()
+    expect(await getDb().mcpSyncJobs.count()).toBe(0)
   })
 })
 
 describe("buildMcpServerMap", () => {
   it("includes only enabled servers and folds transport into the map under `type`", async () => {
-    const a = await createMcpServer({
+    const a = await createReviewed({
       name: "alpha",
       transport: "stdio",
       config: { command: "x" },
     })
-    const b = await createMcpServer({
+    const b = await createReviewed({
       name: "beta",
       transport: "http",
       config: { url: "https://x" },
@@ -262,7 +311,7 @@ describe("buildMcpServerMap", () => {
   })
 
   it("forwards http transport with url + headers verbatim", async () => {
-    const row = await createMcpServer({
+    const row = await createReviewed({
       name: "wiki",
       transport: "http",
       config: { url: "https://mcp.deepwiki.com/mcp", headers: { "X-Trace": "1" } },
@@ -275,8 +324,26 @@ describe("buildMcpServerMap", () => {
     })
   })
 
-  it("forwards sse transport with url + headers verbatim", async () => {
-    const row = await createMcpServer({
+  it("applies the remote egress guard before projecting into an SDK session", async () => {
+    const blocked = await createReviewed({
+      name: "blocked-local",
+      transport: "http",
+      config: { url: "https://127.0.0.1/mcp" },
+    })
+    expect(() => buildMcpServerMap([blocked])).toThrow("private")
+
+    const reviewed = {
+      ...blocked,
+      config: { url: "http://127.0.0.1/mcp", allowPrivateNetwork: true },
+    }
+    expect(buildMcpServerMap([reviewed])["blocked-local"]).toMatchObject({
+      url: "http://127.0.0.1/mcp",
+      allowPrivateNetwork: true,
+    })
+  })
+
+  it("never returns a newly persisted authorization header as plaintext", async () => {
+    const row = await createReviewed({
       name: "stream",
       transport: "sse",
       config: { url: "https://example.com/sse", headers: { Authorization: "Bearer x" } },
@@ -285,26 +352,47 @@ describe("buildMcpServerMap", () => {
     expect(out.stream).toMatchObject({
       type: "sse",
       url: "https://example.com/sse",
-      headers: { Authorization: "Bearer x" },
+      headers: {
+        Authorization: { secretRef: expect.stringMatching(/\/headers\/Authorization$/) },
+      },
     })
   })
 
   it("emits keys in sorted-name order regardless of input order", async () => {
-    const z = await createMcpServer({ name: "zeta", transport: "stdio", config: { command: "z" } })
-    const a = await createMcpServer({
+    const z = await createReviewed({ name: "zeta", transport: "stdio", config: { command: "z" } })
+    const a = await createReviewed({
       name: "alpha2",
       transport: "stdio",
       config: { command: "a" },
     })
-    const m = await createMcpServer({ name: "mid", transport: "stdio", config: { command: "m" } })
+    const m = await createReviewed({ name: "mid", transport: "stdio", config: { command: "m" } })
     expect(Object.keys(buildMcpServerMap([z, m, a]))).toEqual(["alpha2", "mid", "zeta"])
     expect(Object.keys(buildMcpServerMap([a, z, m]))).toEqual(["alpha2", "mid", "zeta"])
+  })
+
+  it("resolves SecretRef values before projecting outside the Tauri auth path", async () => {
+    const row = await createReviewed({
+      name: "secret-cli",
+      transport: "stdio",
+      config: { command: "tool", args: ["--token", { secretRef: "mcp/secret-cli/args/1" }] },
+    })
+
+    const out = await buildMcpServerMapResolved([row], async () => ({
+      command: "tool",
+      args: ["--token", "resolved-secret"],
+    }))
+
+    expect(out["secret-cli"]).toEqual({
+      type: "stdio",
+      command: "tool",
+      args: ["--token", "resolved-secret"],
+    })
   })
 })
 
 describe("buildMcpServerMapWithAuth", () => {
   it("injects a bearer header for a remote server with a stored token", async () => {
-    const row = await createMcpServer({
+    const row = await createReviewed({
       name: "remote",
       transport: "http",
       config: { url: "https://x/mcp" },
@@ -320,7 +408,7 @@ describe("buildMcpServerMapWithAuth", () => {
   })
 
   it("merges the bearer header alongside existing static headers", async () => {
-    const row = await createMcpServer({
+    const row = await createReviewed({
       name: "remote",
       transport: "sse",
       config: { url: "https://x/sse", headers: { "X-Trace": "1" } },
@@ -332,12 +420,12 @@ describe("buildMcpServerMapWithAuth", () => {
   })
 
   it("leaves stdio servers and tokenless remotes untouched", async () => {
-    const stdio = await createMcpServer({
+    const stdio = await createReviewed({
       name: "alpha",
       transport: "stdio",
       config: { command: "x" },
     })
-    const remote = await createMcpServer({
+    const remote = await createReviewed({
       name: "beta",
       transport: "http",
       config: { url: "https://y" },
@@ -350,7 +438,7 @@ describe("buildMcpServerMapWithAuth", () => {
   })
 
   it("refreshes a near-expiry token before injecting it", async () => {
-    const row = await createMcpServer({
+    const row = await createReviewed({
       name: "remote",
       transport: "http",
       config: { url: "https://x" },
@@ -366,7 +454,7 @@ describe("buildMcpServerMapWithAuth", () => {
   })
 
   it("does not refresh a token that is comfortably valid", async () => {
-    const row = await createMcpServer({
+    const row = await createReviewed({
       name: "remote",
       transport: "http",
       config: { url: "https://x" },
@@ -382,7 +470,7 @@ describe("buildMcpServerMapWithAuth", () => {
   })
 
   it("falls back to the un-authed config when the auth lookup throws", async () => {
-    const row = await createMcpServer({
+    const row = await createReviewed({
       name: "remote",
       transport: "http",
       config: { url: "https://x" },
@@ -418,7 +506,7 @@ describe("bulkImportMcpServers", () => {
   })
 
   it("skips collisions by default (case-insensitive)", async () => {
-    await createMcpServer({ name: "Same", transport: "stdio", config: {} })
+    await createMcpServer({ name: "Same", transport: "stdio", config: { command: "x" } })
     const result = await bulkImportMcpServers([draft("same"), draft("fresh")])
     expect(result.skipped).toBe(1)
     expect(result.created).toBe(1)
@@ -443,7 +531,7 @@ describe("bulkImportMcpServers", () => {
     expect(fresh?.config).toMatchObject({ url: "https://x" })
   })
 
-  it("duplicate strategy creates a new row with ' (imported)' suffix", async () => {
+  it("duplicate strategy creates a new row with a valid imported suffix", async () => {
     await createMcpServer({
       name: "clone",
       transport: "stdio",
@@ -456,18 +544,22 @@ describe("bulkImportMcpServers", () => {
     expect(result.created).toBe(1)
     const names = (await listMcpServers()).map((s) => s.name).sort()
     expect(names).toContain("clone")
-    expect(names).toContain("clone (imported)")
+    expect(names).toContain("clone-imported")
   })
 
   it("records errors for drafts missing a name", async () => {
-    const result = await bulkImportMcpServers([{ name: "", transport: "stdio", config: {} }])
+    const result = await bulkImportMcpServers([
+      { name: "", transport: "stdio", config: { command: "x" } },
+    ])
     expect(result.errored).toHaveLength(1)
     expect(result.errored[0].error).toMatch(/missing a name/i)
   })
 
   it("trims names before checking for collisions", async () => {
-    await createMcpServer({ name: "trim", transport: "stdio", config: {} })
-    const result = await bulkImportMcpServers([{ name: " trim ", transport: "stdio", config: {} }])
+    await createMcpServer({ name: "trim", transport: "stdio", config: { command: "x" } })
+    const result = await bulkImportMcpServers([
+      { name: " trim ", transport: "stdio", config: { command: "x" } },
+    ])
     expect(result.skipped).toBe(1)
     expect(result.created).toBe(0)
   })

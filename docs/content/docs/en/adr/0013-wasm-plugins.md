@@ -268,6 +268,131 @@ accept and auto-trusts subsequent updates from the same key.
   registered. v0.2 will copy `since_v0_1.rs` → `since_v0_2.rs` and add
   the matching arm in `host::version_linker`.
 
+> **Superseded.** Every bullet above except Sigstore is delivered by the
+> 2026-08-03 amendment below. Sigstore remains deliberately unbuilt.
+
+---
+
+## Amendment — 2026-08-03 (host API v0.2.0, hard cutover)
+
+Delivers the five non-Sigstore `## Deferred` bullets. **Sigstore is
+still not implemented and no backend was scaffolded for it** — the
+remaining bullet stands as written.
+
+### Reversed: multi-version linkers are a migration tool, not a compatibility promise
+
+The original design registered a linker per contract version so old
+plugins would keep running indefinitely. v0.2 registers **only**
+`0.2.0`. Loading a v0.1 plugin fails with `UPGRADE_REQUIRED` naming the
+plugin, the version found, and the five steps to rebuild.
+
+Why a hard cutover rather than a compat shim: `notification.notify`
+changed from returning nothing to `result<_, string>`, which changes the
+component's import types. A v0.1 guest binary cannot be linked against
+the v0.2 world at all — "compatibility" would mean permanently
+maintaining a second host implementation, not a shim. With no
+third-party WASM plugins published yet, the migration cost is one
+`cargo component build`; that cost only rises.
+
+The version is read from the `cognia:api-version` **custom wasm
+section**, never the manifest. A binary carrying no section at all keeps
+its existing "malformed" error and specifically does **not** report
+`UPGRADE_REQUIRED` — a test pins this, because telling an author to
+rebuild for 0.2 when their toolchain is not stamping the section sends
+them down the wrong path entirely.
+
+### Reversed: freezing v0.1 required un-compiling it, not just unregistering it
+
+`since_v0_1.rs` constructed `HostState` with a full struct literal, so
+adding the new `services` field would have forced an edit to the file we
+had just declared byte-frozen. The sources moved out of the module tree
+to `crates/cognia-plugin-runtime/frozen/v0_1/`, where `rustc`, `clippy`,
+and `cargo fmt` never visit them. A checksum manifest
+(`scripts/gates/frozen-wasm-api.json`, gate `pnpm lint:frozen-wasm-api`)
+audits in three directions — entries match, no unlisted file, no missing
+entry — and an in-crate `include_bytes!` test holds the freeze for
+contributors who never run the node gates.
+
+### Added: capability-first bounded IPC with a stable error vocabulary
+
+Every `result<..., string>` error now carries a machine-parseable
+`"<CODE>: <message>"` prefix. `<CODE>` is one of `CAPABILITY_DENIED`,
+`INVALID_REQUEST`, `PAYLOAD_TOO_LARGE`, `TIMEOUT`, `CANCELLED`,
+`HOST_UNAVAILABLE`, `PROVIDER_ERROR`, `WORKFLOW_REJECTED`. Guests branch
+with `split_once(": ")`; the codes are stable for the life of the 0.2
+contract, the prose is not.
+
+Codes arriving **from** the renderer are re-parsed through a mapping
+where an unknown code downgrades to `PROVIDER_ERROR`, so a compromised
+renderer cannot forge `CAPABILITY_DENIED` (or `UPGRADE_REQUIRED`, which
+is filtered explicitly).
+
+Host services reach the sandbox through a `WasmHostServices` trait whose
+accessors are **per-surface `Option`s**. That is what makes "a host with
+no clipboard returns `HOST_UNAVAILABLE` without disabling unrelated
+capabilities" mechanically true rather than a convention someone has to
+remember. A process-global `OnceLock` was rejected: cargo runs unit
+tests as parallel threads in one process, which would make "desktop
+serves clipboard" and "headless returns `HOST_UNAVAILABLE`" mutually
+unrunnable in the same binary.
+
+Gate order in every host impl is fixed: **capability check → validate →
+service lookup → bridge lookup → payload size → dispatch**. No pending
+state is allocated, no event emitted, and no native API touched until
+all of those pass.
+
+### Added: the renderer bridge, and why cancellation is load-bearing
+
+`ai.generate-text` and `workflow.emit-event` are answered by a bridge
+(`wasm/bridge.rs` + `lib/plugin/wasm-bridge/`) structurally parallel to
+the CLI bridge but with its own channels, pending map, response command,
+and a plugin-identity binding the CLI bridge lacks.
+
+`resolve` compares plugin identity **while holding the lock and before
+removing** the entry. Remove-then-compare would let a buggy or hostile
+renderer cancel another plugin's in-flight request by guessing its id —
+a cross-plugin denial of service.
+
+Cancellation is not a nicety. `Store::set_epoch_deadline` traps at wasm
+execution points, but a host import awaiting the renderer is not
+executing wasm, so epoch interruption does not bound it — and
+`plugin_wasm_call_for_state` holds the per-plugin mutex across the whole
+guest call. Without `cancel_plugin`, a deactivate during a 30 s AI call
+leaks a live store for up to 30 s. It is therefore called *before*
+`WasmPluginHost::deactivate`, not after.
+
+The renderer sends exactly one response per request, including for
+cancel-initiated aborts, so the host tolerates and drops a response for
+a request it already resolved on its own timeout.
+
+### Added: two capability re-gates
+
+| Surface | v0.1 | v0.2 |
+| --- | --- | --- |
+| `ai.generate-text` | `network:fetch` | **`ai:chat`** |
+| `workflow.emit-event` | _(ungated)_ | **`extension:workflow`** |
+
+`network:fetch` grants raw outbound HTTP. Spending the user's model
+quota and passing through the host's PII redaction gate is a distinct
+consent decision, so it gets a distinct capability. `emit-event` was
+ungated when it only wrote a log line; in v0.2 it genuinely re-enters
+the workflow runtime. A hard cutover is the zero-migration-cost moment
+to fix both.
+
+Consequently `WASM_UNIMPLEMENTED_PERMISSIONS` is now `[]`. Left
+unchanged it would have rendered the now-working clipboard capabilities
+as permanently disabled in the install grant sheet and never added them
+to the granted set — implemented in Rust and unreachable in practice.
+
+### Fixed: a payload leak carried since v0.1
+
+`since_v0_1.rs` logged notification `title` and `body` at info level.
+v0.2 logs neither, in full or in part; the same rule now applies to
+clipboard contents, AI prompts and completions, and workflow payloads
+(length only). Bridge diagnostics render through a closed key allowlist,
+pinned by a test that builds a diagnostic from a payload containing a
+sentinel string and asserts the sentinel never appears.
+
 ---
 
 ## References

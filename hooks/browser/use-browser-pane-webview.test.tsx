@@ -4,8 +4,17 @@ import type { ElementRect } from "@/lib/browser/protocol"
 
 let mockOnRect: ((r: ElementRect) => void) | undefined
 let mockOnRects: Array<(r: ElementRect) => void> = []
+let mockProxyErrorHandler: ((payload: { paneId: string; code: string }) => void) | undefined
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+jest.mock("@/lib/tauri/events", () => ({
+  onTauriEvent: jest.fn(
+    async (_event: string, handler: (payload: { paneId: string; code: string }) => void) => {
+      mockProxyErrorHandler = handler
+      return jest.fn()
+    }
+  ),
+}))
 jest.mock("@/lib/browser/client", () => ({
   browserClient: {
     setEmbedOwnerToken: jest.fn(),
@@ -37,6 +46,7 @@ const deliverRect = (rect: ElementRect = RECT) => act(() => mockOnRect?.(rect))
 beforeEach(() => {
   mockOnRect = undefined
   mockOnRects = []
+  mockProxyErrorHandler = undefined
   ;(browserClient.embedCreate as jest.Mock).mockClear().mockResolvedValue("browser-embed")
   ;(browserClient.embedSetBounds as jest.Mock).mockClear().mockResolvedValue(undefined)
   ;(browserClient.embedNavigate as jest.Mock).mockClear().mockResolvedValue(undefined)
@@ -175,6 +185,63 @@ it("recovers when embedCreate rejects (allows a later retry)", async () => {
     width: 10,
     height: 10,
   })
+})
+
+it("reports native creation failures to the owning surface", async () => {
+  const error = new Error("PROXY_TRANSPORT_UNSUPPORTED")
+  const onError = jest.fn()
+  ;(browserClient.embedCreate as jest.Mock).mockRejectedValueOnce(error)
+  renderHook(() => useBrowserPaneWebview(ref, { url: "https://example.com/", onError }))
+
+  deliverRect()
+  await act(async () => Promise.resolve())
+
+  expect(onError).toHaveBeenCalledWith(error)
+})
+
+it("reports native navigation failures to the owning surface", async () => {
+  const error = new Error("PROXY_CONNECT_FAILED")
+  const onError = jest.fn()
+  ;(browserClient.embedNavigate as jest.Mock).mockRejectedValueOnce(error)
+  const { rerender } = renderHook(({ url }) => useBrowserPaneWebview(ref, { url, onError }), {
+    initialProps: { url: "https://example.com/" },
+  })
+  deliverRect()
+
+  rerender({ url: "https://example.org/" })
+  await act(async () => Promise.resolve())
+
+  expect(onError).toHaveBeenCalledWith(error)
+})
+
+it("reports fail-closed in-page proxy routing errors from native events", async () => {
+  const onError = jest.fn()
+  renderHook(() => useBrowserPaneWebview(ref, { url: "https://example.com/", onError }))
+  deliverRect()
+  await act(async () => Promise.resolve())
+
+  act(() => {
+    mockProxyErrorHandler?.({
+      paneId: "browser-embed",
+      code: "PROXY_TRANSPORT_UNSUPPORTED",
+    })
+  })
+
+  expect(onError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: "PROXY_TRANSPORT_UNSUPPORTED",
+    })
+  )
+})
+
+it("re-evaluates the current WebView route after native proxy apply succeeds", () => {
+  renderHook(() => useBrowserPaneWebview(ref, { url: "https://example.com/" }))
+  deliverRect()
+  ;(browserClient.embedNavigate as jest.Mock).mockClear()
+
+  act(() => window.dispatchEvent(new Event("cognia:network-proxy-applied")))
+
+  expect(browserClient.embedNavigate).toHaveBeenCalledWith("https://example.com/")
 })
 
 it("backs off instead of spinning while another native window owns the lease", async () => {

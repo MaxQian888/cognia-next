@@ -10,7 +10,7 @@
  *     pre-extraction provider (including the `isTauri()` gate).
  *   - Headless brain: `lib/headless/runtimes/connector-runtime.ts` calls it
  *     with `skipHostGate` and a serve-log `log`, after remapping the Tauri
- *     command/event seams onto the companion RPC arms and `/ws/v1/events`.
+ *     command/event seams onto the companion RPC arms and `/ws/events`.
  *
  * Boot sequence:
  *   0. Registers the two connector scheduler-task executors

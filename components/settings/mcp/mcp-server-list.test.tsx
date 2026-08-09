@@ -59,6 +59,8 @@ describe("McpServerList", () => {
         view="grid"
         groupBy="none"
         selection={new Set()}
+        agentStatuses={[]}
+        agentStatusesLoading={false}
         isFavorite={() => false}
         {...handlers}
       />
@@ -75,6 +77,8 @@ describe("McpServerList", () => {
         view="list"
         groupBy="transport"
         selection={new Set()}
+        agentStatuses={[]}
+        agentStatusesLoading={false}
         isFavorite={() => false}
         {...handlers}
       />
@@ -93,6 +97,8 @@ describe("McpServerList", () => {
         view="grid"
         groupBy="status"
         selection={new Set()}
+        agentStatuses={[]}
+        agentStatusesLoading={false}
         isFavorite={() => false}
         {...handlers}
       />

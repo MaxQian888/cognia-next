@@ -26,6 +26,7 @@ import {
   type BuiltInSkill,
   type BuiltInSkillMutation,
 } from "@/lib/skills/built-in"
+import type { LarkCliCapabilityDiagnostics } from "@/lib/skills/built-in/lark/capabilities"
 
 type Locale = "en" | "zh-CN"
 
@@ -33,6 +34,7 @@ export function LarkTab() {
   const t = useTranslations("settings.builtInSkills.lark")
   const tMutation = useTranslations("settings.builtInSkills.mutation")
   const [skills, setSkills] = useState<BuiltInSkill[]>([])
+  const [diagnostics, setDiagnostics] = useState<LarkCliCapabilityDiagnostics | null>(null)
 
   useEffect(() => {
     // Trigger the family barrel side-effects on mount so the registry
@@ -41,6 +43,10 @@ export function LarkTab() {
       const reg = getSharedBuiltInSkillRegistry()
       setSkills(reg.listByPlatform("lark"))
     })
+    import("@/lib/skills/built-in/lark/capabilities")
+      .then(({ probeLarkCliCapabilities }) => probeLarkCliCapabilities())
+      .then(setDiagnostics)
+      .catch(() => setDiagnostics(null))
   }, [])
 
   const groupedByFamily = useMemo(() => {
@@ -79,6 +85,61 @@ export function LarkTab() {
           <p>{t("intro.gates")}</p>
         </CardContent>
       </Card>
+
+      {diagnostics && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              {diagnostics.ready ? (
+                <ShieldCheckIcon className="size-4 text-emerald-600" />
+              ) : (
+                <AlertTriangleIcon className="size-4 text-destructive" />
+              )}
+              {t(diagnostics.ready ? "diagnostics.ready" : "diagnostics.blocked")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-xs text-muted-foreground">
+            <p>
+              {t("diagnostics.versions", {
+                detected: diagnostics.detectedVersion ?? t("diagnostics.unknown"),
+                certified: diagnostics.certifiedVersion,
+              })}
+            </p>
+            {!diagnostics.ready && (
+              <>
+                <p>
+                  {diagnostics.message ??
+                    t("diagnostics.missing", {
+                      count:
+                        diagnostics.missingCommands.length +
+                        Object.values(diagnostics.missingFlags).flat().length,
+                    })}
+                </p>
+                {(diagnostics.missingCommands.length > 0 ||
+                  Object.keys(diagnostics.missingFlags).length > 0) && (
+                  <p>
+                    {t("diagnostics.missingCapabilities", {
+                      capabilities: [
+                        ...diagnostics.missingCommands,
+                        ...Object.entries(diagnostics.missingFlags).flatMap(([skillId, flags]) =>
+                          flags.map((flag) => `${skillId} ${flag}`)
+                        ),
+                      ].join(", "),
+                    })}
+                  </p>
+                )}
+                {diagnostics.affectedSkillIds.length > 0 && (
+                  <p>
+                    {t("diagnostics.affectedTools", {
+                      tools: diagnostics.affectedSkillIds.join(", "),
+                    })}
+                  </p>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Accordion type="multiple" className="w-full">
         {groupedByFamily.map(([family, familySkills]) => (

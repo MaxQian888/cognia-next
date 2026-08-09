@@ -5,8 +5,19 @@ import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { getCommandDescriptor } from "./command-descriptors"
 import { type CompanionConfig, companionStorage } from "./companion-storage"
-import type { Transport, TransportCallOptions } from "./transport-types"
+import type {
+  Transport,
+  TransportBinaryResource,
+  TransportBinaryResponse,
+  TransportCallOptions,
+} from "./transport-types"
 import { pinnedFetch } from "./pinned-fetch"
+import {
+  companionAuthorizationHeaders,
+  invalidateCompanionAccessToken,
+  issueSocketTicket,
+  type SocketTicketRequest,
+} from "./companion-auth"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
 import { TransportRtc, type TransportRtcOptions } from "./transport-rtc"
 
@@ -38,15 +49,25 @@ function encodeContentContext(context: ManagedIdeContentContext): string {
 // reads happen on every RPC call so we keep them sync via a module-level
 // cache. The cache is primed by:
 //   - explicit hydration at app boot (`hydrateCompanionConfig()`), or
-//   - any successful `saveCompanionConfig()` (writes update the cache
-//     synchronously before the storage round-trip).
+//   - any successful `saveCompanionConfig()` (writes update the cache only
+//     after secure persistence succeeds).
 // ---------------------------------------------------------------------------
 
 let cachedConfig: CompanionConfig | null = null
+let runtimeTargetRegistrarOverride: ((config: CompanionConfig) => Promise<void>) | null = null
 
 /** Synchronous read used on the hot path (every `call()` / WS open). */
 export function loadCompanionConfig(): CompanionConfig | null {
   return cachedConfig
+}
+
+/** Issue a canonical socket ticket for the active paired Companion target. */
+export async function issueCompanionSocketTicket(
+  request: SocketTicketRequest
+): Promise<{ ticket: string; expiresAt: number }> {
+  const config = loadCompanionConfig()
+  if (!config) throw new Error("companion device identity is unavailable; pair this device again")
+  return issueSocketTicket(config, request)
 }
 
 /** Read storage and prime the cache. Call once at app boot. Idempotent. */
@@ -57,11 +78,22 @@ export async function hydrateCompanionConfig(): Promise<CompanionConfig | null> 
 }
 
 export async function saveCompanionConfig(config: CompanionConfig): Promise<void> {
-  const nextConfig = await attachWebRuntimeTarget(config, false)
-  // Cache update must run before the await so any synchronous reader (a
-  // `transport.call()` chained right after) sees the new config.
+  const storage = companionStorage()
+  const previousStored = isPlainBrowser() ? await storage.load() : null
+  const nextConfig = await attachWebRuntimeTarget(config, false, false)
+  await storage.save(nextConfig)
+  try {
+    await registerWebRuntimeTarget(nextConfig)
+  } catch (error) {
+    // Secure persistence and the runtime target registry live in different
+    // stores. Compensate the first write if the second cannot commit so a
+    // failed pair never appears as a target with unusable runtime state.
+    if (storage.remove) await storage.remove(nextConfig)
+    if (previousStored) await storage.save(previousStored)
+    else if (!storage.remove) await storage.clear()
+    throw error
+  }
   cachedConfig = nextConfig
-  await companionStorage().save(nextConfig)
   await activateWebCompanionTransport()
   notifyCompanionConfigChanged()
 }
@@ -109,20 +141,43 @@ export function __resetCompanionConfigCacheForTests(): void {
   cachedConfig = null
 }
 
+/** Test-only — seed the active config without touching secure storage. */
+export function __setCompanionConfigCacheForTests(config: CompanionConfig | null): void {
+  cachedConfig = config
+}
+
+/** Test-only seam for cross-store compensation failures. */
+export function __setRuntimeTargetRegistrarForTests(
+  registrar: ((config: CompanionConfig) => Promise<void>) | null
+): void {
+  runtimeTargetRegistrarOverride = registrar
+}
+
 async function attachWebRuntimeTarget(
   config: CompanionConfig,
-  persistAssignedTarget: boolean
+  persistAssignedTarget: boolean,
+  registerTarget = true
 ): Promise<CompanionConfig> {
   if (!isPlainBrowser() || !getActiveRuntimeTargetContext()) return config
-  const { deriveCompanionRuntimeTargetId, registerCompanionRuntimeTarget } =
-    await import("@/lib/runtime/account-runtime-target")
+  const { deriveCompanionRuntimeTargetId } = await import("@/lib/runtime/account-runtime-target")
   const targetId = config.targetId ?? (await deriveCompanionRuntimeTargetId(config))
-  const nextConfig = { ...config, targetId }
+  const nextConfig = {
+    ...config,
+    targetId,
+    accountId: getActiveRuntimeTargetContext()!.accountId,
+  }
   if (persistAssignedTarget && config.targetId !== targetId) {
     await companionStorage().save(nextConfig)
   }
-  await registerCompanionRuntimeTarget(nextConfig)
+  if (registerTarget) await registerWebRuntimeTarget(nextConfig)
   return nextConfig
+}
+
+async function registerWebRuntimeTarget(config: CompanionConfig): Promise<void> {
+  if (!isPlainBrowser()) return
+  if (runtimeTargetRegistrarOverride) return runtimeTargetRegistrarOverride(config)
+  const { registerCompanionRuntimeTarget } = await import("@/lib/runtime/account-runtime-target")
+  await registerCompanionRuntimeTarget(config)
 }
 
 async function activateWebCompanionTransport(): Promise<void> {
@@ -173,6 +228,11 @@ export class CompanionError extends Error {
 
 export type ConnectionState = "connected" | "reconnecting" | "offline" | "unauthenticated"
 
+export interface CompanionPlaneHealth {
+  rpc: "unknown" | "ready" | "unavailable" | "unauthenticated"
+  events: "idle" | "connecting" | "replaying" | "ready"
+}
+
 // ---------------------------------------------------------------------------
 // Transport tier — ADR-0021
 //
@@ -212,14 +272,43 @@ type Handler<T = unknown> = (payload: T) => void
 /** Backoff delays for WS reconnect (ms). Capped at 30 000 ms. */
 const WS_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000] as const
 
-/** Backoff delays for HTTP call retries (ms). */
-const HTTP_BACKOFF_MS = [250, 500, 1000] as const
+const HTTP_MAX_ATTEMPTS = 3
+const HTTP_BACKOFF_BASE_MS = 250
+const HTTP_BACKOFF_CAP_MS = 2_000
+const HTTP_RETRY_AFTER_CAP_MS = 30_000
+const BINARY_HTTP_BACKOFF_MS = [250, 500, 1_000] as const
 
 /** Grace period before tearing down an idle WS (ms). */
 const WS_CLOSE_GRACE_MS = 30_000
 
 /** HTTP call timeout (ms). */
 const CALL_TIMEOUT_MS = 30_000
+
+/** Canonical chat images share the composer's existing 10 MiB input ceiling. */
+const MAX_SESSION_MEDIA_BYTES = 10 * 1024 * 1024
+
+type EventSocketTicket = { ticket: string; expiresAt: number }
+type EventSocketTicketIssuer = (
+  config: CompanionConfig,
+  channel: "events"
+) => EventSocketTicket | Promise<EventSocketTicket>
+let eventSocketTicketIssuer: EventSocketTicketIssuer = issueSocketTicket
+type AuthorizationHeadersProvider = (
+  config: CompanionConfig,
+  method: string,
+  path: string
+) => Promise<Record<string, string>>
+let authorizationHeadersProvider: AuthorizationHeadersProvider = companionAuthorizationHeaders
+
+export function __setEventSocketTicketIssuerForTests(issuer: EventSocketTicketIssuer | null): void {
+  eventSocketTicketIssuer = issuer ?? issueSocketTicket
+}
+
+export function __setAuthorizationHeadersProviderForTests(
+  provider: AuthorizationHeadersProvider | null
+): void {
+  authorizationHeadersProvider = provider ?? companionAuthorizationHeaders
+}
 
 /** Jitter randomness source — overridable so reconnect-timing tests stay
  * deterministic while production gets real spread. */
@@ -247,11 +336,11 @@ function withJitter(ms: number): number {
  * Real transport for Capacitor mobile mode.
  *
  * Talks to the desktop's axum companion server via:
- * - `POST /api/v1/_rpc/<name>` for `call()`
- * - `GET  /ws/v1/events?token=<jwt>&since=<seq>` for `subscribe()`
+ * - `POST /api/_rpc/<name>` for `call()`
+ * - `GET  /ws/events?ticket=<single-use-ticket>&since=<seq>` for `subscribe()`
  *
- * Config is stored in localStorage under `cognia.companion.config.v1`.
- * M3.4 will migrate that to @capacitor-community/secure-storage-plugin.
+ * Device private keys are persisted through the credential-book secure
+ * storage adapter; short-lived access tokens remain memory-only.
  */
 export class CompanionTransport implements Transport {
   // ── WebSocket state ────────────────────────────────────────────────────────
@@ -272,6 +361,8 @@ export class CompanionTransport implements Transport {
   // ── Connection state observable ────────────────────────────────────────────
   private connectionState: ConnectionState = "offline"
   private connectionStateHandlers: Set<(state: ConnectionState) => void> = new Set()
+  private planeHealth: CompanionPlaneHealth = { rpc: "unknown", events: "idle" }
+  private planeHealthHandlers: Set<(health: CompanionPlaneHealth) => void> = new Set()
 
   // ── Network awareness ──────────────────────────────────────────────────────
   private onlineListener: (() => void) | null = null
@@ -318,14 +409,24 @@ export class CompanionTransport implements Transport {
    * Optional config source override (ADR-0059 T-B2). When set, every config
    * read in this instance goes through it instead of the module-level
    * storage cache — the headless brain injects an in-memory
-   * `{ baseUrl, deviceJwt: serviceToken, deviceId: "brain-<id>" }` that is
+   * `{ baseUrl, serviceToken, deviceId: "brain-<id>" }` that is
    * never persisted (token refreshes just change the provider's return).
    * The wire shape is unchanged; mobile/web instances pass nothing.
    */
   private readonly configProvider: (() => CompanionConfig | null) | null
+  private readonly rpcPath: string
+  private readonly eventsPath: string
 
-  constructor(opts: { configProvider?: () => CompanionConfig | null } = {}) {
+  constructor(
+    opts: {
+      configProvider?: () => CompanionConfig | null
+      rpcPath?: string
+      eventsPath?: string
+    } = {}
+  ) {
     this.configProvider = opts.configProvider ?? null
+    this.rpcPath = opts.rpcPath ?? "/api/_rpc"
+    this.eventsPath = opts.eventsPath ?? "/ws/events"
     this.attachNetworkListeners()
   }
 
@@ -340,10 +441,77 @@ export class CompanionTransport implements Transport {
     return this.connectionState
   }
 
+  /**
+   * Fetch a session-scoped media variant as raw bytes. The endpoint performs
+   * the session-to-hash authorization check; this client validates the opaque
+   * identifiers and response budget before retaining anything in memory.
+   */
+  public async readBinary(resource: TransportBinaryResource): Promise<TransportBinaryResponse> {
+    const config = this.config()
+    if (!config) {
+      throw new CompanionError({
+        code: "not_paired",
+        message: "companion not paired",
+        retryable: false,
+      })
+    }
+    if (
+      resource.kind !== "session-media" ||
+      resource.sessionId.length === 0 ||
+      resource.sessionId.length > 512 ||
+      !/^[a-f0-9]{64}$/.test(resource.hash) ||
+      !["thumbnail", "canonical", "original"].includes(resource.variant)
+    ) {
+      throw new CompanionError({
+        code: "invalid_binary_resource",
+        message: "invalid session media resource",
+        retryable: false,
+      })
+    }
+
+    if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
+      try {
+        return await this.rtc.readBinary(resource)
+      } catch (error) {
+        const code =
+          error && typeof error === "object" ? String((error as { code?: unknown }).code ?? "") : ""
+        if (
+          [
+            "INVALID_PARAMS",
+            "MEDIA_NOT_FOUND",
+            "device_revoked",
+            "rate_limited",
+            "binary_resource_too_large",
+          ].includes(code)
+        ) {
+          throw error
+        }
+        // Read-only resource requests are safe to retry over authenticated
+        // HTTPS. Do not log the session id, hash, or resource URL.
+      }
+    }
+
+    const baseUrl = config.baseUrl.replace(/\/+$/, "")
+    const url = `${baseUrl}/api/sessions/${encodeURIComponent(resource.sessionId)}/media/${resource.hash}?variant=${resource.variant}`
+    return this.fetchBinaryWithRetry(url, config, new URL(url).pathname)
+  }
+
   public onConnectionStateChange(handler: (state: ConnectionState) => void): () => void {
     this.connectionStateHandlers.add(handler)
     return () => {
       this.connectionStateHandlers.delete(handler)
+    }
+  }
+
+  public getPlaneHealth(): CompanionPlaneHealth {
+    return { ...this.planeHealth }
+  }
+
+  public onPlaneHealthChange(handler: (health: CompanionPlaneHealth) => void): () => void {
+    this.planeHealthHandlers.add(handler)
+    handler(this.getPlaneHealth())
+    return () => {
+      this.planeHealthHandlers.delete(handler)
     }
   }
 
@@ -370,7 +538,8 @@ export class CompanionTransport implements Transport {
     // available — WebRTC is consulted only when LAN is unavailable). The
     // TransportRtc surface returns the same `result` payload the HTTP path
     // would, so callers see no difference.
-    const isReadOnly = getCommandDescriptor(name)?.operation === "read"
+    const descriptor = getCommandDescriptor(name)
+    const isReadOnly = descriptor?.operation === "read"
     // Mint the idempotency key once and reuse it across the RTC attempt and
     // the HTTPS fallback. If the DataChannel write reached the server and ran
     // before the channel hard-failed, the fallback request carrying the same
@@ -388,17 +557,20 @@ export class CompanionTransport implements Transport {
       }
     }
 
-    const url = `${config.baseUrl}/api/v1/_rpc/${encodeURIComponent(name)}`
+    const url = `${config.baseUrl}${this.rpcPath}/${encodeURIComponent(name)}`
 
+    const path = `${this.rpcPath}/${encodeURIComponent(name)}`
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${config.deviceJwt}`,
       "Content-Type": "application/json",
     }
     if (idempotencyKey) {
       headers["Idempotency-Key"] = idempotencyKey
     }
 
-    return this.fetchWithRetry<T>(url, headers, JSON.stringify(args ?? {}))
+    const retryable =
+      descriptor?.operation === "read" ||
+      (descriptor?.idempotency === "required" && idempotencyKey !== undefined)
+    return this.fetchWithRetry<T>(url, config, path, headers, JSON.stringify(args ?? {}), retryable)
   }
 
   /**
@@ -414,10 +586,11 @@ export class CompanionTransport implements Transport {
     if (!config) throw new Error("companion not paired")
     const body = new ArrayBuffer(bytes.byteLength)
     new Uint8Array(body).set(bytes)
-    const response = await pinnedFetch(`${config.baseUrl.replace(/\/+$/, "")}/api/v1/ide/content`, {
+    const path = "/ide/content"
+    const response = await pinnedFetch(`${config.baseUrl.replace(/\/+$/, "")}${path}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.deviceJwt}`,
+        ...(await authorizationHeadersProvider(config, "POST", path)),
         "Content-Type": context.mediaType ?? "application/octet-stream",
         "X-Cognia-Content-Context": encodeContentContext(context),
       },
@@ -439,17 +612,15 @@ export class CompanionTransport implements Transport {
   ): Promise<Uint8Array> {
     const config = this.config()
     if (!config) throw new Error("companion not paired")
-    const response = await pinnedFetch(
-      `${config.baseUrl.replace(/\/+$/, "")}/api/v1/ide/content/${encodeURIComponent(handleId)}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${config.deviceJwt}`,
-          "X-Cognia-Content-Context": encodeContentContext(context),
-        },
-        serverFingerprint: config.serverFingerprint,
-      }
-    )
+    const path = `/ide/content/${encodeURIComponent(handleId)}`
+    const response = await pinnedFetch(`${config.baseUrl.replace(/\/+$/, "")}${path}`, {
+      method: "GET",
+      headers: {
+        ...(await authorizationHeadersProvider(config, "GET", path)),
+        "X-Cognia-Content-Context": encodeContentContext(context),
+      },
+      serverFingerprint: config.serverFingerprint,
+    })
     if (!response.ok) {
       throw new Error(
         `managed IDE content redemption failed (${response.status}): ${await response.text()}`
@@ -731,6 +902,7 @@ export class CompanionTransport implements Transport {
       this.openWebSocket()
     } else {
       this.wsState = "idle"
+      this.setPlaneHealth({ events: "idle" })
       this.setConnectionState("offline")
     }
   }
@@ -829,14 +1001,30 @@ export class CompanionTransport implements Transport {
 
   private async fetchWithRetry<T>(
     url: string,
-    headers: Record<string, string>,
-    body: string
+    initialConfig: CompanionConfig,
+    path: string,
+    baseHeaders: Record<string, string>,
+    body: string,
+    canRetryRequest: boolean
   ): Promise<T> {
     let lastError: CompanionError | null = null
+    let authRetryUsed = false
+    let retryAfterMs: number | null = null
 
-    for (let attempt = 0; attempt <= HTTP_BACKOFF_MS.length; attempt++) {
+    for (let attempt = 0; attempt < HTTP_MAX_ATTEMPTS; attempt++) {
       if (attempt > 0) {
-        await sleep(HTTP_BACKOFF_MS[attempt - 1])
+        const ceiling = Math.min(HTTP_BACKOFF_CAP_MS, HTTP_BACKOFF_BASE_MS * 2 ** (attempt - 1))
+        const delay = retryAfterMs ?? Math.floor(backoffRandom() * ceiling)
+        retryAfterMs = null
+        await sleep(delay)
+      }
+
+      // DPoP proofs are single-use replay tokens. Mint authorization headers
+      // for every network attempt while keeping the request body and
+      // Idempotency-Key stable across the logical call.
+      const headers: Record<string, string> = {
+        ...(await authorizationHeadersProvider(initialConfig, "POST", path)),
+        ...baseHeaders,
       }
 
       const controller = new AbortController()
@@ -849,17 +1037,18 @@ export class CompanionTransport implements Transport {
         // desktop's self-signed cert. Web / dev builds fall through to
         // the platform `fetch`. The pinned fingerprint comes from
         // CompanionConfig.serverFingerprint (set at pair time from the
-        // QR's `cgnp2|<base64>` payload).
+        // QR's `cgnp3|<base64>` invitation payload).
         response = await pinnedFetch(url, {
           method: "POST",
           headers,
           body,
           signal: controller.signal,
-          serverFingerprint: this.config()?.serverFingerprint,
+          serverFingerprint: initialConfig.serverFingerprint,
         })
       } catch (err: unknown) {
         clearTimeout(timeoutId)
         if (isAbortError(err)) {
+          this.setPlaneHealth({ rpc: "unavailable" })
           lastError = new CompanionError({
             code: "timeout",
             message: `request timed out after ${CALL_TIMEOUT_MS}ms (${url})`,
@@ -874,7 +1063,8 @@ export class CompanionTransport implements Transport {
           message: err instanceof Error ? err.message : String(err),
           retryable: true,
         })
-        if (attempt < HTTP_BACKOFF_MS.length) {
+        this.setPlaneHealth({ rpc: "unavailable" })
+        if (canRetryRequest && attempt + 1 < HTTP_MAX_ATTEMPTS) {
           continue
         }
         throw lastError
@@ -883,38 +1073,63 @@ export class CompanionTransport implements Transport {
       }
 
       if (response.ok) {
-        return (await response.json()) as T
+        this.setPlaneHealth({ rpc: "ready" })
+        const envelope = (await response.json()) as unknown
+        return (
+          envelope !== null && typeof envelope === "object" && Object.hasOwn(envelope, "result")
+            ? (envelope as Record<string, unknown>).result
+            : envelope
+        ) as T
       }
 
       if (response.status === 401) {
-        // Device revoked / invalid — surface as unauthenticated.
+        if (!authRetryUsed && initialConfig.devicePrivateKeyJwk) {
+          authRetryUsed = true
+          invalidateCompanionAccessToken(initialConfig.deviceId)
+          attempt--
+          continue
+        }
+        // Device revoked / invalid after one refresh — surface as unauthenticated.
         this.setConnectionState("unauthenticated")
+        this.setPlaneHealth({ rpc: "unauthenticated" })
         const body = await safeJson(response)
+        const detail = nestedError(body)
         throw new CompanionError({
-          code: (body?.code as string) ?? "unauthenticated",
-          message: (body?.message as string) ?? "device unauthenticated",
+          code: detail?.code ?? "unauthenticated",
+          message: detail?.message ?? "device unauthenticated",
           retryable: false,
         })
       }
 
-      if (response.status >= 400 && response.status < 500) {
+      if (
+        response.status >= 400 &&
+        response.status < 500 &&
+        ![408, 429].includes(response.status)
+      ) {
         // 4xx — not retried.
+        this.setPlaneHealth({ rpc: "ready" })
         const body = await safeJson(response)
+        const detail = nestedError(body)
         throw new CompanionError({
-          code: (body?.code as string) ?? `http_${response.status}`,
-          message: (body?.message as string) ?? `HTTP ${response.status}`,
+          code: detail?.code ?? `http_${response.status}`,
+          message: detail?.message ?? `HTTP ${response.status}`,
           retryable: false,
         })
       }
 
-      // 5xx — retryable.
+      // 408, 429 and 5xx are retryable only when the manifest permits it.
       const errBody = await safeJson(response)
+      const detail = nestedError(errBody)
       lastError = new CompanionError({
-        code: "server_error",
-        message: (errBody?.message as string) ?? `HTTP ${response.status}`,
+        code: detail?.code ?? (response.status >= 500 ? "server_error" : `http_${response.status}`),
+        message: detail?.message ?? `HTTP ${response.status}`,
         retryable: true,
       })
-      if (attempt < HTTP_BACKOFF_MS.length) {
+      this.setPlaneHealth({
+        rpc: response.status === 503 || response.status === 504 ? "unavailable" : "ready",
+      })
+      if (canRetryRequest && attempt + 1 < HTTP_MAX_ATTEMPTS) {
+        retryAfterMs = parseRetryAfterMs(response.headers?.get("retry-after") ?? null)
         continue
       }
       throw lastError
@@ -924,6 +1139,95 @@ export class CompanionTransport implements Transport {
     throw (
       lastError ??
       new CompanionError({ code: "network", message: "unknown fetch error", retryable: true })
+    )
+  }
+
+  private async fetchBinaryWithRetry(
+    url: string,
+    initialConfig: CompanionConfig,
+    path: string
+  ): Promise<TransportBinaryResponse> {
+    let lastError: CompanionError | null = null
+
+    for (let attempt = 0; attempt <= BINARY_HTTP_BACKOFF_MS.length; attempt++) {
+      if (attempt > 0) await sleep(BINARY_HTTP_BACKOFF_MS[attempt - 1])
+
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS)
+      let response: Response
+      try {
+        const headers = await authorizationHeadersProvider(initialConfig, "GET", path)
+        response = await pinnedFetch(url, {
+          method: "GET",
+          headers,
+          signal: controller.signal,
+          serverFingerprint: initialConfig.serverFingerprint,
+        })
+      } catch (err: unknown) {
+        if (isAbortError(err)) {
+          throw new CompanionError({
+            code: "timeout",
+            message: "session media request timed out",
+            retryable: true,
+          })
+        }
+        lastError = new CompanionError({
+          code: "network",
+          message: "session media network request failed",
+          retryable: true,
+        })
+        if (attempt < BINARY_HTTP_BACKOFF_MS.length) continue
+        throw lastError
+      } finally {
+        clearTimeout(timeoutId)
+      }
+
+      if (response.ok) {
+        const declaredSize = Number(response.headers.get("content-length") ?? "0")
+        if (Number.isFinite(declaredSize) && declaredSize > MAX_SESSION_MEDIA_BYTES) {
+          throw new CompanionError({
+            code: "binary_resource_too_large",
+            message: "session media exceeds the 10 MiB response budget",
+            retryable: false,
+          })
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        if (bytes.byteLength > MAX_SESSION_MEDIA_BYTES) {
+          throw new CompanionError({
+            code: "binary_resource_too_large",
+            message: "session media exceeds the 10 MiB response budget",
+            retryable: false,
+          })
+        }
+        return {
+          bytes,
+          mediaType: response.headers.get("content-type") ?? "application/octet-stream",
+          ...(response.headers.get("etag") ? { etag: response.headers.get("etag")! } : {}),
+        }
+      }
+
+      if (response.status === 401) this.setConnectionState("unauthenticated")
+      if (response.status >= 400 && response.status < 500) {
+        const body = await safeJson(response)
+        throw new CompanionError({
+          code: (body?.code as string) ?? `http_${response.status}`,
+          message: (body?.message as string) ?? `HTTP ${response.status}`,
+          retryable: false,
+        })
+      }
+
+      const body = await safeJson(response)
+      lastError = new CompanionError({
+        code: "server_error",
+        message: (body?.message as string) ?? `HTTP ${response.status}`,
+        retryable: true,
+      })
+      if (attempt >= BINARY_HTTP_BACKOFF_MS.length) throw lastError
+    }
+
+    throw (
+      lastError ??
+      new CompanionError({ code: "network", message: "binary request failed", retryable: true })
     )
   }
 
@@ -937,19 +1241,53 @@ export class CompanionTransport implements Transport {
       // accepted SPKI. Keep the channel closed until a native pinned WS
       // transport exists; WebRTC remains eligible for subscriptions.
       this.wsState = "idle"
+      this.setPlaneHealth({ events: "idle" })
       this.setConnectionState("offline")
       return
     }
+
+    this.wsState = "connecting"
+    this.setPlaneHealth({ events: "connecting" })
+    this.setConnectionState("reconnecting")
+    const internalServiceToken = this.eventsPath.startsWith("/internal/")
+      ? config.serviceToken
+      : null
+    if (internalServiceToken) {
+      this.openAuthenticatedWebSocket(config, internalServiceToken, true)
+      return
+    }
+    try {
+      const issued = eventSocketTicketIssuer(config, "events")
+      if (isPromiseLike(issued)) {
+        void issued
+          .then(({ ticket }) => this.openAuthenticatedWebSocket(config, ticket, false))
+          .catch(() => {
+            this.wsState = "reconnecting"
+            this.scheduleWsReconnect()
+          })
+      } else {
+        this.openAuthenticatedWebSocket(config, issued.ticket, false)
+      }
+    } catch {
+      this.wsState = "reconnecting"
+      this.scheduleWsReconnect()
+    }
+  }
+
+  private openAuthenticatedWebSocket(
+    config: CompanionConfig,
+    ticket: string,
+    internalService: boolean
+  ): void {
+    if (this.wsDestroyed || this.wsState !== "connecting") return
 
     // Build ?since= from the highest cursor across all active channels.
     const maxSeq = this.globalMaxSeq()
     const since = maxSeq > 0 ? String(maxSeq) : ""
     const wsBase = config.baseUrl.replace(/^https?/, "wss")
-    const sinceParam = since ? `&since=${since}` : ""
-    const wsUrl = `${wsBase}/ws/v1/events?token=${encodeURIComponent(config.deviceJwt)}${sinceParam}`
-
-    this.wsState = "connecting"
-    this.setConnectionState("reconnecting")
+    const query = new URLSearchParams(internalService ? { token: ticket } : { ticket })
+    if (since) query.set("since", since)
+    const wsUrl = `${wsBase}${this.eventsPath}?${query.toString()}`
 
     const ws = new WebSocket(wsUrl)
     this.ws = ws
@@ -958,6 +1296,7 @@ export class CompanionTransport implements Transport {
       if (this.ws !== ws) return // stale reference
       this.wsState = "connected"
       this.wsReconnectAttempt = 0
+      this.setPlaneHealth({ events: "replaying" })
       this.setConnectionState("connected")
     }
 
@@ -975,9 +1314,11 @@ export class CompanionTransport implements Transport {
       this.ws = null
       this.wsState = "reconnecting"
       if (!this.wsDestroyed && this.channelHandlers.size > 0) {
+        this.setPlaneHealth({ events: "connecting" })
         this.scheduleWsReconnect()
       } else {
         this.wsState = "idle"
+        this.setPlaneHealth({ events: "idle" })
         this.setConnectionState("offline")
       }
     }
@@ -994,7 +1335,18 @@ export class CompanionTransport implements Transport {
     const type = frame["type"] as string | undefined
     if (!type) return
 
+    if (type === "stream_ready") {
+      const cursor = frame["cursor"]
+      if (!Number.isSafeInteger(cursor) || (cursor as number) < 0) return
+      for (const event of this.channelHandlers.keys()) {
+        this.highestSeq.set(event, Math.max(this.highestSeq.get(event) ?? 0, cursor as number))
+      }
+      this.setPlaneHealth({ events: "ready" })
+      return
+    }
+
     if (type === "resync_required") {
+      this.setPlaneHealth({ events: "replaying" })
       this.startWsAuthoritativeResync(frame)
       return
     }
@@ -1057,6 +1409,7 @@ export class CompanionTransport implements Transport {
       .catch((error) => {
         console.error("CompanionTransport: authoritative event resync failed", error)
         this.wsState = "idle"
+        this.setPlaneHealth({ events: "idle" })
         this.setConnectionState("offline")
       })
       .finally(() => {
@@ -1074,6 +1427,7 @@ export class CompanionTransport implements Transport {
       return
     }
     this.setConnectionState("reconnecting")
+    this.setPlaneHealth({ events: "connecting" })
 
     const idx = Math.min(this.wsReconnectAttempt, WS_BACKOFF_MS.length - 1)
     const delay = withJitter(WS_BACKOFF_MS[idx])
@@ -1109,6 +1463,7 @@ export class CompanionTransport implements Transport {
       ws.close()
     }
     this.wsState = "idle"
+    this.setPlaneHealth({ events: "idle" })
     this.setConnectionState("offline")
   }
 
@@ -1131,6 +1486,15 @@ export class CompanionTransport implements Transport {
     }
     // Connection state changes alter the tier (offline ↔ ws-*).
     void this.recomputeTier()
+  }
+
+  private setPlaneHealth(patch: Partial<CompanionPlaneHealth>): void {
+    const next = { ...this.planeHealth, ...patch }
+    if (next.rpc === this.planeHealth.rpc && next.events === this.planeHealth.events) return
+    this.planeHealth = next
+    for (const handler of this.planeHealthHandlers) {
+      handler(this.getPlaneHealth())
+    }
   }
 
   // ── Private: network awareness ─────────────────────────────────────────────
@@ -1160,6 +1524,7 @@ export class CompanionTransport implements Transport {
         this.wsReconnectTimer = null
       }
       this.setConnectionState("offline")
+      this.setPlaneHealth({ events: "idle" })
     }
 
     window.addEventListener("online", this.onlineListener)
@@ -1185,6 +1550,7 @@ export class CompanionTransport implements Transport {
     }
     this.channelHandlers.clear()
     this.connectionStateHandlers.clear()
+    this.planeHealthHandlers.clear()
   }
 }
 
@@ -1194,6 +1560,27 @@ export class CompanionTransport implements Transport {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function parseRetryAfterMs(value: string | null, nowMs = Date.now()): number | null {
+  if (value === null) return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+
+  let delayMs: number
+  if (/^\d+$/.test(trimmed)) {
+    delayMs = Number(trimmed) * 1_000
+  } else {
+    const retryAt = Date.parse(trimmed)
+    if (!Number.isFinite(retryAt)) return null
+    delayMs = Math.max(0, retryAt - nowMs)
+  }
+  if (!Number.isFinite(delayMs)) return null
+  return Math.min(delayMs, HTTP_RETRY_AFTER_CAP_MS)
+}
+
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return typeof (value as Promise<T>).then === "function"
 }
 
 function isAbortError(err: unknown): boolean {
@@ -1206,4 +1593,17 @@ async function safeJson(response: Response): Promise<Record<string, unknown> | n
   } catch {
     return null
   }
+}
+
+function nestedError(
+  body: Record<string, unknown> | null
+): { code: string; message: string } | null {
+  if (!body) return null
+  const candidate =
+    body.error && typeof body.error === "object" && !Array.isArray(body.error)
+      ? (body.error as Record<string, unknown>)
+      : body
+  return typeof candidate.code === "string" && typeof candidate.message === "string"
+    ? { code: candidate.code, message: candidate.message }
+    : null
 }

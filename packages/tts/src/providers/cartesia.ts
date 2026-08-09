@@ -23,6 +23,8 @@ export interface CartesiaTTSOptions {
   speed?: number
   emotion?: string
   outputFormat?: "mp3" | "wav" | "raw"
+  signal?: AbortSignal
+  requestId?: string
 }
 
 export async function generateCartesiaTTS(
@@ -71,6 +73,9 @@ export async function generateCartesiaTTS(
   try {
     const response = await proxyFetch(`${CARTESIA_API_BASE}/tts/bytes`, {
       method: "POST",
+      provider: "cartesia",
+      signal: options.signal,
+      requestId: options.requestId,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Cartesia-Version": CARTESIA_API_VERSION,

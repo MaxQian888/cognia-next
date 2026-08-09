@@ -14,17 +14,22 @@ jest.mock("@/lib/platform/detect", () => ({
   isHeadlessHost: jest.fn(() => false),
 }))
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
+jest.mock("@/lib/runtime/browser-vault", () => ({
+  getActiveBrowserVault: jest.fn(() => null),
+}))
 
 import { createKeyringStore, createLocalKeyringStore } from "./keyring-store"
 import { isCapacitor, isTauri, transport } from "@/lib/tauri"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { invoke } from "@tauri-apps/api/core"
+import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 
 const mockIsTauri = isTauri as jest.Mock
 const mockIsCapacitor = isCapacitor as jest.Mock
 const mockCall = transport.call as jest.Mock
 const mockIsHeadless = isHeadlessHost as jest.Mock
 const mockInvoke = invoke as jest.Mock
+const mockGetActiveBrowserVault = getActiveBrowserVault as jest.Mock
 
 beforeEach(() => {
   mockIsTauri.mockReturnValue(false)
@@ -32,6 +37,7 @@ beforeEach(() => {
   mockCall.mockReset()
   mockIsHeadless.mockReturnValue(false)
   mockInvoke.mockReset()
+  mockGetActiveBrowserVault.mockReturnValue(null)
 })
 
 describe("createKeyringStore — in-memory backend (web/dev fallback)", () => {
@@ -70,25 +76,66 @@ describe("createKeyringStore — in-memory backend (web/dev fallback)", () => {
   })
 })
 
+describe("createKeyringStore — encrypted Browser Vault backend", () => {
+  it("persists namespaced secrets through the active vault", async () => {
+    const secrets = new Map<string, string>()
+    mockGetActiveBrowserVault.mockReturnValue({
+      storeSecret: jest.fn(async (name: string, value: string) => secrets.set(name, value)),
+      loadSecret: jest.fn(async (name: string) => secrets.get(name) ?? null),
+      deleteSecret: jest.fn(async (name: string) => secrets.delete(name)),
+    })
+
+    const store = createKeyringStore("tts")
+    expect(store.isPersistent?.()).toBe(true)
+    await store.save("openai", "sk-secret")
+    expect(await store.load("openai")).toBe("sk-secret")
+    expect(secrets.get("keyring:tts:openai")).toBe("sk-secret")
+    await store.delete("openai")
+    expect(await store.load("openai")).toBeNull()
+  })
+
+  it("reports the memory fallback as session-only", () => {
+    expect(createKeyringStore("tts").isPersistent?.()).toBe(false)
+  })
+
+  it("promotes a session value after the Browser Vault is unlocked", async () => {
+    const store = createKeyringStore("tts")
+    await store.save("openai", "session-secret")
+
+    const secrets = new Map<string, string>()
+    const vault = {
+      storeSecret: jest.fn(async (name: string, value: string) => secrets.set(name, value)),
+      loadSecret: jest.fn(async (name: string) => secrets.get(name) ?? null),
+      deleteSecret: jest.fn(async (name: string) => secrets.delete(name)),
+    }
+    mockGetActiveBrowserVault.mockReturnValue(vault)
+
+    await expect(store.load("openai")).resolves.toBe("session-secret")
+    expect(vault.storeSecret).toHaveBeenCalledWith("keyring:tts:openai", "session-secret")
+    await expect(store.load("openai")).resolves.toBe("session-secret")
+    expect(vault.storeSecret).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe("createKeyringStore — Tauri OS keyring backend", () => {
   beforeEach(() => {
     mockIsTauri.mockReturnValue(true)
   })
 
-  it("writes through keyring_secret_set with the namespace + key", async () => {
+  it("writes through secret_store_set with the namespace + key", async () => {
     mockCall.mockResolvedValue(undefined)
     const store = createKeyringStore("provider-ns")
     await store.save("k1", "tok")
-    expect(mockCall).toHaveBeenCalledWith("keyring_secret_set", {
+    expect(mockCall).toHaveBeenCalledWith("secret_store_set", {
       input: { namespace: "provider-ns", key: "k1", value: "tok" },
     })
   })
 
-  it("reads through keyring_secret_get and passes the value through", async () => {
+  it("reads through secret_store_get and passes the value through", async () => {
     mockCall.mockResolvedValue("tok")
     const store = createKeyringStore("provider-ns")
     expect(await store.load("k1")).toBe("tok")
-    expect(mockCall).toHaveBeenCalledWith("keyring_secret_get", {
+    expect(mockCall).toHaveBeenCalledWith("secret_store_get", {
       input: { namespace: "provider-ns", key: "k1" },
     })
   })
@@ -99,11 +146,11 @@ describe("createKeyringStore — Tauri OS keyring backend", () => {
     expect(await store.load("k1")).toBeNull()
   })
 
-  it("clears through keyring_secret_clear", async () => {
+  it("clears through secret_store_delete", async () => {
     mockCall.mockResolvedValue(undefined)
     const store = createKeyringStore("provider-ns")
     await store.delete("k1")
-    expect(mockCall).toHaveBeenCalledWith("keyring_secret_clear", {
+    expect(mockCall).toHaveBeenCalledWith("secret_store_delete", {
       input: { namespace: "provider-ns", key: "k1" },
     })
   })
@@ -127,11 +174,11 @@ describe("createKeyringStore — headless encrypted server backend", () => {
 
     expect(mockCall.mock.calls).toEqual([
       [
-        "keyring_secret_set",
+        "secret_store_set",
         { input: { namespace: "webdav", key: "sync-passphrase", value: "secret" } },
       ],
-      ["keyring_secret_get", { input: { namespace: "webdav", key: "sync-passphrase" } }],
-      ["keyring_secret_clear", { input: { namespace: "webdav", key: "sync-passphrase" } }],
+      ["secret_store_get", { input: { namespace: "webdav", key: "sync-passphrase" } }],
+      ["secret_store_delete", { input: { namespace: "webdav", key: "sync-passphrase" } }],
     ])
   })
 })
@@ -144,7 +191,7 @@ describe("createLocalKeyringStore — non-routable Tauri keyring backend", () =>
 
     const store = createLocalKeyringStore("cognia-sites")
     expect(await store.load("cloudflare:account_1")).toBe("local-token")
-    expect(mockInvoke).toHaveBeenCalledWith("keyring_secret_get", {
+    expect(mockInvoke).toHaveBeenCalledWith("secret_store_get", {
       input: {
         namespace: "cognia-sites",
         key: "cloudflare:account_1",

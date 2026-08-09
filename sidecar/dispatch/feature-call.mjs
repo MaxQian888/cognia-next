@@ -1,6 +1,7 @@
 import { buildModel as defaultBuildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
 import { resolveAdapter as defaultResolveProtocolAdapter } from "./protocol-adapters/registry.mjs"
 import { buildBedrockProviderOptions, discoverBedrockModels } from "./bedrock.mjs"
+import { discoverMcpServer as defaultDiscoverMcpServer } from "./mcp-runtime-gateway.mjs"
 
 function modelInput(message) {
   const credentials = message.credentials ?? {}
@@ -230,6 +231,7 @@ export function createFeatureCallHandler({
   buildModel = defaultBuildModel,
   buildEmbeddingModel = defaultBuildEmbeddingModel,
   discoverOpenCodeV2 = discoverOpenCodeV2Service,
+  discoverMcpServer = defaultDiscoverMcpServer,
   resolveProtocolAdapter = defaultResolveProtocolAdapter,
 }) {
   const active = new Map()
@@ -257,6 +259,14 @@ export function createFeatureCallHandler({
 
       if (operation === "opencode-v2-discover") {
         const result = await discoverOpenCodeV2()
+        emit({ type: "feature_call_result", requestId, result })
+        return
+      }
+
+      if (operation === "mcp-discover") {
+        const result = await discoverMcpServer(message.mcpServer, {
+          signal: controller.signal,
+        })
         emit({ type: "feature_call_result", requestId, result })
         return
       }

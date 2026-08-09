@@ -676,6 +676,11 @@ export async function executeAgent(
     const { executeAgentTurn } = await import("@/lib/ai/agent/execution/agent-execution-service")
     return executeAgentTurn(prompt, config, { isTauri: isTauri(), isHeadlessHost: false })
   }
+  void import("@/lib/ai/agent/execution/agent-execution-service")
+    .then(({ recordAgentExecutionShadow }) =>
+      recordAgentExecutionShadow(config, { isTauri: isTauri(), isHeadlessHost: false })
+    )
+    .catch(() => undefined)
 
   // Tool-enabled branch: route through the sidecar when requested and available.
   if (config.toolsEnabled) {

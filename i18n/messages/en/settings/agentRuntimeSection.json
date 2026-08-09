@@ -50,11 +50,11 @@
     "planMaxAutoRefinements": "Max automatic refinements",
     "planMaxAutoRefinementsHint": "Cap on automatic repair replans after a step failure (0–10).",
     "planRequireApproval": "Require plan approval",
+    "planRequireApprovalHint": "Show the approval card before implementing. When off, captured plans auto-resume in accept-edits mode.",
     "planStyleCards": "Cards",
     "planStyleCompact": "Compact",
     "planStyleDefault": "Default",
     "planStyleTimeline": "Timeline",
-    "planRequireApprovalHint": "Show the approval card before implementing. When off, captured plans auto-resume in accept-edits mode.",
     "planTitle": "Plan mode",
     "routingDesc": "When a turn fails, retry against the next entry in the alias's fallback chain. Disable to keep the original error visible.",
     "routingTitle": "Routing fallback",
@@ -69,6 +69,10 @@
     "workingDirTitle": "Default working directory"
   },
   "description": "Configure defaults for the in-process Claude SDK sidecar — these flow into every new chat unless a character or session overrides them.",
+  "nav": {
+    "mobileTrigger": "Sections",
+    "title": "Agent runtime settings"
+  },
   "permissions": {
     "addBtn": "Add",
     "addToolPlaceholder": "Tool name (e.g. mcp__cognia-tools__file_hash)",
@@ -148,6 +152,7 @@
         "name": "Web clone"
       }
     },
+    "categoriesTitle": "Tool categories",
     "desktopOnlyHint": "Built-in tool categories run inside the desktop sidecar — switch to the desktop app to enable them.",
     "infoLabel": "Tools in {name}",
     "infoListTitle": "{count} tools",
@@ -215,6 +220,37 @@
     "resume": "Resume",
     "resumedToast": "Resumed `{title}`.",
     "save": "Save",
+    "sdk": {
+      "cancel": "Cancel",
+      "count": "{count, plural, one {# native session} other {# native sessions}}",
+      "delete": "Delete SDK session",
+      "deleteConfirm": "Delete permanently",
+      "deleteDescription": "This removes the native SDK transcript and all of its subagent transcripts. This action cannot be undone.",
+      "deleteTitle": "Delete native SDK session?",
+      "deleted": "SDK session deleted.",
+      "description": "Sessions stored by the Claude Agent SDK, including transcripts that are not yet linked to a Cognia chat.",
+      "disabled": "Enable Claude Agent SDK parity in Sidecar diagnostics to manage native sessions.",
+      "empty": "No native SDK sessions were found.",
+      "errors": {
+        "deleteFailed": "The SDK session could not be deleted.",
+        "forkFailed": "The SDK session could not be forked.",
+        "importFailed": "The SDK session could not be imported.",
+        "loadFailed": "SDK sessions could not be loaded.",
+        "renameFailed": "The SDK session could not be renamed."
+      },
+      "fork": "Fork SDK session",
+      "forked": "SDK session forked.",
+      "importStore": "Import into SessionStore",
+      "imported": "SDK session imported into SessionStore.",
+      "refresh": "Refresh SDK sessions",
+      "rename": "Rename SDK session",
+      "renameDescription": "Change the native SDK session title without changing its transcript.",
+      "renameTitle": "Rename native SDK session",
+      "renamed": "SDK session renamed.",
+      "save": "Save",
+      "title": "Native SDK sessions",
+      "titleLabel": "Session title"
+    },
     "title": "Sessions",
     "untitled": "(untitled)"
   },
@@ -236,6 +272,32 @@
     "countsTitle": "Linked surfaces",
     "description": "Read-only view of the in-process Claude SDK sidecar.",
     "desktopOnlyHint": "Restart is only available in the desktop build.",
+    "parity": {
+      "capabilities": "Configured capability coverage",
+      "checkpoint": {
+        "description": "Allow dry-run and confirmed file rewind for SDK user-message checkpoints.",
+        "label": "File checkpointing"
+      },
+      "description": "Roll out the complete Claude Agent SDK surface with independent controls for stateful, higher-risk capabilities.",
+      "disabledHint": "Enable the master flag before turning on stateful capabilities.",
+      "master": {
+        "description": "Use the versioned options, controls, events, hooks, and session API contract.",
+        "label": "Claude Agent SDK parity"
+      },
+      "prewarm": {
+        "description": "Keep isolated warm SDK processes ready for the next compatible request.",
+        "label": "Prewarm pool"
+      },
+      "sessionStore": {
+        "description": "Mirror native SDK session records into the encrypted, tenant-isolated host store.",
+        "label": "Session store"
+      },
+      "title": "Claude Agent SDK advanced features",
+      "resolver": {
+        "description": "Use the unified execution resolver to select the correct agent runtime.",
+        "label": "Unified execution resolver"
+      }
+    },
     "restartBtn": "Restart sidecar",
     "restartedToast": "Sidecar restart requested.",
     "running": "Running",

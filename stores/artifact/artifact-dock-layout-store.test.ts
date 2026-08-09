@@ -257,6 +257,19 @@ describe("useArtifactDockLayoutStore", () => {
   })
 
   describe("reveal intents + workspace reveal", () => {
+    it("reveals the shared sidechat panel and expands a dismissed dock", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.setDockCollapsed(true))
+      act(() => result.current.revealSidechat())
+
+      expect(result.current.revealIntent).toEqual({
+        panelId: "session-sidechat",
+        mode: "narrow",
+      })
+      expect(result.current.dockCollapsed).toBe(false)
+      expect(result.current.userDismissed).toBe(false)
+    })
+
     it("opens the browser as a one-shot panel intent, not a persisted mode", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
 

@@ -1,0 +1,27 @@
+[
+  {
+    "component": "gateway",
+    "event": "request accepted for qwen3-32b",
+    "evidenceIds": ["log_001"]
+  },
+  {
+    "component": "router",
+    "event": "route selected qwen-vllm-a",
+    "evidenceIds": ["log_002"]
+  },
+  {
+    "component": "provider",
+    "event": "provider qwen-vllm-a timeout",
+    "evidenceIds": ["log_003", "span_002", "span_004"]
+  },
+  {
+    "component": "gateway",
+    "event": "fallback qwen-vllm-a -> qwen-vllm-b",
+    "evidenceIds": ["log_004", "metric_001"]
+  },
+  {
+    "component": "gateway",
+    "event": "request completed status=200",
+    "evidenceIds": ["log_005", "span_005"]
+  }
+]

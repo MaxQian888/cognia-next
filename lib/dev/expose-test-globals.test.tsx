@@ -3,6 +3,16 @@ import "fake-indexeddb/auto"
 import { render, waitFor, cleanup } from "@testing-library/react"
 import { ExposeTestGlobals } from "./expose-test-globals"
 import { getDb } from "@/lib/db/schema"
+import {
+  __resetBrowserVaultForTesting,
+  deleteBrowserVault,
+  provisionBrowserVault,
+} from "@/lib/runtime/browser-vault"
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
+import { __setRuntimeTargetRegistrarForTests } from "@/lib/tauri/transport-companion"
 
 const originalEnv = process.env.NEXT_PUBLIC_E2E
 
@@ -18,6 +28,7 @@ const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaMockBaseUrls",
   "__cogniaSaveCompanionConfig",
   "__cogniaClearCompanionConfig",
+  "__cogniaE2ECompanion",
   "__cogniaSetSettings",
   "__cogniaE2EWebRtc",
   "__cogniaE2EWebRtcEvents",
@@ -33,8 +44,12 @@ beforeEach(() => {
   window.localStorage.clear()
 })
 
-afterEach(() => {
+afterEach(async () => {
   cleanup()
+  __setRuntimeTargetRegistrarForTests(null)
+  clearActiveRuntimeTargetContext()
+  await deleteBrowserVault("acct_e2e_vault").catch(() => undefined)
+  __resetBrowserVaultForTesting()
   delete window.__cogniaPluginRuntimeReady
   process.env.NEXT_PUBLIC_E2E = originalEnv
 })
@@ -79,6 +94,14 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaSetMockBaseUrls).toBe("function")
     expect(typeof window.__cogniaSaveCompanionConfig).toBe("function")
     expect(typeof window.__cogniaClearCompanionConfig).toBe("function")
+    expect(typeof window.__cogniaE2ECompanion?.call).toBe("function")
+    expect(typeof window.__cogniaE2ECompanion?.request).toBe("function")
+    expect(typeof window.__cogniaE2ECompanion?.subscribe).toBe("function")
+    expect(typeof window.__cogniaE2ECompanion?.pair).toBe("function")
+    expect(typeof window.__cogniaE2ECompanion?.targets).toBe("function")
+    expect(typeof window.__cogniaE2ECompanion?.switchTarget).toBe("function")
+    expect(typeof window.__cogniaE2ECompanion?.runtime).toBe("function")
+    expect(window.__cogniaE2ECompanion?.activeTier()).toBeNull()
     expect(typeof window.__cogniaSetSettings).toBe("function")
     // ADR-0021 real-pair harness seam.
     expect(typeof window.__cogniaE2EWebRtc?.connect).toBe("function")
@@ -162,24 +185,34 @@ describe("ExposeTestGlobals", () => {
     }
   })
 
-  it("__cogniaSaveCompanionConfig persists to localStorage and clear removes it", async () => {
+  it("__cogniaSaveCompanionConfig persists only public target data outside the Browser Vault", async () => {
     process.env.NEXT_PUBLIC_E2E = "1"
+    await provisionBrowserVault("acct_e2e_vault", "correct horse battery staple")
+    setActiveRuntimeTargetContext("acct_e2e_vault", "standalone-local")
+    __setRuntimeTargetRegistrarForTests(async (config) => {
+      setActiveRuntimeTargetContext("acct_e2e_vault", config.targetId!)
+    })
     render(<ExposeTestGlobals />)
     await waitFor(() => {
       expect(window.__cogniaTestGlobalsReady).toBe(true)
     })
     await window.__cogniaSaveCompanionConfig!({
       baseUrl: "https://192.168.1.42:7891",
-      deviceJwt: "tok.tok.tok",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+      deviceKeyThumbprint: "device-thumbprint",
       deviceId: "device_abc",
       serverVersion: "1.2.3",
     })
-    const stored = window.localStorage.getItem("cognia.companion.config.v1")
+    const stored = window.localStorage.getItem("cognia.companion.hosts.v2")
     expect(stored).not.toBeNull()
-    expect(JSON.parse(stored!).baseUrl).toBe("https://192.168.1.42:7891")
+    expect(stored).toContain("https://192.168.1.42:7891")
+    expect(stored).not.toContain("device-private")
+    expect(window.localStorage.getItem("cognia.companion.config.v1")).toBeNull()
 
     await window.__cogniaClearCompanionConfig!()
-    expect(window.localStorage.getItem("cognia.companion.config.v1")).toBeNull()
+    expect(window.localStorage.getItem("cognia.companion.hosts.v2") ?? "").not.toContain(
+      "https://192.168.1.42:7891"
+    )
   })
 
   it("__cogniaSetMockBaseUrls round-trips through localStorage", async () => {

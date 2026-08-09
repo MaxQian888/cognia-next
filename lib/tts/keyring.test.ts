@@ -2,18 +2,20 @@
 /**
  * Tests for the TTS keyring frontend wrapper. Drives both code paths:
  *   - Tauri (mocks `@tauri-apps/api/core` and `lib/tauri.isTauri`)
- *   - Web fallback (uses fake-indexeddb-backed Dexie)
+ *   - Web fallback (Browser Vault/session store plus legacy Dexie migration)
  */
 
 import "fake-indexeddb/auto"
 
 jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
   isTauri: jest.fn(),
 }))
 
 import { isTauri } from "@/lib/tauri"
 import * as core from "@tauri-apps/api/core"
 import {
+  HOST_KEY_PRESENT,
   KEYRING_PROVIDER_IDS,
   clearProviderKey,
   getProviderKey,
@@ -47,6 +49,7 @@ describe("keyringProviderFor", () => {
     expect(keyringProviderFor("cartesia")).toBe("cartesia")
     expect(keyringProviderFor("deepgram")).toBe("deepgram")
     expect(keyringProviderFor("mistral")).toBe("mistral")
+    expect(keyringProviderFor("local-openai-compatible")).toBe("local-openai-compatible")
   })
 
   it("returns null for free providers", () => {
@@ -56,9 +59,16 @@ describe("keyringProviderFor", () => {
 })
 
 describe("KEYRING_PROVIDER_IDS", () => {
-  it("matches the nine keyed provider accounts", () => {
-    expect(KEYRING_PROVIDER_IDS).toHaveLength(9)
-    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(9)
+  it("lists every keyring account exactly once", () => {
+    expect(KEYRING_PROVIDER_IDS).toHaveLength(11)
+    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(11)
+  })
+
+  it("carries xai, which is a live-voice account with no TTS provider", () => {
+    // The keyring backs both subsystems, so its account list is a superset of
+    // the TTS providers: `keyringProviderFor` never returns xai, but live voice
+    // still needs somewhere to store the key.
+    expect(KEYRING_PROVIDER_IDS).toContain("xai")
   })
 })
 
@@ -69,9 +79,10 @@ describe("getProviderKey/setProviderKey/clearProviderKey (web fallback)", () => 
     expect(await getProviderKey("openai")).toBeNull()
   })
 
-  it("round-trips a value via Dexie", async () => {
+  it("round-trips a value without persisting cleartext in Dexie", async () => {
     await setProviderKey("openai", "sk-abc")
     expect(await getProviderKey("openai")).toBe("sk-abc")
+    expect(await getDb().tts_provider_keys.get("tts.providerKey.openai")).toBeUndefined()
   })
 
   it("trims surrounding whitespace before storing", async () => {
@@ -142,17 +153,14 @@ describe("loadAllProviderKeys", () => {
     expect(map).toEqual({ openai: "k1", hume: "k2" })
   })
 
-  it("queries Tauri keyring for every listed provider and skips empty values", async () => {
+  it("loads only Tauri key presence and never requests secret values", async () => {
     mockIsTauri.mockReturnValue(true)
     // first call: list providers
     mockInvoke.mockImplementationOnce(async () => ["openai", "hume"])
-    // subsequent calls: getProviderKey -> tts_keyring_get
-    mockInvoke.mockImplementationOnce(async () => "key-1") // openai
-    mockInvoke.mockImplementationOnce(async () => "") // hume — empty -> dropped
-
     const map = await loadAllProviderKeys()
-    expect(map).toEqual({ openai: "key-1" })
+    expect(map).toEqual({ openai: HOST_KEY_PRESENT, hume: HOST_KEY_PRESENT })
     expect(mockInvoke).toHaveBeenCalledWith("tts_keyring_list_providers")
+    expect(mockInvoke).not.toHaveBeenCalledWith("tts_keyring_get", expect.anything())
   })
 })
 
@@ -164,6 +172,12 @@ describe("providerKeyMapToSettingsMap", () => {
 
   it("ignores undefined providers", () => {
     expect(providerKeyMapToSettingsMap({})).toEqual({})
+  })
+
+  it("turns a desktop presence marker into a non-secret host placeholder", () => {
+    expect(providerKeyMapToSettingsMap({ openai: HOST_KEY_PRESENT })).toEqual({
+      openai: { apiKey: "host-key" },
+    })
   })
 })
 

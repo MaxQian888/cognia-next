@@ -4,7 +4,7 @@
 //! - the outbound WSS connection to the public signaling rendezvous,
 //! - the `PeerSession` (created on receipt of `rtc:offer`),
 //! - the dispatcher that bridges the resulting DataChannel to
-//!   `companion_api::rpc::dispatch` + `EventBus`.
+//!   `companion_api::remote_execution` + `EventBus`.
 //!
 //! Reconnect policy mirrors the Discord-gateway pattern used elsewhere
 //! in the codebase (`lib/connectors/adapters/discord/gateway-client.ts`):

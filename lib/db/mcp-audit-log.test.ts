@@ -1,10 +1,8 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for `lib/db/mcp-audit-log.ts` — append/list/count/clear plus the
  * 5000-row cap (overflow behavior in `pruneOldest`).
  */
 
-import "fake-indexeddb/auto"
 import {
   __TESTING__,
   appendMcpAuditLog,
@@ -13,14 +11,14 @@ import {
   listMcpAuditLog,
 } from "./mcp-audit-log"
 import type { McpAuditDraft } from "./mcp-audit-log"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function draft(overrides: Partial<McpAuditDraft> = {}): McpAuditDraft {
   return {
@@ -45,6 +43,17 @@ describe("mcp-audit-log", () => {
   it("honors caller-supplied id", async () => {
     const row = await appendMcpAuditLog(draft({ id: "mau_custom" }))
     expect(row.id).toBe("mau_custom")
+  })
+
+  it("never persists raw exception text", async () => {
+    const row = await appendMcpAuditLog(
+      draft({
+        errorMessage: "request failed with Authorization: Bearer secret",
+        errorCode: "failed",
+      })
+    )
+    expect(row.errorMessage).toBeUndefined()
+    expect(row.errorCode).toBe("failed")
   })
 
   it("listMcpAuditLog returns newest-first", async () => {
@@ -120,15 +129,19 @@ describe("mcp-audit-log", () => {
   })
 
   it("appendMcpAuditLog enforces the cap on writes that overflow", async () => {
-    // Drive 5005 writes — every write past 5000 triggers prune in the same
-    // transaction. Verify the table never exceeds the cap.
-    for (let i = 0; i < 5005; i++) {
-      await appendMcpAuditLog(draft({ ts: i, tool: "load" }))
+    const start = Date.now()
+    await getDb().mcpAuditLog.bulkPut(
+      Array.from({ length: __TESTING__.AUDIT_CAP }, (_, i) =>
+        draft({ id: `seed-${i}`, ts: start + i, tool: "load" })
+      ) as never
+    )
+    for (let i = 0; i < 5; i++) {
+      await appendMcpAuditLog(draft({ ts: start + __TESTING__.AUDIT_CAP + i, tool: "load" }))
     }
     expect(await countMcpAuditLog()).toBe(__TESTING__.AUDIT_CAP)
   }, 60_000)
 
   it("AUDIT_CAP is exposed for tuning", () => {
-    expect(__TESTING__.AUDIT_CAP).toBe(5000)
+    expect(__TESTING__.AUDIT_CAP).toBe(10_000)
   })
 })

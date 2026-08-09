@@ -14,6 +14,7 @@ const lastViewportChangeRef: {
 } = { current: null }
 jest.mock("@xyflow/react", () => ({
   __esModule: true,
+  Panel: ({ children, ...props }: React.ComponentProps<"div">) => <div {...props}>{children}</div>,
   useOnViewportChange: ({
     onChange,
   }: {

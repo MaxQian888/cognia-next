@@ -1,6 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listPlanEvents } from "@/lib/db/plans"
 import type { CreatePlanInput } from "@/types/agent/plan"
 import * as detect from "@/lib/platform/detect"
@@ -44,11 +43,11 @@ const isTauriMock = detect.isTauri as jest.Mock
 
 // 30s: the first cold Dexie open (full schema migration chain) can exceed the
 // 5s default on slower disks — same bump as the other cold-Dexie suites.
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   __resetPlanRuntimeForTesting()
   isTauriMock.mockReturnValue(false)
   runWorkflowMock.mockReset()
@@ -68,6 +67,8 @@ function createInput(over: Partial<CreatePlanInput> = {}): CreatePlanInput {
     metadata: over.metadata,
   }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("resolvePlanConfig", () => {
   it("returns defaults with no overrides", () => {

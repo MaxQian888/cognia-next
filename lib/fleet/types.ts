@@ -132,6 +132,9 @@ export interface FleetSession {
   /** Live subagents (Task tool), foreground and background. */
   subagents?: FleetSubagent[]
   capabilities: FleetCapabilities
+  /** Built-in manifest lineage that produced `capabilities`. Optional for old snapshots. */
+  capabilityDescriptorVersion?: number
+  capabilityDescriptorSource?: string
   startedAt: number
   lastEventAt: number
   endedAt?: number

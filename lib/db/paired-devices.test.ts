@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 import {
   addPairedDevice,
   getPairedDevice,
@@ -17,14 +14,16 @@ import {
   setRemoteTerminalAllowed,
   touchPairedDevice,
 } from "./paired-devices"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 describe("addPairedDevice", () => {
   it("inserts a row with both pairedAt and lastSeenAt set to nowMs", async () => {

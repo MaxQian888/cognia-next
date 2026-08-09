@@ -55,12 +55,12 @@ describe("settings-nav-config", () => {
       expect(item?.labelKey).toBe("plugins")
     })
 
-    it("remote-control sits in the System group and is desktopOnly", () => {
-      const item = SETTINGS_NAV.find((n) => n.id === "remote-control")
+    it("webhooks sits in the System group and is desktopOnly", () => {
+      const item = SETTINGS_NAV.find((n) => n.id === "webhooks")
       expect(item).toBeDefined()
       expect(item?.group).toBe("system")
       expect(item?.desktopOnly).toBe(true)
-      expect(item?.labelKey).toBe("remoteControl")
+      expect(item?.labelKey).toBe("webhooks")
     })
 
     it("Pro IDE is a searchable desktop-only interface section", () => {
@@ -119,10 +119,11 @@ describe("settings-nav-config", () => {
       expect(isSearchMatch(item, "marketplace", t)).toBe(true)
     })
 
-    it("matches remote-control keyword", () => {
-      const item = SETTINGS_NAV.find((n) => n.id === "remote-control")!
+    it("matches webhook keywords without advertising the deleted inbound listener", () => {
+      const item = SETTINGS_NAV.find((n) => n.id === "webhooks")!
       expect(isSearchMatch(item, "webhook", t)).toBe(true)
-      expect(isSearchMatch(item, "远程控制", t)).toBe(true)
+      expect(isSearchMatch(item, "签名", t)).toBe(true)
+      expect(isSearchMatch(item, "inbound", t)).toBe(false)
     })
 
     it("returns false on unrelated query", () => {

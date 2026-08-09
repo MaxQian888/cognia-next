@@ -17,6 +17,7 @@ import {
   type PluginPointFormFactor,
 } from "./plugin-points"
 import { EXTENSION_POINT_FORM_FACTORS as SDK_EXTENSION_POINT_FORM_FACTORS } from "@cognia/plugin-sdk/extensions"
+import { CANONICAL_PLUGIN_PERMISSIONS } from "@cognia/plugin-sdk/contracts"
 
 describe("plugin point contracts", () => {
   it("has unique canonical extension points", () => {
@@ -376,17 +377,7 @@ describe("plugin point contracts", () => {
     })
 
     it("assigns a permission to every new runtime point (no new perm keys)", () => {
-      const existingPermissions = new Set([
-        "extension:ui",
-        "extension:workflow",
-        "network:fetch",
-        "process:spawn",
-        "filesystem:read",
-        "filesystem:write",
-        "agent:control",
-        "secrets:read",
-        "secrets:write",
-      ])
+      const existingPermissions = new Set(CANONICAL_PLUGIN_PERMISSIONS)
       for (const id of newRuntimePoints) {
         const contract = PLUGIN_POINT_CONTRACTS.find((c) => c.id === id)
         expect(contract).toBeDefined()

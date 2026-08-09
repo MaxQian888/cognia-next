@@ -45,8 +45,8 @@ export async function migrateLegacyDatabaseToAccount(
     throw new Error(`Legacy database ${sourceDbName} does not exist.`)
   }
 
-  const source = new CogniaDB(sourceDbName)
-  const target = new CogniaDB(targetDbName)
+  const source = new CogniaDB(sourceDbName, "legacy-migration:source")
+  const target = new CogniaDB(targetDbName, "legacy-migration:target")
 
   try {
     await source.open()

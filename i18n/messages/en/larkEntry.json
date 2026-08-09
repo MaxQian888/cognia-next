@@ -20,11 +20,11 @@
   "openWorkbench": "Open workbench",
   "resolving": "Verifying your link…",
   "shortcut": {
-    "title": "Import messages",
-    "preparing": "Preparing the import…",
-    "importing": "Importing the selected messages…",
+    "creating": "Starting a task for this chat…",
     "done": "Imported — opening the conversation…",
-    "creating": "Starting a task for this chat…"
+    "importing": "Importing the selected messages…",
+    "preparing": "Preparing the import…",
+    "title": "Import messages"
   },
   "title": "Cognia entry"
 }

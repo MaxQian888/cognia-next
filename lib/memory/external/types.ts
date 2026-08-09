@@ -9,7 +9,7 @@
  */
 
 /** Which external agent owns a discovered file. */
-export type ExternalAgentId = "claude-code" | "codex"
+export type ExternalAgentId = "claude-code" | "codex" | "opencode"
 
 /**
  * Where a discovered file sits in its agent's hierarchy. Drives grouping,
@@ -19,7 +19,8 @@ export type ExternalAgentId = "claude-code" | "codex"
  * - `managed`  — Claude Code enterprise policy file (always read-only)
  * - `project`  — project-scoped CLAUDE.md / AGENTS.md walked root→cwd
  * - `auto`     — Claude Code auto-memory under `~/.claude/projects/<repo>/memory`
- * - `global`   — Codex global `~/.codex/AGENTS[.override].md`
+ * - `global`   — Codex global `~/.codex/AGENTS[.override].md`, OpenCode global
+ *                `~/.config/opencode/AGENTS.md`
  * - `memories` — Codex-managed `~/.codex/memories/*` (always read-only)
  */
 export type ExternalMemoryScope = "user" | "managed" | "project" | "auto" | "global" | "memories"
@@ -65,4 +66,11 @@ export interface DiscoverCtx {
   cwd?: string
   platform: ExternalPlatform
   fs: ExternalFs
+  /**
+   * Environment-resolved per-vendor config roots (`lib/agent-roots/`), so
+   * `$CLAUDE_CONFIG_DIR` / `$CODEX_HOME` / `$XDG_CONFIG_HOME` are honoured.
+   * Optional: providers fall back to the conventional home-relative paths,
+   * which keeps every existing caller and test working.
+   */
+  vendorRoots?: import("@/lib/agent-roots").VendorRoots
 }

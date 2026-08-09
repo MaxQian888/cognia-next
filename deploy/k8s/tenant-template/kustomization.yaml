@@ -4,8 +4,8 @@
 #        --from-literal=COGNIA_MASTER_KEY=<64hex> \
 #        --from-literal=SHARE_UPLOAD_SECRET=<random> \
 #        [--from-literal=ANTHROPIC_API_KEY=...]
-#   3. set `publicUrl` below to the tenant's ingress URL (REQUIRED — pair
-#      payloads advertise it; a wrong value produces dead cgnp2 payloads)
+#   3. set `publicUrl` and `publicSignalingUrl` below to the tenant's ingress
+#      URLs (REQUIRED — clients cannot use the cluster-internal signaling URL)
 #   4. (multi-user) add the Logto wiring: logtoIssuer + logtoAudience turn
 #      OIDC on (see deploy/compose/LOGTO.md for seeding + the issuer footgun)
 #   5. (external agents) uncomment the `runners/` resource, the runners patch
@@ -25,6 +25,8 @@ configMapGenerator:
   - name: cognia-config
     literals:
       - publicUrl=https://cognia-CHANGE-ME.example.com
+      - signalingUrl=ws://signaling:7892/v2/signaling
+      - publicSignalingUrl=wss://cognia-CHANGE-ME.example.com/v2/signaling
       # - logtoIssuer=https://logto.example.com/oidc
       # - logtoAudience=https://cognia-CHANGE-ME.example.com/api
       # - logtoRequiredScopes=brain:rpc

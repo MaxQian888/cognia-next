@@ -21,7 +21,11 @@ export const DEFAULT_LOCAL_ACCOUNT_ID = "local_acct_a"
 export function getActiveAccountId(): string {
   try {
     const name = getDb().name
-    if (name.startsWith(ACCOUNT_DB_PREFIX)) return name.slice(ACCOUNT_DB_PREFIX.length)
+    if (name.startsWith(ACCOUNT_DB_PREFIX)) {
+      const scoped = name.slice(ACCOUNT_DB_PREFIX.length)
+      const targetSeparator = scoped.indexOf("-target-")
+      return targetSeparator === -1 ? scoped : scoped.slice(0, targetSeparator)
+    }
   } catch {
     // `getDb()` throws outside the browser/brain runtime (SSR pre-render, the
     // static export's build pass). Resolution never runs there, but the

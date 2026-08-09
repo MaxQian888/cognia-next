@@ -341,6 +341,43 @@ describe("BaseProtocolAdapter.execute", () => {
     expect(a.permissionRecords[0].requestId).toBe("r")
   })
 
+  it("invokes onElicitationRequest and forwards the typed response", async () => {
+    const a = new TestAdapter()
+    a.events = [
+      {
+        type: "elicitation_request",
+        request: {
+          id: "e1",
+          mode: "form",
+          message: "Choose",
+          requestedSchema: { type: "object", properties: {} },
+          raw: {},
+        },
+        timestamp: new Date(),
+      },
+      { type: "done", success: true, timestamp: new Date() },
+    ] as ExternalAgentEvent[]
+    const forwarded: unknown[] = []
+    a.respondToElicitation = async (response) => {
+      forwarded.push(response)
+    }
+    const s = await a.createSession()
+    const onElicitationRequest = jest.fn().mockResolvedValue({
+      requestId: "e1",
+      action: "accept",
+      content: {},
+    })
+
+    await a.execute(
+      s.id,
+      { id: "m", role: "user", content: [{ type: "text", text: "x" }], timestamp: new Date() },
+      { onElicitationRequest }
+    )
+
+    expect(onElicitationRequest).toHaveBeenCalledWith(expect.objectContaining({ id: "e1" }))
+    expect(forwarded).toEqual([{ requestId: "e1", action: "accept", content: {} }])
+  })
+
   it("forwards plan_update and progress events to onProgress", async () => {
     const a = new TestAdapter()
     a.events = [

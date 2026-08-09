@@ -2,7 +2,6 @@ import {
   objectToKvRows,
   kvRowsToObject,
   summarizeServer,
-  serverToTestRequest,
   cloneServerDraft,
   groupServers,
   MCP_TRANSPORT_VALUES,
@@ -67,36 +66,6 @@ describe("summarizeServer", () => {
     expect(summarizeServer({ transport: "http", config: { url: "https://d/mcp" } })).toBe(
       "https://d/mcp"
     )
-  })
-})
-
-describe("serverToTestRequest", () => {
-  it("maps stdio config including env", () => {
-    const req = serverToTestRequest(
-      srv({ config: { command: "node", args: ["s.js"], env: { TOKEN: "t" } } })
-    )
-    expect(req).toEqual({
-      transport: "stdio",
-      command: "node",
-      args: ["s.js"],
-      env: { TOKEN: "t" },
-    })
-  })
-  it("maps http config including headers", () => {
-    const req = serverToTestRequest(
-      srv({
-        transport: "http",
-        config: { url: "https://x", headers: { Authorization: "Bearer y" } },
-      })
-    )
-    expect(req).toEqual({
-      transport: "http",
-      url: "https://x",
-      headers: { Authorization: "Bearer y" },
-    })
-  })
-  it("omits env/headers when absent", () => {
-    expect(serverToTestRequest(srv({ config: { command: "x" } })).env).toBeUndefined()
   })
 })
 

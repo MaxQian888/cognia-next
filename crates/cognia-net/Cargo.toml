@@ -29,19 +29,24 @@ base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks", "stream"] }
 # `macros` for the detect-stage tokio::join!; `fs` for http_download's
 # streamed writes.
-tokio = { version = "1", features = ["net", "time", "io-util", "rt", "macros", "fs"] }
+tokio = { version = "1", features = ["net", "time", "io-util", "rt", "macros", "fs", "sync"] }
 # http_download hashes each chunk as it lands rather than buffering the body.
 sha2 = "0.11"
 hex = "0.4"
 thiserror = "2"
 # SOCKS5 CONNECT dialing for the WSS proxy path.
 tokio-socks = "0.5"
+tokio-rustls = "0.26"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
 # join_all over the detect-stage probe futures.
 futures-util = { version = "0.3", default-features = false }
 # Proxy-client detection: process snapshot + per-client config-file discovery.
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 dirs = "6"
+regex = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tempfile = "3"
+rcgen = "0.13"

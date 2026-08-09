@@ -32,6 +32,8 @@ import { promises as fs } from "node:fs"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { z } from "zod"
 
 /** Marker string the E2E bridge hangs off `window`; survives minification. */
 export const E2E_MARKER = "__cogniaResetDb"
@@ -172,24 +174,46 @@ export function createOutServer(root) {
   })
 }
 
-function parseArgs(argv) {
-  const args = { port: 3000, host: "127.0.0.1", root: "out", skipMarkerCheck: false }
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i]
-    if (arg === "--port") args.port = Number(argv[++i])
-    else if (arg === "--host") args.host = String(argv[++i])
-    else if (arg === "--root") args.root = String(argv[++i])
-    else if (arg === "--skip-e2e-marker-check") args.skipMarkerCheck = true
-    else throw new Error(`Unknown argument: ${arg}`)
-  }
-  if (!Number.isInteger(args.port) || args.port < 0 || args.port > 65535) {
-    throw new Error(`Invalid --port: ${args.port}`)
-  }
-  return args
+const cliSchema = z.object({
+  host: z.string().trim().min(1, "--host must not be empty").default("127.0.0.1"),
+  port: z.coerce
+    .number({ error: "--port must be an integer between 0 and 65535" })
+    .int("--port must be an integer between 0 and 65535")
+    .min(0, "--port must be an integer between 0 and 65535")
+    .max(65_535, "--port must be an integer between 0 and 65535")
+    .default(3000),
+  root: z.string().trim().min(1, "--root must not be empty").default("out"),
+  skipMarkerCheck: z.boolean().default(false),
+})
+
+function createProgram() {
+  return new Command()
+    .name("node scripts/e2e/serve-out.mjs")
+    .description("Serve Cognia's static export for Playwright E2E runs.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--port <port>", "TCP port; use 0 to select an available port.", "3000")
+    .option("--host <host>", "Network interface to bind.", "127.0.0.1")
+    .option("--root <directory>", "Static export directory.", "out")
+    .option("--skip-e2e-marker-check", "Serve exports without the E2E bridge marker.")
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2))
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  const options = program.opts()
+  return cliSchema.parse({ ...options, skipMarkerCheck: options.skipE2eMarkerCheck })
+}
+
+async function main(argv) {
+  const args = parseArgs(argv)
+  if (!args) return
   const root = path.resolve(args.root)
   if (!existsSync(path.join(root, "index.html"))) {
     console.error(
@@ -220,7 +244,7 @@ async function main() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((err) => {
+  main(process.argv.slice(2)).catch((err) => {
     console.error(`[serve-out] ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
   })

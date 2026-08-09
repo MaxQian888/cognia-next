@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
-import { spawnSync } from "node:child_process"
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { dirname, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { Command, CommanderError } from "commander"
+import { execaSync } from "execa"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const catalogPath = resolve(repoRoot, "packages/plugin-sdk/contract/catalog.json")
@@ -15,16 +18,93 @@ const pluginPointSchemaPath = resolve(
 )
 const pluginPointExporterPath = resolve(repoRoot, "scripts/plugin/export-plugin-points.mts")
 const tsxCliPath = resolve(repoRoot, "node_modules/tsx/dist/cli.mjs")
+const prettierCliPath = resolve(repoRoot, "node_modules/prettier/bin/prettier.cjs")
 const rustPath = resolve(repoRoot, "crates/cognia-cli/src/engine/contract.rs")
 const pythonPath = resolve(repoRoot, "plugin-sdk/python/src/cognia/_generated_contract.py")
+const typescriptPath = resolve(repoRoot, "packages/plugin-sdk/src/contracts/generated.ts")
+const apiDocsPath = resolve(repoRoot, "docs/content/docs/plugin-dev/api-reference.generated.mdx")
+const apiSurfaceBaselinePath = resolve(
+  repoRoot,
+  "packages/plugin-sdk/contract/api-surface-baseline.json"
+)
+
+export function validateApiSurfaceCompatibility(catalog, baseline) {
+  const namespaces = new Map(catalog.apiNamespaces.map((namespace) => [namespace.id, namespace]))
+  const errors = []
+  for (const expected of baseline.namespaces) {
+    const current = namespaces.get(expected.id)
+    if (!current) {
+      errors.push(`removed namespace ${expected.id}`)
+      continue
+    }
+    if (current.authorPath !== expected.authorPath) {
+      errors.push(`renamed public path ${expected.authorPath} to ${current.authorPath}`)
+    }
+    for (const runtime of expected.runtimes) {
+      if (!current.runtimes.includes(runtime)) {
+        errors.push(`removed runtime ${runtime} from ${expected.id}`)
+      }
+    }
+    for (const platform of expected.platforms) {
+      if (!current.platforms.includes(platform)) {
+        errors.push(`removed platform ${platform} from ${expected.id}`)
+      }
+    }
+    const methods = new Set(current.methods.map((method) => method.id))
+    for (const method of expected.methods) {
+      if (!methods.has(method)) errors.push(`removed method ${method}`)
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(
+      `incompatible Plugin API surface:\n${errors.map((error) => `- ${error}`).join("\n")}`
+    )
+  }
+  return catalog
+}
+
+export function validateInterfaceCatalog(catalog) {
+  const permissions = new Set(catalog.permissions)
+  const errorCodes = new Set(catalog.errorCodes ?? [])
+  if (!Array.isArray(catalog.errorCodes) || catalog.errorCodes.length === 0) {
+    throw new Error(`catalog.errorCodes must declare at least one code`)
+  }
+  if (errorCodes.size !== catalog.errorCodes.length) {
+    throw new Error(`catalog.errorCodes contains duplicates`)
+  }
+  const namespaces = new Set()
+  const methods = new Set()
+  for (const namespace of catalog.apiNamespaces) {
+    if (namespaces.has(namespace.id)) throw new Error(`duplicate API namespace ${namespace.id}`)
+    namespaces.add(namespace.id)
+    if (namespace.authorPath !== `ctx.${namespace.id}`) {
+      throw new Error(`API namespace ${namespace.id} must use authorPath ctx.${namespace.id}`)
+    }
+    if (namespace.id !== "capabilities" && namespace.methods.length === 0) {
+      throw new Error(`callable API namespace ${namespace.id} must declare its methods`)
+    }
+    for (const method of namespace.methods) {
+      if (methods.has(method.id)) throw new Error(`duplicate API method ${method.id}`)
+      methods.add(method.id)
+      if (method.id !== `${namespace.id}.${method.name}`) {
+        throw new Error(`API method ${method.id} must be namespaced by ${namespace.id}`)
+      }
+      for (const permission of method.requiredPermissions) {
+        if (!permissions.has(permission)) {
+          throw new Error(`API method ${method.id} uses unknown permission ${permission}`)
+        }
+      }
+    }
+  }
+  return catalog
+}
 
 export function validatePluginPointCatalog(pointCatalog, permissions) {
   const seen = new Set()
   const validPermissions = new Set(permissions)
   for (const point of pointCatalog.pluginPoints) {
-    const key = `${point.kind}:${point.id}`
-    if (seen.has(key)) throw new Error(`duplicate plugin point ${key}`)
-    seen.add(key)
+    if (seen.has(point.id)) throw new Error(`duplicate plugin point ${point.id}`)
+    seen.add(point.id)
     if (point.kind === "ui-slot" && !point.formFactor) {
       throw new Error(`UI plugin point ${point.id} must declare formFactor`)
     }
@@ -39,12 +119,12 @@ export function validatePluginPointCatalog(pointCatalog, permissions) {
 }
 
 export function readPluginPointCatalog(permissions) {
-  const result = spawnSync(process.execPath, [tsxCliPath, pluginPointExporterPath], {
+  const result = execaSync(process.execPath, [tsxCliPath, pluginPointExporterPath], {
     cwd: repoRoot,
-    encoding: "utf8",
+    reject: false,
   })
-  if (result.status !== 0) {
-    throw new Error(`plugin point export failed: ${result.stderr.trim()}`)
+  if (result.exitCode !== 0 || result.signal) {
+    throw new Error(`plugin point export failed: ${result.stderr?.trim() ?? "unknown error"}`)
   }
   const pointCatalog = JSON.parse(result.stdout)
   const pointSchema = JSON.parse(readFileSync(pluginPointSchemaPath, "utf8"))
@@ -57,11 +137,13 @@ export function readCatalog() {
   const schema = JSON.parse(readFileSync(catalogSchemaPath, "utf8"))
   validateAgainstSchema(catalog, schema)
   const pointCatalog = readPluginPointCatalog(catalog.permissions)
-  return {
+  const hydratedCatalog = validateInterfaceCatalog({
     ...catalog,
     pluginPointSchemaVersion: pointCatalog.schemaVersion,
     pluginPoints: pointCatalog.pluginPoints,
-  }
+  })
+  const baseline = JSON.parse(readFileSync(apiSurfaceBaselinePath, "utf8"))
+  return validateApiSurfaceCompatibility(hydratedCatalog, baseline)
 }
 
 function valueType(value) {
@@ -135,12 +217,27 @@ function rustRawString(value) {
 }
 
 function formatRust(source) {
-  const result = spawnSync("rustfmt", ["--emit", "stdout", "--edition", "2021"], {
+  const result = execaSync("rustfmt", ["--emit", "stdout", "--edition", "2021"], {
     input: source,
-    encoding: "utf8",
+    reject: false,
   })
-  if (result.status !== 0) {
-    throw new Error(`rustfmt failed while generating the Rust contract: ${result.stderr.trim()}`)
+  if (result.exitCode !== 0 || result.signal) {
+    throw new Error(
+      `rustfmt failed while generating the Rust contract: ${result.stderr?.trim() ?? "unknown error"}`
+    )
+  }
+  return result.stdout
+}
+
+function formatPrettier(source, parser) {
+  const result = execaSync(process.execPath, [prettierCliPath, "--parser", parser], {
+    input: source,
+    reject: false,
+  })
+  if (result.exitCode !== 0 || result.signal) {
+    throw new Error(
+      `prettier failed while generating the Plugin API contract: ${result.stderr?.trim() ?? "unknown error"}`
+    )
   }
   return result.stdout
 }
@@ -193,7 +290,14 @@ export function renderRustContract(catalog) {
     )
     .join("\n")
   return formatRust(`// @generated by scripts/plugin/generate-contract.mjs — do not edit.\n\
+pub(crate) const CONTRACT_VERSION: &str = ${JSON.stringify(catalog.contractVersion)};\n\
+pub(crate) const PROTOCOL_VERSION: &str = ${JSON.stringify(catalog.protocol.version)};\n\
+pub(crate) const SDK_VERSION: &str = ${JSON.stringify(catalog.protocol.sdkVersion)};\n\
+pub(crate) const MINIMUM_SDK_VERSION: &str = ${JSON.stringify(catalog.protocol.minimumSdkVersion)};\n\
+pub(crate) const GATEWAY_CLIENT_VERSION: &str = ${JSON.stringify(catalog.protocol.gatewayClientVersion)};\n\
+pub(crate) const MINIMUM_GATEWAY_CLIENT_VERSION: &str = ${JSON.stringify(catalog.protocol.minimumGatewayClientVersion)};\n\n\
 pub(crate) const VALID_PERMISSIONS: &[&str] = &[\n${rustStrings(catalog.permissions)}\n];\n\n\
+pub(crate) const VALID_ERROR_CODES: &[&str] = &[\n${rustStrings(catalog.errorCodes)}\n];\n\n\
 pub(crate) const VALID_CAPABILITIES: &[&str] = &[\n${rustStrings(
     catalog.capabilities.map((capability) => capability.id)
   )}\n];\n\n\
@@ -260,9 +364,17 @@ export function renderPythonContract(catalog) {
   )
   return `# @generated by scripts/plugin/generate-contract.mjs — do not edit.\n\
 CATALOG_SCHEMA_VERSION = ${catalog.schemaVersion}\n\
+CONTRACT_VERSION = ${JSON.stringify(catalog.contractVersion)}\n\
+PROTOCOL_VERSION = ${JSON.stringify(catalog.protocol.version)}\n\
+SDK_VERSION = ${JSON.stringify(catalog.protocol.sdkVersion)}\n\
+MINIMUM_SDK_VERSION = ${JSON.stringify(catalog.protocol.minimumSdkVersion)}\n\
+GATEWAY_CLIENT_VERSION = ${JSON.stringify(catalog.protocol.gatewayClientVersion)}\n\
+MINIMUM_GATEWAY_CLIENT_VERSION = ${JSON.stringify(catalog.protocol.minimumGatewayClientVersion)}\n\
+LEGACY_ADAPTER_ENABLED = ${catalog.protocol.legacyAdapter ? "True" : "False"}\n\
 MINIMUM_HOST_VERSION = ${JSON.stringify(catalog.minimumHostVersion)}\n\n\
 VALID_PLUGIN_TYPES = (\n${pythonTuple(catalog.pluginTypes)}\n)\n\n\
 VALID_PERMISSIONS = (\n${pythonTuple(catalog.permissions)}\n)\n\n\
+VALID_ERROR_CODES = (\n${pythonTuple(catalog.errorCodes)}\n)\n\n\
 VALID_CAPABILITIES = (\n${pythonTuple(
     catalog.capabilities.map((capability) => capability.id)
   )}\n)\n\n\
@@ -275,7 +387,40 @@ RUNTIME_ENTRY_CONTRACTS = ${pythonLiteral(catalog.runtimeEntries)}\n\n\
 PLUGIN_PATH_FIELD_CONTRACTS = ${pythonLiteral(catalog.pathFields)}\n\n\
 PLUGIN_POINT_SCHEMA_VERSION = ${catalog.pluginPointSchemaVersion}\n\n\
 PLUGIN_POINT_CONTRACTS = ${pythonLiteral(catalog.pluginPoints)}\n\n\
+API_NAMESPACE_CONTRACTS = ${pythonLiteral(catalog.apiNamespaces)}\n\n\
 PLUGIN_PATH_FIELDS = (\n${pythonTuple(catalog.pathFields.map((entry) => entry.path))}\n)\n`
+}
+
+export function renderTypeScriptContract(catalog) {
+  return formatPrettier(
+    `// @generated by scripts/plugin/generate-contract.mjs — do not edit.\n\nexport const PLUGIN_CONTRACT_VERSION = ${JSON.stringify(catalog.contractVersion)} as const\nexport const PLUGIN_PROTOCOL_VERSION = ${JSON.stringify(catalog.protocol.version)} as const\nexport const PLUGIN_SDK_VERSION = ${JSON.stringify(catalog.protocol.sdkVersion)} as const\nexport const PLUGIN_MINIMUM_SDK_VERSION = ${JSON.stringify(catalog.protocol.minimumSdkVersion)} as const\nexport const PLUGIN_GATEWAY_CLIENT_VERSION = ${JSON.stringify(catalog.protocol.gatewayClientVersion)} as const\nexport const PLUGIN_MINIMUM_GATEWAY_CLIENT_VERSION = ${JSON.stringify(catalog.protocol.minimumGatewayClientVersion)} as const\nexport const CANONICAL_PLUGIN_PERMISSION_IDS = ${JSON.stringify(catalog.permissions, null, 2)} as const\nexport type CanonicalPluginPermission = (typeof CANONICAL_PLUGIN_PERMISSION_IDS)[number]\nexport const CANONICAL_PLUGIN_ERROR_CODES = ${JSON.stringify(catalog.errorCodes, null, 2)} as const\nexport type CanonicalPluginErrorCode = (typeof CANONICAL_PLUGIN_ERROR_CODES)[number]\n`,
+    "typescript"
+  )
+}
+
+export function renderApiReference(catalog) {
+  const rows = catalog.apiNamespaces
+    .map((namespace) => {
+      const permissions = new Set(namespace.methods.flatMap((method) => method.requiredPermissions))
+      return `| \`${namespace.authorPath}\` | ${namespace.methods.length} | ${
+        [...permissions].map((permission) => `\`${permission}\``).join(", ") || "None"
+      } | ${namespace.runtimes.join(", ")} | ${namespace.dataClassification} |`
+    })
+    .join("\n")
+  const details = catalog.apiNamespaces
+    .filter((namespace) => namespace.methods.length > 0)
+    .map(
+      (namespace) =>
+        `## \`${namespace.authorPath}\`\n\n| Method | Permissions | Risk | Idempotent |\n| --- | --- | --- | --- |\n${namespace.methods
+          .map(
+            (method) =>
+              `| \`${method.id}\` | ${method.requiredPermissions.map((permission) => `\`${permission}\``).join(", ") || "None"} | ${method.risk} | ${method.idempotent ? "Yes" : "No"} |`
+          )
+          .join("\n")}`
+    )
+    .join("\n\n")
+  const errorRows = catalog.errorCodes.map((code) => `| \`${code}\` |`).join("\n")
+  return `---\ntitle: Generated Plugin API Reference\ndescription: Generated from the canonical Plugin Interface Catalog.\n---\n\n{/* Generated by scripts/plugin/generate-contract.mjs — do not edit. */}\n\n# Plugin API Reference\n\nContract \`${catalog.contractVersion}\`; protocol \`${catalog.protocol.version}\`. The public author surface is \`ctx.*\`. Runtime enforcement remains fail-closed for unmapped methods.\n\n| Namespace | Methods | Declared permissions | Runtimes | Data class |\n| --- | ---: | --- | --- | --- |\n${rows}\n\n## Adapter error codes\n\nCanonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI integrations, managed processes, desktop automation sessions). Author-facing surface: \`PluginAdapterError\` from \`@cognia/plugin-sdk\`.\n\n| Code |\n| --- |\n${errorRows}\n\n${details}\n`
 }
 
 function writeOrCheck(path, content, check) {
@@ -288,30 +433,59 @@ function writeOrCheck(path, content, check) {
     }
     return
   }
-  writeFileSync(path, content)
+  writeFileAtomic.sync(path, content)
 }
 
 export function generate({ check = false } = {}) {
   const catalog = readCatalog()
   writeOrCheck(
     pluginPointCatalogPath,
-    `${JSON.stringify(
-      {
-        schemaVersion: catalog.pluginPointSchemaVersion,
-        pluginPoints: catalog.pluginPoints,
-      },
-      null,
-      2
-    )}\n`,
+    formatPrettier(
+      JSON.stringify(
+        {
+          schemaVersion: catalog.pluginPointSchemaVersion,
+          pluginPoints: catalog.pluginPoints,
+        },
+        null,
+        2
+      ),
+      "json"
+    ),
     check
   )
   writeOrCheck(rustPath, renderRustContract(catalog), check)
   writeOrCheck(pythonPath, renderPythonContract(catalog), check)
+  writeOrCheck(typescriptPath, renderTypeScriptContract(catalog), check)
+  writeOrCheck(apiDocsPath, renderApiReference(catalog), check)
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+const cliSchema = z.object({ check: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm plugin:contract:generate")
+    .description("Generate or verify the canonical Plugin API contract mirrors.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--check", "Verify generated mirrors without rewriting them.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
   try {
-    generate({ check: process.argv.includes("--check") })
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    const options = parseArgs(process.argv.slice(2))
+    if (options) generate(options)
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error))
     process.exitCode = 1

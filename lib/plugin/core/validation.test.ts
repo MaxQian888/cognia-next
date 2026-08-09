@@ -168,6 +168,32 @@ describe("Plugin Validation", () => {
       )
     })
 
+    it("accepts legacy camelCase Integration action IDs for compatibility", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["integrations"]
+      manifest.integrations = [
+        {
+          id: "github",
+          label: "GitHub",
+          authStrategies: [],
+          resourceKinds: ["repository"],
+          eventTypes: [],
+          actions: [
+            {
+              id: "openPr",
+              label: "Open PR",
+              handler: "openPr",
+              inputSchema: { type: "object" },
+              risk: "write",
+              idempotency: "required",
+            },
+          ],
+        },
+      ]
+
+      expect(validatePluginManifest(manifest).errors).toEqual([])
+    })
+
     it("rejects malformed Integration auth strategies and credential injection", () => {
       const manifest = createValidManifest()
       manifest.capabilities = ["integrations"]
@@ -1101,6 +1127,43 @@ describe("Plugin Validation", () => {
             (d) => d.code === "manifest.networkAccess.allowedDomains.entry.invalid"
           )
         ).toBe(true)
+      })
+
+      it("accepts least-privilege method/path rules without a duplicate domain list", () => {
+        const result = validatePluginManifest(
+          withNetworkAccess({
+            rules: [
+              {
+                domain: "observability.example.com",
+                methods: ["GET"],
+                paths: ["/api/logs/*", "/api/metrics/*"],
+              },
+            ],
+          })
+        )
+        expect(result.errors).toHaveLength(0)
+      })
+
+      it.each([
+        [{ rules: [] }, "manifest.networkAccess.rules.invalid"],
+        [
+          { rules: [{ domain: "", methods: ["GET"], paths: ["/api/*"] }] },
+          "manifest.networkAccess.rules.domain.invalid",
+        ],
+        [
+          { rules: [{ domain: "example.com", methods: ["TRACE"], paths: ["/api/*"] }] },
+          "manifest.networkAccess.rules.methods.invalid",
+        ],
+        [
+          { rules: [{ domain: "example.com", methods: ["GET"], paths: ["relative/*"] }] },
+          "manifest.networkAccess.rules.paths.invalid",
+        ],
+      ])("rejects malformed network rules %#", (networkAccess, code) => {
+        const result = validatePluginManifest(withNetworkAccess(networkAccess))
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([expect.objectContaining({ severity: "error", code })])
+        )
       })
     })
 
@@ -2843,5 +2906,86 @@ describe("validatePluginManifest cliTools", () => {
         (d) => d.code === "manifest.capability.field_missing" && d.severity === "warning"
       )
     ).toBe(true)
+  })
+})
+
+describe("validatePluginManifest configSchema.secret", () => {
+  const secretManifest = (property: Record<string, unknown>): PluginManifest =>
+    ({
+      id: "sec-demo",
+      name: "Secret Demo",
+      version: "1.0.0",
+      description: "demo",
+      type: "frontend",
+      capabilities: ["tools"],
+      main: "index.js",
+      configSchema: {
+        type: "object",
+        properties: {
+          apiKey: property,
+        },
+      },
+    }) as unknown as PluginManifest
+
+  it("accepts a top-level string field with secret: true", () => {
+    const result = validatePluginManifest(
+      secretManifest({ type: "string", secret: true, description: "provider key" })
+    )
+    expect(result.errors).toEqual([])
+  })
+
+  it("rejects secret: true on a non-string type", () => {
+    const result = validatePluginManifest(secretManifest({ type: "number", secret: true }))
+    expect(result.errors.some((message) => message.includes("secret: true"))).toBe(true)
+  })
+
+  it("rejects a secret field that also declares a default", () => {
+    const result = validatePluginManifest(
+      secretManifest({ type: "string", secret: true, default: "leaked" })
+    )
+    expect(result.errors.some((message) => message.includes("must not carry a default"))).toBe(true)
+  })
+
+  it("rejects secret: true inside a nested object property (Phase 1 scope)", () => {
+    const manifest = {
+      id: "nested-demo",
+      name: "Nested Demo",
+      version: "1.0.0",
+      description: "demo",
+      type: "frontend",
+      capabilities: ["tools"],
+      main: "index.js",
+      configSchema: {
+        type: "object",
+        properties: {
+          nested: {
+            type: "object",
+            properties: {
+              apiKey: { type: "string", secret: true },
+            },
+          },
+        },
+      },
+    } as unknown as PluginManifest
+    const result = validatePluginManifest(manifest)
+    expect(
+      result.errors.some((message) =>
+        message.includes("only top-level configSchema properties may be secret")
+      )
+    ).toBe(true)
+  })
+
+  it("rejects a non-boolean secret flag", () => {
+    const result = validatePluginManifest(
+      secretManifest({ type: "string", secret: "yes" } as unknown as Record<string, unknown>)
+    )
+    expect(result.errors.some((message) => message.includes('invalid "secret" flag'))).toBe(true)
+  })
+
+  it("leaves fields without secret: true unaffected", () => {
+    const result = validatePluginManifest(
+      secretManifest({ type: "string", default: "plain-value" })
+    )
+    expect(result.errors.filter((message) => message.includes("secret"))).toEqual([])
   })
 })

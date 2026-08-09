@@ -42,6 +42,7 @@ function mk<S extends z.ZodTypeAny>(input: {
     summary: string
     details?: { label: string; value: string }[]
   }
+  buildArgs?: (args: z.infer<S>) => string[]
 }): BuiltInSkill<S> {
   const skill: BuiltInSkill<S> = {
     id: input.id,
@@ -55,7 +56,10 @@ function mk<S extends z.ZodTypeAny>(input: {
     inputSchema: input.schema,
     execute: async (args, ctx) =>
       runLarkCli({
-        args: [...input.subcommand, ...argsToFlags(args as Record<string, unknown>)],
+        args: [
+          ...input.subcommand,
+          ...(input.buildArgs?.(args) ?? argsToFlags(args as Record<string, unknown>)),
+        ],
         confirmed: ctx.hitlBypass === true,
         adapterId: larkAdapterIdFromCtx(ctx),
       }),
@@ -91,7 +95,12 @@ registerBuiltInSkill(
         .optional()
         .describe("Optional wiki space id to scope the search to one space."),
     }),
-    subcommand: ["wiki", "+search-nodes"],
+    subcommand: ["docs", "+search"],
+    buildArgs: (args) =>
+      argsToFlags({
+        query: args.query,
+        ...(args.spaceId ? { filter: { space_id: args.spaceId } } : {}),
+      }),
     mutation: "read",
     imAccess: "always",
   })
@@ -110,7 +119,7 @@ registerBuiltInSkill(
       spaceId: spaceIdParam,
       nodeToken: nodeTokenParam,
     }),
-    subcommand: ["wiki", "+read-node"],
+    subcommand: ["wiki", "+node-get"],
     mutation: "read",
     imAccess: "always",
   })
@@ -137,7 +146,7 @@ registerBuiltInSkill(
         .optional()
         .describe("Document type to create (default docx)."),
     }),
-    subcommand: ["wiki", "+create-node"],
+    subcommand: ["wiki", "+node-create"],
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Create wiki node",
@@ -167,7 +176,13 @@ registerBuiltInSkill(
         .min(1)
         .describe("Token of the destination parent node (same space)."),
     }),
-    subcommand: ["wiki", "+move-node"],
+    subcommand: ["wiki", "+move"],
+    buildArgs: (args) =>
+      argsToFlags({
+        sourceSpaceId: args.spaceId,
+        nodeToken: args.nodeToken,
+        targetParentToken: args.newParentNodeToken,
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Move wiki node",

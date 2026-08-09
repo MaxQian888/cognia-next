@@ -5,7 +5,7 @@ description: Cognia's complete Model Context Protocol surface — how it consume
 
 # MCP System
 
-<Status variant="stable">Stable · Dexie `mcpServers` (v2+) · 3 transports · 7 agent targets</Status>
+<Status variant="stable">Governed · Dexie schema v151 · 3 transports · scoped runtime</Status>
 
 <TLDR>
   Cognia wears **four MCP faces**. As a **client**, it stores user/plugin/built-in server definitions in
@@ -111,8 +111,9 @@ flowchart TB
     <File name="mcp-my-servers-tab · mcp-preset-grid · mcp-health-tab" />
     <File name="mcp-server-editor · mcp-server-card · kv-editor" />
   </Folder>
-  <Folder name="src-tauri/src/claude/">
-    <File name="mcp_test.rs (connection probe)" />
+  <Folder name="sidecar/dispatch/">
+    <File name="mcp-runtime-gateway.mjs (capability discovery)" />
+    <File name="anthropic-mcp-relay.mjs (guarded remote relay)" />
   </Folder>
 </Files>
 
@@ -122,33 +123,37 @@ flowchart TB
 | Presets + import | `lib/claude/mcp-presets.ts`, `components/settings/mcp-import-dialog.tsx` | [Presets & import](./presets-and-import) |
 | Per-turn resolution | `lib/claude/build-options.ts`, `lib/claude/builtin-mcp/` | [Session resolution](./session-resolution) |
 | Settings UI + stores | `components/settings/mcp/`, `stores/mcp/` | [Settings panel](./settings-panel) |
-| Agent mirror + health | `components/settings/mcp-*`, `mcp_test.rs`, `mcp-audit-log.ts` | [Agent sync & health](./agent-sync-and-health) |
+| Agent mirror + health | `lib/mcp/sync-coordinator.ts`, `lib/mcp/operations.ts`, `mcp-audit-log.ts` | [Agent sync & health](./agent-sync-and-health) |
 | In-process built-ins | `sidecar/builtin-tools/` | [Built-in tools](./builtin-tools) |
 | A2UI MCP bridge | `sidecar/a2ui-tools/`, `sidecar/a2ui-mcp.mjs` | [A2UI bridge](./a2ui-bridge) |
 | Pickers + renderers | `components/agent/`, `components/scheduler/`, `components/chat/message-parts/` | [Consumption surfaces](./consumption-surfaces) |
 
-## The one config model
+## Governed definition and runtime
 
-Every MCP server — whether typed by hand, installed from a preset, imported from a CLI config, or
-seeded by a plugin — lands in the **same** `McpServer` row shape (`lib/claude/types.ts:1969`):
+Every MCP server lands in the same versioned Registry definition. Raw credentials are replaced with
+`SecretRef` values and resolved only inside the trusted host:
 
 ```typescript title="lib/claude/types.ts"
 export interface McpServer {
   id: string
-  name: string
-  transport: McpTransport // "stdio" | "sse" | "http"
-  config: Record<string, unknown> // stdio: { command, args?, env? } · http/sse: { url, headers? }
+  name: string // unique case-insensitive external namespace
+  displayName?: string
+  schemaVersion?: 1
+  revision?: number
+  credentialVersion?: number
+  origin?: McpServerOrigin
+  trust?: { state: "legacy" | "pending" | "trusted" | "blocked" }
+  transport: "stdio" | "sse" | "http"
+  config: McpServerConfig // transport-discriminated; sensitive values are SecretRef
   enabled: boolean
-  appsEnabled?: Partial<Record<AgentId, boolean>> // per-CLI projection matrix
-  pluginId?: string // set only by the plugin manager
-  createdAt: number
-  updatedAt: number
+  appsEnabled?: Partial<Record<AgentId, boolean>>
 }
 ```
 
-`enabled` controls whether the server reaches Cognia's own chat; `appsEnabled[agent]` controls whether
-it is mirrored into that external agent's config file. The two are independent — a server can be ON for
-Claude Code's CLI but OFF in Cognia, or vice versa.
+New/manual/imported/plugin definitions start pending, disabled, and unprojected. Legacy definitions stay
+operational. Registry mutations update the redacted mobile summary and enqueue durable Agent sync jobs in
+one transaction. Workflow and plan calls use `McpRuntimeGateway`: reuse is limited to one session/run,
+connect concurrency is four, capability TTL is five minutes, and tool calls are never retried.
 
 ## When to use this section
 
@@ -176,3 +181,4 @@ Claude Code's CLI but OFF in Cognia, or vice versa.
 
 - [ADR 0008 — External Bridge](../../adr/0008-external-bridge) — why the inbound MCP server is a separate binary from `a2ui-mcp.mjs`.
 - [ADR 0025 — A2UI ⇄ IM bridge](../../adr/0025-a2ui-im-bridge) — the `a2ui_handle_connector_action` tool that lets IM users drive surfaces.
+- [ADR 0110 — MCP Control Plane Governance](../../adr/0110-mcp-control-plane-governance) — Registry, SecretRef, policy, durable sync, scoped runtime, privacy, and audit decisions.

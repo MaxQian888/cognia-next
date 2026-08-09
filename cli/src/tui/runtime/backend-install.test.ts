@@ -8,10 +8,14 @@ import {
   resolveInstallPlan,
   runInstall,
   type InstallMethod,
+  type RunInstallDeps,
 } from "./backend-install"
 
 describe("resolveInstallPlan", () => {
   it("maps native-binary agents to their official install methods", () => {
+    expect(resolveInstallPlan("claude-agent-acp")?.methods[0]?.display).toBe(
+      "npm install -g @agentclientprotocol/claude-agent-acp"
+    )
     expect(resolveInstallPlan("codex")?.methods.map((m) => m.kind)).toEqual(["npm", "brew"])
     expect(resolveInstallPlan("copilot")?.methods[0]?.display).toBe(
       "npm install -g @github/copilot"
@@ -108,6 +112,25 @@ describe("runInstall", () => {
     const run = runInstall({ method, spawnFn })
     child.emit("exit", 1, null)
     await expect(run).resolves.toEqual({ ok: false, exitCode: 1, signal: null })
+  })
+
+  it("terminates the installer process when the abort signal fires", async () => {
+    const child = fakeChild() as ReturnType<typeof fakeChild> & { pid: number; kill: jest.Mock }
+    child.pid = 123
+    child.kill = jest.fn(() => true)
+    const spawnFn = jest.fn(() => child) as unknown as typeof import("node:child_process").spawn
+    const killProcessTree: NonNullable<RunInstallDeps["killProcessTree"]> = jest.fn((target) => {
+      target.kill("SIGTERM")
+    })
+    const controller = new AbortController()
+    const run = runInstall({ method, spawnFn, signal: controller.signal, killProcessTree })
+
+    controller.abort()
+    child.emit("exit", null, "SIGTERM")
+
+    await expect(run).resolves.toEqual({ ok: false, exitCode: null, signal: "SIGTERM" })
+    expect(killProcessTree).toHaveBeenCalledWith(child)
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM")
   })
 
   it("treats a spawn error as a failed install, not a throw", async () => {

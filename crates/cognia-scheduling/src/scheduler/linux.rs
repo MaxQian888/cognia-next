@@ -5,7 +5,7 @@
 #![cfg(target_os = "linux")]
 
 use async_trait::async_trait;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
@@ -16,8 +16,8 @@ use super::error::{Result, SchedulerError};
 use super::service::{generate_task_name, now_iso, SystemScheduler, TASK_PREFIX};
 use super::types::{
     derive_trigger_capabilities, CreateSystemTaskInput, RunLevel, SchedulerCapabilities,
-    SystemTask, SystemTaskAction, SystemTaskId, SystemTaskStatus, SystemTaskTrigger,
-    SystemTriggerKind, TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
+    SystemTask, SystemTaskAction, SystemTaskStatus, SystemTaskTrigger, SystemTriggerKind,
+    TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
 };
 
 /// Linux systemd scheduler implementation
@@ -57,13 +57,24 @@ impl LinuxScheduler {
 
     /// Get user systemd directory
     fn get_user_systemd_dir() -> PathBuf {
-        dirs::config_dir()
-            .map(|c| c.join("systemd").join("user"))
-            .unwrap_or_else(|| {
-                dirs::home_dir()
-                    .map(|h| h.join(".config").join("systemd").join("user"))
-                    .unwrap_or_else(|| PathBuf::from("/tmp"))
-            })
+        Self::user_systemd_dir(
+            std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            std::env::var_os("HOME").map(PathBuf::from),
+        )
+    }
+
+    fn user_systemd_dir(xdg_config_home: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
+        xdg_config_home
+            .map(|path| path.join("systemd").join("user"))
+            .or_else(|| home.map(|path| path.join(".config").join("systemd").join("user")))
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+    }
+
+    fn parse_effective_uid(status: &str) -> Option<u32> {
+        status.lines().find_map(|line| {
+            let fields = line.strip_prefix("Uid:")?.split_whitespace();
+            fields.skip(1).next()?.parse().ok()
+        })
     }
 
     /// Generate service unit name
@@ -819,7 +830,10 @@ impl SystemScheduler for LinuxScheduler {
     }
 
     fn is_elevated(&self) -> bool {
-        unsafe { libc::geteuid() == 0 }
+        fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|status| Self::parse_effective_uid(&status))
+            == Some(0)
     }
 
     fn get_trigger_capabilities(&self) -> Vec<TriggerCapability> {
@@ -910,6 +924,39 @@ impl SystemScheduler for LinuxScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolves_user_systemd_directory_from_linux_environment() {
+        assert_eq!(
+            LinuxScheduler::user_systemd_dir(
+                Some(PathBuf::from("/xdg")),
+                Some(PathBuf::from("/home/user")),
+            ),
+            PathBuf::from("/xdg/systemd/user")
+        );
+        assert_eq!(
+            LinuxScheduler::user_systemd_dir(None, Some(PathBuf::from("/home/user"))),
+            PathBuf::from("/home/user/.config/systemd/user")
+        );
+        assert_eq!(
+            LinuxScheduler::user_systemd_dir(None, None),
+            PathBuf::from("/tmp")
+        );
+    }
+
+    #[test]
+    fn parses_effective_uid_from_proc_status() {
+        assert_eq!(
+            LinuxScheduler::parse_effective_uid(
+                "Name:\\tcognia\\nUid:\\t1000\\t0\\t1000\\t1000\\n"
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            LinuxScheduler::parse_effective_uid("Name:\\tcognia\\n"),
+            None
+        );
+    }
 
     #[test]
     fn parses_systemd_units_for_trigger_and_action() {

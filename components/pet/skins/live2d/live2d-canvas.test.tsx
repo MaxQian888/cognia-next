@@ -42,11 +42,9 @@ jest.mock("@/lib/pet/live2d/loader", () => ({
   createLive2dLoader: () => ({ load }),
 }))
 
-const getPetModel = jest.fn()
-const getPetModelEntries = jest.fn()
-jest.mock("@/lib/db/pet-models", () => ({
-  getPetModel: (...a: unknown[]) => getPetModel(...a),
-  getPetModelEntries: (...a: unknown[]) => getPetModelEntries(...a),
+const loadLive2dSkinAsset = jest.fn()
+jest.mock("@/lib/pet/skin-assets", () => ({
+  loadLive2dSkinAsset: (...a: unknown[]) => loadLive2dSkinAsset(...a),
 }))
 
 // The canvas registers the Live2D render pipe before building the renderer; the
@@ -94,8 +92,14 @@ const row = {
 beforeEach(() => {
   jest.clearAllMocks()
   tickerState.maxFPS = undefined
-  getPetModel.mockResolvedValue(row)
-  getPetModelEntries.mockResolvedValue([{ path: "Hiyori.model3.json", blob: new Blob(["{}"]) }])
+  loadLive2dSkinAsset.mockResolvedValue({
+    row,
+    entries: [{ path: "Hiyori.model3.json", blob: new Blob(["{}"]) }],
+  })
+  Object.defineProperty(HTMLCanvasElement.prototype, "toDataURL", {
+    configurable: true,
+    value: jest.fn(() => "data:image/png;base64,snapshot"),
+  })
 })
 
 function renderCanvas(props: Partial<React.ComponentProps<typeof Live2dCanvas>> = {}) {
@@ -183,7 +187,7 @@ describe("Live2dCanvas", () => {
     load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
     const view = renderCanvas()
     await waitFor(() => expect(addChild).toHaveBeenCalled())
-    const initCalls = getPetModel.mock.calls.length
+    const initCalls = loadLive2dSkinAsset.mock.calls.length
     loaded.scale.set.mockClear()
     view.rerender(
       <Live2dCanvas
@@ -201,26 +205,28 @@ describe("Live2dCanvas", () => {
       expect(loaded.scale.set).toHaveBeenCalledWith((96 / 400) * 2, (96 / 400) * 2)
     )
     // The heavy init effect did not re-run.
-    expect(getPetModel.mock.calls.length).toBe(initCalls)
+    expect(loadLive2dSkinAsset.mock.calls.length).toBe(initCalls)
   })
 
   it("extracts motion-group counts from the stored settings and feeds random overrides", async () => {
     const loaded = makeLoadedModel()
     load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
-    getPetModel.mockResolvedValue({ ...row, motionGroups: ["Idle"] })
-    getPetModelEntries.mockResolvedValue([
-      {
-        path: "Hiyori.model3.json",
-        blob: new Blob([
-          JSON.stringify({
-            FileReferences: {
-              Moc: "a.moc3",
-              Motions: { Idle: [{ File: "a" }, { File: "b" }, { File: "c" }, { File: "d" }] },
-            },
-          }),
-        ]),
-      },
-    ])
+    loadLive2dSkinAsset.mockResolvedValue({
+      row: { ...row, motionGroups: ["Idle"] },
+      entries: [
+        {
+          path: "Hiyori.model3.json",
+          blob: new Blob([
+            JSON.stringify({
+              FileReferences: {
+                Moc: "a.moc3",
+                Motions: { Idle: [{ File: "a" }, { File: "b" }, { File: "c" }, { File: "d" }] },
+              },
+            }),
+          ]),
+        },
+      ],
+    })
     const rng = jest.spyOn(Math, "random").mockReturnValue(0.6)
     try {
       renderCanvas({ motionOverrides: { idle: { motionGroup: "Idle" } } })
@@ -330,7 +336,7 @@ describe("Live2dCanvas", () => {
 
   it("reports modelMissing when the row is absent", async () => {
     const onError = jest.fn()
-    getPetModel.mockResolvedValue(undefined)
+    loadLive2dSkinAsset.mockResolvedValue(undefined)
     renderCanvas({ onError })
     await waitFor(() => expect(onError).toHaveBeenCalledWith("modelMissing"))
   })
@@ -426,14 +432,14 @@ describe("Live2dCanvas", () => {
   })
 
   it("bails out cleanly when unmounted while the row fetch is in flight", async () => {
-    let resolveRow: (v: unknown) => void = () => {}
-    getPetModel.mockReturnValue(new Promise((r) => (resolveRow = r)))
+    let resolveAsset: (v: unknown) => void = () => {}
+    loadLive2dSkinAsset.mockReturnValue(new Promise((r) => (resolveAsset = r)))
     load.mockResolvedValue({ ok: true, model: makeLoadedModel(), dispose: jest.fn() })
     const view = renderCanvas()
-    await waitFor(() => expect(getPetModel).toHaveBeenCalled())
+    await waitFor(() => expect(loadLive2dSkinAsset).toHaveBeenCalled())
     act(() => view.unmount())
     await act(async () => {
-      resolveRow(row)
+      resolveAsset({ row, entries: [{ path: "Hiyori.model3.json", blob: new Blob(["{}"]) }] })
       await Promise.resolve()
     })
     // Cancelled after the row resolved → pixi init never runs.
@@ -452,21 +458,6 @@ describe("Live2dCanvas", () => {
       resolveInit()
       await Promise.resolve()
     })
-    expect(addChild).not.toHaveBeenCalled()
-  })
-
-  it("bails out cleanly when unmounted while loading the model entries", async () => {
-    let resolveEntries: (v: unknown) => void = () => {}
-    getPetModelEntries.mockReturnValue(new Promise((r) => (resolveEntries = r)))
-    load.mockResolvedValue({ ok: true, model: makeLoadedModel(), dispose: jest.fn() })
-    const view = renderCanvas()
-    await waitFor(() => expect(getPetModelEntries).toHaveBeenCalled())
-    act(() => view.unmount())
-    await act(async () => {
-      resolveEntries([{ path: "Hiyori.model3.json", blob: new Blob(["{}"]) }])
-      await Promise.resolve()
-    })
-    expect(load).not.toHaveBeenCalled()
     expect(addChild).not.toHaveBeenCalled()
   })
 

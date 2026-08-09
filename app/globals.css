@@ -1696,6 +1696,53 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
 
 /* End wallpaper-aware UI surfaces. */
 
+/* Artifact workbench preset changes land their final flex layout in one frame,
+   then animate compositor snapshots of the two panels and their divider. This
+   keeps responsive chat/dock contents from reflowing on every animation frame.
+   The old/new snapshots are cropped from their stable outer edges instead of
+   stretched, so text and controls retain their geometry through the motion. */
+::view-transition-group(cognia-dock-chat),
+::view-transition-group(cognia-dock-divider),
+::view-transition-group(cognia-dock-panel) {
+  animation-duration: calc(280ms * var(--motion-duration-scale, 1));
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+::view-transition-old(cognia-dock-chat),
+::view-transition-new(cognia-dock-chat),
+::view-transition-old(cognia-dock-panel),
+::view-transition-new(cognia-dock-panel) {
+  object-fit: cover;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(cognia-dock-chat),
+::view-transition-new(cognia-dock-chat) {
+  object-position: left center;
+}
+
+::view-transition-old(cognia-dock-panel),
+::view-transition-new(cognia-dock-panel) {
+  object-position: right center;
+}
+
+html.reduce-motion::view-transition-group(cognia-dock-chat),
+html.reduce-motion::view-transition-group(cognia-dock-divider),
+html.reduce-motion::view-transition-group(cognia-dock-panel),
+html[data-reduce-motion="true"]::view-transition-group(cognia-dock-chat),
+html[data-reduce-motion="true"]::view-transition-group(cognia-dock-divider),
+html[data-reduce-motion="true"]::view-transition-group(cognia-dock-panel) {
+  animation-duration: 1ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-dock-chat),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-dock-divider),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-dock-panel) {
+    animation-duration: 1ms !important;
+  }
+}
+
 /* Monaco editor flex-shrink fix (microsoft/monaco-editor#3393, #1482).
    Monaco creates a fixed-size internal div that prevents its flex parent
    from shrinking. Setting min-width: 0 on the wrapper section allows the

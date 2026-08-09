@@ -1,8 +1,3 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
-
 jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: jest.fn(() => ({
     dispatchWorkflowStart: jest.fn(),
@@ -17,16 +12,17 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
 }))
 
 import { runSingleNode, ancestorsOf } from "./run-single-node"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listRunEvents } from "./event-log"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function setNode(id: string, value: unknown): VisualWorkflow["nodes"][number] {
   return {

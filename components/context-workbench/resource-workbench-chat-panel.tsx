@@ -9,6 +9,7 @@ import { useChatScope } from "@/components/chat/chat-scope-provider"
 import { useClaudeChat } from "@/hooks/chat/use-claude-chat"
 import { getDb } from "@/lib/db/schema"
 import { listMessages } from "@/lib/db/messages"
+import { updateSession } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
 import { useContextWorkbench } from "./context-workbench"
 import { AsideTargetProvider } from "./aside-target"
@@ -104,11 +105,12 @@ export function ResourceWorkbenchChatPanel({
   }, [reloadNonce, sessionId])
 
   const resolveResourceContext = useCallback(async () => {
+    if (session?.spawnedTask) return ""
     return withSelectionCoordinates(
       (await getResourceContext?.()) ?? "",
       "selection" in resource ? resource.selection : undefined
     )
-  }, [getResourceContext, resource])
+  }, [getResourceContext, resource, session?.spawnedTask])
 
   const withArtifactTarget = useCallback(
     async <T,>(operation: () => Promise<T>): Promise<T> => {
@@ -162,17 +164,61 @@ export function ResourceWorkbenchChatPanel({
       }),
     [claude, resolveResourceContext, sessionId, withArtifactTarget]
   )
-  const submittedPromptRef = useRef<string | null>(null)
+  const submittedPromptRef = useRef<{ sessionId: string; prompt: string } | null>(null)
+  const spawnedTaskMode = session?.spawnedTask?.mode
+  const stagedTaskPrompt =
+    multiAside && session?.lastMessageAt === undefined
+      ? (session?.spawnedTask?.pendingPrompt ?? null)
+      : null
+  const effectivePendingPrompt = pendingPrompt ?? stagedTaskPrompt
 
   useEffect(() => {
-    if (!pendingPrompt || submittedPromptRef.current === pendingPrompt) return
-    submittedPromptRef.current = pendingPrompt
-    void send(pendingPrompt)
-      .then(() => onPendingPromptConsumed?.())
+    if (
+      !multiAside ||
+      !spawnedTaskMode ||
+      !session?.spawnedTask?.pendingPrompt ||
+      session.lastMessageAt === undefined
+    ) {
+      return
+    }
+    void updateSession(sessionId, { spawnedTask: { mode: spawnedTaskMode } }).catch((error) => {
+      console.error("Failed to clear a stale spawned-task prompt", error)
+    })
+  }, [
+    multiAside,
+    session?.lastMessageAt,
+    session?.spawnedTask?.pendingPrompt,
+    sessionId,
+    spawnedTaskMode,
+  ])
+
+  useEffect(() => {
+    if (
+      !effectivePendingPrompt ||
+      (submittedPromptRef.current?.sessionId === sessionId &&
+        submittedPromptRef.current.prompt === effectivePendingPrompt)
+    ) {
+      return
+    }
+    submittedPromptRef.current = { sessionId, prompt: effectivePendingPrompt }
+    void send(effectivePendingPrompt)
+      .then(async () => {
+        if (pendingPrompt) onPendingPromptConsumed?.()
+        else if (spawnedTaskMode) {
+          await updateSession(sessionId, { spawnedTask: { mode: spawnedTaskMode } })
+        }
+      })
       .catch(() => {
         submittedPromptRef.current = null
       })
-  }, [onPendingPromptConsumed, pendingPrompt, send])
+  }, [
+    effectivePendingPrompt,
+    onPendingPromptConsumed,
+    pendingPrompt,
+    send,
+    sessionId,
+    spawnedTaskMode,
+  ])
 
   // Selecting a different aside routes through the workbench store's existing
   // `sessionOverrides` map — the same seam the project editor's re-linker uses,

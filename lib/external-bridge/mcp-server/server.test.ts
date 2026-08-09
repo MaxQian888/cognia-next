@@ -1,18 +1,17 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for the MCP server skeleton — exercises tool registration +
  * the gate→handler→envelope dispatch using the SDK's in-memory transport.
  */
 
-import "fake-indexeddb/auto"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWikiArticle } from "@/lib/db/wiki-articles"
 import { createCharacter } from "@/lib/db/characters"
 import { listMcpAuditLog } from "@/lib/db/mcp-audit-log"
 import type { ExternalBridgeSettings } from "@/types/wiki"
-import { buildMcpServer, __TESTING__ } from "./server"
+import type { WorkflowMcpDeploymentDescriptor, WorkflowMcpHost } from "../handlers/workflow"
+import { buildMcpServer, startWorkflowToolRefresh, __TESTING__ } from "./server"
 
 function settings(overrides: Partial<ExternalBridgeSettings> = {}): ExternalBridgeSettings {
   return {
@@ -33,12 +32,94 @@ async function makeWiredPair(currentSettings: ExternalBridgeSettings | undefined
   return { server, client }
 }
 
+function workflowDescriptor(
+  overrides: Partial<WorkflowMcpDeploymentDescriptor> = {}
+): WorkflowMcpDeploymentDescriptor {
+  return {
+    deploymentId: "deployment-1",
+    workflowId: "workflow-1",
+    versionId: "version-1",
+    revision: 1,
+    environment: "production",
+    name: "Summarize PRs",
+    toolName: "workflow_summarize_prs",
+    inputSchema: {
+      type: "object",
+      properties: { topic: { type: "string" } },
+      required: ["topic"],
+    },
+    ...overrides,
+  }
+}
+
+function workflowHost(
+  descriptors: WorkflowMcpDeploymentDescriptor[]
+): jest.Mocked<WorkflowMcpHost> {
+  return {
+    listDeployments: jest.fn(async () => descriptors),
+    createRun: jest.fn(
+      async (
+        _input: Parameters<WorkflowMcpHost["createRun"]>[0]
+      ): Promise<Awaited<ReturnType<WorkflowMcpHost["createRun"]>>> => ({
+        runId: "run-1",
+        status: "pending",
+      })
+    ),
+    getRun: jest.fn(
+      async ({
+        runId,
+      }: Parameters<WorkflowMcpHost["getRun"]>[0]): Promise<
+        Awaited<ReturnType<WorkflowMcpHost["getRun"]>>
+      > => ({
+        runId,
+        workflowId: "workflow-1",
+        status: "running",
+        startedAt: 1,
+      })
+    ),
+    listEvents: jest.fn(
+      async (
+        _input: Parameters<WorkflowMcpHost["listEvents"]>[0]
+      ): Promise<Awaited<ReturnType<WorkflowMcpHost["listEvents"]>>> => ({
+        events: [],
+        terminal: false,
+      })
+    ),
+    cancelRun: jest.fn(
+      async ({
+        runId,
+      }: Parameters<WorkflowMcpHost["cancelRun"]>[0]): Promise<
+        Awaited<ReturnType<WorkflowMcpHost["cancelRun"]>>
+      > => ({ runId, cancelled: true, mode: "cooperative" })
+    ),
+  }
+}
+
+async function makeWorkflowWiredPair(
+  currentSettings: ExternalBridgeSettings,
+  host: WorkflowMcpHost
+) {
+  const opts = { settingsGetter: async () => currentSettings, workflowHost: host }
+  const server = buildMcpServer(opts)
+  const refresh = await startWorkflowToolRefresh(server, {
+    ...opts,
+    refreshIntervalMs: 0,
+  })
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair()
+  await server.connect(serverTransport)
+  const client = new Client({ name: "workflow-test-client", version: "0.0.1" })
+  await client.connect(clientTransport)
+  return { server, client, refresh }
+}
+
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 }, 30_000)
+
+afterAll(dbFixture.dispose)
 
 describe("buildMcpServer — tool registration", () => {
   // Note: `client.listTools()` round-trips through zod-to-json-schema which
@@ -119,6 +200,18 @@ describe("buildMcpServer — per-client scope projection", () => {
 describe("buildMcpServer — orchestration tools (Thread D)", () => {
   it.each([
     ["agent_dispatch", { subagentId: "x", prompt: "hi" }],
+    [
+      "spawn_task",
+      {
+        parentSessionId: "s1",
+        title: "Fix cleanup",
+        tldr: "Handle it separately.",
+        situation: "Cleanup is missing.",
+        code_locations: [],
+        solution: "Add cleanup.",
+        caveats: [],
+      },
+    ],
     ["team_run", { teamId: "t1" }],
     ["team_list", {}],
     ["plugin_tool_invoke", { pluginId: "p", toolName: "t" }],
@@ -151,6 +244,183 @@ describe("buildMcpServer — orchestration tools (Thread D)", () => {
     // returns the structured "requires desktop renderer" payload, but the
     // call itself is NOT a gate error.
     expect(result.isError).not.toBe(true)
+    await client.close()
+  })
+
+  it("allows spawn_task when the agent:dispatch scope is ON", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["agent:dispatch"] }))
+    const result = await client.callTool({
+      name: "spawn_task",
+      arguments: {
+        parentSessionId: "s1",
+        title: "Fix cleanup",
+        tldr: "Handle it separately.",
+        situation: "Cleanup is missing.",
+        code_locations: [],
+        solution: "Add cleanup.",
+        caveats: [],
+      },
+    })
+    expect(result.isError).not.toBe(true)
+    await client.close()
+  })
+})
+
+describe("buildMcpServer — immutable workflow deployments", () => {
+  it("routes lifecycle tools through the shared host adapter", async () => {
+    const descriptor = workflowDescriptor()
+    const host = workflowHost([descriptor])
+    const { client, refresh } = await makeWorkflowWiredPair(
+      settings({ enabledScopes: ["workflow:run"] }),
+      host
+    )
+
+    const listed = await client.callTool({ name: "workflow_list", arguments: {} })
+    expect(listed.structuredContent).toEqual({ deployments: [descriptor] })
+    await client.callTool({ name: "workflow_status", arguments: { runId: "run-1" } })
+    await client.callTool({
+      name: "workflow_events",
+      arguments: { runId: "run-1", afterSequence: 12, limit: 50 },
+    })
+    await client.callTool({
+      name: "workflow_cancel",
+      arguments: { runId: "run-1" },
+      _meta: { cogniaBridgeClientId: "client-7" },
+    })
+
+    expect(host.getRun).toHaveBeenCalledWith({ runId: "run-1" })
+    expect(host.listEvents).toHaveBeenCalledWith({
+      runId: "run-1",
+      afterSequence: 12,
+      limit: 50,
+    })
+    expect(host.cancelRun).toHaveBeenCalledWith({ runId: "run-1", caller: "mcp:client-7" })
+    refresh.stop()
+    await client.close()
+  })
+
+  it("registers a typed deployment tool and stamps caller plus idempotency metadata", async () => {
+    const host = workflowHost([workflowDescriptor()])
+    const { client, refresh } = await makeWorkflowWiredPair(
+      settings({ enabledScopes: ["workflow:run"] }),
+      host
+    )
+
+    const invalid = await client.callTool({
+      name: "workflow_summarize_prs",
+      arguments: { topic: 42 },
+    })
+    expect(invalid).toMatchObject({ isError: true })
+    expect(JSON.stringify(invalid.content)).toContain("Input validation error")
+    const accepted = await client.callTool({
+      name: "workflow_summarize_prs",
+      arguments: { topic: "release" },
+      _meta: {
+        cogniaBridgeClientId: "client-9",
+        cogniaIdempotencyKey: "call-42",
+      },
+    })
+
+    expect(accepted.structuredContent).toEqual({ runId: "run-1", status: "pending" })
+    expect(host.createRun).toHaveBeenCalledWith({
+      deploymentId: "deployment-1",
+      caller: "mcp:client-9",
+      idempotencyKey: "call-42",
+      input: { topic: "release" },
+    })
+    refresh.stop()
+    await client.close()
+  })
+
+  it("applies the per-client scope projection to dynamic workflow tools", async () => {
+    const host = workflowHost([workflowDescriptor()])
+    const { client, refresh } = await makeWorkflowWiredPair(
+      settings({ enabledScopes: ["workflow:run", "wiki:cognia"] }),
+      host
+    )
+
+    const denied = await client.callTool({
+      name: "workflow_summarize_prs",
+      arguments: { topic: "release" },
+      _meta: { cogniaBridgeScopes: ["wiki:cognia"] },
+    })
+
+    expect(denied.isError).toBe(true)
+    expect(host.createRun).not.toHaveBeenCalled()
+    refresh.stop()
+    await client.close()
+  })
+
+  it("refreshes changed schemas and removes disabled deployment tools", async () => {
+    let descriptors = [workflowDescriptor()]
+    const host = workflowHost(descriptors)
+    host.listDeployments.mockImplementation(async () => descriptors)
+    const { server, client, refresh } = await makeWorkflowWiredPair(
+      settings({ enabledScopes: ["workflow:run"] }),
+      host
+    )
+    const notification = jest.spyOn(server, "sendToolListChanged")
+
+    descriptors = [
+      workflowDescriptor({
+        versionId: "version-2",
+        revision: 2,
+        inputSchema: {
+          type: "object",
+          properties: { count: { type: "integer" } },
+          required: ["count"],
+        },
+      }),
+    ]
+    notification.mockClear()
+    await refresh.refresh()
+    const staleSchema = await client.callTool({
+      name: "workflow_summarize_prs",
+      arguments: { topic: "old" },
+    })
+    expect(staleSchema).toMatchObject({ isError: true })
+    expect(JSON.stringify(staleSchema.content)).toContain("Input validation error")
+    await client.callTool({ name: "workflow_summarize_prs", arguments: { count: 2 } })
+    expect(notification).toHaveBeenCalledTimes(1)
+
+    descriptors = []
+    await refresh.refresh()
+    const removed = await client.callTool({
+      name: "workflow_summarize_prs",
+      arguments: { count: 2 },
+    })
+    expect(removed).toMatchObject({ isError: true })
+    expect(JSON.stringify(removed.content)).toMatch(/not found/i)
+
+    refresh.stop()
+    await client.close()
+  })
+
+  it("retains the last known-good tools when a replacement registration fails", async () => {
+    let descriptors = [workflowDescriptor()]
+    const host = workflowHost(descriptors)
+    host.listDeployments.mockImplementation(async () => descriptors)
+    const { client, refresh } = await makeWorkflowWiredPair(
+      settings({ enabledScopes: ["workflow:run"] }),
+      host
+    )
+
+    descriptors = [
+      workflowDescriptor({
+        versionId: "version-2",
+        revision: 2,
+        toolName: "workflow_list",
+      }),
+    ]
+    await expect(refresh.refresh()).rejects.toThrow(/workflow_list/i)
+
+    const retained = await client.callTool({
+      name: "workflow_summarize_prs",
+      arguments: { topic: "release" },
+    })
+    expect(retained.structuredContent).toEqual({ runId: "run-1", status: "pending" })
+
+    refresh.stop()
     await client.close()
   })
 })

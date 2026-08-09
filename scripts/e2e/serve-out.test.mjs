@@ -17,7 +17,25 @@ import {
   exportHasE2eMarker,
   createOutServer,
   E2E_MARKER,
+  parseArgs,
 } from "./serve-out.mjs"
+
+test("parseArgs uses safe defaults and validates the port", () => {
+  assert.deepEqual(parseArgs([]), {
+    host: "127.0.0.1",
+    port: 3000,
+    root: "out",
+    skipMarkerCheck: false,
+  })
+  assert.deepEqual(parseArgs(["--port", "0", "--root", "fixture", "--skip-e2e-marker-check"]), {
+    host: "127.0.0.1",
+    port: 0,
+    root: "fixture",
+    skipMarkerCheck: true,
+  })
+  assert.throws(() => parseArgs(["--port", "65536"]), /between 0 and 65535/)
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 /** Build a minimal fake `out/` export in a temp dir. */
 function makeExport({ withMarker = true } = {}) {

@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-
-import "fake-indexeddb/auto"
 import {
   addPetSpritePack,
   deletePetSpritePack,
@@ -8,15 +5,17 @@ import {
   getPetSpritePackStorageUsage,
   listPetSpritePacks,
 } from "./pet-sprite-packs"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().petSpritePacks.clear()
 })
+afterAll(dbFixture.dispose)
 
 function pack(id: string, displayName = id, bytes = "sprite") {
   return {
@@ -91,6 +90,35 @@ describe("pet sprite pack CRUD", () => {
 
     await expect(getPetSpritePack("momo")).resolves.toBeUndefined()
     await expect(listPetSpritePacks()).resolves.toEqual([expect.objectContaining({ id: "nori" })])
+  })
+
+  it("clears global and per-character selection when deleting an active pack", async () => {
+    await addPetSpritePack(pack("momo"), 100)
+    await getDb().settings.put({
+      id: "singleton",
+      petSettings: {
+        enabled: true,
+        anchor: "bottom-right",
+        motion: "auto",
+        mutedBubbles: false,
+        size: 96,
+        skinId: "sprite-v2",
+        activeSpritePackId: "momo",
+      },
+    } as never)
+    await getDb().petCharacterBindings.put({
+      characterId: "sprite-character",
+      skin: { skinId: "sprite-v2", packId: "momo" },
+      updatedAt: "old",
+    })
+
+    await deletePetSpritePack("momo")
+
+    expect((await getDb().settings.get("singleton"))?.petSettings).toMatchObject({ skinId: "svg" })
+    expect(
+      (await getDb().settings.get("singleton"))?.petSettings?.activeSpritePackId
+    ).toBeUndefined()
+    expect((await getDb().petCharacterBindings.get("sprite-character"))?.skin).toBeUndefined()
   })
 
   it("reports pack count and total persisted sprite bytes", async () => {

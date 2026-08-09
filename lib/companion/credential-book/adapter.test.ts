@@ -24,6 +24,8 @@ import type {
   CompanionHostRecord,
 } from "./types"
 
+const DEVICE_KEY: JsonWebKey = { kty: "EC", crv: "P-256", d: "device-key" }
+
 function memoryRecords(): HostRecordStore {
   let book: HostBookEnvelope = emptyHostBook()
   return {
@@ -55,7 +57,8 @@ function memoryCredentials(): HostCredentialStore {
 function config(patch: Partial<CompanionConfig> = {}): CompanionConfig {
   return {
     baseUrl: "https://studio.local:27890",
-    deviceJwt: "jwt.a",
+    devicePrivateKeyJwk: DEVICE_KEY,
+    deviceKeyThumbprint: "thumbprint-a",
     deviceId: "dev-1",
     serverVersion: "0.2.0",
     serverFingerprint: "aa11",
@@ -63,12 +66,18 @@ function config(patch: Partial<CompanionConfig> = {}): CompanionConfig {
   }
 }
 
-function harness(accountNamespace: () => string | null = () => "acct_a") {
+function harness(
+  accountNamespace: () => string | null = () => "acct_a",
+  activeHostId?: () => string | null | undefined
+) {
   const book = createCredentialBook({
     records: memoryRecords(),
     credentials: memoryCredentials(),
   })
-  return { book, storage: new CredentialBookCompanionStorage({ book, accountNamespace }) }
+  return {
+    book,
+    storage: new CredentialBookCompanionStorage({ book, accountNamespace, activeHostId }),
+  }
 }
 
 describe("toCompanionConfig", () => {
@@ -84,6 +93,7 @@ describe("toCompanionConfig", () => {
     tlsPin: "aa11",
     cursorNamespace: "acct_a:host-1",
     deviceId: "dev-1",
+    deviceKeyThumbprint: "thumbprint-a",
     serverVersion: "0.2.0",
     rendezvousId: "r1",
     connection: {
@@ -98,12 +108,13 @@ describe("toCompanionConfig", () => {
   }
 
   it("flattens a record and credential back into the legacy shape", async () => {
-    expect(await toCompanionConfig(record, { deviceJwt: "jwt.a" })).toEqual({
+    expect(await toCompanionConfig(record, { devicePrivateKeyJwk: DEVICE_KEY })).toEqual({
       targetId: "host-1",
       baseUrl: "https://studio.local:27890",
       lanBaseUrl: "https://lan",
       tunnelBaseUrl: "https://tunnel",
-      deviceJwt: "jwt.a",
+      devicePrivateKeyJwk: DEVICE_KEY,
+      deviceKeyThumbprint: "thumbprint-a",
       deviceId: "dev-1",
       serverVersion: "0.2.0",
       serverFingerprint: "aa11",
@@ -115,7 +126,7 @@ describe("toCompanionConfig", () => {
   it("omits optional fields that the record does not carry", async () => {
     const bare = { ...record, tlsPin: null, endpoints: { baseUrl: "https://x" } }
     delete (bare as Partial<CompanionHostRecord>).rendezvousId
-    const flat = await toCompanionConfig(bare, { deviceJwt: "j" })
+    const flat = await toCompanionConfig(bare, { devicePrivateKeyJwk: DEVICE_KEY })
     expect("serverFingerprint" in flat).toBe(false)
     expect("lanBaseUrl" in flat).toBe(false)
     expect("rendezvousId" in flat).toBe(false)
@@ -140,7 +151,7 @@ describe("toCompanionConfig", () => {
     const { descriptor, privateKeyJwk } = await room()
     const flat = await toCompanionConfig(
       { ...record, signalingRoomDescriptor: descriptor },
-      { deviceJwt: "j", signalingPrivateKeyJwk: privateKeyJwk }
+      { devicePrivateKeyJwk: DEVICE_KEY, signalingPrivateKeyJwk: privateKeyJwk }
     )
     expect(flat.signalingRoomDescriptor).toEqual(descriptor)
     expect(flat.signalingPrivateKeyJwk).toEqual(privateKeyJwk)
@@ -152,7 +163,7 @@ describe("toCompanionConfig", () => {
     const { descriptor } = await room()
     const flat = await toCompanionConfig(
       { ...record, signalingRoomDescriptor: descriptor },
-      { deviceJwt: "j" }
+      { devicePrivateKeyJwk: DEVICE_KEY }
     )
     expect(flat.signalingRoomDescriptor).toEqual(descriptor)
     expect("signalingPrivateKey" in flat).toBe(false)
@@ -161,7 +172,7 @@ describe("toCompanionConfig", () => {
   it("only carries the signing key when the host has a signaling room", async () => {
     const jwk = { kty: "EC" } as JsonWebKey
     const withoutRoom = await toCompanionConfig(record, {
-      deviceJwt: "j",
+      devicePrivateKeyJwk: DEVICE_KEY,
       signalingPrivateKeyJwk: jwk,
     })
     expect("signalingPrivateKeyJwk" in withoutRoom).toBe(false)
@@ -174,7 +185,7 @@ describe("CredentialBookCompanionStorage", () => {
     await storage.save(config())
     expect(await storage.load()).toMatchObject({
       baseUrl: "https://studio.local:27890",
-      deviceJwt: "jwt.a",
+      devicePrivateKeyJwk: DEVICE_KEY,
       deviceId: "dev-1",
       accountId: "acct_a",
       targetId: "dev-1",
@@ -182,11 +193,17 @@ describe("CredentialBookCompanionStorage", () => {
     })
   })
 
-  it("files under the config's own account when it carries one", async () => {
+  it("uses the active local account while preserving the remote tenant separately", async () => {
     const { book, storage } = harness(() => "acct_ambient")
-    await storage.save(config({ accountId: "acct_explicit" }))
-    expect(await book.get({ hostId: "dev-1", accountNamespace: "acct_explicit" })).not.toBeNull()
-    expect(await book.get({ hostId: "dev-1", accountNamespace: "acct_ambient" })).toBeNull()
+    await storage.save(config({ accountId: "acct_stale", tenantId: "tenant_remote" }))
+    expect(await book.get({ hostId: "dev-1", accountNamespace: "acct_stale" })).toBeNull()
+    expect(await book.get({ hostId: "dev-1", accountNamespace: "acct_ambient" })).toMatchObject({
+      tenantId: "tenant_remote",
+    })
+    expect(await storage.load()).toMatchObject({
+      accountId: "acct_ambient",
+      tenantId: "tenant_remote",
+    })
   })
 
   it("falls back to the reserved namespace when no account is active", async () => {
@@ -204,6 +221,32 @@ describe("CredentialBookCompanionStorage", () => {
     expect((await storage.load())?.deviceId).toBe("dev-2")
   })
 
+  it("loads the host selected by the runtime target instead of a stale book pointer", async () => {
+    let activeHostId: string | null | undefined = "host-1"
+    const { storage } = harness(
+      () => "acct_a",
+      () => activeHostId
+    )
+    await storage.save(config({ targetId: "host-1", deviceId: "dev-1" }))
+    await storage.save(
+      config({
+        targetId: "host-2",
+        deviceId: "dev-2",
+        baseUrl: "https://second.local",
+      })
+    )
+
+    activeHostId = "host-1"
+    await expect(storage.load()).resolves.toMatchObject({
+      targetId: "host-1",
+      deviceId: "dev-1",
+      baseUrl: "https://studio.local:27890",
+    })
+
+    activeHostId = "web-standalone"
+    await expect(storage.load()).resolves.toBeNull()
+  })
+
   it("keeps a user-edited label across a re-save", async () => {
     const { book, storage } = harness()
     await storage.save(config())
@@ -212,6 +255,70 @@ describe("CredentialBookCompanionStorage", () => {
     await book.upsert({ ...current, label: "My Studio" })
     await storage.save(config({ baseUrl: "https://moved.local" }))
     expect((await book.get(key))?.label).toBe("My Studio")
+  })
+
+  it("removes a newly-written private key when the public upsert fails", async () => {
+    const stable = createCredentialBook({
+      records: memoryRecords(),
+      credentials: memoryCredentials(),
+    })
+    let fail = true
+    const book: CompanionCredentialBook = {
+      ...stable,
+      async upsert(draft) {
+        if (fail) {
+          fail = false
+          throw new Error("record write failed")
+        }
+        return stable.upsert(draft)
+      },
+    }
+    const storage = new CredentialBookCompanionStorage({
+      book,
+      accountNamespace: () => "acct_a",
+    })
+
+    await expect(storage.save(config())).rejects.toThrow("record write failed")
+    const key = { hostId: "dev-1", accountNamespace: "acct_a" }
+    expect(await stable.get(key)).toBeNull()
+    expect(await stable.loadCredential(key)).toBeNull()
+  })
+
+  it("restores an existing pairing when activating its update fails", async () => {
+    const stable = createCredentialBook({
+      records: memoryRecords(),
+      credentials: memoryCredentials(),
+    })
+    let failActivation = false
+    const book: CompanionCredentialBook = {
+      ...stable,
+      async setActive(key) {
+        if (failActivation) {
+          failActivation = false
+          throw new Error("active pointer write failed")
+        }
+        return stable.setActive(key)
+      },
+    }
+    const storage = new CredentialBookCompanionStorage({
+      book,
+      accountNamespace: () => "acct_a",
+    })
+    await storage.save(config())
+    failActivation = true
+
+    await expect(
+      storage.save(
+        config({
+          baseUrl: "https://replacement.example",
+          devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "replacement" },
+        })
+      )
+    ).rejects.toThrow("active pointer write failed")
+    await expect(storage.load()).resolves.toMatchObject({
+      baseUrl: "https://studio.local:27890",
+      devicePrivateKeyJwk: DEVICE_KEY,
+    })
   })
 
   it("reports no pairing when nothing is stored", async () => {
@@ -236,6 +343,7 @@ describe("CredentialBookCompanionStorage", () => {
       endpoints: { baseUrl: "https://x" },
       tlsPin: null,
       deviceId: "dev-1",
+      deviceKeyThumbprint: "device-thumbprint",
       serverVersion: "0.2.0",
     })
     expect(await storage.load()).toBeNull()
@@ -252,6 +360,7 @@ describe("CredentialBookCompanionStorage", () => {
       endpoints: { baseUrl: "https://x" },
       tlsPin: null,
       deviceId: "dev-1",
+      deviceKeyThumbprint: "device-thumbprint",
       serverVersion: "0.2.0",
     })
     expect(await storage.load()).toBeNull()
@@ -265,15 +374,43 @@ describe("CredentialBookCompanionStorage", () => {
     expect((await book.list("acct_a")).map((r) => r.hostId)).toEqual(["dev-1"])
   })
 
+  it("clears the runtime-selected host even when the book pointer names another host", async () => {
+    const activeHostId: string | null | undefined = "host-1"
+    const { book, storage } = harness(
+      () => "acct_a",
+      () => activeHostId
+    )
+    await storage.save(config({ targetId: "host-1", deviceId: "dev-1" }))
+    await storage.save(config({ targetId: "host-2", deviceId: "dev-2" }))
+    await storage.clear()
+
+    expect((await book.list("acct_a")).map((record) => record.hostId)).toEqual(["host-2"])
+    expect(await book.loadCredential({ accountNamespace: "acct_a", hostId: "host-1" })).toBeNull()
+  })
+
+  it("removes an explicitly named pairing without relying on either active pointer", async () => {
+    const { book, storage } = harness()
+    await storage.save(config({ targetId: "host-1", deviceId: "dev-1" }))
+    await storage.save(config({ targetId: "host-2", deviceId: "dev-2" }))
+
+    await storage.remove(config({ targetId: "host-1", deviceId: "dev-1", accountId: "acct_a" }))
+
+    expect((await book.list("acct_a")).map((record) => record.hostId)).toEqual(["host-2"])
+    expect(await book.loadCredential({ accountNamespace: "acct_a", hostId: "host-1" })).toBeNull()
+  })
+
   it("clearing with nothing paired is a no-op", async () => {
     const { storage } = harness()
     await expect(storage.clear()).resolves.toBeUndefined()
   })
 
   it("does not clear another account's pairings", async () => {
-    const { book, storage } = harness()
+    let activeAccount = "acct_a"
+    const { book, storage } = harness(() => activeAccount)
     await storage.save(config())
-    await storage.save(config({ accountId: "acct_b", deviceId: "dev-b" }))
+    activeAccount = "acct_b"
+    await storage.save(config({ deviceId: "dev-b" }))
+    activeAccount = "acct_a"
     await storage.clear()
     expect(await book.list("acct_b")).toHaveLength(1)
   })

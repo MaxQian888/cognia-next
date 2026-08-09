@@ -23,7 +23,9 @@ import {
 import { SAMPLE_MODEL_CATALOG } from "@/lib/pet/live2d/constants"
 import { discoverLive2dModels, type DiscoveredModel } from "@/lib/pet/live2d/discover-models"
 import { formatBytes } from "@/lib/agent/utils"
-import type { PetSettings } from "@/types/pet"
+import type { PetAssetDiagnostic, PetSettings } from "@/types/pet"
+import { toPetAssetDiagnostics } from "@/lib/pet/live2d/compatibility-diagnostics"
+import { PetSkinStatus } from "@/components/pet/settings/pet-skin-status"
 import {
   filesToEntries,
   importModelFromEntries,
@@ -36,11 +38,12 @@ import { PetModelImportDialog } from "./pet-model-import-dialog"
 export interface PetModelManagerProps {
   settings: PetSettings
   onPatch: (patch: Partial<PetSettings>) => void
+  coreReady?: boolean
 }
 
 const IMPORT_ACCEPT = ".zip,.model3.json,.moc3,.png,.json"
 
-export function PetModelManager({ settings, onPatch }: PetModelManagerProps) {
+export function PetModelManager({ settings, onPatch, coreReady }: PetModelManagerProps) {
   const t = useTranslations("settings.pet.live2d")
   const models = useLiveQuery(() => listPetModels(), [], [] as PetModelRow[])
   const usage = useLiveQuery(() => getPetModelStorageUsage(), [models], {
@@ -59,6 +62,27 @@ export function PetModelManager({ settings, onPatch }: PetModelManagerProps) {
   const [importModels, setImportModels] = useState<DiscoveredModel[] | null>(null)
 
   const activeId = settings.activeLive2dModelId
+  const activeModel = models.find((model) => model.id === activeId)
+  const compatibilityDiagnostics: PetAssetDiagnostic[] = activeModel?.compatibility
+    ? toPetAssetDiagnostics(activeModel.compatibility.diagnostics)
+    : []
+  if (!activeId || !activeModel) {
+    compatibilityDiagnostics.push({
+      code: "assetMissing",
+      severity: "error",
+      recoverable: true,
+    })
+  } else if (coreReady === false) {
+    compatibilityDiagnostics.push({
+      code: "runtimeUnavailable",
+      severity: "error",
+      recoverable: true,
+    })
+  }
+  const effectiveSkin =
+    activeModel && activeModel.compatibility?.status !== "invalid" && coreReady !== false
+      ? "live2d"
+      : "svg"
 
   function applyOutcome(outcome: ImportOutcome): void {
     if (outcome.ok) {
@@ -134,6 +158,13 @@ export function PetModelManager({ settings, onPatch }: PetModelManagerProps) {
         </span>
       </div>
 
+      <PetSkinStatus
+        requestedSkinId="live2d"
+        effectiveSkinId={effectiveSkin}
+        diagnostics={compatibilityDiagnostics}
+        onConfigure={activeModel ? () => setConfigModelId(activeModel.id) : undefined}
+      />
+
       {models.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("noModels")}</p>
       ) : (
@@ -143,17 +174,46 @@ export function PetModelManager({ settings, onPatch }: PetModelManagerProps) {
               key={m.id}
               className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
             >
-              <div className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="pet-live2d-active"
-                  aria-label={t("setActive")}
-                  checked={activeId === m.id}
-                  onChange={() => onPatch({ activeLive2dModelId: m.id })}
-                />
-                <span className="text-sm">{m.name}</span>
-                {activeId === m.id && (
-                  <span className="rounded bg-secondary px-1.5 py-0.5 text-xs">{t("active")}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="pet-live2d-active"
+                    aria-label={t("setActive")}
+                    checked={activeId === m.id}
+                    disabled={m.compatibility?.status === "invalid"}
+                    onChange={() => {
+                      if (m.compatibility?.status !== "invalid") {
+                        onPatch({ activeLive2dModelId: m.id })
+                      }
+                    }}
+                  />
+                  <span className="text-sm">{m.name}</span>
+                  {activeId === m.id && (
+                    <span className="rounded bg-secondary px-1.5 py-0.5 text-xs">
+                      {t("active")}
+                    </span>
+                  )}
+                  <span
+                    data-compatibility-status={m.compatibility?.status ?? "legacy"}
+                    className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                  >
+                    {t(`compatibility.status.${m.compatibility?.status ?? "legacy"}`)}
+                  </span>
+                </div>
+                {m.compatibility && m.compatibility.diagnostics.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 pl-6 text-xs text-amber-600 dark:text-amber-500">
+                    {m.compatibility.diagnostics.map((diagnostic, index) => (
+                      <li key={`${diagnostic.code}:${diagnostic.path ?? index}`}>
+                        {diagnostic.path
+                          ? t("compatibility.diagnosticWithPath", {
+                              message: t(`errors.${diagnostic.code}`),
+                              path: diagnostic.path,
+                            })
+                          : t(`errors.${diagnostic.code}`)}
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
               <div className="flex items-center gap-1">

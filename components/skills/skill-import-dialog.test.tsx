@@ -79,4 +79,41 @@ describe("SkillImportDialog", () => {
     const drafts = bulkImportSkills.mock.calls[0][0] as Array<{ status?: string }>
     expect(drafts.every((d) => d.status === "disabled")).toBe(true)
   })
+
+  it("preserves portable skill metadata in the persistence draft", async () => {
+    const portableStaging: ImportStaging = {
+      drafts: [
+        {
+          name: "Reviewer",
+          slug: "reviewer",
+          description: "Review changes",
+          compatibility: "Requires git",
+          metadata: { owner: "platform" },
+          invocationPolicy: "explicit",
+          frontmatterExtensions: { "disable-model-invocation": true },
+          codexOpenAiYaml: "interface:\n  display_name: Reviewer\n",
+          content: "body",
+        },
+      ],
+      sourceLabel: "reviewer.zip",
+      parseErrors: [],
+    }
+
+    render(
+      <SkillImportDialog staging={portableStaging} onCancel={jest.fn()} onComplete={jest.fn()} />
+    )
+    fireEvent.click(screen.getByText("apply"))
+    await waitFor(() => expect(bulkImportSkills).toHaveBeenCalled())
+
+    expect(bulkImportSkills.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        slug: "reviewer",
+        compatibility: "Requires git",
+        metadata: { owner: "platform" },
+        invocationPolicy: "explicit",
+        frontmatterExtensions: { "disable-model-invocation": true },
+        codexOpenAiYaml: "interface:\n  display_name: Reviewer\n",
+      }),
+    ])
+  })
 })

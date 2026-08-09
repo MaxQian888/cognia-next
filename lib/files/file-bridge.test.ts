@@ -22,10 +22,12 @@ jest.mock("@/lib/claude/ipc", () => ({
 }))
 
 const mockReadBinary = jest.fn()
+const mockWriteBinary = jest.fn()
 jest.mock(
   "@tauri-apps/plugin-fs",
   () => ({
     readFile: (...args: unknown[]) => mockReadBinary(...args),
+    writeFile: (...args: unknown[]) => mockWriteBinary(...args),
   }),
   { virtual: true }
 )
@@ -41,6 +43,7 @@ import {
   pickAndReadFiles,
   pickAndReadBinaryFiles,
   saveFileAs,
+  saveBinaryFileAs,
   pickDirectory,
   saveFilesToDir,
 } from "./file-bridge"
@@ -60,6 +63,7 @@ beforeEach(() => {
   mockOpen.mockReset()
   mockSave.mockReset()
   mockReadBinary.mockReset()
+  mockWriteBinary.mockReset()
 })
 
 describe("pickAndReadFiles — Tauri branch", () => {
@@ -373,6 +377,52 @@ describe("saveFileAs — browser branch", () => {
     expect(revokeSpy).toHaveBeenCalledWith("blob:mock")
 
     createElementSpy.mockRestore()
+    URL.createObjectURL = originalCreate
+    URL.revokeObjectURL = originalRevoke
+  })
+})
+
+describe("saveBinaryFileAs", () => {
+  it("writes the selected byte payload through the Tauri fs plugin", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedDefaultExportDir.mockResolvedValue("/exp")
+    mockSave.mockResolvedValue("/exp/demo.zip")
+    mockWriteBinary.mockResolvedValue(undefined)
+    const bytes = new Uint8Array([0x50, 0x4b])
+
+    await expect(
+      saveBinaryFileAs({
+        defaultName: "demo.zip",
+        bytes,
+        filters: [{ name: "Zip", extensions: ["zip"] }],
+      })
+    ).resolves.toBe(true)
+    expect(mockWriteBinary).toHaveBeenCalledWith("/exp/demo.zip", bytes)
+  })
+
+  it("downloads a zip blob in the browser", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    const click = jest.fn()
+    const anchor = { href: "", download: "", click }
+    jest.spyOn(document, "createElement").mockReturnValueOnce(anchor as unknown as HTMLElement)
+    const originalCreate = URL.createObjectURL
+    const originalRevoke = URL.revokeObjectURL
+    const createObjectUrl = jest.fn((_blob: Blob) => "blob:zip")
+    ;(URL as unknown as { createObjectURL: typeof createObjectUrl }).createObjectURL =
+      createObjectUrl
+    ;(URL as unknown as { revokeObjectURL: jest.Mock }).revokeObjectURL = jest.fn()
+
+    await expect(
+      saveBinaryFileAs({
+        defaultName: "demo.zip",
+        bytes: new Uint8Array([1]),
+        mimeType: "application/zip",
+      })
+    ).resolves.toBe(true)
+    expect(anchor.download).toBe("demo.zip")
+    expect(click).toHaveBeenCalled()
+    expect(createObjectUrl.mock.calls[0]![0].type).toBe("application/zip")
+
     URL.createObjectURL = originalCreate
     URL.revokeObjectURL = originalRevoke
   })

@@ -5,7 +5,8 @@
  * detail.
  */
 import React, { useState } from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
@@ -54,7 +55,7 @@ export function DoctorPanel({
   const [index, setIndex] = useState(0)
   const reports = report.latestCrash ? [report.latestCrash] : []
 
-  useInput((input, key) => {
+  useModalInput((input, key) => {
     if (key.escape || input === "q") {
       onClose()
       return
@@ -147,6 +148,23 @@ export function DoctorPanel({
           {report.credentialedProviders.length ? report.credentialedProviders.join(", ") : "none"}
         </Text>
       </Box>
+
+      {report.tuiRenderer ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color={theme.muted}>
+            Terminal renderer
+          </Text>
+          <Text>{`Engine       ${report.tuiRenderer.engine}`}</Text>
+          <Text>{`Blocks       ${report.tuiRenderer.visibleBlocks}/${report.tuiRenderer.totalBlocks} visible · ${(report.tuiRenderer.blockCacheHitRate * 100).toFixed(1)}% cache hits`}</Text>
+          <Text>{`Latency      ${report.tuiRenderer.renderDurationMs.p95.toFixed(1)}ms render p95 · ${report.tuiRenderer.resizeDurationMs.p95.toFixed(1)}ms resize p95`}</Text>
+          <Text>{`Capabilities graphics=${report.tuiRenderer.capabilities.graphics ?? "none"} · links=${report.tuiRenderer.capabilities.hyperlinks ? "yes" : "no"} · tty=${report.tuiRenderer.capabilities.tty ? "yes" : "no"}`}</Text>
+          {report.tuiRenderer.unknownParts > 0 ? (
+            <Text
+              color={theme.warning}
+            >{`Unknown/rejected parts ${report.tuiRenderer.unknownParts}`}</Text>
+          ) : null}
+        </Box>
+      ) : null}
 
       {/* Workspace */}
       <Box flexDirection="column" marginTop={1}>

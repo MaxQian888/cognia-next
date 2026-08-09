@@ -46,9 +46,9 @@ import type {
   WorkflowNodeKind,
   WorkflowTriggeredFrom,
 } from "@/types/workflow/visual"
-import type { McpServer } from "@cognia/agent-config-types"
 import { registerNodeExecutor } from "./registry"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
+import { iterationCacheKey } from "@/lib/workflow/runtime/idempotency"
 import { respondToWebhook } from "@/lib/workflow/runtime/tauri-bridge"
 import { computeGoalAnalytics } from "@/lib/goal/analytics"
 import { getGoalRuntime } from "@/lib/goal/runtime"
@@ -65,7 +65,6 @@ import {
   updateSkill,
 } from "@/lib/db/skills"
 import { getSkill as getPluginSkill } from "@/lib/plugin/registries/skill-registry"
-import { getMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { invokeMcpTool } from "@/lib/mcp/invoke"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
@@ -2918,46 +2917,48 @@ registerNodeExecutor({
       )
     }
     // Lazy-imports avoid a circular dep through the node registry.
-    const [{ getWorkflow }, { runWorkflow }] = await Promise.all([
-      import("@/lib/db/workflows"),
-      import("@/lib/workflow/runtime/orchestrator"),
-    ])
-    const workflow = await getWorkflow(workflowId)
-    if (!workflow) {
-      throw nonRetryable(`flow.subworkflow: workflow ${workflowId} not found`)
-    }
-    // Typed-interface validation (D5): when the target declares an input
-    // schema, the call payload must satisfy it BEFORE the run starts.
-    const inputSchema = workflow.interface?.inputSchema
-    if (inputSchema && Object.keys(inputSchema).length > 0) {
-      const v = validateAgainstJsonSchema(inputSchema, params.input ?? null)
-      if (!v.ok) {
-        throw nonRetryable(
-          `flow.subworkflow: input violates the target's schema — ${v.errors.join("; ")}`
-        )
-      }
-    }
-    const result = await runWorkflow({
-      workflow,
-      trigger: {
+    const { executeDeployedWorkflow, WorkflowAdmissionError } =
+      await import("@/lib/workflow/runtime/execution-authority")
+    let execution: Awaited<ReturnType<typeof executeDeployedWorkflow>>
+    try {
+      const lockedDependency = ctx.executionBinding?.dependencyLock?.workflows[ctx.stepId]
+      execution = await executeDeployedWorkflow({
         workflowId,
-        kind: "trigger.manual",
+        entrypoint: "subworkflow",
+        caller: `run:${ctx.runId}`,
+        idempotencyKey: ctx.iteration
+          ? iterationCacheKey(ctx.iteration.loopId, ctx.iteration.iterationIndex, ctx.stepId)
+          : ctx.stepId,
+        ...(lockedDependency ? { lockedDependency } : {}),
+        triggerKind: "trigger.manual",
         payload: {
           parentRunId: ctx.runId,
           parentStepId: ctx.stepId,
           input: params.input ?? null,
           depth: parentDepth + 1,
         },
-        originAt: Date.now(),
-      },
-      signal: ctx.signal,
-    })
+        signal: ctx.signal,
+      })
+    } catch (error) {
+      if (error instanceof WorkflowAdmissionError) {
+        if (error.code === "deployment-not-found") {
+          throw nonRetryable(`flow.subworkflow: workflow ${workflowId} is not deployed`)
+        }
+        if (error.code === "input-schema-violation") {
+          throw nonRetryable(
+            `flow.subworkflow: input violates the target's schema — ${error.message}`
+          )
+        }
+      }
+      throw error
+    }
+    const result = execution.result
     if (result.status !== "succeeded") {
       const message = result.error?.message ?? "subworkflow run failed"
       throw nonRetryable(`flow.subworkflow: ${message}`)
     }
     // Validate the terminal output against the declared output schema.
-    const outputSchema = workflow.interface?.outputSchema
+    const outputSchema = execution.version.interface.outputSchema
     if (outputSchema && Object.keys(outputSchema).length > 0) {
       const v = validateAgainstJsonSchema(outputSchema, result.output)
       if (!v.ok) {
@@ -3264,6 +3265,10 @@ registerNodeExecutor({
       expectedOutput?: string
       assignedTo?: string
       dependencies?: string[]
+      access?: "read" | "write"
+      taskKind?: "general" | "code" | "ui"
+      repositoryId?: string
+      fileOwnership?: string[]
     }
     if (!params.teamId || !params.taskId) {
       throw nonRetryable("action.team.task.dispatch requires 'teamId' and 'taskId'")
@@ -3326,6 +3331,17 @@ registerNodeExecutor({
       signal: ctx.signal,
       validateOutput: true,
       recordToStore: true,
+      access: params.access === "read" ? "read" : "write",
+      taskKind:
+        params.taskKind === "ui" || params.taskKind === "general" ? params.taskKind : "code",
+      ...(typeof params.repositoryId === "string" ? { repositoryId: params.repositoryId } : {}),
+      ...(Array.isArray(params.fileOwnership)
+        ? {
+            fileOwnership: params.fileOwnership.filter(
+              (path): path is string => typeof path === "string" && path.length > 0
+            ),
+          }
+        : {}),
       // Skill-aware claim: prefer the teammate the task was assigned to.
       ...(params.assignedTo ? { preferTeammateId: params.assignedTo } : {}),
     })
@@ -3471,6 +3487,13 @@ registerNodeExecutor({
         ...(teamCtx.team.config?.workingDir ? { workingDir: teamCtx.team.config.workingDir } : {}),
         taskId,
       })
+      const durableEvidence =
+        teamCtx.team.config?.runtimeVersion === "durable-v2"
+          ? await (await import("@/lib/db/agent-team-runtime")).listAgentTeamEvidence(ctx.runId)
+          : []
+      const durableEvidenceIds = durableEvidence
+        .filter((item) => item.taskId === taskId)
+        .map((item) => item.id)
 
       // Record what was reviewed, so reconcile / the UI can point at the commit
       // the verdict was actually about. `dispatchTeammate` already commits the
@@ -3487,7 +3510,7 @@ registerNodeExecutor({
         verdict = await runLeadReview({
           team: teamCtx.team,
           lead,
-          task,
+          task: durableEvidenceIds.length > 0 ? { ...task, evidenceIds: durableEvidenceIds } : task,
           ...(workerName ? { workerName } : {}),
           workerOutput,
           evidence,
@@ -3894,24 +3917,10 @@ registerNodeExecutor({
       unknown
     >
 
-    // Resolve the server up front so the connect hook carries the human name and
-    // the not-found case maps to a non-retryable failure. Falls back to a
-    // plugin-contributed preset (overlay registry) when the Dexie table has no
-    // row — presets share the `{ name, transport, config }` shape.
+    // Presets are installation templates only. Runtime execution requires a
+    // stored Registry row that has crossed the common trust policy.
     const { getMcpServer } = await import("@/lib/db/mcp-servers")
-    const dbServer = await getMcpServer(serverId)
-    const preset = dbServer ? undefined : getMcpServerPreset(serverId)
-    const server = dbServer
-      ? dbServer
-      : preset
-        ? ({
-            id: serverId,
-            name: preset.name,
-            transport: preset.transport,
-            config: preset.config,
-            enabled: true,
-          } as McpServer)
-        : undefined
+    const server = await getMcpServer(serverId)
     if (!server) throw nonRetryable(`MCP server ${serverId} not found`)
 
     const { getPluginEventHooks } = await import("@/lib/plugin")
@@ -3929,6 +3938,8 @@ registerNodeExecutor({
           toolName,
           args,
           signal: ctx.signal,
+          scopeId: `run:${ctx.runId}`,
+          surface: "workflow",
           clientInfo: { name: "cognia-workflow", version: "1.0.0" },
         },
         { getServer: async () => server }

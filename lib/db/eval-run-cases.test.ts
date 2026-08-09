@@ -1,15 +1,15 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import { saveCaseResult, listCaseResults, deleteCaseResultsForRun } from "./eval-run-cases"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().evalRunCaseResults.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("eval-run-cases", () => {
   it("persists and reads back compact per-case verdicts", async () => {

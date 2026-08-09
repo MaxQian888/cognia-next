@@ -17,6 +17,20 @@ export interface TransportCallOptions {
   idempotencyKey?: string
 }
 
+export type TransportBinaryResource = {
+  kind: "session-media"
+  sessionId: string
+  /** Lower-case SHA-256 content hash. */
+  hash: string
+  variant: "thumbnail" | "canonical" | "original"
+}
+
+export interface TransportBinaryResponse {
+  bytes: Uint8Array
+  mediaType: string
+  etag?: string
+}
+
 export interface Transport {
   /**
    * Invoke a named command on the underlying runtime and wait for its result.
@@ -36,4 +50,11 @@ export interface Transport {
    * implementations MUST make repeat calls to it safe (idempotent).
    */
   subscribe<T = unknown>(event: string, handler: (payload: T) => void): () => void
+
+  /**
+   * Read a bounded binary resource without expanding it through JSON/base64.
+   * Optional for legacy/local transports; callers capability-detect it and
+   * retain the existing message URL path when unavailable.
+   */
+  readBinary?(resource: TransportBinaryResource): Promise<TransportBinaryResponse>
 }

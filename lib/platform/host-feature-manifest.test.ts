@@ -21,6 +21,7 @@ describe("host feature manifest", () => {
       platform: "headless",
       hostIdentity: { id: "cloud-a", kind: "cloud" },
       protocol: { min: 1, max: 2 },
+      transportCapabilities: { eventStreamReady: 1 },
       deviceGrants: ["workspace.read"],
       limits: {
         rpcJsonBodyBytes: 64 * 1024,
@@ -52,6 +53,39 @@ describe("host feature manifest", () => {
     expect(manifest.features["external-bridge.managed-relay"]).toBeUndefined()
     expect(manifest.features["external-bridge.direct-tls"]).toBeUndefined()
     expect(manifest.operations.every((operation) => operation.healthy)).toBe(true)
+  })
+
+  it("publishes the complete headless secret, browser, OCR, notification and file contracts", () => {
+    const manifest = buildLocalHostFeatureManifest({
+      platform: "headless",
+      operationHealth: {
+        browser_capability: { healthy: false, reason: "workspace probe failed" },
+        ocr_extract_native: false,
+      },
+    })
+
+    expect(manifest.features["automation.hitl"]).toBeUndefined()
+    expect(manifest.features["secrets.store"]?.operations).toEqual([
+      "secret_store_get",
+      "secret_store_set",
+      "secret_store_delete",
+    ])
+    expect(manifest.features["browser.remote"]?.operations).toContain("browser_runtime_status")
+    expect(manifest.features["browser.remote"]?.operations).toContain("browser_set_files")
+    expect(manifest.features["ocr.server"]?.operations).toContain("ocr_extract_native")
+    expect(manifest.features["notifications.remote"]?.operations).not.toContain(
+      "event:automation:consent-request"
+    )
+    expect(manifest.features["workspace.files"]?.operations).toContain("fs_write_workspace_file")
+    expect(
+      manifest.operations.find((operation) => operation.name === "browser_capability")
+    ).toMatchObject({ healthy: false, reason: "workspace probe failed" })
+    expect(supportsHostFeatureOperation(manifest, "browser.remote", "browser_capability")).toBe(
+      false
+    )
+    expect(supportsHostFeatureOperation(manifest, "browser.remote", "browser_runtime_status")).toBe(
+      true
+    )
   })
 
   it("checks both the feature and operation instead of trusting a coarse capability", () => {
@@ -101,6 +135,12 @@ describe("host feature manifest", () => {
             operations: ["skills_catalog_get"],
           },
         },
+      })
+    ).toBeNull()
+    expect(
+      parseHostFeatureManifest({
+        ...valid,
+        operations: valid.operations.slice(1),
       })
     ).toBeNull()
     expect(
@@ -163,20 +203,37 @@ describe("host feature manifest", () => {
     ).toBeNull()
   })
 
+  it("rejects malformed event-stream readiness capability versions", () => {
+    const valid = buildLocalHostFeatureManifest({ platform: "headless" })
+
+    expect(
+      parseHostFeatureManifest({
+        ...valid,
+        transportCapabilities: { eventStreamReady: 2 },
+      })
+    ).toBeNull()
+    expect(
+      parseHostFeatureManifest({
+        ...valid,
+        transportCapabilities: { eventStreamReady: 1 },
+      })
+    ).toMatchObject({ transportCapabilities: { eventStreamReady: 1 } })
+  })
+
   it("fails operation support closed for an unsupported feature version", () => {
     const manifest = buildLocalHostFeatureManifest({ platform: "headless" })
     manifest.features["skills.catalog"] = {
       version: 2,
       operations: ["skills_catalog_get"],
     }
-    manifest.operations = [
-      {
+    manifest.operations = manifest.operations
+      .filter((operation) => operation.feature !== "skills.catalog")
+      .concat({
         name: "skills_catalog_get",
         feature: "skills.catalog",
         featureVersion: 2,
         healthy: true,
-      },
-    ]
+      })
 
     expect(parseHostFeatureManifest(manifest)).toEqual(manifest)
     expect(supportsHostFeatureOperation(manifest, "skills.catalog", "skills_catalog_get")).toBe(

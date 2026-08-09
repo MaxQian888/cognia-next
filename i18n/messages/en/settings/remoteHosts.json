@@ -30,7 +30,6 @@
     "disconnect": "Disconnect",
     "emptyBody": "Pair a remote Cognia server to drive its terminal, files, and git from here. Add one on the Add host tab.",
     "emptyTitle": "No remote hosts yet",
-    "neverConnected": "Never connected",
     "featureCategory": {
       "host": "Remote host execution",
       "proxy": "Controller proxy",
@@ -40,6 +39,7 @@
     "featureManifestUnknown": "Operation-level feature contract unavailable — writes stay disabled until the host reports one",
     "featurePermissionNote": "Advertised operations still require their command permission; management writes require remote-control, and high-risk writes require an Owner admin lease.",
     "featureVersion": "{feature} v{version}",
+    "neverConnected": "Never connected",
     "none": "None",
     "remove": "Remove",
     "removeA11y": "Remove {label}",

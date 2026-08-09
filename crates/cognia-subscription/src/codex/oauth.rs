@@ -304,8 +304,10 @@ pub async fn revoke_token(token: &str) -> Result<(), String> {
 }
 
 fn http_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .user_agent(CODEX_USER_AGENT)
+    let builder = reqwest::Client::builder().user_agent(CODEX_USER_AGENT);
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, DEVICE_USERCODE_URL)
+        .map_err(|error| error.to_string())?;
+    builder
         .build()
         .map_err(|e| format!("http client build: {e}"))
 }

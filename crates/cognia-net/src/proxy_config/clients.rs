@@ -7,7 +7,8 @@
 //!
 //!   1. process snapshot — is the client running right now?
 //!   2. config file      — what ports did the user actually configure?
-//!   3. TCP probe        — is the port really listening? (done by detect.rs)
+//!   3. protocol verify  — can it complete a real CONNECT handshake to a
+//!      temporary local target? (done by detect.rs)
 //!
 //! Config parsing is deliberately tolerant: we only ever need a handful of
 //! top-level scalar keys, so instead of pulling in a YAML dependency

@@ -14,7 +14,20 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { dirSizeBytes, cleanStaleTurbopackCache } from "./clean-stale-turbopack-cache.mjs"
+import {
+  cleanAllNextCaches,
+  cleanLegacyWebpackDevArtifacts,
+  dirSizeBytes,
+  cleanStaleTurbopackCache,
+  cleanTurbopackCacheForMode,
+  parseArgs,
+} from "./clean-stale-turbopack-cache.mjs"
+
+test("parseArgs supports full cleanup and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { all: false })
+  assert.deepEqual(parseArgs(["--all"]), { all: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 function tmpRoot() {
   return mkdtempSync(join(tmpdir(), "turbo-cache-"))
@@ -84,5 +97,74 @@ test("no-op and silent when the cache dir does not exist", () => {
   assert.equal(result.cleaned, false)
   assert.equal(result.sizeBytes, 0)
   assert.equal(messages.length, 0)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("cache-off mode purges only the Turbopack directory regardless of size", () => {
+  const root = tmpRoot()
+  const turbopackDir = join(root, ".next", "dev", "cache", "turbopack")
+  const siblingDir = join(root, ".next", "dev", "cache", "other")
+  mkdirSync(turbopackDir, { recursive: true })
+  mkdirSync(siblingDir, { recursive: true })
+  writeFileSync(join(turbopackDir, "tiny.sst"), Buffer.alloc(1))
+  writeFileSync(join(siblingDir, "keep.bin"), Buffer.alloc(1))
+
+  const result = cleanTurbopackCacheForMode({
+    cacheDir: turbopackDir,
+    persistentCacheEnabled: false,
+    thresholdBytes: 10_000,
+    log: () => {},
+  })
+
+  assert.equal(result.cleaned, true)
+  assert.equal(existsSync(turbopackDir), false)
+  assert.equal(existsSync(siblingDir), true)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("legacy Webpack dev output is rebuilt as one unit before Turbopack starts", () => {
+  const root = tmpRoot()
+  const devDir = join(root, ".next", "dev")
+  mkdirSync(join(devDir, "cache", "webpack"), { recursive: true })
+  mkdirSync(join(devDir, "static", "chunks"), { recursive: true })
+  writeFileSync(join(devDir, "cache", "webpack", "index.pack"), Buffer.alloc(20))
+  writeFileSync(join(devDir, "static", "chunks", "legacy.js"), Buffer.alloc(30))
+
+  const result = cleanLegacyWebpackDevArtifacts({ devDir, log: () => {} })
+
+  assert.deepEqual(result, { cleaned: true, sizeBytes: 50 })
+  assert.equal(existsSync(devDir), false)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("current Turbopack dev output is preserved when no Webpack marker exists", () => {
+  const root = tmpRoot()
+  const devDir = join(root, ".next", "dev")
+  mkdirSync(join(devDir, "static", "chunks"), { recursive: true })
+  writeFileSync(join(devDir, "static", "chunks", "current.js"), Buffer.alloc(30))
+
+  const result = cleanLegacyWebpackDevArtifacts({ devDir, log: () => {} })
+
+  assert.deepEqual(result, { cleaned: false, sizeBytes: 0 })
+  assert.equal(existsSync(devDir), true)
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("explicit all-cache cleanup removes dev output and production Webpack cache", () => {
+  const root = tmpRoot()
+  const nextDir = join(root, ".next")
+  mkdirSync(join(nextDir, "dev"), { recursive: true })
+  mkdirSync(join(nextDir, "cache", "webpack"), { recursive: true })
+  mkdirSync(join(nextDir, "cache", "swc"), { recursive: true })
+  writeFileSync(join(nextDir, "dev", "chunk.js"), Buffer.alloc(20))
+  writeFileSync(join(nextDir, "cache", "webpack", "index.pack"), Buffer.alloc(30))
+  writeFileSync(join(nextDir, "cache", "swc", "keep"), Buffer.alloc(10))
+
+  const result = cleanAllNextCaches({ nextDir, log: () => {} })
+
+  assert.deepEqual(result, { cleaned: true, sizeBytes: 50 })
+  assert.equal(existsSync(join(nextDir, "dev")), false)
+  assert.equal(existsSync(join(nextDir, "cache", "webpack")), false)
+  assert.equal(existsSync(join(nextDir, "cache", "swc", "keep")), true)
   rmSync(root, { recursive: true, force: true })
 })

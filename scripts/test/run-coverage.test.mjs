@@ -32,7 +32,7 @@ test("parseArgs defaults to memory-safe shards with bounded parallelism", () => 
   assert.deepEqual(parseArgs(["--", "--only", "2"]).only, [2])
   assert.throws(() => parseArgs(["--jobs", "0"]), /positive integer/)
   assert.throws(() => parseArgs(["--workers", "0"]), /positive integer/)
-  assert.throws(() => parseArgs(["--unknown"]), /Unknown argument/)
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
 })
 
 test("effectiveJobCount never oversubscribes the shard count", () => {

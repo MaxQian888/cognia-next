@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 // CRUD coverage for the v15 plugin tables. Each table's module mirrors the
 // pattern set by `lib/db/skills.ts`, so the assertions focus on:
 //   * defaults applied by `create*` / `upsert*` helpers,
@@ -6,7 +5,6 @@
 //   * cascade-delete helpers used by the plugin manager during disable /
 //     uninstall.
 
-import "fake-indexeddb/auto"
 import {
   listPlugins,
   listEnabledPlugins,
@@ -46,14 +44,16 @@ import {
   clearReviewsForPlugin,
   averageRatingForPlugin,
 } from "./plugin-reviews"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import type { PluginRow } from "./plugin-types"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function makeDraft(overrides: Partial<PluginRow> = {}): Parameters<typeof upsertPlugin>[0] {
   return {

@@ -56,12 +56,31 @@ describe("SkillFileTree", () => {
       <SkillFileTree skill={skill} resources={resources} activeFileId={null} onSelect={jest.fn()} />
     )
     expect(screen.getByText("SKILL.md")).toBeInTheDocument()
+    expect(screen.getByText("agents/openai.yaml")).toBeInTheDocument()
     expect(screen.getByText("scripts/")).toBeInTheDocument()
     expect(screen.getByText("references/")).toBeInTheDocument()
     expect(screen.getByText("assets/")).toBeInTheDocument()
     expect(screen.getByText("build.sh")).toBeInTheDocument()
     expect(screen.getByText("api.md")).toBeInTheDocument()
     expect(screen.getByText("logo.png")).toBeInTheDocument()
+  })
+
+  it("opens the virtual Codex configuration file", () => {
+    const onSelect = jest.fn()
+    render(
+      <SkillFileTree
+        skill={{ ...skill, codexOpenAiYaml: "policy: {}\n" }}
+        resources={resources}
+        activeFileId={null}
+        onSelect={onSelect}
+      />
+    )
+    fireEvent.click(screen.getByText("agents/openai.yaml"))
+    expect(onSelect).toHaveBeenCalledWith({
+      id: "codex",
+      kind: "codex",
+      content: "policy: {}\n",
+    })
   })
 
   it("calls onSelect with main on SKILL.md click", () => {

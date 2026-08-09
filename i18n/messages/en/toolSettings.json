@@ -11,8 +11,6 @@
   "coreFilesDesc": "Full coding-agent toolkit for non-Anthropic models: search, read, patch, shell, waitable background commands, and structured session tasks with dependencies. Read-only tools run freely; filesystem and shell mutations require per-call approval.",
   "dependencyResearch": "Dependency source",
   "dependencyResearchDesc": "Clone a dependency's source repository into an ignored .cognia/clonedeps/ workspace (clone_dep_source / list_cloned_deps) so the agent can read library internals. HTTPS only, idempotent, no build scripts run. Desktop only.",
-  "webclone": "Web page snapshot",
-  "webcloneDesc": "Snapshot a live web page (web_clone / web_clone_convert) — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction and Vue/React/Angular/Svelte/jQuery codegen. Private/loopback targets are blocked unless opted in. Desktop only.",
   "description": "Per-category toggles for the in-process cognia-tools MCP server. Each category exposes a different set of tools to the agent.",
   "desktopRequired": "Desktop only",
   "desktopRequiredDesc": "These tools run inside the local sidecar process. They are unavailable in the web build.",
@@ -42,6 +40,10 @@
   "skillToolTitle": "Skill tool",
   "slashToolDesc": "Expose the SlashCommand tool so the agent can run a registered slash command. Built-in UI commands return guidance to run them from the composer.",
   "slashToolTitle": "SlashCommand tool",
+  "spawnTaskToolDesc": "Let the agent stage a scoped follow-up task in a named sidechat for you to review and start.",
+  "spawnTaskToolTitle": "Spawn task",
+  "sessionMessagingToolDesc": "Let the agent discover and send untrusted plain-text requests to other live sessions in the same workspace.",
+  "sessionMessagingToolTitle": "Session messaging",
   "teamCollabToolDesc": "Let teammates collaborate during a team run — message peers, share the blackboard, open or vote in a consensus, and delegate sub-tasks. Only applies to Agent Team sessions.",
   "teamCollabToolTitle": "Team collaboration tools",
   "terminalRepl": "Interactive REPL",
@@ -53,8 +55,6 @@
     "astGrepSearch": "Search code by AST structure (meta-variables $VAR / $$$) across 25 languages. Read-only; more precise than text grep.",
     "checkProgramAllowed": "Test whether a program would be allowed to start_process.",
     "cloneDepSource": "Clone a dependency's HTTPS source repo into .cognia/clonedeps/ (idempotent) so you can read its internals.",
-    "webClone": "Snapshot a live web page — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction + framework codegen. Writes into the workspace.",
-    "webCloneConvert": "Run component extraction + framework codegen on an existing local snapshot (bundle directory or single HTML) without re-fetching. Generates Vue/React/Angular/Svelte/jQuery components.",
     "contentSearch": "Search file contents (substring or regex) with line numbers.",
     "coreApplyPatch": "Apply a unified diff across one or more files atomically (create / modify / delete).",
     "coreBash": "Execute a free-form shell command (approval-gated; output keeps the tail).",
@@ -122,8 +122,13 @@
     "terminalReplSpawn": "Open a persistent interactive PTY (e.g. python / sql REPL). Returns sessionId for subsequent writes / reads.",
     "terminalReplWrite": "Write bytes into a REPL session's stdin. Non-blocking — pair with terminal_repl_read.",
     "terminateProcess": "Terminate a PID (default: only PIDs this session started).",
-    "topMemoryProcesses": "Top N processes by resident memory."
+    "topMemoryProcesses": "Top N processes by resident memory.",
+    "webClone": "Snapshot a live web page — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction + framework codegen. Writes into the workspace.",
+    "webCloneConvert": "Run component extraction + framework codegen on an existing local snapshot (bundle directory or single HTML) without re-fetching. Generates Vue/React/Angular/Svelte/jQuery components."
   },
+  "vectorToolDesc": "Let the agent store and recall documents in the current project's vector memory. Collections are scoped to the linked project; a session without one cannot use these tools.",
+  "vectorToolDesktopOnly": "Requires the desktop app — vector memory runs on the local native vector store.",
+  "vectorToolTitle": "Vector memory tools",
   "webAllowPrivateDesc": "Let web_fetch reach localhost and private-network hosts (10.x, 192.168.x, 169.254.x cloud metadata). Off by default to block SSRF — enable only for trusted local development.",
   "webAllowPrivateTitle": "Allow private / local addresses",
   "webAlwaysDistillDesc": "Run every fetched page through the utility model before the agent sees it, even without a question — the agent never reads raw page text, narrowing the prompt-injection surface. Needs a configured model; slightly more cost per fetch.",
@@ -132,7 +137,6 @@
   "webCardTitle": "Web",
   "webNativeAnthropicDesc": "On the Anthropic path, use Claude's built-in WebSearch / WebFetch (server-side extraction + citations) instead of the multi-provider tools. Other providers keep the multi-provider tools.",
   "webNativeAnthropicTitle": "Use native Anthropic web tools",
-  "vectorToolDesc": "Let the agent store and recall documents in the current project's vector memory. Collections are scoped to the linked project; a session without one cannot use these tools.",
-  "vectorToolDesktopOnly": "Requires the desktop app — vector memory runs on the local native vector store.",
-  "vectorToolTitle": "Vector memory tools"
+  "webclone": "Web page snapshot",
+  "webcloneDesc": "Snapshot a live web page (web_clone / web_clone_convert) — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction and Vue/React/Angular/Svelte/jQuery codegen. Private/loopback targets are blocked unless opted in. Desktop only."
 }

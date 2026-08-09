@@ -1,7 +1,7 @@
 //! Sync-pull bridge between the Rust HTTP server and the desktop webview
 //! (M4.7 / #51).
 //!
-//! The phone hits `POST /api/v1/_rpc/sync_pull` against the desktop's Rust
+//! The phone hits `POST /api/_rpc/sync_pull` against the desktop's Rust
 //! server, but the actual data lives in the WebView's Dexie. So when the
 //! Rust handler runs, it has to ask the WebView "give me the rows for
 //! table X since cursor Y", await the response, and forward it to the
@@ -84,6 +84,7 @@ impl SyncBridge {
         account_id: String,
         timeout: Duration,
     ) -> Result<Value, String> {
+        let mut request_guard = transport.reserve_request()?;
         let request_id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel::<Result<Value, String>>();
 
@@ -114,21 +115,29 @@ impl SyncBridge {
             return Err(err);
         }
 
-        let outcome = tokio::time::timeout(timeout, rx).await;
+        let outcome = tokio::select! {
+            biased;
+            _ = request_guard.disconnected() => None,
+            outcome = tokio::time::timeout(timeout, rx) => Some(outcome),
+        };
 
         match outcome {
-            Ok(Ok(Ok(value))) => Ok(value),
-            Ok(Ok(Err(err))) => Err(err),
-            Ok(Err(_recv_err)) => {
+            Some(Ok(Ok(Ok(value)))) => Ok(value),
+            Some(Ok(Ok(Err(err)))) => Err(err),
+            Some(Ok(Err(_recv_err))) => {
                 self.pending.lock().remove(&request_id);
                 Err("sync-pull-response sender dropped before responding".to_string())
             }
-            Err(_) => {
+            Some(Err(_)) => {
                 self.pending.lock().remove(&request_id);
                 Err(format!(
                     "sync-pull-request timed out after {} ms",
                     timeout.as_millis()
                 ))
+            }
+            None => {
+                self.pending.lock().remove(&request_id);
+                Err("brain bridge disconnected".to_string())
             }
         }
     }
@@ -161,9 +170,44 @@ impl SyncBridge {
 
 #[cfg(test)]
 mod tests {
-    use super::super::bridge_transport::test_support::RecordingBridgeTransport;
+    use super::super::bridge_transport::{
+        test_support::RecordingBridgeTransport, BridgeRequestGuard,
+    };
     use super::*;
     use serde_json::json;
+    use tokio::sync::{watch, Semaphore};
+
+    struct DisconnectingTransport {
+        disconnected: watch::Sender<bool>,
+        permits: Arc<Semaphore>,
+    }
+
+    impl DisconnectingTransport {
+        fn new() -> Arc<Self> {
+            let (disconnected, _) = watch::channel(false);
+            Arc::new(Self {
+                disconnected,
+                permits: Arc::new(Semaphore::new(1)),
+            })
+        }
+    }
+
+    impl BridgeTransport for DisconnectingTransport {
+        fn emit(&self, _channel: &str, _payload: Value) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn reserve_request(&self) -> Result<BridgeRequestGuard, String> {
+            Ok(BridgeRequestGuard::scoped(
+                self.disconnected.subscribe(),
+                Arc::clone(&self.permits).try_acquire_owned().unwrap(),
+            ))
+        }
+
+        fn kind(&self) -> &'static str {
+            "disconnecting-test"
+        }
+    }
 
     #[tokio::test]
     async fn pull_emits_snake_case_request_through_the_transport() {
@@ -219,6 +263,37 @@ mod tests {
             .await
             .expect_err("emit fails");
         assert!(err.contains("forced failure"));
+        assert_eq!(bridge.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn pull_fails_immediately_when_its_transport_disconnects() {
+        let bridge = SyncBridge::new();
+        let transport = DisconnectingTransport::new();
+        let task_bridge = Arc::clone(&bridge);
+        let task_transport = Arc::clone(&transport);
+        let task = tokio::spawn(async move {
+            task_bridge
+                .pull(
+                    task_transport.as_ref(),
+                    "sessions".into(),
+                    0,
+                    "a".into(),
+                    DEFAULT_TIMEOUT,
+                )
+                .await
+        });
+        while bridge.pending_count() == 0 {
+            tokio::task::yield_now().await;
+        }
+
+        let _ = transport.disconnected.send(true);
+        let error = tokio::time::timeout(Duration::from_millis(100), task)
+            .await
+            .expect("disconnect must not wait for the bridge timeout")
+            .unwrap()
+            .expect_err("disconnect must fail the request");
+        assert!(error.contains("disconnected"));
         assert_eq!(bridge.pending_count(), 0);
     }
 

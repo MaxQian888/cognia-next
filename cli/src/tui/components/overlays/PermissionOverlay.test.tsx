@@ -153,4 +153,20 @@ describe("PermissionOverlay", () => {
     __fireInput("", { escape: true })
     expect(onResolve).toHaveBeenCalledWith({ decision: "deny", message: 'Denied "bash".' })
   })
+
+  it("keeps permission controls visible before details in a tiny viewport", () => {
+    const { container } = render(
+      <PermissionOverlay
+        req={req}
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={0}
+        maxRows={7}
+        onMove={() => {}}
+        onResolve={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text.indexOf("Allow once")).toBeLessThan(text.indexOf("rm -rf /tmp/x"))
+    expect(text).toContain("Deny")
+  })
 })

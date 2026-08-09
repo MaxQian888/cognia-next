@@ -35,6 +35,20 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => false),
 }))
 
+const mockDispatchSessionToCodexApp = jest.fn()
+jest.mock("@/lib/chat/dispatch-to-codex-app", () => ({
+  dispatchSessionToCodexApp: (session: unknown) => mockDispatchSessionToCodexApp(session),
+}))
+
+const mockToastSuccess = jest.fn()
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (message: unknown) => mockToastSuccess(message),
+    error: (message: unknown) => mockToastError(message),
+  },
+}))
+
 // The header account switcher talks to the subscription transport when
 // isTauri() is true — irrelevant to header logic tests. Stubbed like the
 // other heavy children below.
@@ -137,6 +151,10 @@ describe("ChatHeader", () => {
     mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })
     sidebarCollapsed = false
     toggleSidebar.mockClear()
+    mockDispatchSessionToCodexApp.mockReset()
+    mockDispatchSessionToCodexApp.mockResolvedValue({ threadId: "thread-1" })
+    mockToastSuccess.mockClear()
+    mockToastError.mockClear()
   })
 
   // `sidebarCollapsed` used to have four entry points on one screen — this
@@ -208,6 +226,55 @@ describe("ChatHeader", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: /^split view$/i }))
     expect(onSplitView).toHaveBeenCalledTimes(1)
+  })
+
+  it("dispatches the conversation to Codex App from the desktop header", async () => {
+    mockIsTauri.mockReturnValue(true)
+    let finish!: (value: { threadId: string }) => void
+    mockDispatchSessionToCodexApp.mockImplementationOnce(
+      () => new Promise((resolve) => (finish = resolve))
+    )
+    const currentSession = mkSession({ title: "Codex handoff" })
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={currentSession} />
+      </Wrapper>
+    )
+
+    const button = screen.getByRole("button", { name: /open in codex app/i })
+    fireEvent.click(button)
+    expect(button).toBeDisabled()
+    expect(mockDispatchSessionToCodexApp).toHaveBeenCalledWith(currentSession)
+
+    finish({ threadId: "thread-1" })
+    await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled())
+    expect(button).not.toBeDisabled()
+  })
+
+  it("hides the Codex App dispatch action outside Tauri", () => {
+    mockIsTauri.mockReturnValue(false)
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.queryByRole("button", { name: /open in codex app/i })).not.toBeInTheDocument()
+  })
+
+  it("surfaces a Codex App dispatch failure", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockDispatchSessionToCodexApp.mockRejectedValueOnce(new Error("app too old"))
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /open in codex app/i }))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled())
   })
 
   it("shows an unread dot + hint when an artifact arrived while the dock is dismissed", () => {

@@ -54,7 +54,7 @@ pub struct BrainConfig {
     /// `https://127.0.0.1:<bound port>` — loopback; the service token is
     /// loopback-gated.
     pub server_url: String,
-    /// `wss://127.0.0.1:<bound port>/ws/v1/bridge`.
+    /// `wss://127.0.0.1:<bound port>/internal/bridge`.
     pub bridge_url: String,
     pub data_dir: PathBuf,
     pub account_id: String,
@@ -82,7 +82,7 @@ impl BrainConfig {
         Self {
             entry,
             server_url: format!("https://127.0.0.1:{port}"),
-            bridge_url: format!("wss://127.0.0.1:{port}/ws/v1/bridge"),
+            bridge_url: format!("wss://127.0.0.1:{port}/internal/bridge"),
             data_dir,
             account_id,
             host_id,
@@ -371,17 +371,14 @@ mod tests {
     use crate::companion_api::{
         deny_list::DenyList, desktop_messages_bridge::DesktopMessagesBridge,
         desktop_writes_bridge::DesktopWritesBridge, event_bus::EventBus,
-        idempotency::IdempotencyCache, pair_code_lru::PairCodeLru, push::PushTokenRegistry,
-        rate_limit::RateLimiter, redemption_lru::RedemptionLru, sync_bridge::SyncBridge,
-        sync_registry::SyncTableRegistry, CompanionState,
+        idempotency::IdempotencyCache, push::PushTokenRegistry, rate_limit::RateLimiter,
+        sync_bridge::SyncBridge, sync_registry::SyncTableRegistry, CompanionState,
     };
     use parking_lot::RwLock;
 
     fn test_state() -> SharedState {
         Arc::new(CompanionState {
             secret: RwLock::new(b"test-secret-32-bytes-exactly____".to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -399,7 +396,7 @@ mod tests {
         BrainConfig {
             entry,
             server_url: "https://127.0.0.1:7890".into(),
-            bridge_url: "wss://127.0.0.1:7890/ws/v1/bridge".into(),
+            bridge_url: "wss://127.0.0.1:7890/internal/bridge".into(),
             data_dir: PathBuf::from("/data"),
             account_id: "local_acct_a".into(),
             host_id: "host-test".into(),
@@ -422,7 +419,7 @@ mod tests {
         assert_eq!(get("COGNIA_SERVICE_TOKEN"), Some("tok-123"));
         assert_eq!(
             get("COGNIA_BRIDGE_URL"),
-            Some("wss://127.0.0.1:7890/ws/v1/bridge")
+            Some("wss://127.0.0.1:7890/internal/bridge")
         );
         assert_eq!(get("COGNIA_TLS_FINGERPRINT"), Some("ff00"));
         assert_eq!(get("COGNIA_LOCAL_ACCOUNT_ID"), Some("local_acct_a"));
@@ -443,7 +440,7 @@ mod tests {
             None,
         );
         assert_eq!(c.server_url, "https://127.0.0.1:7777");
-        assert_eq!(c.bridge_url, "wss://127.0.0.1:7777/ws/v1/bridge");
+        assert_eq!(c.bridge_url, "wss://127.0.0.1:7777/internal/bridge");
         // No CA path → no NODE_EXTRA_CA_CERTS entry.
         assert!(!build_brain_env(&c, "t")
             .iter()

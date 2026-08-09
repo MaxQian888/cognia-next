@@ -66,20 +66,24 @@ describe("externalCapabilities", () => {
     ).toMatch(/tool bridge/)
   })
 
-  it("offers model selection only where the agent can enumerate its own models", () => {
-    // `model/list` is native-app-server only. The `codex` preset is the ACP
-    // shim, and ACP has no model-list call — a picker there could only show the
-    // built-in provider's catalog, which is not what that agent runs.
+  it("offers ACP model selection through the session config-option channel", () => {
+    // `model/list` is native-app-server only. ACP agents expose model choices
+    // from the live session via configOptions instead of a global catalog.
     const native = externalCapabilities({ backend: "codex", presetId: "codex-app-server" })
     const shim = externalCapabilities({ backend: "codex", presetId: "codex" })
-    const acp = externalCapabilities({ backend: "claude-code" })
+    const acp = externalCapabilities({ backend: "claude-code", protocol: "acp" })
 
     expect(supportsFeature(native, "modelPicker")).toBe(true)
     expect(featureBlockedReason(shim, "modelPicker")).toMatch(/no equivalent/)
-    expect(featureBlockedReason(acp, "modelPicker")).toMatch(/no equivalent/)
+    expect(supportsFeature(acp, "modelPicker")).toBe(true)
     // Narrower than the metadata channel on purpose — the shim still forwards
     // reasoning effort, it just cannot list models.
     expect(supportsFeature(shim, "thinking")).toBe(true)
+  })
+
+  it("does not optimistically enable model selection before protocol negotiation", () => {
+    const unknown = externalCapabilities({ backend: "claude-code" })
+    expect(featureBlockedReason(unknown, "modelPicker")).toMatch(/no equivalent/)
   })
 
   it("reads session resume off what the agent negotiated", () => {

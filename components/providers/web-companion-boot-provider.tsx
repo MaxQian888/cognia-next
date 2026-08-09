@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react"
 import { usePlatform } from "@/hooks/use-platform"
 import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { parseHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
 import {
   runtimeHostSnapshotFromManifest,
@@ -20,6 +21,7 @@ import {
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
+import type { CompanionPlaneHealth } from "@/lib/tauri/transport-companion"
 import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import { transport } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
@@ -28,6 +30,7 @@ const log = loggers.shell
 
 // The pair flow owns navigation on these routes — never redirect from them.
 const ONBOARDING_PREFIXES = ["/welcome", "/pair", "/oauth"]
+const RECOVERY_BACKOFF_MS = [250, 1_000, 4_000, 16_000, 30_000] as const
 
 /**
  * Cloud-companion boot for the PLAIN BROWSER (ADR-0059 C1).
@@ -130,59 +133,175 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
         },
       })
 
-      const loadManifest = async () => {
-        try {
-          const manifest = await transport.call("host_feature_manifest", {})
-          if (cancelled) return
-          updateRuntimeSnapshot({
-            host: runtimeHostSnapshotFromManifest(manifest),
-          })
-        } catch (error) {
-          if (cancelled) return
-          updateRuntimeSnapshot({
-            host: { compatible: false, operations: [], grants: [] },
-          })
-          log.warn("web companion: host manifest unavailable", {
-            error: error instanceof Error ? error.message : String(error),
-          })
-        }
-      }
-
       const statefulTransport = asConnectionStateTransport(transport)
       if (statefulTransport) {
         const applyConnectionState = (state: CompanionConnectionState) => {
-          const connectionState = mapConnectionState(state)
-          updateRuntimeSnapshot({ connectionState })
-          if (connectionState === "online") void loadManifest()
+          updateRuntimeSnapshot({
+            connectionState:
+              state === "offline" || state === "unauthenticated" ? "offline" : "connecting",
+          })
         }
         applyConnectionState(statefulTransport.getConnectionState())
         cleanup.push(statefulTransport.onConnectionStateChange(applyConnectionState))
-      } else {
-        updateRuntimeSnapshot({ connectionState: "online" })
       }
-      await loadManifest()
 
-      try {
-        cleanup.push(
-          remoteEventResyncCoordinator.register("*", async () => {
-            await runSyncDown()
-          })
-        )
-        await runSyncDown()
-      } catch (err) {
-        log.warn("web companion: initial sync-down failed", {
-          error: err instanceof Error ? err.message : String(err),
+      const planeTransport = asPlaneHealthTransport(transport)
+      if (!planeTransport) {
+        updateRuntimeSnapshot({
+          connectionState: "offline",
+          host: { compatible: false, operations: [], grants: [] },
         })
-      }
-      if (cancelled) return
-      cleanup.push(installForegroundSync())
-      cleanup.push(installEventDrivenSync())
-      const teardownNetworkSync = await installNetworkSync()
-      if (cancelled) {
-        teardownNetworkSync()
         return
       }
-      cleanup.push(teardownNetworkSync)
+
+      let eventReady = false
+      let needsManifestRefresh = false
+      let completedRecovery = false
+      let recoveryAttempt = 0
+      let recoveryTimer: ReturnType<typeof setTimeout> | null = null
+      let recoveryInFlight: Promise<void> | null = null
+      let backgroundSyncInstalled = false
+
+      cleanup.push(() => {
+        if (recoveryTimer !== null) clearTimeout(recoveryTimer)
+        recoveryTimer = null
+      })
+
+      const loadManifest = async (): Promise<boolean> => {
+        const manifestValue = await transport.call("host_feature_manifest", {})
+        if (cancelled) return false
+        const manifest = parseHostFeatureManifest(manifestValue)
+        if (
+          manifest?.schemaVersion !== 2 ||
+          manifest.transportCapabilities?.eventStreamReady !== 1
+        ) {
+          updateRuntimeSnapshot({
+            connectionState: "offline",
+            host: { compatible: false, operations: [], grants: [] },
+          })
+          return false
+        }
+        updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
+        return true
+      }
+
+      const waitForManifest = async (): Promise<boolean> => {
+        while (!cancelled) {
+          try {
+            const compatible = await loadManifest()
+            if (compatible || cancelled) return compatible
+            return false
+          } catch (error) {
+            if (cancelled) return false
+            updateRuntimeSnapshot({ connectionState: "connecting" })
+            log.warn("web companion: host manifest unavailable", {
+              error: error instanceof Error ? error.message : String(error),
+            })
+            const base =
+              RECOVERY_BACKOFF_MS[Math.min(recoveryAttempt, RECOVERY_BACKOFF_MS.length - 1)]
+            recoveryAttempt++
+            await new Promise<void>((resolve) => {
+              recoveryTimer = setTimeout(
+                () => {
+                  recoveryTimer = null
+                  resolve()
+                },
+                Math.round(base * (0.85 + Math.random() * 0.3))
+              )
+            })
+          }
+        }
+        return false
+      }
+
+      if (!(await waitForManifest()) || cancelled) return
+      recoveryAttempt = 0
+
+      cleanup.push(
+        remoteEventResyncCoordinator.register("*", async () => {
+          await runSyncDown()
+        })
+      )
+      // Subscribe before the authoritative sync so invalidations cannot fall
+      // into a sync-complete/subscription-not-yet-open race window.
+      cleanup.push(installEventDrivenSync())
+
+      const installBackgroundSync = async () => {
+        if (backgroundSyncInstalled || cancelled) return
+        backgroundSyncInstalled = true
+        cleanup.push(installForegroundSync())
+        const teardownNetworkSync = await installNetworkSync()
+        if (cancelled) {
+          teardownNetworkSync()
+          return
+        }
+        cleanup.push(teardownNetworkSync)
+      }
+
+      const scheduleRecovery = () => {
+        if (cancelled || recoveryTimer !== null || recoveryInFlight !== null || !eventReady) return
+        const base = RECOVERY_BACKOFF_MS[Math.min(recoveryAttempt, RECOVERY_BACKOFF_MS.length - 1)]
+        recoveryAttempt++
+        recoveryTimer = setTimeout(
+          () => {
+            recoveryTimer = null
+            recover()
+          },
+          Math.round(base * (0.85 + Math.random() * 0.3))
+        )
+      }
+
+      function recover() {
+        if (cancelled || !eventReady || recoveryInFlight) return
+        if (recoveryTimer !== null) {
+          clearTimeout(recoveryTimer)
+          recoveryTimer = null
+        }
+        recoveryInFlight = (async () => {
+          updateRuntimeSnapshot({ connectionState: "connecting" })
+          if (needsManifestRefresh) {
+            if (!(await loadManifest()) || cancelled) return
+            needsManifestRefresh = false
+          }
+          await runSyncDown()
+          if (cancelled || !eventReady) return
+          updateRuntimeSnapshot({ connectionState: "online" })
+          completedRecovery = true
+          recoveryAttempt = 0
+          await installBackgroundSync()
+        })()
+          .catch((error) => {
+            if (cancelled) return
+            needsManifestRefresh = true
+            updateRuntimeSnapshot({ connectionState: "connecting" })
+            log.warn("web companion: connection recovery failed", {
+              error: error instanceof Error ? error.message : String(error),
+            })
+            scheduleRecovery()
+          })
+          .finally(() => {
+            recoveryInFlight = null
+            if (!cancelled && eventReady && needsManifestRefresh) scheduleRecovery()
+          })
+      }
+
+      const applyPlaneHealth = (health: CompanionPlaneHealth) => {
+        eventReady = health.events === "ready"
+        if (health.rpc === "unauthenticated") {
+          updateRuntimeSnapshot({ connectionState: "offline" })
+          return
+        }
+        if (!eventReady || health.rpc !== "ready") {
+          if (completedRecovery) needsManifestRefresh = true
+          updateRuntimeSnapshot({ connectionState: "connecting" })
+          if (eventReady && health.rpc === "unavailable") scheduleRecovery()
+          return
+        }
+        recover()
+      }
+
+      cleanup.push(planeTransport.onPlaneHealthChange(applyPlaneHealth))
+      applyPlaneHealth(planeTransport.getPlaneHealth())
     })()
 
     return () => {
@@ -201,6 +320,11 @@ interface ConnectionStateTransport {
   onConnectionStateChange(handler: (state: CompanionConnectionState) => void): () => void
 }
 
+interface PlaneHealthTransport {
+  getPlaneHealth(): CompanionPlaneHealth
+  onPlaneHealthChange(handler: (health: CompanionPlaneHealth) => void): () => void
+}
+
 function asConnectionStateTransport(value: unknown): ConnectionStateTransport | null {
   if (
     value &&
@@ -215,8 +339,16 @@ function asConnectionStateTransport(value: unknown): ConnectionStateTransport | 
   return null
 }
 
-function mapConnectionState(state: CompanionConnectionState): "online" | "connecting" | "offline" {
-  if (state === "connected") return "online"
-  if (state === "reconnecting") return "connecting"
-  return "offline"
+function asPlaneHealthTransport(value: unknown): PlaneHealthTransport | null {
+  if (
+    value &&
+    typeof value === "object" &&
+    "getPlaneHealth" in value &&
+    typeof value.getPlaneHealth === "function" &&
+    "onPlaneHealthChange" in value &&
+    typeof value.onPlaneHealthChange === "function"
+  ) {
+    return value as PlaneHealthTransport
+  }
+  return null
 }

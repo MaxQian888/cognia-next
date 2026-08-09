@@ -8,9 +8,8 @@
  *     inside the parent workflow's snapshot (so the next workflow save
  *     doesn't revert the change). The Rust `cron_daemon` re-syncs via
  *     `syncWorkflowTriggers` after the write.
- *   - `runNow` — invoke `runWorkflow` directly with a synthetic `manual`
- *     trigger payload (the workflow runtime accepts manual triggers as a
- *     first-class kind).
+ *   - `runNow` — invoke the active deployment through `ExecutionAuthority`
+ *     with a synthetic `manual` trigger payload.
  *   - `create` / `update` / `delete` — NOT supported at this layer. The
  *     canonical write path is the workflow editor; the UI deep-links to
  *     `/workflows/<id>` when the user wants to add or remove a trigger node.
@@ -22,7 +21,7 @@
 import { liveQuery } from "dexie"
 import { getDb } from "@/lib/db/schema"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
-import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
+import { executeDeployedWorkflow } from "@/lib/workflow/runtime/execution-authority"
 import type {
   VisualWorkflow,
   WorkflowNode,
@@ -63,7 +62,7 @@ interface WorkflowSourceDb {
 }
 
 export interface WorkflowRunInput {
-  workflow: VisualWorkflow
+  workflowId: string
   triggerId: string
 }
 
@@ -88,15 +87,13 @@ export function createWorkflowSource(
   const sync = deps.sync ?? syncWorkflowTriggers
   const run =
     deps.run ??
-    (async ({ workflow, triggerId }) =>
-      runWorkflow({
-        workflow,
-        trigger: {
-          workflowId: workflow.id,
-          kind: "trigger.manual",
-          payload: { triggerId },
-          originAt: Date.now(),
-        },
+    (async ({ workflowId, triggerId }) =>
+      executeDeployedWorkflow({
+        workflowId,
+        entrypoint: "desktop",
+        caller: "scheduler:run-now",
+        triggerKind: "trigger.manual",
+        payload: { triggerId },
       }))
   const observe = deps.observe ?? ((querier) => liveQuery(querier))
   const listRuns =
@@ -183,9 +180,7 @@ export function createWorkflowSource(
     async runNow(sourceId: string): Promise<void> {
       const row = await db.workflowTriggers.get(sourceId)
       if (!row) return
-      const workflow = await db.workflows.get(row.workflowId)
-      if (!workflow) return
-      await run({ workflow, triggerId: sourceId })
+      await run({ workflowId: row.workflowId, triggerId: sourceId })
     },
   }
 }

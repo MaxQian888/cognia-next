@@ -39,10 +39,11 @@ export function useLive2dLipSync(
   model: Live2dLipSyncModel | null,
   speaking: boolean,
   reducedMotion: boolean,
-  now: () => number = defaultNow
+  now: () => number = defaultNow,
+  parameterId: string | undefined = LIP_SYNC_PARAM
 ): void {
   useEffect(() => {
-    if (!model || reducedMotion || !speaking) return
+    if (!model || reducedMotion || !speaking || !parameterId) return
     const internal = model.internalModel
     const core = internal?.coreModel
     // Feature-detect the engine surface; if the model doesn't expose the event
@@ -52,7 +53,7 @@ export function useLive2dLipSync(
 
     const setMouth = (value: number) => {
       try {
-        core.setParameterValueById!(LIP_SYNC_PARAM, value)
+        core.setParameterValueById!(parameterId, value)
       } catch {
         // A parameter write must never break the render frame.
       }
@@ -68,5 +69,5 @@ export function useLive2dLipSync(
       // motion frame resumes normal control of the parameter.
       setMouth(LIP_SYNC_REST)
     }
-  }, [model, speaking, reducedMotion, now])
+  }, [model, speaking, reducedMotion, now, parameterId])
 }

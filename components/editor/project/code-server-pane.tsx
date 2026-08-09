@@ -12,6 +12,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { useCodeServerChatBridge } from "@/hooks/codeserver/use-code-server-chat-bridge"
 import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-editor-events"
 import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
 import { useCodeServerPane } from "@/hooks/codeserver/use-code-server-pane"
@@ -97,6 +98,9 @@ export function CodeServerPane({ root, ownerId, onRevoked, onCancelled, beforeOp
   // Republish the extension's pushed editor changes as the app's active-editor
   // signal, so "what the user is looking at" stays live without anyone polling.
   useCodeServerEditorEvents(phase === "ready", root)
+  // Bridge the extension's context-menu actions (Add to Chat, Explain, Fix…)
+  // into the app's chat composer so they appear as staged context chips.
+  useCodeServerChatBridge(phase === "ready", root)
   // `ready` only means code-server answers; the native webview lands a beat
   // later. Holding the placeholder until it is actually mounted removes the
   // flash of bare background in between.

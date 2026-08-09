@@ -19,6 +19,8 @@ import {
   shouldGenerateTitle,
   isPlaceholderTitle,
 } from "@/lib/ai/generation/run-title-task"
+import { markTitleFailed, clearTitleRetry } from "@/lib/ai/generation/title-retry"
+import { smartContentPreview } from "@/lib/ai/generation/smart-preview"
 import {
   approveTool,
   closeSession,
@@ -37,9 +39,16 @@ import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import {
   buildSupervisorRoster,
   parseDispatches,
+  parseMentions,
   routeTurn,
   stripDispatches,
 } from "@/lib/claude/team-router"
+import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import {
+  duplicateTeamResponseIds,
+  resolveTeamResponseCap,
+  selectPrimaryResponder,
+} from "@/lib/claude/team-primary-router"
 import { listMessages, persistMessages } from "@/lib/db/messages"
 import { getSession, touchSession, updateSession } from "@/lib/db/sessions"
 import { listCharactersByIds } from "@/lib/db/characters"
@@ -444,7 +453,7 @@ export function useTeamChat() {
           // a still-placeholder title and marks it machine-set (`titleAuto`) so
           // the turn-complete path may later upgrade it to an LLM title.
           if (isPlaceholderTitle(session.title)) {
-            const title = contentPreview(content, 40)
+            const title = smartContentPreview(content, 40)
             if (title) {
               instantPreviewTitle = title
               await updateSession(sessionId, { title, titleAuto: true })
@@ -490,7 +499,26 @@ export function useTeamChat() {
 
       // 2. Branch on orchestration. Supervisor has its own multi-round loop.
       try {
-        if (team.orchestration === "supervisor") {
+        let primaryCharacterId: string | undefined
+        if (
+          team.orchestration === "mention_round_robin" &&
+          parseMentions(userText, members).length === 0
+        ) {
+          const primary = await selectPrimaryResponder({
+            client: buildUtilityLlmClient({
+              session,
+              appSettings: useSettingsStore.getState().settings,
+              featureId: "team-primary-router",
+            }),
+            userText,
+            members,
+            memberByCharId,
+          })
+          primaryCharacterId = primary?.id
+        }
+        const targets = routeTurn(team, members, userText, primaryCharacterId)
+
+        if (team.orchestration === "supervisor" && targets.length === 0) {
           await runSupervisorTurn({
             session,
             sessionId,
@@ -506,7 +534,6 @@ export function useTeamChat() {
             turnUserMessage: userText,
           })
         } else {
-          const targets = routeTurn(team, members, userText)
           if (targets.length === 0) {
             // `manual` mode → user picks a member explicitly. Stop here.
             useChatStore.getState().setSessionStatus(sessionId, "idle")
@@ -567,20 +594,30 @@ export function useTeamChat() {
         ) {
           const firstUser = finalMessages.find((m) => m.role === "user")
           const firstAssistant = finalMessages.find((m) => m.role === "assistant")
+          const sourceText = firstUser ? textFromParts(firstUser.parts) : userText
+          const resultText = firstAssistant ? textFromParts(firstAssistant.parts) : undefined
+          const locale = settings?.language
           void runTitleTask({
             session,
             appSettings: settings,
             override: titleCfg,
             featureId: "conversation-title",
-            sourceText: firstUser ? textFromParts(firstUser.parts) : userText,
-            resultText: firstAssistant ? textFromParts(firstAssistant.parts) : undefined,
-            locale: settings?.language,
+            sourceText,
+            resultText,
+            locale,
             currentTitle: instantPreviewTitle ?? session.title,
+            dedupKey: sessionId,
             isStillAuto: async () => {
               const fresh = await getSession(sessionId).catch(() => undefined)
               return !fresh || fresh.titleAuto !== false
             },
             persist: (title) => updateSession(sessionId, { title, titleAuto: true }),
+          }).then((titleResult) => {
+            if (titleResult) {
+              clearTitleRetry(sessionId)
+            } else {
+              markTitleFailed(sessionId, { sourceText, resultText, locale })
+            }
           })
         }
       } finally {
@@ -901,9 +938,12 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
   }
 
   const dispatchedReplies: { name: string; reply: string }[] = []
+  const responseCap = resolveTeamResponseCap(team.maxResponses)
+  let responseCount = 0
+  const seenDispatches = new Set<string>()
 
   for (let round = 1; round <= MAX_SUPERVISOR_ROUNDS; round++) {
-    if (interruptedRef.current.has(sessionId)) return
+    if (interruptedRef.current.has(sessionId) || responseCount >= responseCap) return
 
     const sub = subSessionId(sessionId, supervisor.id, `${turnId}r${round}`)
     useUIStore.getState().setMemberStatus(sessionId, supervisor.id, "thinking")
@@ -952,6 +992,7 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
         turnMemoryDeps,
         turnUserMessage,
       })
+      responseCount += 1
 
       useUIStore.getState().setMemberStatus(sessionId, supervisor.id, "idle")
     } catch (err) {
@@ -974,9 +1015,12 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
     if (dispatches.length === 0) return
 
     for (const d of dispatches) {
-      if (interruptedRef.current.has(sessionId)) return
+      if (interruptedRef.current.has(sessionId) || responseCount >= responseCap) return
       const target = members.find((m) => m.id === d.characterId)
       if (!target) continue
+      const dispatchKey = `${d.characterId}\u0000${d.task.trim().replace(/\s+/g, " ").toLowerCase()}`
+      if (seenDispatches.has(dispatchKey)) continue
+      seenDispatches.add(dispatchKey)
 
       if (useUIStore.getState().isStopRequested(sessionId, target.id)) {
         useUIStore.getState().clearStopRequest(sessionId, target.id)
@@ -1001,6 +1045,7 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
           turnMemoryDeps,
           turnUserMessage,
         })
+        responseCount += 1
         useUIStore.getState().setMemberStatus(sessionId, target.id, "idle")
         const reply = await readLastAssistantText(sessionId, target.id)
         if (reply.trim()) dispatchedReplies.push({ name: target.name, reply })
@@ -1403,6 +1448,18 @@ async function handleTeamEvent(
           // transparency parity — previously dropped on the team path).
           coalesce.commit.cancel()
           coalesce.persist.cancel()
+          const duplicateIds = duplicateTeamResponseIds(
+            tagged
+              .filter((message) => message.role === "assistant")
+              .map((message) => ({
+                id: message.id,
+                text: contentPreview(message),
+                existing: existingIds.has(message.id),
+              }))
+          )
+          if (duplicateIds.size > 0) {
+            tagged = tagged.filter((message) => !duplicateIds.has(message.id))
+          }
           tagged = mergeMemorySourcesIntoLastAssistant(tagged, ctx?.memoryContext)
           await persistMessages(teamSessionId, tagged)
           if (isOpen) {

@@ -179,6 +179,31 @@ check(pluginId: string, operation: string): void {
 
 注意：`companion:goal-control` **不**危险 —— 它是 `goal:write` 的子集（`:218-219`）。
 
+## 10. 最小权限网络出口
+
+`network:fetch` 是用户同意的能力权限，`manifest.networkAccess` 则是资源策略。
+旧版 `allowedDomains` 用于限制主机；新的 `rules` 会同时校验 HTTP Method 与 URL
+路径：
+
+```json
+{
+  "networkAccess": {
+    "rules": [
+      {
+        "domain": "observability.example.com",
+        "methods": ["GET"],
+        "paths": ["/api/logs/*", "/api/metrics/*"]
+      }
+    ]
+  }
+}
+```
+
+Web/移动端由 renderer 执行策略，桌面/headless 端会把同一策略同步到 Rust host
+做纵深防御。`get`、`fetch`、`download`、`upload` 都经过同一策略。出站 URL、
+非凭证 Header 与请求体还会经过宿主 PII gate：默认自动脱敏；需要 fail-closed
+时设置 `piiPolicy: "block"`，并用 `dataClassification` 标记审计记录。
+
 ### Rust 一致性
 
 `crates/cognia-cli/src/cmd_lint.rs` 中的 `cognia plugin lint` CLI 硬编码了 `VALID_PERMISSIONS` / `VALID_CAPABILITIES` / `VALID_PLUGIN_TYPES`。契约测试 `lib/plugin/contracts/rust-capability-parity.test.ts:52` 同时读取 Rust 与 TS 的 `validation.ts` 列表并断言二者一致。

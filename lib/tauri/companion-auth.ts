@@ -1,0 +1,435 @@
+import { pinnedFetch, type PinnedFetchInit } from "./pinned-fetch"
+import type { CompanionConfig } from "./companion-storage"
+import {
+  generatePersistableV2SigningIdentity,
+  type RoomDescriptorV2,
+} from "@/lib/signaling/v2-crypto"
+
+export interface CompanionAuthConfig {
+  deploymentMode: "single-user" | "multi-tenant"
+  hostId: string
+  tenantId?: string
+  oidc?: {
+    issuer: string
+    audience: string
+    webClientId: string
+    scopes: string[]
+  }
+  signaling: {
+    url: string
+    iceServers: RTCIceServer[]
+  }
+}
+
+export interface PairOidcSession {
+  issuer: string
+  clientId: string
+  resource: string
+  organizationId?: string
+  accessToken: string
+}
+
+export interface DeviceIdentity {
+  deviceId: string
+  privateKeyJwk: JsonWebKey
+  publicKeyPem: string
+  thumbprint: string
+}
+
+interface Challenge {
+  challengeId: string
+  nonce: string
+  expiresAt: number
+}
+
+interface TokenState {
+  accessToken: string
+  jti: string
+  expiresAt: number
+}
+
+export type AuthFetcher = (url: string, init: PinnedFetchInit) => Promise<Response>
+export type SocketTicketRequest =
+  { channel: "events" | "terminal" | "acp" } | { channel: "browser"; sessionId: string }
+const tokens = new Map<string, TokenState>()
+
+export async function generateDeviceIdentity(): Promise<DeviceIdentity> {
+  const pair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair
+  const [privateKeyJwk, spki] = await Promise.all([
+    crypto.subtle.exportKey("jwk", pair.privateKey),
+    crypto.subtle.exportKey("spki", pair.publicKey),
+  ])
+  const publicKeyPem = spkiToPem(spki)
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(publicKeyPem))
+  return {
+    deviceId: crypto.randomUUID(),
+    privateKeyJwk,
+    publicKeyPem,
+    thumbprint: bytesToHex(new Uint8Array(digest)),
+  }
+}
+
+export async function registerCompanionDevice(
+  input: {
+    baseUrl: string
+    mode: "owner-invitation" | "oidc"
+    invitation?: string
+    hostId: string
+    tenantId: string
+    displayName: string
+    serverVersion: string
+    serverFingerprint?: string
+    oidc?: PairOidcSession
+  },
+  fetcher: AuthFetcher = pinnedFetch
+): Promise<CompanionConfig> {
+  const authConfig = await fetchCompanionAuthConfig(input.baseUrl, input.serverFingerprint, fetcher)
+  validateRegistrationContext(input, authConfig)
+  const identity = await generateDeviceIdentity()
+  const signalingIdentity = await generatePersistableV2SigningIdentity()
+  const challenge = await requestChallenge(
+    input.baseUrl,
+    input.tenantId,
+    input.serverFingerprint,
+    fetcher
+  )
+  const proof = await createDeviceProof(
+    identity.privateKeyJwk,
+    challenge.nonce,
+    "POST",
+    "/api/auth/device/register"
+  )
+  const registration = await expectJson(
+    fetcher(`${trimSlash(input.baseUrl)}/api/auth/device/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(input.mode === "oidc" ? { Authorization: `Bearer ${input.oidc!.accessToken}` } : {}),
+      },
+      body: JSON.stringify({
+        tenantId: input.tenantId,
+        ...(input.mode === "owner-invitation" ? { invitation: input.invitation } : {}),
+        challengeId: challenge.challengeId,
+        challengeNonce: challenge.nonce,
+        deviceId: identity.deviceId,
+        displayName: input.displayName,
+        publicKeyPem: identity.publicKeyPem,
+        signalingPublicKey: signalingIdentity.encodedPublicKey,
+        proof,
+      }),
+      serverFingerprint: input.serverFingerprint,
+    })
+  )
+  const signaling = parseSignalingRegistration(registration, signalingIdentity.encodedPublicKey)
+  if (registration.deviceId !== identity.deviceId || registration.tenantId !== input.tenantId) {
+    throw new Error("device registration response does not match the requested identity")
+  }
+  const config: CompanionConfig = {
+    baseUrl: trimSlash(input.baseUrl),
+    deviceId: identity.deviceId,
+    devicePrivateKeyJwk: identity.privateKeyJwk,
+    deviceKeyThumbprint: identity.thumbprint,
+    tenantId: registration.tenantId,
+    serverVersion:
+      typeof registration.serverVersion === "string"
+        ? registration.serverVersion
+        : input.serverVersion,
+    serverFingerprint: input.serverFingerprint,
+    rendezvousId: signaling.rendezvousId,
+    signalingRoomDescriptor: signaling.roomDescriptor,
+    signalingPrivateKeyJwk: signalingIdentity.privateKeyJwk,
+    signalingUrl: authConfig.signaling.url,
+    iceServers: authConfig.signaling.iceServers,
+  }
+  await refreshAccessToken(config, fetcher)
+  return config
+}
+
+export async function fetchCompanionAuthConfig(
+  baseUrl: string,
+  serverFingerprint: string | undefined,
+  fetcher: AuthFetcher = pinnedFetch
+): Promise<CompanionAuthConfig> {
+  const body = await expectJson(
+    fetcher(`${trimSlash(baseUrl)}/api/auth/config`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      serverFingerprint,
+    })
+  )
+  if (
+    (body.deploymentMode !== "single-user" && body.deploymentMode !== "multi-tenant") ||
+    typeof body.hostId !== "string" ||
+    !isSignalingConfig(body.signaling)
+  ) {
+    throw new Error("companion auth config response is malformed")
+  }
+  return body as unknown as CompanionAuthConfig
+}
+
+function validateRegistrationContext(
+  input: {
+    mode: "owner-invitation" | "oidc"
+    invitation?: string
+    hostId: string
+    tenantId: string
+    oidc?: PairOidcSession
+  },
+  config: CompanionAuthConfig
+): void {
+  if (config.hostId !== input.hostId) throw new Error("pairing payload Host does not match server")
+  if (input.mode === "owner-invitation") {
+    if (config.deploymentMode !== "single-user" || !input.invitation) {
+      throw new Error("server does not accept Owner invitation pairing")
+    }
+    if (config.tenantId !== input.tenantId)
+      throw new Error("pairing payload tenant does not match server")
+    return
+  }
+  if (config.deploymentMode !== "multi-tenant" || !config.oidc || !input.oidc) {
+    throw new Error("an active OIDC session is required for this pairing")
+  }
+  if (
+    input.oidc.issuer !== config.oidc.issuer ||
+    input.oidc.resource !== config.oidc.audience ||
+    input.oidc.clientId !== config.oidc.webClientId
+  ) {
+    throw new Error("OIDC session issuer, resource, or client does not match server config")
+  }
+  if (input.oidc.organizationId !== input.tenantId) {
+    throw new Error("OIDC organization does not match pairing tenant")
+  }
+}
+
+function isSignalingConfig(value: unknown): value is CompanionAuthConfig["signaling"] {
+  if (!value || typeof value !== "object") return false
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.url === "string" &&
+    /^wss:\/\//.test(record.url) &&
+    Array.isArray(record.iceServers)
+  )
+}
+
+function parseSignalingRegistration(
+  body: Record<string, unknown>,
+  clientPublicKey: string
+): { rendezvousId: string; roomDescriptor: RoomDescriptorV2 } {
+  const signaling = body.signaling as Record<string, unknown> | undefined
+  const descriptor = signaling?.roomDescriptor as RoomDescriptorV2 | undefined
+  if (
+    typeof signaling?.rendezvousId !== "string" ||
+    !descriptor ||
+    descriptor.v !== 2 ||
+    descriptor.roomId !== signaling.rendezvousId ||
+    descriptor.mobileSigningKey !== clientPublicKey ||
+    descriptor.notAfter <= Date.now()
+  ) {
+    throw new Error("device registration signaling response is malformed")
+  }
+  return { rendezvousId: signaling.rendezvousId, roomDescriptor: descriptor }
+}
+
+export async function companionAuthorizationHeaders(
+  config: CompanionConfig,
+  method: string,
+  path: string,
+  fetcher: AuthFetcher = pinnedFetch
+): Promise<Record<string, string>> {
+  if (!config.devicePrivateKeyJwk) {
+    if (config.serviceToken) return { Authorization: `Bearer ${config.serviceToken}` }
+    throw new Error("companion device identity is unavailable; pair this device again")
+  }
+  let token = tokens.get(config.deviceId)
+  if (!token || token.expiresAt - Date.now() < 30_000) {
+    token = await refreshAccessToken(config, fetcher)
+  }
+  return {
+    Authorization: `Bearer ${token.accessToken}`,
+    DPoP: await createDeviceProof(config.devicePrivateKeyJwk, token.jti, method, path),
+  }
+}
+
+export async function issueSocketTicket(
+  config: CompanionConfig,
+  request: SocketTicketRequest | "events" | "terminal" | "acp",
+  fetcher: AuthFetcher = pinnedFetch
+): Promise<{ ticket: string; expiresAt: number }> {
+  const payload: SocketTicketRequest = typeof request === "string" ? { channel: request } : request
+  if (payload.channel === "browser" && payload.sessionId.trim() === "") {
+    throw new Error("browser socket tickets require a sessionId")
+  }
+  const path = "/api/auth/socket-ticket"
+  const headers = await companionAuthorizationHeaders(config, "POST", path, fetcher)
+  const body = await expectJson(
+    fetcher(`${trimSlash(config.baseUrl)}${path}`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      serverFingerprint: config.serverFingerprint,
+    })
+  )
+  const ticket = body.ticket
+  const expiresIn = body.expiresIn
+  if (typeof ticket !== "string" || typeof expiresIn !== "number") {
+    throw new Error("socket ticket response is malformed")
+  }
+  return { ticket, expiresAt: Date.now() + expiresIn * 1_000 }
+}
+
+export function clearCompanionAccessTokens(): void {
+  tokens.clear()
+}
+
+export function invalidateCompanionAccessToken(deviceId: string): void {
+  tokens.delete(deviceId)
+}
+
+async function refreshAccessToken(
+  config: CompanionConfig,
+  fetcher: AuthFetcher
+): Promise<TokenState> {
+  if (!config.devicePrivateKeyJwk) throw new Error("device private key is unavailable")
+  const tenantId = config.tenantId ?? config.accountId ?? "local_acct_a"
+  const challenge = await requestChallenge(
+    config.baseUrl,
+    tenantId,
+    config.serverFingerprint,
+    fetcher
+  )
+  const proof = await createDeviceProof(
+    config.devicePrivateKeyJwk,
+    challenge.nonce,
+    "POST",
+    "/api/auth/token"
+  )
+  const body = await expectJson(
+    fetcher(`${trimSlash(config.baseUrl)}/api/auth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenantId,
+        deviceId: config.deviceId,
+        challengeId: challenge.challengeId,
+        challengeNonce: challenge.nonce,
+        proof,
+      }),
+      serverFingerprint: config.serverFingerprint,
+    })
+  )
+  if (typeof body.accessToken !== "string" || typeof body.expiresIn !== "number") {
+    throw new Error("access token response is malformed")
+  }
+  const claims = decodeJwtPayload(body.accessToken)
+  if (typeof claims.jti !== "string") throw new Error("access token is missing jti")
+  const state = {
+    accessToken: body.accessToken,
+    jti: claims.jti,
+    expiresAt: Date.now() + body.expiresIn * 1_000,
+  }
+  tokens.set(config.deviceId, state)
+  return state
+}
+
+async function requestChallenge(
+  baseUrl: string,
+  tenantId: string,
+  serverFingerprint: string | undefined,
+  fetcher: AuthFetcher
+): Promise<Challenge> {
+  const body = await expectJson(
+    fetcher(`${trimSlash(baseUrl)}/api/auth/device/challenge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tenantId }),
+      serverFingerprint,
+    })
+  )
+  if (
+    typeof body.challengeId !== "string" ||
+    typeof body.nonce !== "string" ||
+    typeof body.expiresAt !== "number"
+  ) {
+    throw new Error("device challenge response is malformed")
+  }
+  return body as unknown as Challenge
+}
+
+async function createDeviceProof(
+  privateKeyJwk: JsonWebKey,
+  nonce: string,
+  method: string,
+  path: string
+): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    privateKeyJwk,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"]
+  )
+  const now = Math.floor(Date.now() / 1_000)
+  const header = base64UrlJson({ alg: "ES256", typ: "dpop+jwt" })
+  const payload = base64UrlJson({
+    nonce,
+    htm: method.toUpperCase(),
+    htu: path,
+    iat: now,
+    exp: now + 60,
+    jti: crypto.randomUUID(),
+  })
+  const input = `${header}.${payload}`
+  const signature = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    key,
+    new TextEncoder().encode(input)
+  )
+  return `${input}.${base64UrlBytes(new Uint8Array(signature))}`
+}
+
+async function expectJson(responsePromise: Promise<Response>): Promise<Record<string, unknown>> {
+  const response = await responsePromise
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
+  if (!response.ok) {
+    const detail = body?.error as Record<string, unknown> | undefined
+    throw new Error(
+      typeof detail?.message === "string" ? detail.message : `HTTP ${response.status}`
+    )
+  }
+  return body ?? {}
+}
+
+function spkiToPem(spki: ArrayBuffer): string {
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(spki)))
+  const lines = base64.match(/.{1,64}/g)?.join("\n") ?? base64
+  return `-----BEGIN PUBLIC KEY-----\n${lines}\n-----END PUBLIC KEY-----\n`
+}
+
+function base64UrlJson(value: unknown): string {
+  return base64UrlBytes(new TextEncoder().encode(JSON.stringify(value)))
+}
+
+function base64UrlBytes(bytes: Uint8Array): string {
+  let binary = ""
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")
+}
+
+function decodeJwtPayload(jwt: string): Record<string, unknown> {
+  const payload = jwt.split(".")[1]
+  if (!payload) throw new Error("access token is malformed")
+  const normalized = payload.replace(/-/g, "+").replace(/_/g, "/")
+  const padding = (4 - (normalized.length % 4)) % 4
+  return JSON.parse(atob(normalized + "=".repeat(padding))) as Record<string, unknown>
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+function trimSlash(value: string): string {
+  return value.replace(/\/+$/, "")
+}

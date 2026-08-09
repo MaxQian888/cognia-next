@@ -35,6 +35,18 @@
     "title": "Blame · {path}",
     "uncommitted": "Uncommitted"
   },
+  "branches": {
+    "create": "Create Branch",
+    "delete": "Delete Branch",
+    "detached": "Detached HEAD",
+    "empty": "No branches found",
+    "newName": "New branch name",
+    "remote": "remote",
+    "rename": "Rename Branch",
+    "renameTo": "Rename current branch to…",
+    "search": "Search branches…",
+    "switch": "Switch Branch"
+  },
   "clone": {
     "authHelp": "Sign in with your Git credential manager or SSH agent, then retry.",
     "authRetry": "Retry after Signing In",
@@ -50,18 +62,6 @@
     "title": "Clone Repository",
     "urlLabel": "Repository URL",
     "urlPlaceholder": "https://example.com/team/repository.git"
-  },
-  "branches": {
-    "create": "Create Branch",
-    "delete": "Delete Branch",
-    "detached": "Detached HEAD",
-    "empty": "No branches found",
-    "newName": "New branch name",
-    "remote": "remote",
-    "rename": "Rename Branch",
-    "renameTo": "Rename current branch to…",
-    "search": "Search branches…",
-    "switch": "Switch Branch"
   },
   "commit": {
     "ai": {
@@ -364,8 +364,8 @@
     "pruned": "Stale worktree records pruned",
     "remove": "Remove Worktree",
     "removeDescription": "Remove the linked worktree at {path}?",
-    "removed": "Worktree removed",
     "removeTitle": "Remove worktree?",
+    "removed": "Worktree removed",
     "title": "Worktrees"
   }
 }

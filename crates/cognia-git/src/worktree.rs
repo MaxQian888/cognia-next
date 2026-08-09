@@ -37,6 +37,77 @@ pub async fn add(main_repo: &str, path: &str, branch: &str, base_ref: Option<&st
     exec::run(&cwd, args).await
 }
 
+/// ADR-0111 managed-worktree add: detached HEAD by default, no auto-branch,
+/// optional post-add lock reason.
+///
+/// Unlike [`add`], the managed variant does **not** create a per-dispatch
+/// branch (ADR-0111 §4 — every dispatch previously produced a stale
+/// `cognia/task/**` branch). If the caller wants a branch, they invoke
+/// [`create_branch_here`] after the worktree materializes — the Registry
+/// UI does this on explicit "Create branch here" only.
+///
+/// When `lock_reason` is `Some(reason)`, `git worktree lock --reason
+/// <reason>` runs immediately after the add succeeds, so no window exists
+/// where another owner could delete the worktree.
+pub async fn add_managed(
+    main_repo: &str,
+    path: &str,
+    base_ref: Option<&str>,
+    lock_reason: Option<&str>,
+) -> Result<()> {
+    let cwd = PathBuf::from(main_repo);
+    let mut args: Vec<String> = vec![
+        "worktree".into(),
+        "add".into(),
+        "--detach".into(),
+        path.into(),
+    ];
+    if let Some(base) = base_ref {
+        args.push(base.into());
+    }
+    exec::run(&cwd, args.clone()).await?;
+    if let Some(reason) = lock_reason {
+        // Lock the worktree so [`remove_managed`] can validate ownership
+        // before allowing deletion. If the lock fails we roll back the add
+        // so callers never see a half-provisioned managed row.
+        if let Err(error) = lock(main_repo, path, reason).await {
+            // Best-effort rollback — surface the lock error to the caller.
+            let _ = exec::run(&cwd, ["worktree", "remove", "--force", path]).await;
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+/// `git -C <main_repo> worktree lock <path> --reason <reason>`.
+///
+/// ADR-0111 §3: the Registry stamps `cognia:<workspaceId>` as the reason so
+/// other owners (Agent Team dispatch, the user-facing worktree panel) can
+/// detect that the worktree is Registry-managed and refuse to delete it.
+pub async fn lock(main_repo: &str, path: &str, reason: &str) -> Result<()> {
+    let cwd = PathBuf::from(main_repo);
+    exec::run(&cwd, ["worktree", "lock", path, "--reason", reason]).await
+}
+
+/// `git -C <main_repo> worktree unlock <path>`.
+///
+/// Only used by the Registry's controlled remove path.
+pub async fn unlock(main_repo: &str, path: &str) -> Result<()> {
+    let cwd = PathBuf::from(main_repo);
+    exec::run(&cwd, ["worktree", "unlock", path]).await
+}
+
+/// Return the current lock reason for `path`, or `None` when unlocked.
+///
+/// Parses `git worktree list --porcelain` and picks the `locked` line for
+/// the requested path. The porcelain form is `locked <reason>` when a
+/// reason was set, or bare `locked` otherwise.
+pub async fn lock_reason(main_repo: &str, path: &str) -> Result<Option<String>> {
+    let cwd = PathBuf::from(main_repo);
+    let porcelain = exec::capture(&cwd, ["worktree", "list", "--porcelain"]).await?;
+    Ok(extract_lock_reason(&porcelain, path))
+}
+
 /// `git -C <main_repo> worktree remove [--force] <path>`, then optionally
 /// prune + delete the branch it was on.
 ///
@@ -64,6 +135,56 @@ pub async fn remove(
         exec::run(&cwd, ["branch", "-D", branch]).await?;
     }
     Ok(())
+}
+
+/// ADR-0111 managed-worktree remove: refuses when the lock reason does not
+/// match `expected_lock_reason`, so the user-facing worktree panel and the
+/// Agent Team dispatch cannot force-delete a Registry-managed row.
+///
+/// The remove path is:
+///
+/// 1. Read the current lock reason. If it does not match, error out.
+/// 2. Unlock the worktree.
+/// 3. `git worktree remove --force <path>` (managed rows never require the
+///    user to resolve dirty state — the Registry has already snapshotted
+///    the run).
+///
+/// The `delete_branch` argument is preserved for callers that mixed
+/// [`remove`] and [`remove_managed`] during the migration, though ADR-0111
+/// runs `--detach` so there is usually no branch to delete.
+pub async fn remove_managed(
+    main_repo: &str,
+    path: &str,
+    expected_lock_reason: &str,
+    delete_branch: Option<&str>,
+) -> Result<()> {
+    let cwd = PathBuf::from(main_repo);
+    let actual = lock_reason(main_repo, path).await?;
+    if actual.as_deref() != Some(expected_lock_reason) {
+        return Err(super::error::GitError::LockHeld(
+            format!(
+                "worktree at {path} is locked by {actual:?}, expected {expected_lock_reason:?}"
+            )
+            .into(),
+        ));
+    }
+    unlock(main_repo, path).await?;
+    exec::run(&cwd, ["worktree", "remove", "--force", path]).await?;
+    if let Some(branch) = delete_branch {
+        exec::run(&cwd, ["worktree", "prune"]).await?;
+        exec::run(&cwd, ["branch", "-D", branch]).await?;
+    }
+    Ok(())
+}
+
+/// ADR-0111 detached-worktree "Create branch here" — the only place
+/// Registry creates a branch on a managed worktree.
+///
+/// Runs inside the worktree so `git checkout -b <name>` puts the worktree on
+/// the new branch without also switching the main worktree's HEAD.
+pub async fn create_branch_here(worktree_path: &str, branch: &str) -> Result<()> {
+    let cwd = PathBuf::from(worktree_path);
+    exec::run(&cwd, ["checkout", "-b", branch]).await
 }
 
 /// `git -C <main_repo> worktree list --porcelain`, parsed into [`GitWorktree`].
@@ -96,6 +217,31 @@ pub async fn commit(worktree_path: &str, message: &str) -> Result<Option<String>
     exec::run(&cwd, ["commit", "-m", message]).await?;
     let sha = exec::capture(&cwd, ["rev-parse", "HEAD"]).await?;
     Ok(Some(sha.trim().to_string()))
+}
+
+/// Extract the lock reason for a specific worktree from `git worktree list
+/// --porcelain` output.
+///
+/// The porcelain form for a locked worktree is either `locked <reason>` (with
+/// a reason) or bare `locked` (no reason). Returns `None` when the requested
+/// path is not present or is unlocked.
+fn extract_lock_reason(porcelain: &str, target_path: &str) -> Option<String> {
+    let mut current_path: Option<&str> = None;
+    for raw in porcelain.lines() {
+        let line = raw.trim_end();
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            current_path = Some(rest);
+        } else if line == "locked" && current_path == Some(target_path) {
+            // Locked without a reason. ADR-0111 requires a reason so this
+            // path is treated as "unowned by Cognia" for lookups.
+            return None;
+        } else if let Some(rest) = line.strip_prefix("locked ") {
+            if current_path == Some(target_path) {
+                return Some(rest.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Parse `git worktree list --porcelain` output. Records are separated by a
@@ -231,6 +377,51 @@ branch refs/heads/agent/run_x/alice/t1
         let wts = parse_worktree_list(porcelain);
         assert_eq!(wts.len(), 1);
         assert_eq!(wts[0].branch.as_deref(), Some("main"));
+    }
+
+    // ---------------------------------------------------------------
+    // ADR-0111 lock-reason parsing (pure — no git required)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn extract_lock_reason_returns_reason_for_matching_worktree() {
+        let porcelain = "\
+worktree /repo
+HEAD abc
+branch refs/heads/main
+
+worktree /wt-managed
+HEAD def
+locked cognia:ws-42
+";
+        assert_eq!(
+            extract_lock_reason(porcelain, "/wt-managed").as_deref(),
+            Some("cognia:ws-42")
+        );
+    }
+
+    #[test]
+    fn extract_lock_reason_returns_none_for_bare_lock() {
+        // Manual lock without a reason (rare) — treated as "not Cognia's" so
+        // remove_managed will refuse the delete.
+        let porcelain = "worktree /wt\nlocked\n";
+        assert!(extract_lock_reason(porcelain, "/wt").is_none());
+    }
+
+    #[test]
+    fn extract_lock_reason_returns_none_when_worktree_not_locked() {
+        let porcelain = "worktree /a\nHEAD abc\n\nworktree /b\nlocked custom\n";
+        assert!(extract_lock_reason(porcelain, "/a").is_none());
+        assert_eq!(
+            extract_lock_reason(porcelain, "/b").as_deref(),
+            Some("custom")
+        );
+    }
+
+    #[test]
+    fn extract_lock_reason_returns_none_when_worktree_missing() {
+        let porcelain = "worktree /a\nlocked custom\n";
+        assert!(extract_lock_reason(porcelain, "/nowhere").is_none());
     }
 
     // ---- env-conditional integration tests (need `git` on PATH) ----
@@ -394,6 +585,130 @@ branch refs/heads/agent/run_x/alice/t1
         assert!(
             add(&repo_str, &b, "agent/dup", None).await.is_err(),
             "second add on same branch must fail"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // ADR-0111 managed worktree (detached HEAD + lock reason)
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn add_managed_creates_detached_and_locked_worktree() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        init_repo_with_commit(&repo);
+        let repo_str = repo.to_string_lossy().into_owned();
+        let wt = tmp.path().join("wt-managed");
+        let wt_str = wt.to_string_lossy().into_owned();
+
+        add_managed(&repo_str, &wt_str, None, Some("cognia:ws-managed"))
+            .await
+            .expect("managed add");
+
+        // git canonicalizes the worktree path (e.g. `/var/folders/...` →
+        // `/private/var/folders/...` on macOS), so resolve before comparing.
+        let canonical = wt.canonicalize().expect("canonicalize wt");
+        let canonical_str = canonical.to_string_lossy().into_owned();
+
+        // Detached HEAD → no branch surfaces on the worktree.
+        let wts = list(&repo_str).await.unwrap();
+        let managed = wts
+            .iter()
+            .find(|w| w.path == canonical_str)
+            .unwrap_or_else(|| panic!("row for {canonical_str} present in {wts:?}"));
+        assert!(
+            managed.branch.is_none(),
+            "managed worktree must be detached, got branch {:?}",
+            managed.branch
+        );
+
+        // Lock reason must round-trip. `lock_reason` scans porcelain using
+        // the path git itself printed, so we pass the canonicalized string.
+        let reason = lock_reason(&repo_str, &canonical_str)
+            .await
+            .expect("read lock reason");
+        assert_eq!(reason.as_deref(), Some("cognia:ws-managed"));
+    }
+
+    #[tokio::test]
+    async fn remove_managed_refuses_mismatched_lock_reason() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        init_repo_with_commit(&repo);
+        let repo_str = repo.to_string_lossy().into_owned();
+        let wt = tmp.path().join("wt-managed");
+        let wt_str = wt.to_string_lossy().into_owned();
+
+        add_managed(&repo_str, &wt_str, None, Some("cognia:ws-A"))
+            .await
+            .unwrap();
+        let canonical_str = wt
+            .canonicalize()
+            .expect("canonicalize wt")
+            .to_string_lossy()
+            .into_owned();
+
+        let error = remove_managed(&repo_str, &canonical_str, "cognia:ws-B", None)
+            .await
+            .expect_err("wrong reason must fail");
+        assert!(
+            matches!(error, crate::error::GitError::LockHeld(_)),
+            "unexpected error {error:?}"
+        );
+
+        // Worktree must still exist after refusal.
+        assert!(wt.exists(), "refused remove must not delete files");
+
+        // Correct reason succeeds.
+        remove_managed(&repo_str, &canonical_str, "cognia:ws-A", None)
+            .await
+            .expect("correct reason removes");
+        assert!(!wt.exists(), "worktree dir gone after managed remove");
+    }
+
+    #[tokio::test]
+    async fn create_branch_here_puts_the_managed_worktree_on_a_named_branch() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        init_repo_with_commit(&repo);
+        let repo_str = repo.to_string_lossy().into_owned();
+        let wt = tmp.path().join("wt-detached");
+        let wt_str = wt.to_string_lossy().into_owned();
+
+        add_managed(&repo_str, &wt_str, None, Some("cognia:ws-cb"))
+            .await
+            .unwrap();
+        let canonical_str = wt
+            .canonicalize()
+            .expect("canonicalize wt")
+            .to_string_lossy()
+            .into_owned();
+
+        create_branch_here(&wt_str, "feature/managed-branch")
+            .await
+            .expect("checkout -b");
+
+        let wts = list(&repo_str).await.unwrap();
+        let managed = wts
+            .iter()
+            .find(|w| w.path == canonical_str)
+            .expect("present");
+        assert_eq!(
+            managed.branch.as_deref(),
+            Some("feature/managed-branch"),
+            "branch was created and checked out"
         );
     }
 }

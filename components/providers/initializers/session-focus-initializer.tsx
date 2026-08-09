@@ -19,6 +19,10 @@
  * conversation changes the workbench scope key, which tears the whole right
  * rail down and back up.
  *
+ * Additionally handles retry of failed title generation: when a session becomes
+ * active (or the app resumes to the foreground), we check if the session's
+ * title needs upgrading and trigger a background retry if eligible.
+ *
  * Renders nothing; mounted once in `app/layout.tsx`.
  */
 
@@ -27,6 +31,8 @@ import { useEffect } from "react"
 import { useChatStore } from "@/stores/chat"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { retryTitleIfNeeded } from "@/lib/ai/generation/title-retry"
+import { subscribeResume } from "@/lib/capacitor/app"
 
 /**
  * Apply the per-switch resets. Exported for the test and for any future caller
@@ -36,6 +42,8 @@ import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layo
 export function applySessionFocusChange(sessionId: string | null): void {
   useArtifactDockLayoutStore.getState().clearSessionScopedReveals()
   useArtifactStore.getState().resetSessionScopedWorkspaceFilters(sessionId)
+  // Retry failed title generation when the user re-focuses a session.
+  if (sessionId) void retryTitleIfNeeded(sessionId)
 }
 
 export function SessionFocusInitializer() {
@@ -43,10 +51,27 @@ export function SessionFocusInitializer() {
     // Subscribe rather than depend on a rendered `activeSessionId`: the reset
     // must land before the dock re-renders for the new conversation, and an
     // effect keyed on the value would run after it.
-    return useChatStore.subscribe((state, prevState) => {
+    const unsubFocus = useChatStore.subscribe((state, prevState) => {
       if (state.activeSessionId === prevState.activeSessionId) return
       applySessionFocusChange(state.activeSessionId)
     })
+
+    // On app resume (foreground), retry title for the currently active session.
+    let disposed = false
+    let unsubResume: (() => void) | undefined
+    void subscribeResume(() => {
+      const sessionId = useChatStore.getState().activeSessionId
+      if (sessionId) void retryTitleIfNeeded(sessionId)
+    }).then((off) => {
+      if (disposed) off()
+      else unsubResume = off
+    })
+
+    return () => {
+      disposed = true
+      unsubFocus()
+      unsubResume?.()
+    }
   }, [])
 
   return null

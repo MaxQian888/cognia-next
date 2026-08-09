@@ -15,9 +15,9 @@ import type { SkillResourceDraft } from "@/lib/db/skill-resources"
 import type { LastSkillView, SkillPanelPrefs } from "@/lib/skills/preferences"
 
 export interface EditorFile {
-  /** "main" for SKILL.md, otherwise the resource id. */
+  /** "main" for SKILL.md, "codex" for agents/openai.yaml, otherwise a resource id. */
   id: string
-  kind: "main" | "resource"
+  kind: "main" | "codex" | "resource"
   /** When kind === "resource", the SkillResource id. */
   resourceId?: string
   /** Display path used as the tab label (SKILL.md or scripts/x.sh). */
@@ -25,6 +25,9 @@ export interface EditorFile {
   language: MonacoLanguage
   draftContent: string
   savedContent: string
+  /** Last persistence outcome; dirtiness remains derived from draft vs baseline. */
+  saveState?: "clean" | "saving" | "saved" | "blocked" | "conflict" | "error"
+  saveError?: string
 }
 
 export interface EditorWorkspace {
@@ -124,6 +127,11 @@ interface SkillsStoreState {
   setActiveFile: (id: string) => void
   updateDraftContent: (id: string, content: string) => void
   markSaved: (id: string, savedContent: string) => void
+  markFileSaveState: (
+    ids: string[],
+    state: NonNullable<EditorFile["saveState"]>,
+    error?: string
+  ) => void
   discardDrafts: () => void
   toggleRightPane: () => void
 }
@@ -131,7 +139,13 @@ interface SkillsStoreState {
 export interface ImportStaging {
   drafts: Array<{
     name: string
+    slug?: string
     description?: string
+    compatibility?: string
+    metadata?: Record<string, string>
+    invocationPolicy?: "implicit" | "explicit"
+    frontmatterExtensions?: Record<string, unknown>
+    codexOpenAiYaml?: string
     content: string
     tags?: string[]
     allowedTools?: string[]
@@ -257,6 +271,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
             language: "markdown",
             draftContent: mainContent,
             savedContent: mainContent,
+            saveState: "clean",
           },
         ],
         activeFileId: "main",
@@ -292,7 +307,9 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
       editorWorkspace: {
         ...s.editorWorkspace,
         openFiles: s.editorWorkspace.openFiles.map((f) =>
-          f.id === id ? { ...f, draftContent: content } : f
+          f.id === id
+            ? { ...f, draftContent: content, saveState: "clean", saveError: undefined }
+            : f
         ),
       },
     })),
@@ -302,10 +319,22 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
       editorWorkspace: {
         ...s.editorWorkspace,
         openFiles: s.editorWorkspace.openFiles.map((f) =>
-          f.id === id ? { ...f, savedContent } : f
+          f.id === id ? { ...f, savedContent, saveState: "saved", saveError: undefined } : f
         ),
       },
     })),
+
+  markFileSaveState: (ids, saveState, saveError) => {
+    const targets = new Set(ids)
+    set((s) => ({
+      editorWorkspace: {
+        ...s.editorWorkspace,
+        openFiles: s.editorWorkspace.openFiles.map((file) =>
+          targets.has(file.id) ? { ...file, saveState, saveError } : file
+        ),
+      },
+    }))
+  },
 
   discardDrafts: () =>
     set((s) => ({

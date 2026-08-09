@@ -1,20 +1,23 @@
-/** @jest-environment jsdom */
 // Coverage for the messages CRUD layer — list/persist/clear/truncateAfter.
 // Persistence is diff-based so we exercise the upsert-vs-delete branches
 // directly, plus the metadata hoisting (senderId/senderKind) round-trip.
 
-import "fake-indexeddb/auto"
 import type { UIMessage } from "ai"
 import {
   clearMessages,
+  commitMessageDelta,
   deleteStoredMessage,
   listMessages,
   persistMessages,
   persistStreamingMessages,
+  replaceSessionTranscript,
   truncateAfter,
   updateMessageMetadata,
 } from "./messages"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
+import { isMediaRef, putMessageMedia } from "./message-media"
+import { listMessageMediaRefsForSession } from "./message-media-refs"
 
 jest.setTimeout(30_000)
 
@@ -28,15 +31,14 @@ async function putSession(id: string, projectId = "proj-A"): Promise<void> {
   } as never)
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().messages.clear()
-  // The first cold open builds the full Dexie schema (now v99) which can exceed
-  // the default 5s hook budget under fake-indexeddb — give it room.
-}, 30_000)
+})
+afterAll(dbFixture.dispose)
 
 function msg(
   id: string,
@@ -53,6 +55,94 @@ function msg(
 }
 
 describe("persistMessages + listMessages", () => {
+  it("keeps omitted history when committing a partial delta", async () => {
+    await replaceSessionTranscript("s-delta", [
+      msg("old", "user", "old"),
+      msg("current", "assistant", "before"),
+    ])
+
+    await commitMessageDelta("s-delta", {
+      upserts: [msg("current", "assistant", "after"), msg("new", "user", "new")],
+    })
+
+    const stored = await listMessages("s-delta")
+    expect(stored.map((message) => message.id)).toEqual(["old", "current", "new"])
+    expect((stored[1]?.parts[0] as { text?: string }).text).toBe("after")
+  })
+
+  it("deletes only explicit ids owned by the target session", async () => {
+    await replaceSessionTranscript("s-delta", [msg("a", "user", "a"), msg("b", "assistant", "b")])
+    await replaceSessionTranscript("other", [msg("foreign", "user", "foreign")])
+
+    await commitMessageDelta("s-delta", { deleteIds: ["a", "foreign", "missing"] })
+
+    expect((await listMessages("s-delta")).map((message) => message.id)).toEqual(["b"])
+    expect((await listMessages("other")).map((message) => message.id)).toEqual(["foreign"])
+  })
+
+  it("rejects attempts to move an existing message across sessions", async () => {
+    await replaceSessionTranscript("owner", [msg("shared", "user", "owner")])
+
+    await expect(
+      commitMessageDelta("other", { upserts: [msg("shared", "assistant", "other")] })
+    ).rejects.toThrow("cannot move")
+  })
+
+  it("increments the session revision only when the persisted transcript changes", async () => {
+    await putSession("s-revision")
+    const first = msg("u1", "user", "hello")
+
+    await persistMessages("s-revision", [first])
+    expect((await getDb().sessions.get("s-revision"))?.transcriptRevision).toBe(1)
+
+    await persistMessages("s-revision", [first])
+    expect((await getDb().sessions.get("s-revision"))?.transcriptRevision).toBe(1)
+
+    await persistMessages("s-revision", [msg("u1", "user", "edited")])
+    expect((await getDb().sessions.get("s-revision"))?.transcriptRevision).toBe(2)
+  })
+
+  it("ingests image data URLs before persistence and records their references", async () => {
+    await persistMessages("s-media", [
+      {
+        id: "image-message",
+        role: "user",
+        parts: [
+          {
+            type: "file",
+            url: "data:image/png;base64,aGVsbG8=",
+            mediaType: "image/png",
+          },
+        ],
+      } as UIMessage,
+    ])
+
+    const stored = await getDb().messages.get("image-message")
+    const url = (stored?.parts[0] as { url?: string } | undefined)?.url
+    expect(isMediaRef(url)).toBe(true)
+    expect(await listMessageMediaRefsForSession("s-media")).toEqual([
+      { messageId: "image-message", sessionId: "s-media", hash: url!.slice("cognia-media:".length) },
+    ])
+  })
+
+  it("updates the reference ledger when a persisted message changes media", async () => {
+    const first = msg("media", "user", "first")
+    first.parts = [
+      { type: "file", url: "data:image/png;base64,YQ==", mediaType: "image/png" },
+    ] as UIMessage["parts"]
+    await persistMessages("s-media", [first])
+
+    const second = msg("media", "user", "second")
+    second.parts = [
+      { type: "file", url: "data:image/png;base64,Yg==", mediaType: "image/png" },
+    ] as UIMessage["parts"]
+    await persistMessages("s-media", [second])
+
+    const refs = await listMessageMediaRefsForSession("s-media")
+    expect(refs).toHaveLength(1)
+    expect(refs[0]?.hash).toBe((getDb().messages && ((await getDb().messages.get("media"))?.parts[0] as { url: string }).url.slice("cognia-media:".length)))
+  })
+
   it("inserts a fresh batch and reads them back in order", async () => {
     await persistMessages("s1", [msg("a", "user", "hello"), msg("b", "assistant", "hi")])
     const list = await listMessages("s1")
@@ -185,6 +275,36 @@ describe("clearMessages", () => {
     await clearMessages("s1")
     expect(await listMessages("s1")).toHaveLength(0)
     expect(await listMessages("s2")).toHaveLength(1)
+  })
+
+  it("drops the session's media references and collects old orphans", async () => {
+    await putMessageMedia({
+      hash: "clear-me",
+      mediaType: "image/png",
+      width: 1,
+      height: 1,
+      blob: new Blob(["x"], { type: "image/png" }),
+      byteSize: 1,
+      createdAt: 0,
+      lastUsedAt: 0,
+    })
+    await getDb().messages.put({
+      id: "media-row",
+      sessionId: "s-clear-media",
+      role: "user",
+      parts: [{ type: "file", url: "cognia-media:clear-me", mediaType: "image/png" }],
+      createdAt: 1,
+    } as never)
+    await getDb().messageMediaRefs.put({
+      messageId: "media-row",
+      sessionId: "s-clear-media",
+      hash: "clear-me",
+    })
+
+    await clearMessages("s-clear-media")
+
+    expect(await listMessageMediaRefsForSession("s-clear-media")).toEqual([])
+    expect(await getDb().messageMedia.get("clear-me")).toBeUndefined()
   })
 })
 

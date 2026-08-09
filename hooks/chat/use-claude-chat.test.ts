@@ -6,12 +6,18 @@
  * — that handler is exercised indirectly via `send` / `respondToApproval`.
  */
 import { act, renderHook } from "@testing-library/react"
+import type { SendOptions } from "@cognia/agent-config-types"
 
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/telemetry/events/track-event", () => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
+
+const releaseSkillLoadContextMock = jest.fn()
+jest.mock("@/lib/skills/runtime-loader", () => ({
+  releaseSkillLoadContext: (sessionId: string) => releaseSkillLoadContextMock(sessionId),
 }))
 
 jest.mock("@/lib/perf/chat-turn-performance", () => ({
@@ -202,8 +208,26 @@ jest.mock("@/lib/files/project-editor-bridge", () => ({
   flushProjectEditorEdits: () => flushProjectEditorEdits(),
 }))
 jest.mock("sonner", () => ({ toast: { warning: (msg: string) => toastWarning(msg) } }))
+const resolveSendOptionsMock = jest.fn<Promise<SendOptions>, []>(async () => ({
+  model: "sonnet",
+  systemPrompt: "sys",
+}))
 jest.mock("@/lib/claude/build-options", () => ({
-  resolveSendOptions: jest.fn(async () => ({ model: "sonnet", systemPrompt: "sys" })),
+  resolveSendOptions: (...args: unknown[]) => resolveSendOptionsMock(...(args as [])),
+}))
+
+const openTaskWorkspaceRunLeaseMock = jest.fn()
+jest.mock("@/lib/task-workspace/run-lease", () => ({
+  openTaskWorkspaceRunLease: (input: unknown) => openTaskWorkspaceRunLeaseMock(input),
+}))
+
+const getProjectEnvironmentMock = jest.fn()
+jest.mock("@/lib/db/project-environments", () => ({
+  getProjectEnvironment: (id: string) => getProjectEnvironmentMock(id),
+}))
+const executeProjectEnvironmentMock = jest.fn()
+jest.mock("@/lib/project-environment/executor", () => ({
+  executeProjectEnvironment: (input: unknown) => executeProjectEnvironmentMock(input),
 }))
 
 const dispatchUserPromptSubmitMock = jest.fn(async () => ({ action: "proceed" as const }))
@@ -517,6 +541,7 @@ beforeEach(() => {
   runStandaloneTurnMock.mockReset().mockResolvedValue(undefined)
   gateWorkbenchProviderPayloadMock.mockClear()
   runTurnMemoryMock.mockReset().mockResolvedValue(undefined)
+  releaseSkillLoadContextMock.mockClear()
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   approveToolMock.mockReset().mockResolvedValue(undefined)
   persistMessagesMock.mockReset().mockResolvedValue(undefined)
@@ -530,6 +555,10 @@ beforeEach(() => {
   setSdkSessionIdMock.mockClear()
   touchSessionMock.mockClear()
   updateSessionMock.mockReset().mockResolvedValue(undefined)
+  resolveSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet", systemPrompt: "sys" })
+  openTaskWorkspaceRunLeaseMock.mockReset().mockResolvedValue(null)
+  getProjectEnvironmentMock.mockReset().mockResolvedValue(undefined)
+  executeProjectEnvironmentMock.mockReset().mockResolvedValue({ success: true, bypassed: false })
   chatState.activeSessionId = "sess-1"
   chatState.openSessionIds = ["sess-1"]
   chatState.splitSessionId = null
@@ -645,9 +674,177 @@ describe("useClaudeChat — actions", () => {
     expect(touchSessionMock).toHaveBeenCalledWith("sess-1")
     expect(chatTurnPerformanceMock.begin).toHaveBeenCalledWith("sess-1")
     expect(chatTurnPerformanceMock.markDispatched).toHaveBeenCalledWith("sess-1")
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ skillRenderMode: "hybrid" })
+    )
     // Plugin bus: the committed send announces MESSAGE_SENT + AGENT_STARTED.
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_SENT, { sessionId: "sess-1" })
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
+  })
+
+  it("reuses the persisted managed-worktree binding and redirects the turn", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Managed",
+      model: "sonnet",
+      executionContext: {
+        location: "managedWorktree",
+        projectId: "project-1",
+        projectRoot: "/repo",
+        taskWorkspace: { taskId: "task-workspace:sess-1", workspaceKey: "sess-1" },
+        lifecycle: { state: "ready", createdAt: 1, updatedAt: 2, pinned: false },
+      },
+    })
+    openTaskWorkspaceRunLeaseMock.mockResolvedValue({
+      run: {
+        runId: "run:sess-1:1",
+        executionRoot: "/managed/sess-1",
+        isolationRef: "codex/sess-1",
+      },
+      settle: jest.fn(),
+    })
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+
+    expect(openTaskWorkspaceRunLeaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-workspace:sess-1",
+        workspaceKey: "sess-1",
+        workspaceRoot: "/repo",
+      })
+    )
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.anything(),
+      expect.objectContaining({ cwd: "/managed/sess-1" })
+    )
+    expect(updateSessionMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({
+        executionContext: expect.objectContaining({
+          worktreePath: "/managed/sess-1",
+          branch: "codex/sess-1",
+          taskWorkspace: expect.objectContaining({ runId: "run:sess-1:1" }),
+          lifecycle: expect.objectContaining({ state: "active" }),
+        }),
+      })
+    )
+  })
+
+  it("fails closed instead of falling back to Local when managed isolation is unavailable", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Managed",
+      model: "sonnet",
+      executionContext: {
+        location: "managedWorktree",
+        projectId: "project-1",
+        projectRoot: "/repo",
+        taskWorkspace: { taskId: "task-workspace:sess-1", workspaceKey: "sess-1" },
+        lifecycle: { state: "requested", createdAt: 1, updatedAt: 1, pinned: false },
+      },
+    })
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+  })
+
+  it("runs an explicit zero-tool turn without a managed workspace", async () => {
+    standaloneFlag.value = true
+    useAgentRuntimeStore.setState({ runtime: "external", externalAgentId: "ext-1" })
+    resolveSendOptionsMock.mockResolvedValue({
+      model: "sonnet",
+      systemPrompt: "sys",
+      toolSurface: "none",
+    })
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Cognia Support",
+      model: "sonnet",
+      executionContext: {
+        location: "managedWorktree",
+        projectId: "project-1",
+        projectRoot: "/repo",
+        taskWorkspace: { taskId: "task-workspace:sess-1", workspaceKey: "sess-1" },
+        lifecycle: { state: "requested", createdAt: 1, updatedAt: 1, pinned: false },
+      },
+    })
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("help")
+    })
+
+    expect(openTaskWorkspaceRunLeaseMock).not.toHaveBeenCalled()
+    expect(runStandaloneTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess-1",
+        sendOptions: expect.objectContaining({ toolSurface: "none" }),
+      })
+    )
+    expect(chatState.setSessionError).not.toHaveBeenCalledWith(
+      "sess-1",
+      expect.stringContaining("managed")
+    )
+  })
+
+  it("initializes the selected environment inside the managed execution root", async () => {
+    const environment = {
+      id: "env-1",
+      projectId: "project-1",
+      name: "Development",
+      isEnabled: true,
+      setupScript: { default: "pnpm install" },
+      actions: [],
+      variables: {},
+      keyringReferences: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    getProjectEnvironmentMock.mockResolvedValue(environment)
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Managed",
+      model: "sonnet",
+      executionContext: {
+        location: "managedWorktree",
+        projectId: "project-1",
+        projectRoot: "/repo",
+        environmentId: "env-1",
+        taskWorkspace: { taskId: "task-workspace:sess-1", workspaceKey: "sess-1" },
+        lifecycle: { state: "ready", createdAt: 1, updatedAt: 2, pinned: false },
+      },
+    })
+    openTaskWorkspaceRunLeaseMock.mockResolvedValue({
+      run: { runId: "run-1", executionRoot: "/managed/sess-1", isolationRef: "branch" },
+      settle: jest.fn(),
+    })
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+
+    expect(executeProjectEnvironmentMock).toHaveBeenCalledWith({
+      environment,
+      executionRoot: "/managed/sess-1",
+      scope: "managedWorktree",
+      surface: "interactive",
+      bypassOnFailure: undefined,
+    })
+    expect(sendPromptMock).toHaveBeenCalled()
   })
 
   it("preserves attachment provenance on the optimistic user message", async () => {
@@ -811,6 +1008,7 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       await result.current.send("refactor this module", {
         additionalDirectories: ["/shared"],
+        effort: "xhigh",
       })
     })
     expect(setDelegationRulesMock).toHaveBeenCalled()
@@ -818,6 +1016,7 @@ describe("useClaudeChat — actions", () => {
       "refactor this module",
       expect.objectContaining({
         agentId: "ext-1",
+        reasoningEffort: "xhigh",
         context: { custom: { additionalDirectories: ["/shared"] } },
       })
     )
@@ -1082,6 +1281,7 @@ describe("useClaudeChat — actions", () => {
     })
 
     expect(hasSessionGrant("sess-1", "click_text")).toBe(false)
+    expect(releaseSkillLoadContextMock).toHaveBeenCalledWith("sess-1")
   })
 
   it("respondToApproval (allow): forwards to approveTool", async () => {
@@ -1140,6 +1340,35 @@ describe("useClaudeChat — actions", () => {
     await expect(pending).resolves.toEqual({ decision: "allow" })
     expect(approveToolMock).not.toHaveBeenCalled()
     expect(chatState.clearApproval).toHaveBeenCalledWith("builtin-skill:im.create_chat:x", "sess-1")
+  })
+
+  it("respondToApproval resolves realtime approvals locally and persists always-allow rules", async () => {
+    const { awaitApproval } = await import("@/lib/connectors/hitl/approval-registry")
+    const requestId = "realtime-tool:call-1"
+    const pending = awaitApproval("sess-1", requestId, { ttlMs: 0 })
+    settingsState.save.mockClear()
+    settingsState.toggleAlwaysAllow.mockClear()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.respondToApproval(
+        {
+          sessionId: "sess-1",
+          requestId,
+          toolName: "search_notes",
+        } as never,
+        "allow_always"
+      )
+    })
+
+    await expect(pending).resolves.toEqual({ decision: "allow" })
+    expect(settingsState.save).toHaveBeenCalledWith({
+      agentPermissions: { toolRules: { search_notes: { "*": "allow" } } },
+    })
+    expect(settingsState.toggleAlwaysAllow).not.toHaveBeenCalled()
+    expect(approveToolMock).not.toHaveBeenCalled()
+    expect(chatState.clearApproval).toHaveBeenCalledWith(requestId, "sess-1")
   })
 
   it("respondToApproval (allow_always) toggles the always-allow list", async () => {
@@ -1321,6 +1550,7 @@ describe("useClaudeChat — actions", () => {
     })
     expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
     expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "completed")
+    expect(releaseSkillLoadContextMock).toHaveBeenCalledWith("sess-1")
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "chat.turn.completed",
       expect.objectContaining({
@@ -1721,6 +1951,7 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     expect(chatTurnPerformanceMock.beginFinalPersistence).toHaveBeenCalledWith("sess-1")
     expect(chatTurnPerformanceMock.endFinalPersistence).toHaveBeenCalledWith("sess-1")
     expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "completed")
+    expect(releaseSkillLoadContextMock).toHaveBeenCalledWith("sess-1")
   })
 
   it("passes the sealed assistant message id to long-term memory extraction", async () => {

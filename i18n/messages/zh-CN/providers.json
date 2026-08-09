@@ -298,11 +298,12 @@
     "notConfigured": "未配置",
     "notConfiguredHint": "添加凭据以开始使用该提供商",
     "setDefault": "设为默认",
-    "warning": "警告",
-    "warningHint": "已配置但未验证 — 请运行连接测试",
     "setDefaultAria": "将此提供商设为新会话的默认提供商",
-    "testButton": "测试"
+    "testButton": "测试",
+    "warning": "警告",
+    "warningHint": "已配置但未验证 — 请运行连接测试"
   },
+  "detect": "检测",
   "diagnostics": {
     "balance": {
       "addScript": "添加沙箱余额来源",
@@ -478,7 +479,6 @@
       "transport": "网络传输"
     }
   },
-  "detect": "检测",
   "differentSettings": "配置不同",
   "disable": "禁用",
   "disableSelected": "禁用所选",
@@ -906,7 +906,14 @@
       "thresholdPowerful": "强力档阈值（0–1）",
       "title": "自动路由"
     },
+    "autoMode": "自动",
+    "calibrationApply": "应用建议",
+    "calibrationNeedSamples": "校准至少需要 50 次本地决策（已收集 {count}/50）。",
+    "calibrationNeedTiers": "各层级样本仍不足：快速 {fast}、均衡 {balanced}、强力 {powerful}。",
+    "calibrationReady": "已基于 {count} 次本地决策生成工作负载校准建议（置信度 {confidence}%）。",
+    "calibrationThresholds": "建议阈值：均衡 {balanced}，强力 {powerful}。",
     "cancel": "取消",
+    "classificationSummary": "{category} · {complexity}",
     "confirmApply": "应用预设",
     "constraintEnabled": "启用约束",
     "constraintProvider": "服务商",
@@ -927,6 +934,7 @@
     },
     "distribution": "分发方式",
     "distributionPriority": "优先级顺序",
+    "distributionRoundRobin": "轮询",
     "distributionWeighted": "加权",
     "droppedEffortToast": "模型 {model} 不支持思考强度（reasoning effort），本次请求已忽略该设置。",
     "editAlias": "编辑别名",
@@ -974,26 +982,6 @@
     "previewEmpty": "该预设的服务商均未启用——请先启用一些服务商。",
     "previewTitle": "应用「{name}」预设",
     "prunedByBadge": "已过滤：{filter}",
-    "reliability": {
-      "breakerEnabled": "启用熔断器",
-      "breakerEnabledDesc": "自动把持续失败的部署移出轮换，冷却后再探测恢复。",
-      "cooldownMs": "冷却时长（毫秒）",
-      "desc": "熔断器行为与每次路由请求经过的预检过滤链。",
-      "failureRatePct": "失败率（%）",
-      "failureThreshold": "失败次数阈值",
-      "filterChainDesc": "预检按以下顺序执行，之后路由策略才从存活候选中选择。插件可以贡献过滤器，在路由配置中引用即可启用。",
-      "filterChainTitle": "当前过滤链",
-      "maxCooldownMs": "最大冷却（毫秒）",
-      "minRequestVolume": "最小请求量",
-      "mode": "熔断模式",
-      "modeAbsolute": "绝对次数",
-      "modeAbsoluteDesc": "窗口内连续失败 N 次后熔断。",
-      "modeFailureRate": "失败率",
-      "modeFailureRateDesc": "请求量足够时失败比例越过阈值即熔断。",
-      "pluginBadge": "插件",
-      "retryAfterNote": "服务商错误中的 Retry-After 提示会自动延长冷却时长，并受最大冷却钳制。",
-      "title": "可靠性"
-    },
     "reasonCode": {
       "affinity-pin": "会话亲和",
       "alias-match": "已匹配别名策略",
@@ -1018,6 +1006,27 @@
       "reliability-first": "可靠性优先排序",
       "strategy-unavailable": "策略不可用"
     },
+    "rejectedSummary": "已拒绝 {count} 个：{reason}",
+    "reliability": {
+      "breakerEnabled": "启用熔断器",
+      "breakerEnabledDesc": "自动把持续失败的部署移出轮换，冷却后再探测恢复。",
+      "cooldownMs": "冷却时长（毫秒）",
+      "desc": "熔断器行为与每次路由请求经过的预检过滤链。",
+      "failureRatePct": "失败率（%）",
+      "failureThreshold": "失败次数阈值",
+      "filterChainDesc": "预检按以下顺序执行，之后路由策略才从存活候选中选择。插件可以贡献过滤器，在路由配置中引用即可启用。",
+      "filterChainTitle": "当前过滤链",
+      "maxCooldownMs": "最大冷却（毫秒）",
+      "minRequestVolume": "最小请求量",
+      "mode": "熔断模式",
+      "modeAbsolute": "绝对次数",
+      "modeAbsoluteDesc": "窗口内连续失败 N 次后熔断。",
+      "modeFailureRate": "失败率",
+      "modeFailureRateDesc": "请求量足够时失败比例越过阈值即熔断。",
+      "pluginBadge": "插件",
+      "retryAfterNote": "服务商错误中的 Retry-After 提示会自动延长冷却时长，并受最大冷却钳制。",
+      "title": "可靠性"
+    },
     "removeConstraint": "移除约束",
     "removeEntry": "移除条目",
     "resolvedTo": "解析为",
@@ -1036,6 +1045,8 @@
       "title": "语义工具路由",
       "topK": "保留前 K 个"
     },
+    "shadowDiff": "影子决策不同：{provider}:{model}",
+    "shadowMatch": "影子决策一致：{provider}:{model}",
     "strategy": {
       "adaptive": "自适应",
       "balanced": "均衡",
@@ -1078,18 +1089,8 @@
     },
     "testAliasPlaceholder": "输入别名，例如 fast",
     "testDesc": "无需发送模型请求即可检查分类、硬过滤、有序尝试和决策原因。",
-    "testTitle": "路由工作台",
     "testPromptPlaceholder": "用于本地分类的可选提示词",
-    "autoMode": "自动",
-    "calibrationApply": "应用建议",
-    "calibrationNeedSamples": "校准至少需要 50 次本地决策（已收集 {count}/50）。",
-    "calibrationNeedTiers": "各层级样本仍不足：快速 {fast}、均衡 {balanced}、强力 {powerful}。",
-    "calibrationReady": "已基于 {count} 次本地决策生成工作负载校准建议（置信度 {confidence}%）。",
-    "calibrationThresholds": "建议阈值：均衡 {balanced}，强力 {powerful}。",
-    "classificationSummary": "{category} · {complexity}",
-    "rejectedSummary": "已拒绝 {count} 个：{reason}",
-    "shadowMatch": "影子决策一致：{provider}:{model}",
-    "shadowDiff": "影子决策不同：{provider}:{model}",
+    "testTitle": "路由工作台",
     "timeoutMs": "请求超时（毫秒）"
   },
   "running": "运行中",
@@ -1313,5 +1314,12 @@
     "waitingForTest": "等待运行连接测试..."
   },
   "xai": "xAI (Grok)",
-  "xaiDescription": "Grok 3、Grok 3 Mini"
+  "xaiDescription": "Grok 3、Grok 3 Mini",
+  "capabilityChatApi": "聊天 API",
+  "capabilityModelDelete": "删除模型",
+  "capabilityModelList": "列出模型",
+  "capabilityModelPull": "拉取模型",
+  "capabilityModelUnload": "卸载模型",
+  "localProviderApiKeyHint": "用于受保护本地端点的可选 API Key。",
+  "unknownVersion": "未知版本"
 }

@@ -1,17 +1,17 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
 import { clearCursors, clearCursorsForServer, loadCursors, saveCursor } from "./cursor-store"
 import type { SyncCursorRow } from "./types"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+
+afterAll(dbFixture.dispose)
 
 describe("loadCursors", () => {
   it("returns an empty map when no rows are persisted", async () => {

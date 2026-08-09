@@ -56,10 +56,10 @@ function getWebBackupKey(): string {
 
 async function getHeadlessBackupKey(): Promise<string> {
   const input = { namespace: SERVER_SECRET_NAMESPACE, key: SERVER_SECRET_KEY }
-  const existing = await transport.call<string | null>("keyring_secret_get", { input })
+  const existing = await transport.call<string | null>("secret_store_get", { input })
   if (existing) return existing
   const generated = generateKeyMaterial()
-  await transport.call("keyring_secret_set", { input: { ...input, value: generated } })
+  await transport.call("secret_store_set", { input: { ...input, value: generated } })
   return generated
 }
 
@@ -87,7 +87,7 @@ export async function getDefaultBackupPassphrase(): Promise<string | null> {
 export async function rotateBackupKey(): Promise<string | null> {
   const generated = generateKeyMaterial()
   if (isHeadlessHost()) {
-    await transport.call("keyring_secret_set", {
+    await transport.call("secret_store_set", {
       input: {
         namespace: SERVER_SECRET_NAMESPACE,
         key: SERVER_SECRET_KEY,
@@ -117,7 +117,7 @@ export async function rotateBackupKey(): Promise<string | null> {
 /** Wipe the stored auto-key. Next call to `getDefaultBackupPassphrase` regenerates. */
 export async function clearBackupKey(): Promise<void> {
   if (isHeadlessHost()) {
-    await transport.call("keyring_secret_clear", {
+    await transport.call("secret_store_delete", {
       input: { namespace: SERVER_SECRET_NAMESPACE, key: SERVER_SECRET_KEY },
     })
     return

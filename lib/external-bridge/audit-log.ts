@@ -26,8 +26,8 @@ export interface RecordCallInput {
   check: ScopeCheckResult
   /** Wall-clock latency in ms — caller times the handler. */
   latencyMs: number
-  /** Set when the handler threw after the gate allowed the call. */
-  errorMessage?: string
+  /** Bounded classifier set when the allowed handler failed. */
+  errorCode?: string
 }
 
 /**
@@ -44,7 +44,12 @@ export async function recordCall(input: RecordCallInput): Promise<McpAuditLogRow
       allowed: input.check.allowed,
       latencyMs: input.latencyMs,
       reason: input.check.allowed ? undefined : input.check.reason,
-      errorMessage: input.errorMessage,
+      errorCode: input.errorCode,
+      direction: "inbound",
+      phase: "call",
+      executionSurface: "bridge",
+      decision: input.check.allowed ? "allow" : "deny",
+      durationMs: input.latencyMs,
     })
     return row
   } catch (err) {

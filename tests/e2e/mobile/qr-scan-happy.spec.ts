@@ -1,37 +1,30 @@
 /**
- * E2E: QR scan happy path — pair via cgnp2 payload.
+ * E2E: QR scan happy path — pair via a canonical cgnp3 Owner invitation.
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
-
-const PAIR_PAYLOAD =
-  "cgnp2|" +
-  Buffer.from(
-    JSON.stringify({
-      baseUrl: "https://10.0.0.5:7891",
-      pairJwt: "pj.pj.pj",
-      version: 2,
-      fingerprint: "abcdef",
-    })
-  ).toString("base64url")
+import { createOwnerPairPayload } from "./companion-fixture"
 
 test.describe("mobile — QR scan (happy path)", () => {
-  test.beforeEach(async ({ page }) => {
-    await injectCapacitor(page, { platform: "android", barcodeResult: { rawValue: PAIR_PAYLOAD } })
+  test("scanning a valid pair payload registers and advances to the paired step", async ({
+    page,
+  }) => {
+    const baseUrl = process.env.E2E_V2_BASE_URL
+    if (!baseUrl) throw new Error("the Companion E2E mock was not started")
+    await injectCapacitor(page, {
+      platform: "android",
+      barcodeResult: { rawValue: createOwnerPairPayload(baseUrl) },
+    })
     await page.goto("/")
     await resetCogniaDb(page)
-  })
-
-  test("scanning a valid pair payload advances the pair flow to step 3", async ({ page }) => {
     await page.goto("/pair")
     await page
       .getByRole("button", { name: /scan|扫码/i })
       .first()
       .click()
-    // Mock scan completes; the flow should advance past step 2.
-    await expect(page.locator("[data-step=3], [data-pair-step=paired]").first()).toBeVisible({
+    await expect(page.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "paired", {
       timeout: 15_000,
     })
   })

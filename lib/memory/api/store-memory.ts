@@ -55,6 +55,8 @@ export interface StoreMemoryCoreInput {
   piiGate?: "block" | "redact"
   source?: { sessionId?: string; messageId?: string }
   attribution?: MemoryAttribution
+  /** Agent whose CRUD/scope policy governs this write. */
+  policyCharacterId?: string
 }
 
 export type StoreMemoryCoreResult =
@@ -68,7 +70,10 @@ export type StoreMemoryCoreResult =
       applied: ConsolidationOp["op"][]
       piiRedacted?: boolean
     }
-  | { ok: false; reason: "disabled" | "temporary" | "pii_blocked" }
+  | {
+      ok: false
+      reason: "disabled" | "temporary" | "pii_blocked" | "policy_denied" | "scope_denied"
+    }
 
 export function clampImportance(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 7
@@ -104,6 +109,17 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
   const config = resolveMemoryConfig(settings?.memory)
   if (!config.enabled) return { ok: false, reason: "disabled" }
   if (config.temporary) return { ok: false, reason: "temporary" }
+  const { resolvePersistedAgentMemoryPolicy, scopeAllowedByAgentMemoryPolicy } =
+    await import("@/lib/memory/agent-policy")
+  const policy = await resolvePersistedAgentMemoryPolicy({
+    config,
+    characterId: input.policyCharacterId ?? input.agentId ?? input.characterId,
+    sessionId: input.source?.sessionId,
+  })
+  if (!policy.canCreate) return { ok: false, reason: "policy_denied" }
+  if (!scopeAllowedByAgentMemoryPolicy(policy, "create", scope)) {
+    return { ok: false, reason: "scope_denied" }
+  }
 
   // PII gate — mandatory on the write path (memory text persists durably).
   const { hasNoLeakingPii, redactText } = await import("@cognia/redact")
@@ -323,6 +339,7 @@ export interface StoreExternalMemoryInput {
   importance?: number
   tags?: string[]
   source?: { sessionId?: string }
+  policyCharacterId?: string
 }
 
 /**
@@ -351,6 +368,7 @@ export async function storeExternalMemory(
     provenance: "external",
     piiGate: "block",
     source: input.source,
+    policyCharacterId: input.policyCharacterId,
     attribution,
   })
 }

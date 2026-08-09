@@ -27,8 +27,8 @@ spec:
           env:
             - name: PORT
               value: "7892"
-            # Comma-separated WebSocket Origin allowlist; unset allows all
-            # (same knob the compose suite exposes).
+            # Exact HTTPS split-origin WebSocket allowlist; unset permits only
+            # same-origin browsers (native clients omit Origin and remain allowed).
             - name: SIGNALING_ALLOWED_ORIGINS
               valueFrom:
                 configMapKeyRef:

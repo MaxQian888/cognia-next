@@ -1,0 +1,216 @@
+{
+  "hiyori": {
+    "name": "Hiyori",
+    "revision": "b1de66b0b1f1cb881d95fb6158622aeb6a2827bd",
+    "baseUrl": "https://raw.githubusercontent.com/Live2D/CubismWebSamples/b1de66b0b1f1cb881d95fb6158622aeb6a2827bd/Samples/Resources/Hiyori/",
+    "files": [
+      {
+        "path": "Hiyori.model3.json",
+        "sha256": "973cb3392f7b01f5f73e9d3fedc495a81a0f3ee8014e5df72ef943311c56ee12",
+        "bytes": 1736
+      },
+      {
+        "path": "Hiyori.moc3",
+        "sha256": "0323f5f377b9afef54318be09e9b4eea2a8cb266190ff9d2f843f95ecb77716c",
+        "bytes": 443648
+      },
+      {
+        "path": "Hiyori.physics3.json",
+        "sha256": "c7a6d641893519c0bbc615545887f03f6c5b8031b4096873740b618370452fc1",
+        "bytes": 26160
+      },
+      {
+        "path": "Hiyori.pose3.json",
+        "sha256": "ff1cc242790f196c87a7379dc1340b608723db60af1b2825e00da8f351ffc1bf",
+        "bytes": 166
+      },
+      {
+        "path": "Hiyori.2048/texture_00.png",
+        "sha256": "560aea0d910dc04950d669640b2ef17c0d817969e9909f477f166bb5cbd8ffbe",
+        "bytes": 1814312
+      },
+      {
+        "path": "Hiyori.2048/texture_01.png",
+        "sha256": "87fe9ab7db81ab3025e0407229e449233581e00fa92c8e911923bc6c7d98ce84",
+        "bytes": 2504416
+      },
+      {
+        "path": "motions/Hiyori_m01.motion3.json",
+        "sha256": "c4f0d982c685b81c1af0ced96c8f6bd5118b8a3fa972c3a12a46652b8d78461d",
+        "bytes": 10622
+      },
+      {
+        "path": "motions/Hiyori_m02.motion3.json",
+        "sha256": "858c582874a0c4badfec38d4caf19e232fea5ba714f5a2ac6a282c617910c154",
+        "bytes": 14248
+      },
+      {
+        "path": "motions/Hiyori_m03.motion3.json",
+        "sha256": "de33a8ce78226a5ff80cfa941fb5a4c50b6c1c4b346031ed44b384f772b62cf9",
+        "bytes": 12732
+      },
+      {
+        "path": "motions/Hiyori_m04.motion3.json",
+        "sha256": "54ddb94d0494772e10355429c547bb7e29601f38d663087804b0c793b29cc51f",
+        "bytes": 8772
+      },
+      {
+        "path": "motions/Hiyori_m05.motion3.json",
+        "sha256": "7f71061c9207ac1da6e06098ede9318307a7e75715a3ef97c82646acd9ee8620",
+        "bytes": 16061
+      },
+      {
+        "path": "motions/Hiyori_m06.motion3.json",
+        "sha256": "55c007646febe4cb76d20cbb0623086986dbb55c7ef82212693a5e26636a32ef",
+        "bytes": 19492
+      },
+      {
+        "path": "motions/Hiyori_m07.motion3.json",
+        "sha256": "3f06cb70f5654eed3389978885e4dff151b6cf9e8d59248680addcd267ff793a",
+        "bytes": 9636
+      },
+      {
+        "path": "motions/Hiyori_m08.motion3.json",
+        "sha256": "66022fff5cff3c30b7fc1295bf92e4975e3ab9980d5cb296b5e24a2a8acc6daf",
+        "bytes": 10551
+      },
+      {
+        "path": "motions/Hiyori_m09.motion3.json",
+        "sha256": "9edbd6a88e977221fa90625b5f94c9fd27212e1183288105584be8272543ade7",
+        "bytes": 11479
+      },
+      {
+        "path": "motions/Hiyori_m10.motion3.json",
+        "sha256": "ba0ba6764a80459432ffd48d6bd5ba261fd25f196208ade3016be74efb9d3dfc",
+        "bytes": 9604
+      }
+    ]
+  },
+  "haru": {
+    "name": "Haru",
+    "revision": "b1de66b0b1f1cb881d95fb6158622aeb6a2827bd",
+    "baseUrl": "https://raw.githubusercontent.com/Live2D/CubismWebSamples/b1de66b0b1f1cb881d95fb6158622aeb6a2827bd/Samples/Resources/Haru/",
+    "files": [
+      {
+        "path": "Haru.model3.json",
+        "sha256": "5a41969802b8f9019ca731b07d918fc137e6a61eb9943bdd3f532aeaa0936f8c",
+        "bytes": 2083
+      },
+      {
+        "path": "Haru.moc3",
+        "sha256": "aa59f7a3dc3b30b23b5f10afd9192ed755e4d01dc9a12442d99b972a418e2543",
+        "bytes": 384704
+      },
+      {
+        "path": "Haru.physics3.json",
+        "sha256": "b09a654759a0a0a49998a263757b10f310377adab4b8a281ae5c70902a8a7d1f",
+        "bytes": 5914
+      },
+      {
+        "path": "Haru.pose3.json",
+        "sha256": "cd1c1e2c0faac3bf0c42fdf1a4d5a064ebd5e1f2dc4116a9a7c723b948818ef6",
+        "bytes": 274
+      },
+      {
+        "path": "Haru.2048/texture_00.png",
+        "sha256": "30fce81e6b2d69fb99e8d1b5f391a6e0240f671095e491e9bbe24ddd7c7f434d",
+        "bytes": 1526786
+      },
+      {
+        "path": "Haru.2048/texture_01.png",
+        "sha256": "e1e977447ee7e6e347f1b96b9103ae269e6f4e4a8cf38068d161537415cc51c8",
+        "bytes": 1188664
+      },
+      {
+        "path": "expressions/F01.exp3.json",
+        "sha256": "b143d37d24af8fa5d619e333e791facd87d6396ab75e09fa9051e760f8ff96e7",
+        "bytes": 124
+      },
+      {
+        "path": "expressions/F02.exp3.json",
+        "sha256": "c0bd4f923b12f40f8ad778766cf48a260054ff346156aaee062dcad788053063",
+        "bytes": 464
+      },
+      {
+        "path": "expressions/F03.exp3.json",
+        "sha256": "cdea71773205e6299155820c12afe20c15dcf53f0e73da7a30c364fe5d16d38c",
+        "bytes": 739
+      },
+      {
+        "path": "expressions/F04.exp3.json",
+        "sha256": "354c58609b64a74daf8d7e37b4d28a365548aa5ba1bf941ec4d8db4bd3bb43bd",
+        "bytes": 841
+      },
+      {
+        "path": "expressions/F05.exp3.json",
+        "sha256": "4f43af57229467492fab13a88f600b741f42887493e993b6ec9f558688d2dcea",
+        "bytes": 474
+      },
+      {
+        "path": "expressions/F06.exp3.json",
+        "sha256": "1bf9ad6a640b8009d429d883718b2bf2d0091b380c63ca1c65326bdbc17105aa",
+        "bytes": 475
+      },
+      {
+        "path": "expressions/F07.exp3.json",
+        "sha256": "77e3b941e2525aff0308ed82998e6b4356c896e97d9411c528f98fd4a753d685",
+        "bytes": 907
+      },
+      {
+        "path": "expressions/F08.exp3.json",
+        "sha256": "be652831b79458fd3f9d55b28c15b0e93d551dd730c5e1053e23d238fe879a21",
+        "bytes": 421
+      },
+      {
+        "path": "motions/haru_g_idle.motion3.json",
+        "sha256": "8a4fac459abf35dfb049188e4330d485a9fce54ae6111625f4ffae4d9b03abfb",
+        "bytes": 21183
+      },
+      {
+        "path": "motions/haru_g_m15.motion3.json",
+        "sha256": "4383147bd61a7bd2d990591512bfe29eea743f93868e8679ffed16e588628088",
+        "bytes": 13540
+      },
+      {
+        "path": "motions/haru_g_m26.motion3.json",
+        "sha256": "2b20fbbf31439a5792c808085ecd4c9dc5addeb6195c6d113a25e77f7acc0f4f",
+        "bytes": 23275
+      },
+      {
+        "path": "motions/haru_g_m06.motion3.json",
+        "sha256": "311c544c67282cbc40ac1e0287751b20a7f49a46f4eea989b7071efc3188053c",
+        "bytes": 15118
+      },
+      {
+        "path": "motions/haru_g_m20.motion3.json",
+        "sha256": "536e467d6533c0883b2ad6c8915bc632b4d4188fc3d3abb19cc6b4f5fd12ddb9",
+        "bytes": 23651
+      },
+      {
+        "path": "motions/haru_g_m09.motion3.json",
+        "sha256": "d6c8abb01dcfee8246cccbe7a437f025cb31884f8408f3207e1a6e4139888e45",
+        "bytes": 25066
+      },
+      {
+        "path": "sounds/haru_talk_13.wav",
+        "sha256": "a0890e39bd46e45469e6ea3da96859957f161bbef19146591c8437ed57d0bb0f",
+        "bytes": 138862
+      },
+      {
+        "path": "sounds/haru_Info_14.wav",
+        "sha256": "a1723f7f6a7858882091d50b4762f063e577a671630b0d910b429c49804fa0c7",
+        "bytes": 267922
+      },
+      {
+        "path": "sounds/haru_normal_6.wav",
+        "sha256": "7cbee57fa4a59bf5e645b19408df0a1869a4d2d7234d5bfd8e0849262dd39c6d",
+        "bytes": 142374
+      },
+      {
+        "path": "sounds/haru_Info_04.wav",
+        "sha256": "df9bdccee25492b1787bde80877a0bbbe442c71385083ce63987ff4d7aba456d",
+        "bytes": 111354
+      }
+    ]
+  }
+}

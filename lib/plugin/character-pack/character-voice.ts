@@ -25,6 +25,7 @@ import { type SpeechSettings, type TTSProvider, TTS_PROVIDERS } from "@cognia/tt
 const PROVIDER_VOICE_FIELD: Record<TTSProvider, keyof SpeechSettings> = {
   system: "systemVoice",
   openai: "openaiVoice",
+  "local-openai-compatible": "localOpenaiVoice",
   "openai-realtime": "realtimeVoice",
   gemini: "geminiVoice",
   edge: "edgeVoice",

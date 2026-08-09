@@ -8,7 +8,7 @@
 //   - "readonly" → adapter doesn't write (cline, roo-code). Inert.
 //
 // On click, we patch `appsEnabled[agentId]` via `updateMcpServer` and the
-// CRUD layer schedules a debounced sync to the agent's file.
+// Registry mutation enqueues a durable, coalesced sync to the agent's file.
 
 import { Loader2Icon } from "lucide-react"
 import { useState } from "react"
@@ -18,19 +18,21 @@ import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { updateMcpServer } from "@/lib/db/mcp-servers"
+import { hasMcpSecretRefs } from "@/lib/mcp/credentials"
 import type { McpServer } from "@cognia/agent-config-types"
-import { useAgentStatuses, type AgentStatus } from "@/hooks/agent"
+import type { AgentStatus } from "@/hooks/agent/use-agent-status"
 
 // Re-export for back-compat with callers.
 export { refreshAgentStatuses as refreshAgentAvailability } from "@/hooks/agent"
 
 interface AgentChipGroupProps {
   server: McpServer
+  statuses?: AgentStatus[]
+  loading?: boolean
 }
 
-export function McpAgentChipGroup({ server }: AgentChipGroupProps) {
+export function McpAgentChipGroup({ server, statuses = [], loading = false }: AgentChipGroupProps) {
   const t = useTranslations("mcp.chips")
-  const { statuses, loading } = useAgentStatuses()
   return (
     <div className="flex flex-wrap items-center gap-1">
       <span className="mr-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -63,6 +65,9 @@ function AgentChip({ status, server, loading }: AgentChipProps) {
     try {
       const next = { ...(server.appsEnabled ?? {}), [agent.id]: !projected }
       await updateMcpServer(server.id, { appsEnabled: next })
+      if (!projected && hasMcpSecretRefs(server.config)) {
+        toast.warning(t("plaintextCredentialWarning", { agent: agent.displayName }))
+      }
       toast.success(
         projected
           ? t("removingToast", { agent: agent.displayName, name: server.name })

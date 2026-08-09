@@ -35,6 +35,18 @@
     "title": "追溯 · {path}",
     "uncommitted": "未提交"
   },
+  "branches": {
+    "create": "创建分支",
+    "delete": "删除分支",
+    "detached": "游离 HEAD",
+    "empty": "未找到分支",
+    "newName": "新分支名称",
+    "remote": "远程",
+    "rename": "重命名分支",
+    "renameTo": "将当前分支重命名为…",
+    "search": "搜索分支…",
+    "switch": "切换分支"
+  },
   "clone": {
     "authHelp": "请先通过 Git 凭据管理器或 SSH Agent 登录，然后重试。",
     "authRetry": "登录后重试",
@@ -50,18 +62,6 @@
     "title": "克隆仓库",
     "urlLabel": "仓库 URL",
     "urlPlaceholder": "https://example.com/team/repository.git"
-  },
-  "branches": {
-    "create": "创建分支",
-    "delete": "删除分支",
-    "detached": "游离 HEAD",
-    "empty": "未找到分支",
-    "newName": "新分支名称",
-    "remote": "远程",
-    "rename": "重命名分支",
-    "renameTo": "将当前分支重命名为…",
-    "search": "搜索分支…",
-    "switch": "切换分支"
   },
   "commit": {
     "ai": {
@@ -364,8 +364,8 @@
     "pruned": "已清理失效的工作树记录",
     "remove": "移除工作树",
     "removeDescription": "确定移除位于 {path} 的关联工作树吗？",
-    "removed": "工作树已移除",
     "removeTitle": "移除工作树？",
+    "removed": "工作树已移除",
     "title": "工作树"
   }
 }

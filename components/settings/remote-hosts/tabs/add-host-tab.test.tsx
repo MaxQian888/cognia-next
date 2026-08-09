@@ -4,25 +4,16 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+const registerPairPayload = jest.fn()
+
 jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
 }))
-jest.mock("@/lib/signaling/v2-crypto", () => ({
-  generatePersistableV2SigningIdentity: async () => ({
-    privateKey: {},
-    publicKey: {},
-    privateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
-    encodedPublicKey: "mobile-signing-key",
-  }),
-  buildRoomDescriptorV2: async (input: Record<string, unknown>) => ({
-    v: 2,
-    roomId: "room-1",
-    ...input,
-  }),
-  importV2SigningPrivateKey: async () => ({}),
+jest.mock("@/components/mobile/pair/pair-api", () => ({
+  registerPairPayload: (...args: unknown[]) => registerPairPayload(...args),
 }))
 
-import type { PairFetcher } from "@/components/mobile/pair/pair-api"
+import type { AuthFetcher } from "@/lib/tauri/companion-auth"
 import { __resetRoutingForTests, getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import type { Transport } from "@/lib/tauri/transport-types"
 import {
@@ -36,177 +27,96 @@ const fakeRemote: Transport = {
   subscribe: () => () => {},
 }
 
-function okFetcher(body: Record<string, unknown>): PairFetcher {
-  return async () =>
-    ({
-      ok: true,
-      status: 200,
-      json: async () => body,
-      text: async () => JSON.stringify(body),
-    }) as unknown as Response
-}
-
-const networkFetcher: PairFetcher = async () => {
-  throw new Error("Failed to fetch")
-}
-
-function errorFetcher(status: number, text: string): PairFetcher {
-  return async () =>
-    ({
-      ok: false,
-      status,
-      json: async () => ({}),
-      text: async () => text,
-    }) as unknown as Response
-}
-
-function base64url(input: string): string {
-  return btoa(input).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
-}
-
-const PAIR_BODY = {
-  deviceJwt: "dev.jwt.sig",
+const fetcher = jest.fn() as AuthFetcher
+const payload = "cgnp3|eyJiYXNlVXJsIjoiaHR0cHM6Ly9ib3guZXhhbXBsZSJ9"
+const pairedConfig = {
+  baseUrl: "https://box.example:27890",
+  devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+  deviceKeyThumbprint: "device-thumbprint",
   deviceId: "remote-1",
   serverVersion: "1.0.0",
-  rendezvousId: "room-1",
-  roomDescriptor: {
-    v: 2 as const,
-    roomId: "room-1",
-    roomNonce: "room-nonce",
-    desktopSigningKey: "desktop-signing-key",
-    mobileSigningKey: "mobile-signing-key",
-    notAfter: Date.now() + 60_000,
-  },
 }
 
 beforeEach(() => {
+  jest.clearAllMocks()
+  registerPairPayload.mockResolvedValue({ kind: "ok", config: pairedConfig })
   useRemoteHostStore.setState({ hosts: [], activeHostId: null })
   __resetRoutingForTests()
   __setRemoteTransportFactoryForTests(() => fakeRemote)
 })
+
 afterEach(() => {
   __setRemoteTransportFactoryForTests(null)
   __resetRoutingForTests()
 })
 
-it("pairs from a raw JWT + base URL, registers the host, and connects", async () => {
+it("registers a cgnp3 invitation, adds the returned device identity, and connects", async () => {
   const user = userEvent.setup()
   const onPaired = jest.fn()
-  render(<AddHostTab onPaired={onPaired} fetcher={okFetcher(PAIR_BODY)} />)
+  render(<AddHostTab onPaired={onPaired} fetcher={fetcher} />)
 
-  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), "aaa.bbb.ccc")
-  await user.type(
-    screen.getByLabelText("settings.remoteHosts.add.baseUrlLabel"),
-    "https://box.example:27890"
-  )
+  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), `  ${payload}  `)
+  await user.type(screen.getByLabelText("settings.remoteHosts.add.labelLabel"), "  Dev box  ")
   await user.click(screen.getByRole("button", { name: "settings.remoteHosts.add.submit" }))
 
   await waitFor(() => expect(useRemoteHostStore.getState().hosts).toHaveLength(1))
+  expect(registerPairPayload).toHaveBeenCalledWith(payload, fetcher)
   const host = useRemoteHostStore.getState().hosts[0]
-  expect(host.config.baseUrl).toBe("https://box.example:27890")
-  expect(host.config.deviceJwt).toBe("dev.jwt.sig")
-  // connectAfter defaults on → activated.
+  expect(host).toMatchObject({ label: "Dev box", config: pairedConfig })
   expect(useRemoteHostStore.getState().activeHostId).toBe(host.id)
-  expect(getActiveRemoteTransport()).not.toBeNull()
-  expect(onPaired).toHaveBeenCalledTimes(1)
-  expect(onPaired.mock.calls[0][0].id).toBe(host.id)
+  expect(getActiveRemoteTransport()).toBe(fakeRemote)
+  expect(onPaired).toHaveBeenCalledWith(expect.objectContaining({ id: host.id, label: "Dev box" }))
+  expect(screen.getByRole("status")).toHaveTextContent("settings.remoteHosts.add.success")
 })
 
-it("derives the base URL from a pasted cgnp2 payload", async () => {
-  const user = userEvent.setup()
-  const payload =
-    "cgnp2|" +
-    base64url(
-      JSON.stringify({ baseUrl: "https://derived.example:27890", pairJwt: "x.y.z", fp: "ab12" })
-    )
-  render(<AddHostTab fetcher={okFetcher(PAIR_BODY)} />)
-
-  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), payload)
-  await user.click(screen.getByRole("button", { name: "settings.remoteHosts.add.submit" }))
-
-  await waitFor(() => expect(useRemoteHostStore.getState().hosts).toHaveLength(1))
-  expect(useRemoteHostStore.getState().hosts[0].config.baseUrl).toBe(
-    "https://derived.example:27890"
-  )
+it("does not expose a separate base URL field because the invitation owns the origin", () => {
+  render(<AddHostTab />)
+  expect(screen.queryByLabelText("settings.remoteHosts.add.baseUrlLabel")).toBeNull()
 })
 
 it("does not activate when connect-after is turned off", async () => {
   const user = userEvent.setup()
-  render(<AddHostTab fetcher={okFetcher(PAIR_BODY)} />)
+  render(<AddHostTab />)
 
-  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), "aaa.bbb.ccc")
-  await user.type(
-    screen.getByLabelText("settings.remoteHosts.add.baseUrlLabel"),
-    "https://box.example:27890"
-  )
+  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), payload)
   await user.click(screen.getByRole("switch"))
   await user.click(screen.getByRole("button", { name: "settings.remoteHosts.add.submit" }))
 
   await waitFor(() => expect(useRemoteHostStore.getState().hosts).toHaveLength(1))
   expect(useRemoteHostStore.getState().activeHostId).toBeNull()
+  expect(getActiveRemoteTransport()).toBeNull()
 })
 
-it("shows an error when nothing is pasted", async () => {
+it("shows an error when no invitation is pasted", async () => {
   const user = userEvent.setup()
-  render(<AddHostTab fetcher={okFetcher(PAIR_BODY)} />)
+  render(<AddHostTab />)
+
   await user.click(screen.getByRole("button", { name: "settings.remoteHosts.add.submit" }))
+
   expect(await screen.findByRole("alert")).toHaveTextContent("settings.remoteHosts.add.errMissing")
-  expect(useRemoteHostStore.getState().hosts).toHaveLength(0)
+  expect(registerPairPayload).not.toHaveBeenCalled()
 })
 
-it("requires a base URL for a raw JWT", async () => {
+it("maps an invalid cgnp3 payload to the payload-specific error", async () => {
   const user = userEvent.setup()
-  render(<AddHostTab fetcher={okFetcher(PAIR_BODY)} />)
-  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), "aaa.bbb.ccc")
-  await user.click(screen.getByRole("button", { name: "settings.remoteHosts.add.submit" }))
-  expect(await screen.findByRole("alert")).toHaveTextContent("settings.remoteHosts.add.errBaseUrl")
-})
+  registerPairPayload.mockResolvedValue({ kind: "invalid_payload", message: "invalid" })
+  render(<AddHostTab />)
 
-it("surfaces a network error", async () => {
-  const user = userEvent.setup()
-  render(<AddHostTab fetcher={networkFetcher} />)
-  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), "aaa.bbb.ccc")
-  await user.type(
-    screen.getByLabelText("settings.remoteHosts.add.baseUrlLabel"),
-    "https://box.example:27890"
-  )
+  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), "not a payload")
   await user.click(screen.getByRole("button", { name: "settings.remoteHosts.add.submit" }))
-  expect(await screen.findByRole("alert")).toHaveTextContent("settings.remoteHosts.add.errNetwork")
-})
 
-it("rejects text that is neither a payload nor a JWT", async () => {
-  const user = userEvent.setup()
-  render(<AddHostTab fetcher={okFetcher(PAIR_BODY)} />)
-  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), "not a token")
-  await user.click(screen.getByRole("button", { name: "settings.remoteHosts.add.submit" }))
   expect(await screen.findByRole("alert")).toHaveTextContent("settings.remoteHosts.add.errPayload")
   expect(useRemoteHostStore.getState().hosts).toHaveLength(0)
 })
 
-it("surfaces an HTTP error from the host", async () => {
+it("maps registration failures to a non-sensitive generic error", async () => {
   const user = userEvent.setup()
-  render(<AddHostTab fetcher={errorFetcher(401, "unauthorized")} />)
-  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), "aaa.bbb.ccc")
-  await user.type(
-    screen.getByLabelText("settings.remoteHosts.add.baseUrlLabel"),
-    "https://box.example:27890"
-  )
-  await user.click(screen.getByRole("button", { name: "settings.remoteHosts.add.submit" }))
-  expect(await screen.findByRole("alert")).toHaveTextContent("settings.remoteHosts.add.errHttp")
-})
+  registerPairPayload.mockResolvedValue({ kind: "registration_error", message: "proof rejected" })
+  render(<AddHostTab />)
 
-it("maps a structured pair-code error to the generic message", async () => {
-  const user = userEvent.setup()
-  render(
-    <AddHostTab
-      fetcher={errorFetcher(400, JSON.stringify({ code: "pair_code_expired", message: "expired" }))}
-    />
-  )
-  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), "aaa.bbb.ccc")
-  await user.type(
-    screen.getByLabelText("settings.remoteHosts.add.baseUrlLabel"),
-    "https://box.example:27890"
-  )
+  await user.type(screen.getByLabelText("settings.remoteHosts.add.payloadLabel"), payload)
   await user.click(screen.getByRole("button", { name: "settings.remoteHosts.add.submit" }))
+
   expect(await screen.findByRole("alert")).toHaveTextContent("settings.remoteHosts.add.errGeneric")
+  expect(screen.getByRole("alert")).not.toHaveTextContent("proof rejected")
 })

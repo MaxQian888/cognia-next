@@ -10,7 +10,7 @@ jest.mock("next-intl", () => ({
 }))
 
 // Keep the artifact store light: stub the plugin hook surface + project store.
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => new Proxy({}, { get: () => jest.fn() }),
 }))
 jest.mock("@/stores/project/project-store", () => ({

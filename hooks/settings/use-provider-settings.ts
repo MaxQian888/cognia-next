@@ -14,14 +14,17 @@ import { PROVIDERS } from "@cognia/provider-types/provider"
 import type {
   CustomModelMetadata,
   CustomProviderSettings,
+  ProviderName,
   ProviderUIPreferences,
   UserProviderSettings,
 } from "@cognia/provider-types/provider"
+import { isLocalProviderName } from "@cognia/provider-types/local-provider"
 import {
   testCustomProviderConnectionByProtocol,
   testProviderConnection,
   type ApiTestResult,
 } from "@cognia/provider-core/providers/api-test"
+import { discoverLocalProviderModels } from "@cognia/provider-core/providers/model-discovery"
 import { testAndDiscoverBedrock } from "@/lib/ai/providers/bedrock-connection"
 
 export interface UseProviderSettingsResult {
@@ -173,7 +176,20 @@ export function useProviderSettings(): UseProviderSettingsResult {
           }
           result = bedrockResult.test
         } else {
-          result = await testProviderConnection(id, cfg.apiKey ?? "", cfg.baseURL)
+          result = await testProviderConnection(
+            id,
+            cfg.apiKey ?? "",
+            cfg.baseURL,
+            cfg.customHeaders
+          )
+          const providerName = id as ProviderName
+          if (result.success && isLocalProviderName(providerName)) {
+            const discoveredModels = await discoverLocalProviderModels(providerName, cfg.baseURL)
+            await setProviderConfig(id, {
+              discoveredModels,
+              discoveredModelsLastFetched: Date.now(),
+            })
+          }
         }
 
         const verificationPatch: Partial<UserProviderSettings> = result.success

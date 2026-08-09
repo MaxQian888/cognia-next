@@ -20,6 +20,7 @@ import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { SettingsAlert } from "@/components/settings/common/settings-section"
 import { isTauri } from "@/lib/tauri"
+import type { Account } from "@/types/subscription"
 
 import { AccountList } from "../account-list"
 import { AnthropicAddAccountDialog } from "../add-account-dialog/anthropic"
@@ -31,6 +32,7 @@ export function ClaudeAccountPanel() {
   const t = useTranslations("subscription.nav.items.claude")
   const tRoot = useTranslations("subscription")
   const [addOpen, setAddOpen] = useState(false)
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null)
 
   // `SubscriptionAccountTab` gates itself, but the account list, quota panel and
   // preset picker above it did not — so in the browser this panel rendered an
@@ -47,12 +49,30 @@ export function ClaudeAccountPanel() {
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
 
-      <AccountList provider="anthropic" onAdd={() => setAddOpen(true)} />
+      <AccountList
+        provider="anthropic"
+        onAdd={() => {
+          setEditingAccount(null)
+          setAddOpen(true)
+        }}
+        onUpdate={(account) => {
+          setEditingAccount(account)
+          setAddOpen(true)
+        }}
+      />
       <ProviderQuotaPanel provider="anthropic" />
       <PresetPicker provider="anthropic" />
       <SubscriptionAccountTab onRequestAddAccount={() => setAddOpen(true)} />
 
-      <AnthropicAddAccountDialog open={addOpen} onOpenChange={setAddOpen} />
+      <AnthropicAddAccountDialog
+        open={addOpen}
+        existingAccount={editingAccount ?? undefined}
+        onAdded={() => setEditingAccount(null)}
+        onOpenChange={(next) => {
+          setAddOpen(next)
+          if (!next) setEditingAccount(null)
+        }}
+      />
     </div>
   )
 }

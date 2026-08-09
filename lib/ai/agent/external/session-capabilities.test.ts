@@ -54,6 +54,7 @@ describe("external-agent session capabilities", () => {
       })
     ).toBe(true)
     expect(isExplicitlyUnsupportedCapabilityError({ code: -32601 })).toBe(true)
+    expect(isExplicitlyUnsupportedCapabilityError({ code: "CAPABILITY_UNAVAILABLE" })).toBe(true)
     expect(isExplicitlyUnsupportedCapabilityError(new Error("Method not found"))).toBe(true)
     expect(isExplicitlyUnsupportedCapabilityError(new Error("Request timed out"))).toBe(false)
     expect(isExplicitlyUnsupportedCapabilityError(new Error("Provider model not found"))).toBe(

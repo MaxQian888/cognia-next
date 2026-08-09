@@ -46,6 +46,26 @@ import { resolveScopeProjectId } from "./project-scope"
  * Exported for the saturation banner threshold derivation + tests.
  */
 export const OUTBOUND_QUEUE_SOFT_CAP = 5000
+let outboundQueueSoftCap = OUTBOUND_QUEUE_SOFT_CAP
+
+/** Test-only threshold override so boundary tests do not need 5000 IDB rows. */
+export function __setOutboundQueueSoftCapForTesting(softCap: number): () => void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("__setOutboundQueueSoftCapForTesting() is only available when NODE_ENV=test")
+  }
+  if (!Number.isSafeInteger(softCap) || softCap < 1) {
+    throw new Error("Outbound queue test soft cap must be a positive safe integer")
+  }
+
+  const previous = outboundQueueSoftCap
+  outboundQueueSoftCap = softCap
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    outboundQueueSoftCap = previous
+  }
+}
 
 /**
  * Retention window for terminal (`sent` / `deadlettered`) rows. Rows whose
@@ -288,8 +308,8 @@ async function waitForTerminalRaw(
 async function enforceQueueSoftCap(now: number): Promise<void> {
   const db = getDb()
   const total = await db.outboundQueue.where("status").anyOf("pending", "failed", "sending").count()
-  if (total <= OUTBOUND_QUEUE_SOFT_CAP) return
-  const overflow = total - OUTBOUND_QUEUE_SOFT_CAP
+  if (total <= outboundQueueSoftCap) return
+  const overflow = total - outboundQueueSoftCap
   const oldestPending = await db.outboundQueue.where("status").equals("pending").toArray()
   oldestPending.sort((a, b) => a.createdAt - b.createdAt)
   const victims = oldestPending.slice(0, overflow)
@@ -297,7 +317,7 @@ async function enforceQueueSoftCap(now: number): Promise<void> {
     await db.outboundQueue.update(job.id, {
       status: "deadlettered",
       lastErrorCode: "queue_capped",
-      lastError: `outboundQueue exceeded soft cap of ${OUTBOUND_QUEUE_SOFT_CAP}`,
+      lastError: `outboundQueue exceeded soft cap of ${outboundQueueSoftCap}`,
     })
     try {
       await appendConnectorAudit({

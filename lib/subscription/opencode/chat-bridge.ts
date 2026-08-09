@@ -2,25 +2,25 @@
 //
 // The "opencode" / "opencode-go" built-in chat providers normally read their
 // API key from Settings → Providers. When the user never configured one,
-// `resolveSendOptions` falls back here: the active (or best-matching) account
+// `resolveSendOptions` falls back here: the explicitly selected/default account,
+// or the active account when no higher-precedence selection exists,
 // in the OpenCode subscription vault supplies the key, so a pasted Zen/Go
 // subscription key is immediately usable in chat with zero extra setup —
 // the same convenience the Anthropic subscription path already has.
 //
 // Plan matching: the vault stores Zen and Go accounts side by side under the
 // single "opencode" provider. The chat-provider id picks which plan we want
-// ("opencode" → zen, "opencode-go" → go); the active account wins when its
-// plan matches, otherwise the most recently used matching account does.
+// ("opencode" → zen, "opencode-go" → go). A mismatched active account is not
+// silently replaced with a recently-used credential.
 
 import { isTauri } from "@/lib/tauri"
 import {
   getAccount,
   getActiveAccount,
   getProviderPreset,
-  listAccounts,
   listPresets,
 } from "@/lib/subscription/core/transport"
-import type { Account, AccountSummary, ProviderPreset } from "@/types/subscription"
+import type { Account, ProviderPreset } from "@/types/subscription"
 import {
   isOpencodeChatProviderId,
   opencodeDefaultBaseUrl,
@@ -39,20 +39,21 @@ export interface OpencodeVaultCredential {
  * on any transport error — callers treat `null` as "no fallback available".
  */
 export async function resolveOpencodeVaultCredential(
-  providerId: string
+  providerId: string,
+  selectedAccountId?: string | null
 ): Promise<OpencodeVaultCredential | null> {
   if (!isOpencodeChatProviderId(providerId)) return null
   if (!isTauri()) return null
   const wantPlan = planForOpencodeChatProvider(providerId)
   try {
-    const [summaries, active] = await Promise.all([
-      listAccounts("opencode"),
-      getActiveAccount("opencode").catch(() => null),
-    ])
-    const candidate = pickAccount(summaries, wantPlan, active?.activeAccountId)
-    if (!candidate) return null
-    const full = await getAccount("opencode", candidate.id)
+    const accountId =
+      selectedAccountId === undefined
+        ? (await getActiveAccount("opencode")).activeAccountId
+        : selectedAccountId || (await getActiveAccount("opencode")).activeAccountId
+    if (!accountId) return null
+    const full = await getAccount("opencode", accountId)
     if (!full || full.credential.provider !== "opencode-zen") return null
+    if ((full.credential.plan ?? "zen") !== wantPlan) return null
     const apiKey = full.credential.accessToken?.trim()
     if (!apiKey) return null
     // Precedence mirrors the Rust env_for_sidecar: bound/default preset
@@ -81,24 +82,4 @@ async function resolvePresetFor(account: Account): Promise<ProviderPreset | null
   } catch {
     return null
   }
-}
-
-/**
- * Pick the vault account to draw the key from: paste-key accounts only
- * (discovery rows carry no adoptable secret), plan must match, the active
- * account wins, then most recently used. The Rust side defaults a missing
- * plan to "zen".
- */
-function pickAccount(
-  summaries: AccountSummary[],
-  wantPlan: "zen" | "go",
-  activeAccountId?: string
-): AccountSummary | null {
-  const matching = summaries.filter(
-    (s) => s.variant === "opencode-zen" && (s.plan ?? "zen") === wantPlan
-  )
-  const active = activeAccountId ? matching.find((s) => s.id === activeAccountId) : undefined
-  if (active) return active
-  matching.sort((a, b) => (b.lastUsedAtMs ?? 0) - (a.lastUsedAtMs ?? 0))
-  return matching[0] ?? null
 }

@@ -155,6 +155,12 @@
     "lines": 90,
     "statements": 90
   },
+  "./plugins/sre-agent/src/**/*.{ts,tsx}": {
+    "branches": 90,
+    "functions": 90,
+    "lines": 90,
+    "statements": 90
+  },
   "./hooks/**/*.{ts,tsx}": {
     "branches": 50,
     "functions": 30,

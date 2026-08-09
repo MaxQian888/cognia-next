@@ -13,6 +13,7 @@ import type {
   A2UISurfaceType,
 } from "../artifact/a2ui"
 import type { AgentModeConfig } from "../agent/agent-mode"
+import type { CanonicalPluginPermission } from "@/packages/plugin-sdk/src/contracts/generated"
 import type { LspServerConfig } from "../lsp/config"
 import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/presets"
 import type { ProtocolAdapterFactory } from "@/lib/ai/agent/external/protocol-adapter"
@@ -88,6 +89,7 @@ import type { VsCodeExtensionBlock, VsCodeLanguage } from "./plugin-vscode"
 import type {
   Artifact,
   ArtifactLanguage,
+  ArtifactType,
   CanvasDocumentVersion,
   CanvasSuggestion,
 } from "../artifact/artifact"
@@ -393,125 +395,7 @@ export interface ExtensionCatalogEntry {
 /**
  * Permission types that plugins can request
  */
-export type PluginPermission =
-  | "filesystem:read" // Read files
-  | "filesystem:write" // Write files
-  | "network:fetch" // Make HTTP requests
-  | "network:websocket" // WebSocket connections
-  | "clipboard:read" // Read clipboard
-  | "clipboard:write" // Write clipboard
-  | "notification" // Show notifications
-  | "shell:execute" // Execute shell commands
-  | "process:spawn" // Spawn processes
-  | "database:read" // Read from database
-  | "database:write" // Write to database
-  | "settings:read" // Read settings
-  | "settings:write" // Modify settings
-  | "session:read" // Read chat sessions
-  | "session:write" // Modify chat sessions
-  | "session:delete" // Delete chat sessions
-  | "project:read" // Read project metadata and files through scoped APIs
-  | "project:write" // Create/modify projects, their knowledge files and links
-  | "project:delete" // Delete projects
-  | "canvas:read" // Read Canvas document metadata and selection
-  | "canvas:write" // Create/modify/delete Canvas documents
-  | "canvas:run" // Execute Canvas code blocks and actions
-  | "canvas:collaborate" // Join Canvas collaboration sessions
-  | "artifact:read" // Read artifact metadata
-  | "artifact:write" // Create and modify artifacts
-  | "workflow:read" // Read workflow metadata and selection
-  | "editor:read" // Read what the user is looking at in the project editor
-  | "editor:write" // Open files and reflect edits in the project editor
-  | "debug:control" // Start, inspect, and control debug sessions
-  | "tests:run" // Discover and run tests through an IDE test controller
-  | "notebook:execute" // Execute notebook cells or notebook-backed kernels
-  | "vector:read" // Query the vector store
-  | "vector:write" // Write to and delete from the vector store
-  | "ai:chat" // Send prompts to a language model on the user's account
-  | "ai:embed" // Generate embeddings on the user's account
-  | "export:session" // Export chat sessions
-  | "export:project" // Export whole projects
-  | "theme:read" // Read the active theme
-  | "theme:write" // Change the active theme
-  | "extension:ui" // Contribute trusted host-rendered UI
-  | "media:image:read" // Read image media assets
-  | "media:image:write" // Write image media assets
-  | "media:video:read" // Read video media assets
-  | "media:video:write" // Write video media assets
-  | "media:video:export" // Export rendered video output
-  | "agent:control" // Control agent execution (tool-enabled headless runs)
-  | "agent:dispatch-external" // Dispatch external coding agents (Claude Code / Codex / …)
-  | "agent:dispatch" // Dispatch built-in subagents / agent teams in-process
-  | "agent:shared-memory:read" // Read team shared-memory entries (ACL-gated)
-  | "twin:read" // Query the employee twin's RAG memory
-  | "templates:read" // Read the unified template catalog and validation results
-  | "templates:contribute" // Register lifecycle-scoped template packages
-  | "templates:instantiate" // Request guarded preflight/instantiation
-  | "templates:library:write" // Create user-owned template drafts after confirmation
-  | "ipc:call" // Call/send to another plugin over inter-plugin IPC (incl. RPC)
-  | "ipc:expose" // Expose RPC methods other plugins can invoke over IPC
-  | "events:publish" // Emit onto the cross-plugin event bus
-  | "events:subscribe" // Listen on the cross-plugin event bus
-  | "python:execute" // Execute Python code
-  | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
-  | "secrets:read" // Read from OS keyring / secure storage
-  | "secrets:write" // Write to OS keyring / secure storage
-  | "auth:provide" // Register a native auth/OAuth provider (C1)
-  | "auth:consume" // Consume sessions from a registered auth provider (C1)
-  | "terminal:spawn" // Open a new PTY session in the integrated terminal dock
-  | "terminal:write" // Pipe bytes into an existing terminal session's stdin
-  | "terminal:kill" // Signal-terminate an existing terminal session
-  | "terminal:completion" // Contribute inline command completions + read the in-progress input line
-  | "terminal:safety" // Contribute command-safety rules + classify command risk for Auto-mode
-  | "git:read" // Read the active source-control repository (status/log/diff/branches)
-  | "git:write" // Mutate the active repo (stage/commit/checkout/push/stash/discard)
-  | "goal:read" // Read the user's goals and their progress
-  | "goal:write" // Create, update, complete, and decompose goals
-  | "memory:read" // Search/list the user's long-term memories
-  | "memory:write" // Store, update, and forget long-term memories (PII-gated, never procedural)
-  | "team:read" // Read agent teams, rosters, and their task boards
-  | "team:write" // Create tasks / comment / guarded card moves on team boards (no run control)
-  | "subscription:read" // Read subscription plan + usage metrics (never raw credentials)
-  | "perf:read" // Read performance dashboard snapshots + live sample stream
-  | "connectors:read" // List connector adapters + subscribe to inbound bus events
-  | "connectors:send" // Send outbound messages through a connector adapter
-  | "connectors:manage" // Create / update / delete / enable connector adapter instances
-  | "integrations:read" // Read Integration definitions, accounts, subscriptions, jobs, and audit
-  | "integrations:events" // Publish verified normalized Integration events
-  | "integrations:execute" // Queue Integration actions through host risk policy
-  | "integrations:manage" // Create/update/remove Integration accounts and subscriptions
-  | "share:read" // Read the local mirror of created public share links + their stats
-  | "share:create" // Create / revoke public share links (publishes data to the share worker)
-  | "backup:read" // Build + read encrypted backup packages and the backup history
-  | "backup:write" // Restore a backup package (overwrites local data)
-  // Desktop automation (Computer Use) — drives the real desktop. All DANGEROUS.
-  // Reuses the host Rust gate→policy→consent→audit pipeline (surface:"plugin").
-  | "automation:screenshot" // Capture desktop screenshots / regions
-  | "automation:read" // Read a11y tree, find elements, cursor position, pick-at-point
-  | "automation:click" // Mouse click / double / triple / button down-up
-  | "automation:type" // Keyboard input, key chords, hold-key
-  | "automation:pointer" // Mouse move, drag, scroll
-  | "automation:window" // Window focus / close / minimize / maximize / resize
-  // Companion remote-control management (host-side). read is sensitive, control is DANGEROUS.
-  | "companion:read" // List paired devices, read remote-control grants + inbound activity
-  | "companion:control" // Grant / revoke a device's remote-control capability
-  | "cli:execute" // Run an allowlisted external CLI declared via manifest.cliTools — DANGEROUS
-  | "companion:goal-control" // Pause / resume / stop a host goal loop
-  // Native Anthropic computer-use tool bridge (declared by computer-use; keyed
-  // on by the automation settings UI and the plugin-sdk native-tool examples).
-  | "native:input" // Synthesize native keyboard / mouse input via a native Anthropic tool
-  | "native:screen" // Capture the native screen via a native Anthropic tool
-  // Sandboxed core tools (ADR-0028; declared by cognia-sandboxed-tools).
-  | "native:filesystem" // Read/write the host filesystem through the sandboxed-tools backend
-  | "native:process" // Run host processes through the sandboxed-tools backend
-  // Desktop pet (gated by the "pet" capability; see lib/plugin/api/pet-api.ts).
-  | "pet:read" // Read the pet's public view (level/stage/needs/mood) + subscribe to sanitized events
-  | "pet:interact" // Emit nurture interactions and budget-capped XP/coin rewards
-  // Chat interception (W3.2). High-risk: lets a plugin rewrite/block every
-  // prompt, tool call, and tool result. Required to declare the
-  // onUserPromptSubmit / onPreToolUse / onPostToolUse / onMessageSend /
-  // onMessageReceive hooks.
-  | "hooks:chat-intercept" // Intercept and rewrite chat prompts, tool calls, and tool results
+export type PluginPermission = CanonicalPluginPermission
 
 export type PluginPermissionDecision = "allow" | "deny"
 export type PluginPermissionPolicy = "ask" | "allow" | "deny"
@@ -725,6 +609,9 @@ export interface PluginManifest {
    */
   optionalDependencies?: Record<string, string>
 
+  /** Built-in skill ids/families this plugin may invoke (for example `lark.sheets.*`). */
+  builtInSkills?: string[]
+
   /** Host application version requirements */
   engines?: {
     cognia?: string
@@ -794,15 +681,14 @@ export interface PluginManifest {
   shellCommands?: string[]
 
   /**
-   * Declarative network egress allowlist (Figma-style). When present, the host
-   * clamps this plugin's `network:fetch`/`download`/`upload` to the listed
-   * domains; subdomains match (`example.com` matches `api.example.com`). Use
-   * `["*"]` for any host (state `reasoning`) or `["none"]` for no network.
-   * Omitting `networkAccess` leaves egress unrestricted (the `network:fetch`
-   * grant + consent remains the boundary).
+   * Declarative network egress policy. `allowedDomains` preserves the legacy
+   * domain-only form; `rules` additionally constrains HTTP method and path so
+   * read-only plugins can be enforced by the host. Omitting `networkAccess`
+   * denies network egress even when `network:fetch` is granted.
    */
   networkAccess?: {
     allowedDomains?: string[]
+    rules?: PluginNetworkAccessRule[]
     /** Why the plugin needs the declared access — shown in the consent prompt. */
     reasoning?: string
   }
@@ -1539,6 +1425,20 @@ export interface PluginConfigProperty {
   markdownDescription?: string
   default?: unknown
   enum?: unknown[]
+  /**
+   * When `true`, the field's value is stored in the OS keyring under the
+   * plugin's `plugin:<id>` namespace instead of the plaintext plugin-config
+   * store, and is exposed to the plugin only via
+   * `ctx.configuration.getSecret(path)` / `hasSecret(path)` (gated by the
+   * `secrets:read` permission). Constraints, enforced by
+   * `validateConfigSchema` / `validatePluginConfig`:
+   *   - Only valid on `type: "string"` fields (Phase 1).
+   *   - Incompatible with `default` — a secret must not travel with the
+   *     manifest.
+   *   - Only supported at the top level of `configSchema.properties`;
+   *     nested `object.properties[key].secret` is rejected in Phase 1.
+   */
+  secret?: boolean
   /** Per-enum-value plain-text descriptions, surfaced beside each option. */
   enumDescriptions?: string[]
   /** Per-enum-value markdown descriptions (takes precedence over enumDescriptions). */
@@ -2454,9 +2354,9 @@ export interface PluginA2UIAPI {
 }
 
 export interface PluginAgentAPI {
-  registerTool: (tool: PluginTool) => void
+  registerTool: (tool: PluginTool) => () => void
   unregisterTool: (name: string) => void
-  registerMode: (mode: AgentModeConfig) => void
+  registerMode: (mode: AgentModeConfig) => () => void
   unregisterMode: (id: string) => void
   /**
    * Run one agent turn and resolve with the typed result. The embeddable
@@ -2482,6 +2382,13 @@ export interface PluginAgentAPI {
     name: string,
     args: Record<string, unknown>,
     opts?: { signal?: AbortSignal }
+  ) => Promise<unknown>
+  /** Invoke a tool owned by a required dependency declared in the manifest. */
+  invokeDependencyTool: (
+    dependencyId: string,
+    name: string,
+    args: Record<string, unknown>,
+    opts?: { signal?: AbortSignal; sessionId?: string; messageId?: string }
   ) => Promise<unknown>
   /**
    * @deprecated Use {@link run} / {@link runStreamed}. Retained as a thin shim
@@ -2624,8 +2531,30 @@ export interface PluginNetworkAPI {
   ) => Promise<NetworkResponse<unknown>>
 }
 
-export interface NetworkRequestOptions {
-  method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS"
+export type PluginNetworkHttpMethod =
+  "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS"
+
+export interface PluginNetworkAccessRule {
+  /** Host suffix (`example.com` includes `api.example.com`) or `*`. */
+  domain: string
+  /** HTTP methods admitted by this rule. */
+  methods: PluginNetworkHttpMethod[]
+  /** URL pathname globs admitted by this rule. */
+  paths: string[]
+}
+
+export type NetworkDataClassification =
+  "public" | "operational" | "internal" | "confidential" | "restricted"
+
+export interface NetworkEgressPolicyOptions {
+  /** Data class recorded for policy/audit consumers. */
+  dataClassification?: NetworkDataClassification
+  /** Redact recognized PII/secrets (default) or block the request. */
+  piiPolicy?: "redact" | "block"
+}
+
+export interface NetworkRequestOptions extends NetworkEgressPolicyOptions {
+  method?: PluginNetworkHttpMethod
   headers?: Record<string, string>
   body?: unknown
   timeout?: number
@@ -2641,7 +2570,7 @@ export interface NetworkResponse<T> {
   data: T
 }
 
-export interface DownloadOptions {
+export interface DownloadOptions extends NetworkEgressPolicyOptions {
   headers?: Record<string, string>
   onProgress?: (progress: DownloadProgress) => void
 }
@@ -2658,9 +2587,15 @@ export interface DownloadResult {
   contentType?: string
 }
 
-export interface UploadOptions {
+export interface UploadOptions extends NetworkEgressPolicyOptions {
   headers?: Record<string, string>
   fieldName?: string
+  /**
+   * Policy for the file bytes themselves. Defaults to `block` because the
+   * host cannot safely redact arbitrary binary formats. `allow` requires an
+   * explicit `dataClassification` and is enforced again by the native host.
+   */
+  fileContentPolicy?: "block" | "allow"
   onProgress?: (progress: DownloadProgress) => void
 }
 
@@ -4376,8 +4311,19 @@ export interface CreateArtifactOptions {
   language: ArtifactLanguage
   sessionId?: string
   messageId?: string
-  type?: "code" | "text" | "react" | "html" | "svg" | "mermaid"
+  type?: ArtifactType | "text"
   metadata?: Artifact["metadata"]
+  /** Namespaced plugin-owned payload descriptor, e.g. `cognia-office/workbook`. */
+  kind?: string
+  schemaVersion?: number
+}
+
+export interface UpdateArtifactOptions {
+  title?: string
+  content?: string
+  metadata?: Artifact["metadata"]
+  expectedVersion: number
+  changeDescription?: string
 }
 
 /**
@@ -4404,11 +4350,17 @@ export interface PluginArtifactAPI {
   /** Create a new artifact */
   createArtifact: (options: CreateArtifactOptions) => Promise<string>
 
-  /** Update an artifact */
-  updateArtifact: (id: string, updates: Partial<Artifact>) => void
+  /** Atomically update a plugin-owned artifact and snapshot its previous version. */
+  updateArtifact: (id: string, updates: UpdateArtifactOptions) => Artifact
 
   /** Delete an artifact */
   deleteArtifact: (id: string) => void
+
+  /** Version history for a plugin-owned artifact. */
+  listVersions: (id: string) => import("@/types/artifact").ArtifactVersion[]
+
+  /** Restore a plugin-owned artifact version. */
+  restoreVersion: (id: string, versionId: string, expectedVersion: number) => Artifact
 
   /** List artifacts */
   listArtifacts: (filter?: ArtifactFilter) => Artifact[]
@@ -4430,10 +4382,51 @@ export interface PluginArtifactAPI {
  * Artifact renderer definition
  */
 export interface ArtifactRenderer {
-  type: string
   name: string
-  canRender: (artifact: Artifact) => boolean
-  render: (artifact: Artifact, container: HTMLElement) => () => void
+  mount: (artifact: Artifact, container: HTMLElement) => ArtifactRendererHandle
+}
+
+export interface ArtifactRendererHandle {
+  update?: (artifact: Artifact) => void
+  dispose: () => void
+}
+
+export interface PluginFileHandle {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  bytes: Uint8Array
+}
+
+export interface PluginFilesAPI {
+  open: (options?: {
+    accept?: string[]
+    multiple?: boolean
+    maxBytes?: number
+  }) => Promise<PluginFileHandle[]>
+  save: (options: {
+    suggestedName: string
+    mimeType: string
+    bytes: Uint8Array
+  }) => Promise<{ saved: boolean }>
+  readAttachment: (handle: string) => Promise<PluginFileHandle>
+}
+
+export interface PluginBuiltInSkillSummary {
+  id: string
+  family: string
+  mutation: "read" | "write" | "destructive"
+  label: { en: string; "zh-CN": string }
+}
+
+export interface PluginSkillsAPI {
+  listBuiltIns: (family?: string) => PluginBuiltInSkillSummary[]
+  invokeBuiltIn: (
+    skillId: string,
+    args: Record<string, unknown>,
+    options: { sessionId: string; signal?: AbortSignal }
+  ) => Promise<import("@/lib/skills/built-in/types").BuiltInSkillResult>
 }
 
 // =============================================================================
@@ -4736,6 +4729,8 @@ export interface PluginExtensionAPI {
  * Plugin API permissions for extended features
  */
 export type PluginAPIPermission =
+  | "filesystem:read"
+  | "filesystem:write"
   | "session:read"
   | "session:write"
   | "session:delete"
@@ -4754,6 +4749,7 @@ export type PluginAPIPermission =
   | "ai:chat"
   | "ai:embed"
   | "agent:control"
+  | "builtin-skills:invoke"
   | "agent:dispatch-external"
   | "agent:dispatch"
   | "agent:shared-memory:read"
@@ -4772,6 +4768,7 @@ export type PluginAPIPermission =
   | "media:video:write"
   | "media:video:export"
   | "extension:ui"
+  | "extension:workflow"
   | "notification:show"
   | "ipc:call"
   | "ipc:expose"
@@ -4849,6 +4846,12 @@ export interface PluginContextAPI {
 
   /** Artifact management API */
   artifact: PluginArtifactAPI
+
+  /** Cross-platform user-selected and authorized attachment bytes. */
+  files: PluginFilesAPI
+
+  /** Controlled access to allowlisted first-party built-in skills. */
+  skills: PluginSkillsAPI
 
   /** Media processing API */
   media: PluginMediaAPI

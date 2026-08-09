@@ -24,6 +24,7 @@ import { OcrError } from "./errors"
 import { type OcrProvider, type UserOcrSettings } from "./types"
 import type { OcrRegistry } from "./registry"
 import { shellAllows } from "./registry"
+import { staticRuntimeStatus, type OcrRuntimeStatusResolver } from "./runtime-status"
 
 /**
  * Optional readiness check for local engines. Some engines (windows-media-ocr
@@ -48,20 +49,21 @@ export interface AutoRouterDeps {
   >
   /** Sub-OS classification used to drill into the localPreference table. */
   osTag?: "windows" | "macos" | "linux" | "ios" | "android" | "browser"
-  /** Defaults to `() => true` — no readiness gate. */
+  /** Legacy local readiness probe; the shared static status is used when omitted. */
   localReadiness?: LocalReadinessFn
-  /** Defaults to `() => true` — no credentials gate. */
+  /** Legacy credential probe; the shared static status is used when omitted. */
   hasCredentials?: HasCredentialsFn
+  /** Preferred readiness contract. Hosts should provide this instead of the legacy split probes. */
+  runtimeStatus?: OcrRuntimeStatusResolver
 }
 
 /**
  * Built-in defaults — overridable via `AutoRouterDeps.localPreference`.
  *
- * `ocrs` and `paddle-ocr` are pure-Rust local engines wired through the
- * `ocr-ocrs` / `ocr-paddle` Cargo features. They sit just behind the
- * platform-native engines (Windows.Media.Ocr, Apple Vision) and ahead of
- * Tesseract because they require no system toolchain and emit per-line
- * bboxes. `local-http` stays out of the preference list — its endpoint
+ * PaddleOCR is the cross-platform packaged default. Apple Vision remains the
+ * first macOS choice. The early-preview, Latin-only `ocrs` backend and the
+ * unimplemented Windows.Media.Ocr placeholder stay advanced opt-ins and never
+ * enter automatic routing. `local-http` stays out of the preference list — its endpoint
  * is user-configured, so the user picks it explicitly in settings.
  */
 export const DEFAULT_LOCAL_PREFERENCE: Required<NonNullable<AutoRouterDeps["localPreference"]>> = {
@@ -69,13 +71,15 @@ export const DEFAULT_LOCAL_PREFERENCE: Required<NonNullable<AutoRouterDeps["loca
   mobile: [],
   web: ["tesseract-wasm"],
   headless: [],
-  windows: ["windows-media-ocr", "ocrs", "paddle-ocr", "tesseract-native", "tesseract-wasm"],
-  macos: ["apple-vision", "ocrs", "paddle-ocr", "tesseract-native", "tesseract-wasm"],
-  linux: ["ocrs", "paddle-ocr", "tesseract-native", "tesseract-wasm"],
+  windows: ["paddle-ocr", "tesseract-native", "tesseract-wasm"],
+  macos: ["apple-vision", "paddle-ocr", "tesseract-native", "tesseract-wasm"],
+  linux: ["paddle-ocr", "tesseract-native", "tesseract-wasm"],
   ios: ["apple-vision", "tesseract-wasm"],
   android: ["mlkit-android", "tesseract-wasm"],
   browser: ["tesseract-wasm"],
 }
+
+const ADVANCED_ONLY_LOCAL_PROVIDERS = new Set(["ocrs", "windows-media-ocr"])
 
 function isProviderUsable(
   provider: OcrProvider | undefined,
@@ -88,33 +92,14 @@ function isProviderUsable(
   return true
 }
 
-async function firstReadyLocal(
-  deps: AutoRouterDeps,
-  candidates: readonly string[]
-): Promise<OcrProvider | null> {
-  const readyCheck = deps.localReadiness ?? (() => true)
-  for (const id of candidates) {
-    const provider = deps.registry.get(id)
-    if (!isProviderUsable(provider, deps.platform, deps.settings)) continue
-    if (provider.category !== "local") continue
-    const ready = await readyCheck(id)
-    if (ready) return provider
+async function isRuntimeReady(deps: AutoRouterDeps, provider: OcrProvider): Promise<boolean> {
+  if (deps.runtimeStatus) return (await deps.runtimeStatus(provider, deps.platform)).ready
+  if (provider.category === "local") {
+    if (deps.localReadiness) return deps.localReadiness(provider.id)
+  } else if (deps.hasCredentials) {
+    return deps.hasCredentials(provider.id)
   }
-  return null
-}
-
-async function firstCloudWithCreds(
-  deps: AutoRouterDeps,
-  candidates: readonly string[]
-): Promise<OcrProvider | null> {
-  const credCheck = deps.hasCredentials ?? (() => true)
-  for (const id of candidates) {
-    const provider = deps.registry.get(id)
-    if (!isProviderUsable(provider, deps.platform, deps.settings)) continue
-    const ok = await credCheck(id)
-    if (ok) return provider
-  }
-  return null
+  return staticRuntimeStatus(provider, deps.platform).ready
 }
 
 function platformBucket(deps: AutoRouterDeps): readonly string[] {
@@ -147,30 +132,48 @@ function allCloudCandidates(deps: AutoRouterDeps): string[] {
  * explicit `defaultProviderId` from settings before falling through to
  * platform-local then cloud.
  */
-export async function pickDefaultProvider(deps: AutoRouterDeps): Promise<OcrProvider> {
-  // 1. Explicit setting wins — if the user pinned a provider, use it.
+export async function listProviderCandidates(deps: AutoRouterDeps): Promise<OcrProvider[]> {
+  const candidates: OcrProvider[] = []
+  const seen = new Set<string>()
+  const add = async (provider: OcrProvider | undefined, allowAdvancedOnly = false) => {
+    if (!provider || seen.has(provider.id)) return
+    if (!allowAdvancedOnly && ADVANCED_ONLY_LOCAL_PROVIDERS.has(provider.id)) return
+    if (!isProviderUsable(provider, deps.platform, deps.settings)) return
+    if (!(await isRuntimeReady(deps, provider))) return
+    seen.add(provider.id)
+    candidates.push(provider)
+  }
+
+  // 1. A saved default is preferred, but an unavailable saved id behaves as auto.
   if (deps.settings.defaultProviderId !== "auto") {
-    const pinned = deps.registry.get(deps.settings.defaultProviderId)
-    if (isProviderUsable(pinned, deps.platform, deps.settings)) {
-      return pinned
+    await add(deps.registry.get(deps.settings.defaultProviderId), true)
+  }
+
+  // 2. Platform-local engines, ordered strongest-first.
+  for (const id of platformBucket(deps)) {
+    const provider = deps.registry.get(id)
+    if (provider?.category === "local") await add(provider)
+  }
+
+  // 3. Credentialed cloud fallbacks.
+  if (deps.settings.cloudFallbackEnabled) {
+    for (const id of allCloudCandidates(deps)) {
+      const provider = deps.registry.get(id)
+      if (provider?.category !== "local") await add(provider)
     }
   }
 
-  // 2. Platform-local engine.
-  const localPick = await firstReadyLocal(deps, platformBucket(deps))
-  if (localPick) return localPick
-
-  // 3. Cloud fallback.
-  if (deps.settings.cloudFallbackEnabled) {
-    const cloudPick = await firstCloudWithCreds(deps, allCloudCandidates(deps))
-    if (cloudPick) return cloudPick
-  }
-
-  // 4. Last resort — any registered, shell-compatible, enabled provider.
+  // 4. Last resort — still readiness-gated; never route to placeholders.
   for (const p of deps.registry.listForShell(deps.platform)) {
-    if (deps.settings.providerEnabled[p.id] === false) continue
-    return p
+    await add(p)
   }
+
+  return candidates
+}
+
+export async function pickDefaultProvider(deps: AutoRouterDeps): Promise<OcrProvider> {
+  const [provider] = await listProviderCandidates(deps)
+  if (provider) return provider
 
   throw new OcrError(
     "provider_failed",

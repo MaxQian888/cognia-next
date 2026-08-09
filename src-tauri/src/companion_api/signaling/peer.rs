@@ -13,12 +13,13 @@
 //!   `set_local_description`, and exposes the inbound DataChannel through
 //!   the supplied `inbound_data_tx` channel.
 
-use std::sync::Arc;
+use std::{future::Future, sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, Mutex, Notify, RwLock};
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
+use webrtc::data_channel::data_channel_state::RTCDataChannelState;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -34,6 +35,9 @@ pub const TERMINAL_DATACHANNEL_LABEL: &str = "cognia.terminal";
 pub const ICE_QUEUE_CAPACITY: usize = 256;
 pub const INBOUND_FRAME_QUEUE_CAPACITY: usize = 128;
 pub const STATE_QUEUE_CAPACITY: usize = 32;
+const SEND_BUFFER_HIGH_WATER: usize = 1024 * 1024;
+const SEND_BUFFER_LOW_WATER: usize = 256 * 1024;
+const SEND_BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Wraps an `RTCPeerConnection` and its (single) data channel, fanning the
 /// callback world out to plain mpsc channels for the signaling client to
@@ -44,6 +48,8 @@ pub struct PeerSession {
     /// Latched once the data channel opens — wakes `wait_for_open()`.
     open_tx: tokio::sync::watch::Sender<bool>,
     open_rx: tokio::sync::watch::Receiver<bool>,
+    send_lock: Mutex<()>,
+    send_capacity: Arc<Notify>,
 }
 
 /// Construction-time configuration for [`PeerSession`]. The mpsc senders
@@ -86,6 +92,7 @@ impl PeerSession {
         let pc = Arc::new(api.new_peer_connection(config).await?);
         let dc: Arc<RwLock<Option<Arc<RTCDataChannel>>>> = Arc::new(RwLock::new(None));
         let (open_tx, open_rx) = tokio::sync::watch::channel(false);
+        let send_capacity = Arc::new(Notify::new());
 
         // ── on_ice_candidate ───────────────────────────────────────────
         let ice_tx = callbacks.outbound_ice.clone();
@@ -125,11 +132,13 @@ impl PeerSession {
         let inbound_tx = callbacks.inbound_data.clone();
         let terminal_channel = Arc::clone(&callbacks.terminal_channel);
         let open_tx_dc = open_tx.clone();
+        let send_capacity_dc = Arc::clone(&send_capacity);
         pc.on_data_channel(Box::new(move |channel: Arc<RTCDataChannel>| {
             let dc_slot = Arc::clone(&dc_slot);
             let inbound_tx = inbound_tx.clone();
             let terminal_channel = Arc::clone(&terminal_channel);
             let open_tx_dc = open_tx_dc.clone();
+            let send_capacity_dc = Arc::clone(&send_capacity_dc);
             Box::pin(async move {
                 if channel.label() == TERMINAL_DATACHANNEL_LABEL {
                     if !is_reliable_ordered_channel(
@@ -154,11 +163,50 @@ impl PeerSession {
                     return;
                 }
 
-                // Stash the channel so `send()` can reach it.
-                {
+                // The RPC/event channel is a single ordered, fully reliable
+                // stream. A second channel with the same label is not a
+                // replacement protocol: accepting it would let its callbacks
+                // overwrite the live channel and reorder framed messages.
+                let decision = {
                     let mut slot = dc_slot.write().await;
-                    *slot = Some(Arc::clone(&channel));
+                    let decision = classify_inbound_channel(
+                        channel.label(),
+                        channel.ordered(),
+                        channel.max_packet_lifetime(),
+                        channel.max_retransmits(),
+                        slot.is_some(),
+                    );
+                    if decision == InboundChannelDecision::AcceptMain {
+                        *slot = Some(Arc::clone(&channel));
+                    }
+                    decision
+                };
+                match decision {
+                    InboundChannelDecision::AcceptMain => {}
+                    InboundChannelDecision::RejectUnreliable => {
+                        log::warn!("signaling::peer: rejecting unreliable main data channel");
+                        let _ = channel.close().await;
+                        return;
+                    }
+                    InboundChannelDecision::RejectDuplicate => {
+                        log::warn!("signaling::peer: rejecting duplicate main data channel");
+                        let _ = channel.close().await;
+                        return;
+                    }
                 }
+
+                channel
+                    .set_buffered_amount_low_threshold(SEND_BUFFER_LOW_WATER)
+                    .await;
+                let capacity_signal = Arc::clone(&send_capacity_dc);
+                channel
+                    .on_buffered_amount_low(Box::new(move || {
+                        let capacity_signal = Arc::clone(&capacity_signal);
+                        Box::pin(async move {
+                            capacity_signal.notify_waiters();
+                        })
+                    }))
+                    .await;
 
                 // on_open → signal the caller via the watch channel.
                 let open_signal = open_tx_dc.clone();
@@ -189,13 +237,23 @@ impl PeerSession {
                 // on_close → drop the cached handle and signal closure.
                 let dc_slot_close = Arc::clone(&dc_slot);
                 let open_signal_close = open_tx_dc.clone();
+                let capacity_signal_close = Arc::clone(&send_capacity_dc);
+                let closing_channel = Arc::clone(&channel);
                 channel.on_close(Box::new(move || {
                     let dc_slot_close = Arc::clone(&dc_slot_close);
                     let open_signal_close = open_signal_close.clone();
+                    let capacity_signal_close = Arc::clone(&capacity_signal_close);
+                    let closing_channel = Arc::clone(&closing_channel);
                     Box::pin(async move {
                         let mut slot = dc_slot_close.write().await;
-                        *slot = None;
+                        if slot
+                            .as_ref()
+                            .is_some_and(|current| Arc::ptr_eq(current, &closing_channel))
+                        {
+                            *slot = None;
+                        }
                         let _ = open_signal_close.send(false);
+                        capacity_signal_close.notify_waiters();
                     })
                 }));
             })
@@ -206,6 +264,8 @@ impl PeerSession {
             dc,
             open_tx,
             open_rx,
+            send_lock: Mutex::new(()),
+            send_capacity,
         })
     }
 
@@ -240,19 +300,108 @@ impl PeerSession {
     /// mobile→desktop direction already sends text; this makes the two
     /// symmetric. Non-UTF-8 payloads (should never occur) fall back to binary.
     pub async fn send_bytes(&self, bytes: Vec<u8>) -> Result<(), PeerSendError> {
-        let dc = self.dc.read().await;
-        let channel = dc.as_ref().ok_or(PeerSendError::ChannelClosed)?;
+        let channel = self
+            .dc
+            .read()
+            .await
+            .clone()
+            .ok_or(PeerSendError::ChannelClosed)?;
         let message_id = uuid::Uuid::new_v4().to_string();
         let frames = super::datachannel_framing::encode_message(&bytes, &message_id)
             .map_err(|error| PeerSendError::Webrtc(error.to_string()))?;
         for frame in frames {
-            let result = match String::from_utf8(frame) {
-                Ok(text) => channel.send_text(text).await,
-                Err(err) => channel.send(&Bytes::from(err.into_bytes())).await,
+            let frame = match String::from_utf8(frame) {
+                Ok(text) => OutboundFrame::Text(text),
+                Err(err) => OutboundFrame::Binary(Bytes::from(err.into_bytes())),
             };
-            result.map_err(|e| PeerSendError::Webrtc(e.to_string()))?;
+            self.send_frame(&channel, frame).await?;
         }
         Ok(())
+    }
+
+    /// Send a media resource as raw bounded DataChannel frames. Metadata is
+    /// announced separately by the dispatcher; these frames contain only the
+    /// request id, ordering fields, and the original bytes.
+    pub async fn send_binary_resource(
+        &self,
+        request_id: &str,
+        bytes: &[u8],
+    ) -> Result<(), PeerSendError> {
+        let channel = self
+            .dc
+            .read()
+            .await
+            .clone()
+            .ok_or(PeerSendError::ChannelClosed)?;
+        let chunk_bytes = super::datachannel_framing::BINARY_RESOURCE_CHUNK_BYTES;
+        let total_chunks = bytes.len().max(1).div_ceil(chunk_bytes) as u32;
+        if bytes.is_empty() {
+            let frame = super::datachannel_framing::encode_binary_resource_chunk(
+                request_id,
+                0,
+                total_chunks,
+                &[],
+            )
+            .map_err(|error| PeerSendError::Webrtc(error.to_string()))?;
+            self.send_frame(&channel, OutboundFrame::Binary(Bytes::from(frame)))
+                .await?;
+            return Ok(());
+        }
+        for (index, payload) in bytes.chunks(chunk_bytes).enumerate() {
+            let frame = super::datachannel_framing::encode_binary_resource_chunk(
+                request_id,
+                index as u32,
+                total_chunks,
+                payload,
+            )
+            .map_err(|error| PeerSendError::Webrtc(error.to_string()))?;
+            self.send_frame(&channel, OutboundFrame::Binary(Bytes::from(frame)))
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn send_frame(
+        &self,
+        channel: &Arc<RTCDataChannel>,
+        frame: OutboundFrame,
+    ) -> Result<(), PeerSendError> {
+        // Lock one physical frame at a time. Logical messages may interleave
+        // safely because each frame carries its own message id, while the lock
+        // prevents concurrent senders from all refilling a just-drained SCTP
+        // buffer before any of them can observe the new buffered amount.
+        let _send_guard = self.send_lock.lock().await;
+        if channel.ready_state() != RTCDataChannelState::Open {
+            return Err(PeerSendError::ChannelClosed);
+        }
+        if let Err(error) = wait_for_send_capacity(
+            {
+                let channel = Arc::clone(channel);
+                move || {
+                    let channel = Arc::clone(&channel);
+                    async move { channel.buffered_amount().await }
+                }
+            },
+            self.open_rx.clone(),
+            &self.send_capacity,
+            SEND_BACKPRESSURE_TIMEOUT,
+        )
+        .await
+        {
+            if matches!(error, PeerSendError::BackpressureTimeout) {
+                let _ = channel.close().await;
+            }
+            return Err(error);
+        }
+        if channel.ready_state() != RTCDataChannelState::Open {
+            return Err(PeerSendError::ChannelClosed);
+        }
+        match frame {
+            OutboundFrame::Text(text) => channel.send_text(text).await,
+            OutboundFrame::Binary(bytes) => channel.send(&bytes).await,
+        }
+        .map(|_| ())
+        .map_err(|error| PeerSendError::Webrtc(error.to_string()))
     }
 
     /// Wait until the data channel transitions to the `open` state. Returns
@@ -297,12 +446,86 @@ fn is_reliable_ordered_channel(
     ordered && max_packet_lifetime.is_none() && max_retransmits.is_none()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InboundChannelDecision {
+    AcceptMain,
+    RejectUnreliable,
+    RejectDuplicate,
+}
+
+fn classify_inbound_channel(
+    label: &str,
+    ordered: bool,
+    max_packet_lifetime: Option<u16>,
+    max_retransmits: Option<u16>,
+    main_occupied: bool,
+) -> InboundChannelDecision {
+    debug_assert_eq!(label, DATACHANNEL_LABEL);
+    if !is_reliable_ordered_channel(ordered, max_packet_lifetime, max_retransmits) {
+        InboundChannelDecision::RejectUnreliable
+    } else if main_occupied {
+        InboundChannelDecision::RejectDuplicate
+    } else {
+        InboundChannelDecision::AcceptMain
+    }
+}
+
+enum OutboundFrame {
+    Text(String),
+    Binary(Bytes),
+}
+
+async fn wait_for_send_capacity<F, Fut>(
+    mut buffered_amount: F,
+    mut open_rx: tokio::sync::watch::Receiver<bool>,
+    capacity_signal: &Notify,
+    timeout: Duration,
+) -> Result<(), PeerSendError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = usize>,
+{
+    if buffered_amount().await <= SEND_BUFFER_HIGH_WATER {
+        return Ok(());
+    }
+
+    let wait = async {
+        loop {
+            // Register before re-checking the amount so a drain between the
+            // check and the await cannot strand this sender.
+            let drained = capacity_signal.notified();
+            tokio::pin!(drained);
+            drained.as_mut().enable();
+            if buffered_amount().await <= SEND_BUFFER_LOW_WATER {
+                return Ok(());
+            }
+            if !*open_rx.borrow() {
+                return Err(PeerSendError::ChannelClosed);
+            }
+            tokio::select! {
+                _ = &mut drained => {}
+                changed = open_rx.changed() => {
+                    if changed.is_err() || !*open_rx.borrow() {
+                        return Err(PeerSendError::ChannelClosed);
+                    }
+                }
+            }
+        }
+    };
+
+    tokio::time::timeout(timeout, wait)
+        .await
+        .unwrap_or(Err(PeerSendError::BackpressureTimeout))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PeerSendError {
     #[error("data channel is not open")]
     ChannelClosed,
     #[error("wait_for_open timed out")]
     Timeout,
+    #[error("data channel backpressure timed out")]
+    BackpressureTimeout,
     #[error("webrtc error: {0}")]
     Webrtc(String),
 }
@@ -314,6 +537,7 @@ pub enum PeerSendError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use webrtc::peer_connection::offer_answer_options::RTCOfferOptions;
 
     fn callbacks() -> (
@@ -355,6 +579,96 @@ mod tests {
         assert!(!is_reliable_ordered_channel(false, None, None));
         assert!(!is_reliable_ordered_channel(true, Some(1000), None));
         assert!(!is_reliable_ordered_channel(true, None, Some(3)));
+    }
+
+    #[test]
+    fn main_channel_contract_rejects_unreliable_and_duplicate_channels() {
+        assert_eq!(
+            classify_inbound_channel(DATACHANNEL_LABEL, true, None, None, false),
+            InboundChannelDecision::AcceptMain
+        );
+        assert_eq!(
+            classify_inbound_channel(DATACHANNEL_LABEL, false, None, None, false),
+            InboundChannelDecision::RejectUnreliable
+        );
+        assert_eq!(
+            classify_inbound_channel(DATACHANNEL_LABEL, true, Some(1000), None, false),
+            InboundChannelDecision::RejectUnreliable
+        );
+        assert_eq!(
+            classify_inbound_channel(DATACHANNEL_LABEL, true, None, Some(3), false),
+            InboundChannelDecision::RejectUnreliable
+        );
+        assert_eq!(
+            classify_inbound_channel(DATACHANNEL_LABEL, true, None, None, true),
+            InboundChannelDecision::RejectDuplicate
+        );
+    }
+
+    #[tokio::test]
+    async fn send_capacity_wait_resumes_after_buffer_drains() {
+        let amount = Arc::new(AtomicUsize::new(SEND_BUFFER_HIGH_WATER + 1));
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let (open_tx, open_rx) = tokio::sync::watch::channel(true);
+        let amount_for_wait = Arc::clone(&amount);
+        let notify_for_wait = Arc::clone(&notify);
+        let waiter = tokio::spawn(async move {
+            wait_for_send_capacity(
+                move || {
+                    let amount = Arc::clone(&amount_for_wait);
+                    async move { amount.load(Ordering::SeqCst) }
+                },
+                open_rx,
+                &notify_for_wait,
+                std::time::Duration::from_secs(1),
+            )
+            .await
+        });
+
+        tokio::task::yield_now().await;
+        amount.store(SEND_BUFFER_LOW_WATER, Ordering::SeqCst);
+        notify.notify_waiters();
+
+        assert!(waiter.await.unwrap().is_ok());
+        drop(open_tx);
+    }
+
+    #[tokio::test]
+    async fn send_capacity_wait_stops_when_channel_closes() {
+        let notify = tokio::sync::Notify::new();
+        let (open_tx, open_rx) = tokio::sync::watch::channel(true);
+        let waiter = tokio::spawn(async move {
+            wait_for_send_capacity(
+                || async { SEND_BUFFER_HIGH_WATER + 1 },
+                open_rx,
+                &notify,
+                std::time::Duration::from_secs(1),
+            )
+            .await
+        });
+
+        tokio::task::yield_now().await;
+        open_tx.send(false).unwrap();
+
+        assert!(matches!(
+            waiter.await.unwrap(),
+            Err(PeerSendError::ChannelClosed)
+        ));
+    }
+
+    #[tokio::test]
+    async fn send_capacity_wait_has_a_distinct_timeout_error() {
+        let notify = tokio::sync::Notify::new();
+        let (_open_tx, open_rx) = tokio::sync::watch::channel(true);
+        let result = wait_for_send_capacity(
+            || async { SEND_BUFFER_HIGH_WATER + 1 },
+            open_rx,
+            &notify,
+            std::time::Duration::from_millis(10),
+        )
+        .await;
+
+        assert!(matches!(result, Err(PeerSendError::BackpressureTimeout)));
     }
 
     #[tokio::test]

@@ -12,7 +12,7 @@
  * composer, so this line stays a steady identity readout.
  */
 import React from "react"
-import { Box, Text, useStdout, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
 
 import {
   buildStatusBar,
@@ -22,10 +22,37 @@ import {
   type StatusSegmentView,
 } from "../format/status-bar"
 import { useTheme } from "../theme/context"
+import { stringWidth, truncateToWidth } from "../markdown/width"
 import type { RateLimitSnapshot } from "../format/rate-limits"
 import type { BackendCapabilities } from "../runtime/backend-capabilities"
 import type { ResolvedConfig } from "../../config/schema"
 import type { SessionTotals, TurnStatus, UsageInfo } from "../state/types"
+
+const HINT_TEXT = " · ⚙ /settings · ▸ /inspect"
+
+/** Keep every footer suffix inside the same physical terminal row. */
+export function fitFooterSuffixes(
+  columns: number,
+  firstSegmentWidth: number,
+  planTitle: string | undefined,
+  showHint: boolean
+): { planText: string; hintText: string; reservedWidth: number } {
+  const roomAfterIdentity = Math.max(0, columns - firstSegmentWidth - 2)
+  const hintText = showHint && stringWidth(HINT_TEXT) <= roomAfterIdentity ? HINT_TEXT : ""
+  const planPrefix = " · 📋 "
+  const planRoom = Math.max(0, roomAfterIdentity - stringWidth(hintText))
+  let planText = ""
+  if (planTitle && planRoom > stringWidth(planPrefix) + 1) {
+    const titleRoom = planRoom - stringWidth(planPrefix)
+    const fittedTitle = truncateToWidth(planTitle, titleRoom)
+    planText = planPrefix + fittedTitle
+  }
+  return {
+    planText,
+    hintText,
+    reservedWidth: stringWidth(planText) + stringWidth(hintText),
+  }
+}
 
 function FooterImpl({
   config,
@@ -40,6 +67,7 @@ function FooterImpl({
   capabilities,
   rowRef,
   segmentsRef,
+  showHint = true,
 }: {
   config: ResolvedConfig
   usage?: UsageInfo
@@ -65,10 +93,10 @@ function FooterImpl({
   /** Receives the exact fitted segments App needs to map a click column to a
    * segment id (single source of truth — no recompute on the App side). */
   segmentsRef?: React.MutableRefObject<StatusSegmentView[] | null>
+  showHint?: boolean
 }) {
   const theme = useTheme()
-  const { stdout } = useStdout()
-  const cols = columns ?? stdout?.columns ?? 80
+  const cols = columns ?? 80
   const busy = turnStatus !== "idle"
   const segmentsConfig = React.useMemo(() => resolveSegments(config), [config])
   const wantsGit = segmentsConfig.includes("git")
@@ -90,9 +118,19 @@ function FooterImpl({
       }),
     [config, usage, totals, git, contextWindow, rateLimits, capabilities, theme]
   )
+  const suffixes = React.useMemo(
+    () =>
+      fitFooterSuffixes(
+        cols,
+        allSegments[0] ? stringWidth(allSegments[0].text) : 0,
+        planTitle,
+        !busy && showHint && config.statusBar?.showHints !== false
+      ),
+    [cols, allSegments, planTitle, busy, showHint, config.statusBar?.showHints]
+  )
   const { segments, truncated } = React.useMemo(
-    () => fitStatusSegments(allSegments, cols),
-    [allSegments, cols]
+    () => fitStatusSegments(allSegments, Math.max(0, cols - suffixes.reservedWidth)),
+    [allSegments, cols, suffixes.reservedWidth]
   )
   // Cache the rendered segments so App's footer click hit-test maps a column to
   // the EXACT segment shown. Written in an effect (not during render) so it never
@@ -114,17 +152,16 @@ function FooterImpl({
           {" …"}
         </Text>
       ) : null}
-      {planTitle ? (
+      {suffixes.planText ? (
         <Text color={theme.accent} dimColor>
-          {" · 📋 "}
-          {planTitle}
+          {suffixes.planText}
         </Text>
       ) : null}
       {/* Persistent discoverability hint — only when idle so it never competes
           with the transient working indicator above the composer. */}
-      {!busy ? (
+      {suffixes.hintText ? (
         <Text color={theme.muted} dimColor>
-          {" · ⚙ /settings · ▸ /inspect"}
+          {suffixes.hintText}
         </Text>
       ) : null}
     </Box>

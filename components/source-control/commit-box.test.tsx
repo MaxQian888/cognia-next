@@ -50,11 +50,25 @@ function setPanelPrefs(panel: Record<string, unknown>) {
   })
 }
 
+function statusWithUpstream(upstream: string | null) {
+  return {
+    branch: "main",
+    upstream,
+    ahead: 0,
+    behind: 0,
+    staged: [],
+    changes: [],
+    merge: [],
+    isRebasing: false,
+    isMerging: false,
+  } as never
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   window.localStorage.clear()
   act(() => {
-    useGitStore.setState({ commitDraft: {}, commitAmend: false })
+    useGitStore.setState({ commitDraft: {}, commitAmend: false, status: null })
   })
   setAiEnabled(false)
 })
@@ -187,8 +201,9 @@ describe("CommitBox", () => {
     expect(screen.getByTestId("commit-ai-generate")).toBeDisabled()
   })
 
-  it("chains the configured post-commit push after a plain commit", async () => {
+  it("publishes after a plain commit when the branch has no upstream", async () => {
     setPanelPrefs({ postCommit: "push" })
+    act(() => useGitStore.setState({ status: statusWithUpstream(null) }))
     const actions = makeActions()
     render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
     fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "feat: x" } })
@@ -199,9 +214,24 @@ describe("CommitBox", () => {
     expect(actions.push).toHaveBeenCalledWith({ setUpstream: true })
   })
 
+  it("pushes to the configured upstream without republishing it", async () => {
+    setPanelPrefs({ postCommit: "push" })
+    act(() => useGitStore.setState({ status: statusWithUpstream("upstream/main") }))
+    const actions = makeActions()
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
+    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "feat: x" } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("commit-button"))
+    })
+
+    expect(actions.push).toHaveBeenCalledWith()
+  })
+
   it("supports commit-and-sync plus amend and signoff menu actions", async () => {
     const user = userEvent.setup()
     const actions = makeActions()
+    act(() => useGitStore.setState({ status: statusWithUpstream("origin/main") }))
     render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
     fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "feat: menu" } })
 
@@ -214,6 +244,22 @@ describe("CommitBox", () => {
 
     expect(actions.commit).toHaveBeenCalledWith("feat: menu", { amend: true, signoff: true })
     expect(actions.sync).toHaveBeenCalled()
+  })
+
+  it("publishes instead of running sync when commit-and-sync has no upstream", async () => {
+    const user = userEvent.setup()
+    const actions = makeActions()
+    act(() => useGitStore.setState({ status: statusWithUpstream(null) }))
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
+    fireEvent.change(screen.getByTestId("commit-message"), {
+      target: { value: "feat: publish" },
+    })
+
+    await user.click(screen.getByTestId("commit-more"))
+    await user.click(screen.getByTestId("commit-and-sync"))
+
+    expect(actions.push).toHaveBeenCalledWith({ setUpstream: true })
+    expect(actions.sync).not.toHaveBeenCalled()
   })
 
   it("supports the explicit commit-and-push menu action", async () => {

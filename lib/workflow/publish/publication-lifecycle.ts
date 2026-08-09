@@ -2,7 +2,13 @@ import type { Skill } from "@cognia/agent-config-types"
 
 import { getDb, withDbReopenRetry } from "@/lib/db/schema"
 import { upsertSkillByCanonicalId, workflowSkillBody } from "@/lib/db/skills"
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { migrateWorkflow } from "@/lib/workflow/definition/migrate"
+import { validateWorkflow } from "@/lib/workflow/definition/validate"
+import {
+  createWorkflowVersion,
+  workflowDeploymentId,
+} from "@/lib/workflow/versioning/version-snapshot"
 import type { VisualWorkflow, WorkflowInterface } from "@/types/workflow/visual"
 
 /** Canonical id of the skill-catalog entry backing a published workflow. */
@@ -128,6 +134,9 @@ export interface PublishWorkflowResult {
   workflowInterface: WorkflowInterface
   skillId: string
   created: boolean
+  versionId: string
+  deploymentId: string
+  deploymentRevision: number
 }
 
 /** Explicitly publish or re-publish a workflow and its generated Skill. */
@@ -136,36 +145,97 @@ export async function publishWorkflowLifecycle(
   at: number
 ): Promise<PublishWorkflowResult> {
   const skillBeforePublish = await findWorkflowSkill(workflowId)
+  const accountId = getActiveAccountId()
   try {
     return await withDbReopenRetry(() => {
       const db = getDb()
-      return db.transaction("rw", db.workflows, db.skills, () =>
-        Promise.all([db.workflows.get(workflowId), db.skills.toArray()]).then(
-          ([stored, skills]) => {
+      return db.transaction(
+        "rw",
+        db.workflows,
+        db.skills,
+        db.skillResources,
+        db.workflowVersions,
+        db.workflowDeployments,
+        () =>
+          Promise.all([
+            db.workflows.get(workflowId),
+            db.skills.toArray(),
+            db.workflowVersions.where("workflowId").equals(workflowId).sortBy("sequence"),
+            db.workflowDeployments
+              .where("[accountId+workflowId+environment]")
+              .equals([accountId, workflowId, "production"])
+              .first(),
+          ]).then(([stored, skills, versions, existingDeployment]) => {
             if (!stored) throw new Error(`publishWorkflow: workflow ${workflowId} not found`)
 
             const existing = migrateWorkflow(stored)
+            const validation = validateWorkflow(existing)
+            if (!validation.ok) {
+              throw new Error(
+                `publishWorkflow: workflow ${workflowId} is invalid: ${validation.errors.join("; ")}`
+              )
+            }
+            const legacyCodeNode = existing.nodes.find(
+              (node) => node.type === "data.code" && node.typeVersion === 1
+            )
+            if (legacyCodeNode) {
+              throw new Error(
+                `publishWorkflow: node ${legacyCodeNode.id} uses data.code@1; migrate it to the isolated data.code@2 executor before publishing`
+              )
+            }
             const workflowInterface = derivePublishedInterface(existing)
             const toolName = toolNameForWorkflow(existing)
+            const sequence = (versions.at(-1)?.sequence ?? 0) + 1
+            const version = createWorkflowVersion({
+              workflow: existing,
+              workflowInterface,
+              accountId,
+              sequence,
+              createdAt: at,
+            })
+            const deploymentId =
+              existingDeployment?.id ?? workflowDeploymentId(accountId, workflowId, "production")
+            const deploymentRevision = (existingDeployment?.revision ?? 0) + 1
             const workflow: VisualWorkflow = {
               ...existing,
               interface: workflowInterface,
-              published: { at, toolName },
+              published: {
+                at,
+                toolName,
+                versionId: version.id,
+                deploymentId,
+                deploymentRevision,
+              },
               updatedAt: Date.now(),
             }
             const canonicalId = workflowSkillCanonicalId(workflowId)
             const existingSkill = skills.find((skill) => skill.canonicalId === canonicalId)
-            return db.workflows
-              .put(workflow)
+            return Promise.all([
+              db.workflowVersions.add(version),
+              db.workflowDeployments.put({
+                id: deploymentId,
+                accountId,
+                workflowId,
+                environment: "production",
+                versionId: version.id,
+                revision: deploymentRevision,
+                status: "active",
+                createdAt: existingDeployment?.createdAt ?? at,
+                updatedAt: at,
+              }),
+              db.workflows.put(workflow),
+            ])
               .then(() => syncWorkflowSkill(workflow, existingSkill))
               .then(({ skill, created }) => ({
                 toolName,
                 workflowInterface,
                 skillId: skill.id,
                 created,
+                versionId: version.id,
+                deploymentId,
+                deploymentRevision,
               }))
-          }
-        )
+          })
       )
     })
   } catch (error) {
@@ -184,6 +254,9 @@ export async function publishWorkflowLifecycle(
     if (
       workflow.published?.at !== at ||
       workflow.published.toolName !== toolName ||
+      !workflow.published.versionId ||
+      !workflow.published.deploymentId ||
+      workflow.published.deploymentRevision === undefined ||
       !workflowInterfacesEqual(workflow.interface, workflowInterface) ||
       workflowSkillNeedsSync(skill, workflow)
     ) {
@@ -194,26 +267,125 @@ export async function publishWorkflowLifecycle(
       workflowInterface,
       skillId: skill.id,
       created: skillBeforePublish === undefined,
+      versionId: workflow.published.versionId,
+      deploymentId: workflow.published.deploymentId,
+      deploymentRevision: workflow.published.deploymentRevision,
     }
   }
 }
 
 /** Explicitly remove a workflow's callable contract and generated Skill. */
 export async function unpublishWorkflowLifecycle(workflowId: string): Promise<void> {
+  const accountId = getActiveAccountId()
   const db = getDb()
-  await db.transaction("rw", db.workflows, db.skills, async () => {
-    const stored = await db.workflows.get(workflowId)
+  await db.transaction("rw", db.workflows, db.skills, db.workflowDeployments, async () => {
+    const [stored, deployment] = await Promise.all([
+      db.workflows.get(workflowId),
+      db.workflowDeployments
+        .where("[accountId+workflowId+environment]")
+        .equals([accountId, workflowId, "production"])
+        .first(),
+    ])
     if (stored) {
+      const migrated = migrateWorkflow(stored)
       await db.workflows.put({
-        ...migrateWorkflow(stored),
+        ...migrated,
         interface: undefined,
         published: undefined,
+        updatedAt: Date.now(),
+      })
+    }
+    if (deployment) {
+      await db.workflowDeployments.put({
+        ...deployment,
+        status: "disabled",
+        revision: deployment.revision + 1,
         updatedAt: Date.now(),
       })
     }
     const skill = await findWorkflowSkill(workflowId)
     if (skill) await db.skills.delete(skill.id)
   })
+}
+
+/** Atomically point production back to an existing immutable version. */
+export async function rollbackWorkflowLifecycle(
+  workflowId: string,
+  versionId: string,
+  at: number
+): Promise<PublishWorkflowResult> {
+  const accountId = getActiveAccountId()
+  const db = getDb()
+  return db.transaction(
+    "rw",
+    db.workflows,
+    db.skills,
+    db.skillResources,
+    db.workflowVersions,
+    db.workflowDeployments,
+    async () => {
+      const [stored, version, deployment, skill] = await Promise.all([
+        db.workflows.get(workflowId),
+        db.workflowVersions.get(versionId),
+        db.workflowDeployments
+          .where("[accountId+workflowId+environment]")
+          .equals([accountId, workflowId, "production"])
+          .first(),
+        findWorkflowSkill(workflowId),
+      ])
+      if (!stored) throw new Error(`rollbackWorkflow: workflow ${workflowId} not found`)
+      if (!version || version.workflowId !== workflowId || version.accountId !== accountId) {
+        throw new Error(
+          `rollbackWorkflow: version ${versionId} is not owned by workflow ${workflowId}`
+        )
+      }
+      if (!deployment) {
+        throw new Error(`rollbackWorkflow: production deployment for ${workflowId} not found`)
+      }
+
+      const deploymentRevision = deployment.revision + 1
+      const toolName = toolNameForWorkflow(version.definition)
+      const published = {
+        at,
+        toolName,
+        versionId: version.id,
+        deploymentId: deployment.id,
+        deploymentRevision,
+      }
+      const projection: VisualWorkflow = {
+        ...version.definition,
+        interface: version.interface,
+        published,
+      }
+      const draft: VisualWorkflow = {
+        ...migrateWorkflow(stored),
+        interface: version.interface,
+        published,
+        updatedAt: Date.now(),
+      }
+
+      await Promise.all([
+        db.workflowDeployments.put({
+          ...deployment,
+          versionId: version.id,
+          revision: deploymentRevision,
+          status: "active",
+          updatedAt: at,
+        }),
+        db.workflows.put(draft),
+      ])
+      const synced = await syncWorkflowSkill(projection, skill)
+      return {
+        toolName,
+        workflowInterface: version.interface,
+        skillId: synced.skill.id,
+        created: synced.created,
+        versionId: version.id,
+        deploymentId: deployment.id,
+        deploymentRevision,
+      }
+    }
+  )
 }
 
 export interface WorkflowMutationResult {
@@ -245,7 +417,7 @@ export async function updateWorkflowWithPublication(
       published: _ignoredPublished,
       ...ordinaryPatch
     } = patch
-    let workflow: VisualWorkflow = {
+    const workflow: VisualWorkflow = {
       ...existing,
       ...ordinaryPatch,
       id: existing.id,
@@ -253,39 +425,15 @@ export async function updateWorkflowWithPublication(
       schemaVersion: 2,
       updatedAt,
     }
-    let publicationInvalidated = false
-
-    if (existing.published) {
-      const derivedInterface = derivePublishedInterface(workflow)
-      if (!workflowInterfacesEqual(existing.interface, derivedInterface)) {
-        workflow = { ...workflow, interface: undefined, published: undefined }
-        publicationInvalidated = true
-        const skill = await findWorkflowSkill(id)
-        if (skill) await db.skills.delete(skill.id)
-      } else {
-        workflow = {
-          ...workflow,
-          interface: derivedInterface,
-          published: {
-            at: existing.published.at,
-            toolName: toolNameForWorkflow(workflow),
-          },
-        }
-        const skill = await findWorkflowSkill(id)
-        if (workflowSkillNeedsSync(skill, workflow)) {
-          await syncWorkflowSkill(workflow, skill)
-        }
-      }
-    } else {
-      workflow = {
-        ...workflow,
-        interface: existing.interface,
-        published: undefined,
-      }
-    }
+    // Publication is a projection of an immutable WorkflowVersion. Ordinary
+    // draft edits must never mutate, rename, or invalidate the deployed
+    // artifact; only an explicit publish/unpublish/rollback operation may
+    // change it.
+    workflow.interface = existing.interface
+    workflow.published = existing.published
 
     await db.workflows.put(workflow)
-    return { workflow, publicationInvalidated }
+    return { workflow, publicationInvalidated: false }
   })
 }
 
@@ -299,8 +447,21 @@ export function replaceWorkflowWithPublication(
 
 /** Atomically remove a workflow definition and its generated Skill row. */
 export async function deleteWorkflowWithPublication(workflowId: string): Promise<void> {
+  const accountId = getActiveAccountId()
   const db = getDb()
-  await db.transaction("rw", db.workflows, db.skills, async () => {
+  await db.transaction("rw", db.workflows, db.skills, db.workflowDeployments, async () => {
+    const deployment = await db.workflowDeployments
+      .where("[accountId+workflowId+environment]")
+      .equals([accountId, workflowId, "production"])
+      .first()
+    if (deployment) {
+      await db.workflowDeployments.put({
+        ...deployment,
+        status: "disabled",
+        revision: deployment.revision + 1,
+        updatedAt: Date.now(),
+      })
+    }
     const skill = await findWorkflowSkill(workflowId)
     if (skill) await db.skills.delete(skill.id)
     await db.workflows.delete(workflowId)
@@ -320,12 +481,16 @@ export interface WorkflowPublicationReconciliationResult {
  */
 export async function reconcileWorkflowPublications(): Promise<WorkflowPublicationReconciliationResult> {
   const db = getDb()
-  const [workflowSnapshot, skillSnapshot] = await Promise.all([
+  const [workflowSnapshot, skillSnapshot, versionSnapshot, deploymentSnapshot] = await Promise.all([
     db.workflows.toArray(),
     db.skills.toArray(),
+    db.workflowVersions.toArray(),
+    db.workflowDeployments.toArray(),
   ])
   const needsReconciliation =
     workflowSnapshot.some((workflow) => Boolean(workflow.published)) ||
+    versionSnapshot.length > 0 ||
+    deploymentSnapshot.length > 0 ||
     skillSnapshot.some(
       (skill) => skill.kind === "workflow" || workflowIdFromSkillCanonicalId(skill.canonicalId)
     )
@@ -333,97 +498,157 @@ export async function reconcileWorkflowPublications(): Promise<WorkflowPublicati
     return { synchronized: 0, invalidated: 0, removedSkills: 0 }
   }
 
-  return db.transaction("rw", db.workflows, db.skills, async () => {
-    // Schedule both initial reads before awaiting either result. Some
-    // IndexedDB implementations auto-commit a readwrite transaction as soon as
-    // its request queue drains; a sequential read leaves a gap before the
-    // second request and makes the reconciliation writes fail with
-    // TransactionInactiveError.
-    const [workflowRows, skills] = await Promise.all([db.workflows.toArray(), db.skills.toArray()])
-    const workflows = workflowRows.map(migrateWorkflow)
-    const workflowById = new Map(workflows.map((workflow) => [workflow.id, workflow]))
-    const skillByCanonicalId = new Map<string, Skill>()
-    for (const skill of skills) {
-      if (skill.canonicalId && !skillByCanonicalId.has(skill.canonicalId)) {
-        skillByCanonicalId.set(skill.canonicalId, skill)
+  return db.transaction(
+    "rw",
+    db.workflows,
+    db.skills,
+    db.skillResources,
+    db.workflowVersions,
+    db.workflowDeployments,
+    async () => {
+      // Schedule both initial reads before awaiting either result. Some
+      // IndexedDB implementations auto-commit a readwrite transaction as soon as
+      // its request queue drains; a sequential read leaves a gap before the
+      // second request and makes the reconciliation writes fail with
+      // TransactionInactiveError.
+      const [workflowRows, skills, versions, deployments] = await Promise.all([
+        db.workflows.toArray(),
+        db.skills.toArray(),
+        db.workflowVersions.toArray(),
+        db.workflowDeployments.toArray(),
+      ])
+      const workflows = workflowRows.map(migrateWorkflow)
+      const workflowById = new Map(workflows.map((workflow) => [workflow.id, workflow]))
+      const versionById = new Map(versions.map((version) => [version.id, version]))
+      const deploymentById = new Map(deployments.map((deployment) => [deployment.id, deployment]))
+      const skillByCanonicalId = new Map<string, Skill>()
+      for (const skill of skills) {
+        if (skill.canonicalId && !skillByCanonicalId.has(skill.canonicalId)) {
+          skillByCanonicalId.set(skill.canonicalId, skill)
+        }
       }
-    }
 
-    const result: WorkflowPublicationReconciliationResult = {
-      synchronized: 0,
-      invalidated: 0,
-      removedSkills: 0,
-    }
-    const activePublishedIds = new Set<string>()
-    const deletedSkillIds = new Set<string>()
+      const result: WorkflowPublicationReconciliationResult = {
+        synchronized: 0,
+        invalidated: 0,
+        removedSkills: 0,
+      }
+      const activePublishedIds = new Set<string>()
+      const deletedSkillIds = new Set<string>()
 
-    for (const workflow of workflows) {
-      if (!workflow.published) continue
-      const canonicalId = workflowSkillCanonicalId(workflow.id)
-      const existingSkill = skillByCanonicalId.get(canonicalId)
-      const derivedInterface = derivePublishedInterface(workflow)
+      for (const workflow of workflows) {
+        if (!workflow.published) continue
+        const canonicalId = workflowSkillCanonicalId(workflow.id)
+        const existingSkill = skillByCanonicalId.get(canonicalId)
 
-      if (!workflowInterfacesEqual(workflow.interface, derivedInterface)) {
-        const invalidated: VisualWorkflow = {
+        if (workflow.published.versionId) {
+          const version = versionById.get(workflow.published.versionId)
+          const deployment = workflow.published.deploymentId
+            ? deploymentById.get(workflow.published.deploymentId)
+            : undefined
+          if (
+            version &&
+            version.workflowId === workflow.id &&
+            deployment?.status === "active" &&
+            deployment.workflowId === workflow.id &&
+            deployment.versionId === version.id
+          ) {
+            activePublishedIds.add(workflow.id)
+            const canonicalWorkflow: VisualWorkflow = {
+              ...version.definition,
+              interface: version.interface,
+              published: workflow.published,
+            }
+            if (workflowSkillNeedsSync(existingSkill, canonicalWorkflow)) {
+              const synced = await syncWorkflowSkill(canonicalWorkflow, existingSkill)
+              skillByCanonicalId.set(canonicalId, synced.skill)
+              result.synchronized += 1
+            }
+            continue
+          }
+
+          const invalidated: VisualWorkflow = {
+            ...workflow,
+            interface: undefined,
+            published: undefined,
+            updatedAt: Date.now(),
+          }
+          await db.workflows.put(invalidated)
+          workflowById.set(workflow.id, invalidated)
+          if (existingSkill) {
+            await db.skills.delete(existingSkill.id)
+            deletedSkillIds.add(existingSkill.id)
+          }
+          result.invalidated += 1
+          continue
+        }
+
+        // Compatibility path for a pre-v144 publication that has not yet been
+        // backfilled. Only legacy rows derive their contract from the live graph.
+        const derivedInterface = derivePublishedInterface(workflow)
+
+        if (!workflowInterfacesEqual(workflow.interface, derivedInterface)) {
+          const invalidated: VisualWorkflow = {
+            ...workflow,
+            interface: undefined,
+            published: undefined,
+            updatedAt: Date.now(),
+          }
+          await db.workflows.put(invalidated)
+          workflowById.set(workflow.id, invalidated)
+          if (existingSkill) {
+            await db.skills.delete(existingSkill.id)
+            deletedSkillIds.add(existingSkill.id)
+          }
+          result.invalidated += 1
+          continue
+        }
+
+        activePublishedIds.add(workflow.id)
+        const canonicalWorkflow: VisualWorkflow = {
           ...workflow,
-          interface: undefined,
-          published: undefined,
-          updatedAt: Date.now(),
+          interface: derivedInterface,
+          published: {
+            at: workflow.published.at,
+            toolName: toolNameForWorkflow(workflow),
+          },
         }
-        await db.workflows.put(invalidated)
-        workflowById.set(workflow.id, invalidated)
-        if (existingSkill) {
-          await db.skills.delete(existingSkill.id)
-          deletedSkillIds.add(existingSkill.id)
+        if (
+          !workflowInterfacesEqual(workflow.interface, canonicalWorkflow.interface) ||
+          workflow.published.toolName !== canonicalWorkflow.published?.toolName
+        ) {
+          await db.workflows.put(canonicalWorkflow)
+          workflowById.set(workflow.id, canonicalWorkflow)
         }
-        result.invalidated += 1
-        continue
+        if (workflowSkillNeedsSync(existingSkill, canonicalWorkflow)) {
+          const synced = await syncWorkflowSkill(canonicalWorkflow, existingSkill)
+          skillByCanonicalId.set(canonicalId, synced.skill)
+          result.synchronized += 1
+        }
       }
 
-      activePublishedIds.add(workflow.id)
-      const canonicalWorkflow: VisualWorkflow = {
-        ...workflow,
-        interface: derivedInterface,
-        published: {
-          at: workflow.published.at,
-          toolName: toolNameForWorkflow(workflow),
-        },
-      }
-      if (
-        !workflowInterfacesEqual(workflow.interface, canonicalWorkflow.interface) ||
-        workflow.published.toolName !== canonicalWorkflow.published?.toolName
-      ) {
-        await db.workflows.put(canonicalWorkflow)
-        workflowById.set(workflow.id, canonicalWorkflow)
-      }
-      if (workflowSkillNeedsSync(existingSkill, canonicalWorkflow)) {
-        const synced = await syncWorkflowSkill(canonicalWorkflow, existingSkill)
-        skillByCanonicalId.set(canonicalId, synced.skill)
-        result.synchronized += 1
-      }
-    }
-
-    for (const skill of skills) {
-      if (deletedSkillIds.has(skill.id)) continue
-      const canonicalWorkflowId = workflowIdFromSkillCanonicalId(skill.canonicalId)
-      if (canonicalWorkflowId) {
-        // Canonical identity wins over stale generated fields from the
-        // pre-repair snapshot. This also recognizes orphan projections whose
-        // `kind` drifted away from "workflow".
-        if (!activePublishedIds.has(canonicalWorkflowId)) {
+      for (const skill of skills) {
+        if (deletedSkillIds.has(skill.id)) continue
+        const canonicalWorkflowId = workflowIdFromSkillCanonicalId(skill.canonicalId)
+        if (canonicalWorkflowId) {
+          // Canonical identity wins over stale generated fields from the
+          // pre-repair snapshot. This also recognizes orphan projections whose
+          // `kind` drifted away from "workflow".
+          if (!activePublishedIds.has(canonicalWorkflowId)) {
+            await db.skills.delete(skill.id)
+            result.removedSkills += 1
+          }
+          continue
+        }
+        if (skill.kind !== "workflow") continue
+        const workflow = skill.workflowId ? workflowById.get(skill.workflowId) : undefined
+        if (!workflow || !activePublishedIds.has(workflow.id)) {
           await db.skills.delete(skill.id)
           result.removedSkills += 1
         }
-        continue
       }
-      if (skill.kind !== "workflow") continue
-      const workflow = skill.workflowId ? workflowById.get(skill.workflowId) : undefined
-      if (!workflow || !activePublishedIds.has(workflow.id)) {
-        await db.skills.delete(skill.id)
-        result.removedSkills += 1
-      }
-    }
 
-    return result
-  })
+      return result
+    }
+  )
 }

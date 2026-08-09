@@ -126,6 +126,7 @@ impl RegionOcr for LocalRegionOcr {
                 bytes,
                 mime_type: "image/png".into(),
                 languages: Vec::new(),
+                model_variant: None,
             })
             .await
             .ok()?;

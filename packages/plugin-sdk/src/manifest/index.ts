@@ -62,6 +62,7 @@ export type {
   PluginToolDef,
   PluginTool,
   PluginToolContext,
+  PluginNetworkAccessRule,
   PluginModeDef,
   PluginManifestCommandDef,
   PluginQuickActionDef,

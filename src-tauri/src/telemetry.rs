@@ -171,8 +171,10 @@ pub async fn telemetry_otlp_export(
         .map_err(|error| format!("telemetry payload must be valid JSON: {error}"))?;
     let endpoint = validate_endpoint(&endpoint)?;
     let headers = build_headers(headers, credential)?;
-    let client = reqwest::Client::builder()
-        .timeout(EXPORT_TIMEOUT)
+    let builder = reqwest::Client::builder().timeout(EXPORT_TIMEOUT);
+    let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, endpoint.as_str())
+        .map_err(|error| error.to_string())?;
+    let client = builder
         .build()
         .map_err(|e| format!("telemetry client build failed: {e}"))?;
     let mut request = client

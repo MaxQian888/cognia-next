@@ -12,6 +12,14 @@ import { openExternal } from "@/lib/tauri/opener"
 import { ImageLightbox, type ImageLightboxItem } from "./image-lightbox"
 
 const mockUseReducedMotion = jest.fn(() => false)
+const mockUseMediaUrl = jest.fn((ref?: string | null) => ({
+  url: ref ? `blob:${ref}` : null,
+  width: 0,
+  height: 0,
+  isThumbnail: false,
+  status: ref ? "ready" : "inactive",
+  retry: jest.fn(),
+}))
 
 jest.mock("motion/react", () => ({
   ...jest.requireActual("../../../__mocks__/motion-react.js"),
@@ -24,6 +32,10 @@ jest.mock("@/lib/files/download", () => ({
 
 jest.mock("@/lib/tauri/opener", () => ({
   openExternal: jest.fn(async () => undefined),
+}))
+
+jest.mock("@/hooks/chat/use-media-url", () => ({
+  useMediaUrl: (ref?: string | null) => mockUseMediaUrl(ref),
 }))
 
 const mockDownloadFromUrl = jest.mocked(downloadFromUrl)
@@ -107,6 +119,7 @@ describe("ImageLightbox", () => {
     mockOpenExternal.mockClear()
     mockOpenExternal.mockResolvedValue(undefined)
     mockUseReducedMotion.mockReturnValue(false)
+    mockUseMediaUrl.mockClear()
   })
 
   it("navigates the gallery from thumbnails and arrow keys", () => {
@@ -131,6 +144,43 @@ describe("ImageLightbox", () => {
     expect(screen.getByTestId("image-lightbox-active-image")).toHaveAttribute("src", items[0].src)
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "End" })
     expect(screen.getByTestId("image-lightbox-active-image")).toHaveAttribute("src", items[1].src)
+  })
+
+  it("fetches canonical bytes only for the active image and one neighbour", () => {
+    const referencedItems: ImageLightboxItem[] = Array.from({ length: 3 }, (_, index) => ({
+      id: `image-${index}`,
+      src: `blob:thumbnail-${index}`,
+      sourceRef: `cognia-media:${String(index).repeat(64)}`,
+      alt: `Image ${index}`,
+    }))
+    function ReferencedGallery() {
+      const [activeIndex, setActiveIndex] = useState(0)
+      return (
+        <ImageLightbox
+          items={referencedItems}
+          open
+          activeIndex={activeIndex}
+          onActiveIndexChange={setActiveIndex}
+          onOpenChange={jest.fn()}
+        />
+      )
+    }
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <TooltipProvider>
+          <ReferencedGallery />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+
+    const requested = () => mockUseMediaUrl.mock.calls.map(([ref]) => ref).filter(Boolean)
+    expect(requested()).toContain(referencedItems[0].sourceRef)
+    expect(requested()).toContain(referencedItems[1].sourceRef)
+    expect(requested()).not.toContain(referencedItems[2].sourceRef)
+
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }))
+
+    expect(requested()).toContain(referencedItems[2].sourceRef)
   })
 
   it("keeps zoom and rotation controls available in the focused viewer", () => {

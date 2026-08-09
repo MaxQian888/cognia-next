@@ -55,6 +55,7 @@ mod tests {
             bytes: vec![],
             mime_type: "image/png".to_string(),
             languages: vec!["en".to_string()],
+            model_variant: None,
         };
         let err = backend.extract(&payload).unwrap_err();
         match err {

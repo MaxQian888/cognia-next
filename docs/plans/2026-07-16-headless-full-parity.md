@@ -8,7 +8,7 @@
 - **Part A(H1–H8)**:IM 连接器全量对等 —— `crates/cognia-connectors` 传输层 + companion RPC 面 + 归属模型
 - **Part B(C1–C6)**:平台能力探测与常驻触发 —— `lib/platform/capabilities.ts` + cron/alarm 常驻 + 剩余未抽取的 initializer
 
-**明确不做**:纯桌面 UI / 硬件绑死的功能(桌宠、托盘、窗口 chrome、computer-use、native OCR…)—— 完整的纳入/排除判据见 **§2.0**。
+**明确不做**:纯桌面 UI / 硬件绑死的功能(桌宠、托盘、窗口 chrome、OS-local computer-use、Apple Vision 等平台绑定 OCR backend)—— 跨平台 Server OCR 已于 2026-08-08 纳入 headless；完整的纳入/排除判据见 **§2.0**。
 
 **参考 ADR**: **0059**(云部署 / 无头 brain —— 本计划推翻其 T-A5 的一条前提 §1.3,并指出其 D4 清单失效 F11)、0060(能力词汇表 L0)、0061(跨设备执行)、0067(crate 分解)、0009 / 0025 / 0036(连接器)
 
@@ -92,17 +92,17 @@ L3 是注释没提的,也是唯一需要人拍板的。**先做 L1/L2 再做 L3,
 
 **排除(无头下无意义,不做)**:
 
-| 功能                                                 | 为什么无意义                                                 |
-| ---------------------------------------------------- | ------------------------------------------------------------ |
-| 桌面宠物 / 托盘 / fleet island                       | 纯桌面 overlay 窗口,没有屏幕就没有它                         |
-| window-title / appearance / context-keys / AppSplash | WebView chrome 与视觉状态                                    |
-| 退出确认 / 崩溃报告 / 同意授权对话框                 | 交互式模态,无人可点                                          |
-| WindowShow / WebviewHeartbeat initializer            | 前者揭示窗口,后者是白屏看门狗 —— 都无窗口可管                |
-| computer-use / `uia-automation`                      | 需要真实显示器 + OS 辅助功能 API                             |
-| OCR **native backend**                               | Apple Vision 等本机硬件(cloud OCR provider 另议,见 [OPEN-5]) |
-| `pty`(交互式终端标签页)                              | 可见终端 UI 才需要;**一次性 shell 执行不在此列**,见 F14      |
-| storage-persistence                                  | `navigator.storage.persist()` 是浏览器 API                   |
-| companion-boot                                       | 这是配对协议的**客户端**侧;brain 是服务端                    |
+| 功能                                                 | 为什么无意义                                                                                 |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 桌面宠物 / 托盘 / fleet island                       | 纯桌面 overlay 窗口,没有屏幕就没有它                                                         |
+| window-title / appearance / context-keys / AppSplash | WebView chrome 与视觉状态                                                                    |
+| 退出确认 / 崩溃报告 / 同意授权对话框                 | 交互式模态,无人可点                                                                          |
+| WindowShow / WebviewHeartbeat initializer            | 前者揭示窗口,后者是白屏看门狗 —— 都无窗口可管                                                |
+| computer-use / `uia-automation`                      | 需要真实显示器 + OS 辅助功能 API                                                             |
+| OCR **platform-bound backend**                       | Apple Vision / Windows package-identity 等本机能力；跨平台 native backend 由 Server OCR 提供 |
+| `pty`(交互式终端标签页)                              | 可见终端 UI 才需要;**一次性 shell 执行不在此列**,见 F14                                      |
+| storage-persistence                                  | `navigator.storage.persist()` 是浏览器 API                                                   |
+| companion-boot                                       | 这是配对协议的**客户端**侧;brain 是服务端                                                    |
 
 **纳入(无头下有意义,本计划要补)**:
 
@@ -300,7 +300,7 @@ async fn oauth_lark_callback(RawQuery(raw_query): RawQuery) -> Response {
 
 D4 是仓里唯一的正式清单:
 
-> Not available in cloud (degraded/hidden): computer-use, OCR, native terminal into the host, desktop pet, native sqlite-vec (use the five cloud vector backends from ADR-0023).
+> Historical note (superseded 2026-08-08): OS-local UI automation and platform-bound OCR engines remain unavailable, while Server OCR, headless terminal, and Remote Browser now negotiate through host runtime operations.
 
 **生来不全**:它漏了嵌入式浏览器。ADR-0055(Agent browser loop)**Accepted 2026-06-25**,比 0059(proposed 2026-07-02 / accepted 07-13)早**一周多** —— 写 D4 时浏览器已经在仓里了。
 
@@ -615,6 +615,8 @@ case "connectors_reset_all_ws":  return 0 as T                         // ❌ �
 
 扩一档 `--tier im`:每个放宽后的 transport 各跑一条「入站 → AI 出话 → 出站」。OneBot 可用仓里已有的 stub 思路(参考 `COGNIA_SMOKE_AGENT` / `stub-acp-agent.mjs` 的 fail-closed 门禁写法:**默认惰性,仅在显式 env 下启用**)。
 
+**2026-08-09 实施结果**：`--tier im` 已落地为 `server` 的超集。它要求显式提供 `COGNIA_SMOKE_ONEBOT_ADAPTER_ID`、`COGNIA_SMOKE_ONEBOT_BEARER` 与 `ANTHROPIC_API_KEY`，先确认目标 adapter 已由无头 Brain 注册，再以带 bearer 的真实反向 WebSocket 注入 OneBot private-message event，等待 Brain 完成 AI turn，并断言回传的 `send_private_msg` action 命中原用户且包含 `pong`。缺少任一凭据直接失败，不再用未注册 adapter 的 404 形状测试代替端到端验收。其他需要真平台凭据的 transport 仍由 [OPEN-3] 跟踪。
+
 ---
 
 ## 4bis. Part B 详细工作项
@@ -667,7 +669,7 @@ case "connectors_reset_all_ws":  return 0 as T                         // ❌ �
    ] as const),   // === SERVER_BACKED;两者必须用同一个常量,加测试钉住
    ```
 
-   **注意**:**不含** `webview` / `pty` / `uia-automation` / `ocr` / `keyring` —— 这正是与 F12 表格「该不该被拒」一列对齐的结果。
+   **注意**:**不含** `webview` / `uia-automation` / `keyring`；`pty` 与 `ocr` 已由 headless terminal / Server OCR 的 runtime operation manifest 单独协商。
 
 3. 加一条测试钉住 `PLATFORM_BASELINES.headless === SERVER_BACKED`(两者漂移必红)。
 
@@ -679,7 +681,7 @@ case "connectors_reset_all_ws":  return 0 as T                         // ❌ �
 
 > ⚠️ **`keyring` 的归属存疑** [UNVERIFIED]:无头用的是加密文件 store(ADR-0059 W5)而非 OS keyring,但 `keyring:*` secret ref 在无头下**是**能解析的。它算不算 `keyring` 能力?`SERVER_BACKED` 没列它。C1 动工前需确认 —— 列错会让一批 secret-ref 节点被误拒。
 
-**2026-07-17 核查结论**:`keyring` 不进入 headless baseline。该 capability 的代码定义是「OS keyring access」;headless 使用 `cognia-secrets` 的 master-key 加密文件,不是 OS keyring。并且当前 `getDefaultSecretResolver()` 只在 Tauri 返回 keyring resolver,companion RPC 也没有 `keyring_secret_*` arm,所以原文「`keyring:*` 在无头能解析」的推断不成立。现有 workflow catalog 没有节点声明 `requires: ["keyring"]`,因此省略它不会误拒现有节点;无头 secret-ref 对等应另列工作项,不能靠谎报 capability 解决。
+**2026-08-08 更新**:`keyring` 仍不进入 headless baseline，因为该 capability 专指 OS keyring；但 headless secret-ref 已通过 `cognia-secrets` 和 canonical `secret_store_get/set/delete` service RPC 完成对等。旧 `keyring_secret_*` 仅作兼容别名，不再用于 availability 语义。
 
 **验收**: brain 里 `detectLocalCapabilities()` 返回 headless 基线;一个含 shell 节点的工作流在 cognia-server 里**跑通而不是 t=0 失败**;桌面/移动/web 三档零变化。
 
@@ -775,7 +777,7 @@ case "connectors_reset_all_ws":  return 0 as T                         // ❌ �
 - **dingtalk / wecom 补 webhook 模式**:它们只声明 `["gateway"]`。**[UNVERIFIED]** 我推测平台侧支持回调,但**没查文档**。若属实,补 adapter 的 webhook transport 比走 H2/H3 便宜,但那是独立工作项,不是本计划的前置。
 - **无头镜像瘦身**:`Dockerfile.cognia-server:33-34` 自陈无头镜像仍整份编译并动态链接 Tauri 桌面栈(`libwebkit2gtk` 等),「no-tauri cargo feature」是 ADR-0059 的 tracked follow-up。与本计划正交。
 - **ADR-0059 F1 / F3**(web transport、账号模型):独立。
-- **§2.0「排除」表里的所有功能**:桌宠、托盘、窗口 chrome、computer-use、native OCR 等 —— 无头下无意义。本计划只在 **C6** 里让它们**诚实降级**,不做任何移植。
+- **§2.0「排除」表里的纯 UI/平台绑定功能**:桌宠、托盘、窗口 chrome、OS-local computer-use、Apple Vision 等 —— 无头下无意义。跨平台 Server OCR、Remote Browser 与 headless terminal 不在此排除项中。
 - **headless Chromium**:见 [OPEN-4]。若拍板走 (c),另立项。
 - **`pty` 交互式终端**:排除。但**一次性 `shell` 执行纳入**(C1a) —— 别把这两个混为一谈,见 F14。
 
@@ -799,24 +801,24 @@ case "connectors_reset_all_ws":  return 0 as T                         // ❌ �
 
 ## 7. 待拍板 [OPEN]
 
-### [OPEN-1] 桌面共存 vs 服务器独占 —— **这条决定 H1 的形状,必须先答**
+### [OPEN-1] 桌面共存 vs 服务器独占 —— RESOLVED 2026-08-09
 
 ADR-0059 T-A5 的兜底是「桌面继续跑长连接」(F3/§1.3)。本计划的目标(服务器独占)与之冲突。两个选项:
 
 - **(a) 服务器独占,桌面永不跑 connector** —— H1 退化成一个部署模式开关,便宜。但**拦不住误操作**:用户手上有桌面版,同账号一开就双拨。
 - **(b) 二者皆可,单持有者** —— H1 是真 lease(§4 H1 的草案)。贵一点,但对误操作是鲁棒的。
 
-**作者推荐 (b)**,理由见 H1。但这是产品决策,不是技术决策 —— **不要默默替它做决定**。
+**决定采用 (b)**。无头进程通过 Rust 宿主的 15 秒租约保证单持有者；桌面本地 WebView 继续使用 Web Locks。账户激活远程目标时，现有 remote-target guard 会停掉桌面连接器运行时，因此日常形态是服务器独占；租约同时防止多个 Brain 进程并发启动。续租失败按 fail-closed 处理，立即停止所有连接器传输。
 
-### [OPEN-2] 要不要开 ADR?
+### [OPEN-2] 要不要开 ADR? —— RESOLVED 2026-08-09
 
-本计划推翻 ADR-0059 的一条明文前提(§1.3),且 H4 改桌面线格。**作者认为至少需要 ADR-0059 修订(加一个 F6 wave),而不是纯计划文档。** 需拍板。
+已修订 ADR-0059，新增 F6 wave，冻结 connector runtime 的所有权、租约 TTL/续租/失租语义，以及 OneBot command plane 与 Lark OAuth EventBus 的无头路径。
 
 ### [OPEN-3] H6 / H8 的真 bot 凭据
 
 Lark send-as-user、OneBot、Discord gateway 的端到端验证都需要真凭据。谁提供?哪个环境?
 
-### [OPEN-4] 嵌入式浏览器怎么办 —— **它不是桌宠**
+### [OPEN-4] 嵌入式浏览器怎么办 —— RESOLVED 2026-08-08
 
 排除桌宠很容易(没屏幕就没意义)。**浏览器不一样**:ADR-0055 叫 "Agent browser loop" —— 一个能上网、能操作页面的 agent,在服务器上是**有意义**的,甚至是核心用途。所以不能照桌宠的理由排除它。
 
@@ -828,13 +830,13 @@ Lark send-as-user、OneBot、Discord gateway 的端到端验证都需要真凭�
 - **(b) 用现有的 web 工具兜底**:`lib/web/reader/`、`lib/web/web-tools-core.ts`(ADR-0060)是纯 HTTP fetch + 解析,**无头可用**。够不够取决于用途 —— 读网页够,操作页面不够。
 - **(c) 单开一份 headless Chromium 的计划**。本计划不碰。
 
-**作者倾向 (b) 兜底 + (c) 另立项**,但需拍板。**无论选哪个,`CORE_CAPABILITY_IDS` 都缺一个 `browser` 能力 id**(C6 已记)。
+结论采用 (c)：ADR-0085 Remote Browser 已提供 workspace runtime Chromium。`browser.remote` feature 通过 `browser_runtime_status` 做 `compiled/enabled/configured/healthy/reason` 动态探测；只有真实 workspace health probe 成功才发布 healthy browser operations。HTTP reader 仍是无需交互时的轻量兜底。
 
-### [OPEN-5] cloud OCR 要不要保留
+### [OPEN-5] cloud OCR 要不要保留 — RESOLVED 2026-08-08
 
 D4 一句话排除了 "OCR"。但 OCR 子系统(ADR-0024)是有 **cloud provider** 的 —— 只有 native backend(Apple Vision 等)是硬件绑定。
 
-所以「OCR 在无头下不可用」这个说法**可能过粗**:cloud OCR 在服务器上应当是可用的。若认可,C1 的 headless 基线要不要含 `ocr`?**但 `ocr` 是单一能力 id,分不出 native / cloud** —— 可能需要拆 id,或在 provider 层降级而非能力层。需拍板。
+结论：保留。Server OCR 通过 `ocr.server` HostFeatureManifest feature 和逐 operation health 暴露；Rust registry 动态列出实际 callable backend，模型状态/下载/取消与进度事件均走 headless service/EventBus。Apple Vision 等平台绑定 backend 继续按 backend availability 降级，不再用单一粗粒度 `ocr` capability 判断。
 
 ---
 

@@ -1,0 +1,33 @@
+{
+  "name": "cognia-agent-team-chibi",
+  "version": 1,
+  "identityReference": "../icon-512.png",
+  "direction": "One recognizable Cognia silver-haired companion expressed as sixteen professional Agent Team roles.",
+  "palette": [
+    "#0B1638",
+    "#214D9C",
+    "#39C6FF",
+    "#7D82E8",
+    "#B8C8FF",
+    "#E8E7FF",
+    "#F4D8D2",
+    "#FFF9F7"
+  ],
+  "construction": {
+    "grid": "One shared 78% live-area keyline with generous optical padding",
+    "identity": "Reuse the same face, bangs, long silver-white hair masses, sapphire eyes, ear device, segmented halo, and cyan diamond core",
+    "proportions": "Cute 2.5-head chibi bust or half-body at one consistent eye level",
+    "perspective": "Front or gentle three-quarter view only",
+    "stroke": "Crisp slim deep-navy anime linework with rounded joins",
+    "fillRule": "Refined cel shading with one restrained cyan rim light",
+    "detailBudget": "One character, one role silhouette, and at most one compact prop or drone",
+    "roleDifferentiation": "Outerwear silhouette, expression, pose, and compact equipment",
+    "weightHierarchy": "Face and hair first, clothing second, role prop third",
+    "shadow": "No cast or contact shadow on the background",
+    "motif": "The segmented cyan halo, angular ear device, and cyan diamond core appear in every avatar"
+  },
+  "cutout": {
+    "sourceBackground": "#808080",
+    "method": "rembg plus neutral-grey soft-matte cleanup"
+  }
+}

@@ -16,6 +16,7 @@
  */
 
 import { getSession } from "@/lib/db/sessions"
+import { resolveCharacterById } from "@/lib/db/characters"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { updateMemory } from "@/lib/db/memories"
@@ -28,11 +29,12 @@ import {
   failMemoryJob,
 } from "@/lib/db/memory-governance"
 import {
-  resolveMemoryTurnPolicy,
   hasUntrustedMemoryContext,
   type MemoryExternalContextSource,
 } from "@/lib/memory/control-plane/policy"
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
+import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
+import type { MemoryScope } from "@/types/memory/memory"
 
 export interface TurnTranscriptEntry {
   role: string
@@ -55,12 +57,18 @@ export interface TurnMemoryInput {
 
 export function resolveAutomaticMemoryScope(
   configured: ReturnType<typeof resolveMemoryConfig>["scopeDefault"],
-  session: { projectId?: string; characterId?: string }
-): "global" | "workspace" | "character" {
-  if (configured !== "agent") return configured
-  if (session.projectId) return "workspace"
-  if (session.characterId) return "character"
-  return "global"
+  session: { projectId?: string; characterId?: string },
+  writableScopes: readonly MemoryScope[] = ["global", "workspace", "character", "agent"]
+): MemoryScope | null {
+  const available = new Set<MemoryScope>(["global"])
+  if (session.projectId) available.add("workspace")
+  if (session.characterId) {
+    available.add("character")
+    available.add("agent")
+  }
+  if (available.has(configured) && writableScopes.includes(configured)) return configured
+  for (const scope of writableScopes) if (available.has(scope)) return scope
+  return null
 }
 
 export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): Promise<void> {
@@ -74,16 +82,20 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
     if (!config.enabled || config.temporary) return
     const sessionRow = await getSession(sessionId).catch(() => undefined)
     if (!sessionRow) return
+    const character = sessionRow.characterId
+      ? await resolveCharacterById(sessionRow.characterId).catch(() => undefined)
+      : undefined
     const externalContext = input.externalContext ?? detectMemoryExternalContext(input.transcript)
     const contaminationState = hasUntrustedMemoryContext(externalContext)
       ? "external-context"
       : "clean"
-    const policy = resolveMemoryTurnPolicy({
+    const policy = resolveAgentMemoryPolicy({
       config,
       session: sessionRow,
+      agentPolicy: character?.memoryPolicy,
       externalContext,
     })
-    if (!policy.canLearn) {
+    if (!policy.canAutoLearn) {
       await appendMemoryAuditEvent({
         action: "learn-denied",
         sessionId,
@@ -92,13 +104,22 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
       }).catch(() => undefined)
       return
     }
-    const policyConfig =
-      sessionRow.memoryLearn === true
-        ? { ...config, learnFromChats: true, autoExtract: true }
-        : config
+    const automaticScope = resolveAutomaticMemoryScope(
+      config.scopeDefault,
+      sessionRow,
+      policy.writableScopes
+    )
+    if (!automaticScope) {
+      await appendMemoryAuditEvent({
+        action: "learn-denied",
+        sessionId,
+        reason: "agent_scope_policy",
+      }).catch(() => undefined)
+      return
+    }
     const effectiveConfig = {
-      ...policyConfig,
-      scopeDefault: resolveAutomaticMemoryScope(policyConfig.scopeDefault, sessionRow),
+      ...config,
+      scopeDefault: automaticScope,
     }
 
     const { buildAutoExtractionDeps, runMemoryExtraction, sessionProvenance } =
@@ -128,6 +149,7 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
         sessionId,
         projectId: sessionRow.projectId,
         characterId: sessionRow.characterId,
+        agentId: automaticScope === "agent" ? sessionRow.characterId : undefined,
         scope: effectiveConfig.scopeDefault,
         provenance,
         evidenceIds: evidence.map((item) => item.id),
@@ -148,6 +170,7 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
           scope: effectiveConfig.scopeDefault,
           characterId: sessionRow.characterId,
           projectId: sessionRow.projectId,
+          agentId: automaticScope === "agent" ? sessionRow.characterId : undefined,
           provenance,
           source: { sessionId, messageId: input.assistantMessageId },
           config: effectiveConfig,

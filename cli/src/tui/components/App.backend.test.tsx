@@ -51,6 +51,21 @@ const ok = (): BackendConnectResult => ({
   },
 })
 
+const okAcp = (): BackendConnectResult => ({
+  ok: true,
+  connection: {
+    backend: "claude-code",
+    presetId: "claude-code",
+    agentId: "cli-backend-s1",
+    command: "claude-agent-acp",
+    capabilities: externalCapabilities({
+      backend: "claude-code",
+      presetId: "claude-code",
+      protocol: "acp",
+    }),
+  },
+})
+
 const failed = (): BackendConnectResult => ({
   ok: false,
   failure: {
@@ -221,6 +236,37 @@ describe("App — external backend startup", () => {
     expect(container.textContent).not.toContain("Switch model")
   })
 
+  it("uses the live ACP session model options instead of model/list", async () => {
+    const listModels = jest.fn(async () => [{ id: "claude-opus-4-1", name: "Claude Opus 4.1" }])
+    const createExternalSession = jest.fn(() => ({
+      sessionId: "acp-session",
+      send: jest.fn(async () => ({
+        text: "hello",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })),
+      listModels,
+      close: jest.fn(async () => undefined),
+    })) as React.ComponentProps<typeof App>["createExternalSession"]
+    const { container } = renderApp(fakeConnect(okAcp), {
+      config: { ...config, agentBackend: "claude-code" },
+      trusted: true,
+      createExternalSession,
+      listExternalModels: jest.fn(async () => {
+        throw new Error("the ACP path must not call model/list")
+      }),
+    })
+    await settle()
+
+    type("/model")
+    submit()
+    await settle()
+
+    expect(listModels).toHaveBeenCalledTimes(1)
+    expect(container.textContent).toContain("Claude Opus 4.1")
+  })
+
   it("reports external model-list failures instead of leaking a rejection", async () => {
     const { container } = renderApp(fakeConnect(ok), {
       trusted: true,
@@ -352,6 +398,31 @@ describe("App — external backend startup", () => {
     expect(text).toContain("Installing GitHub Copilot CLI")
     expect(text).toContain("npm install -g @github/copilot")
     expect(text).toContain("added 1 package")
+  })
+
+  it("cancels a running install with Esc and returns to the recovery page", async () => {
+    let installSignal: AbortSignal | undefined
+    const runInstallFn: React.ComponentProps<typeof App>["runInstallFn"] = async (deps) => {
+      installSignal = deps.signal
+      return new Promise<never>(() => {})
+    }
+    const { container } = renderApp(fakeConnect(failedInstallable), {
+      trusted: true,
+      resolveInstallOptionFn: async () => installOption,
+      runInstallFn,
+    })
+
+    await settle()
+    act(() => __fireInput("", { return: true }))
+    await settle()
+    expect(container.textContent).toContain("Installing GitHub Copilot CLI")
+
+    act(() => __fireInput("", { escape: true }))
+    await settle()
+
+    expect(installSignal?.aborted).toBe(true)
+    expect(container.textContent).toContain("Install GitHub Copilot CLI (npm)")
+    expect(container.textContent).not.toContain("Installing GitHub Copilot CLI")
   })
 
   it("reconnects automatically after a successful install", async () => {

@@ -7,7 +7,7 @@
 //! (`twin/code_repo.rs`) should migrate onto in a follow-up so the libgit2
 //! mechanics live in one place.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use git2::{Repository, RepositoryState};
 
@@ -18,6 +18,67 @@ use super::types::{GitOperation, GitRepoState};
 /// subdirectory of the repo still resolves, matching `git` CLI behavior).
 pub fn open_repo(path: &str) -> Result<Repository> {
     Repository::discover(path).map_err(|_| GitError::NotARepo(path.to_string().into()))
+}
+
+/// Validate a renderer/plugin file operand before it reaches either git2 or
+/// direct filesystem I/O. Source-control file paths are always repo-relative;
+/// accepting an absolute path or `..` would let a `git:read`/`git:write`
+/// caller escape the active repository.
+pub fn validate_repo_relative_path(path: &str) -> Result<&Path> {
+    let candidate = Path::new(path);
+    let valid = !path.trim().is_empty()
+        && !candidate.is_absolute()
+        && candidate
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)));
+    if !valid {
+        return Err(GitError::InvalidArgument(
+            format!("path must be repository-relative without traversal: {path}").into(),
+        ));
+    }
+    Ok(candidate)
+}
+
+/// Discovered work-tree root for a repository path (which itself may point at
+/// a nested directory inside the repository).
+pub fn repo_workdir(repo_path: &str) -> Result<PathBuf> {
+    let repo = open_repo(repo_path)?;
+    repo.workdir()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| GitError::NotARepo(repo_path.to_string().into()))
+}
+
+/// Resolve a validated repo-relative path without following a parent symlink
+/// outside the work tree. The final component may itself be a symlink (Git
+/// tracks symlinks as files); its parent must still resolve inside the repo.
+pub fn safe_workdir_path(repo: &Repository, path: &str) -> Result<PathBuf> {
+    let relative = validate_repo_relative_path(path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError::NotARepo("bare repository has no work tree".into()))?;
+    let canonical_root = std::fs::canonicalize(workdir).map_err(|error| {
+        GitError::CommandFailed(format!("canonicalize repository root: {error}").into())
+    })?;
+    let full = workdir.join(relative);
+
+    // Resolve the nearest existing parent. This catches `link/secret` where
+    // `link` is a directory symlink pointing outside the repository, while
+    // still allowing a deleted path whose final component no longer exists.
+    let mut ancestor = full.parent().unwrap_or(workdir);
+    while !ancestor.exists() {
+        ancestor = ancestor.parent().ok_or_else(|| {
+            GitError::InvalidArgument(format!("path escapes repository: {path}").into())
+        })?;
+    }
+    let canonical_ancestor = std::fs::canonicalize(ancestor).map_err(|error| {
+        GitError::CommandFailed(format!("canonicalize path parent {path}: {error}").into())
+    })?;
+    if !canonical_ancestor.starts_with(&canonical_root) {
+        return Err(GitError::InvalidArgument(
+            format!("path escapes repository through a symlink: {path}").into(),
+        ));
+    }
+    Ok(full)
 }
 
 /// Short name of the current branch, or `None` when detached/unborn.
@@ -130,12 +191,30 @@ pub fn index_blob_text(repo: &Repository, path: &str) -> Option<String> {
     blob_text(blob.content())
 }
 
-/// Read `path` from the working directory as text, or `None`.
-pub fn workdir_text(repo: &Repository, path: &str) -> Option<String> {
-    let workdir = repo.workdir()?;
-    let full = workdir.join(path);
-    let bytes = std::fs::read(full).ok()?;
-    blob_text(&bytes)
+/// Read `path` from the working directory as text, or `None` when absent or
+/// binary. Symlinks are represented by their link target (the bytes Git
+/// stores), never by reading the target file.
+pub fn workdir_text(repo: &Repository, path: &str) -> Result<Option<String>> {
+    let full = safe_workdir_path(repo, path)?;
+    let metadata = match std::fs::symlink_metadata(&full) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(GitError::CommandFailed(
+                format!("read work-tree metadata for {path}: {error}").into(),
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        let target = std::fs::read_link(&full).map_err(|error| {
+            GitError::CommandFailed(format!("read symlink {path}: {error}").into())
+        })?;
+        return Ok(Some(target.to_string_lossy().into_owned()));
+    }
+    let bytes = std::fs::read(&full).map_err(|error| {
+        GitError::CommandFailed(format!("read work-tree file {path}: {error}").into())
+    })?;
+    Ok(blob_text(&bytes))
 }
 
 /// Decode bytes to a UTF-8 string, returning `None` for binary content.
@@ -247,7 +326,23 @@ mod tests {
             index_blob_text(&repo, "a.txt").as_deref(),
             Some("version2\n")
         );
-        assert_eq!(workdir_text(&repo, "a.txt").as_deref(), Some("version2\n"));
+        assert_eq!(
+            workdir_text(&repo, "a.txt").unwrap().as_deref(),
+            Some("version2\n")
+        );
+    }
+
+    #[test]
+    fn rejects_absolute_and_parent_paths() {
+        assert!(matches!(
+            validate_repo_relative_path("../secret"),
+            Err(GitError::InvalidArgument(_))
+        ));
+        assert!(matches!(
+            validate_repo_relative_path("/tmp/secret"),
+            Err(GitError::InvalidArgument(_))
+        ));
+        assert!(validate_repo_relative_path("src/main.rs").is_ok());
     }
 
     #[test]

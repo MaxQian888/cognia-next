@@ -1,19 +1,17 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/connector-audit.ts — capped audit log for connectors.
  */
 
-import "fake-indexeddb/auto"
 import { append, listRecent, __TESTING__ } from "./connector-audit"
 import type { AuditEntry } from "@/types/connectors/audit"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function makeEntry(overrides: Partial<AuditEntry> = {}): Omit<AuditEntry, "id"> {
   return {

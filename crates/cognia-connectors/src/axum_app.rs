@@ -39,6 +39,13 @@ use super::ws_server;
 pub trait EventEmitter: Send + Sync + 'static {
     fn emit(&self, topic: &str, payload: serde_json::Value);
 
+    /// Deliver a sensitive, single-use event to the trusted headless brain.
+    /// Desktop emitters remain process-local; the companion emitter overrides
+    /// this to target the service principal and omit replay buffering.
+    fn emit_ephemeral_to_brain(&self, topic: &str, payload: serde_json::Value) {
+        self.emit(topic, payload);
+    }
+
     fn emit_webhook(&self, adapter_id: &str, payload: &serde_json::Value) {
         self.emit(
             &format!("connectors://webhook/{adapter_id}"),
@@ -93,15 +100,30 @@ async fn health_handler() -> &'static str {
 /// Feishu's console only accepts http/https redirect URLs, so the desktop OAuth
 /// flow registers `${tunnel}/oauth/lark/callback` (this route, reachable via the
 /// same Cloudflared tunnel as the webhook route). We bounce the `code` + `state`
-/// straight into the app's custom scheme `cognia://connector/oauth/lark`, where
-/// the deep-link router validates state and completes the exchange. This handler
-/// is a dumb pass-through — all validation (state, PKCE) happens in the renderer.
+/// onto the connector event bus for a headless brain and also bounce the fields
+/// into the desktop app's `cognia://connector/oauth/lark` custom scheme. Both
+/// consumers validate state and PKCE before exchanging the code.
 ///
 /// Returns a 200 HTML page that launches the scheme (meta-refresh + JS) with a
 /// manual link fallback, which is more reliable across browsers than a 302 to a
 /// non-http scheme.
-async fn oauth_lark_callback(RawQuery(raw_query): RawQuery) -> Response {
+async fn oauth_lark_callback(
+    RawQuery(raw_query): RawQuery,
+    Extension(EmitterExt(emitter)): Extension<EmitterExt>,
+) -> Response {
     let params = parse_query(raw_query.as_deref().unwrap_or(""));
+    let payload = ["code", "state", "error", "error_description"]
+        .into_iter()
+        .filter_map(|key| {
+            params
+                .get(key)
+                .map(|value| (key.to_string(), serde_json::Value::String(value.clone())))
+        })
+        .collect();
+    emitter.emit_ephemeral_to_brain(
+        "connectors://lark-oauth/callback",
+        serde_json::Value::Object(payload),
+    );
     let deep_link = build_lark_oauth_deep_link(&params);
     lark_oauth_callback_page(&deep_link)
 }
@@ -889,9 +911,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oauth_lark_callback_bounces_code_and_state_to_scheme() {
+    async fn oauth_lark_callback_publishes_code_and_state_and_keeps_desktop_bounce() {
         let state = ConnectorsState::new();
-        let (app, _) = test_router_with(state);
+        let (app, emitter) = test_router_with(state);
         let resp = app
             .oneshot(
                 Request::builder()
@@ -908,6 +930,13 @@ mod tests {
         assert!(text.contains("cognia://connector/oauth/lark?"));
         assert!(text.contains("code=abc123"));
         assert!(text.contains("state=lark")); // `:` is percent-encoded downstream
+        assert_eq!(
+            emitter.events.lock().as_slice(),
+            &[(
+                "connectors://lark-oauth/callback".to_string(),
+                serde_json::json!({ "code": "abc123", "state": "lark:lk1:nonce" }),
+            )]
+        );
     }
 
     #[tokio::test]

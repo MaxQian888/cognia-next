@@ -5,22 +5,17 @@
  * without having to spin up the full Zustand store.
  *
  * Resolution order:
- *   1. Custom default headers — always read from the in-memory Zustand store
- *      (`stores/remote-control/store.ts`). On both web and desktop.
- *   2. Signing secret — on the Tauri desktop runtime, read from the OS
- *      keyring through `remoteControlGetSigningSecret`. On web (or when the
- *      Rust call fails for any reason), the secret is treated as "not set"
- *      and signing is skipped.
+ *   1. Custom default headers — read from the canonical webhook store.
+ *   2. Signing secret — read through the shared secure-storage abstraction.
  *
  * Returning `undefined` for a field means "no override" — the webhook send
  * path will skip that step.
  */
 
 import { useEffect, useState } from "react"
-import { isTauri } from "@/lib/tauri"
-import { remoteControlGetSigningSecret } from "@/lib/tauri/remote-control"
-import { useRemoteControlStore } from "@/stores/remote-control/store"
-import type { WebhookDeliveryConfig } from "@/types/remote-control"
+import { getWebhookSigningSecret } from "@/lib/webhooks/signing-secret"
+import { useWebhookStore } from "@/stores/webhooks/store"
+import type { WebhookDeliveryConfig } from "@/types/webhooks"
 
 export interface WebhookOutboundConfig {
   /** Lowercase-hex secret used for the `X-Cognia-Signature` HMAC header. */
@@ -33,7 +28,7 @@ export interface WebhookOutboundConfig {
 
 export async function getWebhookOutboundConfig(): Promise<WebhookOutboundConfig> {
   const headers = headersFromStore()
-  const signingSecret = await readSigningSecret()
+  const signingSecret = await readSigningSecret(signingConfiguredInStore())
   return {
     headers: Object.keys(headers).length > 0 ? headers : undefined,
     signingSecret: signingSecret ?? undefined,
@@ -41,9 +36,17 @@ export async function getWebhookOutboundConfig(): Promise<WebhookOutboundConfig>
   }
 }
 
+function signingConfiguredInStore(): boolean {
+  try {
+    return useWebhookStore.getState().config.hasSigningSecret
+  } catch {
+    return false
+  }
+}
+
 function deliveryFromStore(): WebhookDeliveryConfig | undefined {
   try {
-    return useRemoteControlStore.getState().config.outbound.delivery
+    return useWebhookStore.getState().config.delivery
   } catch {
     return undefined
   }
@@ -51,7 +54,7 @@ function deliveryFromStore(): WebhookDeliveryConfig | undefined {
 
 function headersFromStore(): Record<string, string> {
   try {
-    const list = useRemoteControlStore.getState().config.outbound.defaultHeaders
+    const list = useWebhookStore.getState().config.defaultHeaders
     const out: Record<string, string> = {}
     for (const { name, value } of list) {
       const trimmedName = name.trim()
@@ -66,12 +69,13 @@ function headersFromStore(): Record<string, string> {
   }
 }
 
-async function readSigningSecret(): Promise<string | null> {
-  if (!isTauri()) return null
+async function readSigningSecret(required: boolean): Promise<string | null> {
   try {
-    const secret = await remoteControlGetSigningSecret()
+    const secret = await getWebhookSigningSecret()
+    if (required && !secret) throw new Error("configured webhook signing secret is unavailable")
     return secret && secret.length > 0 ? secret : null
-  } catch {
+  } catch (error) {
+    if (required) throw error
     return null
   }
 }
@@ -80,11 +84,8 @@ async function readSigningSecret(): Promise<string | null> {
  * React hook indicating whether outbound webhook signing is configured.
  *
  * Resolves once on mount via `getWebhookOutboundConfig()`. The signing secret
- * is stored in the OS keyring (desktop) and rarely changes mid-session, so
- * mount-time resolution is sufficient — users can navigate away and back to
- * re-check after rotating the key.
- *
- * On web `enabled` is always `false` (no keyring access from the browser).
+ * is stored by the shared secure-storage authority and rarely changes
+ * mid-session, so mount-time resolution is sufficient.
  */
 export function useWebhookSigningState(): { enabled: boolean; loading: boolean } {
   const [state, setState] = useState<{ enabled: boolean; loading: boolean }>({

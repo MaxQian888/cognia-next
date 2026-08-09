@@ -1,6 +1,4 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   appendMemoryAuditEvent,
   claimMemoryJob,
@@ -17,12 +15,11 @@ import {
   listMemoryJobs,
 } from "./memory-governance"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("memory evidence and audit", () => {
   it("persists source identities without raw source content", async () => {
@@ -79,6 +76,24 @@ describe("durable memory jobs", () => {
     await claimNextMemoryJob("dead-worker", 1_000, 50)
     expect(await claimNextMemoryJob("replacement", 1_051, 50)).toMatchObject({
       id: "j1",
+      leaseOwner: "replacement",
+    })
+  })
+
+  it("claims the oldest eligible row across queued work and expired leases", async () => {
+    await enqueueMemoryJob({ ...draft, id: "queued-new", dedupeKey: "queued-new", queuedAt: 200 })
+    await enqueueMemoryJob({
+      ...draft,
+      id: "running-old",
+      dedupeKey: "running-old",
+      status: "running",
+      queuedAt: 100,
+      leaseOwner: "dead-worker",
+      leaseExpiresAt: 900,
+    })
+
+    await expect(claimNextMemoryJob("replacement", 1_000)).resolves.toMatchObject({
+      id: "running-old",
       leaseOwner: "replacement",
     })
   })

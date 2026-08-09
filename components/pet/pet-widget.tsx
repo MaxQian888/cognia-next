@@ -5,7 +5,7 @@
 
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useReducedMotion } from "motion/react"
 import { useTranslations } from "next-intl"
@@ -22,6 +22,7 @@ import { usePetScheduledReminder } from "@/hooks/pet/use-pet-scheduled-reminder"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
+import { usePetLookTarget } from "@/hooks/pet/use-pet-look-target"
 import { usePetDragGesture } from "@/hooks/pet/use-pet-drag-gesture"
 import { usePetWidgetThrow } from "@/hooks/pet/use-pet-widget-throw"
 import { usePetStore } from "@/stores/pet/pet-store"
@@ -31,7 +32,8 @@ import { reactionForZone, resolveHitZone } from "@/lib/pet/interaction/hit-zones
 import { toggleDesktopPetWindow } from "@/lib/pet/commands"
 import type { PetAnchor, PetSettings } from "@/types/pet"
 import { withCareCondition } from "@/lib/pet/state/reducer"
-import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
+import { resolveCharacterSkinSelection } from "@/lib/pet/binding/resolve-skin"
+import { resolveEffectiveSkin, selectionFromEffectiveSkin } from "./skins/resolve-effective-skin"
 import { LIVE2D_ONE_SHOT_HOLD_MS } from "@/lib/pet/live2d/constants"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
@@ -65,18 +67,28 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   const reduced =
     settings.motion === "reduced" || (settings.motion === "auto" && Boolean(osReduced))
 
-  const { profile, view, feed, play, petStroke, talk, sleep, clean, treat } =
+  const { profile, view, binding, feed, play, petStroke, talk, sleep, clean, treat } =
     usePet(activeCharacterId)
   // Resolve which skin actually renders — live2d only when picked, the Cubism
   // runtime is ready, and an active model exists; otherwise the SVG mascot.
   // Resolved BEFORE the animation state so the one-shot queue can hold shots
   // long enough for Cubism motions to finish.
-  const { modelId, coreReady } = useActiveLive2dModel(settings)
-  const { row: activeSpritePack } = useActiveSpritePack(settings)
-  const effectiveSkin = resolveEffectiveSkin(settings.skinId, {
+  const preferredSelection = resolveCharacterSkinSelection(settings, binding)
+  const {
+    modelId,
+    row: activeModel,
+    coreReady,
+  } = useActiveLive2dModel(settings, preferredSelection)
+  const { row: activeSpritePack } = useActiveSpritePack(settings, preferredSelection)
+  const effectiveSkin = resolveEffectiveSkin(preferredSelection.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    modelReady: activeModel?.compatibility?.status !== "invalid",
     hasActiveSpritePack: Boolean(activeSpritePack),
+  })
+  const selection = selectionFromEffectiveSkin(effectiveSkin, {
+    modelId,
+    packId: activeSpritePack?.id,
   })
   const { state, oneShot } = usePetAnimationState(
     reduced,
@@ -113,6 +125,24 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   // container below; only the handle button itself is offset, so its rect
   // stays a stable reference for the on-screen bounds.
   const anchorRef = useRef<HTMLDivElement | null>(null)
+  const lookTarget = usePetLookTarget({
+    enabled: settings.gazeFollowing !== false && !reduced,
+    native: false,
+    suspended: docHidden,
+    getBounds: () =>
+      anchorRef.current?.getBoundingClientRect() ?? {
+        left: 0,
+        top: 0,
+        width: settings.size,
+        height: settings.size,
+      },
+  })
+  useEffect(() => {
+    usePetStore.getState().setAppearanceSelection(selection)
+  }, [selection])
+  useEffect(() => {
+    usePetStore.getState().setLookTarget(lookTarget)
+  }, [lookTarget])
   const dragStartOffsetRef = useRef({ x: 0, y: 0 })
   const [holding, setHolding] = useState(false)
   const throwPhysics = usePetWidgetThrow({
@@ -224,6 +254,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
             onClean={clean}
             onTreat={treat}
             skinId={effectiveSkin}
+            selection={selection}
             onOpenConsole={(tab) => router.push(`/pet?tab=${tab}`)}
           />
         </div>
@@ -276,6 +307,10 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
               reducedMotion={reduced}
               size={settings.size}
               skinId={effectiveSkin}
+              selection={selection}
+              renderPriority="interactive"
+              lookTarget={lookTarget}
+              lowPower={settings.lowPower}
               mood={view.mood}
               speaking={Boolean(bubble)}
               held={holding}

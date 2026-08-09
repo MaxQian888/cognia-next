@@ -9,7 +9,7 @@
  * and why" stays answerable after the fact.
  *
  * Append-only with a bounded retention sweep, mirroring
- * `lib/db/remote-control-audit.ts`.
+ * `lib/webhooks/audit.ts`.
  */
 
 import { getDb } from "./schema"

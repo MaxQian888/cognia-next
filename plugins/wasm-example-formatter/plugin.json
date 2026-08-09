@@ -7,7 +7,7 @@
   "capabilities": ["tools", "workflow"],
   "wasmMain": "wasm_example_formatter.wasm",
   "wasm": {
-    "apiVersion": "0.1.0",
+    "apiVersion": "0.2.0",
     "memoryLimitMb": 32,
     "callTimeoutMs": 15000
   },

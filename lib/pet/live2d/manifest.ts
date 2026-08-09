@@ -20,7 +20,8 @@ function dirname(path: string): string {
  * segments. Backslashes are treated as separators so Windows-authored zips
  * resolve identically.
  */
-function joinPosix(baseDir: string, ref: string): string {
+export function resolveLive2dReferencePath(settingsPath: string, ref: string): string {
+  const baseDir = dirname(settingsPath)
   const combined = ref.startsWith("/") ? ref : baseDir ? `${baseDir}/${ref}` : ref
   const out: string[] = []
   for (const segment of combined.replace(/\\/g, "/").split("/")) {
@@ -41,6 +42,8 @@ interface CubismFileReferences {
   Pose?: unknown
   Motions?: unknown
   Expressions?: unknown
+  UserData?: unknown
+  DisplayInfo?: unknown
 }
 
 function asString(value: unknown): string | undefined {
@@ -116,18 +119,29 @@ export function parseLive2dManifest(settingsPath: string, jsonText: string): Man
     return { ok: false, code: "invalidJson" }
   }
 
-  const baseDir = dirname(settingsPath)
-
   const textures = Array.isArray(refs.Textures)
     ? refs.Textures.filter((t): t is string => typeof t === "string").map((t) =>
-        joinPosix(baseDir, t)
+        resolveLive2dReferencePath(settingsPath, t)
       )
     : []
 
-  const motionGroups =
+  const motions =
     typeof refs.Motions === "object" && refs.Motions !== null
-      ? Object.keys(refs.Motions as Record<string, unknown>)
-      : []
+      ? (refs.Motions as Record<string, unknown>)
+      : {}
+  const motionGroups = Object.keys(motions)
+  const motionPaths: string[] = []
+  const soundPaths: string[] = []
+  for (const definitions of Object.values(motions)) {
+    if (!Array.isArray(definitions)) continue
+    for (const definition of definitions) {
+      if (typeof definition !== "object" || definition === null) continue
+      const file = asString((definition as Record<string, unknown>).File)
+      const sound = asString((definition as Record<string, unknown>).Sound)
+      if (file) motionPaths.push(resolveLive2dReferencePath(settingsPath, file))
+      if (sound) soundPaths.push(resolveLive2dReferencePath(settingsPath, sound))
+    }
+  }
 
   const expressionIds = Array.isArray(refs.Expressions)
     ? refs.Expressions.map((e) =>
@@ -136,19 +150,33 @@ export function parseLive2dManifest(settingsPath: string, jsonText: string): Man
           : undefined
       ).filter((n): n is string => typeof n === "string")
     : []
+  const expressionPaths = Array.isArray(refs.Expressions)
+    ? refs.Expressions.flatMap((entry) => {
+        if (typeof entry !== "object" || entry === null) return []
+        const file = asString((entry as Record<string, unknown>).File)
+        return file ? [resolveLive2dReferencePath(settingsPath, file)] : []
+      })
+    : []
 
   const physics = asString(refs.Physics)
   const pose = asString(refs.Pose)
+  const metadataPaths = [asString(refs.UserData), asString(refs.DisplayInfo)]
+    .filter((path): path is string => Boolean(path))
+    .map((path) => resolveLive2dReferencePath(settingsPath, path))
 
   const manifest: Live2DManifest = {
     kind: "modern",
     settingsPath,
-    mocPath: joinPosix(baseDir, moc),
+    mocPath: resolveLive2dReferencePath(settingsPath, moc),
     texturePaths: textures,
     motionGroups,
     expressionIds,
-    ...(physics ? { physicsPath: joinPosix(baseDir, physics) } : {}),
-    ...(pose ? { posePath: joinPosix(baseDir, pose) } : {}),
+    motionPaths,
+    expressionPaths,
+    soundPaths,
+    metadataPaths,
+    ...(physics ? { physicsPath: resolveLive2dReferencePath(settingsPath, physics) } : {}),
+    ...(pose ? { posePath: resolveLive2dReferencePath(settingsPath, pose) } : {}),
   }
 
   return { ok: true, manifest }

@@ -10,6 +10,7 @@ import { Box, Text } from "ink"
 
 import { useTheme } from "../theme/context"
 import { shortenCwd, formatTokens } from "../format/usage"
+import type { BannerDensity } from "../layout/terminal-layout"
 
 /**
  * Live status carried by the banner when it serves as the FIXED fullscreen
@@ -31,6 +32,7 @@ export function Banner({
   model,
   cwd,
   status,
+  density = "full",
 }: {
   version: string
   provider: string
@@ -39,6 +41,7 @@ export function Banner({
   /** When present, renders a live status line — used by the fixed fullscreen
    * header so the banner carries mode / context / tokens without scrolling. */
   status?: BannerStatus
+  density?: BannerDensity
 }) {
   const theme = useTheme()
   const bypass = status?.mode === "bypassPermissions"
@@ -49,6 +52,18 @@ export function Banner({
   }
   if (typeof status?.sessionTokens === "number") {
     statusSegments.push(`${formatTokens(status.sessionTokens)} tok`)
+  }
+  if (density === "compact") {
+    return (
+      <Box flexShrink={0}>
+        <Text color={theme.accent} bold>
+          ✻ Cognia
+        </Text>
+        <Text color={theme.muted}>
+          {` · ${provider}${model ? `/${model}` : ""}${statusSegments.length ? ` · ${statusSegments.join(" · ")}` : ""}`}
+        </Text>
+      </Box>
+    )
   }
   return (
     <Box
@@ -68,13 +83,15 @@ export function Banner({
         {provider}
         {model ? ` · ${model}` : ""}
       </Text>
-      <Text color={theme.muted}>{shortenCwd(cwd, 80)}</Text>
+      <Text color={theme.muted}>{shortenCwd(cwd, density === "medium" ? 40 : 80)}</Text>
       {status && statusSegments.length > 0 && (
         <Text color={bypass ? theme.warning : theme.muted}>{statusSegments.join("  ·  ")}</Text>
       )}
-      <Text color={theme.muted} dimColor>
-        {"/settings to configure · /inspect to expand output · /help · @ files · ! shell"}
-      </Text>
+      {density === "full" ? (
+        <Text color={theme.muted} dimColor>
+          {"/settings to configure · /inspect to expand output · /help · @ files · ! shell"}
+        </Text>
+      ) : null}
     </Box>
   )
 }

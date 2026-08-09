@@ -11,7 +11,7 @@ import { MessagesSquareIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { PetProfile } from "@/types/pet"
+import type { PetProfile, PetSkinSelection } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -37,6 +37,7 @@ export interface PetInteractionPanelProps {
   onTreat: () => void
   /** Effective skin for the stat-card preview (so it matches the live pet). */
   skinId?: string
+  selection?: PetSkinSelection
   /**
    * Navigate to a /pet console tab. Enables the wallet's shop jump and the
    * quick-nav row; the widget routes in-app, the desktop popup goes over the
@@ -63,6 +64,7 @@ export function PetInteractionPanel({
   onClean,
   onTreat,
   skinId,
+  selection,
   onOpenConsole,
   showInventory = true,
   className,
@@ -81,6 +83,7 @@ export function PetInteractionPanel({
         grew={grewStats}
         flavor={profile.evolutionFlavor}
         skinId={skinId}
+        selection={selection}
       />
 
       <PetWalletStrip

@@ -119,6 +119,106 @@ describe("applyExternalAgentEventToParts — tool calls", () => {
     })
   })
 
+  it("preserves a display title and semantic metadata on tool_use_start", () => {
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "tool_use_start",
+        toolUseId: "t1",
+        toolName: "calendar.create_event",
+        title: "Calendar · Create event",
+        rawInput: { date: "2026-08-07" },
+        toolMetadata: {
+          kind: "mcp",
+          readOnlyHint: false,
+          appContext: { appName: "Calendar", actionName: "create_event" },
+        },
+      })
+    )
+
+    expect(parts[0]).toMatchObject({
+      type: "tool-calendar.create_event",
+      toolCallId: "t1",
+      title: "Calendar · Create event",
+      toolMetadata: {
+        kind: "mcp",
+        readOnlyHint: false,
+        appContext: { appName: "Calendar", actionName: "create_event" },
+      },
+    })
+  })
+
+  it("updates a repeated tool_use_start in place when a later OpenCode state adds a title", () => {
+    const started = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "tool_use_start",
+        toolUseId: "t1",
+        toolName: "read",
+        rawInput: { path: "a.ts" },
+      })
+    )
+    const updated = applyExternalAgentEventToParts(
+      started,
+      ev({
+        type: "tool_use_start",
+        toolUseId: "t1",
+        toolName: "read",
+        title: "Reading a.ts",
+        rawInput: { path: "a.ts", offset: 20 },
+      })
+    )
+
+    expect(updated).toHaveLength(1)
+    expect(updated[0]).toMatchObject({
+      type: "tool-read",
+      toolCallId: "t1",
+      title: "Reading a.ts",
+      input: { path: "a.ts", offset: 20 },
+    })
+  })
+
+  it("updates a tool title and metadata without changing its identity or losing output", () => {
+    const started = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "tool_use_start",
+        toolUseId: "t1",
+        toolName: "Read",
+        title: "Reading file",
+        rawInput: { path: "a.ts" },
+      })
+    )
+    const completed = applyExternalAgentEventToParts(
+      started,
+      ev({ type: "tool_result", toolUseId: "t1", result: "contents" })
+    )
+    const updated = applyExternalAgentEventToParts(
+      completed,
+      ev({
+        type: "tool_call_update",
+        toolCallId: "t1",
+        title: "Read a.ts",
+        kind: "read",
+        rawInput: { path: "a.ts", line: 12 },
+        locations: [{ path: "a.ts", line: 12 }],
+      })
+    )
+
+    expect(updated[0]).toMatchObject({
+      type: "tool-Read",
+      toolCallId: "t1",
+      title: "Read a.ts",
+      state: "output-available",
+      input: { path: "a.ts", line: 12 },
+      output: "contents",
+      toolMetadata: {
+        kind: "read",
+        locations: [{ path: "a.ts", line: 12 }],
+      },
+    })
+  })
+
   it("patches the matching tool part on tool_use_end", () => {
     const start = applyExternalAgentEventToParts(
       [],

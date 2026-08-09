@@ -73,8 +73,21 @@
     "description": "显示浮动宠物挂件。",
     "label": "启用宠物"
   },
+  "gaze": {
+    "description": "仅使用本地指针位置；该数据永远不会被保存或发送。",
+    "label": "跟随指针"
+  },
   "live2d": {
     "active": "当前",
+    "compatibility": {
+      "diagnosticWithPath": "{message} — {path}",
+      "status": {
+        "degraded": "降级可用",
+        "invalid": "无效",
+        "legacy": "待验证",
+        "ready": "可用"
+      }
+    },
     "config": {
       "cancel": "取消",
       "columnKey": "状态",
@@ -89,6 +102,24 @@
       "optionDefault": "默认",
       "optionEngine": "引擎默认",
       "optionNoExpression": "无表情",
+      "parameters": {
+        "auto": "自动检测",
+        "custom": "自定义",
+        "description": "将标准宠物行为映射到该模型的参数 ID，或停用模型不支持的参数角色。",
+        "disabled": "已停用",
+        "parameterIdFor": "{role}的参数 ID",
+        "parameterIdPlaceholder": "ParamAngleX",
+        "roles": {
+          "bodyX": "身体水平",
+          "bodyY": "身体垂直",
+          "eyeX": "眼睛水平",
+          "eyeY": "眼睛垂直",
+          "headX": "头部水平",
+          "headY": "头部垂直",
+          "headZ": "头部倾斜",
+          "mouthOpen": "嘴巴张合"
+        }
+      },
       "previewState": "预览状态",
       "previewUnavailable": "实时预览需要 Live2D 运行时 —— 设置仍可保存。",
       "resetAll": "全部重置",
@@ -97,6 +128,7 @@
       "save": "保存",
       "scale": "缩放",
       "tabMotion": "动作映射",
+      "tabParameters": "参数",
       "tabTransform": "变换",
       "test": "测试",
       "title": "自定义 {name}"
@@ -107,12 +139,22 @@
     "download": "下载示例模型",
     "downloading": "下载中…",
     "errors": {
+      "ambiguousPath": "资源包包含仅大小写不同的路径。",
+      "corruptTexture": "必需纹理已损坏或无法解码。",
       "cubism2Unsupported": "暂不支持 Cubism 2 模型。",
       "downloadFailed": "无法下载示例模型。",
+      "duplicatePath": "资源包包含重复的规范化路径。",
       "invalidJson": "配置文件不是有效的 JSON。",
+      "missingExpression": "缺失的表情引用已停用。",
+      "missingMetadata": "缺失的可选模型元数据已停用。",
+      "missingMotion": "缺失的动作引用已停用。",
+      "missingPhysics": "缺失的物理数据已停用。",
+      "missingPose": "缺失的姿势数据已停用。",
       "missingReferenced": "模型缺少其引用的文件。",
+      "missingSound": "缺失的动作音频已停用。",
       "multipleSettings": "找到多个 .model3.json，请只保留一个。",
       "noSettings": "未找到 .model3.json 配置文件。",
+      "pathTraversal": "资源包包含不安全的路径穿越。",
       "tooLarge": "模型超过 50 MB 上限。",
       "zipFailed": "无法读取 .zip 压缩包。"
     },
@@ -226,9 +268,51 @@
       "svg": "矢量吉祥物"
     }
   },
+  "skinStatus": {
+    "configure": "配置",
+    "diagnostics": {
+      "ambiguousPath": "两个资源路径仅大小写不同：{path}。",
+      "assetMissing": "所选资源不存在：{path}。",
+      "assetTooLarge": "资源超过配置的大小限制：{path}。",
+      "contextLost": "WebGL 上下文已丢失两次。渲染已暂停，请手动重试。",
+      "corruptTexture": "引用的纹理无法解码：{path}。",
+      "cubism2Unsupported": "不支持 Cubism 2 模型：{path}。",
+      "duplicatePath": "资源包包含重复的规范化路径：{path}。",
+      "invalidSettings": "模型配置无效：{path}。",
+      "missingOptionalResource": "可选资源缺失，相关功能已停用：{path}。",
+      "missingRequiredResource": "必需资源缺失：{path}。",
+      "pathTraversal": "资源包包含不安全的路径穿越：{path}。",
+      "renderFailed": "所选皮肤渲染失败。请重试或配置其他资源。",
+      "runtimeUnavailable": "所需渲染运行时不可用。",
+      "unknownSkin": "已保存的皮肤不再受支持：{path}。"
+    },
+    "effective": "实际皮肤：{skin}",
+    "fallback": "当前正在回退渲染，请求的皮肤未生效。",
+    "requested": "请求皮肤：{skin}",
+    "retry": "重试",
+    "skins": {
+      "live2d": "Live2D 模型",
+      "sprite-v2": "AI 精灵图（v2）",
+      "svg": "矢量吉祥物"
+    },
+    "unknownResource": "未知资源"
+  },
+  "sound": {
+    "description": "在你抚摸宠物或它作出反应时播放短促音效。默认关闭。",
+    "label": "音效",
+    "quietHours": {
+      "description": "在此时间段内静音宠物音效。",
+      "end": "到",
+      "label": "免打扰时段",
+      "start": "从"
+    },
+    "volume": {
+      "label": "音量（{value}%）"
+    }
+  },
   "spriteV2": {
-    "active": "使用中",
     "activate": "使用",
+    "active": "使用中",
     "agentPrompt": {
       "concept": "宠物设定：{concept}",
       "defaultConcept": "一只适合 Cognia 的友好自定义宠物",
@@ -256,19 +340,6 @@
     "import": "导入 v2 精灵图宠物",
     "importHint": "同时选择 pet.json 与对应的 spritesheet.webp 或 spritesheet.png。安装前 Cognia 会校验 v2 清单和 1536×2288 图集。",
     "installed": "精灵图宠物已安装并启用。"
-  },
-  "sound": {
-    "description": "在你抚摸宠物或它作出反应时播放短促音效。默认关闭。",
-    "label": "音效",
-    "quietHours": {
-      "description": "在此时间段内静音宠物音效。",
-      "end": "到",
-      "label": "免打扰时段",
-      "start": "从"
-    },
-    "volume": {
-      "label": "音量（{value}%）"
-    }
   },
   "title": "宠物",
   "twinAwareness": {

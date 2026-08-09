@@ -70,6 +70,7 @@ class FakeSignaling {
     peerLeft: new Set(),
   }
   closed = false
+  sendError: Error | null = null
 
   /**
    * Peers reported in the synthetic `subscribed` frame on connect(). Defaults
@@ -98,6 +99,7 @@ class FakeSignaling {
   }
   async send(kind: string, body: unknown): Promise<void> {
     this.sent.push({ kind, body })
+    if (this.sendError) throw this.sendError
   }
   close(): void {
     this.closed = true
@@ -127,6 +129,7 @@ class FakeDataChannel {
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
   onmessage: ((ev: MessageEvent) => void) | null = null
+  binaryType: BinaryType = "blob"
   readonly sent: string[] = []
   constructor(public label: string) {}
   send(data: string): void {
@@ -142,6 +145,9 @@ class FakeDataChannel {
   }
   push(data: unknown): void {
     this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)
+  }
+  pushBinary(data: ArrayBuffer): void {
+    this.onmessage?.({ data } as MessageEvent)
   }
 }
 
@@ -288,6 +294,23 @@ describe("TransportRtc", () => {
     expect(rtc.getState()).toBe("open")
   })
 
+  it("handles a rejected fire-and-forget ICE send without an unhandled rejection", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const { rtc, sig, pcs } = makeRtc()
+    void rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    sig.sendError = new Error("queue full")
+
+    pcs[0].fireIceCandidate({ candidate: "candidate:1 1 udp 1 127.0.0.1 9 typ host" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(warn).toHaveBeenCalledWith(
+      "TransportRtc: failed to queue local ICE candidate",
+      sig.sendError
+    )
+    warn.mockRestore()
+  })
+
   it("negotiates a separate ordered terminal channel with the canonical label", async () => {
     const { rtc, pcs } = makeRtc()
     const connect = rtc.connect()
@@ -413,6 +436,48 @@ describe("TransportRtc", () => {
     dc.push({ id: sent.id, ok: true, result: { count: 42 } } satisfies RtcResponse)
     const result = await pending
     expect(result).toEqual({ count: 42 })
+  })
+
+  it("readBinary() reassembles raw resource chunks without JSON/base64", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    pcs[0].channels[0].open()
+    await connect
+
+    const dc = pcs[0].channels[0]
+    const pending = rtc.readBinary({
+      kind: "session-media",
+      sessionId: "s1",
+      hash: "a".repeat(64),
+      variant: "canonical",
+    })
+    const request = dc.sent
+      .map((raw) => JSON.parse(raw) as { kind?: string; id?: string })
+      .find((frame) => frame.kind === "binary-resource")!
+    expect(dc.binaryType).toBe("arraybuffer")
+    dc.push({
+      kind: "binary-resource-start",
+      id: request.id,
+      mediaType: "image/png",
+      totalBytes: 4,
+      totalChunks: 1,
+    })
+    const frame = new ArrayBuffer(48 + 4)
+    const frameBytes = new Uint8Array(frame)
+    frameBytes.set([0x43, 0x47, 0x4d, 0x31], 0)
+    frameBytes.set(new TextEncoder().encode(request.id!), 4)
+    const view = new DataView(frame)
+    view.setUint32(40, 0)
+    view.setUint32(44, 1)
+    frameBytes.set([0, 255, 17, 99], 48)
+    dc.pushBinary(frame)
+
+    await expect(pending).resolves.toEqual({
+      bytes: Uint8Array.from([0, 255, 17, 99]),
+      mediaType: "image/png",
+    })
   })
 
   it("dispatches inbound events to subscribers", async () => {

@@ -25,6 +25,8 @@ export interface XiaomiTTSOptions {
   model?: XiaomiTTSModel
   style?: XiaomiTTSStyle | ""
   dialect?: string
+  signal?: AbortSignal
+  requestId?: string
 }
 
 export async function generateXiaomiTTS(
@@ -61,6 +63,9 @@ export async function generateXiaomiTTS(
   try {
     const response = await proxyFetch(XIAOMI_TTS_URL, {
       method: "POST",
+      provider: "xiaomi",
+      signal: options.signal,
+      requestId: options.requestId,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",

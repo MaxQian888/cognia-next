@@ -11,7 +11,7 @@ jest.mock("next-intl", () => ({
 }))
 
 const changePasswordMock = jest.fn<Promise<LocalAccountRecord>, [string, string, string]>()
-const lockMock = jest.fn<void, []>()
+const lockMock = jest.fn<Promise<void>, []>()
 let mockState: {
   changePassword: typeof changePasswordMock
   lock: typeof lockMock
@@ -44,6 +44,7 @@ const fillPasswords = (current: string, next: string, confirm: string) => {
 beforeEach(() => {
   jest.clearAllMocks()
   changePasswordMock.mockResolvedValue(account)
+  lockMock.mockResolvedValue(undefined)
   mockState = { changePassword: changePasswordMock, lock: lockMock, unlockedAccountId: "acct_a" }
 })
 
@@ -100,6 +101,15 @@ describe("AccountSecurityTab", () => {
     expect(button).not.toBeDisabled()
     fireEvent.click(button)
     expect(lockMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("surfaces runtime-clear errors without reporting the account as locked", async () => {
+    lockMock.mockRejectedValueOnce(new Error("sidecar is busy"))
+    render(<AccountSecurityTab account={account} />)
+
+    fireEvent.click(screen.getByTestId("account-security-lock-now"))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("sidecar is busy")
   })
 
   it("disables Lock now when no session is unlocked", () => {

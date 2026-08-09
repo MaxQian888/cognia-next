@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
 // Coverage for the per-skill resource bundle CRUD layer.
 
-import "fake-indexeddb/auto"
 import {
   createResource,
   deleteResource,
@@ -12,15 +10,17 @@ import {
   replaceResourcesForSkill,
   updateResource,
 } from "./skill-resources"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().skillResources.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("createResource", () => {
   it("stamps id/timestamps and computes size for utf-8 content", async () => {

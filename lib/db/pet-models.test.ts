@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
 // Coverage for the pet Live2D model storage CRUD layer (v73).
 
-import "fake-indexeddb/auto"
 import {
   listPetModels,
   getPetModel,
@@ -10,17 +8,20 @@ import {
   getPetModelEntries,
   getPetModelStorageUsage,
   updatePetModelCustomization,
+  revalidatePetModelCompatibility,
 } from "./pet-models"
 import type { PetModelRow } from "./pet-models"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await Promise.all([getDb().petModels.clear(), getDb().petModelFiles.clear()])
 })
+afterAll(dbFixture.dispose)
 
 type Meta = Omit<PetModelRow, "id" | "createdAt"> & { id?: string }
 
@@ -125,6 +126,38 @@ describe("pet-models CRUD", () => {
     expect(await getDb().petModelFiles.where("modelId").equals(a.id).count()).toBe(0)
   })
 
+  it("transactionally clears global and character references before falling back", async () => {
+    const row = await addPetModel(meta(), [file("a.json", "{}")])
+    await getDb().settings.put({
+      id: "singleton",
+      petSettings: {
+        enabled: true,
+        anchor: "bottom-right",
+        motion: "auto",
+        mutedBubbles: false,
+        size: 96,
+        skinId: "live2d",
+        activeLive2dModelId: row.id,
+      },
+    } as never)
+    await getDb().petCharacterBindings.bulkPut([
+      { characterId: "legacy", live2dModelId: row.id, updatedAt: "old" },
+      {
+        characterId: "typed",
+        skin: { skinId: "live2d", modelId: row.id },
+        updatedAt: "old",
+      },
+    ])
+
+    await deletePetModel(row.id)
+
+    const storedSettings = await getDb().settings.get("singleton")
+    expect(storedSettings?.petSettings).toMatchObject({ skinId: "svg" })
+    expect(storedSettings?.petSettings?.activeLive2dModelId).toBeUndefined()
+    expect((await getDb().petCharacterBindings.get("legacy"))?.live2dModelId).toBeUndefined()
+    expect((await getDb().petCharacterBindings.get("typed"))?.skin).toBeUndefined()
+  })
+
   it("deleting a missing model is a no-op", async () => {
     await expect(deletePetModel("nope")).resolves.toBeUndefined()
   })
@@ -156,6 +189,18 @@ describe("pet-models CRUD", () => {
       updatePetModelCustomization("nope", { transform: { scale: 1, offsetX: 0, offsetY: 0 } })
     ).resolves.toBeUndefined()
     expect(await getPetModel("nope")).toBeUndefined()
+  })
+
+  it("lazily persists an invalid compatibility summary for a legacy row once", async () => {
+    const row = await addPetModel(meta(), [file("not-a-model.txt", "x")])
+    const first = await revalidatePetModelCompatibility(row.id)
+    expect(first?.compatibility).toMatchObject({
+      version: 1,
+      status: "invalid",
+      diagnostics: [expect.objectContaining({ code: "noSettings", severity: "error" })],
+    })
+    const second = await revalidatePetModelCompatibility(row.id)
+    expect(second?.compatibility).toEqual(first?.compatibility)
   })
 
   it("reports storage usage (model count + summed totalBytes)", async () => {

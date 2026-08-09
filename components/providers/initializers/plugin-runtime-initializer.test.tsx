@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { render, waitFor } from "@testing-library/react"
 
 import { PluginRuntimeInitializer } from "./plugin-runtime-initializer"
@@ -26,6 +27,22 @@ jest.mock("@/lib/plugin/core/manager", () => ({
   initializePluginManager: (...args: unknown[]) => mockInitializeManager(...args),
 }))
 
+const mockInstallPackWarningRefreshWiring = jest.fn()
+jest.mock("@/lib/plugin/character-pack/warning-refresh-wiring", () => ({
+  installPackWarningRefreshWiring: () => mockInstallPackWarningRefreshWiring(),
+}))
+
+const mockMarkBootCapabilityReady = jest.fn()
+const mockMarkBootCapabilityFailed = jest.fn()
+let mockPluginRuntimeRequested = true
+jest.mock("@/lib/boot/capabilities", () => ({
+  markBootCapabilityReady: (...args: unknown[]) => mockMarkBootCapabilityReady(...args),
+  markBootCapabilityFailed: (...args: unknown[]) => mockMarkBootCapabilityFailed(...args),
+  getBootCapabilitySnapshot: () => 1,
+  subscribeBootCapabilities: () => () => {},
+  isBootCapabilityRequested: () => mockPluginRuntimeRequested,
+}))
+
 jest.mock("@/lib/plugin/messaging/message-bus", () => ({
   SystemEvents: { APP_READY: "system:app:ready", APP_CLOSING: "system:app:closing" },
   emitSystemBusEvent: jest.fn(),
@@ -48,11 +65,23 @@ jest.mock("@tauri-apps/api/path", () => ({
 const mockDetectPlatform = detectPlatform as jest.MockedFunction<typeof detectPlatform>
 
 describe("PluginRuntimeInitializer", () => {
+  const warningRefreshTeardown = jest.fn()
+
   beforeEach(() => {
     jest.clearAllMocks()
     mockInitializeManager.mockResolvedValue(undefined)
+    mockInstallPackWarningRefreshWiring.mockReturnValue(warningRefreshTeardown)
+    mockPluginRuntimeRequested = true
     delete (window as typeof window & { __cogniaPluginRuntimeReady?: boolean })
       .__cogniaPluginRuntimeReady
+    window.history.replaceState({}, "", "/")
+  })
+
+  it("keeps the pre-account E2E runtime off unrelated browser routes", () => {
+    render(<PluginRuntimeInitializer onlyForPluginSurfaceE2E />)
+
+    expect(mockInitializeManager).not.toHaveBeenCalled()
+    expect(mockInstallPackWarningRefreshWiring).not.toHaveBeenCalled()
   })
 
   it("boots the manager with the browser profile when not in Tauri", async () => {
@@ -76,9 +105,41 @@ describe("PluginRuntimeInitializer", () => {
       pluginDirectory: "",
       enablePython: false,
     })
+    expect(mockMarkBootCapabilityReady).toHaveBeenCalledWith("plugin-runtime")
     // The Tauri path/window APIs must not be touched in web mode.
     expect(mockGetCurrentWindow).not.toHaveBeenCalled()
     expect(mockAppDataDir).not.toHaveBeenCalled()
+  })
+
+  it("installs character-pack warning refresh wiring in the browser", () => {
+    mockDetectPlatform.mockReturnValue("web")
+    mockResolveBootstrap.mockReturnValue({
+      shouldInitialize: true,
+      config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
+    })
+
+    const { unmount } = render(<PluginRuntimeInitializer />)
+
+    expect(mockInstallPackWarningRefreshWiring).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(warningRefreshTeardown).toHaveBeenCalledTimes(1)
+  })
+
+  it("reinstalls character-pack warning refresh wiring after a StrictMode replay", () => {
+    mockDetectPlatform.mockReturnValue("web")
+    mockResolveBootstrap.mockReturnValue({
+      shouldInitialize: true,
+      config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
+    })
+
+    render(
+      <StrictMode>
+        <PluginRuntimeInitializer />
+      </StrictMode>
+    )
+
+    expect(mockInstallPackWarningRefreshWiring).toHaveBeenCalledTimes(2)
+    expect(warningRefreshTeardown).toHaveBeenCalledTimes(1)
   })
 
   it("boots the manager with the mobile profile in the Capacitor shell", async () => {
@@ -151,9 +212,10 @@ describe("PluginRuntimeInitializer", () => {
 
     await waitFor(() => expect(mockResolveBootstrap).toHaveBeenCalledTimes(1))
     expect(mockInitializeManager).not.toHaveBeenCalled()
+    expect(mockMarkBootCapabilityReady).toHaveBeenCalledWith("plugin-runtime")
   })
 
-  it("swallows boot errors instead of crashing the layout", async () => {
+  it("reports boot errors and retries after a fresh capability request", async () => {
     mockDetectPlatform.mockReturnValue("web")
     mockResolveBootstrap.mockReturnValue({
       shouldInitialize: true,
@@ -161,7 +223,7 @@ describe("PluginRuntimeInitializer", () => {
     })
     mockInitializeManager.mockRejectedValue(new Error("boom"))
 
-    render(<PluginRuntimeInitializer />)
+    const { rerender } = render(<PluginRuntimeInitializer />)
 
     await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
     // No throw — the warn logger absorbed it (asserted via the mock).
@@ -169,6 +231,14 @@ describe("PluginRuntimeInitializer", () => {
       loggers: { plugin: { warn: jest.Mock } }
     }
     await waitFor(() => expect(loggers.plugin.warn).toHaveBeenCalled())
+    expect(mockMarkBootCapabilityFailed).toHaveBeenCalledWith("plugin-runtime", expect.any(Error))
+
+    mockPluginRuntimeRequested = false
+    rerender(<PluginRuntimeInitializer />)
+    mockInitializeManager.mockResolvedValue(undefined)
+    mockPluginRuntimeRequested = true
+    rerender(<PluginRuntimeInitializer />)
+    await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(2))
   })
 
   it("emits APP_READY on the plugin bus after the manager boots", async () => {

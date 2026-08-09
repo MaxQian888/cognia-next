@@ -23,6 +23,10 @@ jest.mock("./companion-outbound-runner-provider", () => ({
   CompanionOutboundRunnerProvider: () => <span data-testid="outbound-runner" />,
 }))
 
+beforeEach(() => {
+  jest.clearAllMocks()
+})
+
 it("mounts all companion bridges and detaches them with the provider", () => {
   const view = render(
     <CompanionEventBridgeProvider>
@@ -40,4 +44,25 @@ it("mounts all companion bridges and detaches them with the provider", () => {
   expect(detachEventBridge).toHaveBeenCalledTimes(1)
   expect(detachDesktopSignaling).toHaveBeenCalledTimes(1)
   expect(detachCompanionSignaling).toHaveBeenCalledTimes(1)
+})
+
+it("rebinds the event bridge and companion signaling after the web target changes", () => {
+  const view = render(
+    <CompanionEventBridgeProvider>
+      <span>child</span>
+    </CompanionEventBridgeProvider>
+  )
+
+  window.dispatchEvent(new Event("cognia:companion-config-changed"))
+
+  expect(detachEventBridge).toHaveBeenCalledTimes(1)
+  expect(detachCompanionSignaling).toHaveBeenCalledTimes(1)
+  expect(installEventBridge).toHaveBeenCalledTimes(2)
+  expect(installCompanionSignaling).toHaveBeenCalledTimes(2)
+  expect(installDesktopSignaling).toHaveBeenCalledTimes(1)
+
+  view.unmount()
+  expect(detachEventBridge).toHaveBeenCalledTimes(2)
+  expect(detachCompanionSignaling).toHaveBeenCalledTimes(2)
+  expect(detachDesktopSignaling).toHaveBeenCalledTimes(1)
 })

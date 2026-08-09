@@ -46,6 +46,15 @@ export const DEFAULT_RATE_LIMITS: Record<string, RateLimitConfig> = {
   "ui:notification": { capacity: 30, refillPerSecond: 0.5 },
   "pet:interact": { capacity: 10, refillPerSecond: 0.5 },
   "pet:emit": { capacity: 20, refillPerSecond: 0.5 },
+  // Model calls spend the user's paid quota, and there is no budget ceiling
+  // anywhere else in the plugin API — the `ai:chat` permission is a yes/no, not
+  // an allowance. WASM api-version 0.2 made this the first path where sandboxed
+  // guest code can drive that spend in a loop, so the bucket is the only thing
+  // between a runaway plugin and the user's bill. Sized like the other
+  // expensive-and-irreversible operations (`shell:execute`, `python:eval`):
+  // a burst of 20, then roughly one call every five seconds.
+  "ai:chat": { capacity: 20, refillPerSecond: 0.2 },
+  "ai:embed": { capacity: 20, refillPerSecond: 0.2 },
 }
 
 export class PluginRateLimiter {

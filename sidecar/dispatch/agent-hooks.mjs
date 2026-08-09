@@ -17,11 +17,82 @@
 
 import { spawn } from "node:child_process"
 
+import { HOOK_EVENTS } from "@anthropic-ai/claude-agent-sdk"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+
 const DEFAULT_TIMEOUT_SECS = 5
 const HARD_TIMEOUT_CAP_SECS = 30
+export const HOOK_PII_BLOCK_REASON = "Hook data blocked by the PII redaction gate"
 
-/** Events whose execution Phase 1 owns in the sidecar. */
-const SUPPORTED_EVENTS = ["PreToolUse", "PostToolUse", "PostToolUseFailure"]
+/**
+ * Every lifecycle event the SDK can fire, taken from the SDK itself.
+ *
+ * This used to be a hand-written list of three, so the other 28 events could be
+ * configured in settings.json and would simply never run — no error, no log,
+ * just a hook that did nothing. Importing the SDK's own export means the list
+ * cannot drift: a release that adds an event adds it here, and
+ * `check:sdk-surface` fails if the manifest has not triaged it.
+ */
+export const SUPPORTED_EVENTS = HOOK_EVENTS
+
+/**
+ * Which field of a hook's input the `matcher` is tested against.
+ *
+ * Tool events match on the tool name; the rest each have their own natural
+ * discriminator (a session's `source`, a compaction's `trigger`, a changed
+ * file's path). An event absent from this map matches unconditionally —
+ * correct for events with nothing to discriminate on, like `Stop`.
+ */
+export const HOOK_MATCH_FIELDS = {
+  PreToolUse: "tool_name",
+  PostToolUse: "tool_name",
+  PostToolUseFailure: "tool_name",
+  PermissionRequest: "tool_name",
+  PermissionDenied: "tool_name",
+  Notification: "notification_type",
+  UserPromptExpansion: "command",
+  SessionStart: "source",
+  SessionEnd: "reason",
+  Setup: "trigger",
+  StopFailure: "error",
+  PreCompact: "trigger",
+  PostCompact: "trigger",
+  SubagentStart: "agent_type",
+  SubagentStop: "agent_type",
+  FileChanged: "file_path",
+  DirectoryAdded: "source",
+  ConfigChange: "source",
+  InstructionsLoaded: "load_reason",
+  Elicitation: "mcp_server_name",
+  ElicitationResult: "mcp_server_name",
+}
+
+export const HOOK_EVENTS_WITHOUT_MATCHERS = new Set([
+  "UserPromptSubmit",
+  "PostToolBatch",
+  "Stop",
+  "TeammateIdle",
+  "TaskCreated",
+  "TaskCompleted",
+  "WorktreeCreate",
+  "WorktreeRemove",
+  "MessageDisplay",
+  "CwdChanged",
+])
+
+/**
+ * The value a hook group's `matcher` is compared against for this event.
+ *
+ * Returns `null` when the event does not support matchers. Claude Code ignores
+ * a configured matcher for those events and always runs the group.
+ */
+export function hookMatchTarget(eventName, input) {
+  if (HOOK_EVENTS_WITHOUT_MATCHERS.has(eventName)) return null
+  const field = HOOK_MATCH_FIELDS[eventName]
+  if (!field) return null
+  const value = input?.[field]
+  return typeof value === "string" ? value : ""
+}
 
 // --- Matcher (port of src-tauri/src/hooks/mod.rs:matcher_matches) -----------
 
@@ -33,12 +104,14 @@ const SUPPORTED_EVENTS = ["PreToolUse", "PostToolUse", "PostToolUseFailure"]
  */
 const matcherRegexCache = new Map()
 
-export function matcherMatches(matcher, target) {
+export function matcherMatches(matcher, target, narrowExactSet = false) {
   if (matcher == null) return true
   const m = String(matcher).trim()
   if (m === "" || m === "*") return true
-  if (/^[A-Za-z0-9_|]+$/.test(m)) {
-    return m.split("|").some((alt) => alt === target)
+  const exactPattern = narrowExactSet ? /^[A-Za-z0-9_|]+$/ : /^[A-Za-z0-9_\-, |]+$/
+  if (exactPattern.test(m)) {
+    const separator = narrowExactSet ? /\|/ : /[|,]/
+    return m.split(separator).some((alt) => alt.trim() === target)
   }
   // Compiled once per pattern — this runs for every tool call of the session.
   let re = matcherRegexCache.get(m)
@@ -291,6 +364,9 @@ export function runCommandHandler(command, configuredTimeout, payloadJson, signa
  * errors become soft-allow warnings.
  */
 export async function runWebhookHandler(url, headers, configuredTimeout, payloadJson, signal) {
+  if (!hasNoLeakingPiiDeep(payloadJson)) {
+    return { block: HOOK_PII_BLOCK_REASON }
+  }
   const timeoutSecs = Math.min(
     typeof configuredTimeout === "number" && configuredTimeout > 0
       ? configuredTimeout
@@ -326,21 +402,35 @@ export async function runWebhookHandler(url, headers, configuredTimeout, payload
 }
 
 function runHandler(handler, payloadJson, signal, cwd) {
-  if (!handler || typeof handler !== "object") return Promise.resolve({})
+  if (!handler || typeof handler !== "object") {
+    return Promise.resolve({ warning: "invalid hook handler configuration" })
+  }
   if (handler.type === "command" && typeof handler.command === "string") {
     return runCommandHandler(handler.command, handler.timeout, payloadJson, signal, cwd)
   }
-  if (handler.type === "webhook" && typeof handler.url === "string") {
+  if (
+    (handler.type === "http" || handler.type === "webhook") &&
+    typeof handler.url === "string"
+  ) {
     return runWebhookHandler(handler.url, handler.headers, handler.timeout, payloadJson, signal)
   }
-  // prompt / mcp_tool / agent / unknown — inert in this phase (round-trips in
-  // settings.json without executing, matching the CLI's tolerant behaviour).
-  return Promise.resolve({})
+  const type = typeof handler.type === "string" && handler.type ? handler.type : "missing"
+  return Promise.resolve({ warning: `unsupported hook handler type: ${type}` })
 }
 
+/**
+ * Groups configured for `eventName` that actually contain a handler.
+ *
+ * The emptiness filter used to be implicit: only three events were supported,
+ * so a `Stop: [{ hooks: [] }]` entry was skipped for the wrong reason. Now that
+ * every event is supported, "configured but empty" has to be rejected on its
+ * own terms — registering a callback for it would run the whole matcher and
+ * decision path on every fire to arrive at no decision.
+ */
 function groupsForEvent(hooksConfig, eventName) {
   const arr = hooksConfig ? hooksConfig[eventName] : undefined
-  return Array.isArray(arr) ? arr : []
+  if (!Array.isArray(arr)) return []
+  return arr.filter((g) => Array.isArray(g?.hooks) && g.hooks.length > 0)
 }
 
 /**
@@ -351,11 +441,19 @@ function groupsForEvent(hooksConfig, eventName) {
  * outcomes are merged in ARRAY order so the result is deterministic: first
  * block in config order wins, last mutation in config order wins.
  */
-export async function runGroups(groups, target, payloadJson, signal, cwd) {
+export async function runGroups(groups, target, payloadJson, signal, cwd, eventName) {
   const pending = []
   for (const group of groups) {
     if (!group || typeof group !== "object") continue
-    if (!matcherMatches(group.matcher, target)) continue
+    if (
+      target !== null &&
+      !matcherMatches(
+        group.matcher,
+        target,
+        eventName === "FileChanged" || eventName === "StopFailure"
+      )
+    )
+      continue
     for (const handler of Array.isArray(group.hooks) ? group.hooks : []) {
       pending.push(runHandler(handler, payloadJson, signal, cwd))
     }
@@ -414,7 +512,11 @@ export function mapDecisionToOutput(eventName, dec) {
     return enriched ? { hookSpecificOutput: hso } : {}
   }
 
-  // Generic lifecycle mapping (Phase 2 extends this).
+  // Every other lifecycle event. `block` and `additionalContext` are the two
+  // outputs the generic contract defines for all of them; per-event extras
+  // (SessionStart's `watchPaths`, MessageDisplay's `displayContent`) are not
+  // expressible in the settings.json decision vocabulary, so a hook that wants
+  // them uses the SDK/plugin handler path rather than a command hook.
   if (dec.block !== undefined) return { decision: "block", reason: dec.block }
   if (dec.additionalContext !== undefined) {
     return {
@@ -472,16 +574,19 @@ function makeEventCallback(eventName, hooksConfig, deps) {
   return async (input, _toolUseId, ctx) => {
     const groups = groupsForEvent(hooksConfig, eventName)
     if (groups.length === 0) return {}
-    const target = typeof input?.tool_name === "string" ? input.tool_name : ""
+    const target = hookMatchTarget(eventName, input)
     const payloadJson = safeStringify(input)
-    const dec = await runGroups(groups, target, payloadJson, ctx?.signal, deps?.cwd)
+    const dec = await runGroups(groups, target, payloadJson, ctx?.signal, deps?.cwd, eventName)
     if (dec.warnings.length > 0 && typeof deps?.log === "function") {
       // Host log signature: (level, message).
       for (const w of dec.warnings) deps.log("warn", `agent-hook ${eventName}: ${w}`)
     }
     const fire = buildHookFirePayload(deps?.sessionId, eventName, input?.tool_name ?? null, dec)
     if (fire && typeof deps?.emit === "function") deps.emit(fire)
-    return mapDecisionToOutput(eventName, dec)
+    const output = mapDecisionToOutput(eventName, dec)
+    return hasNoLeakingPiiDeep(output)
+      ? output
+      : mapDecisionToOutput(eventName, { block: HOOK_PII_BLOCK_REASON })
   }
 }
 

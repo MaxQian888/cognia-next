@@ -141,6 +141,29 @@ describe("RoutingTransport", () => {
     expect(local.calls.map((c) => c.name)).toEqual(["git_log"])
   })
 
+  it("routes binary transcript media to the active host", async () => {
+    const local = fakeTransport("local")
+    const remote = fakeTransport("remote")
+    const readBinary = jest.fn(async () => ({
+      bytes: Uint8Array.from([1, 2, 3]),
+      mediaType: "image/png",
+    }))
+    remote.transport.readBinary = readBinary
+    const routing = new RoutingTransport(local.transport)
+    setActiveRemoteTransport(remote.transport)
+
+    await expect(
+      routing.readBinary({
+        kind: "session-media",
+        sessionId: "s1",
+        hash: "a".repeat(64),
+        variant: "thumbnail",
+      })
+    ).resolves.toMatchObject({ mediaType: "image/png" })
+
+    expect(readBinary).toHaveBeenCalledTimes(1)
+  })
+
   it("disposes the previous remote transport on switch and deactivate", () => {
     const local = fakeTransport("local")
     const first = fakeTransport("first")
@@ -219,7 +242,13 @@ describe("active-remote holder", () => {
     const listener = jest.fn()
     subscribeActiveRemoteTransport(listener)
     setActiveRemoteTransport(remote.transport)
-    setActiveRemoteEndpoint({ baseUrl: "https://host:27890", deviceJwt: "jwt" })
+    setActiveRemoteEndpoint({
+      baseUrl: "https://host:27890",
+      deviceId: "device-1",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+      deviceKeyThumbprint: "device-thumbprint",
+      serverVersion: "1.0.0",
+    })
 
     __resetRoutingForTests()
 
@@ -252,7 +281,10 @@ describe("active-remote endpoint + isRemoteHostActive", () => {
     expect(getActiveRemoteEndpoint()).toBeNull()
     const endpoint = {
       baseUrl: "https://box.example:27890",
-      deviceJwt: "device-jwt",
+      deviceId: "device-1",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+      deviceKeyThumbprint: "device-thumbprint",
+      serverVersion: "1.0.0",
       serverFingerprint: "sha256:remote-spki",
     }
     setActiveRemoteEndpoint(endpoint)

@@ -9,7 +9,7 @@
 //!     (today's behavior, byte-identical). The desktop WebView listens for the
 //!     Tauri event and resolves the matching oneshot via its response command.
 //!   - a socket implementation (ADR-0059 W3, added in a later slice) — the
-//!     headless Node brain over `/ws/v1/bridge`; the frame carries the SAME
+//!     headless Node brain over `/internal/bridge`; the frame carries the SAME
 //!     channel name + payload, so the TS listener code is shared between
 //!     `listen()` (desktop) and WS frames (headless).
 //!
@@ -17,12 +17,55 @@
 //! transport-agnostic and is untouched.
 
 use serde_json::Value;
+use tokio::sync::{watch, OwnedSemaphorePermit};
+
+/// Connection-scoped request lifetime returned by a bridge transport.
+/// WebView transports use an unscoped guard; socket transports attach both an
+/// in-flight permit and a disconnect signal for their exact connection.
+pub struct BridgeRequestGuard {
+    disconnected: Option<watch::Receiver<bool>>,
+    _permit: Option<OwnedSemaphorePermit>,
+}
+
+impl BridgeRequestGuard {
+    pub fn unscoped() -> Self {
+        Self {
+            disconnected: None,
+            _permit: None,
+        }
+    }
+
+    pub fn scoped(disconnected: watch::Receiver<bool>, permit: OwnedSemaphorePermit) -> Self {
+        Self {
+            disconnected: Some(disconnected),
+            _permit: Some(permit),
+        }
+    }
+
+    pub async fn disconnected(&mut self) {
+        let Some(receiver) = self.disconnected.as_mut() else {
+            std::future::pending::<()>().await;
+            return;
+        };
+        if *receiver.borrow() {
+            return;
+        }
+        while receiver.changed().await.is_ok() {
+            if *receiver.borrow() {
+                return;
+            }
+        }
+    }
+}
 
 /// Delivers a bridge request frame on a named channel. `channel` is the
 /// existing Tauri event name; `payload` is the existing event payload,
 /// serialized to JSON (byte-identical to what `AppHandle::emit` sent).
 pub trait BridgeTransport: Send + Sync + 'static {
     fn emit(&self, channel: &str, payload: Value) -> Result<(), String>;
+    fn reserve_request(&self) -> Result<BridgeRequestGuard, String> {
+        Ok(BridgeRequestGuard::unscoped())
+    }
     /// `"webview"` | `"socket"` — for logs and error strings.
     fn kind(&self) -> &'static str;
 }

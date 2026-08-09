@@ -1,8 +1,3 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
-
 const runWorkflowMock = jest.fn(async (..._args: unknown[]) => ({
   runId: "run_new",
   status: "succeeded" as const,
@@ -13,17 +8,19 @@ jest.mock("./orchestrator", () => ({
 }))
 
 import { getRunStepOutputs, runFromStep } from "./run-from-step"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { VisualWorkflow, WorkflowRunEventRow } from "@/types/workflow/visual"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().workflowRunEvents.clear()
   runWorkflowMock.mockClear()
 })
+afterAll(dbFixture.dispose)
 
 const ev = (
   over: Partial<WorkflowRunEventRow> & { id: string; ts: number }

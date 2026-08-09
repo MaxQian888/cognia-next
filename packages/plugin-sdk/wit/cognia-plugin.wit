@@ -1,4 +1,4 @@
-/// cognia-next WASM plugin contract — v0.1.0
+/// cognia-next WASM plugin contract — v0.2.0
 ///
 /// A plugin imports the cognia capabilities it needs (each capability is
 /// gated by the host's `CapabilityGranter`) and exports a small set of
@@ -7,11 +7,64 @@
 /// when the contract grows; only the JSON schemas evolve.
 ///
 /// Inspired by Zed's `zed:extension` world (`crates/extension_api/wit/`).
-/// The version is also embedded as a `cognia:api-version` custom section
-/// in the produced `.wasm` so the host can route to the right linker
-/// across breaking changes. See `src-tauri/src/plugin_api/wasm/wit/`.
+/// The version is embedded as a `cognia:api-version` custom section in the
+/// produced `.wasm`. The host reads THAT section — never the manifest, which
+/// is author-controlled JSON — and routes to the matching linker. See
+/// `crates/cognia-plugin-runtime/src/wasm/wit/`.
+///
+/// ## v0.2.0 is a hard cutover
+///
+/// v0.1.0 plugins do not load. The host registers no v0.1 linker and fails
+/// the load with `UPGRADE_REQUIRED`. The v0.1 contract is preserved verbatim,
+/// for reference only, under `crates/cognia-plugin-runtime/frozen/v0_1/`.
+/// A binary with no `cognia:api-version` section is rejected as malformed —
+/// that has been true since v0.1 and is unchanged.
+///
+/// Changes from v0.1.0:
+///
+///   1. `notification.notify` returns `result<_, string>`. In v0.1 it
+///      returned nothing, so capability denials and backend failures were
+///      swallowed and the guest could not tell a delivered notification from
+///      a discarded one.
+///   2. `clipboard.*` and `notification.notify` are backed by real host
+///      surfaces in-process (the Tauri clipboard / notification plugins).
+///      They no longer return `cognia:not-implemented`.
+///   3. `ai.generate-text` is authorized by the `ai:chat` capability, NOT
+///      `network:fetch`. `network:fetch` grants raw outbound HTTP; spending
+///      the user's model quota is a separate, separately-consented decision.
+///   4. `workflow.emit-event` requires the `extension:workflow` capability.
+///      In v0.1 it was ungated because it only wrote a log line; in v0.2 it
+///      genuinely re-enters the workflow runtime.
+///   5. `ai.generate-text` and `workflow.emit-event` are answered by the
+///      host's renderer bridge rather than erroring.
+///
+/// Data shapes are otherwise unchanged from v0.1.0.
+///
+/// ## Error channel
+///
+/// Every `result<..., string>` error in this package carries a
+/// machine-parseable prefix:
+///
+///     "<CODE>: <human-readable message>"
+///
+/// `<CODE>` is exactly one of:
+///
+///     CAPABILITY_DENIED   the plugin was not granted the required capability
+///     INVALID_REQUEST     malformed or out-of-range arguments
+///     PAYLOAD_TOO_LARGE   an argument or response exceeded the documented cap
+///     TIMEOUT             the host gave up waiting on the backing service
+///     CANCELLED           the plugin was deactivated or unloaded mid-call
+///     HOST_UNAVAILABLE    this host build has no backend for the capability
+///                         (for example clipboard on a headless server), or
+///                         the renderer is unreachable
+///     PROVIDER_ERROR      the backing service answered with a failure
+///     WORKFLOW_REJECTED   the workflow runtime refused the event
+///
+/// Guests SHOULD branch on the code (`split_once(": ")`). The text after the
+/// separator is human-facing and may change in any release; the codes are
+/// stable for the life of the 0.2 contract.
 
-package cognia:plugin@0.1.0;
+package cognia:plugin@0.2.0;
 
 interface logger {
     enum log-level {
@@ -21,6 +74,10 @@ interface logger {
         warn,
         error,
     }
+    /// Always permitted — the host owns the only transport, injects plugin
+    /// identity, and bounds `scope` (64 chars) and `message` (4096 chars).
+    /// Infallible by design: a logging failure must never change guest
+    /// control flow.
     log: func(level: log-level, scope: string, message: string);
 }
 
@@ -31,13 +88,23 @@ interface notification {
         warning,
         error,
     }
-    notify: func(title: string, body: string, kind: notification-kind);
+    /// Surface an OS notification. Requires the `notification` capability.
+    ///
+    /// Delivered in-process through the host's native notification plugin —
+    /// there is no renderer round trip. A host with no notification backend
+    /// (headless `cognia-server`) returns `HOST_UNAVAILABLE`; that does NOT
+    /// disable any other capability.
+    ///
+    /// `title` must be non-blank (`INVALID_REQUEST`). `title` and `body` are
+    /// each capped at 4 KiB (`PAYLOAD_TOO_LARGE`). Neither is ever logged.
+    notify: func(title: string, body: string, kind: notification-kind) -> result<_, string>;
 }
 
 interface secrets {
     /// Returns `none` when the key is not present in the host keyring.
-    /// Errors are host-side I/O failures only; access denials surface as
-    /// a guest-visible trap from the capability gate.
+    /// Secrets are namespaced per plugin, so two plugins cannot read each
+    /// other's values even with colliding key names.
+    /// Requires `secrets:read`; `set`/`delete` require `secrets:write`.
     get: func(key: string) -> result<option<string>, string>;
     set: func(key: string, value: string) -> result<_, string>;
     delete: func(key: string) -> result<_, string>;
@@ -59,11 +126,21 @@ interface process {
     /// declared `shellCommands` allowlist. DENY-by-default: a plugin that
     /// declares no `shellCommands` may spawn nothing, even with the
     /// capability granted — full parity with the TS `ctx.shell.execute` gate.
+    ///
+    /// The child's environment is cleared before `options.env` is applied, so
+    /// host credentials in the ambient environment are never inherited.
     exec: func(program: string, args: list<string>, options: exec-options) -> result<exec-result, string>;
 }
 
 interface clipboard {
+    /// Read the system clipboard as text. Requires `clipboard:read`.
+    /// Served in-process by the host's native clipboard plugin. A host with
+    /// no clipboard backend returns `HOST_UNAVAILABLE`. Clipboard contents
+    /// are never logged, in full or in part.
     read-text: func() -> result<string, string>;
+
+    /// Replace the system clipboard with `value`. Requires `clipboard:write`.
+    /// `value` is capped at 1 MiB (`PAYLOAD_TOO_LARGE`).
     write-text: func(value: string) -> result<_, string>;
 }
 
@@ -73,25 +150,51 @@ interface ai {
         temperature: option<f32>,
         model: option<string>,
     }
-    /// Host runs the prompt through the user's configured Anthropic
-    /// provider chain. Returns the full text in one shot; streaming is a
-    /// v0.2 addition.
+    /// Run `prompt` through the user's configured provider chain and return
+    /// the full text in one shot. Streaming is not part of the 0.2 contract.
+    ///
+    /// Requires the `ai:chat` capability. `network:fetch` does NOT authorize
+    /// this call: the provider chain spends the user's model quota and passes
+    /// through the host's PII redaction gate, which is a distinct consent
+    /// decision from raw outbound HTTP.
+    ///
+    /// Validation runs BEFORE the host allocates any request state: `prompt`
+    /// must be non-empty and at most 1 MiB, `temperature` in 0.0..=2.0, and
+    /// `max-tokens` in 1..=100000. The request is answered by the host's
+    /// renderer bridge; the host bounds the wait at 30 s, further capped by
+    /// the plugin manifest's `wasm.callTimeoutMs`. On expiry the request is
+    /// cancelled host-side and `TIMEOUT` is returned. Deactivating or
+    /// unloading the plugin mid-call yields `CANCELLED`.
+    ///
+    /// The prompt, the options, and the generated text are never logged.
     generate-text: func(prompt: string, options: generate-options) -> result<string, string>;
 }
 
 interface workflow {
-    /// Re-enter the host's workflow runtime with a fire-and-forget event.
-    /// Useful for plugins that want to act as a trigger source on a
-    /// background timer or websocket.
+    /// Re-enter the host's workflow runtime with one trigger event. Useful
+    /// for plugins that act as a trigger source on a background timer or a
+    /// websocket. Requires the `extension:workflow` capability.
+    ///
+    /// `workflow-id` and `kind` must be non-blank (`INVALID_REQUEST`);
+    /// `payload` is capped at 4 MiB (`PAYLOAD_TOO_LARGE`). Both checks run
+    /// before the host allocates request state or emits anything.
+    ///
+    /// The workflow runtime may refuse the event (unknown workflow, disabled
+    /// trigger, ambiguous trigger) — that surfaces as `WORKFLOW_REJECTED`,
+    /// which is a normal, retryable outcome and not a host fault. The payload
+    /// bytes are never logged; only their length is.
     emit-event: func(workflow-id: string, kind: string, payload: list<u8>) -> result<_, string>;
 }
 
-/// The plugin world v0.1.0. Hosts implement every `import`, guests
-/// implement every `export`. cognia-specific WIT lives here; the WASI
-/// Preview 2 worlds (filesystem/clocks/io/random/http/cli) are added to
-/// the same component at link time on the host side without appearing
-/// in this file (they are standard WIT and the host pulls them from the
-/// wasmtime-wasi crate).
+/// The plugin world v0.2.0. Hosts implement every `import`, guests implement
+/// every `export`. cognia-specific WIT lives here; the WASI Preview 2 worlds
+/// (filesystem/clocks/io/random/cli) are added to the same component at link
+/// time on the host side without appearing in this file — they are standard
+/// WIT and the host pulls them from the wasmtime-wasi crate.
+///
+/// The export set is unchanged from v0.1.0. A guest that only implements the
+/// exports still needs a rebuild against this package: the `notification`
+/// import signature changed, which changes the component's import types.
 world cognia-plugin {
     import logger;
     import notification;

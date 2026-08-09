@@ -20,6 +20,26 @@ describe("SlashPalette", () => {
     expect(text).toContain("❯ /mode")
   })
 
+  it("shows the active search and command argument hints", () => {
+    const { container } = render(
+      <SlashPalette
+        query="co"
+        matches={[
+          {
+            name: "copy",
+            description: "copy a reply",
+            argumentHint: "[n|code|tool|user]",
+            category: "chat",
+          },
+        ]}
+        index={0}
+        width={50}
+      />
+    )
+    expect(container.textContent).toContain("Search: co")
+    expect(container.textContent).toContain("/copy [n|code|tool|user]")
+  })
+
   it("renders nothing when there are no matches", () => {
     const { container } = render(<SlashPalette matches={[]} index={0} />)
     expect(container.textContent).toBe("")

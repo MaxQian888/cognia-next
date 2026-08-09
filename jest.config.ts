@@ -106,6 +106,10 @@ const baseTestPathIgnorePatterns = [
   "/out/",
   "/src-tauri/",
   "/sidecar/",
+  // Git worktrees for parallel agent sessions (see `modulePathIgnorePatterns`).
+  // Collecting them runs a second, older copy of every suite against the main
+  // tree's node_modules and reports failures nobody can act on.
+  "/.claude/worktrees/",
   // `services/workspace-runtime/` uses Node's built-in `node:test` runner.
   // Importing those TAP suites through Jest reports an empty Jest suite while
   // the nested tests keep running in the background.
@@ -120,6 +124,7 @@ const baseTestPathIgnorePatterns = [
   // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.
   "/tmp/",
   "/tests/e2e/", // Playwright E2E tests — run via `pnpx playwright test`, not Jest
+  "/tests/real-e2e/", // Real-service Playwright lane — run via `pnpm test:e2e:web-headless`
   // Conformance cases use Node's built-in `node:test` runner and native ESM.
   // Jest would transform their dynamic imports to CJS and then report both
   // empty Jest suites and invalid top-level-await syntax. Run via
@@ -251,6 +256,8 @@ const projectCommon: Config = {
     // animation loop. Tests that assert on the post-animation style need
     // a mock that merges `animate` into `style` at render time.
     "^motion/react$": "<rootDir>/__mocks__/motion-react.js",
+    "^media-chrome/react$": "<rootDir>/__mocks__/media-chrome-react.js",
+    "^use-stick-to-bottom$": "<rootDir>/__mocks__/use-stick-to-bottom.js",
 
     // react-markdown and its remark/rehype plugin ecosystem are ESM-only.
     // Instead of fighting pnpm's two-layer path layout with transformIgnorePatterns,
@@ -285,12 +292,30 @@ const projectCommon: Config = {
   },
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
-  modulePathIgnorePatterns: ["<rootDir>/out/", "<rootDir>/.next/", "<rootDir>/target/"],
+  //
+  // `.claude/worktrees/` holds git worktrees created for parallel agent
+  // sessions. Each is a FULL second checkout, so without this every workspace
+  // package appears twice and Jest's Haste map refuses to resolve any of them
+  // ("several different files ... provide a module for that particular name") —
+  // which fails suites in the MAIN tree that have nothing to do with the
+  // worktree. It also stops the same test being collected and run twice.
+  modulePathIgnorePatterns: [
+    "<rootDir>/out/",
+    "<rootDir>/.next/",
+    "<rootDir>/target/",
+    "<rootDir>/.claude/worktrees/",
+  ],
 
   // A list of paths to modules that run some code to configure or set up the testing framework before each test.
   // jest.setup.ts is env-agnostic — every DOM touch is behind a
   // `typeof window !== "undefined"` guard, so it serves both projects.
   setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
+
+  // Multi-project full-suite runs keep several Jest workers CPU-bound at once.
+  // Database setup and other integration-style tests that finish in under ten
+  // seconds alone can cross Jest's five-second default while a worker is
+  // starved. Keep a finite ceiling, but budget for loaded CI and local runs.
+  testTimeout: 30_000,
 
   testPathIgnorePatterns: baseTestPathIgnorePatterns,
 
@@ -300,8 +325,26 @@ const projectCommon: Config = {
   // only form that survives pnpm's two-layer
   // `.pnpm/<scope>+<pkg>@<ver>/node_modules/<scope>/<pkg>` layout. Add new
   // ESM packages to the negative-lookahead alternation as they surface.
+  //
+  // AI SDK 7 is ESM-only (`"type": "module"`, no CJS dist), so every suite whose
+  // module graph reaches `ai` needs it transpiled. `ai` is entered anchored —
+  // `\.pnpm/ai@` and `/node_modules/ai/` — and NEVER as a bare `ai`, which as a
+  // substring alternative would match half the store (`chai`, `ramda`, any path
+  // containing the letters). `@ai-sdk\+` is the pnpm virtual-store dir form
+  // (`.pnpm/@ai-sdk+openai@…`), `@ai-sdk/` the symlinked form — same pairing as
+  // the `@octokit` entries above.
+  //
+  // This list and `transpilePackages` in `next.config.ts` BOTH have to name a
+  // package; neither alone is enough. next/jest prepends two patterns built
+  // from `transpilePackages`, and this pattern is evaluated at every
+  // `/node_modules/` boundary in the path — including the inner one of pnpm's
+  // `.pnpm/<pkg>@<ver>/node_modules/<scope>/<pkg>` layout, where the remainder
+  // is just `<scope>/<pkg>/…` and the `.pnpm` marker is already behind us. A
+  // package missing here is therefore still ignored even when next/jest would
+  // have transformed it (that is how `@workflow/serde`, a transitive ESM-only
+  // dep of `@ai-sdk/provider-utils@5`, slipped through).
   transformIgnorePatterns: [
-    "/node_modules/(?!.*(?:@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/|@modelcontextprotocol\\+|@modelcontextprotocol/|@xyflow\\+|@xyflow/|chart\\.js|cheerio))",
+    "/node_modules/(?!.*(?:\\.pnpm/ai@|/node_modules/ai/|\\bai/dist/|@agentclientprotocol\\+|@agentclientprotocol/|@ai-sdk\\+|@ai-sdk/|@standard-schema\\+|@standard-schema/|@workflow\\+|@workflow/|@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/|@modelcontextprotocol\\+|@modelcontextprotocol/|@xyflow\\+|@xyflow/|chart\\.js|cheerio))",
     "\\.pnp\\.[^\\\\]+$",
   ],
 }
@@ -321,6 +364,10 @@ const globalConfig: Config = {
     // co-located ≥90% coverage contract as host modules.
     "plugins/cognia-work-mode/src/**/*.{ts,tsx}",
     "!plugins/cognia-work-mode/src/**/*.test.{ts,tsx}",
+    // First-party SRE Agent is a browser-bundled plugin with the same
+    // co-located coverage contract as host modules.
+    "plugins/sre-agent/src/**/*.{ts,tsx}",
+    "!plugins/sre-agent/src/**/*.test.{ts,tsx}",
     // The overlay is shipped as a string and loaded by its suites via
     // readFileSync + eval, so V8 cannot attribute any coverage to it and all
     // ~1.8k lines report 0% — diluting the `global` bucket (the

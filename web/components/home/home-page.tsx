@@ -1,11 +1,13 @@
 import { SectionIndexRail } from "@web/components/section-index-rail"
 import { SiteShell, evidence } from "@web/components/site-shell"
+import { ScrollProgress } from "@web/components/ui/scroll-progress"
 import { getCopy } from "@web/content"
 import { HOME_SECTIONS } from "@web/content/types"
 import { releaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
 import { RELEASES_URL, docsUrl } from "@web/lib/site"
 import { Connections } from "./connections"
+import { ContextTrace } from "./context-trace"
 import { DesktopSection } from "./desktop-section"
 import { FinalCta } from "./final-cta"
 import { Hero } from "./hero"
@@ -30,6 +32,7 @@ export function HomePage({ locale }: { locale: Locale }) {
 
   return (
     <SiteShell locale={locale} route="/">
+      <ScrollProgress />
       {/* Eight sections and nine thousand pixels with no chrome between them:
        * without this a reader partway down cannot tell how much argument is
        * left, or get back to a section they skimmed. */}
@@ -39,20 +42,27 @@ export function HomePage({ locale }: { locale: Locale }) {
         label={copy.nav.sectionIndexLabel}
       />
       <Hero locale={locale} copy={copy} releaseState={state} docsOrigin={docsOrigin} />
-      <SignatureDemo copy={copy.home.signature} reconstruction={copy.reconstruction} />
+      <ContextTrace copy={copy.home.contextTrace} />
+      <SignatureDemo
+        copy={copy.home.signature}
+        reconstruction={copy.reconstruction}
+        lensLabel={copy.home.lensLabel}
+        fileTreeLabel={copy.home.fileTreeLabel}
+        pointerLabel={copy.reconstruction.workbench.agentLabel}
+      />
       <WorkbenchBento
         copy={copy.home.workbench}
         common={copy.common}
         reconstruction={copy.reconstruction}
       />
-      <DesktopSection copy={copy.home.desktop} locale={locale} />
+      <DesktopSection copy={copy.home.desktop} terminalCopy={copy.home.terminal} locale={locale} />
       <RunMatrix
         copy={copy.home.run}
         learnMore={copy.common.learnMore}
         locale={locale}
         docsOrigin={docsOrigin}
       />
-      <Connections copy={copy.home.connections} />
+      <Connections copy={copy.home.connections} flowCopy={copy.home.connectionFlow} />
       <TrustSection
         copy={copy.home.trust}
         common={copy.common}

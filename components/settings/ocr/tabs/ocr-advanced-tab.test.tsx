@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { OcrAdvancedTab } from "./ocr-advanced-tab"
 
@@ -20,109 +20,75 @@ function setup(
 }
 
 describe("OcrAdvancedTab", () => {
-  it("shows region only for aws-textract / azure-document-intelligence", () => {
-    const { unmount } = render(
-      <OcrAdvancedTab
-        providerId="aws-textract"
-        config={{}}
-        onConfigChange={() => {}}
-        onClearProviderCache={() => {}}
-      />
-    )
-    expect(screen.getByTestId("ocr-adv-region")).toBeInTheDocument()
-    unmount()
-
-    render(
-      <OcrAdvancedTab
-        providerId="azure-document-intelligence"
-        config={{}}
-        onConfigChange={() => {}}
-        onClearProviderCache={() => {}}
-      />
-    )
-    expect(screen.getByTestId("ocr-adv-region")).toBeInTheDocument()
+  it("renders provider fields from OCR_PARAMETER_SCHEMAS", () => {
+    setup("local-http")
+    expect(screen.getByLabelText(/Endpoint/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Request dialect/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Timeout \(ms\)/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Confirm private LAN access/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/API key/i)).not.toBeInTheDocument()
   })
 
-  it("hides region for providers that don't have one", () => {
-    setup("mistral-ocr")
-    expect(screen.queryByTestId("ocr-adv-region")).not.toBeInTheDocument()
+  it("binds LAN confirmation to the exact current endpoint", async () => {
+    const user = userEvent.setup()
+    const endpoint = "http://192.168.1.20:1224/api/ocr"
+    const { onConfigChange } = setup("local-http", { endpoint })
+    await user.click(screen.getByLabelText(/Confirm private LAN access/i))
+    expect(onConfigChange.mock.calls.at(-1)![0]).toMatchObject({
+      allowLan: true,
+      confirmedLanEndpoint: endpoint,
+    })
+
+    fireEvent.change(screen.getByLabelText(/Endpoint/i), {
+      target: { value: "http://192.168.1.21:1224/api/ocr" },
+    })
+    expect(onConfigChange.mock.calls.at(-1)![0]).toMatchObject({ allowLan: false })
+    expect(onConfigChange.mock.calls.at(-1)![0].confirmedLanEndpoint).toBeUndefined()
   })
 
-  it("shows modelVariant only for declared providers", () => {
-    setup("mistral-ocr")
-    expect(screen.getByTestId("ocr-adv-model-variant")).toBeInTheDocument()
+  it("renders provider-specific fields without leaking fields from another provider", () => {
+    setup("aws-textract")
+    expect(screen.getByLabelText(/^Region/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Extract tables/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Prompt template/i)).not.toBeInTheDocument()
   })
 
-  it("hides modelVariant for ocr-space", () => {
-    setup("ocr-space")
-    expect(screen.queryByTestId("ocr-adv-model-variant")).not.toBeInTheDocument()
+  it("writes the canonical model field and removes a legacy modelVariant", () => {
+    const { onConfigChange } = setup("mistral-ocr", { modelVariant: "legacy" })
+    const input = screen.getByLabelText(/^Model/i)
+    fireEvent.change(input, { target: { value: "current" } })
+    const last = onConfigChange.mock.calls.at(-1)![0]
+    expect(last.model).toBe("current")
+    expect(last.modelVariant).toBeUndefined()
   })
 
-  it("shows promptTemplate only for LLM-vision providers", () => {
-    setup("anthropic-vision")
-    expect(screen.getByTestId("ocr-adv-prompt-template")).toBeInTheDocument()
+  it("defaults PaddleOCR to v6-small and lets the user select v6-tiny", async () => {
+    const user = userEvent.setup()
+    const { onConfigChange } = setup("paddle-ocr")
+    const trigger = screen.getByLabelText(/^Model/i)
+    expect(trigger).toHaveTextContent("v6-small")
+    await user.click(trigger)
+    await user.click(await screen.findByRole("option", { name: "v6-tiny" }))
+    expect(onConfigChange.mock.calls.at(-1)![0].model).toBe("v6-tiny")
   })
 
-  it("hides promptTemplate for non-vision providers", () => {
-    setup("mistral-ocr")
-    expect(screen.queryByTestId("ocr-adv-prompt-template")).not.toBeInTheDocument()
-  })
-
-  it("writes format override into the config blob", async () => {
+  it("writes schema-backed format and language overrides", async () => {
     const user = userEvent.setup()
     const { onConfigChange } = setup("mistral-ocr")
-    const trigger = screen.getByLabelText(/Output format override/i)
-    await user.click(trigger)
+    const format = screen.getByLabelText(/Output format/i)
+    await user.click(format)
     await user.click(await screen.findByRole("option", { name: /Plain text/i }))
-    expect(onConfigChange).toHaveBeenCalled()
-    const last = onConfigChange.mock.calls.at(-1)![0]
-    expect(last.format).toBe("text")
+    expect(onConfigChange.mock.calls.at(-1)![0].format).toBe("text")
+
+    fireEvent.change(screen.getByLabelText(/^Languages/i), { target: { value: "zh" } })
+    expect(onConfigChange.mock.calls.at(-1)![0].languages).toBe("zh")
   })
 
-  it("clears the format field when the user picks 'Inherit global'", async () => {
-    const user = userEvent.setup()
-    const { onConfigChange } = setup("mistral-ocr", { format: "text" })
-    const trigger = screen.getByLabelText(/Output format override/i)
-    await user.click(trigger)
-    await user.click(await screen.findByRole("option", { name: /Inherit/i }))
-    const last = onConfigChange.mock.calls.at(-1)![0]
-    expect(last.format).toBeUndefined()
-  })
-
-  it("writes languages override and clears it when emptied", async () => {
-    const user = userEvent.setup()
-    const { onConfigChange } = setup("mistral-ocr")
-    const input = screen.getByLabelText(/Languages override/i)
-    await user.type(input, "zh")
-    const last = onConfigChange.mock.calls.at(-1)![0]
-    expect(last.languages).toBeDefined()
-  })
-
-  it("writes modelVariant override", async () => {
-    const user = userEvent.setup()
-    const { onConfigChange } = setup("mistral-ocr")
-    await user.type(screen.getByLabelText(/Model variant/i), "x")
-    expect(onConfigChange).toHaveBeenCalled()
-    const last = onConfigChange.mock.calls.at(-1)![0]
-    expect(last.modelVariant).toBe("x")
-  })
-
-  it("writes region override", async () => {
-    const user = userEvent.setup()
-    const { onConfigChange } = setup("aws-textract")
-    await user.type(screen.getByLabelText(/^Region/i), "u")
-    expect(onConfigChange).toHaveBeenCalled()
-    const last = onConfigChange.mock.calls.at(-1)![0]
-    expect(last.region).toBe("u")
-  })
-
-  it("writes promptTemplate override", async () => {
-    const user = userEvent.setup()
-    const { onConfigChange } = setup("anthropic-vision")
-    await user.type(screen.getByLabelText(/Prompt template/i), "h")
-    expect(onConfigChange).toHaveBeenCalled()
-    const last = onConfigChange.mock.calls.at(-1)![0]
-    expect(last.promptTemplate).toBe("h")
+  it("renders and writes the LLM prompt template", () => {
+    const { onConfigChange } = setup("anthropic-vision", { promptTemplate: "old" })
+    const input = screen.getByLabelText(/Prompt template/i)
+    fireEvent.change(input, { target: { value: "new" } })
+    expect(onConfigChange.mock.calls.at(-1)![0].promptTemplate).toBe("new")
   })
 
   it("resets all overrides via the Reset button", async () => {

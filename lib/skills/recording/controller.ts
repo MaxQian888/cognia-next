@@ -596,9 +596,27 @@ export async function recoverOnStartup(): Promise<void> {
     }
     case "offerInterrupted":
     case "offerResume": {
+      const row = await getRecording(plan.recordingId)
+      if (row?.source) {
+        state.setCapturedSteps([])
+        state.setEdits(row.edits)
+        state.dispatch({
+          type: "REATTACH",
+          snapshot: {
+            ...store(),
+            phase: row.draft ? "draft" : "review",
+            recordingId: row.id,
+            bundleId: row.bundleId,
+            startedAt: row.createdAt,
+            scope: null,
+            inputVariables: row.inputVariables,
+            draft: row.draft ?? null,
+          },
+        })
+        break
+      }
       const bundle = await recordLoadBundle(plan.recordingId).catch(() => null)
       if (!bundle) return
-      const row = await getRecording(plan.recordingId)
       state.setCapturedSteps(bundle.steps)
       if (row?.edits) state.setEdits(row.edits)
       state.dispatch({

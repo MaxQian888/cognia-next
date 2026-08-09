@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CheckIcon, LockKeyholeIcon, SettingsIcon, UserRoundIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -135,8 +136,11 @@ export function AccountSwitcher() {
           <button
             type="button"
             onClick={() => {
-              lock()
-              setOpen(false)
+              void Promise.resolve(lock())
+                .then(() => setOpen(false))
+                .catch((cause) =>
+                  toast.error(cause instanceof Error ? cause.message : t("operationFailed"))
+                )
             }}
             data-testid="account-switcher-lock"
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"

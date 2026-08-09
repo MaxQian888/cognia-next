@@ -32,6 +32,8 @@ import {
 } from "@/lib/native/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import { JsonRpcPeer, JsonRpcMethodError } from "./json-rpc-peer"
+import { ACP_PROTOCOL_REGISTRY, classifyAcpV1Method, validateAcpV1Envelope } from "./acp-wire-codec"
+import { normalizeAcpElicitationRequest, validateAcpElicitationResponse } from "./acp-elicitation"
 import { spawnReclaimingOrphan } from "./spawn-reclaim"
 import { buildAgentEnv } from "./env-builder"
 import {
@@ -41,6 +43,14 @@ import {
 } from "./session-extension-errors"
 import { isToolPreApproved } from "./tool-preapproval"
 import type { ExternalAgentCompactionOptions } from "./session-capabilities"
+import type {
+  InitializeRequest as SdkInitializeRequest,
+  InitializeResponse as SdkInitializeResponse,
+  NewSessionRequest as SdkNewSessionRequest,
+  NewSessionResponse as SdkNewSessionResponse,
+  PromptRequest as SdkPromptRequest,
+  PromptResponse as SdkPromptResponse,
+} from "@agentclientprotocol/sdk"
 
 const log = loggers.agent
 
@@ -51,8 +61,8 @@ const log = loggers.agent
  * per https://agentclientprotocol.com/protocol/initialization (the client
  * SHOULD close the connection when it does not support the agent's version).
  */
-export const SUPPORTED_ACP_PROTOCOL_VERSIONS = [1] as const
-export const LATEST_ACP_PROTOCOL_VERSION = 1
+export const SUPPORTED_ACP_PROTOCOL_VERSIONS = [ACP_PROTOCOL_REGISTRY.v1.protocolVersion] as const
+export const LATEST_ACP_PROTOCOL_VERSION = ACP_PROTOCOL_REGISTRY.v1.protocolVersion
 
 /** A process that exits within this window of a successful connect counts as a
  * rapid crash for the reconnect circuit breaker. */
@@ -88,7 +98,6 @@ import type {
   AcpAgentCapabilities,
   AcpImplementationInfo,
   AcpAuthMethod,
-  AcpStopReason,
   AcpSessionUpdate,
   AcpMcpServerConfig,
   AcpSessionModelState,
@@ -101,6 +110,8 @@ import type {
   AcpTerminalOutputResult,
   AcpPermissionRequest,
   AcpPermissionOption,
+  AcpElicitationRequest,
+  AcpElicitationResponse,
   AcpToolCallKind,
   AcpToolCallStatus,
   AcpToolCallLocation,
@@ -129,73 +140,49 @@ interface JsonRpcNotification {
  * ACP Initialize request params
  * @see https://agentclientprotocol.com/protocol/initialization
  */
-interface AcpInitializeParams {
-  /** Protocol version (integer) */
-  protocolVersion: number
-  /** Client capabilities */
-  clientCapabilities: AcpClientCapabilities
-  /** Client implementation info */
-  clientInfo: AcpImplementationInfo
-}
+type AcpInitializeParams = SdkInitializeRequest
 
 /**
  * ACP Initialize response result
  * @see https://agentclientprotocol.com/protocol/initialization
  */
-interface AcpInitializeResult {
-  /** Negotiated protocol version */
-  protocolVersion: number
-  /** Agent capabilities */
-  agentCapabilities: AcpAgentCapabilities
-  /** Agent implementation info */
-  agentInfo: AcpImplementationInfo
-  /** Available authentication methods */
-  authMethods?: AcpAuthMethod[]
-}
+type AcpInitializeResult = SdkInitializeResponse
 
 /**
  * ACP session/new request params
  * @see https://agentclientprotocol.com/protocol/session-setup
  */
-interface AcpNewSessionParams {
-  /** Working directory (absolute path, required) */
-  cwd: string
-  /** MCP servers to connect to */
-  mcpServers: AcpMcpServerConfig[]
-  /** Additional absolute workspace roots (capability-gated). */
-  additionalDirectories?: string[]
-  /** Custom metadata */
-  _meta?: {
-    /** System prompt configuration */
-    systemPrompt?: string | { append?: string }
-    /** Disable built-in tools */
-    disableBuiltInTools?: boolean
-    /** Claude Code specific options */
-    claudeCode?: {
-      options?: Record<string, unknown>
-    }
-    /** Codex ACP specific options */
-    codex?: {
-      options?: Record<string, unknown>
-    }
-    /** Cognia-specific session metadata */
-    cognia?: Record<string, unknown>
+type AcpSessionRequestMeta = {
+  /** System prompt configuration */
+  systemPrompt?: string | { append?: string }
+  /** Disable built-in tools */
+  disableBuiltInTools?: boolean
+  /** Claude Code specific options */
+  claudeCode?: {
+    options?: Record<string, unknown>
   }
+  /** Codex ACP specific options */
+  codex?: {
+    options?: Record<string, unknown>
+  }
+  /** Cognia-specific session metadata */
+  cognia?: Record<string, unknown>
+}
+
+type AcpNewSessionParams = Omit<SdkNewSessionRequest, "_meta" | "mcpServers"> & {
+  mcpServers: AcpMcpServerConfig[]
+  _meta?: AcpSessionRequestMeta
 }
 
 /**
  * ACP session/new response result
  * @see https://agentclientprotocol.com/protocol/session-setup
  */
-interface AcpNewSessionResult {
-  /** Session ID */
-  sessionId: string
-  /** Available models */
-  models?: AcpSessionModelState
-  /** Available modes */
-  modes?: AcpSessionModesState
-  /** Session config options (supersedes modes) */
-  configOptions?: AcpConfigOption[]
+type AcpNewSessionResult = Omit<SdkNewSessionResponse, "modes" | "configOptions"> & {
+  modes?: AcpSessionModesState | null
+  configOptions?: AcpConfigOption[] | null
+  /** Compatibility-only pre-config-options model state. */
+  models?: AcpSessionModelState | null
 }
 
 /**
@@ -215,12 +202,7 @@ interface AcpSessionListItem {
  * ACP session/prompt request params
  * @see https://agentclientprotocol.com/protocol/prompt-turn
  */
-interface AcpPromptParams {
-  /** Session ID */
-  sessionId: string
-  /** Prompt content blocks */
-  prompt: Array<AcpPromptContentBlock>
-}
+type AcpPromptParams = Omit<SdkPromptRequest, "prompt"> & { prompt: AcpPromptContentBlock[] }
 
 /**
  * ACP prompt content block types
@@ -234,10 +216,7 @@ type AcpPromptContentBlock =
 /**
  * ACP session/prompt response result
  */
-interface AcpPromptResult {
-  /** Reason the turn stopped */
-  stopReason: AcpStopReason
-}
+type AcpPromptResult = SdkPromptResponse
 
 /**
  * ACP Session notification types
@@ -259,8 +238,6 @@ type AcpNotificationType =
   | "progress"
   | "error"
 
-type AcpSessionRequestMeta = NonNullable<AcpNewSessionParams["_meta"]>
-
 function createDefaultExtensionSupportStatus(): ExternalAgentExtensionSupportStatus {
   return {
     state: "unknown",
@@ -273,6 +250,50 @@ function createDefaultSessionExtensionSupport(): ExternalAgentSessionExtensionSu
     "session/fork": createDefaultExtensionSupportStatus(),
     "session/resume": createDefaultExtensionSupportStatus(),
   }
+}
+
+function normalizeAgentCapabilities(
+  value: AcpInitializeResult["agentCapabilities"]
+): AcpAgentCapabilities | undefined {
+  if (!value) return undefined
+  const session = value.sessionCapabilities
+  return {
+    loadSession: value.loadSession,
+    promptCapabilities: value.promptCapabilities
+      ? {
+          image: value.promptCapabilities.image,
+          audio: value.promptCapabilities.audio,
+          embeddedContext: value.promptCapabilities.embeddedContext,
+        }
+      : undefined,
+    mcpCapabilities: value.mcpCapabilities
+      ? { http: value.mcpCapabilities.http, sse: value.mcpCapabilities.sse }
+      : undefined,
+    sessionCapabilities: session
+      ? {
+          fork: session.fork ? { ...session.fork } : undefined,
+          resume: session.resume ? { ...session.resume } : undefined,
+          close: session.close ? { ...session.close } : undefined,
+          delete: session.delete ? { ...session.delete } : undefined,
+          list: session.list ? { ...session.list } : undefined,
+          additionalDirectories: session.additionalDirectories
+            ? { ...session.additionalDirectories }
+            : undefined,
+        }
+      : undefined,
+    auth: value.auth ? { logout: value.auth.logout != null } : undefined,
+  }
+}
+
+function normalizeAuthMethods(
+  methods: AcpInitializeResult["authMethods"]
+): AcpAuthMethod[] | undefined {
+  return methods?.map((method) => ({
+    id: method.id,
+    name: method.name,
+    description: method.description ?? undefined,
+    _meta: method._meta ?? undefined,
+  }))
 }
 
 // ============================================================================
@@ -351,6 +372,17 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
   > = new Map()
 
+  private pendingElicitations = new Map<
+    string,
+    {
+      request: AcpElicitationRequest
+      resolve: (response: Omit<AcpElicitationResponse, "requestId">) => void
+      reject: (error: Error) => void
+      timeout: ReturnType<typeof setTimeout>
+    }
+  >()
+  private knownUrlElicitations = new Map<string, string | undefined>()
+
   // Extension method handlers for custom "_" methods
   private extensionHandlers: Map<
     string,
@@ -392,9 +424,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this.peer = new JsonRpcPeer({
       omitJsonRpcVersion: false,
       writeRaw: (message) => this.sendMessage(message),
+      validateInbound: (message) => this.validateInboundEnvelope(message),
       onNotification: (method, params) =>
         this.handleNotification({ jsonrpc: "2.0", method, params }),
-      onServerRequest: (method, params) => this.dispatchAgentRequest(method, params),
+      onServerRequest: (method, params, id, signal) =>
+        this.dispatchAgentRequest(method, params, id, signal),
+      concurrentServerRequests: true,
     })
 
     try {
@@ -494,6 +529,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       pending.resolve({ outcome: { outcome: "cancelled" } })
     }
     this.pendingPermissions.clear()
+    this.cancelPendingElicitations()
     this.peer?.rejectAll("Disconnected")
     this.peer = undefined
     this.clearSessionExtensionSupportCache()
@@ -871,6 +907,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const clientCapabilities: AcpClientCapabilities = {
       session: { configOptions: { boolean: {} } },
       plan: {},
+      ...(this._config?.metadata?.acpElicitationEnabled === true
+        ? { elicitation: { form: {}, url: {} } }
+        : {}),
       ...(supportsAgentFs()
         ? {
             fs: {
@@ -909,9 +948,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     // Store agent info for later use
     this._protocolVersion = result.protocolVersion
-    this._agentCapabilities = result.agentCapabilities
+    this._agentCapabilities = normalizeAgentCapabilities(result.agentCapabilities)
     this._agentInfo = result.agentInfo
-    this._authMethods = result.authMethods
+      ? {
+          name: result.agentInfo.name,
+          version: result.agentInfo.version,
+          title: result.agentInfo.title ?? undefined,
+        }
+      : undefined
+    this._authMethods = normalizeAuthMethods(result.authMethods)
 
     return result
   }
@@ -1171,6 +1216,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         this.pendingPermissions.delete(requestId)
       }
     }
+    this.cancelPendingElicitations(sessionId)
 
     this.turnMessageId.delete(sessionId)
     await this.cleanupNativeSessionTerminals(sessionId)
@@ -1207,9 +1253,24 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         this.pendingPermissions.delete(requestId)
       }
     }
+    this.cancelPendingElicitations(sessionId)
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
+  }
+
+  private cancelPendingElicitations(sessionId?: string): void {
+    for (const [requestId, pending] of this.pendingElicitations) {
+      if (sessionId && pending.request.sessionId !== sessionId) continue
+      clearTimeout(pending.timeout)
+      pending.resolve({ action: "cancel" })
+      this.pendingElicitations.delete(requestId)
+    }
+    for (const [elicitationId, ownerSessionId] of this.knownUrlElicitations) {
+      if (!sessionId || ownerSessionId === sessionId) {
+        this.knownUrlElicitations.delete(elicitationId)
+      }
+    }
   }
 
   private async cleanupNativeSessionTerminals(sessionId: string): Promise<void> {
@@ -1427,6 +1488,25 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         this.pendingPermissions.delete(requestId)
         return
       }
+    }
+  }
+
+  async respondToElicitation(response: AcpElicitationResponse): Promise<void> {
+    const pending = this.pendingElicitations.get(response.requestId)
+    if (!pending) return
+    const validated = validateAcpElicitationResponse(pending.request, response)
+    clearTimeout(pending.timeout)
+    this.pendingElicitations.delete(response.requestId)
+    if (pending.request.mode === "url" && pending.request.elicitationId) {
+      this.knownUrlElicitations.set(pending.request.elicitationId, pending.request.sessionId)
+    }
+    pending.resolve(validated)
+  }
+
+  async cancelRequest(requestId: number | string): Promise<void> {
+    if (!this.peer) throw new Error("Not connected to agent")
+    if (!this.peer.cancelRequest(requestId)) {
+      this.sendNotification("$/cancel_request", { requestId })
     }
   }
 
@@ -2095,6 +2175,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     let outboundPayload: unknown
     try {
       outboundPayload = JSON.parse(message)
+      validateAcpV1Envelope(outboundPayload)
     } catch {
       throw new Error("ACP outbound payload is not valid JSON")
     }
@@ -2145,6 +2226,21 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
   }
 
+  private validateInboundEnvelope(message: unknown): boolean {
+    try {
+      validateAcpV1Envelope(message)
+      return true
+    } catch (error) {
+      log.warn("ACP wire validation rejected an inbound envelope", {
+        adapterId: this._config?.id,
+        protocolVersion: LATEST_ACP_PROTOCOL_VERSION,
+        strict: this._config?.metadata?.acpStrictValidation === true,
+        error: error instanceof Error ? error.message : "Unknown validation error",
+      })
+      return this._config?.metadata?.acpStrictValidation !== true
+    }
+  }
+
   /**
    * Dispatch a server→client request (ACP "Client methods"). Returns the
    * result value or throws — the shared {@link JsonRpcPeer} turns that into the
@@ -2155,15 +2251,27 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    */
   private async dispatchAgentRequest(
     method: string,
-    params: Record<string, unknown> | undefined
+    params: Record<string, unknown> | undefined,
+    requestId: number | string,
+    signal: AbortSignal
   ): Promise<unknown> {
+    const stability = classifyAcpV1Method(method)
+    if (stability === "future" && !method.startsWith("_")) {
+      throw new JsonRpcMethodError(-32601, `Method not found: ${method}`)
+    }
     switch (method) {
       case "fs/read_text_file":
         return this.handleReadTextFile(params as unknown as AcpReadTextFileParams)
       case "fs/write_text_file":
         return this.handleWriteTextFile(params as unknown as AcpWriteTextFileParams)
       case "session/request_permission":
-        return this.handlePermissionRequest(params as unknown as AcpPermissionRequest)
+        return this.handlePermissionRequest(
+          params as unknown as AcpPermissionRequest,
+          signal,
+          requestId
+        )
+      case "elicitation/create":
+        return this.handleElicitationRequest(requestId, params, signal)
       case "terminal/create":
         return this.handleTerminalCreate(params as unknown as AcpTerminalCreateParams)
       case "terminal/output":
@@ -2194,6 +2302,51 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         }
         throw new JsonRpcMethodError(-32601, `Method not found: ${method}`)
     }
+  }
+
+  private async handleElicitationRequest(
+    requestId: number | string,
+    params: Record<string, unknown> | undefined,
+    signal: AbortSignal
+  ): Promise<Omit<AcpElicitationResponse, "requestId">> {
+    if (this._config?.metadata?.acpElicitationEnabled !== true) {
+      throw new JsonRpcMethodError(-32601, "Elicitation is not enabled")
+    }
+    const normalized = normalizeAcpElicitationRequest(requestId, params)
+    if (!normalized.ok) {
+      throw new JsonRpcMethodError(-32602, `Invalid elicitation request: ${normalized.reason}`)
+    }
+    if (normalized.request.sessionId && !this._sessions.has(normalized.request.sessionId)) {
+      return { action: "cancel" }
+    }
+
+    return new Promise((resolve, reject) => {
+      const id = normalized.request.id
+      const cleanup = () => {
+        const pending = this.pendingElicitations.get(id)
+        if (pending) clearTimeout(pending.timeout)
+        this.pendingElicitations.delete(id)
+      }
+      const timeout = setTimeout(() => {
+        cleanup()
+        resolve({ action: "cancel" })
+      }, 300000)
+      this.pendingElicitations.set(id, { request: normalized.request, resolve, reject, timeout })
+      signal.addEventListener(
+        "abort",
+        () => {
+          cleanup()
+          reject(new JsonRpcMethodError(-32800, "Request cancelled"))
+        },
+        { once: true }
+      )
+      this.emitEvent({
+        type: "elicitation_request",
+        sessionId: normalized.request.sessionId,
+        timestamp: new Date(),
+        request: normalized.request,
+      })
+    })
   }
 
   /**
@@ -2238,30 +2391,34 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * The ACP protocol expects synchronous response to the request, so we return the
    * Promise which will resolve when the UI responds or timeout occurs.
    */
-  private async handlePermissionRequest(params: {
-    sessionId?: string
-    toolCall?: {
+  private async handlePermissionRequest(
+    params: {
+      sessionId?: string
+      toolCall?: {
+        toolCallId?: string
+        title?: string
+        kind?: string
+        rawInput?: Record<string, unknown>
+        locations?: AcpToolCallLocation[]
+      }
       toolCallId?: string
       title?: string
       kind?: string
+      requestId?: string
+      options?: AcpPermissionOption[]
       rawInput?: Record<string, unknown>
       locations?: AcpToolCallLocation[]
-    }
-    toolCallId?: string
-    title?: string
-    kind?: string
-    requestId?: string
-    options?: AcpPermissionOption[]
-    rawInput?: Record<string, unknown>
-    locations?: AcpToolCallLocation[]
-    _meta?: Record<string, unknown>
-    toolInfo?: AcpToolInfo
-    id?: string
-    reason?: string
-    riskLevel?: "low" | "medium" | "high" | "critical"
-    autoApproveTimeout?: number
-    metadata?: Record<string, unknown>
-  }): Promise<{ outcome: { outcome: string; optionId?: string } }> {
+      _meta?: Record<string, unknown>
+      toolInfo?: AcpToolInfo
+      id?: string
+      reason?: string
+      riskLevel?: "low" | "medium" | "high" | "critical"
+      autoApproveTimeout?: number
+      metadata?: Record<string, unknown>
+    },
+    signal?: AbortSignal,
+    wireRequestId?: number | string
+  ): Promise<{ outcome: { outcome: string; optionId?: string } }> {
     const sessionId = params.sessionId || ""
     const session = sessionId ? this._sessions.get(sessionId) : undefined
     if (sessionId && !session) {
@@ -2286,10 +2443,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       name: tcTitle || "Tool request",
       category: tcKind,
     }
+    // JSON-RPC ids are collision-free on the connection. Tool/request domain
+    // ids may repeat across concurrent nested requests and cannot safely key
+    // the pending-response map.
     const requestId =
-      params.requestId ||
-      params.id ||
-      (sessionId && toolInfo.id ? `${sessionId}:${toolInfo.id}` : `permission:${Date.now()}`)
+      wireRequestId !== undefined
+        ? String(wireRequestId)
+        : params.requestId ||
+          params.id ||
+          (sessionId && toolInfo.id ? `${sessionId}:${toolInfo.id}` : `permission:${Date.now()}`)
     const request: AcpPermissionRequest = {
       id: requestId,
       requestId,
@@ -2358,21 +2520,38 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     // Create a Promise that waits for UI response
     return new Promise((resolve, reject) => {
+      const removeAbortListener = () => signal?.removeEventListener("abort", onAbort)
+      const onAbort = () => {
+        const pending = this.pendingPermissions.get(requestId)
+        if (!pending) return
+        clearTimeout(pending.timeout)
+        this.pendingPermissions.delete(requestId)
+        reject(new JsonRpcMethodError(-32800, "Request cancelled"))
+      }
       // Set timeout for permission request (5 minutes)
       const timeoutId = setTimeout(() => {
         if (this.pendingPermissions.has(requestId)) {
           this.pendingPermissions.delete(requestId)
+          removeAbortListener()
           resolve({ outcome: { outcome: "cancelled" } })
         }
       }, 300000)
 
       // Store pending permission
       this.pendingPermissions.set(requestId, {
-        resolve,
-        reject,
+        resolve: (response) => {
+          removeAbortListener()
+          resolve(response)
+        },
+        reject: (error) => {
+          removeAbortListener()
+          reject(error)
+        },
         timeout: timeoutId,
         request,
       })
+      signal?.addEventListener("abort", onAbort, { once: true })
+      if (signal?.aborted) onAbort()
 
       // Emit permission request event for UI to handle
       this.emitEvent({
@@ -2512,6 +2691,21 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Handle a JSON-RPC notification
    */
   private handleNotification(notification: JsonRpcNotification): void {
+    if (notification.method === "elicitation/complete") {
+      const elicitationId = notification.params?.elicitationId
+      if (typeof elicitationId !== "string" || !this.knownUrlElicitations.has(elicitationId)) return
+      const sessionId = this.knownUrlElicitations.get(elicitationId)
+      this.knownUrlElicitations.delete(elicitationId)
+      this.emitEvent({
+        type: "elicitation_complete",
+        sessionId,
+        timestamp: new Date(),
+        elicitationId,
+        _meta:
+          (notification.params?._meta as Record<string, unknown> | null | undefined) ?? undefined,
+      })
+      return
+    }
     const event = this.notificationToEvent(notification)
     if (event) {
       this.emitEvent(event)
@@ -2577,9 +2771,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           timestamp,
           toolUseId: update.toolCallId,
           toolName: update.title,
+          title: update.title,
           kind: update.kind,
           rawInput: update.rawInput,
           locations: update.locations,
+          toolMetadata: {
+            kind: update.kind,
+            ...(update.locations ? { locations: update.locations } : {}),
+          },
         }
 
       case "tool_call_update": {
@@ -2606,16 +2805,28 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             result: extractToolCallText(),
             isError: update.status === "error" || update.status === "failed",
             toolName: update.title,
+            title: update.title,
             kind: update.kind,
             rawInput: update.rawInput,
             rawOutput: update.rawOutput,
             locations: update.locations,
             status: update.status,
+            toolMetadata: {
+              ...(update.kind ? { kind: update.kind } : {}),
+              ...(update.locations ? { locations: update.locations } : {}),
+            },
           }
         }
 
         // Emit enhanced tool_call_update event with all fields
-        if (update.content || update.locations) {
+        if (
+          update.title ||
+          update.kind ||
+          update.content ||
+          update.locations ||
+          update.rawInput ||
+          update.rawOutput
+        ) {
           return {
             type: "tool_call_update" as const,
             sessionId,
@@ -2833,7 +3044,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             },
           }
         }
-        return null
+        return {
+          type: "usage_update",
+          sessionId,
+          timestamp,
+          used: update.used,
+          size: update.size,
+          cost: update.cost,
+        }
       }
 
       case "session_info_update": {
@@ -2850,7 +3068,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             if (!Number.isNaN(ts.getTime())) infoSession.lastActivityAt = ts
           }
         }
-        return null
+        return {
+          type: "session_info_update",
+          sessionId,
+          timestamp,
+          title: update.title,
+          updatedAt: update.updatedAt,
+        }
       }
 
       default:
@@ -3104,6 +3328,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     // Reject all pending requests
     this.peer?.rejectAll(`Process exited with code ${code}`)
+    this.cancelPendingElicitations()
 
     // Mark all sessions as closed
     for (const session of this._sessions.values()) {

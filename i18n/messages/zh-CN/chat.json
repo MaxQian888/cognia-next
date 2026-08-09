@@ -26,6 +26,10 @@
       "matches": "{count} 处匹配"
     },
     "rowAria": "{name} 工具调用 — {status}",
+    "semantic": {
+      "readOnly": "只读",
+      "writeCapable": "可修改"
+    },
     "status": {
       "awaitingApproval": "等待批准",
       "completed": "已完成",
@@ -37,6 +41,10 @@
     },
     "subagents": {
       "summary": "{count, plural, other {# 个子代理}}"
+    },
+    "toolSummary": {
+      "ariaLabel": "前序工具调用摘要",
+      "label": "工具摘要"
     }
   },
   "agentTeamDispatch": {
@@ -157,6 +165,15 @@
     "undoFailed": "无法恢复对话",
     "undoSuccess": "对话已恢复"
   },
+  "checkpoint": {
+    "action": "恢复到此文件检查点",
+    "cancel": "取消",
+    "confirm": "恢复文件",
+    "description": "请先检查试运行结果，再恢复被跟踪的文件。对话历史不会改变。",
+    "previewFailed": "无法预览此检查点。",
+    "restoreFailed": "无法恢复此检查点。",
+    "title": "恢复文件检查点"
+  },
   "composer": {
     "ariaAttachImage": "添加文件",
     "ariaMessage": "消息",
@@ -174,6 +191,7 @@
       "trigger": "添加附件"
     },
     "attachments": {
+      "analyzing": "正在解析图片…",
       "countLimit": "最多只能附加 {max} 个附件。",
       "extracting": "读取中…",
       "fallbackFile": "文件",
@@ -189,6 +207,7 @@
       "oversizeConfirm": "仍然发送",
       "oversizeTitle": "附件较大",
       "preparing": "正在处理附件…",
+      "preparingImages": "正在处理 {count} 张图片…",
       "preview": {
         "empty": "未能从此文件中提取到内容。",
         "fileTab": "文件",
@@ -199,8 +218,8 @@
         "ocrDetail": "查看逐页结果",
         "ocrRun": "运行 OCR",
         "ocrRunning": "OCR 识别中…",
-        "ocrToggle": "同时发送 OCR 文本",
         "ocrToInput": "把文本加进输入框",
+        "ocrToggle": "同时发送 OCR 文本",
         "redactedNote": "高亮部分在发送前已被脱敏。",
         "tokens": "{tokens} tokens"
       },
@@ -223,7 +242,17 @@
       "permissionDenied": "需要相机或照片访问权限才能添加照片。",
       "unsupported": "此设备不支持拍照。"
     },
+    "commandHint": {
+      "needsArgs": "请补充必填参数"
+    },
+    "commandQueue": {
+      "ariaLabel": "待执行命令",
+      "failedTooltip": "/{name} 执行失败",
+      "label": "{count} 个命令",
+      "removeAria": "移除 /{name}"
+    },
     "commands": {
+      "batchFailed": "命令 {names} 执行失败",
       "failed": "命令执行失败",
       "unavailable": "/{name} 暂不可用。"
     },
@@ -246,7 +275,20 @@
     },
     "effort": {
       "aria": "思考等级",
-      "auto": "默认"
+      "auto": "默认",
+      "desc": {
+        "high": "深入推理，适合复杂任务。",
+        "low": "轻量推理，适合直接任务。",
+        "max": "最大推理深度，适合最困难的任务。",
+        "medium": "均衡推理，适合日常任务。",
+        "off": "使用模型的默认推理行为。",
+        "ultracode": "次高推理深度，并启用动态工作流工具。",
+        "xhigh": "超深度推理，适合高难度任务。"
+      },
+      "faster": "更快",
+      "hint": "选择模型在本会话中使用的推理强度。",
+      "hintAria": "关于思考等级",
+      "smarter": "更智能"
     },
     "enhance": {
       "modes": {
@@ -289,7 +331,27 @@
     "ghostAcceptHint": "Tab",
     "ghostDismiss": "忽略建议",
     "helperHints": {
+      "chainingNote": "将命令分行输入，即可按顺序执行。",
+      "cheatsheetDescription": "消息输入框可用的键盘快捷键与前缀。",
+      "cheatsheetLabel": "键盘帮助",
+      "cheatsheetTitle": "输入框快捷键",
       "dropImages": "拖拽 / 粘贴文件、文件夹或链接",
+      "keys": {
+        "complete": "补全当前命令或提及",
+        "dismiss": "关闭建议",
+        "history": "调取输入历史",
+        "newline": "插入新行",
+        "permissionMode": "切换权限模式",
+        "send": "发送消息"
+      },
+      "keysTitle": "键盘",
+      "prefixes": {
+        "memory": "写入记忆",
+        "mention": "提及文件、智能体、技能或工作流",
+        "shell": "运行 Shell 命令",
+        "slash": "运行斜杠命令"
+      },
+      "prefixesTitle": "前缀",
       "send": "⏎ 发送 · ⇧⏎ 换行",
       "tryPrefix": "试试"
     },
@@ -300,12 +362,32 @@
     },
     "memory": {
       "appended": "已写入 {path}",
+      "desktopOnly": "文件记忆仅在桌面应用中可用。",
       "emptyPreview": "（开始输入 memory 内容）",
       "failed": "写入 memory 失败",
       "needsLine": "请在 # 后输入要写入 memory 的内容。",
       "panelTitle": "追加到 memory",
       "pickScope": "请在弹层中选择「项目 memory」或「用户 memory」以保存。",
       "projectLabel": "项目 memory",
+      "scope": {
+        "global": "全局记忆",
+        "workspace": "工作区记忆"
+      },
+      "storedInMemory": "已存入{scope}",
+      "storeError": {
+        "disabled": "长期记忆已关闭。",
+        "empty": "请输入要记住的内容。",
+        "failed": "无法存储这条记忆。",
+        "pii": "敏感信息不能存入记忆。",
+        "temporary": "临时模式下无法使用记忆。",
+        "unavailable": "记忆存储当前不可用。"
+      },
+      "targetLabel": {
+        "file:project": "项目记忆文件",
+        "file:user": "用户记忆文件",
+        "store:global": "全局记忆",
+        "store:workspace": "工作区记忆"
+      },
       "userLabel": "用户 memory"
     },
     "modelPicker": {
@@ -325,7 +407,8 @@
       "noProviders": "尚未配置任何模型提供商",
       "routingGroup": "路由",
       "searchPlaceholder": "搜索模型…",
-      "switchModelAria": "切换模型"
+      "switchModelAria": "切换模型",
+      "title": "选择模型"
     },
     "paramForm": {
       "cancel": "取消",
@@ -484,12 +567,17 @@
       },
       "grantMicAccess": "允许访问麦克风",
       "languageLabel": "语言",
+      "listening": "正在聆听…",
       "live": {
         "description": "自然连续对话，随时插话打断，免手动保持交流。",
         "end": "结束实时语音",
         "errors": {
+          "disabled": "实时语音已关闭。请在「设置 → 语音」中开启。",
+          "mintFailed": "无法与任何实时语音服务商建立会话。请检查 API 密钥与网络后重试。",
+          "noDeployments": "尚未配置实时语音服务商。请在「设置 → 语音」中添加。",
+          "noneEligible": "当前地区和设备下，没有可用的实时语音服务商。",
           "sessionFailed": "实时语音连接已中断，请结束会话后重试。",
-          "startFailed": "无法启动实时语音，请检查 OpenAI 密钥和麦克风权限。"
+          "startFailed": "无法启动实时语音。请检查服务商密钥与麦克风权限。"
         },
         "mute": "麦克风静音",
         "phases": {
@@ -505,7 +593,6 @@
         "title": "实时语音",
         "unmute": "取消麦克风静音"
       },
-      "listening": "正在聆听…",
       "micPermissionDenied": "麦克风访问已被禁止——请在系统或浏览器设置中开启。",
       "microphoneLabel": "麦克风",
       "noMicFound": "未找到麦克风。",
@@ -517,6 +604,12 @@
     "webLabel": "Web",
     "workflowRefs": {
       "removeAria": "移除对 {label} 的引用"
+    },
+    "smartSnapshot": {
+      "captureFailed": "智能快照失败",
+      "captureTooltip": "智能快照",
+      "captured": "已附加智能快照：{appName}",
+      "switchPrompt": "请切换到目标应用，Cognia 稍后会截取它。"
     }
   },
   "concurrent": {
@@ -583,6 +676,39 @@
       "continue": "最近",
       "tryPrompt": "试试这些"
     },
+    "stats": {
+      "customize": "自定义统计项",
+      "customizeTitle": "在欢迎页显示",
+      "dayCount": "{count} 天",
+      "empty": "该时间范围内还没有使用记录。",
+      "heatmap": "日历热力图",
+      "models": {
+        "empty": "该时间范围内没有模型用量。",
+        "turns": "{count} 轮"
+      },
+      "none": "—",
+      "range": {
+        "days": "{days} 天",
+        "label": "时间范围"
+      },
+      "tiles": {
+        "activeDays": "活跃天数",
+        "cost": "总花费",
+        "currentStreak": "当前连续",
+        "longestStreak": "最长连续",
+        "peakHour": "高峰时段",
+        "sessions": "会话数",
+        "tokens": "总 Token",
+        "topModel": "常用模型",
+        "turns": "对话轮次"
+      },
+      "title": "使用概览",
+      "view": {
+        "label": "面板视图",
+        "models": "模型",
+        "overview": "总览"
+      }
+    },
     "style": {
       "minimal": "精简",
       "rich": "丰富",
@@ -601,10 +727,23 @@
       "active": "当前",
       "aria": "切换本会话使用的账号",
       "noOverride": "继承",
-      "toast": "下一条消息将使用账号 {label}"
+      "toast": "下一条消息将使用账号 {label}",
+      "effective": "当前生效账号",
+      "error": "无法切换账号。",
+      "inheritedToast": "正在使用继承账号 {label}",
+      "toastInherited": "正在使用继承的账号。",
+      "switchFailed": "无法切换账号：{error}",
+      "unavailable": "账号切换当前不可用。",
+      "unavailableWithId": "账号 {id} 当前不可用。",
+      "useInherited": "使用继承账号"
     },
     "ariaSettings": "会话设置",
     "bareMode": "极简模式",
+    "branchAria": "分支对话",
+    "branchEmpty": "还没有可分支的内容 —— 这个对话还没有消息。",
+    "branchError": "无法分支该对话。",
+    "branchSuccess": "已分支，已切换到新对话。",
+    "branchTooltip": "分支对话 —— 把当前线程复制成一个可以另走一路的新对话",
     "briefMode": "简短输出",
     "cancel": "取消",
     "compactAria": "压缩",
@@ -629,30 +768,16 @@
       "simplified": "简化",
       "standard": "标准"
     },
-    "branchAria": "分支对话",
-    "branchEmpty": "还没有可分支的内容 —— 这个对话还没有消息。",
-    "branchError": "无法分支该对话。",
-    "branchSuccess": "已分支，已切换到新对话。",
-    "branchTooltip": "分支对话 —— 把当前线程复制成一个可以另走一路的新对话",
     "forkAria": "派生会话",
     "forkSuccess": "已派生新会话，已切换到该分支。",
     "forkTooltip": "派生会话 — 从当前会话的历史新建一条分支",
     "forkUnsupported": "此 agent 不支持派生会话。",
-    "providerUndoAria": "提供商撤销",
-    "providerUndoConfirm": "继续执行提供商撤销",
-    "providerUndoFailure": "提供商撤销失败：{error}",
-    "providerUndoProgress": "正在撤销…",
-    "providerUndoSuccess": "提供商撤销已完成",
-    "providerUndoTooltip": "运行提供商声明的 /undo 命令",
-    "providerUndoWarningDescription": "提供商可能会还原对话状态和文件更改。这是提供商原生撤销，并非恢复压缩前上下文。系统会针对当前外部智能体配置记住此确认。",
-    "providerUndoWarningTitle": "提供商撤销可能会更改文件",
     "groups": {
       "default": "默认",
       "favorites": "收藏",
       "other": "其他"
     },
     "hideArtifacts": "折叠产物面板",
-    "openBrowser": "打开浏览器面板",
     "hideConversations": "折叠会话列表",
     "insights": "会话洞察",
     "memoryInherit": "继承应用设置",
@@ -661,6 +786,7 @@
     "memoryOn": "开启",
     "memoryUse": "在此对话使用记忆",
     "noApiKey": "未配置 API Key",
+    "openBrowser": "打开浏览器面板",
     "permissionModeAppDefault": "使用应用默认",
     "permissionModeLabel": "权限模式",
     "pickDirAria": "选择目录",
@@ -690,13 +816,60 @@
       "searchAriaLabel": "搜索预设",
       "searchPlaceholder": "搜索预设…"
     },
+    "providerUndoAria": "提供商撤销",
+    "providerUndoConfirm": "继续执行提供商撤销",
+    "providerUndoFailure": "提供商撤销失败：{error}",
+    "providerUndoProgress": "正在撤销…",
+    "providerUndoSuccess": "提供商撤销已完成",
+    "providerUndoTooltip": "运行提供商声明的 /undo 命令",
+    "providerUndoWarningDescription": "提供商可能会还原对话状态和文件更改。这是提供商原生撤销，并非恢复压缩前上下文。系统会针对当前外部智能体配置记住此确认。",
+    "providerUndoWarningTitle": "提供商撤销可能会更改文件",
+    "execution": {
+      "addEnv": "添加变量",
+      "effort": "执行思考强度",
+      "effortValues": {
+        "high": "高",
+        "low": "低",
+        "max": "最高",
+        "medium": "中",
+        "xhigh": "超高"
+      },
+      "envDescription": "会话变量会覆盖 Agent 中的同名变量；密钥值仅保存在安全钥匙串中。",
+      "envKind": "类型",
+      "envName": "环境变量名称",
+      "envNameDuplicate": "环境变量 {name} 重复。",
+      "envNameInvalid": "环境变量 {name} 的名称无效。",
+      "envNamePlaceholder": "API_BASE_URL",
+      "envPlain": "明文",
+      "envPlainPlaceholder": "值",
+      "envSecret": "密钥",
+      "envSecretPlaceholder": "安全存储；留空以保留当前值",
+      "envSecretRequired": "请输入 {name} 的密钥值。",
+      "envSecretSaveFailed": "无法安全保存 {name}。",
+      "envTitle": "环境变量",
+      "envValue": "环境变量值",
+      "inherit": "继承 Agent 或应用默认值",
+      "maxTurns": "最大轮次",
+      "maxTurnsHint": "留空以继承 Agent 限制；允许范围为 1–100。",
+      "maxTurnsInvalid": "最大轮次必须是 1 到 100 之间的整数。",
+      "maxTurnsPlaceholder": "继承",
+      "removeEnv": "移除环境变量 {name}",
+      "summaryDefault": "默认",
+      "summaryEffort": "强度",
+      "summaryExecute": "执行",
+      "summaryMaxTurns": "轮次",
+      "summaryPlan": "规划",
+      "summaryUtility": "辅助"
+    },
     "save": "保存",
+    "sessionCommunication": "会话通信",
     "sheet": {
       "sections": {
         "account": "模型与账号",
         "actions": "会话操作",
         "behavior": "行为",
         "display": "显示",
+        "execution": "执行覆盖",
         "memory": "记忆",
         "role": "角色与能力",
         "status": "状态"
@@ -722,7 +895,10 @@
     "unreadArtifacts": "有新产物 · 展开面板",
     "untitledSession": "（未命名）",
     "workingDirLabel": "工作目录",
-    "workingDirPlaceholder": "/path/to/project"
+    "workingDirPlaceholder": "/path/to/project",
+    "openInCodexApp": "在 Codex App 中打开",
+    "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
+    "openedInCodexApp": "已在 Codex App 中打开。"
   },
   "history": {
     "loadError": "无法加载此对话。",
@@ -743,12 +919,15 @@
   },
   "inlineError": {
     "dismiss": "忽略",
+    "environmentSetupFailed": "项目环境初始化失败。请重试，或仅为当前交互回合明确绕过初始化。",
+    "environmentUnavailable": "所选项目环境不可用。",
     "noSession": "当前没有打开的会话，请先新建一个再发送。",
     "openSettings": "打开设置",
     "pendingPromptPiiBlocked": "自动提示词可能包含隐私或凭据类数据，已阻止发送。请新建普通对话，并只提供你明确希望发送的内容。",
     "retry": "重试",
     "sidecarExited": "AI 进程意外停止，本轮已中断。点击重试可继续。",
     "title": "发送失败",
+    "managedWorktreeUnavailable": "托管 Worktree 不可用。此任务未在本地目录中运行。",
     "unflushedEditorBuffers": "本回合开始前有 {count} 个打开的文件未能保存，agent 可能读到过期内容：{files}"
   },
   "jump": {
@@ -832,6 +1011,16 @@
     },
     "read": {
       "title": "读取"
+    },
+    "spawnTask": {
+      "aside": "独立侧聊",
+      "caveats": "注意事项",
+      "codeLocations": "代码位置",
+      "inherit": "继承上下文",
+      "open": "打开任务",
+      "situation": "现状",
+      "solution": "建议方案",
+      "start": "开始任务"
     },
     "webFetch": {
       "empty": "无返回内容"
@@ -1046,6 +1235,7 @@
       "failedToLoad": "音频加载失败",
       "loop": "循环",
       "mute": "静音",
+      "playPause": "播放或暂停音频",
       "skipBack": "-10 秒",
       "skipForward": "+10 秒",
       "unmute": "取消静音"
@@ -1089,6 +1279,7 @@
       "titleNamed": "{name} 渲染错误"
     },
     "image": {
+      "allImagesTitle": "全部图片",
       "close": "关闭",
       "copyUrl": "复制链接",
       "counter": "第 {current} 张，共 {total} 张",
@@ -1103,8 +1294,10 @@
       "previewAria": "预览{name}",
       "previewDescription": "预览所选图片，可缩放或旋转。",
       "previous": "上一张图片",
+      "retry": "重试",
       "rotate": "旋转",
       "selectImage": "查看{name}",
+      "showAllImages": "显示全部 {count} 张图片",
       "viewFullscreen": "全屏查看",
       "zoomIn": "放大",
       "zoomOut": "缩小"
@@ -1212,6 +1405,69 @@
     "askError": "无法为这段内容开旁支。",
     "askInAside": "开旁支追问"
   },
+  "sessionCommunication": {
+    "acceptHeld": "接受",
+    "agentOrigin": "来自 {name} 的智能体消息 · 不受信任",
+    "attachedCreateError": "无法创建附加会话。",
+    "attachedCreated": "已创建附加会话。",
+    "attachedPromptLabel": "初始提示词",
+    "attachedTab": "附加会话",
+    "attachedTitleLabel": "任务标题",
+    "attachedStatus": {
+      "closed": "已关闭",
+      "completed": "已完成",
+      "interrupted": "已中断",
+      "running": "运行中",
+      "staged": "待运行"
+    },
+    "closeAttached": "关闭",
+    "contextFull": "完整父会话上下文",
+    "contextLabel": "上下文分叉",
+    "contextLastN": "最近若干消息",
+    "contextNone": "不携带父会话上下文",
+    "createAttached": "创建附加会话",
+    "description": "管理由父会话持有的子会话，以及独立会话之间的实时纯文本交接。",
+    "from": "来自 {name}",
+    "inboxTitle": "收件箱",
+    "intentLabel": "投递意图",
+    "intentNote": "仅作为备注",
+    "intentTrigger": "触发新一轮对话",
+    "interruptAttached": "中断",
+    "messageLabel": "消息",
+    "messageStatus": {
+      "delivered": "已投递",
+      "expired": "已过期",
+      "held": "等待审批",
+      "queued": "排队中",
+      "refused": "已拒绝",
+      "targetUnavailable": "目标不可用"
+    },
+    "noAttached": "还没有附加会话。",
+    "noInbox": "没有收到消息。",
+    "noOutbox": "没有已发送消息。",
+    "noReachable": "当前工作区没有其他在线会话。",
+    "openAttached": "打开",
+    "outboxTitle": "投递回执",
+    "peerTab": "消息其他会话",
+    "policyAccept": "接受",
+    "policyHold": "等待审批",
+    "policyLabel": "接收策略",
+    "policyRefuse": "拒绝",
+    "policyUpdateError": "无法更新消息接收策略。",
+    "refuseHeld": "拒绝",
+    "resultLabel": "结果",
+    "send": "发送消息",
+    "sendError": "无法发送消息。",
+    "sent": "消息状态：{status}",
+    "targetLabel": "目标会话",
+    "targetPlaceholder": "选择在线会话",
+    "title": "会话通信",
+    "turnsLabel": "携带消息数",
+    "userOrigin": "来自 {name} 的消息 · 不受信任",
+    "workspaceIndependent": "独立工作区",
+    "workspaceLabel": "工作区",
+    "workspaceShared": "共享父会话工作区"
+  },
   "sessionCost": {
     "byModelTitle": "按模型拆分",
     "cache": "缓存",
@@ -1250,10 +1506,12 @@
     "ranSlashCommand": "执行了斜杠命令"
   },
   "sourcesPart": {
+    "agentKnowledgeHeader": "Agent 知识库片段（{count}）",
     "citationsLabel": "{count, plural, other {# 个网页来源}}",
     "degradedNotice": "数字分身检索不可用 — 本次回复未使用其资料。",
     "originLabel": {
       "anthropic": "网络",
+      "agentKnowledgeBase": "Agent 知识库",
       "footnote": "脚注",
       "memory": "记忆",
       "twinRag": "数字分身",
@@ -1326,7 +1584,15 @@
     "today": "今天",
     "yesterday": "昨天"
   },
+  "transcript": {
+    "collapseTurn": "收起轮次",
+    "expandTurn": "展开完整轮次",
+    "loadOlder": "加载更早轮次",
+    "loading": "正在加载聊天记录…",
+    "retry": "重试加载聊天记录"
+  },
   "toolApproval": {
+    "actionsTitle": "审批操作",
     "allowAlways": "始终允许",
     "allowOnce": "仅本次允许",
     "askedBySubagent": "由子代理 {subagent} 请求（运行 {runId}）",

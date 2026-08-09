@@ -6,6 +6,14 @@
  * hit Dexie in jsdom).
  */
 
+const mockEnsureBootCapability = jest.fn<Promise<void>, [string]>(async () => undefined)
+const mockGetBootProfile = jest.fn(() => "eager")
+
+jest.mock("@/lib/boot/capabilities", () => ({
+  ensureBootCapability: (capability: string) => mockEnsureBootCapability(capability),
+  getBootProfile: () => mockGetBootProfile(),
+}))
+
 import type { PluginPermission, PluginResilienceConfig, PluginTool } from "@/types/plugin"
 
 import { __resetRegistryForTesting } from "@/lib/plugin/resilience/breaker-registry"
@@ -167,6 +175,17 @@ describe("invokePluginTool", () => {
   afterEach(() => {
     __setInvokePluginToolDepsForTesting(null)
     __resetRegistryForTesting()
+    mockEnsureBootCapability.mockClear()
+    mockGetBootProfile.mockReturnValue("eager")
+  })
+
+  it("waits for the plugin runtime before executing in the main profile", async () => {
+    mockGetBootProfile.mockReturnValue("main")
+    __setInvokePluginToolDepsForTesting(makeDeps())
+
+    await invokePluginTool("plug-a", "demo_tool", {})
+
+    expect(mockEnsureBootCapability).toHaveBeenCalledWith("plugin-runtime")
   })
 
   it("executes the tool and returns the result with identity echo", async () => {

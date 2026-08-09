@@ -65,12 +65,28 @@ export interface OpencodeSession {
  * MUST stay in sync with `candidate_db_paths` in `src-tauri/src/session_import.rs`
  * and `candidateDbPaths` in `cli/src/tui/runtime/node-opencode-reader.ts`.
  * Used as the watch roots so the fs-watcher picks up OpenCode writes.
+ *
+ * `dataDir` is the environment-resolved root from `lib/agent-roots/` (which
+ * honours `$XDG_DATA_HOME` and `%APPDATA%`); it takes precedence when known.
  */
-export function opencodeDataDirs(home: string): string[] {
-  if (!home) return []
-  const sep = home.includes("\\") ? "\\" : "/"
-  const join = (...parts: string[]) => [home, ...parts].join(sep)
-  return [join(".local", "share", "opencode"), join("AppData", "Roaming", "opencode")]
+export function opencodeDataDirs(
+  home: string,
+  dataDir?: string,
+  platformDataDir?: string
+): string[] {
+  const out: string[] = []
+  if (dataDir) out.push(dataDir)
+  if (platformDataDir) out.push(platformDataDir)
+  if (home) {
+    const sep = home.includes("\\") ? "\\" : "/"
+    const join = (...parts: string[]) => [home, ...parts].join(sep)
+    out.push(join(".local", "share", "opencode"))
+    // Rust/CLI also probe the macOS platform data fallback. It is safe to
+    // include on other POSIX hosts: the watcher discards missing directories.
+    if (sep === "/") out.push(join("Library", "Application Support", "opencode"))
+    out.push(join("AppData", "Roaming", "opencode"))
+  }
+  return out.filter((dir, i) => out.indexOf(dir) === i)
 }
 
 export type OpencodeReader = (home: string) => Promise<OpencodeSession[]>

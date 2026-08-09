@@ -26,7 +26,7 @@ import {
   InlineCitationSource,
   InlineCitationText,
 } from "@/components/ai-elements/inline-citation"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Sources, SourcesContent, SourcesTrigger } from "@/components/ai-elements/sources"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { ExternalLink } from "@/components/shared/external-link"
@@ -52,13 +52,19 @@ const ORIGIN_LABEL_KEY: Record<SourcesPartItem["origin"], string> = {
   anthropic: "anthropic",
   "twin-rag": "twinRag",
   "twin-style": "twinStyle",
+  "agent-knowledge-base": "agentKnowledgeBase",
   memory: "memory",
   footnote: "footnote",
 }
 
 // Origins that are "retrieval feedback" worth auto-expanding when they're the
 // only thing shown (twin chunks/style + recalled memory).
-const AUTO_OPEN_ORIGINS: SourcesPartItem["origin"][] = ["twin-rag", "twin-style", "memory"]
+const AUTO_OPEN_ORIGINS: SourcesPartItem["origin"][] = [
+  "twin-rag",
+  "twin-style",
+  "agent-knowledge-base",
+  "memory",
+]
 
 function isOnlyRetrieval(sources: SourcesPartItem[]): boolean {
   return sources.length > 0 && sources.every((s) => AUTO_OPEN_ORIGINS.includes(s.origin))
@@ -68,14 +74,16 @@ function partition(sources: SourcesPartItem[]) {
   const twinRag: SourcesPartItem[] = []
   const twinStyle: SourcesPartItem[] = []
   const memory: SourcesPartItem[] = []
+  const agentKnowledge: SourcesPartItem[] = []
   const other: SourcesPartItem[] = []
   for (const s of sources) {
     if (s.origin === "twin-rag") twinRag.push(s)
     else if (s.origin === "twin-style") twinStyle.push(s)
     else if (s.origin === "memory") memory.push(s)
+    else if (s.origin === "agent-knowledge-base") agentKnowledge.push(s)
     else other.push(s)
   }
-  return { twinRag, twinStyle, memory, other }
+  return { twinRag, twinStyle, agentKnowledge, memory, other }
 }
 
 export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) {
@@ -107,24 +115,25 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
   // Default-open when the only sources are twin-* so the user discovers the
   // retrieval feedback without an extra click. Explicit prop wins.
   const open = defaultOpen ?? isRetrievalOnly
-  const { twinRag, twinStyle, memory, other } = buckets
+  const { twinRag, twinStyle, agentKnowledge, memory, other } = buckets
 
   return (
     <>
       {degradedNotice}
-      <Collapsible
+      <Sources
         data-testid="sources-part"
         className={cn("not-prose my-2 text-primary text-xs", className)}
         defaultOpen={open}
       >
-        <CollapsibleTrigger
+        <SourcesTrigger
+          count={part.sources.length}
           className="group flex items-center gap-2 rounded-sm transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           data-testid="sources-part-trigger"
         >
           <p className="font-medium">{t("usedSources", { count: part.sources.length })}</p>
           <ChevronDownIcon className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-        </CollapsibleTrigger>
-        <CollapsibleContent
+        </SourcesTrigger>
+        <SourcesContent
           className={cn(
             "mt-3 flex w-fit flex-col gap-3",
             "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in"
@@ -166,6 +175,21 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
               </div>
             </section>
           )}
+          {agentKnowledge.length > 0 && (
+            <section
+              className="flex flex-col gap-2"
+              data-testid="sources-part-section-agent-knowledge-base"
+            >
+              <h4 className="text-[11px] font-medium text-muted-foreground">
+                {t("agentKnowledgeHeader", { count: agentKnowledge.length })}
+              </h4>
+              <div className="flex flex-col gap-1">
+                {agentKnowledge.map((source) => (
+                  <SourceRow key={source.id} source={source} />
+                ))}
+              </div>
+            </section>
+          )}
           {other.length > 0 && (
             <section className="flex flex-col gap-1" data-testid="sources-part-section-other">
               <WebCitations sources={other} />
@@ -174,8 +198,8 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
               ))}
             </section>
           )}
-        </CollapsibleContent>
-      </Collapsible>
+        </SourcesContent>
+      </Sources>
     </>
   )
 }

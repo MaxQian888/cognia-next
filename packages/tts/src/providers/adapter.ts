@@ -41,6 +41,14 @@ export interface TTSStreamOptions {
   signal: AbortSignal
 }
 
+export interface TTSBufferedGenerateOptions extends Record<string, unknown> {
+  apiKey: string
+  /** Aborts browser/native transport, retries, and prefetched synthesis. */
+  signal?: AbortSignal
+  /** Stable identity forwarded to cancellable native proxy calls. */
+  requestId?: string
+}
+
 export interface TTSProviderAdapter {
   /** Metadata catalog entry (single source of truth in `TTS_PROVIDERS`). */
   info: TTSProviderInfo
@@ -50,10 +58,7 @@ export interface TTSProviderAdapter {
   /** Fields folded into the cache key so distinct voices/models don't collide. */
   cacheKeyFields: (s: Partial<TTSSettings>) => Record<string, unknown>
   /** Synthesize a finished audio buffer. Present for `http` providers. */
-  generate?: (
-    text: string,
-    options: Record<string, unknown> & { apiKey: string }
-  ) => Promise<TTSResponse>
+  generate?: (text: string, options: TTSBufferedGenerateOptions) => Promise<TTSResponse>
   /** Start an incremental synthesis. Present for `streaming` providers. */
   generateStream?: (options: TTSStreamOptions) => Promise<void>
 }

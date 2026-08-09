@@ -30,8 +30,10 @@
  *   pnpm test:coverage:changed -- --strict            # enforce 90% on changed files
  */
 
-import { execFileSync, spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { execaSync } from "execa"
+import { z } from "zod"
 
 /** Directories whose files are coverage-collected (mirrors jest.config.ts). */
 const COLLECTED_ROOTS = [
@@ -59,18 +61,31 @@ const EXCLUDED = [/^components\/ui\//, /^components\/ai-elements\//, /^web\/comp
 const SOURCE_EXT = /\.(ts|tsx|js|jsx)$/
 const NON_SOURCE = /\.(test|spec|stories)\.[^/]+$/
 
+const cliSchema = z.object({
+  base: z.string().trim().min(1, "--base requires a ref").default("origin/dev"),
+  strict: z.boolean().default(false),
+})
+
+function createProgram() {
+  return new Command()
+    .name("pnpm test:coverage:changed")
+    .description("Run scoped Jest coverage for files changed from a base ref.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--base <ref>", "Git ref used to find the merge base.", "origin/dev")
+    .option("--strict", "Enforce 90% coverage on the changed files.")
+}
+
 export function parseArgs(argv) {
-  const args = { base: "origin/dev", strict: false }
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i]
-    if (arg === "--base") {
-      const value = argv[++i]
-      if (!value) throw new Error("--base requires a ref")
-      args.base = String(value)
-    } else if (arg === "--strict") args.strict = true
-    else throw new Error(`Unknown argument: ${arg}`)
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
   }
-  return args
+  return cliSchema.parse(program.opts())
 }
 
 /** Keep only files Jest would collect coverage for. */
@@ -105,8 +120,8 @@ export function buildJestArgs(files, { strict = false } = {}) {
 }
 
 /** Changed files vs the merge-base with `base`, plus untracked files. */
-export function listChangedFiles(base, exec = execFileSync) {
-  const run = (cmd, args) => exec(cmd, args, { encoding: "utf8" }).trim()
+export function listChangedFiles(base, exec = (command, args) => execaSync(command, args).stdout) {
+  const run = (command, args) => exec(command, args).trim()
   const mergeBase = run("git", ["merge-base", "HEAD", base])
   const changed = run("git", ["diff", "--name-only", "--diff-filter=d", mergeBase])
   const untracked = run("git", ["ls-files", "--others", "--exclude-standard"])
@@ -115,6 +130,7 @@ export function listChangedFiles(base, exec = execFileSync) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2))
+  if (!args) return 0
   const targets = filterCoverageTargets(listChangedFiles(args.base))
   if (targets.length === 0) {
     console.log(
@@ -126,11 +142,12 @@ function main() {
     `[coverage-changed] ${targets.length} changed file(s) vs ${args.base}:\n` +
       targets.map((f) => `  - ${f}`).join("\n")
   )
-  const result = spawnSync("pnpm", ["exec", "jest", ...buildJestArgs(targets, args)], {
+  const result = execaSync("pnpm", ["exec", "jest", ...buildJestArgs(targets, args)], {
     stdio: "inherit",
     env: { ...process.env, JEST_COVERAGE: "1" },
+    reject: false,
   })
-  return result.status ?? 1
+  return result.exitCode ?? 1
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

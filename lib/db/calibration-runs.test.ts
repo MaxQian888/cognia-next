@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import {
   saveCalibrationRun,
   getCalibrationRun,
@@ -10,15 +8,17 @@ import {
   type CalibrationRunRow,
 } from "./calibration-runs"
 import { computeAgreement } from "@/lib/ai/eval/calibration/metrics"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().calibrationRuns.clear()
 })
+afterAll(dbFixture.dispose)
 
 function run(overrides: Partial<CalibrationRunRow> = {}): CalibrationRunRow {
   return {

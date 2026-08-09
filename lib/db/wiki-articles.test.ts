@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for `lib/db/wiki-articles.ts` — the v17 wiki articles CRUD layer.
  * Hits create/bulkCreate/get/listByScope/listByScopeAndModule/count, the
@@ -6,7 +5,6 @@
  * generator-version invalidation.
  */
 
-import "fake-indexeddb/auto"
 import {
   bulkCreateWikiArticles,
   countWikiArticlesByScope,
@@ -22,17 +20,19 @@ import {
   updateWikiArticle,
 } from "./wiki-articles"
 import { bulkCreateWikiSections } from "./wiki-sections"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import type { WikiArticle } from "@/types/wiki"
 import { SELF_CORPUS_ID } from "@/types/wiki"
 import type { WikiArticleDraft } from "./wiki-articles"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function makeDraft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDraft {
   return {

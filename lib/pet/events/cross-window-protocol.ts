@@ -9,7 +9,7 @@
 // and it is trivially testable. The profile/needs flow via Dexie liveQuery, not
 // this channel, so there is intentionally no profile-snapshot message.
 
-import type { PetOneShot, PetVisualState } from "@/types/pet"
+import type { PetLookTarget, PetOneShot, PetSkinSelection, PetVisualState } from "@/types/pet"
 import { isPetConsoleTab, type PetConsoleTab } from "@/lib/pet/console-tabs"
 
 /** Bridge wire text for a speech bubble — already localized by the main side. */
@@ -37,6 +37,8 @@ export type PetBridgeMessage =
   // for ordering only — receivers stamp their OWN clock (the overlay's wander
   // gate runs on performance.now(), a different clock domain).
   | { v: 1; t: "activity"; at: number }
+  | { v: 1; t: "appearance"; selection: PetSkinSelection }
+  | { v: 1; t: "look-target"; target: PetLookTarget | null }
 
 /** The `BroadcastChannel` name shared by both window sides. */
 export const PET_BRIDGE_CHANNEL = "cognia-pet-bridge"
@@ -67,6 +69,8 @@ const ONE_SHOTS: ReadonlySet<string> = new Set<PetOneShot>([
   "surprised",
   "love",
   "sleepy",
+  "land",
+  "hatch",
 ])
 
 const INTERACTION_KINDS: ReadonlySet<string> = new Set<PetBridgeInteractionKind>([
@@ -94,6 +98,26 @@ export function encodePetBridgeMessage(msg: PetBridgeMessage): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
+}
+
+function decodeSelection(value: unknown): PetSkinSelection | null {
+  if (!isRecord(value) || typeof value.skinId !== "string") return null
+  if (value.skinId === "svg") return { skinId: "svg" }
+  if (
+    value.skinId === "live2d" &&
+    typeof value.modelId === "string" &&
+    value.modelId.length <= 200
+  ) {
+    return { skinId: "live2d", modelId: value.modelId }
+  }
+  if (
+    value.skinId === "sprite-v2" &&
+    typeof value.packId === "string" &&
+    value.packId.length <= 200
+  ) {
+    return { skinId: "sprite-v2", packId: value.packId }
+  }
+  return null
 }
 
 /**
@@ -149,6 +173,30 @@ export function decodePetBridgeMessage(raw: unknown): PetBridgeMessage | null {
       return typeof raw.at === "number" && Number.isFinite(raw.at)
         ? { v: 1, t: "activity", at: raw.at }
         : null
+    case "appearance": {
+      const selection = decodeSelection(raw.selection)
+      return selection ? { v: 1, t: "appearance", selection } : null
+    }
+    case "look-target": {
+      if (raw.target === null) return { v: 1, t: "look-target", target: null }
+      if (!isRecord(raw.target)) return null
+      const { x, y, updatedAt, source } = raw.target
+      if (
+        typeof x !== "number" ||
+        !Number.isFinite(x) ||
+        x < -1 ||
+        x > 1 ||
+        typeof y !== "number" ||
+        !Number.isFinite(y) ||
+        y < -1 ||
+        y > 1 ||
+        typeof updatedAt !== "number" ||
+        !Number.isFinite(updatedAt) ||
+        (source !== "window" && source !== "screen")
+      )
+        return null
+      return { v: 1, t: "look-target", target: { x, y, updatedAt, source } }
+    }
     default:
       return null
   }

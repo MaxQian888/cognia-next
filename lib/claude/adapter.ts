@@ -13,6 +13,8 @@ import type {
   SDKPartialAssistantMessage,
   SDKResultMessage,
   SDKUserMessage,
+  SdkMessageType,
+  SdkSystemSubtype,
   SendContent,
   SendContentBlock,
 } from "@cognia/agent-config-types"
@@ -22,6 +24,7 @@ import type {
   McpResultBlock,
   SourcesPart,
   SourcesPartItem,
+  ToolUseSummaryPart,
 } from "./parts-extensions"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type { HookNoticePartData } from "./hooks"
@@ -411,64 +414,8 @@ export function applySdkEvent(
         result,
       }
     }
-    case "system": {
-      // System subtypes: `compact_boundary` (context compaction) and
-      // `permission_denied` (a tool auto-denied without an interactive prompt —
-      // classifier / dontAsk / deny rule). `init` and the rest are metadata the
-      // UI ignores.
-      const sys = evt as unknown as {
-        subtype?: string
-        uuid?: string
-        compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number }
-        tool_name?: string
-        decision_reason?: string
-        message?: string
-        // hook_fire fields (synthetic event emitted by the Rust hook runtime —
-        // see src-tauri/src/claude/sidecar.rs:emit_hook_fire)
-        hook_event?: string
-        outcome?: "blocked" | "context" | "warning"
-        block?: string
-        additional_context?: string
-        warnings?: string[]
-      }
-      if (sys.subtype === "compact_boundary") {
-        return { messages: appendCompactBoundary(messages, sys), turnComplete: false }
-      }
-      if (sys.subtype === "hook_fire") {
-        return {
-          messages: appendHookNotice(messages, {
-            type: "hook-notice",
-            event: sys.hook_event ?? "",
-            toolName: sys.tool_name,
-            outcome: sys.outcome ?? "warning",
-            block: sys.block,
-            additionalContext: sys.additional_context,
-            warnings: sys.warnings ?? [],
-          }),
-          turnComplete: false,
-        }
-      }
-      if (sys.subtype === "permission_denied") {
-        // A hook-caused denial already renders as a `hook_fire` row; the deny
-        // payload Rust writes is prefixed `"hook denied:"`. Suppress the generic
-        // permission-denied notice so the same block isn't shown twice.
-        const reason = sys.decision_reason || sys.message
-        if (reason?.startsWith("hook denied:")) {
-          return { messages, turnComplete: false }
-        }
-        return {
-          messages: appendSessionNotice(messages, {
-            type: "session-notice",
-            variant: "permission-denied",
-            uuid: sys.uuid,
-            toolName: sys.tool_name,
-            reason,
-          }),
-          turnComplete: false,
-        }
-      }
-      return { messages, turnComplete: false }
-    }
+    case "system":
+      return applySystemEvent(messages, evt)
     case "rate_limit_event": {
       // A rate-limit notice describes a *live* condition, not something that
       // happened at a point in the transcript, so every event first drops any
@@ -502,10 +449,282 @@ export function applySdkEvent(
         turnComplete: false,
       }
     }
+
+    // Mapped to canonical events by `sidecar/dispatch/sdk-canonical-events.mjs`.
+    // These lifecycle/status messages render no transcript row of their own.
+    case "tool_progress":
+    case "auth_status":
+    case "prompt_suggestion":
+    case "conversation_reset":
+      return { messages, turnComplete: false }
+
+    case "tool_use_summary": {
+      const summaryEvent = evt as unknown as {
+        summary?: unknown
+        preceding_tool_use_ids?: unknown
+      }
+      return {
+        messages: applyToolUseSummary(messages, {
+          summary: typeof summaryEvent.summary === "string" ? summaryEvent.summary : "",
+          toolCallIds: Array.isArray(summaryEvent.preceding_tool_use_ids)
+            ? summaryEvent.preceding_tool_use_ids.map(String)
+            : [],
+        }),
+        turnComplete: false,
+      }
+    }
+
     default:
+      // A message type this build predates. Tolerated at runtime — dropping a
+      // row beats crashing the transcript — while `HandledSdkMessageType`
+      // below makes it a compile error to leave a KNOWN type here.
       return { messages, turnComplete: false }
   }
 }
+
+function sameToolCallIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index])
+}
+
+/** Insert or update a persisted aggregate tool summary in the relevant assistant turn. */
+export function applyToolUseSummary(
+  messages: UIMessage[],
+  input: ToolUseSummaryPart["data"]
+): UIMessage[] {
+  const summary = input.summary.trim()
+  if (!summary) return messages
+  const part: ToolUseSummaryPart = {
+    type: "data-tool-summary",
+    data: { summary, toolCallIds: [...input.toolCallIds] },
+  }
+
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const existingIndex = messages[messageIndex].parts.findIndex((candidate) => {
+      if ((candidate as { type?: string }).type !== "data-tool-summary") return false
+      const ids = (candidate as unknown as ToolUseSummaryPart).data?.toolCallIds
+      return Array.isArray(ids) && sameToolCallIds(ids, input.toolCallIds)
+    })
+    if (existingIndex >= 0) {
+      const message = messages[messageIndex]
+      const parts = [...message.parts]
+      parts[existingIndex] = part as unknown as Part
+      return messages.map((candidate, index) =>
+        index === messageIndex ? { ...message, parts } : candidate
+      )
+    }
+  }
+
+  const correlatedIds = new Set(input.toolCallIds)
+  let targetMessageIndex = -1
+  let insertAt = -1
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    if (messages[messageIndex].role !== "assistant") continue
+    for (let partIndex = messages[messageIndex].parts.length - 1; partIndex >= 0; partIndex--) {
+      const toolCallId = (messages[messageIndex].parts[partIndex] as { toolCallId?: unknown })
+        .toolCallId
+      if (typeof toolCallId === "string" && correlatedIds.has(toolCallId)) {
+        targetMessageIndex = messageIndex
+        insertAt = partIndex + 1
+        break
+      }
+    }
+    if (targetMessageIndex >= 0) break
+  }
+
+  if (targetMessageIndex < 0) {
+    targetMessageIndex = messages.findLastIndex((message) => message.role === "assistant")
+    if (targetMessageIndex < 0) return messages
+    insertAt = messages[targetMessageIndex].parts.length
+  }
+
+  const message = messages[targetMessageIndex]
+  const parts = [
+    ...message.parts.slice(0, insertAt),
+    part as unknown as Part,
+    ...message.parts.slice(insertAt),
+  ]
+  return messages.map((candidate, index) =>
+    index === targetMessageIndex ? { ...message, parts } : candidate
+  )
+}
+
+/**
+ * The `SDKMessage.type` values `applySdkEvent` names above.
+ *
+ * `SDKMessage` is an open union (it ends in a catch-all so a newer host can't
+ * break the build), which means `switch` can never narrow to `never` and a
+ * conventional exhaustiveness check is silently vacuous — that is exactly how
+ * 30 of the 39 union members went unhandled for eight SDK releases. So
+ * exhaustiveness is asserted against the closed discriminant vocabulary
+ * instead, which `check:sdk-surface` pins to the installed `sdk.d.ts`.
+ */
+type HandledSdkMessageType =
+  | "assistant"
+  | "user"
+  | "stream_event"
+  | "result"
+  | "system"
+  | "rate_limit_event"
+  | "tool_progress"
+  | "tool_use_summary"
+  | "auth_status"
+  | "prompt_suggestion"
+  | "conversation_reset"
+
+/** Compile error the moment the SDK grows a message type nothing handles. */
+const _everySdkMessageTypeIsHandled: Exclude<SdkMessageType, HandledSdkMessageType> extends never
+  ? true
+  : never = true
+void _everySdkMessageTypeIsHandled
+
+/**
+ * What `evt` narrows to under `case "system"`. `SDKSystemMessage` declares
+ * `[k: string]: unknown`, so every payload field reads as `unknown`; this is
+ * the typed view of the fields the reducer actually consumes.
+ *
+ * `hook_fire` is in here and NOT in `SdkSystemSubtype` on purpose: the Rust
+ * hook runtime synthesizes it (`src-tauri/src/claude/sidecar.rs:emit_hook_fire`)
+ * and it rides the same channel, but it is not part of the SDK surface the
+ * gate checks.
+ */
+interface SystemEventFields {
+  subtype?: string
+  uuid?: string
+  tool_name?: string
+  decision_reason?: string
+  message?: string
+  compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number }
+  hook_event?: string
+  outcome?: "blocked" | "context" | "warning"
+  block?: string
+  additional_context?: string
+  warnings?: string[]
+}
+
+function applySystemEvent(
+  messages: UIMessage[],
+  raw: Extract<SDKMessage, { type: "system" }> | { type: string; session_id: string }
+): { messages: UIMessage[]; turnComplete: boolean } {
+  const evt = raw as unknown as SystemEventFields
+
+  switch (evt.subtype) {
+    case "hook_fire":
+      return {
+        messages: appendHookNotice(messages, {
+          type: "hook-notice",
+          event: evt.hook_event ?? "",
+          toolName: evt.tool_name,
+          outcome: evt.outcome ?? "warning",
+          block: evt.block,
+          additionalContext: evt.additional_context,
+          warnings: evt.warnings ?? [],
+        }),
+        turnComplete: false,
+      }
+
+    case "compact_boundary":
+      return { messages: appendCompactBoundary(messages, evt), turnComplete: false }
+
+    case "permission_denied": {
+      // A hook-caused denial already renders as a `hook_fire` row; the deny
+      // payload Rust writes is prefixed `"hook denied:"`. Suppress the generic
+      // permission-denied notice so the same block isn't shown twice.
+      const reason = evt.decision_reason || evt.message
+      if (reason?.startsWith("hook denied:")) {
+        return { messages, turnComplete: false }
+      }
+      return {
+        messages: appendSessionNotice(messages, {
+          type: "session-notice",
+          variant: "permission-denied",
+          uuid: evt.uuid,
+          toolName: evt.tool_name,
+          reason,
+        }),
+        turnComplete: false,
+      }
+    }
+
+    // The remaining 26 subtypes carry no transcript row today — their canonical
+    // projection is what downstream consumers read. Enumerated so the switch
+    // stays exhaustive.
+    case "init":
+    case "status":
+    case "api_retry":
+    case "control_request_progress":
+    case "model_refusal_fallback":
+    case "model_refusal_no_fallback":
+    case "local_command_output":
+    case "hook_started":
+    case "hook_progress":
+    case "hook_response":
+    case "plugin_install":
+    case "task_notification":
+    case "task_started":
+    case "task_updated":
+    case "task_progress":
+    case "background_tasks_changed":
+    case "thinking_tokens":
+    case "session_state_changed":
+    case "worker_shutting_down":
+    case "commands_changed":
+    case "notification":
+    case "files_persisted":
+    case "memory_recall":
+    case "elicitation_complete":
+    case "mirror_error":
+    case "informational":
+      return { messages, turnComplete: false }
+
+    default:
+      // Synthetic subtypes (handled above) and anything a newer host sends.
+      return { messages, turnComplete: false }
+  }
+}
+
+/**
+ * The `system` subtypes `applySystemEvent` names — `hook_fire` excluded, since
+ * it is synthetic and absent from `SdkSystemSubtype`.
+ */
+type HandledSystemSubtype =
+  | "compact_boundary"
+  | "permission_denied"
+  | "init"
+  | "status"
+  | "api_retry"
+  | "control_request_progress"
+  | "model_refusal_fallback"
+  | "model_refusal_no_fallback"
+  | "local_command_output"
+  | "hook_started"
+  | "hook_progress"
+  | "hook_response"
+  | "plugin_install"
+  | "task_notification"
+  | "task_started"
+  | "task_updated"
+  | "task_progress"
+  | "background_tasks_changed"
+  | "thinking_tokens"
+  | "session_state_changed"
+  | "worker_shutting_down"
+  | "commands_changed"
+  | "notification"
+  | "files_persisted"
+  | "memory_recall"
+  | "elicitation_complete"
+  | "mirror_error"
+  | "informational"
+
+/**
+ * Compile error the moment the SDK grows a `system` subtype nothing handles.
+ * 28 of the 39 union members differ only by subtype, so without this the
+ * type-level check above would cover barely a quarter of the surface.
+ */
+const _everySystemSubtypeIsHandled: Exclude<SdkSystemSubtype, HandledSystemSubtype> extends never
+  ? true
+  : never = true
+void _everySystemSubtypeIsHandled
 
 /** Subscription rate-limit info subset surfaced from `rate_limit_event`. */
 interface RateLimitInfo {
@@ -1378,4 +1597,55 @@ export function mergeMemorySourcesIntoLastAssistant(
     memoryBudget: memorySources.length > 0 ? memoryContext.budget : undefined,
     memoryDegraded: memoryContext.degraded,
   })
+}
+
+export interface AgentKnowledgeSourcesContext {
+  retrievedChunks: Array<{
+    chunk: {
+      id: string
+      knowledgeBaseId: string
+      sourceId: string
+      content: string
+      vectorDocId: string
+    }
+    score: number
+  }>
+  citations: Array<{
+    knowledgeBaseId: string
+    knowledgeBaseName: string
+    sourceId: string
+    sourceTitle: string
+    chunkId: string
+    score: number
+  }>
+}
+
+/** Merge reusable Agent Knowledge Base citations into the assistant SourcesPart. */
+export function mergeAgentKnowledgeSourcesIntoLastAssistant(
+  messages: UIMessage[],
+  context: AgentKnowledgeSourcesContext | undefined | null
+): UIMessage[] {
+  if (!context || context.retrievedChunks.length === 0) return messages
+  const citationByChunkId = new Map(
+    context.citations.map((citation) => [citation.chunkId, citation])
+  )
+  const sources: SourcesPartItem[] = context.retrievedChunks.map(({ chunk, score }) => {
+    const citation = citationByChunkId.get(chunk.id)
+    const knowledgeBaseName = citation?.knowledgeBaseName ?? chunk.knowledgeBaseId
+    const sourceTitle = citation?.sourceTitle ?? chunk.sourceId
+    return {
+      id: `agent-kb-${chunk.id}`,
+      title: `${knowledgeBaseName} / ${sourceTitle}`,
+      snippet:
+        chunk.content.length > 200 ? chunk.content.slice(0, 199).trimEnd() + "…" : chunk.content,
+      origin: "agent-knowledge-base",
+      score,
+      knowledgeBaseRef: {
+        knowledgeBaseId: chunk.knowledgeBaseId,
+        sourceId: chunk.sourceId,
+        chunkId: chunk.id,
+      },
+    }
+  })
+  return appendSourcesToLastAssistant(messages, sources)
 }

@@ -38,7 +38,14 @@ function part(type: string, input?: unknown, state = "output-available") {
 
 function partWith(
   type: string,
-  extra: { input?: unknown; output?: unknown; errorText?: unknown; state?: string }
+  extra: {
+    input?: unknown
+    output?: unknown
+    errorText?: unknown
+    state?: string
+    title?: string
+    toolMetadata?: unknown
+  }
 ) {
   return { type, state: "output-available", ...extra } as never
 }
@@ -52,6 +59,77 @@ describe("ToolCallRow", () => {
     expect(getByText("file.ts")).toBeTruthy()
     expect(getByTestId("tool-call-row-Read")).toBeTruthy()
     expect(queryByTestId("tool-body")).toBeNull()
+  })
+
+  it("uses an upstream title without repeating the heuristic target", () => {
+    const { getByText, queryByText } = render(
+      <ToolCallRow
+        part={partWith("tool-Read", {
+          input: { file_path: "/a/b/file.ts" },
+          title: "Reading configuration",
+        })}
+      />
+    )
+    expect(getByText("Reading configuration")).toBeTruthy()
+    expect(queryByText("file.ts")).toBeNull()
+  })
+
+  it("uses Codex app context as a provided title without showing internal ids", () => {
+    const { getByText, queryByText } = render(
+      <ToolCallRow
+        part={partWith("tool-create_event", {
+          input: { name: "team sync" },
+          toolMetadata: {
+            appContext: {
+              appName: "Calendar",
+              actionName: "create_event",
+              connectorId: "calendar-prod",
+              linkId: "primary-account",
+            },
+          },
+        })}
+      />
+    )
+    expect(getByText("Calendar · Create event")).toBeTruthy()
+    expect(queryByText("calendar-prod")).toBeNull()
+    expect(queryByText("primary-account")).toBeNull()
+  })
+
+  it("shows protocol capability hints without treating write-capable as high risk", () => {
+    const { getByTestId, queryByText } = render(
+      <ToolCallRow
+        part={partWith("tool-calendar.create_event", {
+          title: "Calendar · Create event",
+          toolMetadata: { readOnlyHint: false },
+        })}
+      />
+    )
+    expect(getByTestId("tool-write-capable").textContent).toContain("writeCapable")
+    expect(queryByText(/high risk/i)).toBeNull()
+  })
+
+  it("shows read-only hints and hides unknown hints", () => {
+    const { getByTestId, queryByTestId, rerender } = render(
+      <ToolCallRow
+        part={partWith("tool-Read", {
+          title: "Read configuration",
+          toolMetadata: { readOnlyHint: true },
+        })}
+      />
+    )
+    expect(getByTestId("tool-readonly").textContent).toContain("readOnly")
+    expect(queryByTestId("tool-write-capable")).toBeNull()
+
+    rerender(
+      <ToolCallRow
+        part={partWith("tool-Read", {
+          title: "Read configuration",
+          toolMetadata: { readOnlyHint: null },
+        })}
+      />
+    )
+    expect(queryByTestId("tool-readonly")).toBeNull()
+    expect(queryByTestId("tool-write-capable")).toBeNull()
   })
 
   it("expands the body on click (uncontrolled)", () => {

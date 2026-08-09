@@ -20,31 +20,33 @@ import {
 } from "./protocol"
 import { isCapacitor } from "@/lib/tauri"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
+import { issueSocketTicket } from "@/lib/tauri/companion-auth"
+import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 
 import type { IntegrationEvent, SessionInfo, SpawnRequest, TerminalReplayGap } from "./types"
 
-export interface CompanionEndpoint {
-  /** HTTPS base URL for ticket issuance. */
-  baseUrl: string
-  /** Device JWT used only in the authenticated request header. */
-  token: string
-  /** Stable paired-device id used to identify the controller lease. */
-  deviceId?: string
-}
+export type CompanionEndpoint = Pick<
+  CompanionConfig,
+  | "baseUrl"
+  | "deviceId"
+  | "devicePrivateKeyJwk"
+  | "deviceKeyThumbprint"
+  | "accountId"
+  | "serverVersion"
+  | "serverFingerprint"
+>
 
 export type CompanionEndpointResolver = () => Promise<CompanionEndpoint | null>
 
 const defaultResolver: CompanionEndpointResolver = async () => {
   const remote = getActiveRemoteEndpoint()
   if (remote) {
-    return { baseUrl: remote.baseUrl, token: remote.deviceJwt, deviceId: remote.deviceId }
+    return remote
   }
   if (!isCapacitor()) return null
   const { pickCompanionStorage } = await import("@/lib/tauri/companion-storage")
   const config = await pickCompanionStorage().load()
   return config
-    ? { baseUrl: config.baseUrl, token: config.deviceJwt, deviceId: config.deviceId }
-    : null
 }
 
 let endpointResolver: CompanionEndpointResolver = defaultResolver
@@ -100,19 +102,14 @@ interface SocketTicket {
 type SocketTicketIssuer = (endpoint: CompanionEndpoint) => Promise<SocketTicket>
 
 const defaultTicketIssuer: SocketTicketIssuer = async (endpoint) => {
-  const url = new URL("/api/v1/terminal/socket-ticket", toHttpBase(endpoint.baseUrl))
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${endpoint.token}` },
-  })
-  const payload = (await response.json()) as Partial<SocketTicket> & { message?: string }
-  if (!response.ok || !payload.ticket || typeof payload.expiresAt !== "number") {
+  try {
+    return await issueSocketTicket(endpoint, "terminal")
+  } catch (error) {
     throw new TerminalSessionError(
-      response.status === 401 ? "unauthorized" : "permission_denied",
-      payload.message ?? "terminal socket ticket request failed"
+      "unauthorized",
+      error instanceof Error ? error.message : "terminal socket ticket request failed"
     )
   }
-  return { ticket: payload.ticket, expiresAt: payload.expiresAt }
 }
 
 let ticketIssuer: SocketTicketIssuer = defaultTicketIssuer
@@ -590,10 +587,6 @@ async function openWanConnection(): Promise<TerminalHostConnection> {
   }
   await connection.open()
   return connection
-}
-
-function toHttpBase(baseUrl: string): string {
-  return baseUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:")
 }
 
 function toWsBase(baseUrl: string): string {

@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for `persistChunks` — the double-write step that lands chunks
  * in Dexie + the remote vector store. The re-parse path (`M1`) added an
@@ -6,18 +5,17 @@
  * source converges to one set of chunks instead of accumulating.
  */
 
-import "fake-indexeddb/auto"
 import { persistChunks } from "./persist"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createTwinChunk, listTwinChunksBySource } from "@/lib/db/twin-chunks"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import type { IVectorStore } from "@cognia/vector/store"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
 
 function fakeStore(): IVectorStore & {
@@ -70,6 +68,8 @@ async function makeSource(twinId: string, sourceId: string): Promise<void> {
     redacted: false,
   })
 }
+
+afterAll(dbFixture.dispose)
 
 describe("persistChunks", () => {
   it("writes chunks to both Dexie and the vector store", async () => {

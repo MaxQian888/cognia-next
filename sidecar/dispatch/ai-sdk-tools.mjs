@@ -438,14 +438,19 @@ function hasRichContentBlock(result) {
   )
 }
 
+/**
+ * AI SDK 7 collapsed the `image-*` / `file-*` tool-result content variants into
+ * one canonical `file` part carrying a TAGGED data union — images are just files
+ * with an image media type, so the image/non-image split is gone. `{ type:
+ * 'data', data }` is the inline-bytes/base64 arm; `url`, `reference` and `text`
+ * are the others. v7 still auto-migrates the legacy shapes at runtime, but only
+ * until the next major.
+ */
 function binaryModelPart(data, mediaType, filename) {
-  if (mediaType.startsWith("image/")) {
-    return { type: "image-data", mediaType, data }
-  }
   return {
-    type: "file-data",
+    type: "file",
     mediaType,
-    data,
+    data: { type: "data", data },
     ...(filename ? { filename } : {}),
   }
 }
@@ -672,6 +677,11 @@ export function buildAiSdkTools({
   doomGuard: providedDoomGuard,
   reviewToolOutput,
 }) {
+  // An empty `allowedTools` array means "no filtering" on this path. Honor the
+  // explicit runtime-wide deny-all contract before collecting any built-in or
+  // plugin definitions so Support sessions cannot inherit a tool accidentally.
+  if (sendOptions.toolSurface === "none") return {}
+
   /** @type {Record<string, ReturnType<typeof tool>>} */
   const tools = {}
   // Accept a caller-owned guard so the session can `reset()` it per turn (the

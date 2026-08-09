@@ -38,6 +38,14 @@ export interface ContextWorkbenchLayout {
   activatedPanelIds: string[]
   pendingPanelIds: string[]
   lastUsedAt: number
+  /**
+   * When non-null, the workbench shows two panels stacked vertically. The
+   * primary panel is `activePanelId`; the secondary is this one. Only available
+   * in wide/focus modes (≥480px). Entering narrow mode auto-closes the split.
+   */
+  splitPanelId: string | null
+  /** Split ratio (0-100) — percentage of height the primary panel occupies. */
+  splitRatio: number
 }
 
 export interface ContextWorkbenchState {
@@ -76,6 +84,12 @@ export interface ContextWorkbenchState {
    */
   setWidth: (scopeKey: string, width: number, panelId?: string) => void
   setUserPinned: (scopeKey: string, pinned: boolean) => void
+  /** Open a second panel below the active one (vertical split). */
+  activateSplit: (scopeKey: string, panelId: string) => void
+  /** Close the split panel, returning to single-panel view. */
+  closeSplit: (scopeKey: string) => void
+  /** Update the split ratio (0-100, percentage of height for the primary). */
+  setSplitRatio: (scopeKey: string, ratio: number) => void
   removeScope: (scopeKey: string) => void
   setSessionOverride: (resourceKey: string, sessionId: string | null) => void
 }
@@ -96,6 +110,8 @@ function defaultLayout(now = Date.now()): ContextWorkbenchLayout {
     activatedPanelIds: [],
     pendingPanelIds: [],
     lastUsedAt: now,
+    splitPanelId: null,
+    splitRatio: 50,
   }
 }
 
@@ -132,6 +148,8 @@ function normalizeLayout(
     activatedPanelIds: [...new Set(layout?.activatedPanelIds ?? [])],
     pendingPanelIds: [...new Set(layout?.pendingPanelIds ?? [])],
     lastUsedAt: layout?.lastUsedAt ?? now,
+    splitPanelId: layout?.splitPanelId ?? null,
+    splitRatio: layout?.splitRatio ?? 50,
   }
 }
 
@@ -284,7 +302,12 @@ function stateCreator(
       ),
     setMode: (scopeKey, mode) =>
       set((state) => ({
-        layouts: updateLayout(state.layouts, scopeKey, (layout) => ({ ...layout, mode })),
+        layouts: updateLayout(state.layouts, scopeKey, (layout) => ({
+          ...layout,
+          mode,
+          // Auto-close split in narrow mode — not enough vertical/horizontal space.
+          splitPanelId: mode === "narrow" ? null : layout.splitPanelId,
+        })),
       })),
     setWidth: (scopeKey, width, panelId) =>
       set((state) => ({
@@ -305,6 +328,29 @@ function stateCreator(
     setUserPinned: (scopeKey, userPinned) =>
       set((state) => ({
         layouts: updateLayout(state.layouts, scopeKey, (layout) => ({ ...layout, userPinned })),
+      })),
+    activateSplit: (scopeKey, panelId) =>
+      set((state) => ({
+        layouts: updateLayout(state.layouts, scopeKey, (layout) => ({
+          ...layout,
+          splitPanelId: panelId,
+          // Preserve existing ratio if there was one, otherwise default to 50/50.
+          splitRatio: layout.splitRatio || 50,
+        })),
+      })),
+    closeSplit: (scopeKey) =>
+      set((state) => ({
+        layouts: updateLayout(state.layouts, scopeKey, (layout) => ({
+          ...layout,
+          splitPanelId: null,
+        })),
+      })),
+    setSplitRatio: (scopeKey, ratio) =>
+      set((state) => ({
+        layouts: updateLayout(state.layouts, scopeKey, (layout) => ({
+          ...layout,
+          splitRatio: Math.max(20, Math.min(80, ratio)),
+        })),
       })),
     removeScope: (scopeKey) =>
       set((state) => {

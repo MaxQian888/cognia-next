@@ -51,8 +51,8 @@ describe("new ACP agent surfaces", () => {
     // the exact launch commands so a regression can't silently break them.
     {
       presetId: "claude-code",
-      command: "npx",
-      args: ["-y", "@agentclientprotocol/claude-agent-acp"],
+      command: "claude-agent-acp",
+      args: [],
     },
     {
       presetId: "gemini-cli",

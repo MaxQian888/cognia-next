@@ -11,10 +11,14 @@
 // plain node fs (headless), and tests.
 
 import type { CompatibilityManifest } from "@cognia/agent-config-types/compatibility-manifest"
+import type { AgentCapabilityId } from "@cognia/agent-config-types/agent-execution"
 import {
   manifestSigningPayload,
   validateCompatibilityManifest,
 } from "@cognia/agent-config-types/compatibility-manifest"
+import type { CurrentVersions } from "./staleness"
+import { evaluateCompatibilityGate } from "./compatibility-gate"
+import { recordCapabilityFailure, recordCapabilitySuccess } from "./capability-health"
 
 export interface CertificationFs {
   readFile(path: string): Promise<string | null>
@@ -175,4 +179,185 @@ export class CertificationStore {
   async writeHealth(entries: CapabilityHealthEntry[]): Promise<void> {
     await this.fs.writeFile(`${this.rootDir}/health.json`, JSON.stringify(entries, null, 2))
   }
+}
+
+export interface CertificationRuntime {
+  store: CertificationStore
+  publicKeyPem: string
+  current: CurrentVersions
+  managedPolicy?: { requireCiIssuer?: boolean }
+}
+
+export interface ActiveCertificationInput {
+  runtime: string
+  ingressProtocol: string
+  routeMode: string
+  translationMode: string
+  deploymentRef: string
+  model: string
+  requires: AgentCapabilityId[]
+  prefers: AgentCapabilityId[]
+}
+
+export type ActiveCertificationResolution =
+  | {
+      accepted: true
+      certifiedPath: {
+        recordRef: string
+        evidence: "native" | "vendor-certified" | "cognia-verified"
+        suiteVersion?: string
+        disabledOptional: AgentCapabilityId[]
+      }
+    }
+  | { accepted: false; reasons: string[]; blockedRequired?: AgentCapabilityId[] }
+
+let installedRuntime: CertificationRuntime | null = null
+let healthWriteQueue: Promise<void> = Promise.resolve()
+
+/** Install the single certification authority consumed by agent execution. */
+export function installCertificationRuntime(runtime: CertificationRuntime | null): void {
+  installedRuntime = runtime
+  healthWriteQueue = Promise.resolve()
+}
+
+/** Persist an observed command outcome into the active certification overlay. */
+export async function recordCertifiedCapabilityOutcome(
+  recordRef: string | undefined,
+  capability: AgentCapabilityId,
+  outcome: "success" | "failure"
+): Promise<void> {
+  const runtime = installedRuntime
+  if (!runtime || !recordRef) return
+  const separator = recordRef.indexOf(":")
+  if (separator < 0 || separator === recordRef.length - 1) return
+  const keyId = recordRef.slice(separator + 1)
+  healthWriteQueue = healthWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const current = await runtime.store.readHealth()
+      const next =
+        outcome === "failure"
+          ? recordCapabilityFailure(current, keyId, capability)
+          : recordCapabilitySuccess(current, keyId, capability)
+      await runtime.store.writeHealth(next)
+    })
+  await healthWriteQueue
+}
+
+/** Resolve the active signed bundle for one exact execution path. */
+export async function resolveActiveCertification(
+  input: ActiveCertificationInput
+): Promise<ActiveCertificationResolution | undefined> {
+  const runtime = installedRuntime
+  if (!runtime) return undefined
+  const pointer = await runtime.store.getActiveBundle()
+  if (!pointer) return undefined
+  const manifest = await runtime.store.readManifest(pointer.bundleId)
+  if (!manifest) return { accepted: false, reasons: ["active manifest is missing or invalid"] }
+
+  const pathFields = [
+    "runtime",
+    "ingressProtocol",
+    "routeMode",
+    "translationMode",
+    "deploymentRef",
+    "model",
+  ] as const
+  const mismatch = pathFields.find((field) => manifest.key[field] !== input[field])
+  if (mismatch) {
+    return { accepted: false, reasons: [`active manifest path mismatch: ${mismatch}`] }
+  }
+
+  const signatureValid = await runtime.store.verifySignature(manifest, runtime.publicKeyPem)
+  const gate = evaluateCompatibilityGate({
+    manifest,
+    signatureValid,
+    current: runtime.current,
+    requires: input.requires,
+    prefers: input.prefers,
+    health: await runtime.store.readHealth(),
+    managedPolicy: runtime.managedPolicy,
+  })
+  if (!gate.accepted) {
+    const capabilityReasonsOnly = gate.reasons.every((reason) =>
+      reason.startsWith("required capability ")
+    )
+    const blockedRequired = capabilityReasonsOnly
+      ? input.requires.filter((capability) =>
+          gate.reasons.some((reason) => reason.startsWith(`required capability ${capability} `))
+        )
+      : []
+    return {
+      ...gate,
+      ...(blockedRequired.length > 0 ? { blockedRequired } : {}),
+    }
+  }
+  if (
+    manifest.evidence !== "native" &&
+    manifest.evidence !== "vendor-certified" &&
+    manifest.evidence !== "cognia-verified"
+  ) {
+    return { accepted: false, reasons: [`unsupported evidence: ${manifest.evidence}`] }
+  }
+  return {
+    accepted: true,
+    certifiedPath: {
+      recordRef: gate.recordRef,
+      evidence: manifest.evidence,
+      suiteVersion: manifest.key.suiteVersion,
+      disabledOptional: gate.disabledOptional,
+    },
+  }
+}
+
+export interface DesktopCertificationRuntimeDeps {
+  resolveHome?: () => Promise<string | null>
+  fs?: CertificationFs
+  publicKeyPem?: string
+  current?: CurrentVersions
+}
+
+/** Hydrate the existing store from the shared Cognia CLI home. */
+export async function installDesktopCertificationRuntime(
+  deps: DesktopCertificationRuntimeDeps = {}
+): Promise<CertificationStore | null> {
+  const resolveHome =
+    deps.resolveHome ?? (async () => (await import("@/lib/cli-bridge/home")).resolveCliHome())
+  const home = await resolveHome()
+  if (!home) {
+    installCertificationRuntime(null)
+    return null
+  }
+  const root = `${home.replace(/[\\/]+$/, "")}/agent-certification`
+  const fs =
+    deps.fs ??
+    ({
+      async readFile(path: string) {
+        try {
+          return await (await import("@/lib/file/file-operations")).readTextFile(path)
+        } catch {
+          return null
+        }
+      },
+      async writeFile(path: string, content: string) {
+        await (await import("@/lib/file/file-operations")).writeTextFile(path, content)
+      },
+      async listDir(path: string) {
+        return (await import("@/lib/file/file-operations")).readDir(path)
+      },
+    } satisfies CertificationFs)
+  const versions = await import("@cognia/agent-config-types/runtime-versions")
+  const store = new CertificationStore(fs, root)
+  installCertificationRuntime({
+    store,
+    publicKeyPem: deps.publicKeyPem ?? COGNIA_RELEASE_PUBKEY_PEM,
+    current: deps.current ?? {
+      agentSdkVersion: versions.PINNED_RUNTIME_VERSIONS.agentSdkVersion,
+      gatewayVersion: versions.PINNED_RUNTIME_VERSIONS.gatewayCrateVersion,
+      claudeCodeVersion: versions.PINNED_RUNTIME_VERSIONS.claudeCodeVersion,
+      suiteVersion: versions.PINNED_RUNTIME_VERSIONS.certificationSuiteVersion,
+    },
+    managedPolicy: { requireCiIssuer: true },
+  })
+  return store
 }

@@ -37,6 +37,14 @@ describe("stringWidth", () => {
   it("counts astral-plane ideographs and emoji as wide", () => {
     expect(stringWidth("\u{20000}")).toBe(2) // CJK Ext B
     expect(stringWidth("🚀")).toBe(2)
+    expect(stringWidth("👩‍💻")).toBe(2)
+    expect(stringWidth("☝️")).toBe(2) // variation-selector emoji presentation
+    expect(stringWidth("1️⃣")).toBe(2) // keycap sequence
+  })
+
+  it("ignores ANSI and OSC control sequences", () => {
+    expect(stringWidth("\x1b[31m中\x1b[0m")).toBe(2)
+    expect(stringWidth("\x1b]8;;https://example.com\x07link\x1b]8;;\x07")).toBe(4)
   })
 })
 

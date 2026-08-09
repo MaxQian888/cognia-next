@@ -49,13 +49,19 @@ beforeEach(() => {
 
 describe("useLocalProvider — initial state and refresh", () => {
   it("auto-refreshes once on mount when baseUrl is present", async () => {
+    const onModelsDiscovered = jest.fn()
     const { result } = renderHook(() =>
-      useLocalProvider({ providerId: "ollama", baseUrl: "http://localhost:11434" })
+      useLocalProvider({
+        providerId: "ollama",
+        baseUrl: "http://localhost:11434",
+        onModelsDiscovered,
+      })
     )
     await waitFor(() => expect(result.current.status).toEqual(okStatus))
     expect(result.current.models).toEqual(oneModel)
     expect(result.current.isConnected).toBe(true)
     expect(result.current.config).toEqual({ id: "ollama", label: "Ollama" })
+    expect(onModelsDiscovered).toHaveBeenCalledWith(oneModel)
   })
 
   it("skips network calls when baseUrl is absent", async () => {
@@ -70,12 +76,14 @@ describe("useLocalProvider — initial state and refresh", () => {
   })
 
   it("captures errors from refresh in the error field", async () => {
+    const onModelsDiscovered = jest.fn()
     getStatus.mockRejectedValueOnce(new Error("boom"))
     const { result } = renderHook(() =>
-      useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
+      useLocalProvider({ providerId: "ollama", baseUrl: "http://x", onModelsDiscovered })
     )
     await waitFor(() => expect(result.current.error).toBe("boom"))
     expect(result.current.isLoading).toBe(false)
+    expect(onModelsDiscovered).not.toHaveBeenCalled()
   })
 
   it("stringifies non-Error rejections", async () => {

@@ -35,6 +35,7 @@ const VALID_SCOPES: &[&str] = &[
     "inbound:write",
     "memory:read",
     "memory:write",
+    "workflow:run",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -386,7 +387,7 @@ pub fn status(
         config_revision: config.revision,
         endpoint: server
             .port
-            .map(|port| format!("http://127.0.0.1:{port}/mcp")),
+            .map(|port| format!("http://127.0.0.1:{port}/mcp/stream")),
         bind_mode: config.bind_mode,
         health: if state == "running" {
             "healthy".into()
@@ -464,6 +465,17 @@ mod tests {
         )
         .unwrap_err();
         assert!(auto_start.starts_with("REMOTE_FEATURE_UNSUPPORTED"));
+    }
+
+    #[test]
+    fn workflow_run_scope_is_accepted_but_not_enabled_by_default() {
+        assert!(!ExternalBridgeConfig::default()
+            .enabled_scopes
+            .contains(&"workflow:run".to_string()));
+        assert_eq!(
+            validate_scopes(&["workflow:run".to_string()]).unwrap(),
+            vec!["workflow:run".to_string()]
+        );
     }
 
     #[test]

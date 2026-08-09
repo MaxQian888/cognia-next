@@ -103,6 +103,25 @@ pub trait AppStore: Send + Sync {
         offset: Option<u32>,
     ) -> Result<MessagePage, StoreError>;
 
+    /// Newest-first bounded scan used by transcript timeline projection.
+    async fn get_messages_by_session_reverse(
+        &self,
+        session_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<MessagePage, StoreError>;
+
+    /// One implicit user turn, bounded by the next user row.
+    async fn get_implicit_turn_messages(
+        &self,
+        session_id: &str,
+        anchor_message_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<MessagePage, StoreError>;
+
+    async fn transcript_revision(&self, session_id: &str) -> Result<u64, StoreError>;
+
     async fn create_message(
         &self,
         session_id: &str,
@@ -138,7 +157,7 @@ pub mod sqlite {
 
     use async_trait::async_trait;
     use parking_lot::Mutex;
-    use rusqlite::{params, Connection};
+    use rusqlite::{params, Connection, OptionalExtension};
     use uuid::Uuid;
 
     use super::*;
@@ -152,7 +171,7 @@ pub mod sqlite {
     impl SqliteAppStore {
         pub fn open<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, StoreError> {
             let conn = Connection::open(path)?;
-            conn.execute_batch(SCHEMA_SQL)?;
+            initialize_schema(&conn)?;
             Ok(Arc::new(Self {
                 conn: Arc::new(Mutex::new(conn)),
             }))
@@ -161,7 +180,7 @@ pub mod sqlite {
         /// In-memory store — used in tests.
         pub fn in_memory() -> Result<Arc<Self>, StoreError> {
             let conn = Connection::open_in_memory()?;
-            conn.execute_batch(SCHEMA_SQL)?;
+            initialize_schema(&conn)?;
             Ok(Arc::new(Self {
                 conn: Arc::new(Mutex::new(conn)),
             }))
@@ -174,7 +193,8 @@ pub mod sqlite {
             title TEXT NOT NULL,
             kind TEXT NOT NULL,
             created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            transcript_revision INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_sessions_updated_at
             ON sessions(updated_at DESC);
@@ -189,6 +209,23 @@ pub mod sqlite {
         CREATE INDEX IF NOT EXISTS idx_messages_session_created
             ON messages(session_id, created_at ASC);
     ";
+
+    fn initialize_schema(conn: &Connection) -> Result<(), StoreError> {
+        conn.execute_batch(SCHEMA_SQL)?;
+        let mut columns = conn.prepare("PRAGMA table_info(sessions)")?;
+        let has_revision = columns
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .any(|name| name == "transcript_revision");
+        if !has_revision {
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN transcript_revision INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+        Ok(())
+    }
 
     fn now_ms() -> i64 {
         std::time::SystemTime::now()
@@ -307,6 +344,123 @@ pub mod sqlite {
             .map_err(|e| StoreError::InvalidInput(format!("join: {e}")))?
         }
 
+        async fn get_messages_by_session_reverse(
+            &self,
+            session_id: &str,
+            limit: u32,
+            offset: u32,
+        ) -> Result<MessagePage, StoreError> {
+            let conn = Arc::clone(&self.conn);
+            let session_id = session_id.to_string();
+            tokio::task::spawn_blocking(move || {
+                let c = conn.lock();
+                let total: u32 = c.query_row(
+                    "SELECT COUNT(*) FROM messages WHERE session_id = ?1",
+                    params![session_id],
+                    |row| row.get::<_, i64>(0).map(|n| n as u32),
+                )?;
+                let mut stmt = c.prepare(
+                    "SELECT id, session_id, role, content, created_at
+                     FROM messages WHERE session_id = ?1
+                     ORDER BY created_at DESC, rowid DESC LIMIT ?2 OFFSET ?3",
+                )?;
+                let rows = stmt
+                    .query_map(
+                        params![session_id, limit as i64, offset as i64],
+                        row_to_message,
+                    )?
+                    .collect::<Result<Vec<_>, _>>()?;
+                let consumed = offset + rows.len() as u32;
+                Ok(MessagePage {
+                    rows,
+                    total,
+                    next_offset: (consumed < total).then_some(consumed),
+                })
+            })
+            .await
+            .map_err(|e| StoreError::InvalidInput(format!("join: {e}")))?
+        }
+
+        async fn get_implicit_turn_messages(
+            &self,
+            session_id: &str,
+            anchor_message_id: &str,
+            limit: u32,
+            offset: u32,
+        ) -> Result<MessagePage, StoreError> {
+            let conn = Arc::clone(&self.conn);
+            let session_id = session_id.to_string();
+            let anchor_message_id = anchor_message_id.to_string();
+            tokio::task::spawn_blocking(move || {
+                let c = conn.lock();
+                let anchor_rowid: i64 = c
+                    .query_row(
+                        "SELECT rowid FROM messages WHERE id = ?1 AND session_id = ?2",
+                        params![anchor_message_id, session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| StoreError::NotFound(anchor_message_id.clone()))?;
+                let next_user_rowid: Option<i64> = c.query_row(
+                    "SELECT MIN(rowid) FROM messages
+                     WHERE session_id = ?1 AND role = 'user' AND rowid > ?2",
+                    params![session_id, anchor_rowid],
+                    |row| row.get(0),
+                )?;
+                let total: u32 = c.query_row(
+                    "SELECT COUNT(*) FROM messages
+                     WHERE session_id = ?1 AND rowid >= ?2
+                       AND (?3 IS NULL OR rowid < ?3)",
+                    params![session_id, anchor_rowid, next_user_rowid],
+                    |row| row.get::<_, i64>(0).map(|n| n as u32),
+                )?;
+                let mut stmt = c.prepare(
+                    "SELECT id, session_id, role, content, created_at
+                     FROM messages
+                     WHERE session_id = ?1 AND rowid >= ?2
+                       AND (?3 IS NULL OR rowid < ?3)
+                     ORDER BY rowid ASC LIMIT ?4 OFFSET ?5",
+                )?;
+                let rows = stmt
+                    .query_map(
+                        params![
+                            session_id,
+                            anchor_rowid,
+                            next_user_rowid,
+                            limit as i64,
+                            offset as i64
+                        ],
+                        row_to_message,
+                    )?
+                    .collect::<Result<Vec<_>, _>>()?;
+                let consumed = offset + rows.len() as u32;
+                Ok(MessagePage {
+                    rows,
+                    total,
+                    next_offset: (consumed < total).then_some(consumed),
+                })
+            })
+            .await
+            .map_err(|e| StoreError::InvalidInput(format!("join: {e}")))?
+        }
+
+        async fn transcript_revision(&self, session_id: &str) -> Result<u64, StoreError> {
+            let conn = Arc::clone(&self.conn);
+            let session_id = session_id.to_string();
+            tokio::task::spawn_blocking(move || {
+                let c = conn.lock();
+                c.query_row(
+                    "SELECT transcript_revision FROM sessions WHERE id = ?1",
+                    params![session_id],
+                    |row| row.get::<_, i64>(0).map(|value| value.max(0) as u64),
+                )
+                .optional()?
+                .ok_or(StoreError::NotFound(session_id))
+            })
+            .await
+            .map_err(|e| StoreError::InvalidInput(format!("join: {e}")))?
+        }
+
         async fn create_message(
             &self,
             session_id: &str,
@@ -327,7 +481,10 @@ pub mod sqlite {
                     params![id, session_id, role, content, now],
                 )?;
                 c.execute(
-                    "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+                    "UPDATE sessions
+                     SET updated_at = CASE WHEN updated_at >= ?1 THEN updated_at + 1 ELSE ?1 END,
+                         transcript_revision = transcript_revision + 1
+                     WHERE id = ?2",
                     params![now, session_id],
                 )?;
                 Ok(MessageRow {
@@ -352,6 +509,13 @@ pub mod sqlite {
             let content = content.to_string();
             tokio::task::spawn_blocking(move || {
                 let c = conn.lock();
+                let session_id: Option<String> = c
+                    .query_row(
+                        "SELECT session_id FROM messages WHERE id = ?1",
+                        params![message_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
                 let rows = c.execute(
                     "UPDATE messages SET content = ?1 WHERE id = ?2",
                     params![content, message_id],
@@ -359,6 +523,16 @@ pub mod sqlite {
                 if rows == 0 {
                     Err(StoreError::NotFound(message_id))
                 } else {
+                    if let Some(session_id) = session_id {
+                        let now = now_ms();
+                        c.execute(
+                            "UPDATE sessions
+                             SET updated_at = CASE WHEN updated_at >= ?1 THEN updated_at + 1 ELSE ?1 END,
+                                 transcript_revision = transcript_revision + 1
+                             WHERE id = ?2",
+                            params![now, session_id],
+                        )?;
+                    }
                     Ok(())
                 }
             })
@@ -371,7 +545,24 @@ pub mod sqlite {
             let message_id = message_id.to_string();
             tokio::task::spawn_blocking(move || {
                 let c = conn.lock();
+                let session_id: Option<String> = c
+                    .query_row(
+                        "SELECT session_id FROM messages WHERE id = ?1",
+                        params![message_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
                 c.execute("DELETE FROM messages WHERE id = ?1", params![message_id])?;
+                if let Some(session_id) = session_id {
+                    let now = now_ms();
+                    c.execute(
+                        "UPDATE sessions
+                         SET updated_at = CASE WHEN updated_at >= ?1 THEN updated_at + 1 ELSE ?1 END,
+                             transcript_revision = transcript_revision + 1
+                         WHERE id = ?2",
+                        params![now, session_id],
+                    )?;
+                }
                 Ok(())
             })
             .await
@@ -447,8 +638,9 @@ pub mod sqlite {
     #[cfg(test)]
     mod tests {
         use super::super::AppStore;
-        use super::SqliteAppStore;
         use super::StoreError;
+        use super::{initialize_schema, SqliteAppStore};
+        use rusqlite::Connection;
 
         #[tokio::test]
         async fn roundtrip_session_and_messages() {
@@ -535,6 +727,97 @@ pub mod sqlite {
                 .await
                 .expect_err("missing");
             assert!(matches!(err, StoreError::NotFound(_)));
+        }
+
+        #[tokio::test]
+        async fn transcript_reads_are_reverse_bounded_and_turn_scoped() {
+            let store = SqliteAppStore::in_memory().expect("open");
+            store
+                .upsert_session("s1", "Transcript", "direct")
+                .await
+                .unwrap();
+            let first = store.create_message("s1", "one", "user").await.unwrap();
+            store
+                .create_message("s1", "answer one", "assistant")
+                .await
+                .unwrap();
+            store.create_message("s1", "two", "user").await.unwrap();
+            store
+                .create_message("s1", "answer two", "assistant")
+                .await
+                .unwrap();
+
+            let newest = store
+                .get_messages_by_session_reverse("s1", 2, 0)
+                .await
+                .unwrap();
+            assert_eq!(
+                newest
+                    .rows
+                    .iter()
+                    .map(|row| row.content.as_str())
+                    .collect::<Vec<_>>(),
+                ["answer two", "two"]
+            );
+            let first_turn = store
+                .get_implicit_turn_messages("s1", &first.id, 10, 0)
+                .await
+                .unwrap();
+            assert_eq!(
+                first_turn
+                    .rows
+                    .iter()
+                    .map(|row| row.content.as_str())
+                    .collect::<Vec<_>>(),
+                ["one", "answer one"]
+            );
+        }
+
+        #[tokio::test]
+        async fn transcript_revision_changes_for_message_mutations() {
+            let store = SqliteAppStore::in_memory().expect("open");
+            store
+                .upsert_session("s1", "Transcript", "direct")
+                .await
+                .unwrap();
+            assert_eq!(store.transcript_revision("s1").await.unwrap(), 0);
+
+            let message = store.create_message("s1", "one", "user").await.unwrap();
+            assert_eq!(store.transcript_revision("s1").await.unwrap(), 1);
+            store
+                .update_message_content(&message.id, "edited")
+                .await
+                .unwrap();
+            assert_eq!(store.transcript_revision("s1").await.unwrap(), 2);
+            store.delete_message(&message.id).await.unwrap();
+            assert_eq!(store.transcript_revision("s1").await.unwrap(), 3);
+        }
+
+        #[test]
+        fn schema_upgrade_adds_transcript_revision_without_rebuilding_messages() {
+            let conn = Connection::open_in_memory().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );",
+            )
+            .unwrap();
+
+            initialize_schema(&conn).unwrap();
+
+            let column_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('sessions')
+                     WHERE name = 'transcript_revision'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(column_count, 1);
         }
     }
 }

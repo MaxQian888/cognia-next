@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { EvalReport } from "@/types/eval/eval"
 import {
   saveRun,
@@ -10,16 +8,18 @@ import {
   deleteRunsForDataset,
 } from "./eval-runs"
 import { saveCaseResult, listCaseResults } from "./eval-run-cases"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().evalRuns.clear()
   await getDb().evalRunCaseResults.clear()
 })
+afterAll(dbFixture.dispose)
 
 function report(overrides: Partial<EvalReport> = {}): EvalReport {
   return {

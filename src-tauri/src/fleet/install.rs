@@ -179,7 +179,7 @@ OUT=$(curl -sk --max-time "$TMOUT" \
   -H "X-Cognia-Fleet-Token: $TOKEN" \
   -H "Content-Type: application/json" \
   --data-binary "$BODY" \
-  "https://127.0.0.1:$PORT/api/v1/fleet/hook") || exit 0
+  "https://127.0.0.1:$PORT/api/fleet/hook") || exit 0
 
 if [ "$MODE" = "wait" ] && [ -n "$OUT" ]; then
   printf '%s' "$OUT"
@@ -327,7 +327,7 @@ mod tests {
         // Envelope shape.
         assert!(script.contains(r#"\"agent\":\"claude-code\""#));
         assert!(script.contains(r#"\"ppid\":$PPID"#));
-        assert!(script.contains("/api/v1/fleet/hook"));
+        assert!(script.contains("/api/fleet/hook"));
     }
 
     #[test]

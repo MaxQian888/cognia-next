@@ -75,6 +75,8 @@ export function DexTab({ bones }: { bones: PetBones }) {
                       reducedMotion
                       size={56}
                       skinId="live2d"
+                      selection={{ skinId: "live2d", modelId: m.id }}
+                      renderPriority="thumbnail"
                     />
                   ) : (
                     <span className="flex size-14 items-center justify-center rounded-md bg-muted text-muted-foreground">

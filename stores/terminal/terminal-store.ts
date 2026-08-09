@@ -31,6 +31,7 @@ import { persist } from "zustand/middleware"
 
 import type { SessionInfo } from "@/lib/terminal/types"
 import type { TerminalHostState } from "@/lib/terminal/host-state"
+import type { TabColorPreset, TabIconPreset } from "@/lib/terminal/tab-appearance"
 
 /**
  * Status the tab badge surfaces. Driven by OSC 633 events (`command_*`)
@@ -78,6 +79,10 @@ export interface TerminalSessionRow {
   createdAt: number
   /** Per-(chat, tab) trust grant cache key surface. UI only; the authoritative grant lives in `PluginConsentBroker`. */
   agentTrusted: boolean
+  /** User-assigned color accent for the tab. `"none"` means default (no override). */
+  tabColor: TabColorPreset
+  /** User-assigned icon for the tab. `"none"` means no custom icon. */
+  tabIcon: TabIconPreset
   /** Identity of the agent (chat session) that spawned this tab. `null` when user-spawned. Set by `lib/terminal/dock-tool-handler.ts` when the agent calls `terminal_dock_spawn`; reads filter the agent-only dock view. */
   agentSpawner: string | null
   /**
@@ -257,6 +262,13 @@ export interface TerminalStoreState {
   tabOrder: Record<string, string[]>
 
   /**
+   * Sessions that received data while not the active tab for their project.
+   * Cleared when the user switches to that tab. The tab component reads this
+   * to render a pulsing activity indicator.
+   */
+  tabActivity: Record<string, boolean>
+
+  /**
    * Sessions whose output the renderer is currently holding back (xterm
    * backpressure). Surfaced on the tab and the session chip so a throttled
    * background tab is legible without switching to it.
@@ -303,6 +315,10 @@ export interface TerminalStoreState {
   setTabOrder: (projectId: string | null, orderedIds: string[]) => void
   /** Flag/clear renderer backpressure for a session. */
   setOutputThrottled: (sessionId: string, throttled: boolean) => void
+  /** Mark a session as having new output while in background. */
+  markTabActivity: (sessionId: string) => void
+  /** Clear the activity badge for a session (called when tab becomes active). */
+  clearTabActivity: (sessionId: string) => void
 
   registerSession: (
     info: SessionInfo,
@@ -318,6 +334,11 @@ export interface TerminalStoreState {
   renameSession: (id: string, customTitle: string | null) => void
   setAgentTrusted: (id: string, trusted: boolean) => void
   setAgentSpawner: (id: string, agentSpawner: string | null) => void
+  /** Set the tab color/icon appearance. Partial — omit a field to leave it unchanged. */
+  setTabAppearance: (
+    id: string,
+    appearance: { color?: TabColorPreset; icon?: TabIconPreset }
+  ) => void
   pushPrompt: (id: string, startMs: number) => void
   closePrompt: (id: string, endMs: number) => void
   pushCommand: (id: string, record: TerminalCommandRecord) => void
@@ -493,6 +514,7 @@ export const useTerminalStore = create<TerminalStoreState>()(
       splitDirection: {},
       tabOrder: {},
       outputThrottled: {},
+      tabActivity: {},
       pendingReloadLayout: null,
 
       setPanelOpen: (open) => set({ panelOpen: open }),
@@ -597,6 +619,28 @@ export const useTerminalStore = create<TerminalStoreState>()(
         })
       },
 
+      markTabActivity: (sessionId) => {
+        set((s) => {
+          if (s.tabActivity[sessionId]) return s
+          // Only mark if the session is NOT the currently-active tab for its
+          // project — data on the visible tab is already seen by the user.
+          const row = s.sessions[sessionId]
+          if (!row) return s
+          const active = s.activeSessionIdByProject[row.projectId ?? ""]
+          if (active === sessionId) return s
+          return { tabActivity: { ...s.tabActivity, [sessionId]: true } }
+        })
+      },
+
+      clearTabActivity: (sessionId) => {
+        set((s) => {
+          if (!s.tabActivity[sessionId]) return s
+          const next = { ...s.tabActivity }
+          delete next[sessionId]
+          return { tabActivity: next }
+        })
+      },
+
       registerSession: (info, opts = {}) => {
         const row: TerminalSessionRow = {
           id: info.id,
@@ -613,6 +657,8 @@ export const useTerminalStore = create<TerminalStoreState>()(
           cwd: null,
           createdAt: Date.now(),
           agentTrusted: false,
+          tabColor: "none",
+          tabIcon: "none",
           agentSpawner: opts.agentSpawner ?? null,
           agentSpawnerMessageId: opts.agentSpawnerMessageId ?? null,
           promptBoundaries: [],
@@ -774,6 +820,17 @@ export const useTerminalStore = create<TerminalStoreState>()(
         })
       },
 
+      setTabAppearance: (id, appearance) => {
+        set((s) => {
+          const row = s.sessions[id]
+          if (!row) return s
+          const updated = { ...row }
+          if (appearance.color !== undefined) updated.tabColor = appearance.color
+          if (appearance.icon !== undefined) updated.tabIcon = appearance.icon
+          return { sessions: { ...s.sessions, [id]: updated } }
+        })
+      },
+
       pushPrompt: (id, startMs) => {
         set((s) => {
           const row = s.sessions[id]
@@ -820,12 +877,17 @@ export const useTerminalStore = create<TerminalStoreState>()(
       },
 
       setActiveSession: (projectId, sessionId) => {
-        set((s) => ({
-          activeSessionIdByProject: {
-            ...s.activeSessionIdByProject,
-            [projectId ?? ""]: sessionId,
-          },
-        }))
+        set((s) => {
+          const tabActivity = sessionId ? { ...s.tabActivity } : s.tabActivity
+          if (sessionId && tabActivity[sessionId]) delete tabActivity[sessionId]
+          return {
+            activeSessionIdByProject: {
+              ...s.activeSessionIdByProject,
+              [projectId ?? ""]: sessionId,
+            },
+            tabActivity,
+          }
+        })
       },
 
       getActiveSession: (projectId) => {
@@ -1020,6 +1082,7 @@ export const useTerminalStore = create<TerminalStoreState>()(
           splitDirection: {},
           tabOrder: {},
           outputThrottled: {},
+          tabActivity: {},
           pendingReloadLayout: null,
         })
       },

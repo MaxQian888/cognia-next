@@ -108,23 +108,42 @@ pub fn evaluate_subscribe(
     SubscribeDecision::Accept
 }
 
-/// Whether a WebSocket upgrade carrying `origin` is allowed given `allowlist`.
+/// Whether a WebSocket upgrade carrying `origin` is allowed for the request
+/// origin and explicit cross-origin `allowlist`.
 ///
-/// - An empty `allowlist` allows everything (the opt-in default — no behavior
-///   change until an operator configures origins).
 /// - A missing `origin` is allowed: native clients (the desktop
 ///   `tokio-tungstenite` signaling client) do not send an `Origin` header, and
 ///   the header cannot be forged by browser JS, so this check only meaningfully
 ///   gates browser/webview contexts.
-/// - Otherwise the origin must match an allowlist entry exactly.
-pub fn is_origin_allowed(origin: Option<&str>, allowlist: &[String]) -> bool {
-    if allowlist.is_empty() {
-        return true;
-    }
+/// - A same-origin browser is allowed without configuration.
+/// - A cross-origin browser must match an explicit HTTPS allowlist entry.
+///   Consequently, an empty allowlist denies every cross-origin browser.
+pub fn is_origin_allowed(
+    origin: Option<&str>,
+    request_origin: Option<&str>,
+    allowlist: &[String],
+) -> bool {
     match origin {
         None => true,
-        Some(origin) => allowlist.iter().any(|allowed| allowed == origin),
+        Some(origin) => {
+            request_origin.is_some_and(|same_origin| same_origin == origin)
+                || allowlist.iter().any(|allowed| allowed == origin)
+        }
     }
+}
+
+/// Validate one configured split-origin entry.
+///
+/// Browser `Origin` values never carry paths, queries, fragments, credentials,
+/// or wildcards. Requiring the canonical HTTPS shape makes an operator typo a
+/// startup/configuration error instead of silently widening the trust boundary.
+pub fn is_valid_allowed_origin(origin: &str) -> bool {
+    let Some(authority) = origin.strip_prefix("https://") else {
+        return false;
+    };
+    !authority.is_empty()
+        && !authority.contains(['/', '?', '#', '@', '*'])
+        && !authority.chars().any(char::is_whitespace)
 }
 
 // ---------------------------------------------------------------------------
@@ -195,25 +214,57 @@ mod tests {
     }
 
     #[test]
-    fn origin_empty_allowlist_allows_all() {
-        assert!(is_origin_allowed(Some("https://evil.example"), &[]));
-        assert!(is_origin_allowed(None, &[]));
+    fn empty_allowlist_allows_native_and_same_origin_only() {
+        assert!(is_origin_allowed(None, None, &[]));
+        assert!(is_origin_allowed(
+            Some("https://app.cognia.cn"),
+            Some("https://app.cognia.cn"),
+            &[]
+        ));
+        assert!(!is_origin_allowed(
+            Some("https://evil.example"),
+            Some("https://app.cognia.cn"),
+            &[]
+        ));
     }
 
     #[test]
     fn origin_missing_is_allowed_for_native_clients() {
         let allow = vec!["https://app.cognia.cn".to_string()];
-        assert!(is_origin_allowed(None, &allow));
+        assert!(is_origin_allowed(None, None, &allow));
     }
 
     #[test]
     fn origin_must_match_when_configured() {
         let allow = vec![
             "https://app.cognia.cn".to_string(),
-            "capacitor://localhost".to_string(),
+            "https://admin.cognia.cn".to_string(),
         ];
-        assert!(is_origin_allowed(Some("https://app.cognia.cn"), &allow));
-        assert!(is_origin_allowed(Some("capacitor://localhost"), &allow));
-        assert!(!is_origin_allowed(Some("https://evil.example"), &allow));
+        assert!(is_origin_allowed(
+            Some("https://app.cognia.cn"),
+            Some("https://signaling.cognia.cn"),
+            &allow
+        ));
+        assert!(is_origin_allowed(
+            Some("https://admin.cognia.cn"),
+            Some("https://signaling.cognia.cn"),
+            &allow
+        ));
+        assert!(!is_origin_allowed(
+            Some("https://evil.example"),
+            Some("https://signaling.cognia.cn"),
+            &allow
+        ));
+    }
+
+    #[test]
+    fn configured_origins_are_exact_https_origins() {
+        assert!(is_valid_allowed_origin("https://app.cognia.cn"));
+        assert!(is_valid_allowed_origin("https://localhost:8443"));
+        assert!(!is_valid_allowed_origin("http://app.cognia.cn"));
+        assert!(!is_valid_allowed_origin("capacitor://localhost"));
+        assert!(!is_valid_allowed_origin("https://*.cognia.cn"));
+        assert!(!is_valid_allowed_origin("https://app.cognia.cn/path"));
+        assert!(!is_valid_allowed_origin("https://user@app.cognia.cn"));
     }
 }

@@ -20,8 +20,13 @@ import type {
   PluginImportAPI,
 } from "@/types/plugin/plugin"
 
+interface RegisteredCustomImporter {
+  ownerPluginId: string
+  importer: CustomImporter
+}
+
 // Registry for custom importers, keyed by the namespaced `${pluginId}:${id}`.
-const customImporters = new Map<string, CustomImporter>()
+const customImporters = new Map<string, RegisteredCustomImporter>()
 
 /** Create the Import API for a plugin. */
 export function createImportAPI(pluginId: string): PluginImportAPI {
@@ -29,7 +34,10 @@ export function createImportAPI(pluginId: string): PluginImportAPI {
   const api: PluginImportAPI = {
     registerImporter: <T = unknown>(importer: CustomImporter<T>) => {
       const importerId = `${pluginId}:${importer.id}`
-      customImporters.set(importerId, { ...importer, id: importerId } as CustomImporter)
+      customImporters.set(importerId, {
+        ownerPluginId: pluginId,
+        importer: { ...importer, id: importerId } as CustomImporter,
+      })
       logger.info(`Registered importer: ${importer.name}`)
       return () => {
         customImporters.delete(importerId)
@@ -37,7 +45,10 @@ export function createImportAPI(pluginId: string): PluginImportAPI {
       }
     },
 
-    getCustomImporters: (): CustomImporter[] => Array.from(customImporters.values()),
+    getCustomImporters: (): CustomImporter[] =>
+      Array.from(customImporters.entries())
+        .filter(([, registration]) => registration.ownerPluginId === pluginId)
+        .map(([, registration]) => registration.importer),
 
     registerSessionSource: (adapter: AgentSessionSourceAdapter) => {
       const dispose = registerSessionSource(adapter, { pluginId })
@@ -67,12 +78,16 @@ export function createImportAPI(pluginId: string): PluginImportAPI {
     },
 
     importContent: async (source: ImportSource, format: string): Promise<ImportResult> => {
-      const importer = Array.from(customImporters.values()).find((i) => i.format === format)
-      if (!importer) {
+      const importerId = format.includes(":") ? format : `${pluginId}:${format}`
+      if (!importerId.startsWith(`${pluginId}:`)) {
+        return { success: false, error: `Importer is not owned by plugin: ${format}` }
+      }
+      const registration = customImporters.get(importerId)
+      if (!registration || registration.ownerPluginId !== pluginId) {
         return { success: false, error: `No importer registered for format: ${format}` }
       }
       try {
-        return await importer.import(source)
+        return await registration.importer.import(source)
       } catch (error) {
         logger.error("Custom import failed:", error)
         return {
@@ -100,6 +115,22 @@ export function createImportAPI(pluginId: string): PluginImportAPI {
       ],
     }
   )
+}
+
+/** Host-only lookup used to authorize attached bytes for matching importer owners. */
+export function getCustomImporterOwnersForFile(filename: string, mimeType?: string): string[] {
+  const dot = filename.lastIndexOf(".")
+  const extension = dot >= 0 ? filename.slice(dot + 1).toLowerCase() : ""
+  const normalizedMime = mimeType?.toLowerCase()
+  const owners = new Set<string>()
+  for (const { ownerPluginId, importer } of customImporters.values()) {
+    const extensionMatch = importer.extensions.some(
+      (candidate) => candidate.replace(/^\./, "").toLowerCase() === extension
+    )
+    const mimeMatch = Boolean(normalizedMime) && importer.mimeType?.toLowerCase() === normalizedMime
+    if (extensionMatch || mimeMatch) owners.add(ownerPluginId)
+  }
+  return [...owners]
 }
 
 /** Clear all custom importers (test isolation). */

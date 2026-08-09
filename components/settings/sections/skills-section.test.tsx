@@ -3,12 +3,19 @@
  */
 
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { SkillsSection } from "./skills-section"
 
 // Stub SkillPanel — its own coverage lives in components/skills/. The
 // wrapper's responsibility is layout + container metadata.
 jest.mock("@/components/skills", () => ({
   SkillPanel: () => <div data-testid="stub-skill-panel">panel</div>,
+}))
+jest.mock("@/components/settings/built-in-skills", () => ({
+  BuiltInSkillsSection: () => <div data-testid="stub-built-in-skills">built-in</div>,
+}))
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
 }))
 
 describe("SkillsSection", () => {
@@ -31,5 +38,14 @@ describe("SkillsSection", () => {
   it("merges an extra className from the parent", () => {
     render(<SkillsSection className="custom-foo" />)
     expect(screen.getByTestId("skills-section").className).toMatch(/custom-foo/)
+  })
+
+  it("exposes the built-in skill diagnostics surface", async () => {
+    const user = userEvent.setup()
+    render(<SkillsSection />)
+
+    await user.click(screen.getByRole("tab", { name: "builtInSkills.title" }))
+
+    expect(screen.getByTestId("stub-built-in-skills")).toBeInTheDocument()
   })
 })

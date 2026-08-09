@@ -1,6 +1,6 @@
 ---
 title: 桌面宠物
-description: 活在透明浮层窗口里的 Shimeji 式伙伴 —— 五种窗口角色、规避 Windows 黑矩形的双 rAF 揭示协议、需求/照料/经济模拟，以及两套渲染后端（Live2D 与精灵图）。
+description: 活在透明浮层窗口里的 Shimeji 式伙伴 —— 五种窗口角色、三套受治理渲染器、显式模型兼容性、本地视线跟随，以及有界的实时资源。
 ---
 
 # 桌面宠物
@@ -49,15 +49,15 @@ type PetWindowRole = "main" | "overlay" | "popup" | "island" | "web"
 （先布局，再提交后）才调用 `revealPetWindow()` / `revealIslandWindow()`，
 与主窗口的 `WindowShowInitializer` 契约保持一致。
 
-## 可栖附的「表面」仅限 Windows，并且明确声明
+## 可栖附「表面」按平台显式降级
 
 宠物可以爬上其他可见顶层窗口的上边缘并沿其行走（Shimeji 风格）。
 `src-tauri/src/pet_window/surfaces.rs` 把它拆成三层，使业务逻辑无需真实桌面即可测试：
 `PetSurface` / `PetSurfaces` 这组 serde DTO、
 对普通 `WindowCandidate` 记录做纯判定的 `filter_and_sort_surfaces`、
-以及薄薄一层 `platform::enumerate`（`EnumWindows` 调用）。
-在非 Windows 平台上 `enumerate` 返回空列表，浮层退化为常规的地面游走行为 ——
-这是**显式声明的休眠**，而不是悄无声息地损坏。
+以及薄薄一层平台枚举。Windows 使用 `EnumWindows`；macOS 使用 Core Graphics 窗口元数据，
+并排除 Cognia 自身进程。Linux 返回空列表，因为 Wayland 有意不公开稳定的跨应用窗口几何信息；
+浮层会明确退化为常规地面游走，而不是悄无声息地损坏。
 
 <Callout type="warn">
   `PetSurface` 是**具名结构体，不是元组**。裸元组会序列化成 JSON 数组，
@@ -86,13 +86,33 @@ lib/pet/
 由 `account-id.ts` 播种的 `bones/prng.ts`，正是同一账号下宠物生成外观保持稳定、
 而不会每次启动重掷的原因。
 
-## 两套渲染后端
+## 三套受治理渲染器
 
-`live2d/` 是完整的 Cubism 路径 —— 模型发现、manifest 解析、带校验的 zip 导入、
-插件注册步骤、参数 / 情绪映射、口型同步，以及模型资源的 URL 解析器。
-`sprite-v2/import.ts` 是更轻量的精灵图包路径。
-具体启用哪一套，按角色通过 `hooks/pet/use-active-live2d-model.ts`
-与 `use-active-sprite-pack.ts` 解析。
+`types/pet/skin.ts` 为内置 SVG、Live2D Cubism 3–5 和 Sprite v2 定义统一契约：
+类型化资源选择、能力矩阵、渲染模式、视线目标和结构化诊断。未知或已删除的选择会带诊断地
+归一化为 SVG；不会出现空白渲染，也不会静默进入永久降级。
+
+`lib/pet/skin-runtime.ts` 是每个 WebView JavaScript realm 中唯一的昂贵资源所有者。
+它按 `configuration > interactive > console > thumbnail` 仲裁唯一实时渲染器，为未获得租约的
+预览保留中性快照，按资源复用 Sprite object URL，统计 renderer/WebGL/ticker/timer/URL/load/
+context-loss/fallback，并在资源失效或 WebView 销毁时释放。隐藏、挂起、减少动效和点击穿透暂停
+都会停止更新回调。Live2D 正常上限 60 fps，低功耗为 30 fps，静默期为 12 fps。
+
+`lib/pet/live2d/` 负责 Cubism 模型发现、manifest 解析、导入校验、插件注册、参数/情绪/视线映射、
+口型同步和 URL 替换。兼容性分为 `ready`、`degraded`、`invalid`：settings、moc 或必要纹理不可用时
+阻止激活；缺失可选 motion、expression、sound、physics 或 pose 时，删除对应引用并明确报告。
+路径穿越、归一化重复、大小写不明确、损坏图片、Cubism 2 和超限资源都会在持久化前被拒绝。
+官方 Hiyori/Haru 语料在 `test-fixtures/pet/live2d-public-corpus.json` 中固定 revision 和 SHA-256；
+模型二进制下载到 `.cache`，不进入仓库。
+
+`lib/pet/sprite-v2/import.ts` 校验固定图集契约。最后两行提供顺时针 16 个视线方向，按 22.5°
+量化，并包含中心死区、迟滞和陈旧输入回到 idle。SVG 移动既有面部元素；Live2D 映射标准的
+head/eye/body/mouth 参数。视线会让位于挂起、被抓住、one-shot、移动和语义状态。Web 使用页内
+pointer；Tauri 的最小权限 cursor command 采样不超过 10 Hz，且绝不持久化或传输。
+
+角色绑定可以继承全局选择，也可以选择 SVG、某个 Live2D 模型或 Sprite 包。旧的
+`live2dModelId` 会被惰性解释为类型化 Live2D 选择；删除资源时会在事务中清除全局和角色引用，
+随后由 SVG 接管。
 
 ## 相关文档
 

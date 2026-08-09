@@ -8,8 +8,8 @@
 //! - Loads / generates the TLS material in the same `--data-dir` so the
 //!   self-signed cert is stable across restarts.
 //! - Exposes two subcommands:
-//!   - `cognia-server pair --device-name <name>` — issues a pair JWT and
-//!     prints a `cgnp2|<base64>` payload the user can paste into the
+//!   - `cognia-server pair --device-name <name>` — issues a one-time Owner
+//!     invitation and prints a `cgnp3|<base64>` payload the user can paste into the
 //!     mobile app (no QR display in this skeleton — a UTF-8 QR renderer
 //!     is a follow-up).
 //!   - `cognia-server serve --port <port>` — boots the axum HTTPS server
@@ -35,14 +35,12 @@ use app_lib::companion_api::{
     deny_list::DenyList,
     desktop_messages_bridge::DesktopMessagesBridge,
     desktop_writes_bridge::DesktopWritesBridge,
-    device_grants::{self, DeviceGrantStore, FileDeviceGrantStore, GrantKind},
+    device_grants::{DeviceGrantStore, FileDeviceGrantStore, GrantKind},
     event_bus::EventBus,
     idempotency::IdempotencyCache,
-    pair_code_lru::PairCodeLru,
     push::PushTokenRegistry,
     push_creds::{self, FilePushCredStore},
     rate_limit::RateLimiter,
-    redemption_lru::RedemptionLru,
     secret,
     security_store::{install_security_store, SecurityStore},
     server, set_advertised_port, set_tls_fingerprint,
@@ -84,7 +82,7 @@ enum CliCommand {
         #[arg(long)]
         endpoint: Option<String>,
     },
-    /// Issue a one-shot pair token + print the cgnp2 payload the mobile
+    /// Issue a one-shot Owner invitation and print the cgnp3 payload the mobile
     /// app scans or pastes.
     Pair {
         /// Human label for the device being paired.
@@ -99,8 +97,11 @@ enum CliCommand {
         /// `--advertise-url` nor `COGNIA_PUBLIC_URL` is set.
         #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
         port: u16,
+        /// Tenant/organization encoded into the cgnp3 payload.
+        #[arg(long, default_value = "local_acct_a")]
+        tenant_id: String,
     },
-    /// Boot the HTTPS companion server. Binds 0.0.0.0:<port>.
+    /// Boot the HTTPS companion server. Binds 0.0.0.0:<port> by default.
     Serve {
         #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
         port: u16,
@@ -112,6 +113,10 @@ enum CliCommand {
         /// devices that also hold the terminal control grant.
         #[arg(long, default_value_t = false)]
         allow_remote_terminal: bool,
+        /// Bind only to 127.0.0.1. Intended for process-local development
+        /// and automatic local-debug authentication.
+        #[arg(long, default_value_t = false)]
+        bind_loopback: bool,
     },
     /// Re-encrypt the secret store under a new master key (ADR-0059 R9).
     /// The old key comes from COGNIA_MASTER_KEY(_FILE); stored values —
@@ -185,7 +190,7 @@ enum CliCommand {
 
 #[derive(Debug, Subcommand)]
 enum DevicesCommand {
-    /// Create a one-time Companion API v2 Owner invitation. This command is
+    /// Create a one-time Companion API Owner invitation. This command is
     /// the single-user trust root and must be run by an OS-authorized operator.
     InviteOwner {
         #[arg(long, default_value = "local_acct_a")]
@@ -193,12 +198,12 @@ enum DevicesCommand {
         #[arg(long, default_value_t = 600)]
         ttl_seconds: i64,
     },
-    /// List Companion API v2 devices for a tenant.
+    /// List Companion API devices for a tenant.
     List {
         #[arg(long, default_value = "local_acct_a")]
         tenant_id: String,
     },
-    /// Revoke a Companion API v2 device through the local OS trust root.
+    /// Revoke a Companion API device through the local OS trust root.
     ///
     /// Unlike the remote Owner API, this may revoke the last Owner so a lost
     /// deployment can be recovered with a fresh invitation.
@@ -207,8 +212,11 @@ enum DevicesCommand {
         #[arg(long, default_value = "local_acct_a")]
         tenant_id: String,
     },
-    /// Print the current grants.
-    Grants,
+    /// Print the current canonical SecurityStore grants.
+    Grants {
+        #[arg(long, default_value = "local_acct_a")]
+        tenant_id: String,
+    },
     /// Grant a device an elevated capability. Pass at least one of the flags.
     Grant {
         /// Device id from the pair response (`cognia-server devices grants`
@@ -226,6 +234,8 @@ enum DevicesCommand {
         /// Create, attach to, and control interactive terminal sessions.
         #[arg(long)]
         terminal: bool,
+        #[arg(long, default_value = "local_acct_a")]
+        tenant_id: String,
     },
     /// Revoke an elevated capability.
     Revoke {
@@ -236,6 +246,8 @@ enum DevicesCommand {
         agent_control: bool,
         #[arg(long)]
         terminal: bool,
+        #[arg(long, default_value = "local_acct_a")]
+        tenant_id: String,
     },
 }
 
@@ -331,6 +343,11 @@ fn init_logger() {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
+    // Headless deployments do not consume desktop Dexie settings. Publish an
+    // explicit direct policy so shared outbound clients disable ambient proxy
+    // variables without binding to renderer initialization.
+    app_lib::clear_inherited_proxy_environment();
+    app_lib::apply_current_proxy_config(Default::default())?;
     let cli = Cli::parse();
 
     if let CliCommand::DesktopHost { endpoint } = &cli.command {
@@ -417,21 +434,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             device_name,
             advertise_url,
             port,
+            tenant_id,
         } => {
             let base_url = resolve_advertise_url(advertise_url, port);
-            run_pair(&store, &tls_material, &device_name, &base_url).await
+            run_pair(&store, &tls_material, &device_name, &base_url, &tenant_id).await
         }
         CliCommand::Serve {
             port,
             advertise_url,
             allow_remote_terminal,
+            bind_loopback,
         } => {
             if allow_remote_terminal {
                 let mut settings = app_lib::terminal_host_service::load_terminal_host_settings()?;
                 settings.allow_remote_access = true;
                 app_lib::terminal_host_service::save_terminal_host_settings(&settings)?;
             }
-            run_serve(&store, &tls_material, port, advertise_url).await
+            run_serve(&store, &tls_material, port, advertise_url, bind_loopback).await
         }
         CliCommand::IssueServiceToken => {
             let signing_secret = secret::load_or_generate()?;
@@ -484,7 +503,8 @@ fn selected_kinds(
 }
 
 fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::Error>> {
-    let store = FileDeviceGrantStore::new(&store_data_dir());
+    let security = app_lib::companion_api::security_store::security_store()
+        .ok_or("security store is not initialized")?;
     match command {
         DevicesCommand::InviteOwner {
             tenant_id,
@@ -493,8 +513,6 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             if ttl_seconds <= 0 || ttl_seconds > 3_600 {
                 return Err("ttl-seconds must be between 1 and 3600".into());
             }
-            let security = app_lib::companion_api::security_store::security_store()
-                .ok_or("security store is not initialized")?;
             let now = chrono::Utc::now().timestamp();
             let invitation = security.create_owner_invitation(
                 &tenant_id,
@@ -510,8 +528,6 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             Ok(())
         }
         DevicesCommand::List { tenant_id } => {
-            let security = app_lib::companion_api::security_store::security_store()
-                .ok_or("security store is not initialized")?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&security.list_devices(&tenant_id)?)?
@@ -522,8 +538,6 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             device_id,
             tenant_id,
         } => {
-            let security = app_lib::companion_api::security_store::security_store()
-                .ok_or("security store is not initialized")?;
             security.revoke_device(
                 &tenant_id,
                 "local-cli-trust-root",
@@ -531,11 +545,22 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
                 true,
                 chrono::Utc::now().timestamp(),
             )?;
+            if let Some(registrations) = signaling::registration_store::installed() {
+                if let Some(key_ref) = registrations.remove_device(&device_id)? {
+                    cognia_secrets::keyring_secrets::clear(
+                        app_lib::companion_api::signaling::envelope_v2::SIGNALING_KEY_NAMESPACE,
+                        &key_ref,
+                    )?;
+                }
+            }
             println!("revoked device {device_id} for tenant {tenant_id}");
             Ok(())
         }
-        DevicesCommand::Grants => {
-            println!("{}", serde_json::to_string_pretty(&store.load()?)?);
+        DevicesCommand::Grants { tenant_id } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&security.list_devices(&tenant_id)?)?
+            );
             Ok(())
         }
         DevicesCommand::Grant {
@@ -543,12 +568,23 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             control,
             agent_control,
             terminal,
+            tenant_id,
         } => {
+            let mut capabilities = security
+                .capability_snapshot(&tenant_id, &device_id)?
+                .ok_or("device is unknown or revoked")?
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>();
             for kind in selected_kinds(control, agent_control, terminal)? {
-                let changed = device_grants::grant(store.as_ref(), &device_id, kind)?;
+                let before = capabilities.len();
+                capabilities.extend(
+                    grant_kind_capabilities(kind)
+                        .iter()
+                        .map(|value| value.to_string()),
+                );
                 println!(
                     "{} {} for {device_id}",
-                    if changed {
+                    if capabilities.len() != before {
                         "granted"
                     } else {
                         "already granted"
@@ -556,7 +592,13 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
                     kind.as_str()
                 );
             }
-            println!("Takes effect at the next `cognia-server serve`.");
+            security.replace_device_capabilities(
+                &tenant_id,
+                "local-cli-trust-root",
+                &device_id,
+                &capabilities.into_iter().collect::<Vec<_>>(),
+                chrono::Utc::now().timestamp(),
+            )?;
             Ok(())
         }
         DevicesCommand::Revoke {
@@ -564,9 +606,19 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             control,
             agent_control,
             terminal,
+            tenant_id,
         } => {
+            let mut capabilities = security
+                .capability_snapshot(&tenant_id, &device_id)?
+                .ok_or("device is unknown or revoked")?
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>();
             for kind in selected_kinds(control, agent_control, terminal)? {
-                let changed = device_grants::revoke(store.as_ref(), &device_id, kind)?;
+                let changed = grant_kind_capabilities(kind)
+                    .iter()
+                    .fold(false, |changed, capability| {
+                        capabilities.remove(*capability) || changed
+                    });
                 println!(
                     "{} {} for {device_id}",
                     if changed {
@@ -577,9 +629,28 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
                     kind.as_str()
                 );
             }
-            println!("Takes effect at the next `cognia-server serve`.");
+            security.replace_device_capabilities(
+                &tenant_id,
+                "local-cli-trust-root",
+                &device_id,
+                &capabilities.into_iter().collect::<Vec<_>>(),
+                chrono::Utc::now().timestamp(),
+            )?;
             Ok(())
         }
+    }
+}
+
+fn grant_kind_capabilities(kind: GrantKind) -> &'static [&'static str] {
+    match kind {
+        GrantKind::Control => &[
+            "workspace.read",
+            "workspace.write",
+            "git.write",
+            "workflow.run",
+        ],
+        GrantKind::AgentControl => &["agent.run", "process.spawn"],
+        GrantKind::Terminal => &["terminal.open"],
     }
 }
 
@@ -672,6 +743,7 @@ async fn run_pair(
     tls: &tls::TlsMaterial,
     device_name: &str,
     base_url: &str,
+    tenant_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Make sure the store opens cleanly — a successful list_sessions also
     // exercises the schema migration on first run.
@@ -686,27 +758,72 @@ async fn run_pair(
         tls.fingerprint_sha256
     );
 
+    const INVITATION_TTL_SECS: i64 = 5 * 60;
+    let now = chrono::Utc::now().timestamp();
+    let expires_at_ms = now.saturating_add(INVITATION_TTL_SECS) * 1_000;
+    let security = app_lib::companion_api::security_store::security_store()
+        .ok_or("security store is not initialized")?;
+    let mode = app_lib::companion_api::deployment::deployment_mode();
+    let invitation = if mode == app_lib::companion_api::deployment::DeploymentMode::SingleUser {
+        Some(security.create_owner_invitation(
+            tenant_id,
+            "local-cli-trust-root",
+            now,
+            INVITATION_TTL_SECS,
+        )?)
+    } else {
+        None
+    };
     let signing_secret = secret::load_or_generate()?;
-    let (pair_jwt, expires_at_s) =
-        app_lib::companion_api::jwt::issue_pair_jwt(&signing_secret, HEADLESS_LOCAL_ACCOUNT_ID)?;
+    let encoded = encode_pair_invitation_payload(
+        base_url,
+        invitation.as_deref(),
+        &app_lib::companion_api::healthz::derive_server_id(&signing_secret),
+        tenant_id,
+        expires_at_ms,
+        env!("CARGO_PKG_VERSION"),
+        &tls.fingerprint_sha256,
+        if invitation.is_some() {
+            "owner-invitation"
+        } else {
+            "oidc"
+        },
+    );
 
-    // Build the same v2 pair payload the desktop QR code uses
-    // (cgnp2|<base64>) so the mobile client can decode it unchanged.
-    let payload = serde_json::json!({
-        "baseUrl": base_url,
-        "pairJwt": pair_jwt,
-        "accountId": HEADLESS_LOCAL_ACCOUNT_ID,
-        "fingerprint": tls.fingerprint_sha256,
-        "version": "headless-0.1",
-    });
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-    let encoded = URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());
-
-    println!("\nPair token for device \"{device_name}\":\n");
-    println!("    cgnp2|{encoded}\n");
-    println!("Expires at: {expires_at_s} (epoch seconds)\n");
-    println!("Scan / paste the cgnp2|… string into the mobile app's pair screen.");
+    println!("\nPair invitation for device \"{device_name}\":\n");
+    println!("    {encoded}\n");
+    println!("Expires at: {expires_at_ms} (epoch milliseconds)\n");
+    println!("Scan / paste the cgnp3|… string into the mobile app's pair screen.");
     Ok(())
+}
+
+fn encode_pair_invitation_payload(
+    base_url: &str,
+    invitation: Option<&str>,
+    host_id: &str,
+    tenant_id: &str,
+    expires_at_ms: i64,
+    server_version: &str,
+    fingerprint: &str,
+    mode: &str,
+) -> String {
+    let mut payload = serde_json::json!({
+        "base": base_url,
+        "host": host_id,
+        "tenant": tenant_id,
+        "exp": expires_at_ms,
+        "ver": server_version,
+        "fp": fingerprint,
+        "mode": mode,
+    });
+    if let Some(invitation) = invitation {
+        payload["invitation"] = serde_json::Value::String(invitation.to_string());
+    }
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    format!(
+        "cgnp3|{}",
+        URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes())
+    )
 }
 
 /// Resolve the headless sidecar script: `COGNIA_SIDECAR_SCRIPT` env, with a
@@ -739,11 +856,16 @@ fn plugin_storage_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(".cognia").join("plugins")
 }
 
+fn agent_session_store_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("cognia").join("agent-sessions.sqlite")
+}
+
 async fn run_serve(
     store: &std::sync::Arc<SqliteAppStore>,
     tls_material: &tls::TlsMaterial,
     port: u16,
     advertise_url: Option<String>,
+    bind_loopback: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Install the headless AppStore — the DEGRADED data plane, serving only
     // while no brain is connected (ADR-0059 D3/R4).
@@ -754,6 +876,7 @@ async fn run_serve(
     // configure command. Failures are logged but don't block startup —
     // a missing file just means no provider is configured yet.
     let data_dir = store_data_dir();
+    app_lib::configure_agent_session_store_path(agent_session_store_path(&data_dir));
     app_lib::task_workspace::install(data_dir.clone())
         .map_err(|error| format!("task workspace: {error}"))?;
     // The headless host serves the same sidecar `host_rpc` protocol as the
@@ -785,22 +908,20 @@ async fn run_serve(
         eprintln!("[cognia-server] push-creds reinstall: {err}");
     }
 
-    // Project the persisted per-device grants onto the in-memory allow lists
-    // the RPC gates read. The desktop does this from Dexie in its renderer;
-    // without the equivalent here every elevated command was unreachable on a
-    // headless host, whatever the operator intended.
-    //
-    // A corrupt grants file is fatal rather than logged-and-ignored: booting
-    // with "nothing granted" would look like a working server that silently
-    // refuses every elevated call, and the operator would have no way to tell
-    // that from a genuinely empty grant list.
-    match device_grants::seed_allow_lists(FileDeviceGrantStore::new(&data_dir).as_ref()) {
-        Ok((control, agent, terminal)) => {
-            println!(
-                "[cognia-server] device grants: {control} control, {agent} agent-control, {terminal} terminal"
-            );
-        }
-        Err(err) => return Err(format!("device grants: {err}").into()),
+    // One-time import from the retired JSON projection. The SQLite marker is
+    // committed with the grants, so a later revocation can never be undone by
+    // importing the same legacy file again on restart.
+    let legacy = FileDeviceGrantStore::new(&data_dir).load()?;
+    let security = app_lib::companion_api::security_store::security_store()
+        .ok_or("security store is not initialized")?;
+    let imported = security.migrate_legacy_device_grants(
+        &legacy.control.into_iter().collect::<Vec<_>>(),
+        &legacy.agent_control.into_iter().collect::<Vec<_>>(),
+        &legacy.terminal.into_iter().collect::<Vec<_>>(),
+        chrono::Utc::now().timestamp(),
+    )?;
+    if imported {
+        println!("[cognia-server] imported legacy device grants into SecurityStore");
     }
 
     // Publish the TLS fingerprint for the whoami handler (P0.3).
@@ -813,8 +934,6 @@ async fn run_serve(
     let signing_secret = secret::load_or_generate()?;
     let shared: SharedState = Arc::new(CompanionState {
         secret: RwLock::new(signing_secret),
-        redemption_lru: RedemptionLru::new(),
-        pair_code_lru: Arc::new(PairCodeLru::new()),
         deny_list: Arc::new(DenyList::new()),
         app_handle: None,
         idempotency: Arc::new(idempotency),
@@ -854,10 +973,15 @@ async fn run_serve(
     // to in-container local processes would silently void the T2 isolation.
     let exec = exec_backend_from_env().map_err(|e| format!("exec backend: {e}"))?;
     eprintln!("[cognia-server] exec backend: {}", exec.kind());
+    app_lib::companion_api::browser_gateway::install_workspace_runtime_control_from_env()
+        .map_err(|error| format!("remote browser: {error}"))?;
     let remote_browser =
-        app_lib::companion_api::browser_gateway::install_workspace_runtime_control_from_env()
-            .map_err(|error| format!("remote browser: {error}"))?;
-    eprintln!("[cognia-server] remote browser enabled: {remote_browser}");
+        app_lib::companion_api::browser_gateway::browser_runtime_status(None).await;
+    eprintln!(
+        "[cognia-server] remote browser status: {}",
+        serde_json::to_string(&remote_browser)
+            .unwrap_or_else(|error| format!("{{\"serializationError\":\"{error}\"}}"))
+    );
     install_headless_services(Some(
         HeadlessServices::new_with_exec(
             sidecar_host,
@@ -946,18 +1070,28 @@ async fn run_serve(
     // /metrics uptime baseline (D9) — anchor before the server starts.
     app_lib::companion_api::metrics::init();
 
-    // LAN bind (false) so the headless server is reachable on every
-    // interface — the typical deployment puts this behind a reverse proxy
-    // or VPN; binding to loopback in a server context defeats the purpose.
-    let handle =
-        server::spawn_server(port, false, tls_material.clone(), Arc::clone(&shared)).await?;
+    // Production/headless deployments remain LAN-bound by default. Local
+    // debugging opts into loopback so its ephemeral credential cannot be
+    // presented over a remote socket.
+    let handle = server::spawn_server(
+        port,
+        bind_loopback,
+        tls_material.clone(),
+        Arc::clone(&shared),
+    )
+    .await?;
     // Publish the bind port for the public /healthz endpoint so emulator
     // probes can confirm the right server (matches the test+production
     // path used by CompanionServerState::start in mod.rs).
     set_advertised_port(handle.bound_port);
     let public_url = resolve_advertise_url(advertise_url, handle.bound_port);
+    let bind_host = if bind_loopback {
+        "127.0.0.1"
+    } else {
+        "0.0.0.0"
+    };
     println!(
-        "[cognia-server] HTTPS listening on https://0.0.0.0:{}",
+        "[cognia-server] HTTPS listening on https://{bind_host}:{}",
         handle.bound_port
     );
     println!("[cognia-server] advertised base URL: {public_url}");
@@ -1037,7 +1171,11 @@ async fn run_serve(
 
 #[cfg(test)]
 mod tests {
-    use super::{plugin_storage_dir, Cli, CliCommand};
+    use super::{
+        agent_session_store_path, encode_pair_invitation_payload, plugin_storage_dir, Cli,
+        CliCommand,
+    };
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use clap::Parser;
     use std::path::Path;
 
@@ -1046,6 +1184,14 @@ mod tests {
         assert_eq!(
             plugin_storage_dir(Path::new("/srv/cognia")),
             Path::new("/srv/cognia/.cognia/plugins")
+        );
+    }
+
+    #[test]
+    fn agent_session_store_is_scoped_beneath_the_server_data_directory() {
+        assert_eq!(
+            agent_session_store_path(Path::new("/srv/cognia")),
+            Path::new("/srv/cognia/cognia/agent-sessions.sqlite")
         );
     }
 
@@ -1092,6 +1238,65 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn serve_can_bind_to_loopback_for_local_debugging() {
+        let cli = Cli::try_parse_from(["cognia-server", "serve", "--bind-loopback"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            CliCommand::Serve {
+                bind_loopback: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn pair_payload_uses_cgnp3_invitation_schema_without_bearer_credentials() {
+        let encoded = encode_pair_invitation_payload(
+            "https://host.example",
+            Some("one-time-owner-invitation"),
+            "host-a",
+            "tenant-a",
+            1_900_000_000_000,
+            "1.2.3",
+            "sha256-fingerprint",
+            "owner-invitation",
+        );
+        let body = encoded.strip_prefix("cgnp3|").expect("cgnp3 prefix");
+        let decoded = URL_SAFE_NO_PAD.decode(body).expect("base64url payload");
+        let payload: serde_json::Value = serde_json::from_slice(&decoded).expect("JSON payload");
+
+        assert_eq!(payload["base"], "https://host.example");
+        assert_eq!(payload["invitation"], "one-time-owner-invitation");
+        assert_eq!(payload["host"], "host-a");
+        assert_eq!(payload["tenant"], "tenant-a");
+        assert_eq!(payload["exp"], 1_900_000_000_000i64);
+        assert_eq!(payload["ver"], "1.2.3");
+        assert_eq!(payload["fp"], "sha256-fingerprint");
+        assert_eq!(payload["mode"], "owner-invitation");
+        assert!(payload.get("pairJwt").is_none());
+        assert!(payload.get("deviceJwt").is_none());
+    }
+
+    #[test]
+    fn oidc_pair_payload_never_contains_an_owner_invitation() {
+        let encoded = encode_pair_invitation_payload(
+            "https://host.example",
+            None,
+            "host-a",
+            "tenant-a",
+            1_900_000_000_000,
+            "1.2.3",
+            "sha256-fingerprint",
+            "oidc",
+        );
+        let body = encoded.strip_prefix("cgnp3|").unwrap();
+        let decoded = URL_SAFE_NO_PAD.decode(body).unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+        assert_eq!(payload["mode"], "oidc");
+        assert!(payload.get("invitation").is_none());
     }
 
     #[test]

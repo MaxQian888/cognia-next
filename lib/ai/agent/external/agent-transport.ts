@@ -9,7 +9,7 @@
  *   jest mocks of `@tauri-apps/*` keep working).
  * - **The headless brain** — the process `Transport`
  *   (`CompanionTransport` → the R11 service-scope RPC arms + the frozen
- *   `external-agent://*` events over `/ws/v1/events`).
+ *   `external-agent://*` events over `/ws/events`).
  *
  * Terminal support stays desktop-only (no headless `acp_terminal_*` arms) —
  * the ACP capability advertisement reflects that.

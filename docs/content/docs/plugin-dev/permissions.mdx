@@ -74,7 +74,7 @@ Permission checks are synchronous and cached per call. Revoking a permission tak
 - **Request the minimum** — Don't ask for `fs.write:*` if you only need `fs.write:$PLUGIN`.
 - **Explain why** — The `description` field in your manifest is shown next to permissions. Use it to explain what the permission enables.
 - **Handle denial gracefully** — Always wrap API calls in try/catch and show a helpful message if a permission is missing.
-- **Request at runtime for optional features** — Use `ctx.api.permission.request()` for features the user may not need immediately.
+- **Request at runtime for optional features** — Use `ctx.permissions.requestPermission()` for features the user may not need immediately.
 
 ## Related
 

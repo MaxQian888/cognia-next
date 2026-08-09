@@ -29,6 +29,57 @@
   "badgeLive": "live",
   "badgeWeb": "web",
   "description": "Expose this app's knowledge and runtime to external MCP clients.",
+  "inbound": {
+    "accept": "Accept",
+    "acceptConfirmDesc": {
+      "lesson": "This becomes a long-term memory. Accepting is final — it cannot be undone from here.",
+      "note": "This is filed as a knowledge note. Accepting is final — it cannot be undone from here.",
+      "skill": "This becomes a skill, created disabled so it cannot run until you enable it yourself. Accepting is final — it cannot be undone from here."
+    },
+    "acceptConfirmTitle": "Accept this submission?",
+    "cancel": "Cancel",
+    "description": "Lessons, skill drafts, and notes contributed from outside Cognia. Nothing here changes anything until you accept it.",
+    "detailAria": "Show details for {title}",
+    "editAria": "Edit the submitted content of {title}",
+    "empty": "Nothing to review.",
+    "filter": {
+      "accepted": "Accepted",
+      "all": "All",
+      "pending": "Pending",
+      "rejected": "Rejected"
+    },
+    "filterAria": "Filter by review status",
+    "kind": {
+      "lesson": "Lesson",
+      "note": "Note",
+      "skill": "Skill draft"
+    },
+    "materializeFailed": "Could not be applied after {attempts} attempt(s): {error}",
+    "origin": {
+      "crawler": "Crawler",
+      "ide-scanner": "IDE scanner",
+      "mcp": "MCP client"
+    },
+    "pendingCount": "{count} awaiting review",
+    "producedId": "Created: {id}",
+    "reject": "Reject",
+    "rejectConfirmDesc": "The draft is kept for the record but is never applied. Rejecting is final — it cannot be undone from here.",
+    "rejectConfirmTitle": "Reject this submission?",
+    "rejectionReason": "Reason: {reason}",
+    "retry": "Retry",
+    "retryAria": "Retry processing {title}",
+    "retryFailed": "Retry failed.",
+    "status": {
+      "accepted": "Accepted",
+      "pending": "Pending",
+      "rejected": "Rejected"
+    },
+    "title": "Inbound review",
+    "toastAccepted": "Accepted. It will be applied shortly.",
+    "toastRejected": "Rejected.",
+    "toastRetried": "Applied.",
+    "untrustedLabel": "Submitted from outside Cognia — treat as untrusted"
+  },
   "loading": "Loading…",
   "nav": {
     "badgeScopesAria": "{granted} of {total} permission scopes granted",
@@ -41,6 +92,10 @@
       "audit": {
         "description": "Every call the bridge handled",
         "label": "Audit log"
+      },
+      "inbound": {
+        "description": "Approve what outside agents contribute",
+        "label": "Inbound review"
       },
       "scopes": {
         "description": "What external clients may call",
@@ -81,7 +136,8 @@
     "runtime:skills": "⚠ Exposes your installed skills' content.",
     "runtime:twins": "⚠ Exposes Twin profiles. PII redaction has run, but review before enabling.",
     "wiki:cognia": "Public Cognia code wiki — safe to expose.",
-    "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1."
+    "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1.",
+    "workflow:run": "⚠ Lists and runs active immutable workflow deployments, reads their durable events, and can cancel runs. Default OFF."
   },
   "scopes": {
     "description": "Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.",
@@ -95,6 +151,7 @@
       "plugin": "Plugins",
       "rag": "Retrieval",
       "runtime": "Runtime",
+      "workflow": "Workflows",
       "wiki": "Wiki"
     },
     "plannedBadge": "Planned",
@@ -105,11 +162,11 @@
   "server": {
     "bearerTokenLabel": "Bearer token (HTTP only)",
     "copyTokenAria": "Copy token",
+    "defaultClientName": "Cognia controller",
     "hide": "Hide",
     "httpPort": "HTTP port",
     "httpPortDiverged": "The listener is still on port {bound}. Restart the bridge to move it.",
     "httpPortHelp": "Port the HTTP transport listens on. Used in the setup snippets below.",
-    "defaultClientName": "Cognia controller",
     "noActiveClientError": "No active External Bridge client.",
     "regenerateWarning": "⚠ Regenerating invalidates the old token immediately.",
     "rotateConfirmAction": "Rotate token",

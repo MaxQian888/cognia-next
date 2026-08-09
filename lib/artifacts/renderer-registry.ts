@@ -1,11 +1,9 @@
 /**
  * Plugin renderer registry — lets plugins claim ownership of specific
- * artifacts ahead of the built-in renderers. cognia-next has no plugin
- * runtime yet, so this map is always empty in practice; the surface is
- * preserved so upstream plugin code is API-compatible.
+ * namespaced custom artifacts ahead of the built-in renderers. Renderers use
+ * an imperative mount/update/dispose lifecycle inside a host-owned container.
  */
 
-import type { ReactElement } from "react"
 import type { Artifact } from "@/types"
 import { loggers } from "@cognia/logging"
 
@@ -18,40 +16,32 @@ export interface PluginArtifactRenderer {
    * forwards the namespaced `${pluginId}:${type}` here so the runtime can
    * surface a stable label per registration.
    */
-  type?: string
+  kind: string
   /** Human-readable label shown in renderer-aware UI. */
   name?: string
-  /** Returns true when this renderer should claim the artifact. */
-  canRender(artifact: Artifact): boolean
-  /** Returns the rendered React subtree. */
-  render(artifact: Artifact, container?: HTMLElement): ReactElement | null | (() => void)
+  /** Imperatively mount into the host-owned container. */
+  mount(artifact: Artifact, container: HTMLElement): PluginArtifactRendererHandle
   /** Optional priority hint; higher wins when multiple renderers claim. */
   priority?: number
 }
 
-const artifactRenderers = new Map<string, PluginArtifactRenderer>()
-
-function safelyClaimsArtifact(renderer: PluginArtifactRenderer, artifact: Artifact): boolean {
-  try {
-    return renderer.canRender(artifact)
-  } catch (error) {
-    loggers.plugin.warn("artifacts.plugin.canRender-failed", {
-      rendererId: renderer.id,
-      artifactId: artifact.id,
-      error,
-    })
-    return false
-  }
+export interface PluginArtifactRendererHandle {
+  update?: (artifact: Artifact) => void
+  dispose(): void
 }
+
+const artifactRenderers = new Map<string, PluginArtifactRenderer>()
 
 export function registerArtifactRenderer(
   rendererId: string,
   renderer: PluginArtifactRenderer
 ): () => void {
-  artifactRenderers.set(rendererId, renderer)
+  artifactRenderers.set(renderer.kind, renderer)
 
   return () => {
-    artifactRenderers.delete(rendererId)
+    if (artifactRenderers.get(renderer.kind)?.id === rendererId) {
+      artifactRenderers.delete(renderer.kind)
+    }
   }
 }
 
@@ -62,13 +52,13 @@ export function getRegisteredArtifactRenderers(): PluginArtifactRenderer[] {
 export function resolveRegisteredArtifactRenderer(
   artifact: Artifact
 ): PluginArtifactRenderer | null {
-  for (const renderer of artifactRenderers.values()) {
-    if (safelyClaimsArtifact(renderer, artifact)) {
-      return renderer
-    }
+  const kind = artifact.metadata?.plugin?.kind
+  if (!kind) return null
+  const renderer = artifactRenderers.get(kind) ?? null
+  if (!renderer) {
+    loggers.plugin.debug("artifacts.plugin.renderer-missing", { artifactId: artifact.id, kind })
   }
-
-  return null
+  return renderer
 }
 
 export function clearRegisteredArtifactRenderers(): void {

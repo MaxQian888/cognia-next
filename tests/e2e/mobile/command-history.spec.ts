@@ -11,6 +11,10 @@ import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
 import { bootstrapCogniaMobile, readDexieRows } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
+import {
+  companionConfigSecureStorage,
+  provisionMockCompanionConfig,
+} from "./companion-fixture"
 
 const RELEASE_ROW_ID = "terminal-history-e2e-release"
 const TEST_ROW_ID = "terminal-history-e2e-test"
@@ -85,7 +89,7 @@ async function installTerminalDesktop(page: Page): Promise<{
     },
   ]
 
-  await page.route(`${baseUrl}/api/v1/_rpc/**`, async (route) => {
+  await page.route(`${baseUrl}/api/_rpc/**`, async (route) => {
     const request = route.request()
     const command = new URL(request.url()).pathname.split("/").pop() ?? ""
     const body = (request.postDataJSON() ?? {}) as Record<string, unknown>
@@ -136,18 +140,14 @@ test.describe("mobile — terminal command history", () => {
     page,
   }) => {
     const desktop = await installTerminalDesktop(page)
-    const companionConfig = {
-      baseUrl: mockV2BaseUrl(),
-      deviceJwt: "e2e-command-history-jwt",
-      deviceId: "device-e2e-command-history",
-      serverVersion: "1.0.0",
-    }
+    const companionConfig = await provisionMockCompanionConfig(
+      mockV2BaseUrl(),
+      "device-e2e-command-history"
+    )
     await injectCapacitor(page, {
       platform: "android",
       network: { connected: true, connectionType: "wifi" },
-      secureStorage: {
-        "cognia.companion.config.v1": JSON.stringify(companionConfig),
-      },
+      secureStorage: companionConfigSecureStorage(companionConfig),
     })
     await page.goto("/welcome")
     await bootstrapCogniaMobile(page, "paired")

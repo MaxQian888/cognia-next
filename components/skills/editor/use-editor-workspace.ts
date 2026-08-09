@@ -1,89 +1,106 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useSkillsStore } from "@/stores/skills"
-import { getSkill, updateSkill } from "@/lib/db/skills"
-import { updateResource } from "@/lib/db/skill-resources"
-import { validateSkill } from "@/lib/skills/validate"
+import { useSkillsStore, type EditorFile } from "@/stores/skills"
+import {
+  saveSkillWorkspace,
+  type SkillWorkspaceSaveFile,
+  type SkillWorkspaceSaveResult,
+} from "@/lib/db/skill-workspace"
 
 const AUTOSAVE_MS = 2000
 
-/**
- * Per-file autosave + Cmd-S save semantics for the editor workspace.
- *
- * Save semantics:
- *   • Per-file save → updateSkill (main) or updateResource (resource).
- *   • Save all → main first, then every resource.
- *   • Autosave debounces 2s per file. The main file is held back from
- *     autosave when the current draft would fail validation; resources
- *     autosave unconditionally.
- *
- * The hook is i18n-agnostic: the user-visible "all saved" toast is fired
- * by the caller via `savedAllSignal`, which increments after a successful
- * `saveAll()` so the parent component can call `useTranslations` and
- * `toast.success` itself.
- */
+function toSaveFile(file: EditorFile): SkillWorkspaceSaveFile | null {
+  if (file.kind === "main") {
+    return {
+      id: file.id,
+      kind: "main",
+      baseline: file.savedContent,
+      content: file.draftContent,
+    }
+  }
+  if (file.kind === "codex") {
+    return {
+      id: file.id,
+      kind: "codex",
+      baseline: file.savedContent,
+      content: file.draftContent,
+    }
+  }
+  if (!file.resourceId) return null
+  return {
+    id: file.id,
+    kind: "resource",
+    resourceId: file.resourceId,
+    baseline: file.savedContent,
+    content: file.draftContent,
+  }
+}
+
+/** Per-file autosave and atomic Save All semantics for the Skill workspace. */
 export function useEditorWorkspace() {
   const ws = useSkillsStore((s) => s.editorWorkspace)
   const markSaved = useSkillsStore((s) => s.markSaved)
+  const markFileSaveState = useSkillsStore((s) => s.markFileSaveState)
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [savedAllSignal, setSavedAllSignal] = useState(0)
 
-  const saveFile = useCallback(
-    async (fileId: string) => {
-      const state = useSkillsStore.getState().editorWorkspace
-      const file = state.openFiles.find((f) => f.id === fileId)
-      if (!file) return
-      if (file.draftContent === file.savedContent) return
-      if (file.kind === "main" && state.activeSkillId) {
-        const skill = await getSkill(state.activeSkillId)
-        if (!skill) return
-        const errors = validateSkill({
-          name: skill.name,
-          description: skill.description,
-          content: file.draftContent,
-        })
-        const blocking = errors.some(
-          (e) => e.code === "missing-name" || e.code === "missing-content"
-        )
-        if (blocking) return
-        await updateSkill(state.activeSkillId, {
-          content: file.draftContent,
-          validationErrors: errors,
-        })
-      } else if (file.kind === "resource" && file.resourceId) {
-        await updateResource(file.resourceId, { content: file.draftContent })
-      } else {
-        return
+  const persist = useCallback(
+    async (files: EditorFile[]): Promise<SkillWorkspaceSaveResult> => {
+      const skillId = useSkillsStore.getState().editorWorkspace.activeSkillId
+      const saveFiles = files
+        .map(toSaveFile)
+        .filter((file): file is SkillWorkspaceSaveFile => !!file)
+      const dirtyIds = saveFiles
+        .filter((file) => file.content !== file.baseline)
+        .map((file) => file.id)
+      if (!skillId || dirtyIds.length === 0) return { status: "clean", savedFileIds: [] }
+
+      markFileSaveState(dirtyIds, "saving")
+      const result = await saveSkillWorkspace({ skillId, files: saveFiles })
+      if (result.status === "saved") {
+        for (const id of result.savedFileIds) {
+          const file = files.find((candidate) => candidate.id === id)
+          if (file) markSaved(id, file.draftContent)
+        }
+      } else if (result.status !== "clean") {
+        // Save All is atomic: even when only one baseline caused the refusal,
+        // every submitted file remains dirty and exits the transient saving state.
+        markFileSaveState(dirtyIds, result.status, result.message)
       }
-      markSaved(fileId, file.draftContent)
+      return result
     },
-    [markSaved]
+    [markFileSaveState, markSaved]
   )
 
-  const saveActive = useCallback(async () => {
+  const saveFile = useCallback(
+    async (fileId: string): Promise<SkillWorkspaceSaveResult> => {
+      const file = useSkillsStore
+        .getState()
+        .editorWorkspace.openFiles.find((candidate) => candidate.id === fileId)
+      return file ? persist([file]) : { status: "clean", savedFileIds: [] }
+    },
+    [persist]
+  )
+
+  const saveActive = useCallback(async (): Promise<SkillWorkspaceSaveResult> => {
     const id = useSkillsStore.getState().editorWorkspace.activeFileId
-    if (!id) return
-    await saveFile(id)
+    return id ? saveFile(id) : { status: "clean", savedFileIds: [] }
   }, [saveFile])
 
-  const saveAll = useCallback(async () => {
-    const state = useSkillsStore.getState().editorWorkspace
-    const main = state.openFiles.find((f) => f.kind === "main")
-    if (main) await saveFile(main.id)
-    for (const f of state.openFiles.filter((x) => x.kind === "resource")) {
-      await saveFile(f.id)
-    }
-    setSavedAllSignal((n) => n + 1)
-  }, [saveFile])
+  const saveAll = useCallback(async (): Promise<SkillWorkspaceSaveResult> => {
+    const files = useSkillsStore.getState().editorWorkspace.openFiles
+    const result = await persist(files)
+    if (result.status === "saved") setSavedAllSignal((value) => value + 1)
+    return result
+  }, [persist])
 
-  // Autosave per file (debounced).
   useEffect(() => {
-    for (const f of ws.openFiles) {
-      if (f.draftContent === f.savedContent) continue
-      clearTimeout(timersRef.current[f.id])
-      timersRef.current[f.id] = setTimeout(() => {
-        void saveFile(f.id)
+    for (const file of ws.openFiles) {
+      if (file.draftContent === file.savedContent) continue
+      clearTimeout(timersRef.current[file.id])
+      timersRef.current[file.id] = setTimeout(() => {
+        void saveFile(file.id)
       }, AUTOSAVE_MS)
     }
     const timers = timersRef.current

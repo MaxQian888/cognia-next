@@ -14,7 +14,7 @@ import { __resetContextKeysForTesting } from "@/lib/plugin/context-keys/context-
 jest.mock("@/hooks/ui", () => ({
   useBreakpoint: jest.fn(() => "desktop"),
 }))
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({
     dispatchShortcut: jest.fn(),
     dispatchArtifactOpen: jest.fn(),

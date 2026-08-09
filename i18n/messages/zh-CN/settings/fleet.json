@@ -24,7 +24,8 @@
     "ranFor": "运行 {duration}",
     "showLess": "收起",
     "showMore": "显示全部 {count} 条",
-    "title": "最近会话"
+    "title": "最近会话",
+    "detachedAgo": "{ago} 前已脱离"
   },
   "island": {
     "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",

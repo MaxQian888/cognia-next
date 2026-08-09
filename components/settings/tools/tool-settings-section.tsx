@@ -93,6 +93,8 @@ export function ToolSettingsSection() {
   const setSlashCommandToolEnabled = useSettingsStore((s) => s.setSlashCommandToolEnabled)
   const setTeamCollaborationToolEnabled = useSettingsStore((s) => s.setTeamCollaborationToolEnabled)
   const setVectorToolEnabled = useSettingsStore((s) => s.setVectorToolEnabled)
+  const setSpawnTaskToolEnabled = useSettingsStore((s) => s.setSpawnTaskToolEnabled)
+  const setSessionMessagingToolEnabled = useSettingsStore((s) => s.setSessionMessagingToolEnabled)
 
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
   const webToolsEnabled = settings?.webTools?.enabled ?? true
@@ -103,6 +105,8 @@ export function ToolSettingsSection() {
   const slashCommandToolEnabled = settings?.selfInvokeTools?.slashCommand ?? false
   const teamCollaborationToolEnabled = settings?.selfInvokeTools?.teamCollaboration ?? false
   const vectorToolEnabled = settings?.selfInvokeTools?.vector ?? false
+  const spawnTaskToolEnabled = settings?.selfInvokeTools?.spawnTask ?? false
+  const sessionMessagingToolEnabled = settings?.selfInvokeTools?.sessionMessaging ?? false
   const desktop = isTauri()
 
   return (
@@ -215,6 +219,32 @@ export function ToolSettingsSection() {
               checked={skillToolEnabled}
               onCheckedChange={(next) => setSkillToolEnabled(next)}
               aria-label={t("toggleAriaLabel", { name: t("skillToolTitle") })}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("spawnTaskToolTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {t("spawnTaskToolDesc")}
+              </p>
+            </div>
+            <Switch
+              checked={spawnTaskToolEnabled}
+              onCheckedChange={(next) => setSpawnTaskToolEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("spawnTaskToolTitle") })}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("sessionMessagingToolTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {t("sessionMessagingToolDesc")}
+              </p>
+            </div>
+            <Switch
+              checked={sessionMessagingToolEnabled}
+              onCheckedChange={(next) => setSessionMessagingToolEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("sessionMessagingToolTitle") })}
             />
           </div>
           <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">

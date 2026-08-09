@@ -5,9 +5,9 @@
  * subscription / sidecar credentials.
  *
  * Desktop (Tauri):
- *   - Routes through the `keyring_secret_get / set / clear` IPC commands
- *     (see `src-tauri/src/keyring_secrets.rs`). The Rust side uses the
- *     `keyring` crate with service name `com.cognia.<namespace>/v1`.
+ *   - Routes through the `secret_store_get / set / delete` IPC commands
+ *     (see `src-tauri/src/keyring_secrets.rs`). The Rust side encrypts values
+ *     in Cognia's shared secret store; only its master key uses the OS keyring.
  *
  * Web (browser / Capacitor):
  *   - Falls back to an AES-GCM-encrypted blob in IndexedDB. The encryption
@@ -60,7 +60,7 @@ async function safeInvokeThrowing<T>(name: string, payload?: unknown): Promise<T
  */
 export async function getSecret(ref: KeyringRef): Promise<string | null> {
   if (isTauri()) {
-    const value = await safeInvoke<string | null>("keyring_secret_get", {
+    const value = await safeInvoke<string | null>("secret_store_get", {
       input: { namespace: ref.namespace, key: ref.key } satisfies IpcInput,
     })
     return value ?? null
@@ -72,7 +72,7 @@ export async function getSecret(ref: KeyringRef): Promise<string | null> {
 export async function setSecret(ref: KeyringRef, value: string): Promise<void> {
   if (!value) throw new Error("setSecret: value must not be empty")
   if (isTauri()) {
-    await safeInvokeThrowing<void>("keyring_secret_set", {
+    await safeInvokeThrowing<void>("secret_store_set", {
       input: { namespace: ref.namespace, key: ref.key, value } satisfies IpcInput,
     })
     return
@@ -83,7 +83,7 @@ export async function setSecret(ref: KeyringRef, value: string): Promise<void> {
 /** Remove an entry. Idempotent. */
 export async function clearSecret(ref: KeyringRef): Promise<void> {
   if (isTauri()) {
-    await safeInvoke<null>("keyring_secret_clear", {
+    await safeInvoke<null>("secret_store_delete", {
       input: { namespace: ref.namespace, key: ref.key } satisfies IpcInput,
     })
     return

@@ -39,6 +39,8 @@ export interface LeadReviewTask {
   title: string
   description: string
   expectedOutput?: string
+  /** Durable evidence records the completion gate verified for this task. */
+  evidenceIds?: string[]
 }
 
 export interface BuildLeadReviewPromptArgs {
@@ -92,6 +94,9 @@ export function buildLeadReviewPrompt(args: BuildLeadReviewPromptArgs): string {
     "",
     `Task: ${task.description}`,
     task.expectedOutput ? `Expected output: ${task.expectedOutput}` : "",
+    task.evidenceIds && task.evidenceIds.length > 0
+      ? `Durable evidence IDs (verified local records): ${task.evidenceIds.join(", ")}`
+      : "",
     "",
     args.revision > 0
       ? `This is revision ${args.revision}. You previously requested these changes:\n${args.previousFeedback ?? "(none recorded)"}\nVerify they were addressed.`

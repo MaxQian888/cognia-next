@@ -10,6 +10,10 @@ import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
 import { bootstrapCogniaMobile, readDexieRow, readDexieRows } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
+import {
+  companionConfigSecureStorage,
+  provisionMockCompanionConfig,
+} from "./companion-fixture"
 
 const SYNCED_CHARACTER_ID = "character-e2e-release-guide"
 const UPDATED_NAME = "Release Guide v2"
@@ -61,7 +65,7 @@ async function installCharacterDesktop(page: Page): Promise<{ calls: CapturedRpc
     updatedAt: now,
   }
 
-  await page.route(`${baseUrl}/api/v1/_rpc/**`, async (route) => {
+  await page.route(`${baseUrl}/api/_rpc/**`, async (route) => {
     const request = route.request()
     const command = new URL(request.url()).pathname.split("/").pop() ?? ""
     const body = (request.postDataJSON() ?? {}) as Record<string, unknown>
@@ -107,18 +111,14 @@ async function queueStatusFor(
 test.describe("mobile — paired character management", () => {
   test("syncs, edits, deletes, creates, dispatches, and restores characters", async ({ page }) => {
     const desktop = await installCharacterDesktop(page)
-    const companionConfig = {
-      baseUrl: mockV2BaseUrl(),
-      deviceJwt: "e2e-character-jwt",
-      deviceId: "device-e2e-character",
-      serverVersion: "1.0.0",
-    }
+    const companionConfig = await provisionMockCompanionConfig(
+      mockV2BaseUrl(),
+      "device-e2e-character"
+    )
     await injectCapacitor(page, {
       platform: "android",
       network: { connected: true, connectionType: "wifi" },
-      secureStorage: {
-        "cognia.companion.config.v1": JSON.stringify(companionConfig),
-      },
+      secureStorage: companionConfigSecureStorage(companionConfig),
     })
     await page.goto("/welcome")
     await bootstrapCogniaMobile(page, "paired")

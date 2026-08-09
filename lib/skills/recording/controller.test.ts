@@ -842,6 +842,30 @@ describe("recoverOnStartup", () => {
     expect(client.recordStart).not.toHaveBeenCalled()
   })
 
+  it("restores a conversation-derived review without requiring a native bundle", async () => {
+    dbRecordings.listUnfinishedRecordings.mockResolvedValue([
+      { id: RECORDING, status: "drafting", updatedAt: 1 },
+    ] as never)
+    dbRecordings.getRecording.mockResolvedValue({
+      id: RECORDING,
+      bundleId: RECORDING,
+      status: "drafting",
+      source: { kind: "session", sessionId: "session-1" },
+      edits: {
+        bySeq: {},
+        manual: [{ seq: -1, afterSeq: 0, intent: "Reviewed redacted step" }],
+      },
+      inputVariables: [],
+      createdAt: 1,
+    } as never)
+
+    await recoverOnStartup()
+
+    expect(store().phase).toBe("review")
+    expect(store().steps[0]?.intent).toBe("Reviewed redacted step")
+    expect(client.recordLoadBundle).not.toHaveBeenCalled()
+  })
+
   it("leaves the store alone when the stranded bundle is gone", async () => {
     dbRecordings.listUnfinishedRecordings.mockResolvedValue([
       { id: RECORDING, status: "captured", updatedAt: 1 },

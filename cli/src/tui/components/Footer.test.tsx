@@ -4,7 +4,7 @@ import { render } from "@testing-library/react"
 
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
-import { Footer } from "./Footer"
+import { Footer, fitFooterSuffixes } from "./Footer"
 import type { StatusSegmentView } from "../format/status-bar"
 
 const config: ResolvedConfig = {
@@ -109,5 +109,18 @@ describe("Footer", () => {
     const text = container.textContent ?? ""
     expect(text).toContain("claude-x") // highest priority survives
     expect(text).toContain("…") // truncation marker
+  })
+
+  it("budgets plan and hint suffixes into the same physical row", () => {
+    const suffixes = fitFooterSuffixes(40, 12, "A very long plan title that cannot wrap", true)
+    expect(suffixes.reservedWidth).toBeLessThanOrEqual(26)
+    expect(suffixes.planText).toContain("…")
+    expect(suffixes.hintText).toBe("")
+  })
+
+  it("honors the persisted idle-hint preference", () => {
+    const cfg: ResolvedConfig = { ...config, statusBar: { showHints: false } }
+    const { container } = render(<Footer config={cfg} turnStatus="idle" columns={200} />)
+    expect(container.textContent).not.toContain("⚙ /settings")
   })
 })

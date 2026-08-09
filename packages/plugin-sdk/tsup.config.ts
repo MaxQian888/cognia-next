@@ -22,20 +22,11 @@ const shared = {
   platform: "neutral" as const,
 }
 
-export default defineConfig([
-  {
-    ...shared,
-    entry: runtimeEntries,
-    format: ["esm", "cjs"],
-    dts: false,
-    sourcemap: true,
-    clean: true,
-  },
-  {
-    ...shared,
-    entry: runtimeEntries,
-    format: ["esm"],
-    dts: { only: true },
-    clean: false,
-  },
-])
+export default defineConfig({
+  ...shared,
+  entry: runtimeEntries,
+  format: ["esm", "cjs"],
+  dts: false,
+  sourcemap: true,
+  clean: true,
+})

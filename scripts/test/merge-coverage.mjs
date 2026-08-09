@@ -26,10 +26,12 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { Command, CommanderError } from "commander"
 import { globSync } from "glob"
 import libCoverage from "istanbul-lib-coverage"
 import libReport from "istanbul-lib-report"
 import reports from "istanbul-reports"
+import { z } from "zod"
 
 const THRESHOLDS_URL = new URL("./coverage-thresholds.json", import.meta.url)
 const COVERAGE_SOURCES_URL = new URL("./coverage-sources.json", import.meta.url)
@@ -186,20 +188,33 @@ export function writeReports(map, outDir) {
   reports.create("text-summary").execute(context)
 }
 
+const cliSchema = z.object({
+  check: z.boolean().default(false),
+  inputs: z.array(z.string().trim().min(1)).min(1, "No coverage inputs given"),
+  out: z.string().trim().min(1, "--out requires a directory").default("coverage"),
+})
+
+function createProgram() {
+  return new Command()
+    .name("pnpm test:coverage:merge")
+    .description("Merge Jest coverage maps and optionally enforce repository thresholds.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .argument("[inputs...]", "Coverage JSON files or directories.")
+    .option("--check", "Enforce configured coverage thresholds.")
+    .option("--out <directory>", "Merged coverage output directory.", "coverage")
+}
+
 export function parseArgs(argv) {
-  const args = { check: false, out: "coverage", inputs: [] }
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i]
-    if (arg === "--check") args.check = true
-    else if (arg === "--out") {
-      const value = argv[++i]
-      if (!value) throw new Error("--out requires a directory")
-      args.out = value
-    } else if (arg.startsWith("--")) throw new Error(`Unknown argument: ${arg}`)
-    else args.inputs.push(arg)
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
   }
-  if (args.inputs.length === 0) throw new Error("No coverage inputs given")
-  return args
+  return cliSchema.parse({ ...program.opts(), inputs: program.args })
 }
 
 /** Resolve an input path (file, or directory containing coverage-final.json). */
@@ -212,6 +227,7 @@ export function resolveInput(input) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2))
+  if (!args) return 0
   const files = args.inputs.map(resolveInput)
   const missing = files.filter((f) => !existsSync(f))
   if (missing.length > 0) {

@@ -1,5 +1,5 @@
 import { transport } from "@/lib/tauri"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { runPython, type PythonExecResult } from "./canvas"
 
 describe("lib/tauri/canvas", () => {

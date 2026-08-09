@@ -13,8 +13,24 @@ jest.mock("@/components/ai-elements/tool", () => ({
     </div>
   ),
   ToolBody: () => <div data-testid="tool-body" />,
-  ToolHeader: ({ state }: { state: string }) => (
-    <div data-testid="tool-header" data-state={state} />
+  ToolHeader: ({
+    state,
+    title,
+    toolName,
+    readOnlyHint,
+  }: {
+    state: string
+    title?: string
+    toolName?: string
+    readOnlyHint?: boolean | null
+  }) => (
+    <div
+      data-testid="tool-header"
+      data-state={state}
+      data-title={title}
+      data-tool-name={toolName}
+      data-read-only={String(readOnlyHint)}
+    />
   ),
   ToolContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   ToolInput: ({ input }: { input: unknown }) => (
@@ -135,6 +151,34 @@ describe("TerminalToolPart", () => {
   it("forwards the command through ToolInput while running", () => {
     render(<TerminalToolPart part={bashPart("input-available")} />)
     expect(screen.getByTestId("tool-input").textContent).toContain("ls -la")
+  })
+
+  it("shows the resolved title and semantic hint in the specialized terminal header", () => {
+    render(
+      <TerminalToolPart
+        part={bashPart("input-available", {
+          title: "Run project checks",
+          toolMetadata: { readOnlyHint: false },
+        } as Partial<ToolUIPart>)}
+      />
+    )
+    expect(screen.getByTestId("tool-header")).toHaveAttribute("data-title", "Run project checks")
+    expect(screen.getByTestId("tool-header")).toHaveAttribute("data-read-only", "false")
+  })
+
+  it("preserves a dynamic shell machine name for header risk classification", () => {
+    render(
+      <TerminalToolPart
+        part={
+          {
+            ...bashPart("input-available"),
+            type: "dynamic-tool",
+            toolName: "Bash",
+          } as unknown as ToolUIPart
+        }
+      />
+    )
+    expect(screen.getByTestId("tool-header")).toHaveAttribute("data-tool-name", "Bash")
   })
 
   it("surfaces incremental stdout / stderr on the Terminal output prop", () => {

@@ -28,6 +28,7 @@ import { PresetPicker } from "./preset-picker"
 import { ProviderQuotaPanel } from "./provider-quota-panel"
 
 import {
+  type Account,
   DEFAULT_CODEX_SUBSCRIPTION_SETTINGS,
   type AccountSummary,
   type CodexSubscriptionSettings,
@@ -59,6 +60,7 @@ export function ProviderTabCodex() {
   const t = useTranslations("subscription.codex")
   const tSettings = useTranslations("subscription.codex.settings")
   const [addOpen, setAddOpen] = useState(false)
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null)
 
   const codexSettings = useSettingsStore((s) => getCodexSettings(s.settings))
   const save = useSettingsStore((s) => s.save)
@@ -113,7 +115,17 @@ export function ProviderTabCodex() {
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
 
-      <AccountList provider="codex" onAdd={() => setAddOpen(true)} />
+      <AccountList
+        provider="codex"
+        onAdd={() => {
+          setEditingAccount(null)
+          setAddOpen(true)
+        }}
+        onUpdate={(account) => {
+          setEditingAccount(account)
+          setAddOpen(true)
+        }}
+      />
 
       {/* Rate-limit windows require a ChatGPT login — an API key has no usage
           endpoint upstream. This sits *above* the panel: showing an empty gauge
@@ -195,7 +207,15 @@ export function ProviderTabCodex() {
         </div>
       </SettingsCard>
 
-      <CodexAddAccountDialog open={addOpen} onOpenChange={setAddOpen} />
+      <CodexAddAccountDialog
+        open={addOpen}
+        existingAccount={editingAccount ?? undefined}
+        onAdded={() => setEditingAccount(null)}
+        onOpenChange={(next) => {
+          setAddOpen(next)
+          if (!next) setEditingAccount(null)
+        }}
+      />
     </div>
   )
 }

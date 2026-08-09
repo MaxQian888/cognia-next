@@ -16,6 +16,7 @@ import {
 import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "@/lib/ai/agent/agent-team-compat"
 import { assertNoNewRawTeammateCredentials } from "@/lib/ai/agent/team/execution-binding-resolver"
 import { canMoveTask, reorderColumn, sortColumn } from "@/lib/ai/agent/team/task-move-guard"
+import { assignAgentTeamAvatarId, resolveAgentTeamAvatarId } from "@/lib/agent-team/avatar"
 import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
 import { initialState, builtInTemplatesMap } from "../initial-state"
@@ -151,6 +152,7 @@ export const createAgentTeamActionsSlice = (
       description:
         input.leadDescription ?? "Coordinates team work, assigns tasks, and synthesizes results",
       role: "lead",
+      avatarId: "coordinator",
       status: "idle",
       config: {},
       completedTaskIds: [],
@@ -314,6 +316,11 @@ export const createAgentTeamActionsSlice = (
       get().shutdownAllTeammates(teamId)
     }
     get().cleanupTeam(teamId)
+    if (team.config.runtimeVersion === "durable-v2") {
+      void import("@/lib/db/agent-team-runtime")
+        .then(({ purgeAgentTeam }) => purgeAgentTeam(teamId))
+        .catch(() => undefined)
+    }
   },
 
   purgeProject: (projectId) => {
@@ -371,12 +378,31 @@ export const createAgentTeamActionsSlice = (
     // ADR-0090 Phase 7: new configs bind credentials by REFERENCE only.
     assertNoNewRawTeammateCredentials(input.config)
 
+    const teammateId = nanoid()
+    const role = input.role || "teammate"
+    const usedAvatarIds = new Set(
+      team.teammateIds.flatMap((teammateId) => {
+        const teammate = get().teammates[teammateId]
+        return teammate ? [resolveAgentTeamAvatarId(teammate)] : []
+      })
+    )
+
     const teammate: AgentTeammate = {
-      id: nanoid(),
+      id: teammateId,
       teamId: input.teamId,
       name: input.name,
       description: input.description || "",
-      role: input.role || "teammate",
+      role,
+      avatarId: assignAgentTeamAvatarId(
+        {
+          id: teammateId,
+          name: input.name,
+          description: input.description,
+          role,
+          avatarId: input.avatarId,
+        },
+        usedAvatarIds
+      ),
       status: "idle",
       config: input.config || {},
       spawnPrompt: input.spawnPrompt,

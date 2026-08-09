@@ -205,7 +205,7 @@ export async function larkCommand(args: ParsedArgs, deps: LarkCommandDeps = {}):
 
   let requestId: string
   try {
-    const response = await doFetch(`${base}/api/v1/lark/admin`, {
+    const response = await doFetch(`${base}/operator/lark/admin`, {
       method: "POST",
       headers,
       body: JSON.stringify(request),
@@ -229,7 +229,7 @@ export async function larkCommand(args: ParsedArgs, deps: LarkCommandDeps = {}):
     await sleep(POLL_INTERVAL_MS)
     let body: Record<string, unknown>
     try {
-      const response = await doFetch(`${base}/api/v1/lark/admin/${requestId}`, { headers })
+      const response = await doFetch(`${base}/operator/lark/admin/${requestId}`, { headers })
       body = (await response.json().catch(() => ({}))) as Record<string, unknown>
       if (response.status === 404) {
         out.error("lark: the request expired before the brain answered")

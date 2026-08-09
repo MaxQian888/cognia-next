@@ -1,17 +1,15 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import type { GoalTemplate } from "@/types/goal"
 import { upsertGoalTemplate } from "@/lib/db/goal-templates"
 import { __resetGoalRuntimeForTesting } from "./runtime"
 import { createGoalFromTemplate, GoalTemplateNotFound } from "./templates"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await __resetRedactionKey()
   __resetGoalRuntimeForTesting()
 })
@@ -31,6 +29,8 @@ function tpl(over: Partial<GoalTemplate> = {}): GoalTemplate {
     ...over,
   }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("createGoalFromTemplate", () => {
   it("creates an active goal from the template objective + config overrides", async () => {

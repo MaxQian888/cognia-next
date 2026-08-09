@@ -197,6 +197,25 @@ describe("PermissionGuard", () => {
       expect(grants.length).toBeGreaterThan(0)
     })
 
+    it("records contextual usage without performing a second permission decision", () => {
+      guard.recordUsage(
+        "plugin-a",
+        "network:fetch",
+        "egress GET https://api.example.com/logs classification=operational pii=redact"
+      )
+
+      expect(guard.getAuditLog({ pluginId: "plugin-a" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "check",
+            allowed: true,
+            context:
+              "egress GET https://api.example.com/logs classification=operational pii=redact",
+          }),
+        ])
+      )
+    })
+
     it("should clear audit log", () => {
       guard.check("plugin-a", "network:fetch")
       guard.clearAuditLog()
@@ -521,11 +540,17 @@ describe("Permission Constants", () => {
     expect(PERMISSION_GROUPS.filesystem).toContain("filesystem:read")
     expect(PERMISSION_GROUPS.filesystem).toContain("filesystem:write")
     expect(PERMISSION_GROUPS.network).toContain("network:fetch")
+    expect(PERMISSION_GROUPS.network).toContain("network:upload")
   })
 
   it("should have permission descriptions", () => {
     expect(PERMISSION_DESCRIPTIONS["network:fetch"]).toBeTruthy()
+    expect(PERMISSION_DESCRIPTIONS["network:upload"]).toBeTruthy()
     expect(PERMISSION_DESCRIPTIONS["filesystem:write"]).toBeTruthy()
+    expect(PERMISSION_DESCRIPTIONS["builtin-skills:invoke"]).toMatch(/built-in skills/i)
+    expect(PERMISSION_DESCRIPTIONS["extension:workflow"]).toBe(
+      "Contribute workflow nodes, triggers, tasks, and templates"
+    )
   })
 
   it("should have dangerous permissions list", () => {
@@ -533,15 +558,23 @@ describe("Permission Constants", () => {
     expect(DANGEROUS_PERMISSIONS).toContain("process:spawn")
   })
 
-  it("lists the WASM stub capabilities that have no backend in api-version 0.1", () => {
-    // These map to host stubs that return a typed `cognia:not-implemented`
-    // error; the grant sheet renders them disabled so a user isn't misled.
-    expect(WASM_UNIMPLEMENTED_PERMISSIONS).toContain("clipboard:read")
-    expect(WASM_UNIMPLEMENTED_PERMISSIONS).toContain("clipboard:write")
-    // network:fetch is a real, enforced capability (ai rides it) — not a stub.
-    expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain("network:fetch")
-    // notification still emits an audit-log entry, so it is not listed either.
+  it("lists no WASM stub capabilities in api-version 0.2", () => {
+    // Every capability the v0.2 WIT declares has a backend: clipboard and
+    // notifications are served in-process by the Tauri plugins, and
+    // ai.generate-text / workflow.emit-event go through the renderer bridge.
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).toEqual([])
+  })
+
+  it("no longer disables the clipboard permissions the v0.2 host implements", () => {
+    // The regression this pins: leaving these listed would make the grant sheet
+    // render working capabilities as permanently disabled and never add them to
+    // the granted set — implemented in Rust, unreachable in practice.
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain("clipboard:read")
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain("clipboard:write")
     expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain("notification")
+    // ai.generate-text is gated on ai:chat as of v0.2, not network:fetch.
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain("ai:chat")
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain("network:fetch")
   })
 
   it("flags network egress as dangerous (arbitrary-host fetch is an exfiltration channel)", () => {
@@ -549,6 +582,7 @@ describe("Permission Constants", () => {
     // (secrets, clipboard, fs). It must prompt for consent rather than being
     // silently granted on enable.
     expect(DANGEROUS_PERMISSIONS).toContain("network:fetch")
+    expect(DANGEROUS_PERMISSIONS).toContain("network:upload")
     expect(DANGEROUS_PERMISSIONS).toContain("network:websocket")
   })
 

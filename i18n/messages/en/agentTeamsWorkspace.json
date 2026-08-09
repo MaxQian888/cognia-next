@@ -219,6 +219,7 @@
       "missingKey": "Set an Anthropic API key in Settings → Providers to enable @claude.",
       "noAgent": "No external agent configured for {runtime}. Add one in Settings → External Agents."
     },
+    "scrollToLatest": "Scroll to latest message",
     "streaming": "Thinking…",
     "structuredPayload": "Payload",
     "tokenUsage": {
@@ -418,14 +419,14 @@
   "searchTeams": "Search teams...",
   "settings": {
     "accordion": {
+      "execution": "Execution",
       "governance": "Governance",
       "memory": "Shared memory",
       "overview": "Overview",
       "plugins": "Plugins & capabilities",
       "prFeedback": "PR feedback",
       "ultracode": "Ultracode",
-      "worktrees": "Worktree isolation",
-      "execution": "Execution"
+      "worktrees": "Worktree isolation"
     },
     "autoShutdown": "Auto-shutdown on completion",
     "awaitingExternalPickup": "Awaiting external pickup",
@@ -457,6 +458,12 @@
     "description": "Description",
     "dispatchDecisionLabel": "Dispatch decision",
     "enableMessaging": "Inter-agent messaging",
+    "execution": {
+      "description": "Team-level execution defaults (ADR-0090): the binding every inheriting teammate resolves to, and the team-to-team delegation depth cap.",
+      "maxDelegationDepth": "Max team delegation depth",
+      "maxDelegationDepthHint": "Team-to-team delegations only (default 2). A team at the cap has its further delegations refused. Distinct from native subagent nesting depth.",
+      "title": "Execution"
+    },
     "executionMode": "Execution mode",
     "executionModeOption": {
       "autonomous": "Autonomous",
@@ -702,12 +709,6 @@
         }
       },
       "title": "Worktree isolation"
-    },
-    "execution": {
-      "title": "Execution",
-      "description": "Team-level execution defaults (ADR-0090): the binding every inheriting teammate resolves to, and the team-to-team delegation depth cap.",
-      "maxDelegationDepth": "Max team delegation depth",
-      "maxDelegationDepthHint": "Team-to-team delegations only (default 2). A team at the cap has its further delegations refused. Distinct from native subagent nesting depth."
     }
   },
   "stats": {
@@ -723,7 +724,8 @@
     "overview": "Overview",
     "settings": "Settings",
     "tasks": "Tasks",
-    "worktrees": "Worktrees"
+    "worktrees": "Worktrees",
+    "operations": "Operations"
   },
   "tasks": {
     "addTask": "Add task",
@@ -797,6 +799,33 @@
   "teamUpdated": "Team updated.",
   "teammateConfig": {
     "description": "Edit identity, prompt, tools, and plugin capabilities for this teammate.",
+    "executionBinding": {
+      "candidateIds": "Candidate deployments",
+      "candidateIdsHint": "The coordinator picks among these deployment ids only (currently: the first candidate is selected).",
+      "candidateIdsPlaceholder": "dep-a, dep-b",
+      "credentialProfileRef": "Credential profile",
+      "credentialProfileRefPlaceholder": "credential profile reference",
+      "credentialRefHint": "A reference into the credential store — never a raw key.",
+      "deploymentRef": "Deployment profile",
+      "deploymentRefPlaceholder": "deployment id (e.g. dep-vendor-a)",
+      "description": "How this teammate's runtime, deployment and credentials are bound. References only — endpoints and keys live in provider profiles.",
+      "flagOffHint": "Inert until the unified execution resolver flag (agentExecutionResolverV2) is enabled — dispatch ignores this binding while it is off.",
+      "modeInherit": "Inherit team default",
+      "modePinned": "Pinned",
+      "modePool": "Candidate pool",
+      "modelRole": "Model role",
+      "modelRoleFast": "Fast",
+      "modelRoleInherit": "Inherit",
+      "modelRolePowerful": "Powerful",
+      "modelRolePrimary": "Primary",
+      "previewNative": "Native delegation",
+      "previewOrchestrated": "Orchestrated ({reasons})",
+      "runtimeAiSdk": "AI SDK",
+      "runtimeAuto": "Auto",
+      "runtimeClaudeSdk": "Claude Agent SDK",
+      "runtimePolicy": "Runtime",
+      "title": "Execution binding"
+    },
     "rosterSection": {
       "description": "Fields that live on the teammate row, not on its preset config.",
       "provider": "Provider",
@@ -810,34 +839,7 @@
       "twinNone": "None"
     },
     "save": "Save",
-    "title": "Configure {name}",
-    "executionBinding": {
-      "title": "Execution binding",
-      "description": "How this teammate's runtime, deployment and credentials are bound. References only — endpoints and keys live in provider profiles.",
-      "modeInherit": "Inherit team default",
-      "modePinned": "Pinned",
-      "modePool": "Candidate pool",
-      "runtimePolicy": "Runtime",
-      "runtimeAuto": "Auto",
-      "modelRole": "Model role",
-      "modelRoleInherit": "Inherit",
-      "modelRolePrimary": "Primary",
-      "modelRoleFast": "Fast",
-      "modelRolePowerful": "Powerful",
-      "deploymentRef": "Deployment profile",
-      "deploymentRefPlaceholder": "deployment id (e.g. dep-vendor-a)",
-      "credentialProfileRef": "Credential profile",
-      "credentialProfileRefPlaceholder": "credential profile reference",
-      "credentialRefHint": "A reference into the credential store — never a raw key.",
-      "candidateIds": "Candidate deployments",
-      "candidateIdsPlaceholder": "dep-a, dep-b",
-      "candidateIdsHint": "The coordinator picks among these deployment ids only (currently: the first candidate is selected).",
-      "previewNative": "Native delegation",
-      "previewOrchestrated": "Orchestrated ({reasons})",
-      "flagOffHint": "Inert until the unified execution resolver flag (agentExecutionResolverV2) is enabled — dispatch ignores this binding while it is off.",
-      "runtimeClaudeSdk": "Claude Agent SDK",
-      "runtimeAiSdk": "AI SDK"
-    }
+    "title": "Configure {name}"
   },
   "teammatesCount": "{count, plural, one {# teammate} other {# teammates}}",
   "templates": {
@@ -874,5 +876,164 @@
     },
     "refresh": "Refresh",
     "title": "Agent branches"
+  },
+  "commandCenter": {
+    "tab": "Command center",
+    "title": "Durable command center",
+    "description": "Operate every durable team, run, child, gate, resource budget, and delivery stack.",
+    "bulkActions": "Bulk run controls",
+    "empty": "No durable runs match these filters.",
+    "selectRun": "Select run {id}",
+    "stale": "Trajectory stale",
+    "gates": "{count} pending gates",
+    "children": "{count} children",
+    "priority": "Priority {value}",
+    "queuePosition": "Queue #{value}",
+    "queueInactive": "Not queued",
+    "usage": "{tokens} tokens · {seconds}s",
+    "cost": "${value} estimated",
+    "costUnavailable": "Cost unavailable",
+    "slots": "{active}/{max} slots",
+    "attempts": "{attempts} attempts · {failures} failures",
+    "delivery": "{count} delivery layers",
+    "pullRequest": "PR #{number}",
+    "actionFailed": "{count} run actions failed.",
+    "actionApplied": "Applied to {count} runs.",
+    "filters": {
+      "search": "Search teams, runs, or objectives",
+      "status": "Status",
+      "allStatuses": "All statuses",
+      "repository": "Repository",
+      "allRepositories": "All repositories",
+      "project": "Project",
+      "allProjects": "All projects",
+      "team": "Team",
+      "allTeams": "All teams",
+      "runtime": "Runtime",
+      "allRuntimes": "All runtimes",
+      "gate": "Gate",
+      "allGates": "All gates",
+      "pendingGate": "Pending gate",
+      "clearGate": "No pending gate",
+      "failureClass": "Failure class",
+      "allFailures": "All failure classes"
+    },
+    "actions": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "sleep": "Sleep",
+      "wake": "Wake",
+      "stop": "Stop",
+      "terminate": "Terminate"
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "pausing": "Pausing",
+      "paused": "Paused",
+      "sleeping": "Sleeping",
+      "recovering": "Recovering",
+      "needs_input": "Needs input",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "terminated": "Terminated"
+    },
+    "deliveryStatus": {
+      "blocked": "Blocked",
+      "ready": "Ready",
+      "publishing": "Publishing",
+      "ci_pending": "CI pending",
+      "needs_remediation": "Needs remediation",
+      "awaiting_approval": "Awaiting approval",
+      "merging": "Merging",
+      "merged": "Merged",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    }
+  },
+  "operations": {
+    "legacy": "This team remains on the legacy runtime until you accept a durable-v2 migration preview.",
+    "empty": "No durable run exists for this team yet.",
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "pausing": "Pausing",
+      "paused": "Paused",
+      "sleeping": "Sleeping",
+      "recovering": "Recovering",
+      "needs_input": "Needs input",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "terminated": "Terminated"
+    },
+    "run": {
+      "title": "Current durable run",
+      "decisionVersion": "Decision version {value}",
+      "tokens": "{value} tokens",
+      "children": "{value} children"
+    },
+    "environment": {
+      "title": "Environment preflight",
+      "version": "{name} · version {version}",
+      "missing": "No immutable environment version selected.",
+      "ready": "Host capabilities ready",
+      "blocked": "Blocked: missing {capabilities}"
+    },
+    "decisions": {
+      "title": "Decision ledger",
+      "empty": "No constraints or proposals.",
+      "accept": "Accept",
+      "reject": "Reject",
+      "accepted": "Decision accepted.",
+      "rejected": "Decision rejected."
+    },
+    "children": {
+      "title": "Child sessions and takeover",
+      "noWorkspace": "workspace pending",
+      "steerPlaceholder": "Steer this child at the next safe boundary",
+      "steer": "Send steering",
+      "steered": "Steering recorded.",
+      "commandsPlaceholder": "Manual commands, one per line",
+      "diffPlaceholder": "Manual diff or edit summary",
+      "openEditor": "Open editor",
+      "takeover": "Begin takeover",
+      "takeoverStarted": "Child paused for takeover.",
+      "resume": "Checkpoint and resume",
+      "takeoverCompleted": "Manual takeover checkpointed.",
+      "openTerminal": "Open terminal",
+      "openBrowser": "Open browser"
+    },
+    "evidence": {
+      "title": "Evidence bundle",
+      "empty": "No evidence collected yet."
+    },
+    "delivery": {
+      "title": "Delivery graph",
+      "empty": "No delivery stack prepared.",
+      "approveMerge": "Approve and merge stack",
+      "merged": "Delivery stack merged."
+    },
+    "retrospective": {
+      "title": "Retrospective learning",
+      "empty": "No retrospective generated yet.",
+      "approve": "Approve and apply",
+      "reject": "Reject",
+      "approved": "Proposal applied.",
+      "rejected": "Proposal rejected."
+    },
+    "migration": {
+      "preview": "Preview durable-v2 migration",
+      "summary": "This migration changes only future runs. Existing definitions and runtime records remain readable.",
+      "runtime": "Use checkpoint-based durable-v2 execution.",
+      "writer": "Serialize repository writes by default.",
+      "environment": "Freeze the selected environment version for each run.",
+      "retention": "Keep local trajectories until explicit cleanup.",
+      "blocked": "Migration blocked: {reason}",
+      "primaryRepository": "exactly one primary repository is required",
+      "accept": "Accept migration",
+      "migrated": "Team migrated to durable-v2."
+    }
   }
 }

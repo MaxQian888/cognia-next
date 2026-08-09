@@ -7,7 +7,7 @@ description: "Gives the Agent-Team task model its kanban surface and de-silos it
 
 **Status**: Accepted (2026-07-08)
 **Authors**: Max Qian + Claude Fable 5
-**Builds on**: the team runtime (ADR-0022), the plugin integration (ADR-0032), the mobile sync orchestrator (ADR-0027), the companion remote-control surface (ADR-0005 / ADR-0060), and the twin runtime glue (`lib/ai/agent/team/twin-context.ts`, ADR-0003).
+**Builds on**: the team runtime (ADR-0022), the plugin integration (ADR-0032), the mobile sync orchestrator (ADR-0027), the Companion control plane (ADR-0061), and the twin runtime glue (`lib/ai/agent/team/twin-context.ts`, ADR-0003).
 
 ## Context
 
@@ -72,7 +72,7 @@ on runtime state is unchanged). Cross-device visibility is a **one-way projectio
 - **Sync**: `agentTeamBoard` joins `SyncableTable`, the desktop delta reader
   (cursors `updatedAt`), the handler registry, and the Rust `sync_registry`
   (tombstoned). Dexie never writes back to the store.
-- **Control plane**: six remote-control-gated RPCs (`team_task_move|create|comment`,
+- **Control plane**: six Companion-control-gated RPCs (`team_task_move|create|comment`,
   `team_run_pause|resume|stop`) travel the generic desktop-writes bridge. The TS
   arms (`lib/companion/agent-team-write-handlers.ts`) revalidate through the live
   `canMoveTask`, answering `{ ok, reason }` — a stale phone snapshot can never
@@ -106,7 +106,7 @@ first; companion soft-cancel (a `cancelled` row) is still honored.
   `subscribe` behind `team:read`; `createTask`/`addComment`/`moveTask`-through-guard
   behind `team:write` (non-dangerous tier, like `goal:write`). **No run control**
   for plugins — starting a team consumes real compute and stays a human /
-  remote-control decision.
+  Companion control-plane decision.
 - **Twin visibility**: the deep runtime integration (per-teammate twin injection,
   `twin_knowledge_search`) was invisible in the UI. The board now shows twin badges
   on swimlanes/cards, a knowledge-twins chip row, and ranks the create-form

@@ -22,8 +22,8 @@ Every workflow run executes inside exactly one desktop WebView. Rust
 (`src-tauri/src/workflow/`) owns "when does a workflow start" (cron daemon,
 webhook router, UIA watcher) and crash recovery; the TS orchestrator
 (`lib/workflow/runtime/orchestrator.ts`) owns all step execution. Every
-"remote" surface that exists today — the remote-control API
-(`start-from-remote.ts`), the companion `workflow_trigger_manual` RPC, IM
+"remote" surface that exists today — the Companion
+`workflow_trigger_manual` RPC and IM
 triggers — is *remote triggering of local execution*.
 
 A study of the substrate (2026-07-02) found:
@@ -131,7 +131,7 @@ foundation.
    companion `workflow_trigger_manual` arm now records
    `{ source: "api", deviceId }` (previously mislabeled `"ui"`).
    `StartWorkflowFromRemoteInput.deviceId` carries the same for the
-   remote-control path.
+   Companion-triggered path.
 
 6. **`device_capabilities_report` RPC.** On every transition to
    `connected`, the mobile shell reports `detectLocalCapabilities()`

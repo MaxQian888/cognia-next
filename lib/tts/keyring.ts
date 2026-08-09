@@ -9,6 +9,7 @@
 import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import { KEYED_TTS_PROVIDERS, type TTSProvider } from "@cognia/tts/types"
+import { createKeyringStore } from "@/lib/credentials/keyring-store"
 
 /** Stable provider keys understood by the keyring backend. */
 export type KeyringProviderId =
@@ -21,6 +22,9 @@ export type KeyringProviderId =
   | "deepgram"
   | "xiaomi"
   | "mistral"
+  | "local-openai-compatible"
+  /** Live voice only — xAI has no TTS provider, so `keyringProviderFor` never returns it. */
+  | "xai"
 
 export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "openai",
@@ -32,7 +36,12 @@ export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "deepgram",
   "xiaomi",
   "mistral",
+  "local-openai-compatible",
+  "xai",
 ]
+
+/** Presence-only marker used in the renderer for desktop keyring entries. */
+export const HOST_KEY_PRESENT = "__cognia_host_key_present__"
 
 /** Map a TTSProvider → the keyring account it consumes. */
 export function keyringProviderFor(provider: TTSProvider): KeyringProviderId | null {
@@ -56,12 +65,15 @@ export function keyringProviderFor(provider: TTSProvider): KeyringProviderId | n
       return "xiaomi"
     case "mistral":
       return "mistral"
+    case "local-openai-compatible":
+      return "local-openai-compatible"
     default:
       return null
   }
 }
 
 const WEB_STORE_KEY_PREFIX = "tts.providerKey."
+const webSecretStore = createKeyringStore("tts")
 
 export async function getProviderKey(provider: KeyringProviderId): Promise<string | null> {
   if (isTauri()) {
@@ -105,12 +117,7 @@ export async function loadAllProviderKeys(): Promise<Partial<Record<KeyringProvi
     const { invoke } = await import("@tauri-apps/api/core")
     const ids = await invoke<KeyringProviderId[]>("tts_keyring_list_providers")
     const out: Partial<Record<KeyringProviderId, string>> = {}
-    await Promise.all(
-      ids.map(async (id) => {
-        const key = await getProviderKey(id)
-        if (key) out[id] = key
-      })
-    )
+    for (const id of ids) out[id] = HOST_KEY_PRESENT
     return out
   }
   const out: Partial<Record<KeyringProviderId, string>> = {}
@@ -130,7 +137,7 @@ export function providerKeyMapToSettingsMap(
 ): Record<string, { apiKey?: string }> {
   const out: Record<string, { apiKey?: string }> = {}
   for (const id of KEYRING_PROVIDER_IDS) {
-    if (keys[id]) out[id] = { apiKey: keys[id] }
+    if (keys[id]) out[id] = { apiKey: keys[id] === HOST_KEY_PRESENT ? "host-key" : keys[id] }
   }
   return out
 }
@@ -147,13 +154,21 @@ export function isProviderKeyMissing(
   return !keys[id]
 }
 
-// ---- Web fallback: plaintext storage in IndexedDB --------------------------
+// ---- Web fallback: Browser Vault (legacy Dexie rows are read/migrated) -----
 
 async function webStoreGet(provider: KeyringProviderId): Promise<string | null> {
   if (typeof indexedDB === "undefined") return null
   try {
+    const stored = await webSecretStore.load(provider)
+    if (stored) return stored
     const row = await getDb().tts_provider_keys.get(WEB_STORE_KEY_PREFIX + provider)
-    return row?.value ?? null
+    const legacy = row?.value ?? null
+    if (!legacy) return null
+    await webSecretStore.save(provider, legacy)
+    if (webSecretStore.isPersistent?.()) {
+      await getDb().tts_provider_keys.delete(WEB_STORE_KEY_PREFIX + provider)
+    }
+    return legacy
   } catch {
     return null
   }
@@ -161,21 +176,18 @@ async function webStoreGet(provider: KeyringProviderId): Promise<string | null> 
 
 async function webStoreSet(provider: KeyringProviderId, value: string): Promise<void> {
   if (typeof indexedDB === "undefined") return
-  try {
-    await getDb().tts_provider_keys.put({
-      id: WEB_STORE_KEY_PREFIX + provider,
-      value,
-    })
-  } catch {
-    /* ignore — the table may not exist on first run; loaders handle null */
-  }
+  await webSecretStore.save(provider, value)
+  // Remove a legacy cleartext row only after the secure/session adapter has
+  // accepted the new value. Deletion is idempotent.
+  await getDb()
+    .tts_provider_keys.delete(WEB_STORE_KEY_PREFIX + provider)
+    .catch(() => undefined)
 }
 
 async function webStoreDelete(provider: KeyringProviderId): Promise<void> {
   if (typeof indexedDB === "undefined") return
-  try {
-    await getDb().tts_provider_keys.delete(WEB_STORE_KEY_PREFIX + provider)
-  } catch {
-    /* ignore */
-  }
+  await webSecretStore.delete(provider)
+  await getDb()
+    .tts_provider_keys.delete(WEB_STORE_KEY_PREFIX + provider)
+    .catch(() => undefined)
 }

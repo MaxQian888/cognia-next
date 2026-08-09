@@ -1,5 +1,8 @@
 jest.mock("@/lib/task-workspace/client", () => ({ settleTaskWorkspaceTurn: jest.fn() }))
-jest.mock("./client", () => ({ endCodeAdoptionTurn: jest.fn() }))
+jest.mock("./client", () => ({
+  endCodeAdoptionTurn: jest.fn(),
+  consumeCodeAdoptionTrackingAttempt: jest.fn(),
+}))
 jest.mock("./persist", () => ({
   persistCodeAdoptionTurn: jest.fn(),
   pruneCodeAdoptionTurns: jest.fn(),
@@ -14,7 +17,7 @@ jest.mock("@/stores/task-workspace-store", () => ({
 import { settleTaskWorkspaceTurn } from "@/lib/task-workspace/client"
 import { useChatStore } from "@/stores/chat/chat-store"
 
-import { endCodeAdoptionTurn } from "./client"
+import { consumeCodeAdoptionTrackingAttempt, endCodeAdoptionTurn } from "./client"
 import { persistCodeAdoptionTurn, pruneCodeAdoptionTurns } from "./persist"
 import {
   isSettleEdge,
@@ -25,12 +28,16 @@ import {
 const mockSettleTaskWorkspace = settleTaskWorkspaceTurn as jest.Mock
 const mockSubscribe = useChatStore.subscribe as unknown as jest.Mock
 const mockEnd = endCodeAdoptionTurn as jest.Mock
+const mockAttempt = consumeCodeAdoptionTrackingAttempt as jest.Mock
 const mockPersist = persistCodeAdoptionTurn as jest.Mock
 const mockPrune = pruneCodeAdoptionTurns as jest.Mock
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  mockAttempt.mockReturnValue(undefined)
+})
 
 describe("isSettleEdge", () => {
   it.each([
@@ -68,7 +75,9 @@ describe("startCodeAdoptionTracker", () => {
     await flush()
     expect(mockSettleTaskWorkspace).toHaveBeenCalledWith("s1", 3, "ready")
     expect(mockEnd).toHaveBeenCalledWith("s1:3")
-    expect(mockPersist).toHaveBeenCalledWith(row)
+    expect(mockPersist).toHaveBeenCalledWith(
+      expect.objectContaining({ id: row.id, measurement: "legacyFingerprint" })
+    )
     expect(mockPrune).toHaveBeenCalled()
   })
 
@@ -147,6 +156,37 @@ describe("startCodeAdoptionTracker", () => {
         totalFiles: 1,
         totalAdded: 4,
         totalRemoved: 1,
+        measurement: "taskWorkspace",
+        adoptionState: "pending",
+        proposedAdded: 4,
+        acceptedAdded: 0,
+      })
+    )
+  })
+
+  it("persists an unavailable coverage row instead of silently dropping a skipped turn", async () => {
+    mockSettleTaskWorkspace.mockResolvedValue(null)
+    mockEnd.mockResolvedValue(null)
+    mockAttempt.mockReturnValue({
+      cwd: "/repo",
+      sessionId: "s1",
+      runId: 4,
+      model: "opus",
+      agentKind: "in-app",
+      status: "unavailable",
+      reason: "concurrent",
+    })
+    const { fn } = wire()
+    fn(
+      { sessions: { s1: { status: "idle", runId: 4 } } },
+      { sessions: { s1: { status: "streaming", runId: 4 } } }
+    )
+    await flush()
+    expect(mockPersist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "s1:4",
+        trackingState: "unavailable",
+        trackingReason: "concurrent",
       })
     )
   })

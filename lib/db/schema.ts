@@ -14,7 +14,10 @@ import type {
   AppSettings,
   Character,
   ChatSession,
+  McpCapabilityCacheRow,
   McpServer,
+  McpServerSummary,
+  McpSyncJob,
   SessionFolder,
   Skill,
   SkillResource,
@@ -24,6 +27,12 @@ import type {
 } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import type { ProjectChunk } from "@/types/project-knowledge"
+import type {
+  KnowledgeBase,
+  KnowledgeBaseChunk,
+  KnowledgeBaseIngestJob,
+  KnowledgeBaseSource,
+} from "@/types/knowledge-base"
 import type { TrustedWorkspace } from "./trusted-workspaces"
 import type {
   DeploymentProfile,
@@ -53,6 +62,7 @@ import { buildA2UIBridgeMcpRow, A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-t
 import { dispatchDbUpgradeBlocked } from "./upgrade-blocked-signal"
 import { createDiagnostic } from "@cognia/diagnostics"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
+import { allocateUniqueSkillSlug, deriveMigratedSkillSlug } from "@/lib/skills/slug"
 import type { Twin, TwinSource, TwinChunk, TwinProfile, TwinDraft, TwinJob } from "@/types/twin"
 import type { MobileOutboundJobRow } from "./mobile-outbound-types"
 import type {
@@ -115,6 +125,15 @@ import type {
   WorkflowRunEventRow,
   WorkflowTriggerRow,
 } from "@/types/workflow/visual"
+import type {
+  WorkflowDeployment,
+  WorkflowInvocation,
+  WorkflowVersion,
+} from "@/types/workflow/deployment"
+import {
+  createWorkflowVersion,
+  workflowDeploymentId,
+} from "@/lib/workflow/versioning/version-snapshot"
 import type { WorkflowFolder } from "@/types/workflow/folder"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
@@ -123,7 +142,7 @@ import type { ChatInputHistoryRow } from "./chat-input-history"
 import type { Goal, GoalEvent, GoalTemplate } from "@/types/goal"
 import type { Loop, LoopEvent } from "@/types/loop"
 import type { AgentPlan, PlanEvent } from "@/types/agent/plan"
-import type { RemoteControlAuditEntry, RemoteControlRunStatusRow } from "@/types/remote-control"
+import type { WebhookAuditEntry } from "@/types/webhooks"
 import type { OcrResultRow } from "./ocr-results"
 import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
@@ -326,12 +345,34 @@ function buildCollapsedSchema(db: Dexie): CollapsedSchemaCache | undefined {
   return { version: latest, stores }
 }
 
+let databaseConnectionSequence = 0
+
+/** Historical table shape retained only so old databases remain readable. */
+interface LegacyRemoteControlRunStatusRow {
+  runId: string
+  target: string
+  status: string
+  detail?: string
+  correlationId?: string
+  startedAt: number
+  updatedAt: number
+}
+
 export class CogniaDB extends Dexie {
+  readonly connectionOwner: string
+  readonly connectionId: string
+  private readonly connectionCreatedAt: number
   sessions!: Table<ChatSession, string>
   messages!: Table<StoredMessage, string>
+  // v155 — independent-session messages and their durable delivery receipts.
+  sessionPeerMessages!: Table<import("./session-peer-messages").SessionPeerMessageRow, string>
   settings!: Table<AppSettings, "singleton">
   promptPresets!: Table<SystemPromptPreset, string>
   mcpServers!: Table<McpServer, string>
+  // v151 — MCP control-plane governance and durable runtime metadata.
+  mcpSyncJobs!: Table<McpSyncJob, string>
+  mcpCapabilityCache!: Table<McpCapabilityCacheRow, string>
+  mcpServerSummaries!: Table<McpServerSummary, string>
   characters!: Table<Character, string>
   skills!: Table<Skill, string>
   skillResources!: Table<SkillResource, string>
@@ -368,6 +409,14 @@ export class CogniaDB extends Dexie {
   twinProfile!: Table<TwinProfile, string>
   twinDrafts!: Table<TwinDraft, string>
   twinJobs!: Table<TwinJob, string>
+  // v146 — reusable Knowledge Bases independent of Project and Twin ownership.
+  knowledgeBases!: Table<KnowledgeBase, string>
+  knowledgeBaseSources!: Table<KnowledgeBaseSource, string>
+  knowledgeBaseChunks!: Table<KnowledgeBaseChunk, string>
+  knowledgeBaseIngestJobs!: Table<KnowledgeBaseIngestJob, string>
+  // v147 — portable single-Agent board metadata and immutable run attempts.
+  agentTasks!: Table<import("@/types/agent/agent-task").AgentTask, string>
+  agentTaskAttempts!: Table<import("@/types/agent/agent-task").AgentTaskAttempt, string>
   // §A-Schema (v15) — plugin tables. Indexed columns are declared in the v15
   // .stores block below; the per-row types live in `./plugin-types.ts`.
   plugins!: Table<PluginRow, string>
@@ -449,6 +498,14 @@ export class CogniaDB extends Dexie {
   integrationAudit!: Table<IntegrationAuditRow, string>
   // v128 — Content-addressed chat image store. See `lib/db/message-media.ts`.
   messageMedia!: Table<import("./message-media").MessageMediaRow, string>
+  // v152 — Message-to-media authorization and lifecycle ledger.
+  messageMediaRefs!: Table<import("./message-media-refs").MessageMediaRefRow, [string, string]>
+  // v153 — lazily materialized transcript summaries and resumable watermark.
+  chatTurnSummaries!: Table<import("./chat-transcript-index").ChatTurnSummaryRow, [string, string]>
+  chatTranscriptIndexState!: Table<
+    import("./chat-transcript-index").ChatTranscriptIndexStateRow,
+    string
+  >
   // v134 — chat-history search projections + backfill watermark (ADR-0099).
   // See `lib/db/chat-search-text.ts`.
   chatSearchText!: Table<import("./chat-search-text").ChatSearchTextRow, string>
@@ -490,6 +547,10 @@ export class CogniaDB extends Dexie {
   workflowRuns!: Table<WorkflowRunRow, string>
   workflowRunEvents!: Table<WorkflowRunEventRow, string>
   workflowTriggers!: Table<WorkflowTriggerRow, string>
+  // v148 — Immutable workflow publication control plane.
+  workflowVersions!: Table<WorkflowVersion, string>
+  workflowDeployments!: Table<WorkflowDeployment, string>
+  workflowInvocations!: Table<WorkflowInvocation, string>
   // v52 — Workflow library folders (ADR-0011 library upgrade). See
   // `types/workflow/folder.ts`.
   workflowFolders!: Table<WorkflowFolder, string>
@@ -654,6 +715,43 @@ export class CogniaDB extends Dexie {
   // v104 — Agent-Team board projection (one-way store→Dexie mirror for mobile
   // sync). See `lib/db/agent-team-board.ts`.
   agentTeamBoard!: Table<AgentTeamBoardRow, string>
+  // v145 — durable local AgentTeam runtime. Never registered for sync/export.
+  agentTeamRuns!: Table<import("@/types/agent/agent-team-runtime").AgentTeamRunRecord, string>
+  agentTeamChildRuns!: Table<import("@/types/agent/agent-team-runtime").AgentTeamChildRun, string>
+  agentTeamTrajectory!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamTrajectoryEvent,
+    string
+  >
+  agentTeamCheckpoints!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamCheckpoint,
+    string
+  >
+  agentTeamDecisions!: Table<import("@/types/agent/agent-team-runtime").AgentTeamDecision, string>
+  agentTeamSteeringReceipts!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamSteeringReceipt,
+    string
+  >
+  agentTeamEvidence!: Table<import("@/types/agent/agent-team-runtime").AgentTeamEvidence, string>
+  agentTeamDeliveryGraphs!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamDeliveryGraph,
+    string
+  >
+  agentTeamDeliveryNodes!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamDeliveryNode,
+    string
+  >
+  agentTeamRetrospectives!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamRetrospective,
+    string
+  >
+  agentTeamContentObjects!: Table<
+    import("@/types/agent/agent-team-runtime").AgentTeamContentObject,
+    string
+  >
+  projectEnvironmentVersions!: Table<
+    import("@/types/project-environment").ProjectEnvironmentVersion,
+    string
+  >
   // v132 — Unified Template Platform. Definitions/packages/instance provenance
   // are portable; device bindings and migration journals are intentionally
   // local-only and never registered in `lib/sync`.
@@ -669,8 +767,17 @@ export class CogniaDB extends Dexie {
   // v90 — Conversation folders. See `lib/db/session-folders.ts`.
   sessionFolders!: Table<SessionFolder, string>
 
-  constructor(name = LEGACY_COGNIA_DB_NAME) {
+  constructor(name = LEGACY_COGNIA_DB_NAME, connectionOwner = "unspecified") {
     super(name)
+    this.connectionOwner = connectionOwner
+    this.connectionId = `db-${++databaseConnectionSequence}`
+    this.connectionCreatedAt = Date.now()
+    registerKnownConnection(this)
+    this.on("ready", () => {
+      registerKnownConnection(this)
+      this.logConnectionEvent("open")
+    })
+    this.on("blocked", () => this.logConnectionEvent("blocked"))
 
     // Jest fast path: a previous construction in this worker already merged
     // the full version chain — declare only the latest cumulative schema.
@@ -2170,7 +2277,7 @@ export class CogniaDB extends Dexie {
     // ── v72 — Remote-control durable audit trail (ADR-0005 activation). ──────
     // One row per inbound command dispatch and per outbound delivery attempt.
     // `at` drives the newest-first Events tab; `direction`/`kind` filter.
-    // See `lib/db/remote-control-audit.ts` and `@/types/remote-control`.
+    // Historical table name; canonical outbound writes live in `lib/webhooks/audit.ts`.
     this.version(72).stores({
       remoteControlAudit: "id, at, direction, kind, runId",
     })
@@ -2441,7 +2548,7 @@ export class CogniaDB extends Dexie {
     // server-issued `runId` with its dispatch outcome (and, where a subsystem
     // emits a terminal signal, the final status) so `GET /api/v1/runs/:runId`
     // can report it. Pure additive — no upgrade hook. See
-    // `lib/db/remote-control-run-status.ts`.
+    // Historical run projection retained read-only for database compatibility.
     this.version(92).stores({
       remoteControlRunStatus: "&runId, target, status, startedAt, updatedAt",
     })
@@ -3352,6 +3459,242 @@ export class CogniaDB extends Dexie {
         await table.bulkPut(migrated)
       })
 
+    // v144 — Codex-inspired desktop workflow metadata. Project environments
+    // and CDP authority are device-local by contract: none of these tables is
+    // included in sync, backup, export, or Companion allow-lists. CDP audit
+    // rows contain metadata only and are append-only through browser-cdp.ts.
+    this.version(144).stores({
+      projectEnvironments: "&id, projectId, isEnabled, updatedAt, [projectId+updatedAt]",
+      cdpGrants:
+        "&id, sessionId, browserSessionId, origin, expiresAt, revokedAt, [sessionId+expiresAt]",
+      cdpAuditEvents:
+        "&id, grantId, sessionId, browserSessionId, origin, outcome, createdAt, [sessionId+createdAt]",
+    })
+
+    // v145 — durable local AgentTeam execution. These tables are deliberately
+    // device-local: trajectories can contain repository content and may only be
+    // removed through explicit run/team/project cleanup.
+    this.version(145).stores({
+      agentTeamRuns: "&id, teamId, projectId, status, priority, updatedAt, [teamId+updatedAt]",
+      agentTeamChildRuns:
+        "&id, runId, teamId, teammateId, taskId, repositoryId, status, sessionId, updatedAt, [runId+updatedAt]",
+      agentTeamTrajectory:
+        "&id, runId, childRunId, sequence, kind, createdAt, [runId+sequence], [childRunId+sequence]",
+      agentTeamCheckpoints:
+        "&id, runId, childRunId, createdAt, [runId+createdAt], [childRunId+createdAt]",
+      agentTeamDecisions: "&id, runId, version, status, createdAt, [runId+version]",
+      agentTeamSteeringReceipts:
+        "&id, runId, childRunId, status, updatedAt, [childRunId+updatedAt]",
+      agentTeamEvidence:
+        "&id, runId, childRunId, taskId, kind, createdAt, [runId+createdAt], [taskId+createdAt]",
+      agentTeamDeliveryGraphs: "&id, runId, status, updatedAt",
+      agentTeamDeliveryNodes:
+        "&id, graphId, runId, repositoryId, order, status, updatedAt, [graphId+order]",
+      agentTeamRetrospectives: "&id, runId, status, createdAt, updatedAt",
+      agentTeamContentObjects: "&hash, mimeType, byteLength, createdAt",
+      projectEnvironmentVersions:
+        "&id, environmentId, projectId, version, createdAt, [environmentId+version]",
+    })
+
+    // v146 — reusable Agent Knowledge Bases. Sources are portable originals;
+    // chunks are derived vector pointers; ingest jobs provide crash-visible
+    // lifecycle state. Ownership is always explicit through knowledgeBaseId.
+    this.version(146).stores({
+      knowledgeBases: "&id, name, updatedAt",
+      knowledgeBaseSources:
+        "&id, knowledgeBaseId, status, fingerprint, updatedAt, [knowledgeBaseId+updatedAt], &[knowledgeBaseId+fingerprint]",
+      knowledgeBaseChunks:
+        "&id, knowledgeBaseId, sourceId, vectorDocId, [knowledgeBaseId+sourceId], [knowledgeBaseId+createdAt]",
+      knowledgeBaseIngestJobs:
+        "&id, knowledgeBaseId, sourceId, status, updatedAt, [knowledgeBaseId+status], [knowledgeBaseId+updatedAt]",
+    })
+
+    // v147 — single-Agent task board. Task metadata is portable; each retry
+    // appends a separate attempt so results are never overwritten.
+    this.version(147).stores({
+      agentTasks:
+        "&id, agentId, projectId, status, priority, scheduledFor, updatedAt, [agentId+status], [agentId+updatedAt]",
+      agentTaskAttempts:
+        "&id, taskId, agentId, status, attemptNo, schedulerExecutionId, updatedAt, [taskId+attemptNo], [taskId+updatedAt]",
+    })
+
+    // v148 — Immutable workflow versions + atomic environment deployments.
+    // Legacy `published` rows become version 1 and an active production
+    // deployment. The old publication envelope remains as a dual-read
+    // projection for one compatibility release; draft edits never rewrite the
+    // immutable artifact.
+    this.version(148)
+      .stores({
+        workflowVersions: "&id, workflowId, [workflowId+sequence], digest, createdAt",
+        workflowDeployments:
+          "&id, &[accountId+workflowId+environment], workflowId, environment, versionId, status, updatedAt",
+        workflowInvocations:
+          "&id, &[accountId+entrypoint+deploymentId+caller+idempotencyKey], deploymentId, versionId, runId, status, createdAt",
+      })
+      .upgrade(async (tx) => {
+        const accountId = accountIdFromDatabaseName(name) ?? "local_acct_a"
+        const workflowTable = tx.table("workflows")
+        const rows = (await workflowTable.toArray()) as WorkflowRow[]
+        const versions: WorkflowVersion[] = []
+        const deployments: WorkflowDeployment[] = []
+
+        for (const workflow of rows) {
+          if (!workflow.published) continue
+          const version = createWorkflowVersion({
+            workflow,
+            workflowInterface: workflow.interface ?? {},
+            accountId,
+            sequence: 1,
+            createdAt: workflow.published.at,
+          })
+          const deploymentId = workflowDeploymentId(accountId, workflow.id, "production")
+          versions.push(version)
+          deployments.push({
+            id: deploymentId,
+            accountId,
+            workflowId: workflow.id,
+            environment: "production",
+            versionId: version.id,
+            revision: 1,
+            status: "active",
+            createdAt: workflow.published.at,
+            updatedAt: workflow.published.at,
+          })
+          await workflowTable.update(workflow.id, {
+            published: {
+              ...workflow.published,
+              versionId: version.id,
+              deploymentId,
+              deploymentRevision: 1,
+            },
+          })
+        }
+
+        if (versions.length > 0) await tx.table("workflowVersions").bulkPut(versions)
+        if (deployments.length > 0) await tx.table("workflowDeployments").bulkPut(deployments)
+      })
+
+    // v149 — durable, per-run workflow event cursors for HTTP/SSE replay.
+    // Historical rows are ordered deterministically by timestamp then id;
+    // every future event-log write allocates the next sequence transactionally.
+    this.version(149)
+      .stores({
+        workflowRunEvents:
+          "&id, runId, [runId+ts], [runId+sequence], stepId, [runId+stepId], type, projectId",
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table("workflowRunEvents")
+        const rows = (await table.toArray()) as WorkflowRunEventRow[]
+        rows.sort((left, right) =>
+          left.runId === right.runId
+            ? left.ts - right.ts || left.id.localeCompare(right.id)
+            : left.runId.localeCompare(right.runId)
+        )
+        let runId = ""
+        let sequence = 0
+        for (const row of rows) {
+          if (row.runId !== runId) {
+            runId = row.runId
+            sequence = 0
+          }
+          sequence += 1
+          row.sequence = sequence
+        }
+        if (rows.length > 0) await table.bulkPut(rows)
+      })
+
+    // v150 — global trace-time index. Retention, recent-span, paging and
+    // dashboard-window reads previously materialized and sorted the entire
+    // high-write trace table. The existing compound indexes remain unchanged;
+    // `startTime` adds a bounded global cursor for those hot paths.
+    this.version(150).stores({
+      agentTraces:
+        "&id, startTime, sessionId, [sessionId+startTime], traceId, [traceId+startTime], parentSpanId, surface, projectId, [projectId+startTime]",
+    })
+
+    // v151 — MCP control plane. Legacy definitions stay operational, while
+    // newly-created definitions use pending trust and host-owned credentials.
+    // Duplicate legacy namespaces are fail-closed instead of silently
+    // overwriting each other in the SDK's name-keyed map.
+    this.version(151)
+      .stores({
+        mcpSyncJobs: "&id, status, nextAttemptAt, updatedAt",
+        mcpCapabilityCache: "&id, serverId, expiresAt, updatedAt",
+        mcpServerSummaries: "&id, updatedAt, trustState",
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table("mcpServers")
+        const rows = (await table.toArray()) as McpServer[]
+        const seen = new Set<string>()
+        const summaries: McpServerSummary[] = []
+        for (const row of rows.sort(
+          (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)
+        )) {
+          const normalized = row.name.trim().toLocaleLowerCase("en-US")
+          const duplicate = seen.has(normalized)
+          seen.add(normalized)
+          const builtin = row.name === A2UI_BRIDGE_SERVER_NAME
+          row.displayName = row.displayName?.trim() || row.name
+          row.schemaVersion = 1
+          row.revision = row.revision ?? 1
+          row.credentialVersion = row.credentialVersion ?? 0
+          row.origin = row.origin ?? (builtin ? "builtin" : row.pluginId ? "plugin" : "manual")
+          row.trust = duplicate
+            ? { state: "blocked" }
+            : (row.trust ?? { state: builtin ? "trusted" : "legacy" })
+          if (duplicate) row.enabled = false
+          summaries.push({
+            id: row.id,
+            displayName: row.displayName,
+            transport: row.transport,
+            enabled: row.enabled,
+            trustState: row.trust.state,
+            updatedAt: row.updatedAt,
+          })
+        }
+        if (rows.length > 0) await table.bulkPut(rows)
+        if (summaries.length > 0) await tx.table("mcpServerSummaries").bulkPut(summaries)
+      })
+
+    // v152 — Keep binary media outside message payloads while retaining a
+    // small, indexed authorization/lifecycle ledger. Turn indexes support the
+    // lazy transcript projection without rewriting legacy rows.
+    this.version(152).stores({
+      messages:
+        "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id], projectId, [projectId+createdAt], turnKey, [sessionId+turnKey]",
+      messageMediaRefs: "[messageId+hash], sessionId, messageId, hash, [sessionId+hash]",
+    })
+
+    // v153 — Empty-on-upgrade lazy transcript index. First access writes only
+    // the newest bounded page; older pages are added as the user scrolls.
+    this.version(153).stores({
+      chatTurnSummaries:
+        "[sessionId+turnKey], sessionId, turnKey, [sessionId+order], revision, updatedAt",
+      chatTranscriptIndexState: "sessionId, revision, updatedAt",
+    })
+
+    // v154 — Agent Skills portable identity. `slug` is intentionally not
+    // indexed: it is a low-cardinality management field and uniqueness is
+    // enforced transactionally by the Skill persistence seam.
+    this.version(154).upgrade(async (tx) => {
+      const table = tx.table<Skill, string>("skills")
+      const rows = await table.toArray()
+      const used = new Set<string>()
+      rows.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+      for (const row of rows) {
+        row.slug = allocateUniqueSkillSlug(deriveMigratedSkillSlug(row), used)
+      }
+      if (rows.length > 0) await table.bulkPut(rows)
+    })
+
+    // v155 — Independent-session messaging. The payload is text-only and
+    // carries explicit untrusted-agent provenance; receiver policy transitions
+    // the durable receipt instead of treating enqueue success as delivery.
+    this.version(155).stores({
+      sessionPeerMessages:
+        "&id, senderSessionId, receiverSessionId, status, expiresAt, [receiverSessionId+status], [senderSessionId+createdAt], [receiverSessionId+createdAt]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3407,10 +3750,11 @@ export class CogniaDB extends Dexie {
   petAchievements!: Table<PetAchievementRecord, string>
   // v94 — Pet item inventory (economy wave). See `lib/db/pet.ts`.
   petInventory!: Table<PetInventoryRow, string>
-  // v72 — Remote-control durable audit. See `lib/db/remote-control-audit.ts`.
-  remoteControlAudit!: Table<RemoteControlAuditEntry, string>
-  // v92 — Remote-control run-status projection. See `lib/db/remote-control-run-status.ts`.
-  remoteControlRunStatus!: Table<RemoteControlRunStatusRow, string>
+  // Historical table name retained for schema compatibility; new rows are
+  // outbound-only and written through `lib/webhooks/audit.ts`.
+  remoteControlAudit!: Table<WebhookAuditEntry, string>
+  // Historical, no longer written after the legacy inbound listener removal.
+  remoteControlRunStatus!: Table<LegacyRemoteControlRunStatusRow, string>
   // v73 — Pet Live2D models + asset blobs. See `lib/db/pet-models.ts`.
   petModels!: Table<PetModelRow, string>
   petModelFiles!: Table<PetModelFileRow, string>
@@ -3466,6 +3810,30 @@ export class CogniaDB extends Dexie {
   // v117 — host-local remote browser profile and public-domain grants.
   browserProfiles!: Table<import("./browser-profiles").BrowserProfileRow, string>
   browserDomainGrants!: Table<import("./browser-profiles").BrowserDomainGrantRow, string>
+  // v144 — device-local project environments and controlled CDP metadata.
+  projectEnvironments!: Table<import("@/types/project-environment").ProjectEnvironment, string>
+  cdpGrants!: Table<import("@/types/browser-developer").CdpGrant, string>
+  cdpAuditEvents!: Table<import("@/types/browser-developer").CdpAuditEvent, string>
+
+  override close(closeOptions?: { disableAutoOpen: boolean }): void {
+    if (this.isOpen()) this.logConnectionEvent("close")
+    super.close(closeOptions)
+    unregisterKnownConnection(this)
+  }
+
+  private logConnectionEvent(event: "open" | "close" | "blocked"): void {
+    if (process.env.NODE_ENV !== "development") return
+    const backend = this.isOpen() ? this.backendDB() : null
+    console.debug("[db:connection]", {
+      event,
+      connectionId: this.connectionId,
+      owner: this.connectionOwner,
+      databaseName: this.name,
+      declaredVersion: this.verno,
+      nativeVersion: backend?.version ?? null,
+      elapsedMs: Date.now() - this.connectionCreatedAt,
+    })
+  }
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
@@ -3530,14 +3898,45 @@ export type {
 } from "./crm-types"
 
 let _db: CogniaDB | null = null
+const _knownConnections = new Map<string, Set<CogniaDB>>()
 let _seedPromise: Promise<void> | null = null
 let _activeDatabaseName: string | null = null
 let _yieldChannel: BroadcastChannel | null = null
 let _tauriYieldListening = false
 let _tauriYieldUnlisten: (() => void) | null = null
 let _yieldOrigin: string | null = null
+const _reportedConnectionOwners = new Map<string, Set<string>>()
 /** Stops the in-flight blocked-open re-nudge loop, if any (see getDb). */
 let _stopBlockedRetry: (() => void) | null = null
+
+function registerKnownConnection(database: CogniaDB): void {
+  let connections = _knownConnections.get(database.name)
+  if (!connections) {
+    connections = new Set()
+    _knownConnections.set(database.name, connections)
+  }
+  connections.add(database)
+}
+
+function unregisterKnownConnection(database: CogniaDB): void {
+  const connections = _knownConnections.get(database.name)
+  if (!connections) return
+  connections.delete(database)
+  if (connections.size === 0) _knownConnections.delete(database.name)
+}
+
+/** Owners of live CogniaDB handles in this renderer realm, for blocked diagnostics. */
+export function getOpenDatabaseConnectionOwners(databaseName: string): string[] {
+  const connections = _knownConnections.get(databaseName)
+  if (!connections) return []
+  const owners: string[] = []
+  for (const database of connections) {
+    if (database.isOpen()) owners.push(database.connectionOwner)
+    else connections.delete(database)
+  }
+  if (connections.size === 0) _knownConnections.delete(databaseName)
+  return [...new Set(owners)].sort()
+}
 
 /** Interval between yield re-nudges while a schema upgrade stays blocked. */
 const BLOCKED_RENUDGE_INTERVAL_MS = 750
@@ -3580,10 +3979,12 @@ const DB_YIELD_CHANNEL_NAME = "cognia-db-yield"
 const TAURI_DB_YIELD_EVENT = "cognia://db-yield"
 
 interface DbYieldMessage {
-  type: "dexie-yield"
+  type: "dexie-yield" | "dexie-yield-owners"
   dbName: string
   /** Emitting realm's id, so a window skips the yield events it broadcast. */
   origin: string
+  targetOrigin?: string
+  connectionOwners?: string[]
 }
 
 /** Stable per-realm identity for {@link DbYieldMessage.origin}. */
@@ -3601,10 +4002,7 @@ function ensureYieldChannel(): BroadcastChannel | null {
     _yieldChannel = new BroadcastChannel(DB_YIELD_CHANNEL_NAME)
     _yieldChannel.onmessage = (event: MessageEvent) => {
       const msg = event.data as DbYieldMessage | undefined
-      if (msg?.type !== "dexie-yield") return
-      if (_db && _db.name === msg.dbName) {
-        closeCachedDb()
-      }
+      handleYieldMessage(msg, (reply) => _yieldChannel?.postMessage(reply))
     }
   } catch {
     _yieldChannel = null
@@ -3628,11 +4026,7 @@ function ensureTauriYieldListener(): void {
     .then(({ listen }) =>
       listen<DbYieldMessage>(TAURI_DB_YIELD_EVENT, (event) => {
         const msg = event.payload
-        if (msg?.type !== "dexie-yield") return
-        if (msg.origin === yieldOrigin()) return // our own broadcast — ignore
-        if (_db && _db.name === msg.dbName) {
-          closeCachedDb()
-        }
+        handleYieldMessage(msg, emitTauriYield)
       })
     )
     .then((unlisten) => {
@@ -3643,6 +4037,45 @@ function ensureTauriYieldListener(): void {
       // retries. The BroadcastChannel path stays as the best-effort fallback.
       _tauriYieldListening = false
     })
+}
+
+function handleYieldMessage(
+  message: DbYieldMessage | undefined,
+  reply: (message: DbYieldMessage) => void
+): void {
+  if (!message) return
+  if (message.type === "dexie-yield-owners") {
+    if (message.targetOrigin !== yieldOrigin()) return
+    let owners = _reportedConnectionOwners.get(message.dbName)
+    if (!owners) {
+      owners = new Set()
+      _reportedConnectionOwners.set(message.dbName, owners)
+    }
+    for (const owner of message.connectionOwners ?? []) owners.add(owner)
+    return
+  }
+  if (message.type !== "dexie-yield" || message.origin === yieldOrigin()) return
+  if (!_db || _db.name !== message.dbName) return
+  const connectionOwners = getOpenDatabaseConnectionOwners(message.dbName)
+  if (connectionOwners.length > 0) {
+    reply({
+      type: "dexie-yield-owners",
+      dbName: message.dbName,
+      origin: yieldOrigin(),
+      targetOrigin: message.origin,
+      connectionOwners,
+    })
+  }
+  closeCachedDb()
+}
+
+export function getDatabaseUpgradeBlockerOwners(databaseName: string): string[] {
+  return [
+    ...new Set([
+      ...getOpenDatabaseConnectionOwners(databaseName),
+      ...(_reportedConnectionOwners.get(databaseName) ?? []),
+    ]),
+  ].sort()
 }
 
 /** Mirror a yield request onto the Tauri event bus. No-op off Tauri. */
@@ -3783,14 +4216,47 @@ export function clearAccountDatabaseSelection(): void {
   closeCachedDb()
 }
 
+let _testDbRuntimeUsers = 0
+
+/**
+ * Test-only: explicitly allow the singleton Dexie database in a Node Jest
+ * environment after fake IndexedDB has been installed. Keeping this as a
+ * module-local capability avoids defining `window` and accidentally sending
+ * unrelated production modules down their browser-only branches.
+ */
+export function __enableDbRuntimeForTesting(): () => void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("__enableDbRuntimeForTesting() is only available when NODE_ENV=test")
+  }
+  if (typeof indexedDB === "undefined") {
+    throw new Error("__enableDbRuntimeForTesting() requires an IndexedDB implementation")
+  }
+
+  // Dexie snapshots its dependencies when the module is evaluated. Node tests
+  // commonly import schema.ts before their fixture installs fake-indexeddb, so
+  // refresh the dependency slots explicitly instead of relying on import order.
+  Dexie.dependencies.indexedDB = indexedDB
+  if (typeof IDBKeyRange !== "undefined") Dexie.dependencies.IDBKeyRange = IDBKeyRange
+
+  _testDbRuntimeUsers += 1
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    _testDbRuntimeUsers = Math.max(0, _testDbRuntimeUsers - 1)
+  }
+}
+
 export function getDb(): CogniaDB {
   // SSR-safe: only instantiate Dexie on the client. Static export still
   // pre-renders pages where `window` is undefined, so we lazy-create.
-  if (typeof window === "undefined") {
+  const hasExplicitTestRuntime =
+    process.env.NODE_ENV === "test" && _testDbRuntimeUsers > 0 && typeof indexedDB !== "undefined"
+  if (typeof window === "undefined" && !hasExplicitTestRuntime) {
     throw new Error("getDb() called on the server — wrap usage in a client component")
   }
   if (!_db) {
-    _db = new CogniaDB(_activeDatabaseName ?? LEGACY_COGNIA_DB_NAME)
+    _db = new CogniaDB(_activeDatabaseName ?? LEGACY_COGNIA_DB_NAME, "active-singleton")
     ensureYieldChannel()
     ensureTauriYieldListener()
     // Yield to another connection that needs to upgrade the schema. Plugin
@@ -3811,6 +4277,7 @@ export function getDb(): CogniaDB {
     // actively ask other contexts to yield over the BroadcastChannel.
     const opened = _db
     _db.on("blocked", () => {
+      _reportedConnectionOwners.delete(opened.name)
       console.info(
         "[db] schema upgrade is waiting for another connection (tab or plugin) to close; it will proceed automatically."
       )
@@ -3837,6 +4304,7 @@ export function getDb(): CogniaDB {
             dispatchDbUpgradeBlocked({
               databaseName: opened.name,
               attempts: BLOCKED_RENUDGE_MAX_ATTEMPTS,
+              connectionOwners: getDatabaseUpgradeBlockerOwners(opened.name),
             })
           },
         }
@@ -3844,35 +4312,10 @@ export function getDb(): CogniaDB {
     })
     // The upgrade landed (or the db opened cleanly): stop any pending re-nudge.
     _db.on("ready", () => {
+      _reportedConnectionOwners.delete(opened.name)
       _stopBlockedRetry?.()
       _stopBlockedRetry = null
     })
-    const seedTarget = _db
-    // Kick off seeding once per process. We import lazily to avoid a circular
-    // dependency: seed.ts imports the per-table CRUD modules which import this
-    // file. The promise is memoized so concurrent callers share the same run.
-    _seedPromise = import("./seed")
-      .then(({ seedBuiltIns }) => {
-        return withDbReopenRetry(() => {
-          if (_db !== seedTarget) return Promise.resolve()
-          return seedBuiltIns()
-        })
-      })
-      .catch((err) => {
-        // DatabaseClosedError fires when the db is deleted out from under us
-        // (common during tests and hard resets). Not actionable; suppress.
-        if (isDatabaseClosedError(err)) return
-        console.error("seedBuiltIns failed", err)
-        // The user-visible consequence is missing built-in skills, characters
-        // and teams — which reads as "those features don't exist here" rather
-        // than as a failure. Say so instead of only logging it.
-        dispatchDiagnostic(
-          createDiagnostic("seedFailed", {
-            source: "storage",
-            message: err instanceof Error ? err.message : String(err),
-          })
-        )
-      })
   }
   return _db
 }
@@ -3884,9 +4327,34 @@ export function getDb(): CogniaDB {
  * the rows reactively as soon as the seed completes.
  */
 export function whenSeeded(): Promise<void> {
-  // Touch getDb to ensure seeding has been kicked off.
-  getDb()
-  return _seedPromise ?? Promise.resolve()
+  if (_seedPromise) return _seedPromise
+  const seedTarget = getDb()
+  // Seeding is intentionally explicit: database boot first adopts any dynamic
+  // plugin stores, then calls this function. Keeping getDb() side-effect-free
+  // prevents a settings read from racing a plugin close→upgrade→open cycle.
+  _seedPromise = (async () => {
+    try {
+      const { seedBuiltIns } = await import("./seed")
+      await withDbReopenRetry(() => {
+        if (_db !== seedTarget) return Promise.resolve()
+        return seedBuiltIns()
+      })
+    } catch (err) {
+      // DatabaseClosedError fires when the db is deleted or switched out from
+      // under this attempt. The selected database will start its own seed.
+      if (isDatabaseClosedError(err)) return
+      _seedPromise = null
+      console.error("seedBuiltIns failed", err)
+      dispatchDiagnostic(
+        createDiagnostic("seedFailed", {
+          source: "storage",
+          message: err instanceof Error ? err.message : String(err),
+        })
+      )
+      throw err
+    }
+  })()
+  return _seedPromise
 }
 
 /**
@@ -3911,6 +4379,7 @@ export function __resetDbForTesting(): void {
   _tauriYieldUnlisten = null
   _tauriYieldListening = false
   _yieldOrigin = null
+  _reportedConnectionOwners.clear()
 }
 
 function closeCachedDb(): void {

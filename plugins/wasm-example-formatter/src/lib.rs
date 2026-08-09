@@ -57,16 +57,21 @@ impl Guest for Plugin {
             "init",
             "wasm-example-formatter activated",
         );
-        notification::notify(
+        // v0.2: `notify` returns `result<_, string>`, so a denial or a missing
+        // notification backend is observable. Activation should still succeed
+        // without it, so log and continue.
+        if let Err(error) = notification::notify(
             "wasm-example-formatter",
             "Plugin is active. Use the format_rust tool or workflow node.",
             notification::NotificationKind::Info,
-        );
+        ) {
+            logger::log(logger::LogLevel::Warn, "init", &format!("notify: {error}"));
+        }
         Ok(())
     }
 
     fn on_event(_kind: String, _payload: Vec<u8>) -> Result<Vec<u8>, String> {
-        // No hook subscriptions in v0.1 — emit an empty echo.
+        // No hook subscriptions — emit an empty echo.
         Ok(Vec::new())
     }
 

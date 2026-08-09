@@ -53,6 +53,8 @@ function renderApplicationEnvironment(
     COGNIA_WORKSPACE_RUNTIME_IMAGE: target.spec.images.workspaceRuntime,
     COGNIA_CONFIG_REVISION: configRevision,
     COGNIA_PUBLIC_URL: new URL(target.spec.publicUrl).toString(),
+    COGNIA_SIGNALING_URL: "ws://signaling:7892/v2/signaling",
+    COGNIA_PUBLIC_SIGNALING_URL: publicSignalingUrl(target.spec.publicUrl),
     COGNIA_LOGTO_ISSUER: new URL(target.spec.identity.issuer).toString(),
     COGNIA_LOGTO_AUDIENCE: target.spec.identity.audience,
     COGNIA_LOGTO_REQUIRED_SCOPES: Object.values(target.spec.identity.scopes).join(" "),
@@ -90,6 +92,8 @@ function renderKubernetesFiles(
   const literals = renderApplicationEnvironment(target, configRevision)
   const configLiterals = [
     `publicUrl=${literals.COGNIA_PUBLIC_URL}`,
+    `signalingUrl=${literals.COGNIA_SIGNALING_URL}`,
+    `publicSignalingUrl=${literals.COGNIA_PUBLIC_SIGNALING_URL}`,
     `logtoIssuer=${literals.COGNIA_LOGTO_ISSUER}`,
     `logtoAudience=${literals.COGNIA_LOGTO_AUDIENCE}`,
     `logtoRequiredScopes=${literals.COGNIA_LOGTO_REQUIRED_SCOPES}`,
@@ -152,6 +156,14 @@ function renderKubernetesFiles(
     }),
     "kustomization.yaml": stringify(kustomization),
   }
+}
+
+function publicSignalingUrl(publicUrl: string): string {
+  const url = new URL("/v2/signaling", publicUrl)
+  if (url.protocol === "https:") url.protocol = "wss:"
+  else if (url.protocol === "http:") url.protocol = "ws:"
+  else throw new Error("publicUrl must use http or https")
+  return url.toString()
 }
 
 function kubernetesTlsSecretName(target: DeploymentTarget): string {

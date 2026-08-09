@@ -26,21 +26,26 @@ import {
 } from "./tesseract-native"
 
 export interface PaddleOcrConfig {
+  /** PP-OCRv6 asset tier. Small is the product default; Tiny minimizes download size. */
+  model?: "v6-small" | "v6-tiny"
   /** Override invoker — tests inject a mock here. */
   invoker?: NativeOcrInvoker
   /** Optional readiness override; default reads the module-level probe. */
-  isReady?: () => boolean | Promise<boolean>
+  isReady?: (variant: NonNullable<PaddleOcrConfig["model"]>) => boolean | Promise<boolean>
 }
 
 let invoker: NativeOcrInvoker | null = null
-let readinessProbe: (() => boolean | Promise<boolean>) | null = null
+let readinessProbe:
+  ((variant: NonNullable<PaddleOcrConfig["model"]>) => boolean | Promise<boolean>) | null = null
 
 export function __setPaddleOcrInvoker(impl: NativeOcrInvoker | null): void {
   invoker = impl
   if (impl) setShared(impl)
 }
 
-export function __setPaddleOcrReadiness(probe: (() => boolean | Promise<boolean>) | null): void {
+export function __setPaddleOcrReadiness(
+  probe: ((variant: NonNullable<PaddleOcrConfig["model"]>) => boolean | Promise<boolean>) | null
+): void {
   readinessProbe = probe
 }
 
@@ -62,9 +67,10 @@ export async function paddleOcrExtract(
   ctx: OcrProviderContext
 ): Promise<OcrResult> {
   const config = (ctx.config ?? {}) as PaddleOcrConfig
+  const model = config.model ?? "v6-small"
   const probe = config.isReady ?? readinessProbe
   if (probe) {
-    const ready = await probe()
+    const ready = await probe(model)
     if (!ready) {
       throw new OcrError(
         "unsupported_shell",
@@ -91,6 +97,7 @@ export async function paddleOcrExtract(
       bytes: normalized.bytes,
       mimeType: normalized.mimeType,
       languages,
+      modelVariant: model,
     })
   } catch (err) {
     throw mapNativeInvokeError("paddle-ocr", "paddle-ocr", err)

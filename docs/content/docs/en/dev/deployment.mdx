@@ -282,6 +282,14 @@ ghcr.io/maxqian888/cognia-runner        # T2 per-agent runner image
 - **Smoke** — `scripts/smoke/compose-smoke.mjs` drives a running stack in tiers (`services` / `server` / `tls`); `compose-e2e.yml` runs it in CI on every PR touching the suite.
 - Full architecture and the isolation/topology ladder: [ADR-0059](../adr/0059-cloud-deployment-headless-brain).
 
+The headless host uses two deliberately different signaling URLs.
+`COGNIA_SIGNALING_URL` is the host-internal rendezvous endpoint
+(`ws://signaling:7892/v2/signaling` in Compose and Kubernetes).
+`COGNIA_PUBLIC_SIGNALING_URL` is the client-visible endpoint derived from the
+deployment public URL (`https` becomes `wss`, with `/v2/signaling`). Caddy and
+the Kubernetes Ingress route that public path to the `signaling:7892` service;
+all other application paths remain on `cognia-server`.
+
 ### Browser Companion security
 
 The production Web client accepts Companion endpoints only through:
@@ -294,7 +302,7 @@ The browser cannot install or bypass a local CA automatically. Install the CA in
 
 Authorize Web origins by exact HTTPS origin (`scheme://host[:port]`). Do not use `*` on authenticated endpoints. Keep the allowed methods and headers narrow, handle preflight explicitly, and permit Private Network Access only for the exact administrator-approved origins. A browser connection failure should be diagnosed separately as certificate trust, origin/CORS, PNA, expired or revoked JWT, missing TURN, or an offline host.
 
-One browser account can retain multiple encrypted Companion targets, but only one target is active. Provider keys, device JWTs, OIDC tokens, and signaling private material live in the browser Vault; the public target book contains connection metadata only. Each target also owns a separate IndexedDB database and outbound queue scope.
+One browser account can retain multiple encrypted Companion targets, but only one target is active. Provider keys plus device and signaling private keys live in the browser Vault; OIDC and five-minute DPoP access tokens remain memory-only. The public target book contains connection metadata only. Each target also owns a separate IndexedDB database and outbound queue scope.
 
 ## CI/CD
 

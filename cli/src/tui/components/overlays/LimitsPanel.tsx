@@ -10,7 +10,8 @@
  * layout + theme color.
  */
 import React from "react"
-import { Box, Text, useInput, useStdout } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import {
   PANEL_CHROME_ROWS,
@@ -18,6 +19,7 @@ import {
   panelFooterHint,
   usePanelScroll,
 } from "../../hooks/usePanelScroll"
+import { contentRows } from "../../layout/terminal-layout"
 
 import {
   meterColor,
@@ -172,6 +174,7 @@ function SessionSummary({ analysis }: { analysis: SessionAnalysis }) {
 
 export function LimitsPanel({
   snapshots,
+  loading,
   analysis,
   now,
   rateLimits,
@@ -180,6 +183,7 @@ export function LimitsPanel({
   onClose,
 }: {
   snapshots: ProviderLimits[]
+  loading?: boolean
   analysis: SessionAnalysis
   /** Render clock for the reset countdowns (captured when the panel opened). */
   now: number
@@ -192,11 +196,9 @@ export function LimitsPanel({
   onClose: () => void
 }) {
   const theme = useTheme()
-  const { stdout } = useStdout()
-  const viewport =
-    viewportRows ?? Math.max(4, ((stdout?.rows as number | undefined) ?? 24) - PANEL_CHROME_ROWS)
+  const viewport = Math.max(1, contentRows(viewportRows ?? 24, PANEL_CHROME_ROWS))
   const scroll = usePanelScroll(viewport)
-  useInput((input, key) => {
+  useModalInput((input, key) => {
     if (key.escape || key.return) return onClose()
     scroll.onKey(input, key)
   })
@@ -206,6 +208,7 @@ export function LimitsPanel({
         Subscription limits
       </Text>
       <PanelViewport viewportRows={viewport} scroll={scroll}>
+        {loading && <Text color={theme.muted}>◌ Loading provider limits…</Text>}
         {rateLimits && rateLimits.meters.length > 0 && (
           <RateLimitBlock snapshot={rateLimits} now={now} />
         )}
@@ -220,7 +223,7 @@ export function LimitsPanel({
         {/* Onboarding hint whenever NO account carries usable data — shown both
             when the list is empty and when the only block is a no-data active
             provider, so the "add a token" pointer is never lost. */}
-        {!snapshots.some((s) => s.meters.length > 0 || s.error) && (
+        {!loading && !snapshots.some((s) => s.meters.length > 0 || s.error) && (
           <Text color={theme.muted}>
             No subscription limit data — add a Claude/Codex subscription token or a credit-provider
             key, then run /limits again.

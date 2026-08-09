@@ -1,6 +1,6 @@
 /**
  * Renderer handlers for the CLI bridge's agent-team commands
- * (`POST /api/v1/dev/teams/{list,run,run-status}`).
+ * (`POST /api/dev/teams/{list,run,run-status}`).
  *
  * AgentTeam definitions live in the renderer's Zustand store (persisted to
  * GUI localStorage) and run history in the GUI's Dexie `workflowRuns` — the

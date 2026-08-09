@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/adapter-instances.ts — CRUD for the v18 adapterInstances table.
  */
 
-import "fake-indexeddb/auto"
 import {
   createAdapterInstance,
   getAdapterInstance,
@@ -14,14 +12,14 @@ import {
   patchAdapterInstanceSettings,
   deleteAdapterInstance,
 } from "./adapter-instances"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function baseInput() {
   return {

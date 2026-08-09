@@ -351,6 +351,110 @@ test("completion / hover / definition / references / formatting requests reach t
   await client.stop()
 })
 
+test("controlled two-file workspace preserves diagnostics and cross-file language features", async () => {
+  const mock = makeMockConnection()
+  const aUri = "file:///tmp/skill/scripts/a.ts"
+  const bUri = "file:///tmp/skill/scripts/b.ts"
+  mock.replyTo("initialize", () => ({
+    capabilities: {
+      textDocumentSync: 1,
+      completionProvider: {},
+      definitionProvider: true,
+      renameProvider: true,
+      documentFormattingProvider: true,
+    },
+  }))
+  mock.replyTo("shutdown", () => null)
+  mock.replyTo("textDocument/completion", ({ textDocument }) => {
+    assert.equal(textDocument.uri, aUri)
+    return [{ label: "sharedValue", kind: 6 }]
+  })
+  mock.replyTo("textDocument/definition", ({ textDocument }) => {
+    assert.equal(textDocument.uri, aUri)
+    return [
+      {
+        uri: bUri,
+        range: {
+          start: { line: 0, character: 13 },
+          end: { line: 0, character: 24 },
+        },
+      },
+    ]
+  })
+  mock.replyTo("textDocument/rename", ({ textDocument, newName }) => {
+    assert.equal(textDocument.uri, aUri)
+    assert.equal(newName, "renamedValue")
+    return {
+      changes: {
+        [aUri]: [
+          {
+            range: {
+              start: { line: 0, character: 9 },
+              end: { line: 0, character: 20 },
+            },
+            newText: newName,
+          },
+        ],
+        [bUri]: [
+          {
+            range: {
+              start: { line: 0, character: 13 },
+              end: { line: 0, character: 24 },
+            },
+            newText: newName,
+          },
+        ],
+      },
+    }
+  })
+  mock.replyTo("textDocument/formatting", ({ textDocument }) => {
+    assert.equal(textDocument.uri, bUri)
+    return [
+      {
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 0, character: 31 },
+        },
+        newText: "export const sharedValue = 1\n",
+      },
+    ]
+  })
+
+  const client = makeClient(mock)
+  const diagnostics = []
+  client.onPublishDiagnostics((params) => diagnostics.push(params))
+  await client.start()
+  client.registerTextDocument(aUri, "typescript", "export { sharedValue } from './b'\n")
+  client.registerTextDocument(bUri, "typescript", "export const sharedValue=1\n")
+
+  mock.simulateNotification("textDocument/publishDiagnostics", {
+    uri: bUri,
+    diagnostics: [
+      {
+        range: {
+          start: { line: 0, character: 24 },
+          end: { line: 0, character: 25 },
+        },
+        severity: 2,
+        message: "missing spacing",
+      },
+    ],
+  })
+  assert.equal(diagnostics[0].uri, bUri)
+
+  const completion = await client.completion(aUri, { line: 0, character: 9 })
+  const definition = await client.definition(aUri, { line: 0, character: 9 })
+  const rename = await client.rename(aUri, { line: 0, character: 9 }, "renamedValue")
+  const formatting = await client.formatting(bUri)
+
+  assert.equal(completion[0].label, "sharedValue")
+  assert.equal(definition[0].uri, bUri)
+  assert.deepEqual(Object.keys(rename.changes).sort(), [aUri, bUri])
+  assert.equal(formatting[0].newText, "export const sharedValue = 1\n")
+
+  await client.stop()
+})
+
 test("publishDiagnostics notifications fan out to every subscriber", async () => {
   const mock = makeMockConnection()
   mock.replyTo("initialize", () => ({ capabilities: ECHO_CAPS }))

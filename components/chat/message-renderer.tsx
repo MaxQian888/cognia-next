@@ -9,7 +9,11 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
 import { Tool, ToolHeader, ToolContent } from "@/components/ai-elements/tool"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
-import { StreamingTextPart } from "@/components/chat/streaming-text-part"
+import {
+  FINALIZED_MARKDOWN_LAZY_THRESHOLD,
+  FinalizedLongTextPart,
+  StreamingTextPart,
+} from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
 import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
@@ -41,6 +45,7 @@ import {
   type SystemMessageBlock,
 } from "@/lib/slash-commands/system-blocks"
 import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
+import { ToolUseSummaryPart } from "@/components/chat/message-parts/tool-use-summary-part"
 import {
   ToolActivityGroup,
   type ToolActivityChildOptions,
@@ -55,12 +60,13 @@ import {
   SILENT_CONTROL_PART_TYPES,
 } from "@/lib/chat/agent-flow-grouping"
 import { parseTodoInput } from "@/lib/chat/todos"
+import { resolveToolDisplayTitle } from "@/lib/chat/tool-summary"
 import type { AgentFlowMode } from "@/types/appearance"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
 import { BranchPointMarker } from "@/components/chat/branch-children-chip"
 import { TriggerBadge } from "@/components/chat/trigger-badge"
 import { MemoryLearnedChip, MemoryRecalledChip } from "@/components/chat/memory-chips"
-import { isSourcesPart } from "@/lib/claude/parts-extensions"
+import { isSourcesPart, isToolUseSummaryPart } from "@/lib/claude/parts-extensions"
 import type {
   A2UIPart as A2UIPartType,
   AgentTeamDispatchPart as AgentTeamDispatchPartType,
@@ -108,6 +114,7 @@ import { MessagePluginMenu } from "@/components/chat/message-plugin-menu"
 import { BranchDialog } from "@/components/chat/branch-dialog"
 import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
 import { SteerStatusBadge } from "@/components/chat/message-parts/steer-status-badge"
+import { SessionPeerOriginBadge } from "@/components/chat/session-peer-origin-badge"
 import { dispatchComposerAppend } from "@/components/chat/composer"
 import { useAsideTarget } from "@/components/context-workbench/aside-target"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -124,6 +131,7 @@ import {
 import { useSyncExternalStore } from "react"
 import { PerfBoundary } from "@/lib/perf"
 import { useAgentFileAutoFollow } from "@/hooks/agent/use-agent-file-auto-follow"
+import { CheckpointAction } from "@/components/chat/checkpoint-action"
 
 interface Props {
   message: UIMessage
@@ -217,6 +225,12 @@ function MessageRendererInner({
     [branchSessionId]
   )
   const handBackTargetId = asideTargetSessionId ?? branchParentId ?? null
+  const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
+  const messageProvider = (message as { metadata?: { provider?: string } }).metadata?.provider
+  const checkpointEnabled =
+    message.role === "user" &&
+    branchSessionId === activeSessionId &&
+    (messageProvider ?? defaultProvider ?? "anthropic") === "anthropic"
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const isBookmarked = useChatStore(
@@ -555,6 +569,7 @@ function MessageRendererInner({
         {/* Delivery state of a mid-run follow-up. Self-hides for every message
             that is not a pending steer. */}
         <SteerStatusBadge message={message} sessionId={branchSessionId} />
+        <SessionPeerOriginBadge metadata={message.metadata} />
 
         <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
 
@@ -697,6 +712,14 @@ function MessageRendererInner({
               <MessageAction tooltip={t("editTooltip")} label={t("editLabel")} onClick={startEdit}>
                 <PencilIcon className="size-3.5" />
               </MessageAction>
+            )}
+
+            {message.role === "user" && branchSessionId && (
+              <CheckpointAction
+                checkpointId={message.id}
+                enabled={checkpointEnabled}
+                sessionId={branchSessionId}
+              />
             )}
 
             {branchSessionId && (
@@ -966,6 +989,18 @@ function renderToolPart(
   messageId: string | undefined,
   sessionId: string | undefined
 ): React.ReactNode {
+  const toolPresentation = tp as ToolUIPart & {
+    title?: string
+    toolName?: unknown
+    toolMetadata?: { readOnlyHint?: boolean | null }
+  }
+  const isDynamicTool = (tp as { type: string }).type === "dynamic-tool"
+  const dynamicToolName =
+    typeof toolPresentation.toolName === "string" && toolPresentation.toolName.trim()
+      ? toolPresentation.toolName
+      : "tool"
+  const displayTitle = resolveToolDisplayTitle(tp)
+  const readOnlyHint = toolPresentation.toolMetadata?.readOnlyHint
   const slot = (
     <PluginExtensionSlot
       point="chat.tool-call.actions"
@@ -1011,7 +1046,22 @@ function renderToolPart(
       <TerminalToolPart part={tp} defaultOpen={defaultOpen} />
     ) : (
       <Tool defaultOpen={defaultOpen}>
-        <ToolHeader type={tp.type} state={tp.state} />
+        {isDynamicTool ? (
+          <ToolHeader
+            type="dynamic-tool"
+            toolName={dynamicToolName}
+            state={tp.state}
+            title={displayTitle}
+            readOnlyHint={readOnlyHint}
+          />
+        ) : (
+          <ToolHeader
+            type={tp.type}
+            state={tp.state}
+            title={displayTitle}
+            readOnlyHint={readOnlyHint}
+          />
+        )}
         <ToolContent>
           <ToolDetailBody part={tp} sessionId={sessionId} />
         </ToolContent>
@@ -1040,6 +1090,10 @@ function renderPart(
 ) {
   const type = (part as { type?: string }).type
   if (!type) return null
+
+  if (type === "data-tool-summary") {
+    return isToolUseSummaryPart(part) ? <ToolUseSummaryPart key={key} part={part} /> : null
+  }
 
   if (type === "artifact") {
     return <ArtifactPart key={key} part={part as unknown as ArtifactPartType} />
@@ -1108,6 +1162,17 @@ function renderPart(
           key={key}
           text={text}
           isStreaming={isStreaming}
+          projectRoot={projectRoot}
+        />
+      )
+    }
+
+    if (text.length >= FINALIZED_MARKDOWN_LAZY_THRESHOLD) {
+      return (
+        <FinalizedLongTextPart
+          key={key}
+          text={text}
+          messageId={messageId}
           projectRoot={projectRoot}
         />
       )

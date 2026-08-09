@@ -13,6 +13,7 @@
  */
 
 import type { ProxyFetchInit, ProxyFetchResult } from "./proxy-fetch"
+import type { TTSProvider } from "./types"
 
 export interface TtsHost {
   /**
@@ -27,6 +28,10 @@ export interface TtsHost {
    * websocket/stream providers (Edge TTS, OpenAI realtime).
    */
   isNativeShell?: () => boolean
+  /** Mobile playback always uses the device/browser system synthesizer. */
+  isMobileShell?: () => boolean
+  /** Fail-closed app policy for text leaving the device for a cloud TTS provider. */
+  allowCloudText?: (text: string, provider: TTSProvider) => boolean
   /** Surface a user-visible notification (the app binds sonner toasts). */
   notify?: {
     message: (text: string) => void

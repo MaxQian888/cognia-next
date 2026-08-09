@@ -1,8 +1,7 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { AgentPlan, PlanConfig } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   __TESTING__,
   appendPlanEvent,
@@ -42,12 +41,13 @@ function buildPlan(over: Partial<AgentPlan> = {}): Parameters<typeof createPlan>
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 describe("agentPlans CRUD", () => {
   it("createPlan inserts the row and stamps createdAt/updatedAt", async () => {

@@ -1,6 +1,8 @@
 import type {
+  IntegrationAccountStatusProvider,
   IntegrationActionHandler,
   IntegrationEventNormalizer,
+  IntegrationResourceProvider,
   PluginIntegrationDef,
 } from "@/types/plugin/plugin-integration"
 import type { PluginManifest } from "@/types/plugin/plugin"
@@ -48,6 +50,8 @@ export async function registerIntegrationsForPlugin(
 
   const handlers: Record<string, IntegrationActionHandler> = {}
   const normalizers: Record<string, IntegrationEventNormalizer> = {}
+  const resourceProviders: Record<string, IntegrationResourceProvider> = {}
+  const accountStatusProviders: Record<string, IntegrationAccountStatusProvider> = {}
   for (const definition of definitions) {
     for (const action of definition.actions) {
       const candidate = moduleExports[action.handler]
@@ -67,8 +71,33 @@ export async function registerIntegrationsForPlugin(
       }
       normalizers[definition.id] = candidate as IntegrationEventNormalizer
     }
+    if (definition.resourceProvider) {
+      const candidate = moduleExports[definition.resourceProvider.handler]
+      if (typeof candidate !== "function") {
+        throw new Error(
+          `Integration "${definition.id}" resource provider export "${definition.resourceProvider.handler}" was not found`
+        )
+      }
+      resourceProviders[definition.id] = candidate as IntegrationResourceProvider
+    }
+    if (definition.healthProvider) {
+      const candidate = moduleExports[definition.healthProvider.handler]
+      if (typeof candidate !== "function") {
+        throw new Error(
+          `Integration "${definition.id}" health provider export "${definition.healthProvider.handler}" was not found`
+        )
+      }
+      accountStatusProviders[definition.id] = candidate as IntegrationAccountStatusProvider
+    }
   }
-  registerIntegrationDefinitions({ pluginId, definitions, handlers, normalizers })
+  registerIntegrationDefinitions({
+    pluginId,
+    definitions,
+    handlers,
+    normalizers,
+    resourceProviders,
+    accountStatusProviders,
+  })
   registerWorkflowKindAliases(pluginId, manifest.workflowKindAliases ?? {})
 
   const workflow = createWorkflowAPI(pluginId)

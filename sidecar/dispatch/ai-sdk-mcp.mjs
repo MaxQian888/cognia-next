@@ -21,6 +21,10 @@ import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio"
 
 import { resolveForToolCall } from "./permission-resolver.mjs"
 import { createLineBuffer, classifyMcpLogLine } from "./mcp-log.mjs"
+import {
+  createEgressGuard as createMcpEgressGuard,
+  validateRemoteUrl,
+} from "../mcp-oauth-helper.mjs"
 
 /**
  * Build an AI SDK MCP transport (instance or config) from a Claude-Agent-SDK-
@@ -30,7 +34,7 @@ import { createLineBuffer, classifyMcpLogLine } from "./mcp-log.mjs"
  */
 export function toMcpTransport(
   entry,
-  { StdioTransport = Experimental_StdioMCPTransport, stderr } = {}
+  { StdioTransport = Experimental_StdioMCPTransport, stderr, fetch } = {}
 ) {
   const type = entry?.type
   if (type === "stdio") {
@@ -48,13 +52,49 @@ export function toMcpTransport(
   }
   if (type === "sse" || type === "http") {
     if (typeof entry.url !== "string" || !entry.url) return null
+    try {
+      validateRemoteUrl(entry.url, entry.allowPrivateNetwork === true)
+    } catch {
+      return null
+    }
     return {
       type,
       url: entry.url,
       ...(entry.headers && typeof entry.headers === "object" ? { headers: entry.headers } : {}),
+      redirect: "error",
+      ...(fetch ? { fetch } : {}),
     }
   }
   return null
+}
+
+/**
+ * `@ai-sdk/mcp` v2 flipped `MCPTransportConfig.redirect` from `"follow"` to
+ * `"error"`: an HTTP/SSE MCP server that answers with a 3xx is now rejected
+ * instead of followed, so a compromised or misconfigured server can't bounce the
+ * request (with its `Authorization` header) to an unintended host. We keep that
+ * default — restoring `"follow"` would hand back the SSRF surface.
+ *
+ * The raw failure is an opaque fetch error, so recognize it and say what
+ * actually happened; otherwise a working-before-the-upgrade server just reports
+ * "failed to connect".
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isRedirectRefusal(err) {
+  for (let current = err, depth = 0; current && depth < 5; current = current.cause, depth++) {
+    const message = typeof current === "string" ? current : current?.message
+    if (typeof message === "string" && /redirect/i.test(message)) return true
+  }
+  return false
+}
+
+/** Human-readable connect failure, with the redirect case called out. */
+function describeConnectError(err) {
+  const base = err?.message ?? String(err)
+  if (!isRedirectRefusal(err)) return base
+  return `${base} — the server answered with an HTTP redirect, which AI SDK 7 refuses by default to prevent the request (and its Authorization header) being forwarded to another host. Point the config at the server's final URL.`
 }
 
 /**
@@ -96,6 +136,7 @@ function isMcpToolPermitted(namespaced, server, allowSet, disallowedSet) {
  *   retryDelayMs?: number,                           // base backoff (doubles per retry)
  *   maxAttempts?: number,                             // total connect attempts per server
  *   connectTimeoutMs?: number,                        // per-attempt connect cap (0 = none)
+ *   createEgressGuard?: typeof createMcpEgressGuard,  // injected in tests
  * }} params
  * @returns {Promise<{ tools: Record<string, any>, close: () => Promise<void> }>}
  */
@@ -112,6 +153,7 @@ export async function buildAiSdkMcpTools({
   retryDelayMs = 200,
   maxAttempts = 3,
   connectTimeoutMs = 15_000,
+  createEgressGuard = createMcpEgressGuard,
 }) {
   /** @type {Record<string, any>} */
   const tools = {}
@@ -119,6 +161,8 @@ export async function buildAiSdkMcpTools({
   const clients = []
   /** @type {Array<{ end: () => void, stream: import("node:stream").PassThrough }>} */
   const captures = []
+  /** @type {Array<{ close: () => Promise<void> }>} */
+  const egressGuards = []
   const close = async () => {
     for (const c of clients) {
       try {
@@ -140,6 +184,13 @@ export async function buildAiSdkMcpTools({
         // ignore
       }
     }
+    for (const guard of egressGuards) {
+      try {
+        await guard.close()
+      } catch {
+        // best-effort teardown — a dispatcher close must not fail session end.
+      }
+    }
   }
   if (!mcpServers || typeof mcpServers !== "object") return { tools, close }
 
@@ -147,10 +198,11 @@ export async function buildAiSdkMcpTools({
   const allowSet =
     Array.isArray(allowedTools) && allowedTools.length > 0 ? new Set(allowedTools) : null
   const disallowedSet = new Set(Array.isArray(disallowedTools) ? disallowedTools : [])
-  const buildTransport = (entry, stderr) =>
+  const buildTransport = (entry, stderr, fetch) =>
     toMcpTransport(entry, {
       ...(StdioTransport ? { StdioTransport } : {}),
       ...(stderr ? { stderr } : {}),
+      ...(fetch ? { fetch } : {}),
     })
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -229,15 +281,30 @@ export async function buildAiSdkMcpTools({
     const attempts = Math.max(1, maxAttempts)
     let client = null
     let capture = null
+    let egress = null
     for (let attempt = 0; attempt < attempts && !client; attempt++) {
       // Exponential backoff: retryDelayMs, 2×, 4×, …
       if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs * 2 ** (attempt - 1))
       const thisCapture = isStdio ? makeStderrCapture(server) : null
-      const transport = buildTransport(entry, thisCapture?.stream)
+      let thisEgress = null
+      try {
+        thisEgress = isStdio
+          ? null
+          : createEgressGuard({ allowPrivateNetwork: entry?.allowPrivateNetwork === true })
+      } catch (err) {
+        thisCapture?.end()
+        thisCapture?.stream.destroy()
+        const detail = err?.message ?? String(err)
+        log?.("warn", `mcp "${server}": egress guard failed: ${detail}`)
+        diag(server, "warn", `egress guard failed: ${detail}`)
+        return null
+      }
+      const transport = buildTransport(entry, thisCapture?.stream, thisEgress?.fetch)
       if (!transport) {
         // Unsupported/incomplete config — no point retrying.
         thisCapture?.end()
         thisCapture?.stream.destroy()
+        await thisEgress?.close?.().catch(() => undefined)
         log?.("warn", `mcp "${server}": unsupported or incomplete transport config, skipped`)
         diag(server, "warn", "unsupported or incomplete transport config, skipped")
         return null
@@ -245,12 +312,18 @@ export async function buildAiSdkMcpTools({
       try {
         client = await connectOnce(transport)
         capture = thisCapture
+        egress = thisEgress
       } catch (err) {
         thisCapture?.end()
         thisCapture?.stream.destroy()
-        if (attempt === attempts - 1) {
-          log?.("warn", `mcp "${server}" failed to connect: ${err?.message ?? err}`)
-          diag(server, "warn", `failed to connect: ${err?.message ?? err}`)
+        await thisEgress?.close?.().catch(() => undefined)
+        // A refused redirect is deterministic — the server will answer 3xx every
+        // time — so burning the remaining attempts (with backoff) only delays
+        // the turn. Fail fast with the actionable message.
+        if (attempt === attempts - 1 || isRedirectRefusal(err)) {
+          const detail = describeConnectError(err)
+          log?.("warn", `mcp "${server}" failed to connect: ${detail}`)
+          diag(server, "warn", `failed to connect: ${detail}`)
           return null
         }
         diag(
@@ -282,7 +355,7 @@ export async function buildAiSdkMcpTools({
       log?.("warn", `mcp "${server}" tools() failed: ${err?.message ?? err}`)
       diag(server, "warn", `tools() failed: ${err?.message ?? err}`)
       // Keep the client + capture so `close()` still disconnects/flushes them.
-      return { client, tools: {}, capture }
+      return { client, tools: {}, capture, egress }
     }
     /** @type {Record<string, any>} */
     const collected = {}
@@ -292,7 +365,7 @@ export async function buildAiSdkMcpTools({
       collected[namespaced] = wrapMcpToolWithGate(toolDef, namespaced, gate, reviewToolOutput)
     }
     diag(server, "info", `connected · ${Object.keys(collected).length} tool(s) exposed`)
-    return { client, tools: collected, capture }
+    return { client, tools: collected, capture, egress }
   }
 
   // Connect every server concurrently; merge in input order so the tool map is
@@ -305,6 +378,7 @@ export async function buildAiSdkMcpTools({
     if (r.status !== "fulfilled" || !r.value) continue
     if (r.value.client) clients.push(r.value.client)
     if (r.value.capture) captures.push(r.value.capture)
+    if (r.value.egress) egressGuards.push(r.value.egress)
     Object.assign(tools, r.value.tools)
   }
 

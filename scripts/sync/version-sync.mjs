@@ -27,9 +27,12 @@
  *         node scripts/sync/version-sync.mjs --check    (CI: fail on drift)
  */
 
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
+import { Command, CommanderError } from "commander"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
@@ -88,8 +91,30 @@ export function readCanonicalVersion() {
   return pkg.version
 }
 
-function main() {
-  const check = process.argv.includes("--check")
+const cliSchema = z.object({ check: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm version:sync")
+    .description("Synchronize the application version across shipping artifacts.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--check", "Report drift without rewriting version mirrors.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+function main({ check = false } = {}) {
   const version = readCanonicalVersion()
 
   const drifted = []
@@ -115,7 +140,7 @@ function main() {
       drifted.push(`${path} (${current} → ${version})`)
       continue
     }
-    writeFileSync(abs, replaceVersion(content, kind, version))
+    writeFileAtomic.sync(abs, replaceVersion(content, kind, version))
     updated.push(path)
   }
 
@@ -147,5 +172,6 @@ if (
   import.meta.url === `file://${process.argv[1]}` ||
   process.argv[1]?.endsWith("version-sync.mjs")
 ) {
-  main()
+  const options = parseArgs(process.argv.slice(2))
+  if (options) main(options)
 }

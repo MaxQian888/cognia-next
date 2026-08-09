@@ -9,6 +9,7 @@ import { canonicalStringify } from "./migrate"
 import { sha256Hex } from "./crypto"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 import { saveSettings } from "@/lib/db/settings"
+import { PORTABLE_BACKUP_BINDINGS } from "@/lib/data-governance/table-catalog"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -63,6 +64,43 @@ it("backs up portable template data without device bindings", async () => {
 
   expect(backup.payload.templateDefinitions).toHaveLength(1)
   expect(backup.payload).not.toHaveProperty("templateDeviceBindings")
+})
+
+it("backs up canonical comments for non-canvas resources", async () => {
+  await getDb().contextComments.put({
+    id: "comment-project-file",
+    resourceKind: "project-file",
+    resourceId: "README.md",
+    projectId: "project-1",
+    anchor: { kind: "resource" },
+    authorId: "user-1",
+    authorName: "User",
+    content: "Keep this portable",
+    createdAt: 1,
+    reactions: [],
+  })
+
+  const backup = await buildBackupPackage({ includeSessions: false, includeApiKey: false })
+
+  expect(backup.payload.contextComments).toEqual([
+    expect.objectContaining({ id: "comment-project-file", resourceKind: "project-file" }),
+  ])
+  expect(backup.payload.canvasComments).toEqual([])
+})
+
+it("emits an adapter field for every catalog-declared portable table", async () => {
+  const backup = await buildBackupPackage({
+    includeSessions: true,
+    includeApiKey: false,
+    includeMemories: true,
+    includeSettings: true,
+    includeCoreData: true,
+    includePlugins: true,
+  })
+
+  for (const field of new Set(Object.values(PORTABLE_BACKUP_BINDINGS))) {
+    expect(backup.payload).toHaveProperty(field)
+  }
 })
 
 async function seedAll() {
@@ -158,7 +196,7 @@ async function seedAll() {
     id: "m-1",
     name: "test",
     transport: "stdio",
-    config: {},
+    config: { command: "tool", env: { API_KEY: "mcp-secret", COLOR: "blue" } },
     enabled: true,
     createdAt: 1,
     updatedAt: 1,
@@ -304,7 +342,17 @@ describe("buildBackupPackage", () => {
     expect(pkg.payload.messages?.map((m) => m.id)).toEqual(["msg-1"])
     expect(pkg.payload.sessionState?.map((s) => s.sessionId)).toEqual(["sess-1"])
     expect(pkg.payload.trustedWorkspaces?.map((w) => w.path)).toEqual(["/some/dir"])
-    expect(pkg.payload.ttsProviderKeys?.map((k) => k.id)).toEqual(["tts.providerKey.openai"])
+    expect(pkg.payload.mcpServers?.[0].config).toEqual({
+      command: "tool",
+      env: { API_KEY: { secretRef: "mcp/m-1/env/API_KEY" }, COLOR: "blue" },
+    })
+    expect(pkg.payload.mcpCredentialManifest).toEqual([
+      { serverId: "m-1", references: ["mcp/m-1/env/API_KEY"] },
+    ])
+    expect(JSON.stringify(pkg.payload)).not.toContain("mcp-secret")
+    // Secret-bearing tables never leave the credential seam. Legacy packages
+    // carrying this optional field remain importable, but new exports omit it.
+    expect(pkg.payload.ttsProviderKeys).toBeUndefined()
   })
 
   it("includes built-ins and the API key when explicitly opted in", async () => {

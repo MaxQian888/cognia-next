@@ -380,6 +380,54 @@ describe("restorePluginTables", () => {
     expect(restored).toEqual([])
   })
 
+  it("registers manifest-only tables in one boot-time bump when requested", async () => {
+    const restored = await restorePluginTables(
+      db,
+      new Map([
+        ["plugin-a", { tables: [{ name: "x", schema: "++id" }] }],
+        ["plugin-b", { tables: [{ name: "y", schema: "&id" }] }],
+      ]),
+      { registerMissing: true }
+    )
+
+    expect(restored.sort()).toEqual(["plugin-a:x", "plugin-b:y"])
+    expect(await getPluginDexieMeta("plugin-a")).toMatchObject({
+      tableNames: ["plugin-a:x"],
+    })
+    expect(await getPluginDexieMeta("plugin-b")).toMatchObject({
+      tableNames: ["plugin-b:y"],
+    })
+  })
+
+  it("updates stale metadata during the same consolidated boot-time bump", async () => {
+    await seedMeta(db, {
+      pluginId: "plugin-a",
+      tableNames: ["plugin-a:old"],
+      dexieVersion: 2,
+      appliedAt: 1,
+    })
+
+    await restorePluginTables(
+      db,
+      new Map([
+        [
+          "plugin-a",
+          {
+            tables: [
+              { name: "old", schema: "&id" },
+              { name: "new", schema: "&id" },
+            ],
+          },
+        ],
+      ]),
+      { registerMissing: true }
+    )
+
+    expect(await getPluginDexieMeta("plugin-a")).toMatchObject({
+      tableNames: ["plugin-a:old", "plugin-a:new"],
+    })
+  })
+
   it("skips tables already present in the live schema (no bump)", async () => {
     await applyPluginTables(db, "github-delivery", {
       tables: [{ name: "repos", schema: "&fullName" }],

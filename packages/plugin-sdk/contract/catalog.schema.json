@@ -4,30 +4,76 @@
   "required": [
     "schemaVersion",
     "minimumHostVersion",
+    "apiNamespaces",
+    "deprecationPolicy",
+    "protocol",
+    "contractVersion",
     "pluginTypes",
     "permissions",
+    "errorCodes",
     "capabilities",
     "manifestContributions",
     "runtimeEntries",
     "pathFields"
   ],
   "properties": {
-    "$schema": { "type": "string" },
-    "schemaVersion": { "type": "integer", "minimum": 1 },
-    "minimumHostVersion": { "type": "string" },
-    "pluginTypes": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-    "permissions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "minimumHostVersion": {
+      "type": "string"
+    },
+    "pluginTypes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "errorCodes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]+$"
+      },
+      "uniqueItems": true
+    },
     "capabilities": {
       "type": "array",
       "items": {
         "type": "object",
         "required": ["id", "support", "introducedIn", "minimumHostVersion", "manifestFields"],
         "properties": {
-          "id": { "type": "string" },
-          "support": { "enum": ["supported", "partial", "experimental", "blocked"] },
-          "introducedIn": { "type": "string" },
-          "minimumHostVersion": { "type": "string" },
-          "manifestFields": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+          "id": {
+            "type": "string"
+          },
+          "support": {
+            "enum": ["supported", "partial", "experimental", "blocked"]
+          },
+          "introducedIn": {
+            "type": "string"
+          },
+          "minimumHostVersion": {
+            "type": "string"
+          },
+          "manifestFields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          }
         },
         "additionalProperties": false
       }
@@ -38,10 +84,14 @@
         "type": "object",
         "required": ["field", "capabilities", "execution"],
         "properties": {
-          "field": { "type": "string" },
+          "field": {
+            "type": "string"
+          },
           "capabilities": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "uniqueItems": true
           },
           "execution": {
@@ -51,13 +101,19 @@
             "enum": ["supported", "experimental", "unsupported"],
             "description": "Whether a pure-Python (or hybrid python-backed) plugin can supply this contribution's runtime executor via the plugin_python_call seam. Only meaningful for javascript/conditional execution fields; host/data fields are language-agnostic and omit it. Defaults to \"unsupported\" (JS/React only)."
           },
-          "entryPath": { "type": "string" },
+          "entryPath": {
+            "type": "string"
+          },
           "javascriptWhen": {
             "type": "object",
             "required": ["path"],
             "properties": {
-              "path": { "type": "string" },
-              "equals": { "type": "string" }
+              "path": {
+                "type": "string"
+              },
+              "equals": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
@@ -73,14 +129,22 @@
         "properties": {
           "required": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "uniqueItems": true
           },
-          "javascriptEntry": { "type": ["string", "null"] },
-          "javascriptEntryRequiredForContributions": { "type": "boolean" },
+          "javascriptEntry": {
+            "type": ["string", "null"]
+          },
+          "javascriptEntryRequiredForContributions": {
+            "type": "boolean"
+          },
           "requiredAnyOf": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "uniqueItems": true
           }
         },
@@ -93,14 +157,200 @@
         "type": "object",
         "required": ["path", "runtime", "requiredFor", "executable"],
         "properties": {
-          "path": { "type": "string" },
-          "runtime": { "enum": ["javascript", "python", "wasm", "vscode", "asset"] },
-          "requiredFor": { "type": "array", "items": { "type": "string" } },
-          "executable": { "type": "boolean" },
+          "path": {
+            "type": "string"
+          },
+          "runtime": {
+            "enum": ["javascript", "python", "wasm", "vscode", "asset"]
+          },
+          "requiredFor": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "executable": {
+            "type": "boolean"
+          },
           "sentinels": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "contractVersion": {
+      "type": "string"
+    },
+    "protocol": {
+      "type": "object",
+      "required": [
+        "version",
+        "minimumSdkVersion",
+        "sdkVersion",
+        "gatewayClientVersion",
+        "minimumGatewayClientVersion",
+        "legacyAdapter"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "minimumSdkVersion": {
+          "type": "string"
+        },
+        "sdkVersion": {
+          "type": "string"
+        },
+        "gatewayClientVersion": {
+          "type": "string"
+        },
+        "minimumGatewayClientVersion": {
+          "type": "string"
+        },
+        "legacyAdapter": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "deprecationPolicy": {
+      "type": "object",
+      "required": ["minimumHostMinorReleases", "removalRequiresSdkMajor"],
+      "properties": {
+        "minimumHostMinorReleases": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "removalRequiresSdkMajor": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "apiNamespaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "authorPath",
+          "type",
+          "stability",
+          "introducedIn",
+          "runtimes",
+          "platforms",
+          "transport",
+          "factory",
+          "enforcement",
+          "dataClassification",
+          "timeoutMs",
+          "retry",
+          "errorPolicy",
+          "lifecycle",
+          "methods"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "authorPath": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "stability": {
+            "enum": ["stable", "experimental", "deprecated"]
+          },
+          "introducedIn": {
+            "type": "string"
+          },
+          "runtimes": {
+            "type": "array",
+            "items": {
+              "enum": ["frontend", "hybrid", "python", "wasm", "vscode"]
+            },
+            "uniqueItems": true
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "enum": ["desktop", "web", "mobile", "headless"]
+            },
+            "uniqueItems": true
+          },
+          "transport": {
+            "enum": ["direct", "gateway", "rpc"]
+          },
+          "factory": {
+            "type": "string"
+          },
+          "enforcement": {
+            "enum": ["shadow", "active"]
+          },
+          "dataClassification": {
+            "enum": ["public", "internal", "sensitive", "secret"]
+          },
+          "timeoutMs": {
+            "type": ["integer", "null"],
+            "minimum": 1
+          },
+          "retry": {
+            "enum": ["never", "safe", "idempotent"]
+          },
+          "errorPolicy": {
+            "enum": ["preserve", "normalize"]
+          },
+          "lifecycle": {
+            "enum": ["call", "plugin", "host"]
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "requiredPermissions",
+                "consentTier",
+                "risk",
+                "idempotent",
+                "cancellable"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "requiredPermissions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "uniqueItems": true
+                },
+                "consentTier": {
+                  "enum": ["none", "policy", "confirm", "forbid"]
+                },
+                "risk": {
+                  "enum": ["low", "medium", "high", "critical"]
+                },
+                "idempotent": {
+                  "type": "boolean"
+                },
+                "cancellable": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
           }
         },
         "additionalProperties": false

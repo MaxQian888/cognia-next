@@ -69,4 +69,15 @@ describe("Banner", () => {
     expect(text).toContain("10% ctx")
     expect(text).not.toContain("tok")
   })
+
+  it("uses one line at the compact breakpoint and drops nonessential hints", () => {
+    const { container } = render(
+      <Banner version="1" provider="p" model="m" cwd="/long/path" density="compact" />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("Cognia")
+    expect(text).toContain("p/m")
+    expect(text).not.toContain("/settings")
+    expect(text).not.toContain("/long/path")
+  })
 })

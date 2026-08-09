@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // Coverage for the owner-side share service. Network is mocked; the Dexie
 // mirror uses fake-indexeddb. An explicit endpoint is injected so the tests
 // don't depend on settings/keyring resolution.
 
-import "fake-indexeddb/auto"
 import {
   createShareLink,
   revokeShareLink,
@@ -17,7 +15,8 @@ import type { ShareEndpoint } from "./config"
 import { decryptShareEnvelope } from "./crypto"
 import { decodeShareKey } from "./keys"
 import { listSharedLinks, getSharedLinkByCode } from "@/lib/db/shared-links"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { SharePayload, ShareEnvelopeV1 } from "./types"
 
@@ -33,11 +32,11 @@ const PAYLOAD: SharePayload = {
 
 let fetchMock: jest.Mock
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().sharedLinks.clear()
   fetchMock = jest.fn()
   ;(globalThis as { fetch: unknown }).fetch = fetchMock
@@ -52,6 +51,8 @@ function mockFetchOnce(status: number, json: unknown): void {
     json: async () => json,
   } as Response)
 }
+
+afterAll(dbFixture.dispose)
 
 describe("createShareLink", () => {
   it("rejects an encrypted request body that exceeds the upload limit", () => {

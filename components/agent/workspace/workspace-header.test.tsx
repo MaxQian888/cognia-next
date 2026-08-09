@@ -31,6 +31,10 @@ describe("WorkspaceHeader", () => {
     expect(screen.getByText("Squad Alpha")).toBeInTheDocument()
     expect(screen.getByText("Primary research team")).toBeInTheDocument()
     expect(screen.getByTestId("workspace-header-status").textContent).toContain("idle")
+    expect(screen.getByTestId(`agent-team-avatar-${team.id}`)).toHaveAttribute(
+      "src",
+      "/icons/cognia-agent-team/webp/coordinator.webp"
+    )
   })
 
   it("counts only worker teammates in the members chip", () => {
@@ -59,14 +63,13 @@ describe("WorkspaceHeader", () => {
     expect(screen.getByTestId("workspace-stat-working")).toBeInTheDocument()
   })
 
-  it("falls back to '?' for a blank name and omits the description line when unset", () => {
-    render(
-      <WorkspaceHeader
-        team={buildTeam({ name: "   ", description: undefined, totalTokenUsage: undefined })}
-        teammates={[]}
-      />
+  it("keeps the coordinator portrait for a blank team name and omits the description line", () => {
+    const team = buildTeam({ name: "   ", description: undefined, totalTokenUsage: undefined })
+    render(<WorkspaceHeader team={team} teammates={[]} />)
+    expect(screen.getByTestId(`agent-team-avatar-${team.id}`)).toHaveAttribute(
+      "data-avatar-id",
+      "coordinator"
     )
-    expect(screen.getByText("?")).toBeInTheDocument()
     // No description → no paragraph under the title.
     expect(screen.queryByText("Reproduce, fix, and ship the reducer regression.")).toBeNull()
     // No token usage record → the chip still renders, at zero.

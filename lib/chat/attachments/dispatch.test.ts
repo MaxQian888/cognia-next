@@ -12,6 +12,12 @@ jest.mock("@cognia/document/document-processor", () => {
 })
 
 import { processDocumentAsync } from "@cognia/document/document-processor"
+import { clearCustomImporters, createImportAPI } from "@/lib/plugin/api/import-api"
+import { createFilesAPI, revokePluginFileHandles } from "@/lib/plugin/api/files-api"
+import {
+  initializePluginPermissions,
+  revokePluginPermissions,
+} from "@/lib/plugin/api/permission-api"
 import {
   buildAttachmentBlocks,
   buildSendContent,
@@ -34,8 +40,14 @@ const PNG_1PX =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
 
 beforeEach(() => {
+  clearCustomImporters()
   processMock.mockReset()
   processMock.mockResolvedValue({ embeddableContent: "EXTRACTED", content: "EXTRACTED" })
+})
+
+afterEach(() => {
+  revokePluginFileHandles("office")
+  revokePluginPermissions("office")
 })
 
 describe("buildAttachmentBlocks — images", () => {
@@ -86,6 +98,39 @@ describe("buildAttachmentBlocks — images", () => {
 })
 
 describe("buildAttachmentBlocks — documents", () => {
+  it("authorizes matching binary attachments for their importer plugin", async () => {
+    createImportAPI("office").registerImporter({
+      id: "xlsx",
+      name: "Excel",
+      description: "xlsx",
+      format: "xlsx",
+      extensions: ["xlsx"],
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      import: () => ({ success: true }),
+    })
+    initializePluginPermissions("office", ["filesystem:read"])
+    const { blocks, manifest } = await buildAttachmentBlocks([
+      {
+        url: dataUrl(
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "xlsx-bytes"
+        ),
+        mediaType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename: "book.xlsx",
+      },
+    ])
+
+    const handle = manifest[0].pluginHandles?.office
+    expect(handle).toBeTruthy()
+    expect((blocks[0] as { text: string }).text).toContain(
+      "Authorized plugin attachment handles: office:"
+    )
+    await expect(createFilesAPI("office").readAttachment(handle!)).resolves.toMatchObject({
+      name: "book.xlsx",
+      size: 10,
+    })
+  })
+
   it("extracts text from a plain text file into an unfenced text block", async () => {
     processMock.mockResolvedValue({ embeddableContent: "hello world", content: "hello world" })
     const { blocks, rejected } = await buildAttachmentBlocks([

@@ -4,7 +4,8 @@ import type { CompanionConfig } from "@/lib/tauri/transport-companion"
 function config(overrides: Partial<CompanionConfig> = {}): CompanionConfig {
   return {
     baseUrl: "https://192.168.1.42:7890",
-    deviceJwt: "jwt",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    deviceKeyThumbprint: "thumbprint",
     deviceId: "device-1234567890",
     serverVersion: "0.4.2",
     serverFingerprint: "ABCDEF0123456789",

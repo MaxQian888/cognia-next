@@ -58,6 +58,7 @@ import {
   type SubmittedFile,
 } from "@/lib/chat/attachments/dispatch"
 import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
+import { captureSmartSnapshotFiles, SMART_SNAPSHOT_COMMAND_ID } from "@/lib/chat/smart-snapshot"
 import { applyOrder } from "@/lib/chat/attachments/reorder"
 import { StagedAttachmentsProvider, useStagedAttachments } from "./composer/staged-attachment-store"
 import { buildLinkContextBlocks, mergeContextBlocks, removeHttpUrl } from "@/lib/chat/link-context"
@@ -74,6 +75,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { getDocumentAcceptExtensions } from "@cognia/document/support-matrix"
 import { toast } from "sonner"
+import { registerCommand } from "@/lib/plugin/commands/registry"
 import { cn } from "@/lib/utils"
 import { collapsePaste, expandPastes, findPastePlaceholders } from "@/lib/paste-collapse"
 import { usePlatform } from "@/hooks/use-platform"
@@ -106,6 +108,7 @@ import { ComposerAttachMenu } from "./composer/attach-menu"
 import { nextPermissionMode } from "./permission-mode-indicator"
 import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { showMainWindow } from "@/lib/tauri/pet-window"
 import { getDb } from "@/lib/db/schema"
 import {
   listPendingForConversation as listPendingDrafts,
@@ -451,6 +454,45 @@ function ComposerInner(props: InnerProps) {
   useEffect(() => {
     attachmentFileCountRef.current = attachments.files.length
   }, [attachments.files])
+
+  const [smartSnapshotPending, setSmartSnapshotPending] = useState(false)
+  const captureSmartSnapshot = useCallback(
+    async (options: { delayMs?: number; switchPrompt?: boolean } = {}) => {
+      if (!isDesktop || smartSnapshotPending) return
+      setSmartSnapshotPending(true)
+      try {
+        if (options.switchPrompt) {
+          toast.message(t("smartSnapshot.switchPrompt"))
+        }
+        const delayMs = Math.max(0, options.delayMs ?? 0)
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs))
+        }
+        const result = await captureSmartSnapshotFiles()
+        attachments.add(result.files)
+        toast.success(t("smartSnapshot.captured", { appName: result.appName }))
+        // A global shortcut runs while another application is focused. Capture
+        // first, then raise Cognia so the staged attachments are visible.
+        void showMainWindow()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("smartSnapshot.captureFailed"))
+      } finally {
+        setSmartSnapshotPending(false)
+      }
+    },
+    [attachments, isDesktop, smartSnapshotPending, t]
+  )
+
+  useEffect(() => {
+    if (!isDesktop) return
+    return registerCommand({
+      id: SMART_SNAPSHOT_COMMAND_ID,
+      title: t("smartSnapshot.captureTooltip"),
+      category: "Chat",
+      pluginId: null,
+      handler: () => captureSmartSnapshot(),
+    })
+  }, [captureSmartSnapshot, isDesktop, t])
   // Send protection: the chat store only flips to "streaming" once the dispatch
   // pipeline reaches `setSessionStatus`, leaving a window after the click where
   // the button would still read as "send". `isSending` is set synchronously the
@@ -2009,6 +2051,10 @@ function ComposerInner(props: InnerProps) {
             <ComposerAttachMenu
               disabled={props.disabled}
               onPickFiles={openFileDialog}
+              onSmartSnapshot={() =>
+                void captureSmartSnapshot({ delayMs: 2200, switchPrompt: true })
+              }
+              smartSnapshotPending={smartSnapshotPending}
               capabilities={capabilityMenu}
             />
           )}

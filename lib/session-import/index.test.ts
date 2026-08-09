@@ -1,7 +1,10 @@
 jest.mock("@/lib/data/import-registry", () => ({
   applyImported: jest.fn(async () => ({ sessions: 1, messages: 3 })),
 }))
-jest.mock("@/lib/memory/external/home", () => ({ resolveHome: jest.fn(async () => "/home/u") }))
+jest.mock("@/lib/memory/external/home", () => ({
+  resolveHome: jest.fn(async () => "/home/u"),
+  detectPlatform: jest.fn(() => "linux"),
+}))
 
 import { applyImported } from "@/lib/data/import-registry"
 import {
@@ -66,6 +69,19 @@ describe("session-import runner", () => {
   it("resolves the scan input with real home when not overridden", async () => {
     const resolved = await resolveScanInput({ fs })
     expect(resolved.home).toBe("/home/u")
+    // The vendor roots come along so adapters honour $CODEX_HOME & friends.
+    expect(resolved.roots?.codexHome).toBe("/home/u/.codex")
+  })
+
+  it("keeps explicitly passed vendor roots", async () => {
+    const roots = {
+      claudeConfigDir: "/relocated/claude",
+      codexHome: "/relocated/codex",
+      opencodeConfigDir: "",
+      opencodeDataDir: "",
+    }
+    const resolved = await resolveScanInput({ fs, roots })
+    expect(resolved.roots).toBe(roots)
   })
 
   it("lists sessions for a single source and across all sources", async () => {
@@ -110,6 +126,31 @@ describe("session-import runner", () => {
       input
     )
     expect(parsed).toEqual([])
+  })
+
+  it("reports only refs that parsed successfully", async () => {
+    const ok = source("ok", 0)
+    const bad: AgentSessionSourceAdapter = {
+      ...source("bad", 0),
+      parseSession: async () => {
+        throw new Error("corrupt transcript")
+      },
+    }
+    registerSessionSource(ok, { pluginId: "p" })
+    registerSessionSource(bad, { pluginId: "p" })
+    const parsedRefs: string[] = []
+
+    await importSessions(
+      [
+        { sourceId: "p:ok", originalSessionId: "ok", locator: "ok" },
+        { sourceId: "p:bad", originalSessionId: "bad", locator: "bad" },
+      ],
+      input,
+      undefined,
+      { onRefParsed: (ref) => parsedRefs.push(ref.originalSessionId) }
+    )
+
+    expect(parsedRefs).toEqual(["ok"])
   })
 
   it("flattens nested subagent conversations and stamps their projectId", async () => {

@@ -10,7 +10,8 @@
  * callback the App turns into a {@link setSubagentModel} write.
  */
 import React, { useRef } from "react"
-import { Box, Text, useInput, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
@@ -90,7 +91,7 @@ export function SubagentModelsPanel({
     onWheel: (dir) => onMove(dir === "up" ? -1 : 1),
   })
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (handleMouse(input)) return
       if (key.escape) return onClose()

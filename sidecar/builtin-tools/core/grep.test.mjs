@@ -54,6 +54,24 @@ test("content mode groups multi-match files under one path header (token-saving)
   }
 })
 
+test("path accepts a single file", async () => {
+  const dir = await fixture()
+  try {
+    const tool = createGrepTool({ cwd: dir })
+    const text = textOf(
+      await tool.handler(
+        { pattern: "needle", path: path.join(dir, "src", "a.ts"), output_mode: "content" },
+        {}
+      )
+    )
+    assert.match(text, /2:needle here/)
+    assert.match(text, /5:another needle/)
+    assert.doesNotMatch(text, /ENOTDIR/)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("groupByFile hoists a repeated path but leaves lone matches and non-matches inline", () => {
   const out = groupByFile([
     "src/a.ts:2:needle here",

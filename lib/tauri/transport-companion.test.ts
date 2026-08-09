@@ -17,17 +17,27 @@
 import {
   CompanionError,
   CompanionTransport,
+  __setAuthorizationHeadersProviderForTests,
+  __setEventSocketTicketIssuerForTests,
   __resetCompanionConfigCacheForTests,
+  __setCompanionConfigCacheForTests,
+  __setRuntimeTargetRegistrarForTests,
   __setBackoffRandomForTests,
   classifyWsHost,
   clearCompanionConfig,
   hydrateCompanionConfig,
+  issueCompanionSocketTicket,
   loadCompanionConfig,
   saveCompanionConfig,
   type CompanionConfig,
   type TransportTier,
 } from "./transport-companion"
+import { __setCompanionStorageForTests } from "./companion-storage"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 
 const mockVaultSecrets = new Map<string, string>()
 jest.mock("@/lib/runtime/browser-vault", () => ({
@@ -73,13 +83,30 @@ function mockResponse(
   }
 }
 
+function mockResponseWithHeaders(
+  body: unknown,
+  status: number,
+  headers: Record<string, string>
+): ReturnType<typeof mockResponse> & { headers: { get(name: string): string | null } } {
+  const normalized = new Map(
+    Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value] as const)
+  )
+  return {
+    ...mockResponse(body, status),
+    headers: {
+      get: (name: string) => normalized.get(name.toLowerCase()) ?? null,
+    },
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const MOCK_CONFIG: CompanionConfig = {
   baseUrl: "https://192.168.1.42:7890",
-  deviceJwt: "test.jwt.token",
+  devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "test-key" },
+  deviceKeyThumbprint: "test-thumbprint",
   deviceId: "device-abc",
   serverVersion: "0.1.0",
 }
@@ -187,7 +214,18 @@ beforeEach(() => {
 
   // Ensure localStorage + module-level cache are clean.
   localStorage.clear()
+  __setCompanionStorageForTests(null)
   __resetCompanionConfigCacheForTests()
+  clearActiveRuntimeTargetContext()
+  __setEventSocketTicketIssuerForTests(() => ({
+    ticket: "event-ticket",
+    expiresAt: Date.now() + 60_000,
+  }))
+  __setAuthorizationHeadersProviderForTests(async (config) => ({
+    Authorization: `Bearer ${config.serviceToken ?? "test.jwt.token"}`,
+    DPoP: "test-proof",
+  }))
+  __setRuntimeTargetRegistrarForTests(null)
 })
 
 afterEach(() => {
@@ -195,7 +233,13 @@ afterEach(() => {
   wsSpy.mockRestore()
   fetchSpy.mockRestore()
   localStorage.clear()
+  __setCompanionStorageForTests(null)
   __resetCompanionConfigCacheForTests()
+  clearActiveRuntimeTargetContext()
+  __setEventSocketTicketIssuerForTests(null)
+  __setAuthorizationHeadersProviderForTests(null)
+  __setRuntimeTargetRegistrarForTests(null)
+  __setBackoffRandomForTests(null)
   jest.useRealTimers()
 })
 
@@ -208,9 +252,98 @@ describe("config helpers", () => {
     expect(await loadCompanionConfig()).toBeNull()
   })
 
+  it("fails closed when a socket ticket is requested without an active pairing", async () => {
+    await expect(
+      issueCompanionSocketTicket({ channel: "browser", sessionId: "session-a" })
+    ).rejects.toThrow("pair this device again")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("issues a session-bound browser ticket through the active Companion auth adapter", async () => {
+    __setCompanionConfigCacheForTests({
+      baseUrl: "https://host.test",
+      serviceToken: "loopback-test-token",
+      deviceId: "device-a",
+      serverVersion: "test",
+    })
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ticket: "once", expiresIn: 60 }, 200))
+
+    await expect(
+      issueCompanionSocketTicket({ channel: "browser", sessionId: "session-a" })
+    ).resolves.toEqual(expect.objectContaining({ ticket: "once" }))
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("https://host.test/api/auth/socket-ticket")
+    expect(JSON.parse(init.body as string)).toEqual({
+      channel: "browser",
+      sessionId: "session-a",
+    })
+  })
+
   it("saveCompanionConfig + loadCompanionConfig round-trips correctly", async () => {
     await saveCompanionConfig(MOCK_CONFIG)
     expect(await loadCompanionConfig()).toEqual(MOCK_CONFIG)
+  })
+
+  it("does not expose a pairing in the runtime cache when secure persistence fails", async () => {
+    __setCompanionStorageForTests({
+      load: async () => null,
+      save: async () => {
+        throw new Error("vault write failed")
+      },
+      clear: async () => undefined,
+    })
+
+    await expect(saveCompanionConfig(MOCK_CONFIG)).rejects.toThrow("vault write failed")
+    expect(loadCompanionConfig()).toBeNull()
+  })
+
+  it("restores the previous secure pairing when runtime target registration fails", async () => {
+    const previous = { ...MOCK_CONFIG, targetId: "companion-previous" }
+    const save = jest.fn(async (_config: CompanionConfig) => undefined)
+    const clear = jest.fn(async () => undefined)
+    const remove = jest.fn(async () => undefined)
+    __setCompanionStorageForTests({
+      load: async () => previous,
+      save,
+      clear,
+      remove,
+    })
+    setActiveRuntimeTargetContext("acct_transport", "web-standalone")
+    __setRuntimeTargetRegistrarForTests(async () => {
+      throw new Error("runtime registry failed")
+    })
+
+    await expect(
+      saveCompanionConfig({ ...MOCK_CONFIG, targetId: "companion-next" })
+    ).rejects.toThrow("runtime registry failed")
+
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(save.mock.calls[1]?.[0]).toEqual(previous)
+    expect(remove).toHaveBeenCalledWith(expect.objectContaining({ targetId: "companion-next" }))
+    expect(clear).not.toHaveBeenCalled()
+    expect(loadCompanionConfig()).toBeNull()
+  })
+
+  it("registers with the account captured before persistence changes runtime context", async () => {
+    const registrar = jest.fn(async (_config: CompanionConfig) => undefined)
+    __setCompanionStorageForTests({
+      load: async () => null,
+      save: async () => {
+        clearActiveRuntimeTargetContext()
+      },
+      clear: async () => undefined,
+    })
+    setActiveRuntimeTargetContext("acct_transport", "web-standalone")
+    __setRuntimeTargetRegistrarForTests(registrar)
+
+    await saveCompanionConfig({ ...MOCK_CONFIG, targetId: "companion-next" })
+
+    expect(registrar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: "acct_transport",
+        targetId: "companion-next",
+      })
+    )
   })
 
   it("clearCompanionConfig removes the entry", async () => {
@@ -264,6 +397,30 @@ describe("call() — success", () => {
     expect(result).toEqual({ ok: true })
   })
 
+  it("unwraps the canonical Companion RPC response envelope", async () => {
+    await setConfig()
+    fetchSpy.mockResolvedValueOnce(
+      mockResponse(
+        {
+          requestId: "7080c795-aa2b-4dbe-96b7-966e50393b0b",
+          result: { ok: true },
+        },
+        200
+      )
+    )
+
+    transport = new CompanionTransport()
+    await expect(transport.call("claude_sidecar_status")).resolves.toEqual({ ok: true })
+  })
+
+  it("accepts a successful null result from side-effect commands", async () => {
+    await setConfig()
+    fetchSpy.mockResolvedValueOnce(mockResponse(null, 200))
+
+    transport = new CompanionTransport()
+    await expect(transport.call("plugin_set_shell_allowlist")).resolves.toBeNull()
+  })
+
   it("posts to the correct URL with command name encoded", async () => {
     await setConfig()
     fetchSpy.mockResolvedValueOnce(mockResponse({}, 200))
@@ -295,7 +452,7 @@ describe("configProvider injection", () => {
     transport = new CompanionTransport({
       configProvider: () => ({
         baseUrl: "https://127.0.0.1:7999",
-        deviceJwt: "service.token.abc",
+        serviceToken: "service.token.abc",
         deviceId: "brain-1",
         serverVersion: "headless",
       }),
@@ -304,10 +461,34 @@ describe("configProvider injection", () => {
     const result = await transport.call("claude_sidecar_status")
     expect(result).toEqual({ ok: true })
     const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
-    expect(calledUrl).toBe("https://127.0.0.1:7999/api/v1/_rpc/claude_sidecar_status")
+    expect(calledUrl).toBe("https://127.0.0.1:7999/api/_rpc/claude_sidecar_status")
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer service.token.abc")
     // Nothing was persisted — the provider config never touches storage.
     expect(loadCompanionConfig()).toBeNull()
+  })
+
+  it("uses isolated internal endpoints for the headless service transport", async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+    transport = new CompanionTransport({
+      configProvider: () => ({
+        baseUrl: "https://127.0.0.1:7999",
+        serviceToken: "service-token",
+        deviceId: "brain-local_acct_a",
+        serverVersion: "headless",
+      }),
+      rpcPath: "/internal/_rpc",
+      eventsPath: "/internal/events",
+    })
+
+    await transport.call("claude_sidecar_status")
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      "https://127.0.0.1:7999/internal/_rpc/claude_sidecar_status"
+    )
+
+    transport.subscribe("claude://message", jest.fn())
+    expect(MockWebSocket.lastInstance?.url).toBe(
+      "wss://127.0.0.1:7999/internal/events?token=service-token"
+    )
   })
 
   it("a provider returning null yields not_paired", async () => {
@@ -321,7 +502,7 @@ describe("configProvider injection", () => {
     transport = new CompanionTransport({
       configProvider: () => ({
         baseUrl: "https://127.0.0.1:7999",
-        deviceJwt: token,
+        serviceToken: token,
         deviceId: "brain-1",
         serverVersion: "headless",
       }),
@@ -550,7 +731,7 @@ describe("managed IDE raw content transport", () => {
     )
 
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe("https://192.168.1.42:7890/api/v1/ide/content")
+    expect(url).toBe("https://192.168.1.42:7890/ide/content")
     expect(init.body).toBeInstanceOf(ArrayBuffer)
     expect(Array.from(new Uint8Array(init.body as ArrayBuffer))).toEqual([0, 1, 255])
     const headers = init.headers as Record<string, string>
@@ -590,9 +771,101 @@ describe("managed IDE raw content transport", () => {
         "handle/opaque"
       )
     ).resolves.toEqual(Uint8Array.from([7, 8, 9]))
-    expect(fetchSpy.mock.calls[0][0]).toBe(
-      "https://192.168.1.42:7890/api/v1/ide/content/handle%2Fopaque"
+    expect(fetchSpy.mock.calls[0][0]).toBe("https://192.168.1.42:7890/ide/content/handle%2Fopaque")
+  })
+})
+
+describe("readBinary() — session media", () => {
+  it("fetches authenticated media bytes without JSON or base64 expansion", async () => {
+    await setConfig()
+    const hash = "a".repeat(64)
+    const bytes = new Uint8Array([137, 80, 78, 71])
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === "content-type"
+            ? "image/png"
+            : name.toLowerCase() === "etag"
+              ? '"hash-thumb"'
+              : null,
+      },
+      arrayBuffer: async () => bytes.buffer,
+    })
+    transport = new CompanionTransport()
+
+    const result = await transport.readBinary({
+      kind: "session-media",
+      sessionId: "session/one",
+      hash,
+      variant: "thumbnail",
+    })
+
+    expect(result).toEqual({
+      bytes,
+      mediaType: "image/png",
+      etag: '"hash-thumb"',
+    })
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(
+      `https://192.168.1.42:7890/api/sessions/session%2Fone/media/${hash}?variant=thumbnail`
     )
+    expect(init.method).toBe("GET")
+    expect(init.headers).toEqual({
+      Authorization: "Bearer test.jwt.token",
+      DPoP: "test-proof",
+    })
+    expect(init.body).toBeUndefined()
+  })
+
+  it("mints a fresh DPoP proof when a binary GET is retried", async () => {
+    jest.useFakeTimers()
+    await setConfig()
+    let proof = 0
+    const authorize = jest.fn(async () => ({
+      Authorization: "Bearer test.jwt.token",
+      DPoP: `proof-${++proof}`,
+    }))
+    __setAuthorizationHeadersProviderForTests(authorize)
+    fetchSpy.mockResolvedValueOnce(mockResponse({ message: "retry" }, 503)).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      arrayBuffer: async () => Uint8Array.from([1]).buffer,
+    })
+    transport = new CompanionTransport()
+
+    const resultPromise = transport.readBinary({
+      kind: "session-media",
+      sessionId: "s1",
+      hash: "b".repeat(64),
+      variant: "canonical",
+    })
+    await jest.advanceTimersByTimeAsync(250)
+
+    await expect(resultPromise).resolves.toMatchObject({ bytes: Uint8Array.from([1]) })
+    expect(authorize).toHaveBeenCalledTimes(2)
+    expect(
+      fetchSpy.mock.calls.map(
+        ([, init]) => ((init as RequestInit).headers as Record<string, string>).DPoP
+      )
+    ).toEqual(["proof-1", "proof-2"])
+  })
+
+  it("rejects invalid resource identifiers before issuing a request", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+
+    await expect(
+      transport.readBinary({
+        kind: "session-media",
+        sessionId: "s1",
+        hash: "../secret",
+        variant: "canonical",
+      })
+    ).rejects.toMatchObject({ code: "invalid_binary_resource", retryable: false })
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
 
@@ -658,6 +931,82 @@ describe("call() — 4xx errors", () => {
 describe("call() — retries", () => {
   beforeEach(() => setConfig())
 
+  it("surfaces a transient transport failure without replaying an unsafe command", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      mockResponse({ code: "service_unavailable", message: "brain bridge disconnected" }, 503)
+    )
+    transport = new CompanionTransport()
+
+    await expect(transport.call("unclassified_mutation", { value: 1 })).rejects.toMatchObject({
+      code: "service_unavailable",
+      retryable: true,
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(transport.getPlaneHealth().rpc).toBe("unavailable")
+  })
+
+  it("mints a fresh DPoP proof on every attempt while preserving idempotency", async () => {
+    jest.useFakeTimers()
+    __setBackoffRandomForTests(() => 0)
+    let proof = 0
+    const authorize = jest.fn(async () => ({
+      Authorization: "Bearer test.jwt.token",
+      DPoP: `proof-${++proof}`,
+    }))
+    __setAuthorizationHeadersProviderForTests(authorize)
+    fetchSpy
+      .mockResolvedValueOnce(mockResponse({ code: "service_unavailable", message: "retry" }, 503))
+      .mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+
+    transport = new CompanionTransport()
+    const callPromise = transport.call(
+      "claude_send",
+      { session_id: "s1", prompt: "hello" },
+      { idempotencyKey: "stable-key" }
+    )
+    await jest.advanceTimersByTimeAsync(250)
+    await callPromise
+
+    expect(authorize).toHaveBeenCalledTimes(2)
+    const attempts = fetchSpy.mock.calls.map(([, init]) => init as RequestInit)
+    expect(attempts.map((init) => (init.headers as Record<string, string>).DPoP)).toEqual([
+      "proof-1",
+      "proof-2",
+    ])
+    expect(
+      attempts.map((init) => (init.headers as Record<string, string>)["Idempotency-Key"])
+    ).toEqual(["stable-key", "stable-key"])
+    expect(attempts.map((init) => init.body)).toEqual([
+      JSON.stringify({ session_id: "s1", prompt: "hello" }),
+      JSON.stringify({ session_id: "s1", prompt: "hello" }),
+    ])
+  })
+
+  it.each([
+    ["5", 5_000],
+    [new Date(35_000).toUTCString(), 30_000],
+  ])("honors a bounded Retry-After value %s", async (retryAfter, expectedDelay) => {
+    jest.useFakeTimers({ now: 0 })
+    fetchSpy
+      .mockResolvedValueOnce(
+        mockResponseWithHeaders({ code: "rate_limited", message: "slow down" }, 429, {
+          "Retry-After": retryAfter,
+        })
+      )
+      .mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+
+    transport = new CompanionTransport()
+    const callPromise = transport.call("claude_sidecar_status")
+    await Promise.resolve()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(expectedDelay - 1)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    await jest.advanceTimersByTimeAsync(1)
+    await callPromise
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
   it("retries 3 times on network (TypeError) then throws", async () => {
     jest.useFakeTimers()
     fetchSpy.mockRejectedValue(new TypeError("Network error"))
@@ -678,11 +1027,11 @@ describe("call() — retries", () => {
     expect(caught).toBeInstanceOf(CompanionError)
     expect((caught as CompanionError).code).toBe("network")
     expect((caught as CompanionError).retryable).toBe(true)
-    // 1 original + 3 retries = 4 total calls.
-    expect(fetchSpy.mock.calls.length).toBe(4)
+    // The manifest retry budget is three total attempts.
+    expect(fetchSpy.mock.calls.length).toBe(3)
   })
 
-  it("retries up to 3 times on 5xx then throws server_error", async () => {
+  it("uses the manifest retry budget and preserves the canonical server error", async () => {
     jest.useFakeTimers()
     fetchSpy.mockResolvedValue(mockResponse({ code: "internal_error", message: "boom" }, 503))
 
@@ -698,9 +1047,9 @@ describe("call() — retries", () => {
     await callPromise
 
     expect(caught).toBeInstanceOf(CompanionError)
-    expect((caught as CompanionError).code).toBe("server_error")
+    expect((caught as CompanionError).code).toBe("internal_error")
     expect((caught as CompanionError).retryable).toBe(true)
-    expect(fetchSpy.mock.calls.length).toBe(4)
+    expect(fetchSpy.mock.calls.length).toBe(3)
   })
 
   it("succeeds on second attempt after first network error", async () => {
@@ -800,8 +1149,25 @@ describe("subscribe() — WebSocket frame dispatch", () => {
 
     expect(wsSpy).toHaveBeenCalledTimes(1)
     const ws = MockWebSocket.lastInstance!
-    expect(ws.url).toContain("/ws/v1/events")
-    expect(ws.url).toContain("token=test.jwt.token")
+    expect(ws.url).toContain("/ws/events")
+    expect(ws.url).toContain("ticket=event-ticket")
+  })
+
+  it("marks the event plane ready only after the replay boundary", () => {
+    transport = new CompanionTransport()
+    const health = jest.fn()
+    transport.onPlaneHealthChange(health)
+    transport.subscribe("claude://message", jest.fn())
+
+    const ws = MockWebSocket.lastInstance!
+    expect(transport.getPlaneHealth().events).toBe("connecting")
+    ws.triggerOpen()
+    expect(transport.getPlaneHealth().events).toBe("replaying")
+    expect(transport.getConnectionState()).toBe("connected")
+
+    ws.triggerMessage(JSON.stringify({ type: "stream_ready", cursor: 7 }))
+    expect(transport.getPlaneHealth().events).toBe("ready")
+    expect(health).toHaveBeenLastCalledWith(expect.objectContaining({ events: "ready" }))
   })
 
   it("fails closed instead of opening an unpinned browser WebSocket to a paired LAN host", async () => {
@@ -980,8 +1346,8 @@ describe("subscribe() — resync_required", () => {
 // ---------------------------------------------------------------------------
 
 describe("WebSocket reconnect", () => {
-  beforeEach(() => {
-    setConfig()
+  beforeEach(async () => {
+    await setConfig()
     jest.useFakeTimers()
     // Pin the backoff jitter to its midpoint (factor 1.0) so these tests can
     // assert the exact 1s → 2s → 4s schedule.
@@ -1435,6 +1801,10 @@ function makeFakeRtc(opts: FakeRtcOpts = {}) {
   return {
     getState: () => "open" as const,
     call: jest.fn(async () => "RTC_RESULT"),
+    readBinary: jest.fn(async () => ({
+      bytes: Uint8Array.from([4, 5, 6]),
+      mediaType: "image/png",
+    })),
     subscribe: jest.fn(() => () => undefined),
     getSelectedCandidateKind: jest.fn(async () => opts.kind ?? "host"),
     onStateChange: () => () => undefined,
@@ -1530,6 +1900,72 @@ describe("call() — LAN-first gate", () => {
       (init.headers as Record<string, string>)["Idempotency-Key"]
     )
     expect(rtcArgs).not.toHaveProperty("idempotencyKey")
+  })
+})
+
+describe("readBinary() — LAN-first gate", () => {
+  it("uses raw DataChannel frames when LAN HTTPS is unavailable", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    const resource = {
+      kind: "session-media" as const,
+      sessionId: "s1",
+      hash: "a".repeat(64),
+      variant: "canonical" as const,
+    }
+
+    await expect(transport.readBinary(resource)).resolves.toEqual({
+      bytes: Uint8Array.from([4, 5, 6]),
+      mediaType: "image/png",
+    })
+    expect(fakeRtc.readBinary).toHaveBeenCalledWith(resource)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("falls back to authenticated HTTPS when the binary DataChannel read fails", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    fakeRtc.readBinary.mockRejectedValueOnce(new Error("channel closed"))
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: { get: () => "image/png" },
+      arrayBuffer: async () => Uint8Array.from([7, 8]).buffer,
+    })
+
+    await expect(
+      transport.readBinary({
+        kind: "session-media",
+        sessionId: "s1",
+        hash: "b".repeat(64),
+        variant: "thumbnail",
+      })
+    ).resolves.toEqual(expect.objectContaining({ bytes: Uint8Array.from([7, 8]) }))
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not retry a definitive RTC media miss over HTTPS", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    fakeRtc.readBinary.mockRejectedValueOnce(
+      Object.assign(new Error("missing"), { code: "MEDIA_NOT_FOUND" })
+    )
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+
+    await expect(
+      transport.readBinary({
+        kind: "session-media",
+        sessionId: "s1",
+        hash: "c".repeat(64),
+        variant: "canonical",
+      })
+    ).rejects.toMatchObject({ code: "MEDIA_NOT_FOUND" })
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
 

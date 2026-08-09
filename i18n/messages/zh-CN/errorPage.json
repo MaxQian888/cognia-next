@@ -16,7 +16,10 @@
   "copied": "已复制",
   "copyErrorId": "复制 ID",
   "copyErrorIdSuccess": "错误 ID 已复制",
+  "copyStack": "复制调用栈",
+  "componentStack": "组件调用栈",
   "description": "发生了意外错误。下方的技术细节可以帮助诊断问题。",
+  "disablePlugin": "禁用插件",
   "diagnostics": {
     "appVersion": "应用版本",
     "category": "类别",
@@ -41,6 +44,7 @@
   "globalTitle": "Cognia 已停止工作",
   "goHome": "返回首页",
   "hideStack": "收起调用栈",
+  "noStackFrames": "没有调用栈帧",
   "openLogs": "打开日志",
   "recentErrors": {
     "cascadeHint": "短时间内发生了多个错误——这可能是连锁故障。",
@@ -55,6 +59,7 @@
   },
   "retry": "重试",
   "showStack": "查看调用栈",
+  "stackActions": "调用栈操作",
   "title": "出错了",
   "traceTitle": "错误详情",
   "tryAgainWhenOnline": "重试"

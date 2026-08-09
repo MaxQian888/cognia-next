@@ -63,10 +63,7 @@ impl Broadcaster {
     pub fn start(config: BroadcastConfig) -> Result<Self, MdnsError> {
         let daemon = Arc::new(ServiceDaemon::new()?);
 
-        let mut props: HashMap<String, String> = HashMap::new();
-        props.insert("ver".into(), config.app_version.clone());
-        props.insert("fp".into(), config.tls_fingerprint.clone());
-        props.insert("path".into(), "/api/v1".into());
+        let props = service_properties(&config.app_version, &config.tls_fingerprint);
 
         let service = ServiceInfo::new(
             SERVICE_TYPE,
@@ -85,6 +82,14 @@ impl Broadcaster {
     pub fn fullname(&self) -> &str {
         &self.fullname
     }
+}
+
+fn service_properties(app_version: &str, tls_fingerprint: &str) -> HashMap<String, String> {
+    HashMap::from([
+        ("ver".into(), app_version.to_string()),
+        ("fp".into(), tls_fingerprint.to_string()),
+        ("path".into(), "/api".into()),
+    ])
 }
 
 impl Drop for Broadcaster {
@@ -165,6 +170,18 @@ mod tests {
     fn state_new_is_not_running() {
         let s = BroadcasterState::new();
         assert!(!s.is_running());
+    }
+
+    #[test]
+    fn discovery_advertises_only_the_unversioned_api_root() {
+        let properties = service_properties("1.2.3", "fingerprint-a");
+
+        assert_eq!(properties.get("path").map(String::as_str), Some("/api"));
+        assert_eq!(properties.get("ver").map(String::as_str), Some("1.2.3"));
+        assert_eq!(
+            properties.get("fp").map(String::as_str),
+            Some("fingerprint-a")
+        );
     }
 
     #[test]

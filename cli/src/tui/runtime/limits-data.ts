@@ -58,18 +58,16 @@ export interface CliLimitsDeps {
  */
 export async function buildCliLimits(deps: CliLimitsDeps): Promise<ProviderLimits[]> {
   const providers = deps.config.providers ?? {}
-  const results: ProviderLimits[] = []
-
-  for (const [id, p] of Object.entries(providers)) {
+  const providerLoads = Object.entries(providers).map(async ([id, p]) => {
     const token = (p?.authToken ?? p?.apiKey) || null
-    if (!token) continue
+    if (!token) return null
 
     const provider = mapCliProvider(id)
     const providerKey = id
     const baseUrl = p?.baseURL ?? DEFAULT_BASE_URLS[id]
 
     const sources = resolveLimitsSources({ provider, providerKey, baseUrl })
-    if (sources.length === 0) continue
+    if (sources.length === 0) return null
 
     const ctx: LimitsSourceContext = {
       provider,
@@ -90,11 +88,24 @@ export async function buildCliLimits(deps: CliLimitsDeps): Promise<ProviderLimit
         snapshot = null
       }
       if (snapshot && (snapshot.meters.length > 0 || snapshot.error)) {
-        results.push(snapshot)
-        break
+        return snapshot
       }
     }
-  }
+    return null
+  })
+
+  const customSources = deps.config.customLimitsSources ?? []
+  const customLoad =
+    customSources.length > 0
+      ? runCustomLimitsSources(customSources, {
+          authedGet: deps.authedGet,
+          now: () => deps.now,
+        })
+      : Promise.resolve([])
+  const [providerResults, customSnaps] = await Promise.all([Promise.all(providerLoads), customLoad])
+  const results = providerResults.filter(
+    (snapshot): snapshot is ProviderLimits => snapshot !== null
+  )
 
   // Guarantee the active provider is always represented, even when it has no
   // usable source or returned no data. Without this, the panel would collapse to
@@ -120,14 +131,7 @@ export async function buildCliLimits(deps: CliLimitsDeps): Promise<ProviderLimit
   })
 
   // Append user-defined custom sources (self-contained; own baseUrl + token).
-  const customSources = deps.config.customLimitsSources ?? []
-  if (customSources.length > 0) {
-    const customSnaps = await runCustomLimitsSources(customSources, {
-      authedGet: deps.authedGet,
-      now: () => deps.now,
-    })
-    results.push(...customSnaps)
-  }
+  results.push(...customSnaps)
   return results
 }
 

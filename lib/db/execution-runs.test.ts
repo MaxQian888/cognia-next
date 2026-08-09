@@ -224,11 +224,11 @@ describe("execution run journal", () => {
         {},
         {
           ts: 42,
-          visibility: "internal",
+          visibility: "private",
           sourceEventId: "source-42",
         }
       )
-    ).toMatchObject({ ts: 42, visibility: "internal", sourceEventId: "source-42" })
+    ).toMatchObject({ ts: 42, visibility: "private", sourceEventId: "source-42" })
   })
 
   it("removes semantic events 30 days after terminal state while preserving the run snapshot", async () => {

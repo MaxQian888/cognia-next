@@ -4,10 +4,13 @@ import {
   disposeAllWorkspaces,
   disposeWorkspace,
   ensureWorkspace,
+  ensureWorkspaceFiles,
   FLUSH_DEBOUNCE_MS,
   flushDocument,
   listWorkspaceFolders,
   resolveWorkspaceFolder,
+  resolveMaterializedDocumentUri,
+  resolveMonacoDocumentUri,
   registerProjectWorkspace,
   unregisterProjectWorkspace,
   type LspWorkspaceFsAdapter,
@@ -133,6 +136,38 @@ describe("lsp-workspace-manager", () => {
       expect(fs.files.get(a + "/doc.ts")).toBe("v1")
       // Only one writeFile call.
       expect(fs.writeCalls).toHaveLength(1)
+    })
+
+    it("materialises one multi-file Skill workspace with bidirectional URI mapping", async () => {
+      const fs = makeFakeFs()
+      configureLspWorkspaceManager(fs)
+
+      await ensureWorkspaceFiles({
+        surface: "skill",
+        workspaceId: "skill-1",
+        files: [
+          {
+            fileName: "SKILL.md",
+            initialContent: "# Skill",
+            monacoUri: "skill:///skill-1/SKILL.md",
+          },
+          {
+            fileName: "scripts/a.ts",
+            initialContent: "export const a = 1",
+            monacoUri: "skill:///skill-1/scripts/a.ts",
+          },
+        ],
+      })
+
+      expect(listWorkspaceFolders()).toHaveLength(1)
+      expect(
+        fs.files.get("/home/user/AppData/Roaming/cognia/lsp-workspaces/skill-skill-1/scripts/a.ts")
+      ).toBe("export const a = 1")
+      const fileUri = resolveMaterializedDocumentUri("skill:///skill-1/scripts/a.ts")
+      expect(fileUri).toBe(
+        "file:///home/user/AppData/Roaming/cognia/lsp-workspaces/skill-skill-1/scripts/a.ts"
+      )
+      expect(resolveMonacoDocumentUri(fileUri!)).toBe("skill:///skill-1/scripts/a.ts")
     })
 
     it("isolates workspaces by surface + documentId", async () => {

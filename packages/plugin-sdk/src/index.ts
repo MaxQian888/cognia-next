@@ -39,20 +39,38 @@ export { CANONICAL_EXTENSION_POINTS } from "./extensions"
 export {
   AUTHOR_CAPABILITY_CONTRACTS,
   CANONICAL_PLUGIN_CAPABILITIES,
+  CANONICAL_PLUGIN_ERROR_CODES,
   CANONICAL_PLUGIN_PERMISSIONS,
   CANONICAL_PLUGIN_TYPES,
   PLUGIN_CONTRACT_MINIMUM_HOST_VERSION,
   PLUGIN_CONTRACT_SCHEMA_VERSION,
+  PLUGIN_API_NAMESPACE_CONTRACTS,
+  PLUGIN_CONTRACT_VERSION,
+  PLUGIN_GATEWAY_CLIENT_VERSION,
+  PLUGIN_MINIMUM_GATEWAY_CLIENT_VERSION,
+  PLUGIN_MINIMUM_SDK_VERSION,
+  PLUGIN_PROTOCOL_VERSION,
+  PLUGIN_SDK_VERSION,
   PLUGIN_MANIFEST_CONTRIBUTIONS,
   PLUGIN_PATH_FIELD_CONTRACTS,
   PLUGIN_RUNTIME_ENTRY_CONTRACTS,
+  type CanonicalPluginErrorCode,
+  type PluginApiMethodContract,
+  type PluginApiNamespaceContract,
 } from "./contracts/catalog"
+export {
+  PluginAdapterError,
+  pluginAdapterError,
+  isPluginAdapterError,
+} from "./errors/adapter-error"
+export type { PluginAdapterErrorCode, PluginAdapterErrorPayload } from "./errors/adapter-error"
 
 export { definePlugin } from "./manifest"
 export { defineMcpServerPreset } from "./define/define-mcp-server-preset"
 export { defineNativeAnthropicTool } from "./define/define-native-anthropic-tool"
 export { defineSkill } from "./define/define-skill"
 export { defineSubagent } from "./define/define-subagent"
+export type { PluginSubagentInput, PluginSubagentToolReference } from "./define/define-subagent"
 export { defineAgentTeamTemplate } from "./define/define-agent-team-template"
 export {
   defineCharacterPack,

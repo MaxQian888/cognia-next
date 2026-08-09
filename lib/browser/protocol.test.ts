@@ -260,5 +260,6 @@ describe("BROWSER_EVENTS", () => {
   it("exposes the navigation lifecycle event names", () => {
     expect(BROWSER_EVENTS.navigated).toBe("browser://navigated")
     expect(BROWSER_EVENTS.loaded).toBe("browser://loaded")
+    expect(BROWSER_EVENTS.proxyError).toBe("browser://proxy-error")
   })
 })

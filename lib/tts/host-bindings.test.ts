@@ -5,14 +5,14 @@
  * exactly as the pre-extraction proxyFetch did.
  */
 
-jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
+jest.mock("@/lib/tauri", () => ({ isCapacitor: jest.fn(), isTauri: jest.fn() }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn(), message: jest.fn() } }))
 
 import { toast } from "sonner"
 import * as core from "@tauri-apps/api/core"
 
 import { getTtsHost } from "@cognia/tts/host"
-import { isTauri } from "@/lib/tauri"
+import { isCapacitor, isTauri } from "@/lib/tauri"
 
 import { tauriProxyFetch } from "./host-bindings"
 
@@ -25,10 +25,13 @@ beforeEach(() => {
 })
 
 describe("host installation (module side effect)", () => {
-  it("installs nativeProxyFetch, isNativeShell, and notify", () => {
+  it("installs nativeProxyFetch, shell gates, outbound PII gate, and notify", () => {
     const host = getTtsHost()
     expect(typeof host.nativeProxyFetch).toBe("function")
     expect(host.isNativeShell).toBe(isTauri)
+    expect(host.isMobileShell).toBe(isCapacitor)
+    expect(host.allowCloudText?.("clean text", "openai")).toBe(true)
+    expect(host.allowCloudText?.("email alice@example.com", "openai")).toBe(false)
     expect(typeof host.notify?.message).toBe("function")
     expect(typeof host.notify?.error).toBe("function")
   })
@@ -151,5 +154,38 @@ describe("tauriProxyFetch", () => {
     const req = (mockInvoke.mock.calls[0][1] as { request: { headers: Record<string, string> } })
       .request
     expect(req.headers).toEqual({})
+  })
+
+  it("forwards provider identity and cancels an aborted native request", async () => {
+    const controller = new AbortController()
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "tts_proxy_cancel") return Promise.resolve(true)
+      return new Promise((_, reject) => {
+        controller.signal.addEventListener("abort", () => reject(new Error("request cancelled")))
+      })
+    })
+
+    const pending = tauriProxyFetch("http://localhost:8880/v1/audio/speech", {
+      provider: "local-openai-compatible",
+      requestId: "req-local",
+      timeoutMs: 2500,
+      signal: controller.signal,
+      json: {},
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(mockInvoke).toHaveBeenCalledWith("tts_proxy_cancel", { requestId: "req-local" })
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "tts_proxy_fetch",
+      expect.objectContaining({
+        request: expect.objectContaining({
+          provider: "local-openai-compatible",
+          request_id: "req-local",
+          timeout_ms: 2500,
+        }),
+      })
+    )
   })
 })

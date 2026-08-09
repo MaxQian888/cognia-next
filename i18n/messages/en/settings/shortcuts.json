@@ -38,6 +38,7 @@
     "skillsSearch": "Focus skills search",
     "skillsSelectAll": "Select all skills",
     "terminalToggle": "Toggle terminal",
+    "terminalAiShellToggle": "Toggle AI Shell",
     "workbenchActivityAi": "Workbench: AI",
     "workbenchActivityComments": "Workbench: comments",
     "workbenchActivityInspect": "Workbench: inspect",
@@ -45,6 +46,7 @@
     "workbenchActivityReview": "Workbench: review",
     "workbenchActivityTemplates": "Workbench: templates",
     "workbenchActivityWorkspace": "Workbench: workspace",
+    "workbenchQuickSwitch": "Workbench: quick switch panel",
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "zoomReset": "Reset zoom"

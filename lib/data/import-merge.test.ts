@@ -6,6 +6,7 @@ import { applyImportedMerged, mergeImportedSession } from "./import-merge"
 import type { ImportedConversation } from "./importers/types"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { isMediaRef, parseMediaRef } from "@/lib/db/message-media"
 
 // Cold Dexie delete + reseed in beforeEach can exceed the default 5s hook
 // timeout under parallel-worker CPU contention (repo idiom for Dexie suites).
@@ -109,6 +110,41 @@ describe("applyImportedMerged", () => {
     const db = getDb()
     expect(await db.sessions.count()).toBe(1)
     expect(await db.messages.count()).toBe(2)
+  })
+
+  it("moves imported inline images into the media store and maintains authorization refs", async () => {
+    const conversation = makeConv("import:codex:media", {}, [])
+    conversation.messages = [
+      {
+        id: "import:codex:media:m0",
+        sessionId: conversation.session.id,
+        role: "user",
+        parts: [
+          {
+            type: "file",
+            url: "data:image/png;base64,aGVsbG8=",
+            mediaType: "image/png",
+          },
+        ] as StoredMessage["parts"],
+        createdAt: 1000,
+      },
+    ]
+
+    await applyImportedMerged([conversation])
+
+    const db = getDb()
+    const stored = await db.messages.get("import:codex:media:m0")
+    const ref = (stored?.parts[0] as { url?: string } | undefined)?.url
+    expect(isMediaRef(ref)).toBe(true)
+    expect(await db.messageMedia.count()).toBe(1)
+    await expect(
+      db.messageMediaRefs.get(["import:codex:media:m0", parseMediaRef(ref!)!])
+    ).resolves.toMatchObject({
+      sessionId: "import:codex:media",
+    })
+    await expect(db.sessions.get("import:codex:media")).resolves.toMatchObject({
+      transcriptRevision: 1,
+    })
   })
 
   it("re-import of a continued session preserves sdkSessionId + decorations + the user's added turn", async () => {

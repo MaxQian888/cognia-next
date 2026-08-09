@@ -4,7 +4,7 @@
  * Webhook transports subscribe to `connectors://webhook/<adapterId>`. On
  * desktop those events are Tauri events emitted by `AppHandleEmitter`
  * (src-tauri/src/connectors/axum_app.rs); on the headless brain the SAME
- * topic strings arrive as `/ws/v1/events` frames from `BusEventEmitter`, so
+ * topic strings arrive as `/ws/events` frames from `BusEventEmitter`, so
  * the headless connector runtime swaps this seam for a
  * `CompanionTransport.subscribe`-backed listener. One transport
  * implementation, two event sources.

@@ -1,0 +1,6 @@
+FROM node:26-bookworm-slim
+WORKDIR /app
+COPY --from=web-out / /srv
+COPY tmp-cognia-e2e-web-proxy.mjs /app/server.mjs
+EXPOSE 443
+CMD ["node", "/app/server.mjs"]

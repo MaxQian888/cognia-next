@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
@@ -7,6 +8,22 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   ArrowUpCircleIcon,
   CopyIcon,
@@ -23,7 +40,9 @@ import { countRecordingsForSkill } from "@/lib/db/skill-recordings"
 import { getCategoryMeta, getSourceMeta } from "@/lib/skills/categories"
 import { useSkillsStore } from "@/stores/skills"
 import { serializeSkill, skillFilename } from "@/lib/claude/skills-io"
-import { saveFileAs } from "@/lib/files/file-bridge"
+import { saveBinaryFileAs, saveFileAs } from "@/lib/files/file-bridge"
+import { serializeSkillBundle } from "@/lib/skills/bundle/serializer"
+import { deriveSkillSlug } from "@/lib/skills/slug"
 import { toast } from "sonner"
 import type { Skill } from "@cognia/agent-config-types"
 import { SkillResourceManager } from "./skill-resource-manager"
@@ -52,6 +71,7 @@ export function SkillDetail({ skill }: Props) {
   const setActiveTab = useSkillsStore((s) => s.setActiveTab)
   const closeDetail = useSkillsStore((s) => s.closeDetail)
   const resources = useLiveQuery(() => listResourcesForSkill(skill.id), [skill.id])
+  const [compatibilityWarningOpen, setCompatibilityWarningOpen] = useState(false)
   // Counted rather than loaded: the tab only needs to know whether this skill
   // has a source capture, and the section itself does the reading.
   const recordingCount = useLiveQuery(() => countRecordingsForSkill(skill.id), [skill.id], 0)
@@ -69,10 +89,31 @@ export function SkillDetail({ skill }: Props) {
     }
   }
 
-  const handleExport = async () => {
+  const handleBundleExport = async () => {
+    try {
+      const bundle = await serializeSkillBundle({ skill, resources: resources ?? [] })
+      const ok = await saveBinaryFileAs({
+        defaultName: bundle.filename,
+        bytes: bundle.bytes,
+        mimeType: "application/zip",
+        filters: [{ name: tDetail("bundleFilterName"), extensions: ["zip"] }],
+      })
+      if (ok) {
+        toast.success(tToasts("exportedSingle", { name: skill.name }))
+        loggers.skills.info("bundle export single ok", { skillId: skill.id })
+      }
+    } catch (err) {
+      toast.error(
+        tToasts("exportFailed", { error: err instanceof Error ? err.message : String(err) })
+      )
+      loggers.skills.error("bundle export single failed", err, { skillId: skill.id })
+    }
+  }
+
+  const handleCompatibilityExport = async () => {
     try {
       const ok = await saveFileAs({
-        defaultName: skillFilename(skill.name),
+        defaultName: skillFilename(skill.slug ?? deriveSkillSlug(skill)),
         content: serializeSkill(skill),
         filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
       })
@@ -84,6 +125,18 @@ export function SkillDetail({ skill }: Props) {
       toast.error(err instanceof Error ? err.message : String(err))
       loggers.skills.error("export single failed", err, { skillId: skill.id })
     }
+  }
+
+  const compatibilityLosses = [
+    ...(resources && resources.length > 0
+      ? [tDetail("compatibilityExportResources", { count: resources.length })]
+      : []),
+    ...(skill.codexOpenAiYaml !== undefined ? [tDetail("compatibilityExportCodex")] : []),
+  ]
+
+  const requestCompatibilityExport = () => {
+    if (compatibilityLosses.length > 0) setCompatibilityWarningOpen(true)
+    else void handleCompatibilityExport()
   }
 
   const handleToggleStatus = async () => {
@@ -152,15 +205,26 @@ export function SkillDetail({ skill }: Props) {
             >
               <CopyIcon className="size-3.5" />
             </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7"
-              onClick={() => void handleExport()}
-              aria-label={t("card.export")}
-            >
-              <DownloadIcon className="size-3.5" />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-7"
+                  aria-label={t("card.export")}
+                >
+                  <DownloadIcon className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => void handleBundleExport()}>
+                  {tDetail("exportBundle")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={requestCompatibilityExport}>
+                  {tDetail("exportMarkdownCompatibility")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               size="icon"
               variant="ghost"
@@ -243,6 +307,32 @@ export function SkillDetail({ skill }: Props) {
           </TabsContent>
         </ScrollArea>
       </Tabs>
+      <AlertDialog open={compatibilityWarningOpen} onOpenChange={setCompatibilityWarningOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{tDetail("compatibilityExportTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {tDetail("compatibilityExportDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            {compatibilityLosses.map((loss) => (
+              <li key={loss}>{loss}</li>
+            ))}
+          </ul>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tDetail("compatibilityExportCancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setCompatibilityWarningOpen(false)
+                void handleCompatibilityExport()
+              }}
+            >
+              {tDetail("compatibilityExportContinue")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

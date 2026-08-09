@@ -215,6 +215,14 @@ pub struct SidecarState {
 
 Sidecar 在 Unix 上用 SIGTERM、Windows 上用 `TerminateProcess` 杀掉；如 5 秒后仍未退出，升级为 SIGKILL。
 
+## SDK 0.3.220 完整能力面
+
+SDK 边界采用版本化和自动审计，而不是透传任意 JSON。`protocol/agent-sdk-surface.json` 记录每个公共选项、导出、Query 控制、消息与 Hook 事件；已安装声明发生变化时，`check:sdk-surface` 会失败。实时控制和模块级会话函数分别由 `protocol/agent-control-methods.json` 加入白名单。
+
+`SendOptions.claudeAgentSdk` 是可序列化的版本 1 描述符。主机专用回调和 SQLite `SessionStore` 在 sidecar 内构建；渲染端绝不发送可执行函数、存储路径或密钥。文件检查点与会话存储互斥，预热进程按完整的租户、工作区、认证和安全指纹隔离。
+
+设置 → 内置智能体运行时提供能力快照、渐进发布开关和原生 SDK 会话管理器。同一组会话函数也通过 `cognia-agent sdk` 提供；CLI 只暴露类型化操作，不接受原始 SDK 选项 JSON。Conformance 套件版本 `2` 覆盖完整能力词表。
+
 ## 构建发送选项
 
 `lib/claude/build-options.ts:resolveSendOptions` 是 UI 状态 → sidecar `send.options` 的唯一转换点。它组合：

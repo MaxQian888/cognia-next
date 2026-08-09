@@ -893,6 +893,7 @@ test("Empty DM bucket shows the DM empty state", () => {
     />
   )
   expect(screen.getByText("emptyDm")).toBeInTheDocument()
+  expect(screen.getAllByRole("button", { name: "newChat" })).toHaveLength(2)
 })
 
 test("shows the session-list skeleton while the first Dexie read is loading", () => {
@@ -914,7 +915,7 @@ test("shows the session-list skeleton while the first Dexie read is loading", ()
   expect(screen.queryByText("emptyDm")).toBeNull()
 })
 
-test("New chat button on DM guild calls onNewDirect", async () => {
+test("Empty DM state CTA calls onNewDirect", async () => {
   callQueue.push(characters, [], undefined)
   const onNewDirect = jest.fn()
   const user = userEvent.setup()
@@ -929,12 +930,12 @@ test("New chat button on DM guild calls onNewDirect", async () => {
       onRename={jest.fn()}
     />
   )
-  await user.click(screen.getByLabelText("newChat"))
+  await user.click(screen.getAllByRole("button", { name: "newChat" })[1])
   expect(onNewDirect).toHaveBeenCalled()
   expect(logInfo).toHaveBeenCalledWith("channel-list new-direct")
 })
 
-test("New conversation button on team guild routes to onNewTeamConversation with teamId", async () => {
+test("Empty team state CTA routes to onNewTeamConversation with teamId", async () => {
   selectedGuild = { kind: "team", teamId: "t-1" }
   callQueue.push(characters, [], team)
   const onNew = jest.fn()
@@ -950,7 +951,7 @@ test("New conversation button on team guild routes to onNewTeamConversation with
       onRename={jest.fn()}
     />
   )
-  await user.click(screen.getByLabelText("newConversation"))
+  await user.click(screen.getAllByRole("button", { name: "newConversation" })[1])
   expect(onNew).toHaveBeenCalledWith("t-1")
 })
 
@@ -1336,7 +1337,7 @@ test("limits a folder drop target to its header so child rows remain sortable ta
   expect(folderDropTarget).not.toContainElement(screen.getByText("Inside work"))
 })
 
-test("New folder button invokes onCreateFolder", async () => {
+test("New folder stays in the display menu and invokes onCreateFolder", async () => {
   callQueue.push(characters, [], undefined)
   const onCreateFolder = jest.fn()
   const user = userEvent.setup()
@@ -1353,7 +1354,9 @@ test("New folder button invokes onCreateFolder", async () => {
       onCreateFolder={onCreateFolder}
     />
   )
-  await user.click(screen.getByRole("button", { name: "newFolder" }))
+  expect(screen.queryByRole("button", { name: "newFolder" })).toBeNull()
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(screen.getByRole("menuitem", { name: "newFolder" }))
   expect(onCreateFolder).toHaveBeenCalledWith("newFolderName")
 })
 

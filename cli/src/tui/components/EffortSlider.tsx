@@ -24,7 +24,8 @@
  * user isn't surprised by a no-op.
  */
 import React, { useRef, useState } from "react"
-import { Box, Text, useInput, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
+import { useModalInput } from "../input/input-router"
 
 import { useTheme } from "../theme/context"
 import { EFFORT_SLIDER_LEVELS } from "../../config/schema"
@@ -91,7 +92,7 @@ export function EffortSlider({
 
   const gaugeWidth = effortGaugeWidth(typeof width === "number" ? width : undefined)
 
-  useInput(
+  useModalInput(
     (input, key) => {
       // Mouse (fullscreen `scroll` only): wheel nudges the tier; a click on the
       // off-checkbox row toggles it, a click on the gauge track jumps to a tier.
@@ -190,9 +191,10 @@ export function EffortSlider({
       </Box>
 
       {layout === "wide" ? (
-        // Full inline tier scale — each tier labelled, the active one accented.
-        <Text>
-          {"  "}
+        // Use the same width as the gauge and distribute the tier labels across
+        // it. A free-running Text row made xhigh appear under a different track
+        // position than its marker, especially on wide terminals.
+        <Box marginLeft={9} width={gaugeWidth} justifyContent="space-between">
           {LEVELS.map((lvl, i) => {
             const isActiveTier = !off && i === index
             return (
@@ -201,11 +203,10 @@ export function EffortSlider({
                   {isActiveTier ? "●" : "○"}
                   {lvl}
                 </Text>
-                {i < LAST ? <Text color={theme.muted}> ─ </Text> : null}
               </Text>
             )
           })}
-        </Text>
+        </Box>
       ) : (
         // Compact: position readout instead of the (too-wide) inline scale.
         <Text color={theme.muted}>

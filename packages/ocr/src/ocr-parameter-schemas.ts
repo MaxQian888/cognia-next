@@ -80,6 +80,21 @@ const MODEL_PARAM = (defaultValue: string): ParameterDefinition => ({
   defaultValue,
 })
 
+const PADDLE_MODEL_PARAM: ParameterDefinition = {
+  key: "model",
+  type: "select",
+  label: `${PROVIDER_PARAM_PREFIX}.model.label`,
+  description: `${PROVIDER_PARAM_PREFIX}.model.description`,
+  category: "provider-specific",
+  defaultValue: "v6-small",
+  validation: {
+    options: [
+      { value: "v6-small", label: "v6-small" },
+      { value: "v6-tiny", label: "v6-tiny" },
+    ],
+  },
+}
+
 const REGION_PARAM = (defaultValue: string): ParameterDefinition => ({
   key: "region",
   type: "text",
@@ -167,20 +182,6 @@ const DIALECT_PARAM: ParameterDefinition = {
   },
 }
 
-/**
- * Optional bearer token forwarded to the self-hosted OCR server. Stored
- * in the settings blob rather than the keyring because the endpoint is
- * intentionally user-controlled — these are LAN keys, not vendor secrets.
- */
-const OPTIONAL_API_KEY_PARAM: ParameterDefinition = {
-  key: "apiKey",
-  type: "text",
-  label: `${PROVIDER_PARAM_PREFIX}.apiKey.label`,
-  description: `${PROVIDER_PARAM_PREFIX}.apiKey.description`,
-  category: "connection",
-  defaultValue: "",
-}
-
 const TIMEOUT_PARAM: ParameterDefinition = {
   key: "timeoutMs",
   type: "number",
@@ -189,6 +190,15 @@ const TIMEOUT_PARAM: ParameterDefinition = {
   category: "advanced",
   defaultValue: 30000,
   validation: { min: 1000, max: 600000, step: 1000 },
+}
+
+const ALLOW_LAN_PARAM: ParameterDefinition = {
+  key: "allowLan",
+  type: "toggle",
+  label: `${PROVIDER_PARAM_PREFIX}.allowLan.label`,
+  description: `${PROVIDER_PARAM_PREFIX}.allowLan.description`,
+  category: "connection",
+  defaultValue: false,
 }
 
 function compose(
@@ -247,13 +257,11 @@ export const OCR_PARAMETER_SCHEMAS: Record<string, ProviderParameterSchema> = {
   "apple-vision": compose("apple-vision", "Apple Vision", []),
   "mlkit-android": compose("mlkit-android", "ML Kit Text Recognition", []),
   ocrs: compose("ocrs", "ocrs (local)", []),
-  // The native backend loads its bundled PP-OCRv5 models; no model knob is
-  // wired through the invoke payload, so none is exposed here.
-  "paddle-ocr": compose("paddle-ocr", "PaddleOCR (local)", []),
+  "paddle-ocr": compose("paddle-ocr", "PaddleOCR (local)", [PADDLE_MODEL_PARAM]),
   "local-http": compose("local-http", "Local HTTP (self-hosted)", [
     ENDPOINT_PARAM("http://localhost:1224/api/ocr"),
     DIALECT_PARAM,
-    OPTIONAL_API_KEY_PARAM,
+    ALLOW_LAN_PARAM,
     TIMEOUT_PARAM,
   ]),
 }

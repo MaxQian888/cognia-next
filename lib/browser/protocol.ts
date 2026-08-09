@@ -14,6 +14,8 @@ export const BROWSER_EVENTS = {
   navigated: "browser://navigated",
   /** Emitted once a real document has finished loading (`window` `load`). */
   loaded: "browser://loaded",
+  /** Emitted when native proxy policy blocks an embedded navigation. */
+  proxyError: "browser://proxy-error",
   /** Emitted when a fresh agent snapshot is available. */
   snapshot: "browser://snapshot",
   /** Emitted when console output is captured. */
@@ -27,6 +29,11 @@ export interface ElementRect {
   y: number
   width: number
   height: number
+}
+
+export interface BrowserProxyError {
+  paneId: string
+  code: string
 }
 
 export interface ViewportSize {

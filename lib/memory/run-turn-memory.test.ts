@@ -5,9 +5,13 @@ const mockEnqueueJob = jest.fn()
 const mockClaimJob = jest.fn()
 const mockCompleteJob = jest.fn()
 const mockFailJob = jest.fn()
+const mockResolveCharacter = jest.fn()
 
 jest.mock("@/lib/db/sessions", () => ({
   getSession: jest.fn(),
+}))
+jest.mock("@/lib/db/characters", () => ({
+  resolveCharacterById: (...args: unknown[]) => mockResolveCharacter(...args),
 }))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: jest.fn() },
@@ -72,6 +76,7 @@ beforeEach(() => {
   mockClaimJob.mockReset()
   mockCompleteJob.mockReset()
   mockFailJob.mockReset()
+  mockResolveCharacter.mockReset().mockResolvedValue(undefined)
   mockCreateEvidence
     .mockResolvedValueOnce({ id: "e-user" })
     .mockResolvedValueOnce({ id: "e-assistant" })
@@ -170,20 +175,31 @@ describe("runTurnMemory", () => {
     )
   })
 
-  it("lets an explicit chat opt in when global learning and extraction are off", async () => {
+  it("enforces the Agent automatic-learning policy", async () => {
+    mockResolveCharacter.mockResolvedValue({
+      id: "c1",
+      memoryPolicy: {
+        operations: { recall: true, create: true, update: true, forget: true },
+        readableScopes: ["global"],
+        writableScopes: ["global"],
+        autoLearn: false,
+      },
+    })
+    await runTurnMemory("s1", INPUT)
+    expect(mockRunExtraction).not.toHaveBeenCalled()
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "learn-denied", reason: "agent_policy" })
+    )
+  })
+
+  it("does not let an explicit chat opt in above the global learning ceiling", async () => {
     setMemory({ learnFromChats: false, autoExtract: false })
     mockGetSession.mockResolvedValue({ id: "s1", characterId: "c1", memoryLearn: true })
     await runTurnMemory("s1", INPUT)
-    expect(mockRunExtraction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        config: expect.objectContaining({ learnFromChats: true, autoExtract: true }),
-      }),
-      expect.anything()
-    )
-    expect(mockSchedule).toHaveBeenCalledWith(
-      expect.objectContaining({
-        config: expect.objectContaining({ learnFromChats: true, autoExtract: true }),
-      })
+    expect(mockRunExtraction).not.toHaveBeenCalled()
+    expect(mockSchedule).not.toHaveBeenCalled()
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "learn-denied" })
     )
   })
 
@@ -264,10 +280,12 @@ describe("runTurnMemory", () => {
 })
 
 describe("resolveAutomaticMemoryScope", () => {
-  it("constrains agent defaults when no automatic agent identity exists", () => {
-    expect(resolveAutomaticMemoryScope("agent", { projectId: "p1" })).toBe("workspace")
-    expect(resolveAutomaticMemoryScope("agent", { characterId: "c1" })).toBe("character")
+  it("uses only scopes that have both an identity and Agent write permission", () => {
+    expect(resolveAutomaticMemoryScope("agent", { projectId: "p1" })).toBe("global")
+    expect(resolveAutomaticMemoryScope("agent", { characterId: "c1" })).toBe("agent")
     expect(resolveAutomaticMemoryScope("agent", {})).toBe("global")
     expect(resolveAutomaticMemoryScope("workspace", { projectId: "p1" })).toBe("workspace")
+    expect(resolveAutomaticMemoryScope("global", {}, ["agent"])).toBeNull()
+    expect(resolveAutomaticMemoryScope("global", { characterId: "c1" }, ["agent"])).toBe("agent")
   })
 })

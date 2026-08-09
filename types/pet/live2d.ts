@@ -44,3 +44,9 @@ export interface Live2dMotionOverride {
  * Unset keys fall back to the naming-convention resolver.
  */
 export type Live2dMotionOverrides = Partial<Record<string, Live2dMotionOverride>>
+
+export type Live2dParameterRole =
+  "headX" | "headY" | "headZ" | "eyeX" | "eyeY" | "bodyX" | "bodyY" | "mouthOpen"
+
+/** A null entry explicitly disables a role for a non-standard model. */
+export type Live2dParameterMapping = Partial<Record<Live2dParameterRole, string | null>>

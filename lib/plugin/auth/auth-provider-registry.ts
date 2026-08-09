@@ -69,7 +69,12 @@ export interface AuthenticationProvider {
     options: AuthSessionOptions
   ) => Promise<AuthSession[]>
   /** Open the interactive consent flow and return the resulting session. */
-  createSession: (scopes: readonly string[]) => Promise<AuthSession>
+  createSession: (scopes: readonly string[], options?: AuthSessionOptions) => Promise<AuthSession>
+  /** Resolve a short-lived request credential without exposing it to plugin code. */
+  resolveRequestCredential?: (
+    sessionId: string,
+    context: AuthRequestCredentialContext
+  ) => Promise<ResolvedAuthRequestCredential>
   /** Revoke a session. Idempotent. */
   removeSession: (sessionId: string) => Promise<void>
 }
@@ -79,6 +84,18 @@ export interface AuthSessionOptions {
   forceNewSession?: boolean
   silent?: boolean
   clearSessionPreference?: boolean
+  /** Provider-specific setup values collected by a host-owned form. */
+  configuration?: Record<string, unknown>
+}
+
+export interface AuthRequestCredentialContext {
+  accountId: string
+  origin: string
+}
+
+export interface ResolvedAuthRequestCredential {
+  accessToken: string
+  expiresAt?: string
 }
 
 export interface SecretsAdapter {
@@ -169,7 +186,7 @@ export async function getSession(
     if (match) return match
   }
   if (options.createIfNone || options.forceNewSession) {
-    const session = await provider.createSession(scopes)
+    const session = await provider.createSession(scopes, options)
     await persistSession(providerId, session)
     emit({ added: [session], removed: [], changed: [] })
     return session

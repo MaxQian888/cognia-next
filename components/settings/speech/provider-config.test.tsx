@@ -4,16 +4,21 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 const saveMock = jest.fn()
-let mockIsTauri = false
-
-jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri }))
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => Boolean((globalThis as { __mockTauri?: boolean }).__mockTauri),
+}))
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(
-    selector: (s: { settings: Record<string, unknown>; save: typeof saveMock }) => T
+    selector: (s: {
+      settings: Record<string, unknown>
+      providerKeys: Record<string, string>
+      save: typeof saveMock
+    }) => T
   ): T =>
     selector({
       settings: { realtimeVoice: "marin", realtimeModel: "gpt-realtime" },
+      providerKeys: {},
       save: saveMock,
     }),
 }))
@@ -23,14 +28,19 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("./api-key-input", () => ({
-  ApiKeyInput: () => <div data-testid="api-key" />,
+  ApiKeyInput: ({ label }: { label: string }) => <div data-testid="api-key">{label}</div>,
 }))
 
-import { MistralConfig, OpenAiRealtimeConfig, PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
+import {
+  LocalOpenAiCompatibleConfig,
+  MistralConfig,
+  OpenAiRealtimeConfig,
+  PROVIDER_CONFIG_COMPONENTS,
+} from "./provider-config"
 
 beforeEach(() => {
   saveMock.mockClear()
-  mockIsTauri = false
+  ;(globalThis as { __mockTauri?: boolean }).__mockTauri = false
 })
 
 describe("OpenAiRealtimeConfig", () => {
@@ -45,7 +55,7 @@ describe("OpenAiRealtimeConfig", () => {
   })
 
   it("hides the desktop-only notice when running in Tauri", () => {
-    mockIsTauri = true
+    ;(globalThis as { __mockTauri?: boolean }).__mockTauri = true
     render(<OpenAiRealtimeConfig />)
     expect(screen.queryByText("realtimeDesktopOnly")).not.toBeInTheDocument()
   })
@@ -69,5 +79,19 @@ describe("MistralConfig", () => {
       target: { value: "voice-123" },
     })
     expect(saveMock).toHaveBeenCalledWith({ mistralVoiceId: "voice-123" })
+  })
+})
+
+describe("LocalOpenAiCompatibleConfig", () => {
+  it("registers one generic local provider and persists its endpoint", () => {
+    expect(PROVIDER_CONFIG_COMPONENTS["local-openai-compatible"]).toBe(LocalOpenAiCompatibleConfig)
+    render(<LocalOpenAiCompatibleConfig />)
+    fireEvent.change(screen.getByPlaceholderText("localEndpointPlaceholder"), {
+      target: { value: "http://127.0.0.1:8880/v1" },
+    })
+    expect(saveMock).toHaveBeenCalledWith({
+      localOpenaiBaseUrl: "http://127.0.0.1:8880/v1",
+    })
+    expect(screen.getByTestId("api-key")).toHaveTextContent("label.local-openai-compatible")
   })
 })

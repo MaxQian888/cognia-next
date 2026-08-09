@@ -28,6 +28,7 @@ import type {
   ExternalAgentHookFireEvent,
   ExternalAgentMessageDeltaEvent,
   ExternalAgentThinkingEvent,
+  ExternalAgentToolCallUpdateEvent,
   ExternalAgentToolResultEvent,
   ExternalAgentToolUseEndEvent,
   ExternalAgentToolUseStartEvent,
@@ -65,6 +66,8 @@ export function applyExternalAgentEventToParts(
       return applyCommentaryDelta(parts, event as ExternalAgentCommentaryDeltaEvent)
     case "tool_use_start":
       return applyToolUseStart(parts, event as ExternalAgentToolUseStartEvent)
+    case "tool_call_update":
+      return applyToolCallUpdate(parts, event as ExternalAgentToolCallUpdateEvent)
     case "tool_use_end":
       return applyToolUseEnd(parts, event as ExternalAgentToolUseEndEvent)
     case "tool_result":
@@ -177,6 +180,24 @@ function appendToOrCreateLast(
 }
 
 function applyToolUseStart(parts: readonly Part[], event: ExternalAgentToolUseStartEvent): Part[] {
+  const existingIndex = findToolIndexByCallId(parts, event.toolUseId)
+  if (existingIndex >= 0) {
+    const current = parts[existingIndex] as MutablePart
+    const previousMetadata = (current.toolMetadata as Record<string, unknown> | undefined) ?? {}
+    const toolMetadata = { ...previousMetadata, ...(event.toolMetadata ?? {}) }
+    const updated: MutablePart = {
+      ...current,
+      ...(event.title ? { title: event.title } : {}),
+      ...(event.rawInput ? { input: event.rawInput } : {}),
+      ...(Object.keys(toolMetadata).length > 0 ? { toolMetadata } : {}),
+    }
+    return [
+      ...parts.slice(0, existingIndex),
+      updated as unknown as Part,
+      ...parts.slice(existingIndex + 1),
+    ]
+  }
+
   const artifact = artifactPartFromToolUse(event.toolName, event.rawInput ?? {})
   if (artifact) {
     return [...parts, artifact as unknown as Part]
@@ -186,8 +207,32 @@ function applyToolUseStart(parts: readonly Part[], event: ExternalAgentToolUseSt
     toolCallId: event.toolUseId,
     state: "input-available",
     input: event.rawInput ?? {},
+    ...(event.title ? { title: event.title } : {}),
+    ...(event.toolMetadata ? { toolMetadata: event.toolMetadata } : {}),
   }
   return [...parts, fresh as unknown as Part]
+}
+
+function applyToolCallUpdate(
+  parts: readonly Part[],
+  event: ExternalAgentToolCallUpdateEvent
+): Part[] {
+  const idx = findToolIndexByCallId(parts, event.toolCallId)
+  if (idx < 0) return parts as Part[]
+  const cur = parts[idx] as MutablePart
+  const previousMetadata = (cur.toolMetadata as Record<string, unknown> | undefined) ?? {}
+  const toolMetadata = {
+    ...previousMetadata,
+    ...(event.kind ? { kind: event.kind } : {}),
+    ...(event.locations ? { locations: event.locations } : {}),
+  }
+  const updated: MutablePart = {
+    ...cur,
+    ...(event.title ? { title: event.title } : {}),
+    ...(event.rawInput ? { input: event.rawInput } : {}),
+    ...(Object.keys(toolMetadata).length > 0 ? { toolMetadata } : {}),
+  }
+  return [...parts.slice(0, idx), updated as unknown as Part, ...parts.slice(idx + 1)]
 }
 
 function applyToolUseEnd(parts: readonly Part[], event: ExternalAgentToolUseEndEvent): Part[] {
@@ -205,9 +250,19 @@ function applyToolResult(parts: readonly Part[], event: ExternalAgentToolResultE
   const idx = findToolIndexByCallId(parts, event.toolUseId)
   if (idx < 0) return parts as Part[]
   const cur = parts[idx] as MutablePart
+  const previousMetadata = (cur.toolMetadata as Record<string, unknown> | undefined) ?? {}
+  const toolMetadata = {
+    ...previousMetadata,
+    ...(event.toolMetadata ?? {}),
+    ...(event.kind ? { kind: event.kind } : {}),
+    ...(event.locations ? { locations: event.locations } : {}),
+  }
   const updated: MutablePart = {
     ...cur,
     state: event.isError ? "output-error" : "output-available",
+    ...(event.title ? { title: event.title } : {}),
+    ...(Object.keys(toolMetadata).length > 0 ? { toolMetadata } : {}),
+    ...(event.rawInput ? { input: event.rawInput } : {}),
     output: event.result,
     errorText: event.isError ? errorTextOf(event.result) : cur.errorText,
   }

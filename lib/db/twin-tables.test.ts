@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 /**
  * Integration coverage for the five Employee Digital Twin Dexie tables and
  * their CRUD modules. Lives next to `lib/db/twin-{sources,chunks,profile,
@@ -6,7 +5,6 @@
  * cascade deletes, and the twinJobs FIFO claim path.
  */
 
-import "fake-indexeddb/auto"
 import {
   createTwinSource,
   deleteAllTwinSourcesForTwin,
@@ -74,13 +72,14 @@ import {
   requeueJob,
   updateJobProgress,
 } from "./twin-jobs"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   // The twin tables seed nothing; just clear to be safe.
   const db = getDb()
   await Promise.all([
@@ -91,6 +90,7 @@ beforeEach(async () => {
     db.twinJobs.clear(),
   ])
 })
+afterAll(dbFixture.dispose)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // twinSources

@@ -24,12 +24,14 @@
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { createAdapterInstance, getAdapterInstance } from "@/lib/db/adapter-instances"
+import { enqueueConnectorInboundJob } from "@/lib/db/connector-inbound-jobs"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
 import type { AdapterInstanceRow, DispatchRule } from "@/lib/db/connector-types"
 import {
   installRuntime,
   inboundEventToSendContent,
   insertInboundMessage,
+  resolveRecoveryExecutionSpec,
   shouldEmbedInboundText,
   type RunAndCaptureFn,
 } from "./runtime"
@@ -39,6 +41,20 @@ import { getBus, __resetBusForTesting } from "./bus"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
+import type { AgentExecutionSendSpec } from "@cognia/agent-config-types/agent-execution"
+import { computeExecutionFingerprint } from "@/lib/ai/agent/execution/fingerprint"
+import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
+
+const mockAppendCanonicalEnvelopes = jest.fn<Promise<number>, unknown[]>(async () => 1)
+jest.mock("@/lib/ai/agent/recovery/canonical-log", () => ({
+  ...jest.requireActual("@/lib/ai/agent/recovery/canonical-log"),
+  appendCanonicalEnvelopes: (...args: unknown[]) => mockAppendCanonicalEnvelopes(...(args as [])),
+}))
+
+const mockMintSessionRouteTicket = jest.fn<Promise<undefined>, unknown[]>(async () => undefined)
+jest.mock("@/lib/gateway/mint-session-ticket", () => ({
+  mintSessionRouteTicket: (...args: unknown[]) => mockMintSessionRouteTicket(...(args as [])),
+}))
 
 // Twin runtime deps loader is mocked so the ai-run path can be probed for the
 // twin handshake without standing up a real vector store. Returns undefined by
@@ -177,7 +193,8 @@ const RESOLVED: ResolvedBinding = {
 async function callHandler(
   event: NormalizedInboundEvent,
   decision: RouteDecision,
-  resolved: ResolvedBinding = RESOLVED
+  resolved: ResolvedBinding = RESOLVED,
+  inboundJobId: string = `test:${event.messageId}`
 ): Promise<void> {
   const bus = getBus()
   if (!bus.routeHandler) throw new Error("routeHandler not installed")
@@ -190,7 +207,7 @@ async function callHandler(
     (await getAdapterInstance(event.adapterId)) ?? ({ id: event.adapterId } as AdapterInstanceRow)
   const override = (await readForResolution(event.conversationKey)) ?? null
   await bus.routeHandler(event, decision, resolved, override, adapterRow, {
-    inboundJobId: `test:${event.messageId}`,
+    inboundJobId,
     bindExecutionRun: mockBindExecutionRun,
   })
 }
@@ -253,10 +270,79 @@ beforeEach(async () => {
   endSpanMock.mockClear()
   mockBindExecutionRun.mockClear()
   mockWaitForExecutionRunPresentationFreeze.mockClear()
+  mockAppendCanonicalEnvelopes.mockClear()
+  mockMintSessionRouteTicket.mockClear()
+  window.localStorage.removeItem("cognia-agent-execution-flags-v1")
   installRuntime(bus, { runAndCapture: DEFAULT_RUN_AND_CAPTURE })
 })
 
 // ── tests ─────────────────────────────────────────────────────────────────────
+
+describe("resolveRecoveryExecutionSpec", () => {
+  const existingGateway: AgentExecutionSendSpec = {
+    specVersion: 2,
+    executionFingerprint: "aexf1-existing",
+    runtimeAdapter: "claude-agent-sdk",
+    executionKind: "agent",
+    route: {
+      kind: "gateway",
+      endpoint: "http://127.0.0.1:24680/v1",
+      ticketId: "ticket-old",
+    },
+    modelBindings: { primary: "claude-sonnet-5" },
+    capabilities: { effective: [], disabledOptional: [] },
+    identity: { runId: "run-old", attemptId: "a1" },
+    hostRef: "desktop-sidecar",
+  }
+
+  it("reuses the initial gateway ticket but fails closed when recovery remint is unavailable", async () => {
+    const sendOptions = {
+      provider: "anthropic",
+      model: "claude-sonnet-5",
+      execution: existingGateway,
+    }
+    await expect(
+      resolveRecoveryExecutionSpec(sendOptions as never, "session-1", { runId: "run-old" }, false)
+    ).resolves.toBe(existingGateway)
+    expect(mockMintSessionRouteTicket).not.toHaveBeenCalled()
+
+    window.localStorage.setItem(
+      "cognia-agent-execution-flags-v1",
+      JSON.stringify({ gatewayAgentRouteTickets: true })
+    )
+    await expect(
+      resolveRecoveryExecutionSpec(
+        sendOptions as never,
+        "session-1",
+        { runId: "run-old", attemptId: "recovery-1" },
+        true,
+        "gateway"
+      )
+    ).rejects.toThrow("recovery_gateway_ticket_remint_failed")
+    expect(mockMintSessionRouteTicket).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1" })
+    )
+
+    mockMintSessionRouteTicket.mockClear()
+    const provisionalDirect = {
+      ...sendOptions,
+      execution: {
+        ...existingGateway,
+        route: { kind: "direct" as const },
+      },
+    }
+    await expect(
+      resolveRecoveryExecutionSpec(
+        provisionalDirect as never,
+        "session-1",
+        { runId: "run-old", attemptId: "recovery-2" },
+        true,
+        "gateway"
+      )
+    ).rejects.toThrow("recovery_gateway_ticket_remint_failed")
+    expect(mockMintSessionRouteTicket).toHaveBeenCalledTimes(1)
+  })
+})
 
 describe("installRuntime — ai-run (happy path)", () => {
   it("creates a ChatSession with platformBinding", async () => {
@@ -541,6 +627,225 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
     )
     expect(await getDb().executionRunBindings.where("runId").equals(run!.id).count()).toBe(1)
     expect(mockWaitForExecutionRunPresentationFreeze).toHaveBeenCalledWith(run!.id)
+  })
+
+  it("journals a versioned recovery anchor and persists the captured SDK session", async () => {
+    const conversationKey = "telegram:adapter_1:chat_recovery_anchor"
+    await callHandler(makeEvent({ conversationKey, messageId: "seed" }), "manual-store")
+    const session = await getDb()
+      .sessions.filter(
+        (candidate) => candidate.platformBinding?.conversationKey === conversationKey
+      )
+      .first()
+    expect(session).toBeDefined()
+    await getDb().sessions.update(session!.id, { sdkSessionId: "sdk-before" })
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockImplementationOnce(
+      async (_sessionId, _prompt, _sendOptions, cap) => {
+        await cap?.onSdkSessionId?.("sdk-after")
+        await new Promise<void>((resolve) => {
+          setTimeout(() => {
+            cap?.onEvent?.({ type: "text-delta", delta: "partial" })
+            cap?.onEvent?.({
+              type: "tool-call",
+              toolName: "Read",
+              input: { path: "a.ts" },
+              id: "call-1",
+            })
+            cap?.onEvent?.({
+              type: "tool-result",
+              toolName: "Read",
+              id: "call-1",
+              result: "ok",
+            })
+            resolve()
+          }, 0)
+        })
+        return {
+          text: "continued",
+          messageId: "uuid-recovered",
+          sdkSessionId: "sdk-after",
+        }
+      }
+    )
+
+    const event = makeEvent({ conversationKey, messageId: "recoverable" })
+    await callHandler(event, "ai-run")
+    expect(
+      (await getDb().connectorAudit.toArray()).filter(
+        (entry) => entry.reason === "ai_run_capture_failed"
+      )
+    ).toEqual([])
+
+    const run = await getDb().executionRuns.where("kind").equals("agent-turn").first()
+    const started = (
+      await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()
+    ).find((item) => item.type === "run.started")
+    expect(started?.payload.recoveryAnchor).toEqual(
+      expect.objectContaining({
+        version: 1,
+        inboundJobId: "test:recoverable",
+        sessionId: session!.id,
+        sdkSessionId: "sdk-before",
+        executionFingerprint: expect.any(String),
+      })
+    )
+    expect((await getDb().sessions.get(session!.id))?.sdkSessionId).toBe("sdk-after")
+    expect(
+      (await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()).find(
+        (item) => item.type === "resource.changed"
+      )?.payload.recoveryAnchor
+    ).toEqual(expect.objectContaining({ sdkSessionId: "sdk-after" }))
+    expect((DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][2].execution).toBeUndefined()
+    expect(
+      mockAppendCanonicalEnvelopes.mock.calls.map(
+        (call) => (call[1] as Array<{ event: { kind: string } }>)[0].event.kind
+      )
+    ).toEqual(["text-delta", "tool-call", "tool-result"])
+  })
+
+  it("keeps canonical persistence live after one failure and parks the job fail-closed", async () => {
+    mockAppendCanonicalEnvelopes.mockRejectedValueOnce(new Error("canonical disk unavailable"))
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockImplementationOnce(
+      async (_sessionId, _prompt, _sendOptions, cap) => {
+        cap?.onEvent?.({
+          type: "tool-call",
+          toolName: "Write",
+          input: { path: "a.ts" },
+          id: "call-1",
+        })
+        cap?.onEvent?.({
+          type: "tool-result",
+          toolName: "Write",
+          id: "call-1",
+          result: "ok",
+        })
+        return { text: "must not deliver", messageId: "uuid-canonical-failed" }
+      }
+    )
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_canonical_failure",
+      messageId: "canonical-failure",
+    })
+    const inboundJob = await enqueueConnectorInboundJob(event, "queue")
+
+    await callHandler(event, "ai-run", RESOLVED, inboundJob.id)
+
+    expect(
+      mockAppendCanonicalEnvelopes.mock.calls.map(
+        (call) => (call[1] as Array<{ event: { kind: string } }>)[0].event.kind
+      )
+    ).toEqual(["tool-call", "tool-result"])
+    expect(await getDb().connectorInboundJobs.get(inboundJob.id)).toEqual(
+      expect.objectContaining({
+        status: "recovery_required",
+        recoveryReason: "canonical_log_write_failed",
+      })
+    )
+    expect(await getDb().outboundQueue.toArray()).toHaveLength(0)
+  })
+
+  it("continues the existing run with a new attempt without resetting journal revisions", async () => {
+    window.localStorage.setItem(
+      "cognia-agent-execution-flags-v1",
+      JSON.stringify({ agentExecutionResolverV2: true })
+    )
+    const conversationKey = "telegram:adapter_1:chat_resume_existing_run"
+    const event = makeEvent({ conversationKey, messageId: "same-message" })
+    await callHandler(makeEvent({ conversationKey, messageId: "seed" }), "manual-store")
+    const session = await getDb()
+      .sessions.filter(
+        (candidate) => candidate.platformBinding?.conversationKey === conversationKey
+      )
+      .first()
+    await getDb().sessions.update(session!.id, { sdkSessionId: "sdk-resume" })
+
+    await callHandler(event, "ai-run")
+    const run = await getDb().executionRuns.where("kind").equals("agent-turn").first()
+    const firstEvents = await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()
+    const firstAnchor = firstEvents.find((item) => item.type === "run.started")?.payload
+      .recoveryAnchor as Record<string, unknown>
+    const executionIdentityRunId = firstAnchor.executionIdentityRunId as string
+    const firstRevision = (await getDb().executionRuns.get(run!.id))!.currentRevision
+
+    const resumedEvent = makeEvent({
+      ...event,
+      channelData: {
+        recoveryIntent: "continue_safely",
+        dispatchIntent: "steer-replay",
+        recoveryAnchor: {
+          ...firstAnchor,
+          attemptId: "recovery-test",
+          partialOutput: "partial ",
+          restoredPermissions: [{ requestId: "prior-deny", toolName: "Bash", state: "denied" }],
+        },
+      },
+    })
+    let restoredDecision: unknown
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockImplementationOnce(
+      async (_sessionId, _prompt, _sendOptions, cap) => {
+        await new Promise<void>((resolve, reject) => {
+          setTimeout(() => {
+            void cap
+              ?.onPermissionRequest?.({
+                type: "permission_request",
+                sessionId: session!.id,
+                requestId: "prior-deny",
+                toolUseID: "tool-use-1",
+                toolName: "Bash",
+                input: { command: "pwd" },
+              })
+              .then((decision: CapturePermissionDecision) => {
+                restoredDecision = decision
+                resolve()
+              }, reject)
+          }, 0)
+        })
+        return { text: "resumed", messageId: "uuid-resumed" }
+      }
+    )
+    await callHandler(resumedEvent, "ai-run")
+
+    const rows = await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()
+    const sequences = rows.map((row) => row.seq)
+    expect(await getDb().executionRuns.where("kind").equals("agent-turn").count()).toBe(1)
+    expect((await getDb().executionRuns.get(run!.id))!.currentRevision).toBeGreaterThan(
+      firstRevision
+    )
+    expect(new Set(sequences).size).toBe(sequences.length)
+    const resumedExecution = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[1][2].execution
+    expect(resumedExecution.identity).toMatchObject({
+      runId: executionIdentityRunId,
+      attemptId: "recovery-test",
+    })
+    const { resolveAgentExecutionShadowSpec } =
+      await import("@/lib/ai/agent/execution/agent-execution-service")
+    const resumedSendOptions = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[1][2]
+    const expectedResolution = await resolveAgentExecutionShadowSpec(
+      {
+        sessionId: session!.id,
+        provider: resumedSendOptions.provider,
+        model: resumedSendOptions.model,
+        toolsEnabled: true,
+      },
+      { isTauri: false, isHeadlessHost: false },
+      {
+        surface: "connector",
+        policy: { executionKind: "agent" },
+        identity: { runId: executionIdentityRunId, attemptId: "recovery-test" },
+      }
+    )
+    expect(resumedExecution.executionFingerprint).toBe(
+      computeExecutionFingerprint(expectedResolution.spec)
+    )
+    expect(restoredDecision).toEqual({
+      decision: "deny",
+      message: "permission denied by recovered state",
+    })
+    expect((await getDb().outboundQueue.toArray()).at(-1)?.request.segments[0]).toMatchObject({
+      type: "markdown",
+      md: "partial resumed",
+    })
+    window.localStorage.removeItem("cognia-agent-execution-flags-v1")
   })
 
   it("audits a bounded freeze timeout before enqueueing the independent final reply", async () => {

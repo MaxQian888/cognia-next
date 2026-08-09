@@ -1,6 +1,6 @@
 ---
 title: Mobile Architecture
-description: The mobile companion — one Next.js static export wrapped by Capacitor 8, connected back to the desktop server over a tri-state Transport (Tauri IPC / HTTP+WS / WebRTC), with native plugin bridges, mDNS+tunnel discovery, JWT pairing, secure storage, and offline-first Dexie sync.
+description: The mobile companion — one Next.js static export wrapped by Capacitor 8, connected to a Host over target-aware Tauri IPC / HTTPS+WS / WebRTC, with native bridges, cgnp3 + DPoP pairing, secure storage, and offline-first Dexie sync.
 ---
 
 # Mobile Architecture
@@ -11,16 +11,15 @@ description: The mobile companion — one Next.js static export wrapped by Capac
   Cognia's mobile client is **not** a separate React Native app and **not** a trimmed desktop build —
   it is the *same* `out/` static export wrapped by **Capacitor 8** inside an iOS/Android WebView, then
   connected back to the desktop's [External API](../../subsystems/companion-api). One JS bundle, three
-  shells (Tauri / Capacitor / Web), one shared React codebase. The seam is the `Transport` interface
-  (`transport-types.ts:19`): a tri-state selector (`transport-instance.ts:22`) picks `TauriTransport`
-  on desktop, `CompanionTransport` on mobile, or `WebStubTransport` in a plain browser — so every
-  `transport.call(name, args)` resolves to Tauri IPC, an HTTPS `_rpc` POST, or (when LAN and tunnel
-  both fail) a WebRTC DataChannel. Native capabilities go through `lib/capacitor/*` wrappers that
+  shells (Tauri / Capacitor / Web), one shared React codebase. The seam is the `Transport` interface:
+  desktop uses `TauriTransport`, while Web/Capacitor bind `CompanionTransport` whenever the account's
+  active runtime target is a paired Host. Each `transport.call(name, args)` resolves to Tauri IPC,
+  an HTTPS DPoP `_rpc` POST, or an upgraded WebRTC DataChannel. Native capabilities go through `lib/capacitor/*` wrappers that
   degrade to `unsupported` off-device, and reads come from a local Dexie that syncs incrementally.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Transport states" value="3" hint="Tauri / Companion / WebStub — transport-instance.ts:22" />
+  <Stat label="Runtime targets" value="isolated" hint="standalone / companion" />
   <Stat label="Transport tiers" value="4" hint="ws-lan · ws-tunnel · rtc-direct · rtc-relay" />
   <Stat label="Native wrappers" value="20" hint="lib/capacitor/*.ts via withPlugin" />
   <Stat label="Sync tables" value="10" hint="lib/sync/handlers/*" />
@@ -122,18 +121,18 @@ Read the per-module page for line-accurate internals. Each card is one documenta
 
 ## Why the phone is a client, not a server
 
-Everything stateful and privileged stays on the desktop. The phone holds a device JWT, a pinned TLS
-fingerprint, a v2 room descriptor, a secure mobile role key, and a local Dexie cache — nothing more. It cannot run the agent
+Everything stateful and privileged stays on the Host. The phone holds a P-256 device key, a pinned TLS
+fingerprint, a v2 room descriptor, a separate signaling key, and a local Dexie cache — nothing more. It cannot run the agent
 sidecar, the vector store, MCP, or connector webhooks. This keeps the attack surface small (a lost
-phone is revoked from the desktop's [deny-list](../../subsystems/companion-api/server-and-auth#revocation-deny-list-and-control-allow-list))
+phone is revoked through the Host's [SecurityStore](../../subsystems/companion-api/server-and-auth))
 and keeps the bundle identical, which is the whole point of the Capacitor approach.
 
-## Web-mode degradation
+## Web runtime targets
 
-The same `out/` can be served as a plain PWA. Then the selector returns `WebStubTransport`
-(`transport-web.ts`): every `transport.call` rejects, `usePlatform()` reports browser, and all
-`lib/capacitor/*` wrappers return `unsupported` so their UI entries hide. Only Dexie + translations +
-theme survive — a deliberate minimal subset for demos and screenshots.
+The same `out/` is the production Web client. A browser account can stay on an isolated standalone
+target or activate any paired Headless target, at which point transport, database, manifest, and
+event cursors rebind together. Native-only `lib/capacitor/*` wrappers still return `unsupported`;
+standalone browser chat and Headless-backed capabilities remain available according to the active manifest.
 
 ## Related pages
 

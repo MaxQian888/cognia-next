@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // CRUD + tree-helper coverage for workflow library folders: create/list/
 // rename/update/move (with cycle guards) / delete (reparent + cascade) and
 // the getFolderPath / getDescendantFolderIds walkers.
 
-import "fake-indexeddb/auto"
 import {
   createFolder,
   deleteFolder,
@@ -17,17 +15,19 @@ import {
   updateFolder,
 } from "./workflow-folders"
 import { createWorkflow, listWorkflowsInFolder, moveWorkflowToFolder } from "./workflows"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().workflows.clear()
   await getDb().workflowFolders.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("createFolder", () => {
   it("inserts a row with root default and trims the name", async () => {

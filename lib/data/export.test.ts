@@ -3,14 +3,24 @@ jest.mock("./build-package", () => ({
   defaultExportFileName: jest.fn(() => "name.json"),
   serializePackage: jest.fn(() => "serialized"),
 }))
+jest.mock("./build-stream", () => ({
+  buildBackupStream: jest.fn(),
+  buildBackupSections: jest.fn(),
+}))
+jest.mock("./stream-format", () => ({ readBackupStream: jest.fn() }))
 
 import {
   buildExportEnvelope,
   defaultExportFileName,
   serializePackage,
   buildBackupPackage,
+  buildBackupStream,
+  buildBackupSections,
+  readBackupStream,
 } from "./export"
 import * as buildPackage from "./build-package"
+import * as buildStream from "./build-stream"
+import * as streamFormat from "./stream-format"
 
 describe("export facade", () => {
   it("delegates buildExportEnvelope to buildBackupPackage", async () => {
@@ -26,5 +36,11 @@ describe("export facade", () => {
     expect(defaultExportFileName).toBe(buildPackage.defaultExportFileName)
     expect(serializePackage).toBe(buildPackage.serializePackage)
     expect(buildBackupPackage).toBe(buildPackage.buildBackupPackage)
+  })
+
+  it("exposes the additive v4 streaming seams", () => {
+    expect(buildBackupStream).toBe(buildStream.buildBackupStream)
+    expect(buildBackupSections).toBe(buildStream.buildBackupSections)
+    expect(readBackupStream).toBe(streamFormat.readBackupStream)
   })
 })

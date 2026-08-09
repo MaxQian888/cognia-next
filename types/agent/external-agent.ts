@@ -471,6 +471,11 @@ export interface AcpClientCapabilities {
   }
   /** Client can receive experimental identified plan updates/removals. */
   plan?: Record<string, never>
+  /** Feature-gated schema 1.20.0 elicitation extension. */
+  elicitation?: {
+    form?: Record<string, never>
+    url?: Record<string, never>
+  }
   /** Custom capabilities via _meta */
   _meta?: Record<string, unknown>
 }
@@ -1143,6 +1148,56 @@ export interface AcpPermissionResponse {
   answers?: Record<string, string[]>
 }
 
+export type AcpElicitationValue = string | number | boolean | string[]
+
+export interface AcpElicitationPropertySchema {
+  type: "string" | "integer" | "number" | "boolean" | "array"
+  title?: string
+  description?: string
+  format?: string
+  enum?: string[]
+  oneOf?: Array<{ const: string; title?: string; group?: string }>
+  items?: { type: "string"; enum?: string[] }
+  default?: AcpElicitationValue
+  writeOnly?: boolean
+  [key: string]: unknown
+}
+
+export interface AcpElicitationSchema {
+  type?: "object"
+  title?: string | null
+  description?: string | null
+  properties: Record<string, AcpElicitationPropertySchema>
+  required?: string[] | null
+  _meta?: Record<string, unknown> | null
+}
+
+/** Feature-gated ACP v1 elicitation request (schema 1.20.0 unstable surface). */
+export interface AcpElicitationRequest {
+  /** Local response correlation id derived from the JSON-RPC request id. */
+  id: string
+  mode: "form" | "url"
+  message: string
+  sessionId?: string
+  requestId?: number | string
+  toolCallId?: string | null
+  requestedSchema?: AcpElicitationSchema
+  elicitationId?: string
+  url?: string
+  origin?: string
+  hasPunycodeWarning?: boolean
+  _meta?: Record<string, unknown> | null
+  /** Opaque original payload for storage/proxying; never interpreted as known behavior. */
+  raw: Record<string, unknown>
+}
+
+export interface AcpElicitationResponse {
+  requestId: string
+  action: "accept" | "decline" | "cancel"
+  content?: Record<string, AcpElicitationValue> | null
+  _meta?: Record<string, unknown> | null
+}
+
 // ============================================================================
 // External Agent Configuration
 // ============================================================================
@@ -1277,6 +1332,14 @@ export interface ExternalAgentConfig {
   tags?: string[]
   /** Custom metadata */
   metadata?: Record<string, unknown>
+  /** Optional immutable provenance for an ACP Registry installation. */
+  registryProvenance?: {
+    registryId: string
+    version: string
+    checksum?: string
+    sourceUrl: string
+    installedAt: Date
+  }
   /** Last known runtime validity snapshot (best-effort projection) */
   validitySnapshot?: ExternalAgentValiditySnapshot
 
@@ -1595,12 +1658,16 @@ export type ExternalAgentEventType =
   | "tool_call_update"
   | "permission_request"
   | "permission_response"
+  | "elicitation_request"
+  | "elicitation_complete"
   | "commentary_delta"
   | "thinking"
   | "plan_update"
   | "commands_update"
   | "config_options_update"
   | "mode_update"
+  | "usage_update"
+  | "session_info_update"
   | "progress"
   | "error"
   | "done"
@@ -1670,9 +1737,25 @@ export interface ExternalAgentToolUseStartEvent extends ExternalAgentEventBase {
   type: "tool_use_start"
   toolUseId: string
   toolName: string
+  /** Human-readable per-call title. Kept separate from the stable tool identity. */
+  title?: string
   kind?: AcpToolCallKind
   rawInput?: Record<string, unknown>
   locations?: AcpToolCallLocation[]
+  toolMetadata?: ExternalAgentToolMetadata
+}
+
+/** Presentation and safety metadata shared by external-agent tool adapters. */
+export interface ExternalAgentToolMetadata {
+  kind?: AcpToolCallKind
+  readOnlyHint?: boolean | null
+  locations?: AcpToolCallLocation[]
+  appContext?: {
+    appName?: string | null
+    actionName?: string | null
+    connectorId?: string
+    linkId?: string
+  }
 }
 
 /**
@@ -1702,6 +1785,8 @@ export interface ExternalAgentToolResultEvent extends ExternalAgentEventBase {
   result: string | Record<string, unknown>
   isError?: boolean
   toolName?: string
+  title?: string
+  toolMetadata?: ExternalAgentToolMetadata
   kind?: AcpToolCallKind
   rawInput?: Record<string, unknown>
   rawOutput?: Record<string, unknown>
@@ -1723,6 +1808,17 @@ export interface ExternalAgentPermissionRequestEvent extends ExternalAgentEventB
 export interface ExternalAgentPermissionResponseEvent extends ExternalAgentEventBase {
   type: "permission_response"
   response: AcpPermissionResponse
+}
+
+export interface ExternalAgentElicitationRequestEvent extends ExternalAgentEventBase {
+  type: "elicitation_request"
+  request: AcpElicitationRequest
+}
+
+export interface ExternalAgentElicitationCompleteEvent extends ExternalAgentEventBase {
+  type: "elicitation_complete"
+  elicitationId: string
+  _meta?: Record<string, unknown> | null
 }
 
 /**
@@ -1799,6 +1895,19 @@ export interface ExternalAgentConfigOptionsUpdateEvent extends ExternalAgentEven
 export interface ExternalAgentModeUpdateEvent extends ExternalAgentEventBase {
   type: "mode_update"
   modeId: string
+}
+
+export interface ExternalAgentUsageUpdateEvent extends ExternalAgentEventBase {
+  type: "usage_update"
+  used: number
+  size: number
+  cost?: { amount: number; currency: string } | null
+}
+
+export interface ExternalAgentSessionInfoUpdateEvent extends ExternalAgentEventBase {
+  type: "session_info_update"
+  title?: string | null
+  updatedAt?: string | null
 }
 
 /**
@@ -1883,12 +1992,16 @@ export type ExternalAgentEvent =
   | ExternalAgentToolCallUpdateEvent
   | ExternalAgentPermissionRequestEvent
   | ExternalAgentPermissionResponseEvent
+  | ExternalAgentElicitationRequestEvent
+  | ExternalAgentElicitationCompleteEvent
   | ExternalAgentCommentaryDeltaEvent
   | ExternalAgentThinkingEvent
   | ExternalAgentPlanUpdateEvent
   | ExternalAgentCommandsUpdateEvent
   | ExternalAgentConfigOptionsUpdateEvent
   | ExternalAgentModeUpdateEvent
+  | ExternalAgentUsageUpdateEvent
+  | ExternalAgentSessionInfoUpdateEvent
   | ExternalAgentProgressEvent
   | ExternalAgentErrorEvent
   | ExternalAgentDoneEvent
@@ -1976,6 +2089,22 @@ export interface ExternalAgentExecutionOptions {
    * Omit to inherit whatever the agent's own configuration selects.
    */
   model?: string
+  /**
+   * Reasoning effort ("thinking level") for this execution, as the app names it
+   * (`low`…`max`; the composite `ultracode` tier arrives already mapped to
+   * `xhigh`).
+   *
+   * Bridged to the adapter as `metadata.reasoningEffort`, which takes
+   * precedence over the per-agent `codexOptions.defaultReasoningEffort` — the
+   * same per-session-beats-per-agent layering `model` uses. Before this existed
+   * the composer's thinking level was silently a no-op on the external runtime:
+   * `ChatSession.effort` never reached the adapter at all.
+   *
+   * Best-effort: adapters with no reasoning concept ignore it, and one whose
+   * model advertises a narrower ladder folds it (see the Codex client's
+   * `supportedReasoningEfforts` clamp). Omit to inherit the agent's own default.
+   */
+  reasoningEffort?: string
   /** System prompt override */
   systemPrompt?: string
   /** Permission mode override */
@@ -2018,6 +2147,8 @@ export interface ExternalAgentExecutionOptions {
   onEvent?: (event: ExternalAgentEvent) => void
   /** Callback for permission requests */
   onPermissionRequest?: (request: AcpPermissionRequest) => Promise<AcpPermissionResponse>
+  /** Callback for ACP form/URL elicitation requests. */
+  onElicitationRequest?: (request: AcpElicitationRequest) => Promise<AcpElicitationResponse>
   /** Callback for progress */
   onProgress?: (progress: number, message?: string) => void
   /** Abort signal */

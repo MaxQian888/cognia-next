@@ -15,6 +15,7 @@ import type {
   AcpCapabilities,
   AcpToolInfo,
   AcpPermissionResponse,
+  AcpElicitationResponse,
   AcpPermissionMode,
   AcpAuthMethod,
   AcpImplementationInfo,
@@ -114,6 +115,12 @@ export interface ProtocolAdapter {
    */
   respondToPermission(sessionId: string, response: AcpPermissionResponse): Promise<void>
 
+  /** Respond to a feature-gated ACP v1 elicitation request. */
+  respondToElicitation?(response: AcpElicitationResponse): Promise<void>
+
+  /** Cancel a JSON-RPC request by its wire id using `$/cancel_request`. */
+  cancelRequest?: (requestId: number | string) => Promise<void>
+
   /**
    * Optional: Set session permission mode (ACP)
    */
@@ -166,7 +173,7 @@ export interface ProtocolAdapter {
   undoLastProviderChange?: (sessionId: string) => Promise<void>
 
   /**
-   * Optional: List sessions (ACP extension / unstable)
+   * Optional: List sessions (stable ACP v1)
    */
   listSessions?: (options?: SessionListOptions) => Promise<
     Array<{
@@ -185,7 +192,7 @@ export interface ProtocolAdapter {
   forkSession?: (sessionId: string, options?: SessionCreateOptions) => Promise<ExternalAgentSession>
 
   /**
-   * Optional: Resume session (ACP extension / unstable)
+   * Optional: Resume session (stable ACP v1)
    */
   resumeSession?: (
     sessionId: string,
@@ -316,6 +323,7 @@ export interface SessionCreateOptions {
  * Base class for protocol adapters providing common functionality
  */
 export abstract class BaseProtocolAdapter implements ProtocolAdapter {
+  respondToElicitation?(response: AcpElicitationResponse): Promise<void>
   abstract readonly protocol: string
 
   protected _connectionStatus: ExternalAgentConnectionStatus = "disconnected"
@@ -499,6 +507,13 @@ export abstract class BaseProtocolAdapter implements ProtocolAdapter {
             if (options?.onPermissionRequest) {
               const response = await options.onPermissionRequest(event.request)
               await this.respondToPermission(sessionId, response)
+            }
+            break
+
+          case "elicitation_request":
+            if (options?.onElicitationRequest && this.respondToElicitation) {
+              const response = await options.onElicitationRequest(event.request)
+              await this.respondToElicitation(response)
             }
             break
 

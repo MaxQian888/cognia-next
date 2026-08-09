@@ -166,6 +166,10 @@ export interface KnowledgeFile {
 export interface Project {
   id: string
   name: string
+  /** Pinned projects sort before recent projects in fast-entry surfaces. */
+  pinned?: boolean
+  /** Project-local environment selected for new chats and managed worktrees. */
+  defaultEnvironmentId?: string
   description?: string
   /**
    * Mounted directories of this workspace. Single source of truth for the cwd

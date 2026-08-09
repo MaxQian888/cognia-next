@@ -33,6 +33,21 @@ jest.mock("@/components/error/diagnostic-card", () => ({
 jest.mock("./message-list", () => ({
   MessageList: jest.fn(() => null),
 }))
+const companionTranscriptMessagesMock = jest.fn(() => null)
+jest.mock("./companion-transcript-messages", () => ({
+  CompanionTranscriptMessages: (props: Record<string, unknown>) =>
+    companionTranscriptMessagesMock(props),
+}))
+jest.mock("@/lib/platform/web-companion", () => ({
+  hasWebCompanionTarget: jest.fn(() => false),
+}))
+let historyModeMock: "timeline" | "legacy" | null = null
+const hydrateSessionHistoryMock = jest.fn()
+jest.mock("@/lib/sync/session-history", () => ({
+  getSessionHistoryMode: () => historyModeMock,
+  hydrateSessionHistory: (...args: unknown[]) => hydrateSessionHistoryMock(...args),
+  subscribeSessionHistoryMode: () => () => {},
+}))
 jest.mock("./workspace-changes-card", () => ({
   WorkspaceChangesCard: ({ session }: { session: { id: string } }) => (
     <div data-testid="workspace-changes-card" data-session={session.id} />
@@ -59,6 +74,7 @@ const storeState = {
   // slices directly off the state object.
   sessions: {} as Record<string, { messages: unknown[] }>,
   setSessionError: jest.fn(),
+  setSessionMessagesLoadError: jest.fn(),
   requestSessionMessagesReload: jest.fn(),
 }
 
@@ -121,12 +137,15 @@ import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
 import { createDiagnostic } from "@cognia/diagnostics"
 import type { CogniaDiagnostic } from "@cognia/diagnostics"
 import type { ChatSession, SendContent } from "@cognia/agent-config-types"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { transport as companionTransportMock } from "@/lib/tauri/transport-instance"
 import {
   clearComputerUsePipState,
   publishComputerUseActivity,
 } from "@/lib/automation/computer-use-pip"
 
 const mockSession = { id: "s1", title: "Test" } as unknown as ChatSession
+const hasWebCompanionTargetMock = jest.mocked(hasWebCompanionTarget)
 
 function makeProps() {
   return {
@@ -144,6 +163,14 @@ function makeProps() {
 describe("ChatPane", () => {
   beforeEach(() => {
     consumePendingChatPromptMock.mockReset().mockReturnValue(null)
+    hasWebCompanionTargetMock.mockReset().mockReturnValue(false)
+    historyModeMock = null
+    companionTranscriptMessagesMock.mockClear()
+    hydrateSessionHistoryMock.mockReset().mockResolvedValue({
+      applied: 0,
+      total: 0,
+      mode: "timeline",
+    })
     clearComputerUsePipState()
   })
 
@@ -226,6 +253,49 @@ describe("ChatPane", () => {
     expect(MessageList).toHaveBeenCalledWith(
       expect.objectContaining({ projectRoot: "/repo" }),
       undefined
+    )
+  })
+
+  it("routes browser companion sessions through the bounded transcript surface", () => {
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    historyModeMock = "timeline"
+    const MockList = MessageList as jest.Mock
+    MockList.mockClear()
+
+    render(<ChatPane {...makeProps()} />)
+
+    expect(companionTranscriptMessagesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "s1", projectRoot: "/repo" })
+    )
+    expect(MockList).not.toHaveBeenCalled()
+  })
+
+  it("mounts a remote timeline even when the bounded local tail is empty", () => {
+    const savedMessages = storeState.messages
+    storeState.messages = []
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    historyModeMock = "timeline"
+    try {
+      render(<ChatPane {...makeProps()} />)
+      expect(companionTranscriptMessagesMock).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "s1", messages: [] })
+      )
+    } finally {
+      storeState.messages = savedMessages
+    }
+  })
+
+  it("negotiates transcript capability for a pane-bound non-active session", async () => {
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    historyModeMock = null
+
+    render(<ChatPane {...makeProps()} sessionId="split-session" />)
+
+    await waitFor(() =>
+      expect(hydrateSessionHistoryMock).toHaveBeenCalledWith(
+        companionTransportMock,
+        "split-session"
+      )
     )
   })
 
@@ -559,6 +629,70 @@ describe("ChatPane", () => {
       render(<ChatPane {...makeProps()} emptyState={{ title: "Build a workflow" }} />)
       expect(EmptyChatState.mock.calls.at(-1)?.[0]?.statsSlot).toBeUndefined()
       storeState.messages = saved
+    })
+  })
+
+  describe("history hydration motion", () => {
+    const loadedMessage = { id: "loaded", role: "user", parts: [] }
+    let savedMessages: unknown[]
+    let savedLoading: boolean
+
+    beforeEach(() => {
+      jest.useFakeTimers()
+      savedMessages = storeState.messages
+      savedLoading = storeState.messagesLoading
+      storeState.messages = []
+      storeState.messagesLoading = true
+      ;(MessageList as jest.Mock).mockClear()
+    })
+
+    afterEach(() => {
+      storeState.messages = savedMessages
+      storeState.messagesLoading = savedLoading
+      jest.useRealTimers()
+    })
+
+    it("defers the accessible loader so a fast Dexie read does not flash", () => {
+      render(<ChatPane {...makeProps()} />)
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+
+      act(() => jest.advanceTimersByTime(179))
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+
+      act(() => jest.advanceTimersByTime(1))
+      expect(screen.getByRole("status")).toHaveTextContent("loading")
+    })
+
+    it("finishes the loader beat before revealing history that arrived mid-animation", () => {
+      const props = makeProps()
+      const { rerender } = render(<ChatPane {...props} />)
+
+      act(() => jest.advanceTimersByTime(180))
+      expect(screen.getByRole("status")).toHaveTextContent("loading")
+
+      storeState.messages = [loadedMessage]
+      storeState.messagesLoading = false
+      rerender(<ChatPane {...props} />)
+
+      expect(MessageList).not.toHaveBeenCalled()
+      act(() => jest.advanceTimersByTime(319))
+      expect(MessageList).not.toHaveBeenCalled()
+
+      act(() => jest.advanceTimersByTime(1))
+      expect(MessageList).toHaveBeenCalled()
+    })
+
+    it("reveals fast-loaded history without ever mounting the loader", () => {
+      const props = makeProps()
+      const { rerender } = render(<ChatPane {...props} />)
+
+      storeState.messages = [loadedMessage]
+      storeState.messagesLoading = false
+      rerender(<ChatPane {...props} />)
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+      expect(MessageList).toHaveBeenCalled()
     })
   })
 })

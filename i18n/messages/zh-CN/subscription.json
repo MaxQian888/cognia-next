@@ -97,6 +97,7 @@
       "signedOutBody": "添加一个 Codex 账号即可启用 codex 外部代理。",
       "signedOutTitle": "尚未激活 Codex 账号"
     },
+    "quotaApiKeyOnly": "额度窗口需要 ChatGPT 登录——OpenAI API Key 没有用量查询端点，因此该账号无额度可展示。此模式按请求计费，用量请在 OpenAI 平台控制台查看。",
     "settings": {
       "autoRefresh": {
         "description": "当 ChatGPT Token 还剩约 5 分钟过期时自动刷新；关闭则等到下一次 401 再懒刷新。",
@@ -118,7 +119,6 @@
         "warnLabel": "预警阈值（%）"
       }
     },
-    "quotaApiKeyOnly": "额度窗口需要 ChatGPT 登录——OpenAI API Key 没有用量查询端点，因此该账号无额度可展示。此模式按请求计费，用量请在 OpenAI 平台控制台查看。",
     "title": "Codex（OpenAI）",
     "webModeBanner": "Codex 凭证存放在 OS 钥匙串中——仅在桌面版可用。"
   },
@@ -149,7 +149,24 @@
       "unlink": "解绑",
       "unlinkConfirm": "解绑",
       "unlinkDialogBody": "仅从 Cognia 保险库中移除这条发现到的凭证；磁盘上的 OpenCode auth.json 文件不受影响。",
-      "unlinkDialogTitle": "解绑这个发现到的账户？"
+      "unlinkDialogTitle": "解绑这个发现到的账户？",
+      "accountMissing": "账号详情已不可用。",
+      "actionFailed": "操作失败：{error}",
+      "activated": "账号已激活。",
+      "checkingReferences": "正在检查账号引用…",
+      "default": "默认",
+      "defaultSet": "默认账号已更新。",
+      "finalAccountReferencesCleared": "移除最后一个账号将清除这些引用。",
+      "activeReference": "此账号当前处于激活状态。",
+      "defaultReference": "此账号是默认账号。",
+      "referenceNames": "引用方：{names}",
+      "referenceSummary": "由 {sessions} 个会话和 {characters} 个角色使用。",
+      "removed": "账号已移除。",
+      "renamed": "账号已重命名。",
+      "replacementLabel": "替换账号",
+      "retry": "重试",
+      "setDefault": "设为默认",
+      "updateCredentials": "更新凭据"
     },
     "accountPreset": {
       "ariaLabel": "该账户的端点预设",
@@ -286,8 +303,8 @@
       "name": "名称",
       "namePlaceholder": "我的中转",
       "path": "请求路径",
-      "remainingPath": "剩余字段路径",
       "refreshMinutes": "最短刷新间隔（分钟）",
+      "remainingPath": "剩余字段路径",
       "resetAtPath": "重置时间路径",
       "scale": "缩放系数",
       "token": "令牌",
@@ -302,8 +319,8 @@
       "codingPlanCount": "编程套餐（计数窗口）",
       "custom": "自定义（空白）",
       "genericBalance": "通用余额",
-      "glmCoding": "GLM 编程套餐",
       "githubCopilot": "GitHub Copilot",
+      "glmCoding": "GLM 编程套餐",
       "kimiCoding": "Kimi 编程套餐",
       "label": "预设模板",
       "minimaxTokenPlan": "MiniMax Token Plan",
@@ -500,9 +517,9 @@
     "officialQuotaDisabledBody": "仅在你接受上游兼容性和网络路径风险时前往订阅设置启用。正常工作产生的被动用量仍可显示。",
     "officialQuotaDisabledTitle": "官方额度查询已关闭",
     "refresh": "刷新",
+    "signInCta": "登录",
     "signedOutBody": "登录 Claude 账号即可监控 5 小时 / 7 天速率限制窗口。",
     "signedOutTitle": "未登录",
-    "signInCta": "登录",
     "sourceEndpoint": "用量接口实时数据",
     "sourceHeaders": "来自对话响应头",
     "status": {
@@ -559,7 +576,18 @@
     "costOverTime": {
       "description": "所选范围内每日估算花费。",
       "empty": "该范围内还没有用量。",
-      "title": "成本随时间"
+      "heatmap": {
+        "cell": "{date}：{cost}，{requests} 次请求",
+        "less": "少",
+        "more": "多",
+        "total": "最近 {days} 天共 {cost} · {requests} 次请求"
+      },
+      "title": "成本随时间",
+      "view": {
+        "bar": "柱状图",
+        "heatmap": "热力图",
+        "label": "图表视图"
+      }
     },
     "display": {
       "aria": "用量展示模式",
@@ -612,6 +640,7 @@
     "range": {
       "30d": "最近 30 天",
       "7d": "最近 7 天",
+      "90d": "最近 90 天",
       "all": "全部时间",
       "label": "时间范围"
     },

@@ -1,0 +1,55 @@
+{
+  "title": "Execution workspace",
+  "description": "Keep this task on Local or in its managed Worktree.",
+  "local": "Local",
+  "managed": "Managed Worktree",
+  "switchManaged": "Move to Worktree",
+  "switchLocal": "Apply to Local",
+  "dirtyTitle": "Local changes included in the Worktree baseline",
+  "dirtyEmpty": "No local changes were detected. A clean managed workspace will be created.",
+  "nonGit": "This root is not a Git repository. Cognia will use an isolated shadow workspace.",
+  "continue": "Continue",
+  "cancel": "Cancel",
+  "patchTitle": "Choose Worktree changes to apply to Local",
+  "patchEmpty": "This Worktree has no captured changes to apply.",
+  "irreversible": "Allow binary or otherwise irreversible changes",
+  "confirmApply": "Apply selected changes",
+  "conflictTitle": "Local changed since this Worktree started",
+  "conflictReason": "{path}: {reason}",
+  "retryMerge": "Retry merge",
+  "applyTask": "Use Worktree version",
+  "keepCurrent": "Keep Local version",
+  "undo": "Undo last handoff",
+  "pin": "Pin Worktree",
+  "unpin": "Unpin Worktree",
+  "prune": "Prune expired Worktrees",
+  "snapshots": "Historical snapshots",
+  "restore": "Restore snapshot from {date}",
+  "noSnapshots": "No completed snapshots yet.",
+  "path": "Path: {path}",
+  "branch": "Branch: {branch}",
+  "state": "State: {state}",
+  "busy": "Updating execution workspace…",
+  "error": "Execution workspace update failed: {message}"
+  ,"projectRootRequired": "This action requires a Project workspace root."
+  ,"desktopRequired": "This action requires the desktop app."
+  ,"managedAssets": {
+    "title": "Managed workspace files",
+    "availability": {
+      "available": "Available on this device",
+      "missing-on-device": "Missing on this device — rebind or import to continue.",
+      "deleted": "Deleted locally and available for recovery."
+    },
+    "createHere": "Create on this device",
+    "rebind": "Rebind folder",
+    "import": "Import workspace",
+    "export": "Export workspace",
+    "convert": "Register as Project",
+    "delete": "Delete workspace files",
+    "deleteTitle": "Delete managed workspace files?",
+    "deleteDescription": "The files move to Cognia's recoverable workspace trash. The chat remains available.",
+    "deleteConfirm": "Delete files",
+    "restore": "Restore deleted workspace",
+    "sessionDeleteNote": "Deleting the chat does not delete these files. Workspace deletion is a separate, recoverable action."
+  }
+}

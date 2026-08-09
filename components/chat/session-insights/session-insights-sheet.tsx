@@ -48,7 +48,7 @@ export function SessionInsightsSheet({ session, open, onOpenChange }: Props) {
               {t("empty")}
             </p>
           ) : (
-            <SessionReportView report={report} />
+            <SessionReportView report={report} sessionId={session.id} />
           )}
         </div>
       </SheetContent>

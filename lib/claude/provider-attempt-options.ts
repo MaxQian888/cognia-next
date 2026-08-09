@@ -60,8 +60,23 @@ async function persistRotation(
  */
 export async function resolveProviderAttemptOptions(
   providerId: string,
-  appSettings: AppSettings
+  appSettings: AppSettings,
+  selectedAccountId?: string | null
 ): Promise<ProviderAttemptOptions> {
+  const accountProvider =
+    providerId === "anthropic" || providerId === "codex"
+      ? providerId
+      : providerId === "opencode" || providerId === "opencode-go"
+        ? "opencode"
+        : null
+  const subscriptionAccountId =
+    selectedAccountId === undefined && accountProvider
+      ? (appSettings.defaultAccountIds?.[accountProvider] ??
+        (appSettings.defaultProvider === providerId ||
+        appSettings.defaultProvider === accountProvider
+          ? appSettings.defaultAccountId
+          : null))
+      : (selectedAccountId ?? null)
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: appSettings.defaultProvider,
     providerSettings: appSettings.providerSettings as
@@ -113,11 +128,14 @@ export async function resolveProviderAttemptOptions(
       }
     }
     if (!resolution.apiKey && isOpencodeChatProviderId(providerId)) {
-      const vaultCredential = await resolveOpencodeVaultCredential(providerId)
+      const vaultCredential = await resolveOpencodeVaultCredential(
+        providerId,
+        subscriptionAccountId
+      )
       if (vaultCredential) providerCredentials.apiKey = vaultCredential.apiKey
     }
     if (!resolution.apiKey && isCodexChatProviderId(providerId)) {
-      const vaultCredential = await resolveCodexVaultCredential(providerId)
+      const vaultCredential = await resolveCodexVaultCredential(providerId, subscriptionAccountId)
       if (vaultCredential) {
         providerCredentials.apiKey = vaultCredential.apiKey
         providerCredentials.baseURL = vaultCredential.baseURL
@@ -134,7 +152,7 @@ export async function resolveProviderAttemptOptions(
   }
 
   if (isOpencodeChatProviderId(providerId) && resolution.nextAction !== "enable_provider") {
-    const vaultCredential = await resolveOpencodeVaultCredential(providerId)
+    const vaultCredential = await resolveOpencodeVaultCredential(providerId, subscriptionAccountId)
     if (vaultCredential) {
       return {
         providerCredentials: {
@@ -147,7 +165,7 @@ export async function resolveProviderAttemptOptions(
     }
   }
   if (isCodexChatProviderId(providerId) && resolution.nextAction !== "enable_provider") {
-    const vaultCredential = await resolveCodexVaultCredential(providerId)
+    const vaultCredential = await resolveCodexVaultCredential(providerId, subscriptionAccountId)
     if (vaultCredential) {
       return {
         providerCredentials: {

@@ -23,14 +23,15 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { useSettingsStore } from "@/stores/settings"
 import {
   ORDERED_TTS_PROVIDERS,
-  RETIRED_TTS_PROVIDERS,
   TTS_PROVIDERS,
+  normalizeTTSProvider,
   type TTSProvider,
 } from "@cognia/tts/types"
 import { generateSSML } from "@cognia/tts/tts-text-utils"
 import { TestTtsButton } from "./test-tts-button"
 import { PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
 import { loggers } from "@cognia/logging"
+import { detectPlatform } from "@/lib/platform/detect"
 
 // -- SSML Preview (Edge / System) --------------------------------------------
 
@@ -188,7 +189,7 @@ export function TtsCard() {
   const setTtsVolume = useSettingsStore((s) => s.setTtsVolume)
 
   const ttsEnabled = settings?.ttsEnabled ?? false
-  const provider: TTSProvider = (settings?.ttsProvider ?? "system") as TTSProvider
+  const provider: TTSProvider = normalizeTTSProvider(settings?.ttsProvider)
   const ttsAutoPlay = settings?.ttsAutoPlay ?? false
   const ttsRate = settings?.ttsRate ?? 1.0
   const ttsPitch = settings?.ttsPitch ?? 1.0
@@ -199,6 +200,7 @@ export function TtsCard() {
 
   const ProviderConfig = PROVIDER_CONFIG_COMPONENTS[provider]
   const info = TTS_PROVIDERS[provider]
+  const platform = detectPlatform()
 
   return (
     <Card>
@@ -246,24 +248,23 @@ export function TtsCard() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {/* Keep a persisted retired provider selectable so the value
-                      isn't blank, but label it and steer the user away. */}
-                  {(ORDERED_TTS_PROVIDERS.includes(provider)
-                    ? ORDERED_TTS_PROVIDERS
-                    : [...ORDERED_TTS_PROVIDERS, provider]
-                  ).map((id) => (
+                  {ORDERED_TTS_PROVIDERS.map((id) => (
                     <SelectItem key={id} value={id}>
                       {TTS_PROVIDERS[id].name}
-                      {RETIRED_TTS_PROVIDERS.includes(id) ? ` ${t("retiredSuffix")}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {RETIRED_TTS_PROVIDERS.includes(provider) ? (
-                <p className="text-xs text-destructive">{t("retiredNotice")}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">{info.description}</p>
-              )}
+              <p className="text-xs text-muted-foreground">{info.description}</p>
+              {platform === "mobile" ? (
+                <p className="text-xs text-muted-foreground" role="status">
+                  {t("mobileSystemPlayback")}
+                </p>
+              ) : platform === "web" && provider !== "system" ? (
+                <p className="text-xs text-amber-700 dark:text-amber-400" role="status">
+                  {t("webCloudWarning")}
+                </p>
+              ) : null}
             </div>
 
             <Separator />

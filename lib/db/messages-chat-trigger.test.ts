@@ -1,13 +1,11 @@
-/** @jest-environment jsdom */
 /**
  * Verifies that `persistMessages` fires `trigger.chat.message` exactly once
  * per newly-arrived user message. The earlier 15 tests in `messages.test.ts`
  * cover the diff/upsert mechanics; this file focuses on the trigger fan-out
  * we added in M2.
  */
-import "fake-indexeddb/auto"
 import type { UIMessage } from "ai"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { persistMessages } from "./messages"
 import { createSession } from "./sessions"
 
@@ -24,13 +22,15 @@ jest.mock("@/lib/workflow/runtime/trigger-subscriptions", () => ({
   findMatchingWorkflows: (...args: unknown[]) => findMatchingWorkflowsMock(...args),
 }))
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  await whenSeeded()
+  await dbFixture.restore()
   dispatchTriggerMock.mockReset()
   findMatchingWorkflowsMock.mockReset()
 })
+afterAll(dbFixture.dispose)
 
 function userMessage(id: string, text: string): UIMessage {
   return {
@@ -121,5 +121,60 @@ describe("persistMessages → trigger.chat.message", () => {
       persistMessages(session.id, [userMessage("m_user_1", "hi")])
     ).resolves.toBeUndefined()
     await flush()
+  })
+})
+
+describe("triggerWorkflows opt-out", () => {
+  /** A user message stamped the way live-voice turns are. */
+  function voiceMessage(id: string, text: string): UIMessage {
+    return {
+      id,
+      role: "user",
+      parts: [{ type: "text", text }],
+      metadata: { triggerWorkflows: false },
+    } as unknown as UIMessage
+  }
+
+  it("does not fan out for a message that opted out", async () => {
+    // Live-voice turns never went through the send path — the user spoke to
+    // the assistant directly, so firing chat-message workflows would surprise
+    // them.
+    const session = await createSession({ title: "t", kind: "direct", characterId: "char_x" })
+    findMatchingWorkflowsMock.mockReturnValue([{ workflowId: "wf", nodeId: "n", params: {} }])
+
+    await persistMessages(session.id, [voiceMessage("m_voice_1", "what is the weather")])
+    await flush()
+
+    expect(dispatchTriggerMock).not.toHaveBeenCalled()
+  })
+
+  it("still fans out for a normal message in the same write", async () => {
+    // The opt-out is per message, not per persist call.
+    const session = await createSession({ title: "t", kind: "direct", characterId: "char_x" })
+    findMatchingWorkflowsMock.mockReturnValue([{ workflowId: "wf", nodeId: "n", params: {} }])
+
+    await persistMessages(session.id, [
+      voiceMessage("m_voice_1", "spoken"),
+      userMessage("m_typed_1", "typed"),
+    ])
+    await flush()
+
+    expect(dispatchTriggerMock).toHaveBeenCalledTimes(1)
+    const arg = dispatchTriggerMock.mock.calls[0][0] as { payload?: Record<string, unknown> }
+    expect(JSON.stringify(arg)).toContain("m_typed_1")
+  })
+
+  it("treats an absent flag as opted in", async () => {
+    // ~20 existing call sites never set the field; `undefined !== false` keeps
+    // them behaving exactly as before.
+    const session = await createSession({ title: "t", kind: "direct", characterId: "char_x" })
+    findMatchingWorkflowsMock.mockReturnValue([{ workflowId: "wf", nodeId: "n", params: {} }])
+
+    await persistMessages(session.id, [
+      { ...userMessage("m_1", "hi"), metadata: { senderKind: "user" } } as UIMessage,
+    ])
+    await flush()
+
+    expect(dispatchTriggerMock).toHaveBeenCalledTimes(1)
   })
 })

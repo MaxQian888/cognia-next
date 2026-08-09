@@ -97,7 +97,9 @@ cargo --version
 ## 在 Web 模式下运行
 
 ```bash
-pnpm dev
+pnpm dev          # 默认：完整 eager 启动
+pnpm dev:main     # 主流程启动；可选能力在首次使用时加载
+pnpm dev:cached   # 完整启动，并启用 Turbopack 持久化缓存
 ```
 
 在 [http://localhost:3000](http://localhost:3000) 启动 Next.js 开发服务器。适合：
@@ -108,10 +110,15 @@ pnpm dev
 
 Web 模式下，`invoke()` 调用都被 `isTauri()`（`lib/tauri.ts`）守护，在浏览器中变 no-op。Twin 设置中的原生向量库选项也会被隐藏（仅保留云端后端）。
 
+`main` 仅在开发环境生效。生产静态导出始终使用完整 `eager` profile，并继续输出全部可选动态 chunk。默认的 cache-off 命令只会在启动前清理 `.next/dev/cache/turbopack`；如果更看重 warm compile 速度，可以显式使用 `:cached` 命令。
+
 ## 在桌面模式下运行
 
 ```bash
-pnpm tauri dev
+pnpm tauri:dev          # 默认：完整 eager 启动
+pnpm tauri:dev:main     # 主流程启动
+pnpm tauri:dev:cached   # 完整启动，并启用 Turbopack 持久化缓存
+pnpm tauri:dev:full     # 完整 Rust 调试符号；与功能启动 profile 无关
 ```
 
 并行运行 `beforeDevCommand: pnpm dev`，然后编译并启动 Tauri 窗口。首次编译需要几分钟（下载并编译约 300 个 Rust crate）；之后只需几秒。
@@ -178,7 +185,7 @@ pnpm tauri info
     ```bash
     rustup update stable
     cd src-tauri && cargo clean && cd ..
-    pnpm tauri dev
+    pnpm tauri:dev
     ```
 
     <Callout type="warn" title="sqlite-vec 编译失败">
@@ -191,8 +198,10 @@ pnpm tauri info
 ## 常用脚本
 
 ```bash
-pnpm dev            # Next.js Web 开发（端口 3000）
-pnpm tauri dev      # 桌面开发模式
+pnpm dev            # 完整 Next.js Web 开发（端口 3000）
+pnpm dev:main       # Web 主流程模式
+pnpm tauri:dev      # 完整桌面开发模式
+pnpm tauri:dev:main # 桌面主流程模式
 
 pnpm build          # 静态导出 → out/
 pnpm tauri build    # 桌面安装包

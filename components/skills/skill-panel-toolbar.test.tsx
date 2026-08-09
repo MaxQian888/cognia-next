@@ -2,6 +2,9 @@
  * @jest-environment jsdom
  */
 
+import type { SkillValidationError } from "@cognia/agent-config-types"
+import type { SkillResourceDraft } from "@/lib/db/skill-resources"
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
@@ -30,6 +33,12 @@ jest.mock("@/lib/db/skills", () => ({
 
 jest.mock("@/lib/files/file-bridge", () => ({
   pickAndReadFiles: jest.fn(async () => []),
+  pickAndReadBinaryFiles: jest.fn(async () => []),
+  pickDirectory: jest.fn(async () => null),
+}))
+
+jest.mock("@/lib/skills/bundle/loader", () => ({
+  loadBundle: jest.fn(),
 }))
 
 jest.mock("@/lib/claude/skills-io", () => ({
@@ -53,6 +62,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
 import { useSkillsStore } from "@/stores/skills"
+import { pickAndReadBinaryFiles } from "@/lib/files/file-bridge"
+import { loadBundle } from "@/lib/skills/bundle/loader"
 import {
   __resetRecorderAvailabilityForTesting,
   setRecorderAvailability,
@@ -60,8 +71,14 @@ import {
 import { useRecorderStore } from "@/stores/skills/recorder-store"
 import { SkillPanelToolbar } from "./skill-panel-toolbar"
 
+const mockPickAndReadBinaryFiles = pickAndReadBinaryFiles as jest.MockedFunction<
+  typeof pickAndReadBinaryFiles
+>
+const mockLoadBundle = loadBundle as jest.MockedFunction<typeof loadBundle>
+
 beforeEach(() => {
   jest.clearAllMocks()
+  useSkillsStore.setState({ importStaging: null })
 })
 
 describe("SkillPanelToolbar", () => {
@@ -110,6 +127,83 @@ describe("SkillPanelToolbar", () => {
     await user.click(item)
     expect(useSkillsStore.getState().urlInstallOpen).toBe(true)
     useSkillsStore.setState({ urlInstallOpen: false })
+  })
+
+  it("stages every portable bundle field when importing a zip", async () => {
+    const user = userEvent.setup()
+    const bytes = new Uint8Array([1, 2, 3])
+    const resources: Array<Omit<SkillResourceDraft, "skillId">> = [
+      {
+        name: "run.sh",
+        path: "scripts/run.sh",
+        content: "echo ok",
+        encoding: "utf-8",
+        kind: "script",
+      },
+    ]
+    const validationErrors: SkillValidationError[] = [
+      {
+        severity: "portability",
+        code: "unknown",
+        message: "Review compatibility",
+      },
+    ]
+    mockPickAndReadBinaryFiles.mockResolvedValueOnce([{ name: "portable.zip", path: "", bytes }])
+    mockLoadBundle.mockResolvedValueOnce({
+      draft: {
+        name: "Portable Skill",
+        slug: "portable-skill",
+        description: "Portable description",
+        compatibility: "Requires git",
+        metadata: { owner: "Cognia" },
+        invocationPolicy: "explicit",
+        frontmatterExtensions: { custom: { enabled: true } },
+        codexOpenAiYaml: "interface:\n  display_name: Portable Skill\n",
+        content: "# Portable Skill",
+        tags: ["portable"],
+        allowedTools: ["Read"],
+        category: "productivity",
+      },
+      resources,
+      flavor: "codex",
+      nonFatalValidationErrors: validationErrors,
+      warnings: [],
+    })
+
+    render(<SkillPanelToolbar />)
+    await user.click(screen.getByText("import"))
+    await user.click(await screen.findByTestId("skill-panel-toolbar-import-bundle-zip"))
+
+    await waitFor(() => expect(useSkillsStore.getState().importStaging).not.toBeNull())
+    expect(mockLoadBundle).toHaveBeenCalledWith({
+      kind: "zip-blob",
+      bytes,
+      fallbackName: "portable",
+    })
+    expect(useSkillsStore.getState().importStaging).toEqual({
+      drafts: [
+        {
+          name: "Portable Skill",
+          slug: "portable-skill",
+          description: "Portable description",
+          compatibility: "Requires git",
+          metadata: { owner: "Cognia" },
+          invocationPolicy: "explicit",
+          frontmatterExtensions: { custom: { enabled: true } },
+          codexOpenAiYaml: "interface:\n  display_name: Portable Skill\n",
+          content: "# Portable Skill",
+          tags: ["portable"],
+          allowedTools: ["Read"],
+          category: "productivity",
+          canonicalId: "bundle:zip:portable-skill",
+          resources,
+          validationErrors,
+        },
+      ],
+      sourceLabel: "portable.zip",
+      parseErrors: [],
+      flavor: "codex",
+    })
   })
 })
 

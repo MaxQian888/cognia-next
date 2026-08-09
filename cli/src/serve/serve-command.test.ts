@@ -152,6 +152,7 @@ describe("serveCommand", () => {
 
       // The server asks for it over the bridge.
       const server = FakeServerSocket.last!
+      expect(server.url).toBe(`ws${controlPlane.url.slice(4)}/internal/bridge?token=svc-token-e2e`)
       server.serverSend({
         v: 1,
         type: "event",

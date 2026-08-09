@@ -13,7 +13,7 @@ import type { FleetAgent } from "@/lib/fleet/types"
 import { getDb } from "./schema"
 
 /** Terminal outcome of a monitored session. */
-export type FleetSessionOutcome = "active" | "ended"
+export type FleetSessionOutcome = "active" | "detached" | "ended"
 
 export interface FleetSessionHistoryRow {
   /** Composite key `${agent}:${sessionId}` — stable across updates. */
@@ -33,6 +33,13 @@ export interface FleetSessionHistoryRow {
   /** Epoch ms when the session ended, or null while still active. */
   endedAt: number | null
   outcome: FleetSessionOutcome
+  /** Stable ADR-0090 journal run id for this externally observed session. */
+  canonicalRunId?: string
+  toolUseCount?: number
+  turnCount?: number
+  lastErrorKind?: "tool" | "turn" | null
+  /** Redacted by the canonical projection before durable event persistence. */
+  lastErrorDetail?: string | null
 }
 
 export function fleetHistoryId(agent: FleetAgent, sessionId: string): string {
@@ -66,6 +73,31 @@ export async function recordFleetHistory(incoming: FleetSessionHistoryRow): Prom
   await db.transaction("rw", db.fleetSessions, async () => {
     const existing = await db.fleetSessions.get(incoming.id)
     await db.fleetSessions.put(mergeHistoryRow(existing, incoming))
+  })
+}
+
+/**
+ * Atomically project one authoritative live snapshot into history. Active rows
+ * omitted from the snapshot become `detached`, not `ended`: monitor restart or
+ * disablement proves loss of observation, not termination of the agent.
+ */
+export async function reconcileFleetHistory(
+  incoming: readonly FleetSessionHistoryRow[],
+  updatedAt: number
+): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.fleetSessions, async () => {
+    const liveIds = new Set(incoming.map((row) => row.id))
+    const active = await db.fleetSessions.where("outcome").equals("active").toArray()
+    const detached = active
+      .filter((row) => !liveIds.has(row.id))
+      .map((row) => ({ ...row, outcome: "detached" as const, updatedAt }))
+    if (detached.length > 0) await db.fleetSessions.bulkPut(detached)
+
+    for (const row of incoming) {
+      const existing = await db.fleetSessions.get(row.id)
+      await db.fleetSessions.put(mergeHistoryRow(existing, row))
+    }
   })
 }
 

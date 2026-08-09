@@ -11,7 +11,11 @@ import { transport } from "@/lib/tauri"
 import { compactSession } from "@/lib/claude/ipc"
 import { WORKFLOW_COPILOT_ALLOWED_TOOLS } from "@/lib/claude/agents/workflow-copilot-prompt"
 
-import { createAgentSession, type AgentSession } from "../../agent/session-runner"
+import {
+  createAgentSession,
+  type AgentModelOption,
+  type AgentSession,
+} from "../../agent/session-runner"
 import { runManualCompact } from "../../agent/manual-compact"
 import { readToolApprovals } from "../../agent/tool-approvals"
 import { resolveHome } from "../../config/load"
@@ -34,7 +38,7 @@ import { resolveCliLoggingConfig } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ThinkingLevel } from "../../config/schema"
 import type { Cell, LogInput, PermissionMode, TuiAction } from "../state/types"
-import { sidecarExitedLog, turnErrorLog } from "../runtime/log-ingest"
+import { sidecarExitedLog, turnErrorLog, turnLifecycleLog } from "../runtime/log-ingest"
 
 export type CreateSession = (params: {
   config: ResolvedConfig
@@ -61,6 +65,8 @@ export interface AgentSessionApi {
   clear(newSessionId: string): Promise<void>
   resume(sessionId: string, cells: Cell[]): Promise<void>
   switchModel(model: string): Promise<void>
+  /** List models advertised by the live external session; empty for built-in or pre-session. */
+  listModels(): Promise<AgentModelOption[]>
   switchMode(mode: PermissionMode): Promise<void>
   switchThinking(level: ThinkingLevel, pluginTools?: boolean): Promise<void>
   switchProvider(provider: string, model?: string): Promise<void>
@@ -487,6 +493,7 @@ export function useAgentSession({
         return null
       }
       // Fire UserPromptSubmit hooks before the turn (observational here).
+      onLog(turnLifecycleLog(Date.now(), "started", session.sessionId))
       hookRunner.onPrompt(prompt)
       // Open a rewind checkpoint for this turn (cellCount = state before it ran).
       checkpoint.beginTurn(getCellCount(), prompt)
@@ -513,6 +520,7 @@ export function useAgentSession({
       })
       abortRef.current = null
       if (!ok) {
+        onLog(turnLifecycleLog(Date.now(), "interrupted", session.sessionId))
         // Always clear any orphaned gate resolver from the failed turn.
         gate.reset()
         // Only drop the session when it's genuinely unusable (dead sidecar /
@@ -531,6 +539,7 @@ export function useAgentSession({
         }
         return null
       }
+      onLog(turnLifecycleLog(Date.now(), "completed", session.sessionId))
       // Hand the captured reply (text + usage) back so a self-driving caller
       // (`/goal`, `/loop`) can feed it to a turn-driver. Plain chat ignores it.
       return result ?? null
@@ -622,6 +631,11 @@ export function useAgentSession({
     },
     [dispatch, dropSession]
   )
+
+  const listModels = useCallback(async (): Promise<AgentModelOption[]> => {
+    const session = ensureSession()
+    return (await session.listModels?.()) ?? []
+  }, [ensureSession])
 
   const changeCwd = useCallback(
     async (dir: string) => {
@@ -807,6 +821,7 @@ export function useAgentSession({
     clear,
     resume,
     switchModel,
+    listModels,
     switchMode,
     switchThinking,
     switchProvider,

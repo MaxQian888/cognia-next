@@ -13,7 +13,7 @@ import {
   getExtensionRevision,
   getExtensionsForPoint,
   subscribeExtensionChanges,
-} from "@/lib/plugin/api"
+} from "@/lib/plugin/api/extension-api"
 import {
   getExtensionPointFormFactor,
   type CanonicalExtensionPoint,

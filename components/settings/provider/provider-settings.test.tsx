@@ -268,7 +268,14 @@ jest.mock("./quick-add-provider-dialog", () => ({
     ) : null,
 }))
 jest.mock("./local-provider-settings", () => ({
-  LocalProviderSettings: () => <div data-testid="local-provider-settings" />,
+  LocalProviderSettings: ({ providerId }: { providerId: string }) => (
+    <div data-testid="local-provider-settings" data-provider-id={providerId} />
+  ),
+}))
+jest.mock("./local-provider-model-manager", () => ({
+  LocalProviderModelManager: ({ providerId }: { providerId: string }) => (
+    <div data-testid="local-provider-model-manager" data-provider-id={providerId} />
+  ),
 }))
 // Newly-mounted provider-specific panels. Each shipped fully built with a
 // catalog entry and settings schema but had no mount point until now, so these
@@ -756,7 +763,7 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     )
   })
 
-  it("omits the tabs that do not apply to a local provider", async () => {
+  it("keeps the local-provider model manager while omitting cloud-only tabs", async () => {
     mockHookState = makeHookState({
       filteredProviders: [["ollama", { name: "Ollama", defaultModel: "" }]],
       selectedProviderId: "ollama",
@@ -764,8 +771,11 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     const { findByTestId } = render(<ProviderSettings />)
     await findByTestId("local-provider-settings")
 
-    // A keyless local engine has no cloud model list, per-token cost or routing.
-    expect(screen.getByTestId("provider-detail-models-tab")).toBeEmptyDOMElement()
+    // Local engines keep a provider-specific model manager, but cost + advanced
+    // remain cloud-only because they assume per-token pricing and routing knobs.
+    expect(screen.getByTestId("provider-detail-models-tab")).toContainElement(
+      screen.getByTestId("local-provider-model-manager")
+    )
     expect(screen.getByTestId("provider-detail-cost-tab")).toBeEmptyDOMElement()
     expect(screen.getByTestId("provider-detail-advanced-tab")).toBeEmptyDOMElement()
   })
@@ -1382,7 +1392,6 @@ describe("ProviderSettings (cognia-next slim port)", () => {
           maxOutputTokens: 50,
           supportsTools: true,
           supportsVision: true,
-          supportsStreaming: true,
           supportsReasoning: true,
           supportsAudio: true,
         },

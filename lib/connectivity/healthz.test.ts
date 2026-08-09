@@ -60,7 +60,7 @@ describe("fetchHealthz", () => {
 
   it("strips trailing slash on baseUrl", async () => {
     const fetchImpl = makeFetch((url) => {
-      expect(url).toBe("https://10.0.2.2:7890/api/v1/healthz")
+      expect(url).toBe("https://10.0.2.2:7890/healthz")
       return { status: 200, json: () => Promise.resolve(validHealthzBody) }
     })
     const ctrl = new AbortController()

@@ -24,6 +24,7 @@ import { RoutingAttemptController } from "@cognia/provider-routing"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { recordTeamUsage, swallowUsageWrite } from "@/lib/db/session-usage"
+import { priceTokensForModel } from "@/lib/usage/pricing"
 import type { SpanUsage } from "@/types/agent-trace/span"
 import type { AgentTeammate, ResolvedCapabilities, AgentTeamConfig } from "@/types/agent/agent-team"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
@@ -35,6 +36,7 @@ import { isTaskReviewEnabled } from "./task-review-policy"
 import type { ClaimOptions } from "./teammate-pool"
 import type { WorktreeHandle } from "./workspace/allocator"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import type { AgentChildEnvironmentSession } from "../execution/local-tauri-environment"
 import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
 import { agendaFingerprint, parseRateLimitCooldown } from "./nudge-guard"
 import { runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
@@ -86,6 +88,14 @@ export interface DispatchTeammateArgs {
   timeoutMs?: number
   /** Force the text-only path even on desktop (used by pure-reasoning lenses). */
   preferToolEnabled?: boolean
+  /** Durable-v2 workspace access classification. Defaults to write. */
+  access?: "read" | "write"
+  /** Evidence requirements: UI work additionally requires visual proof. */
+  taskKind?: "general" | "code" | "ui"
+  /** Target repository binding id. Defaults to the team's primary repository. */
+  repositoryId?: string
+  /** Required ownership declaration for isolated parallel writers. */
+  fileOwnership?: string[]
   /** Minimum non-whitespace chars. Falls back to `team.config.minOutputChars`. */
   minOutputChars?: number
   /** Enforce empty/min-output validation (EMPTY_OUTPUT). Default true. */
@@ -183,7 +193,8 @@ async function runToolEnabled(
   onCaptureEvent?: (event: CaptureStreamEvent) => void,
   maxSteps?: number,
   cwdOverride?: string,
-  spanId?: string
+  spanId?: string,
+  onSessionCreated?: (sessionId: string) => Promise<void | (() => void)>
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const cwd = cwdOverride ?? teamCtx.team.config?.workingDir
   const character = teammateToCharacter({
@@ -226,6 +237,7 @@ async function runToolEnabled(
     teammateName: teammate.name,
     runId: teamCtx.runId,
   })
+  const releaseLiveControl = await onSessionCreated?.(session.id)
   try {
     const appSettings =
       (await settingsDb.getSettings().catch(() => undefined)) ??
@@ -396,6 +408,7 @@ async function runToolEnabled(
     }
     return { text: result.text ?? "", usage: readUsage(result) }
   } finally {
+    releaseLiveControl?.()
     clearResolvedPermissionCeiling(session.id)
     clearTeamDispatchContext(session.id)
     void sessionsDb.deleteSession(session.id).catch(() => undefined)
@@ -616,7 +629,7 @@ export async function dispatchTeammate(
     DEFAULT_TEAMMATE_SYSTEM_PROMPT
 
   const modelHint = teamCtx.modelPref.get().modelHint
-  const promptText = typeof args.prompt === "function" ? args.prompt(teammate) : args.prompt
+  let promptText = typeof args.prompt === "function" ? args.prompt(teammate) : args.prompt
 
   // Resolved agentic step budget: a teammate's own `maxSteps` overrides the
   // team-level `defaultMaxSteps`. Undefined → the channel keeps its own default
@@ -759,6 +772,36 @@ export async function dispatchTeammate(
     })
   }
 
+  const durableRepositoryId =
+    args.repositoryId ??
+    teamCtx.team.config?.repositories?.find((repository) => repository.role === "primary")?.id ??
+    "primary"
+  const durableRepository = teamCtx.team.config?.repositories?.find(
+    (repository) => repository.id === durableRepositoryId
+  )
+  const dispatchWorkingDir = durableRepository?.path ?? teamCtx.team.config?.workingDir
+  const durableDispatch =
+    teamCtx.team.config?.runtimeVersion === "durable-v2"
+      ? await (async () => {
+          const [{ beginDurableDispatch }, { getDurableTeamCoordinator }] = await Promise.all([
+            import("./durable-dispatch"),
+            import("./durable-runtime"),
+          ])
+          return beginDurableDispatch({
+            coordinator: getDurableTeamCoordinator(),
+            team: teamCtx.team,
+            runId: teamCtx.runId,
+            teammateId: teammate.id,
+            taskId: args.taskId,
+            access: args.access ?? "write",
+            ...(args.taskKind ? { taskKind: args.taskKind } : {}),
+            repositoryId: durableRepositoryId,
+            ...(args.fileOwnership ? { fileOwnership: args.fileOwnership } : {}),
+            runtime,
+          })
+        })()
+      : undefined
+
   // Live progress streaming → workspace activity panel. Built only when the
   // store exposes an `addEvent` sink (UI runs; eval/plan fixtures omit it).
   // `streamProgress !== false` (default ON) threads the sidecar capture stream
@@ -779,6 +822,13 @@ export async function dispatchTeammate(
       )
     : null
   reporter?.start()
+  const onTurnCapture =
+    durableDispatch || (streamFull && reporter)
+      ? (event: CaptureStreamEvent) => {
+          if (streamFull) reporter?.onCaptureEvent(event)
+          durableDispatch?.capture(event)
+        }
+      : undefined
 
   // Emit one `invoke_agent` span per dispatch so eval (and observability) can
   // assemble the run. The eval team target threads `teamCtx.traceId` so all
@@ -803,7 +853,22 @@ export async function dispatchTeammate(
   let turn: { text: string; usage?: TokenUsage }
   let workspace: WorktreeHandle | undefined
   let taskWorkspaceLease: TaskWorkspaceRunLease | undefined
+  let durableEnvironmentSession: AgentChildEnvironmentSession | undefined
   let taskWorkspaceExecutionRoot: string | undefined
+  let taskWorkspaceChanges: unknown[] = []
+  let environmentEvidence:
+    | Awaited<
+        ReturnType<NonNullable<typeof teamCtx.durableEnvironment>["adapter"]["collectEvidence"]>
+      >
+    | undefined
+  const settleDurableEnvironment = async (
+    finalState: "ready" | "failed" | "cancelled"
+  ): Promise<unknown[]> => {
+    if (!durableEnvironmentSession || !teamCtx.durableEnvironment) return []
+    const changes = await durableEnvironmentSession.settle(finalState)
+    await teamCtx.durableEnvironment.adapter.dispose(durableEnvironmentSession.childRunId)
+    return changes
+  }
   const recordWorkspace = (ok: boolean, output?: string, commitSha?: string): void => {
     if (workspace && teamCtx.workspaceLedger) {
       teamCtx.workspaceLedger.set(workspace.key, {
@@ -815,77 +880,141 @@ export async function dispatchTeammate(
     }
   }
   try {
-    // Workspace isolation: give this dispatch its own git worktree + branch.
-    // Fail-closed — an allocation error flows through the catch below (recorded
-    // as a failure + released) instead of silently running in the shared dir.
-    const taskWorkspaceRoot = teamCtx.team.config?.workingDir
-    if (
-      useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
-      taskWorkspaceRoot
-    ) {
-      const lease = await openTaskWorkspaceRunLease({
-        taskId: taskIdForMessage(`team:${teamCtx.runId}`),
-        sessionId: teamCtx.runId,
-        runId: runIdForTurn(`${teamCtx.runId}:${teammate.id}:${args.taskId}`, 0),
-        executionRunId: teamCtx.runId,
-        traceId: span.traceId,
-        traceSpanId: span.spanId,
-        turnId: args.taskId,
-        attemptId: "a1",
-        surface: "team",
-        agentId: teammate.id,
-        agentKind: "agent-team",
-        workspaceRoot: taskWorkspaceRoot,
-        ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
-      })
-      if (!lease) {
-        throw new Error("task workspace host did not return an execution root for Agent Team")
+    const executeTurn = async (): Promise<{ text: string; usage?: TokenUsage }> => {
+      const durableTurnContext = await durableDispatch?.prepareTurnContext()
+      if (durableTurnContext) {
+        promptText = [
+          "Durable run recovery and steering context:",
+          durableTurnContext,
+          "",
+          promptText,
+        ].join("\n")
       }
-      taskWorkspaceLease = lease
-      taskWorkspaceExecutionRoot = lease.run.executionRoot
-    } else if (teamCtx.workspaceAllocator) {
-      workspace = await teamCtx.workspaceAllocator.allocate({
-        runId: teamCtx.runId,
-        teammateName: teammate.name,
-        taskId: args.taskId,
-        ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
-      })
-    }
-    if (channel === "external" && externalAgentId) {
-      turn = await runExternalBacked(
-        teamCtx,
-        teammate,
-        resolvedCaps,
-        externalAgentId,
-        promptText,
-        systemPrompt,
-        combinedSignal,
-        streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined,
-        taskWorkspaceExecutionRoot ?? workspace?.path,
-        // The teammate's own model wins over the run-level hint, mirroring the
-        // sidecar path (where teammateToCharacter applies config.model first).
-        teammate.config?.model ?? modelHint
-      )
-    } else if (channel === "sidecar") {
-      turn = await runToolEnabled(
-        teamCtx,
-        teammate,
-        resolvedCaps,
-        promptText,
-        systemPrompt,
-        modelHint,
-        combinedSignal,
-        // Real per-event streaming only on the sidecar path; external + text
-        // channels surface start/terminal markers via the reporter instead.
-        streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined,
-        maxSteps,
-        taskWorkspaceExecutionRoot ?? workspace?.path,
-        span.spanId
-      )
-    } else {
+      // Durable-v2 always uses a task workspace for writable isolation. Legacy
+      // runs retain the developer setting and existing allocator behavior.
+      const taskWorkspaceRoot = dispatchWorkingDir
+      if (durableDispatch && taskWorkspaceRoot) {
+        const environment = teamCtx.durableEnvironment
+        if (!environment) {
+          throw new Error("Durable AgentTeam run is missing its prepared execution environment")
+        }
+        let prepared = environment.preparedByRepository.get(durableRepositoryId)
+        if (!prepared) {
+          prepared = await environment.adapter.prepare(environment.profile, taskWorkspaceRoot)
+          environment.preparedByRepository.set(durableRepositoryId, prepared)
+        }
+        durableEnvironmentSession = await environment.adapter.openChild({
+          runId: teamCtx.runId,
+          childRunId: durableDispatch.childRunId,
+          taskId: args.taskId,
+          teammateId: teammate.id,
+          repositoryPath: taskWorkspaceRoot,
+          profile: prepared,
+        })
+        durableDispatch.attachEnvironment(environment.adapter)
+        taskWorkspaceExecutionRoot = durableEnvironmentSession.executionRoot
+        await durableDispatch.setWorkspace({
+          workspacePath: durableEnvironmentSession.executionRoot,
+          ...(durableEnvironmentSession.branch ? { branch: durableEnvironmentSession.branch } : {}),
+        })
+      } else if (
+        useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
+        taskWorkspaceRoot
+      ) {
+        const lease = await openTaskWorkspaceRunLease({
+          taskId: taskIdForMessage(`team:${teamCtx.runId}`),
+          sessionId: teamCtx.runId,
+          runId: runIdForTurn(`${teamCtx.runId}:${teammate.id}:${args.taskId}`, 0),
+          executionRunId: teamCtx.runId,
+          traceId: span.traceId,
+          traceSpanId: span.spanId,
+          turnId: args.taskId,
+          attemptId: "a1",
+          surface: "team",
+          agentId: teammate.id,
+          agentKind: "agent-team",
+          workspaceRoot: taskWorkspaceRoot,
+          ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
+        })
+        if (!lease) {
+          throw new Error("task workspace host did not return an execution root for Agent Team")
+        }
+        taskWorkspaceLease = lease
+        taskWorkspaceExecutionRoot = lease.run.executionRoot
+      } else if (teamCtx.workspaceAllocator) {
+        workspace = await teamCtx.workspaceAllocator.allocate({
+          runId: teamCtx.runId,
+          teammateName: teammate.name,
+          taskId: args.taskId,
+          ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
+        })
+        await durableDispatch?.setWorkspace({
+          workspacePath: workspace.path,
+          branch: workspace.branch,
+        })
+      }
+      const executionRoot = taskWorkspaceExecutionRoot ?? workspace?.path ?? dispatchWorkingDir
+      if (channel === "external" && externalAgentId) {
+        if (durableDispatch) {
+          const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+          const manager = getExternalAgentManager()
+          if (manager.supportsSteering(externalAgentId)) {
+            await durableDispatch.attachControl({
+              steer: (message) => manager.steerSession(externalAgentId, undefined, message),
+            })
+          }
+        }
+        return runExternalBacked(
+          teamCtx,
+          teammate,
+          resolvedCaps,
+          externalAgentId,
+          promptText,
+          systemPrompt,
+          combinedSignal,
+          onTurnCapture,
+          executionRoot,
+          teammate.config?.model ?? modelHint
+        )
+      }
+      if (channel === "sidecar") {
+        return runToolEnabled(
+          teamCtx,
+          teammate,
+          resolvedCaps,
+          promptText,
+          systemPrompt,
+          modelHint,
+          combinedSignal,
+          onTurnCapture,
+          maxSteps,
+          executionRoot,
+          span.spanId,
+          durableDispatch
+            ? async (sessionId) =>
+                durableDispatch.attachControl(
+                  {
+                    steer: async (message, sourceMessageId) => {
+                      const { steerSession } = await import("@/lib/claude/ipc")
+                      await steerSession(sessionId, message, sourceMessageId)
+                    },
+                    pause: async () => {
+                      const { interruptSession } = await import("@/lib/claude/ipc")
+                      await interruptSession(sessionId)
+                    },
+                    terminate: async () => {
+                      const { interruptSession } = await import("@/lib/claude/ipc")
+                      await interruptSession(sessionId)
+                    },
+                  },
+                  sessionId
+                )
+            : undefined
+        )
+      }
+
       // Twin-backed teammate on the text-only channel (web/mobile): executeAgent
-      // bypasses resolveSendOptions, so pre-inject the twin's persona + per-task
-      // RAG into the system prompt here. Degrades to `systemPrompt` on failure.
+      // bypasses resolveSendOptions, so pre-inject the twin's persona + per-task RAG.
       let textSystemPrompt = systemPrompt
       if (teammate.config?.twinId && teamCtx.twinDeps) {
         const injected = await applyTeammateTwinContext({
@@ -899,9 +1028,16 @@ export async function dispatchTeammate(
         })
         textSystemPrompt = injected.systemPrompt
       }
-      turn = await runTextOnly(promptText, textSystemPrompt, modelHint, combinedSignal, maxSteps)
+      return runTextOnly(promptText, textSystemPrompt, modelHint, combinedSignal, maxSteps)
     }
+    turn = durableDispatch ? await durableDispatch.run(executeTurn) : await executeTurn()
   } catch (err) {
+    await durableDispatch?.fail(err).catch(() => undefined)
+    if (durableEnvironmentSession) {
+      await settleDurableEnvironment(
+        err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed"
+      ).catch(() => undefined)
+    }
     if (taskWorkspaceLease)
       await taskWorkspaceLease.settle(
         err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed"
@@ -951,6 +1087,7 @@ export async function dispatchTeammate(
   if (args.validateOutput !== false) {
     if (trimmed.length === 0) {
       const empty = new Error("EMPTY_OUTPUT: teammate returned empty response")
+      await durableDispatch?.fail(empty).catch(() => undefined)
       reporter?.finalize("failed")
       teamCtx.pool.recordFailure(teammate.id, empty)
       if (args.recordToStore) {
@@ -959,6 +1096,7 @@ export async function dispatchTeammate(
       recordWorkspace(false)
       release("failure", empty)
       if (taskWorkspaceLease) await taskWorkspaceLease.settle("failed")
+      if (durableEnvironmentSession) await settleDurableEnvironment("failed").catch(() => undefined)
       throw empty
     }
     const minChars = args.minOutputChars ?? teamCtx.team.config?.minOutputChars ?? 0
@@ -966,6 +1104,7 @@ export async function dispatchTeammate(
       const short = new Error(
         `EMPTY_OUTPUT: output below minOutputChars=${minChars} (got ${trimmed.length})`
       )
+      await durableDispatch?.fail(short).catch(() => undefined)
       reporter?.finalize("failed")
       teamCtx.pool.recordFailure(teammate.id, short)
       if (args.recordToStore) {
@@ -974,11 +1113,34 @@ export async function dispatchTeammate(
       recordWorkspace(false)
       release("failure", short)
       if (taskWorkspaceLease) await taskWorkspaceLease.settle("failed")
+      if (durableEnvironmentSession) await settleDurableEnvironment("failed").catch(() => undefined)
       throw short
     }
   }
 
-  if (taskWorkspaceLease) await taskWorkspaceLease.settle("ready")
+  if (taskWorkspaceLease) taskWorkspaceChanges = await taskWorkspaceLease.settle("ready")
+  if (durableEnvironmentSession && teamCtx.durableEnvironment) {
+    taskWorkspaceChanges = await durableEnvironmentSession.settle("ready")
+    environmentEvidence = await teamCtx.durableEnvironment.adapter.collectEvidence(
+      durableEnvironmentSession.childRunId
+    )
+    await teamCtx.durableEnvironment.adapter.dispose(durableEnvironmentSession.childRunId)
+  }
+  const pricedUsage = turn.usage
+    ? priceTokensForModel(teammate.config?.provider, modelHint, {
+        inputTokens: turn.usage.promptTokens,
+        outputTokens: turn.usage.completionTokens,
+      })
+    : undefined
+  await durableDispatch?.complete({
+    text,
+    usage: turn.usage,
+    ...(pricedUsage?.known ? { costUsd: pricedUsage.cost } : {}),
+    ...(taskWorkspaceChanges.length > 0
+      ? { diffContent: JSON.stringify(taskWorkspaceChanges) }
+      : {}),
+    ...(environmentEvidence && environmentEvidence.length > 0 ? { environmentEvidence } : {}),
+  })
   teamCtx.pool.recordSuccess(teammate.id)
   if (turn.usage) {
     // One accounting authority: the governor's child account when present

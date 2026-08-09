@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import { DEFAULT_BAR_ITEMS, useMemberStatus, useUIStore, type SelectedGuild } from "./ui-store"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import {
   DEFAULT_STATUS_BAR_LAYOUT,
   DEFAULT_TITLE_BAR_LAYOUT,

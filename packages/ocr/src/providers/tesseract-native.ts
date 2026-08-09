@@ -37,6 +37,7 @@ export interface NativeOcrInvokePayload {
   bytes: Uint8Array
   mimeType: string
   languages: string[]
+  modelVariant?: string
   options?: Record<string, unknown>
 }
 

@@ -166,6 +166,7 @@ const mcpStoreState = {
 
 jest.mock("@/stores/mcp/mcp-store", () => ({
   useMcpStore: (selector: (s: typeof mcpStoreState) => unknown) => selector(mcpStoreState),
+  refreshMcpStore: jest.fn().mockResolvedValue(undefined),
 }))
 
 const CONNECTED_SERVER = {

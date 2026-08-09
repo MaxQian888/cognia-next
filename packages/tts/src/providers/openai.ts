@@ -4,11 +4,13 @@
  */
 
 import { proxyFetch } from "../proxy-fetch"
+import { normalizeAudioMime } from "../audio-response"
 import {
   ttsFailure,
   TTS_PROVIDERS,
   type OpenAITTSModel,
   type OpenAITTSVoice,
+  type BufferedTTSResponseFormat,
   type TTSResponse,
 } from "../types"
 
@@ -20,7 +22,9 @@ export interface OpenAITTSOptions {
   model?: OpenAITTSModel
   speed?: number
   instructions?: string
-  responseFormat?: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm"
+  responseFormat?: BufferedTTSResponseFormat
+  signal?: AbortSignal
+  requestId?: string
 }
 
 export async function generateOpenAITTS(
@@ -58,6 +62,9 @@ export async function generateOpenAITTS(
   try {
     const response = await proxyFetch(OPENAI_TTS_URL, {
       method: "POST",
+      provider: "openai",
+      signal: options.signal,
+      requestId: options.requestId,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -75,26 +82,12 @@ export async function generateOpenAITTS(
       })
     }
 
-    return {
-      success: true,
-      audioData: response.bytes,
-      mimeType: getMimeType(responseFormat),
-    }
+    const normalized = normalizeAudioMime(response.mime, responseFormat)
+    if (!normalized.success) return normalized
+    return { success: true, audioData: response.bytes, mimeType: normalized.mimeType }
   } catch (error) {
     return ttsFailure("network-error", {
       providerMessage: error instanceof Error ? error.message : "Unknown error",
     })
   }
-}
-
-function getMimeType(format: string): string {
-  const m: Record<string, string> = {
-    mp3: "audio/mpeg",
-    opus: "audio/opus",
-    aac: "audio/aac",
-    flac: "audio/flac",
-    wav: "audio/wav",
-    pcm: "audio/pcm",
-  }
-  return m[format] ?? "audio/mpeg"
 }

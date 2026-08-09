@@ -655,6 +655,74 @@ function proposedUri(fileUri) {
   return fileUri.with({ scheme: PROPOSED_SCHEME })
 }
 
+/** Maximum snapshot size for chat context to avoid blowing up the chat store. */
+const MAX_CHAT_SNAPSHOT_CHARS = 20_000
+
+/**
+ * Capture the current editor context for a chat action. Returns null when
+ * there is nothing actionable (no active file-based editor).
+ */
+function captureChatContext(action) {
+  const editor = vscode.window.activeTextEditor
+  if (!editor || editor.document.uri.scheme !== "file") return null
+
+  const doc = editor.document
+  const sel = editor.selection
+  const hasSelection = !sel.isEmpty
+
+  let selectedText = hasSelection ? doc.getText(sel) : null
+  let truncated = false
+  if (selectedText && selectedText.length > MAX_CHAT_SNAPSHOT_CHARS) {
+    selectedText = selectedText.slice(0, MAX_CHAT_SNAPSHOT_CHARS)
+    truncated = true
+  }
+
+  return {
+    action,
+    path: doc.uri.fsPath,
+    relativePath: vscode.workspace.asRelativePath(doc.uri, false),
+    language: doc.languageId,
+    selection: hasSelection
+      ? {
+          startLine: sel.start.line + 1,
+          startColumn: sel.start.character + 1,
+          endLine: sel.end.line + 1,
+          endColumn: sel.end.character + 1,
+        }
+      : null,
+    selectedText,
+    truncated,
+    diagnostics: hasSelection
+      ? vscode.languages
+          .getDiagnostics(doc.uri)
+          .filter((d) => sel.contains(d.range) || sel.intersection(d.range))
+          .map((d) => ({
+            message: d.message,
+            severity: diagnosticSeverityName(d.severity),
+            line: d.range.start.line + 1,
+          }))
+      : [],
+  }
+}
+
+/**
+ * Capture file-level context (no selection required). Used by "Add File to
+ * Context" from the explorer context menu.
+ */
+function captureFileContext(uri) {
+  if (!uri || uri.scheme !== "file") return null
+  return {
+    action: "addFile",
+    path: uri.fsPath,
+    relativePath: vscode.workspace.asRelativePath(uri, false),
+    language: null,
+    selection: null,
+    selectedText: null,
+    truncated: false,
+    diagnostics: [],
+  }
+}
+
 let bridge = null
 let contentHandles = null
 const proxyRegistrations = new Map()
@@ -914,6 +982,54 @@ export function activate(context) {
       },
     }
   )
+
+  // ── Chat context commands ──────────────────────────────────────────────
+  // These register the right-click menu actions that push editor context to
+  // the Cognia chat via the event channel. The renderer stages the payload as
+  // a FileSelectionRef context chip and optionally pre-fills the composer.
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cognia.chat.addSelection", () => {
+      const ctx = captureChatContext("addSelection")
+      if (ctx) bridge?.emit("chatContextRequested", () => ctx)
+    }),
+    vscode.commands.registerCommand("cognia.chat.addFile", (uri) => {
+      // `uri` is provided when invoked from the explorer context menu
+      const ctx = uri ? captureFileContext(uri) : captureChatContext("addFile")
+      if (ctx) bridge?.emit("chatContextRequested", () => ctx)
+    }),
+    vscode.commands.registerCommand("cognia.chat.explain", () => {
+      const ctx = captureChatContext("explain")
+      if (ctx) bridge?.emit("chatContextRequested", () => ctx)
+    }),
+    vscode.commands.registerCommand("cognia.chat.fix", () => {
+      const ctx = captureChatContext("fix")
+      if (ctx) bridge?.emit("chatContextRequested", () => ctx)
+    }),
+    vscode.commands.registerCommand("cognia.chat.review", () => {
+      const ctx = captureChatContext("review")
+      if (ctx) bridge?.emit("chatContextRequested", () => ctx)
+    }),
+    vscode.commands.registerCommand("cognia.chat.customAction", async () => {
+      const customActions = vscode.workspace.getConfiguration("cognia").get("customActions", [])
+      if (customActions.length === 0) {
+        vscode.window.showInformationMessage(
+          "No custom actions configured. Add them in Settings → Cognia → Custom Actions."
+        )
+        return
+      }
+      const picked = await vscode.window.showQuickPick(
+        customActions.map((a) => ({ label: a.label, description: a.prompt, action: a })),
+        { placeHolder: "Choose a Cognia action" }
+      )
+      if (!picked) return
+      const ctx = captureChatContext("custom")
+      if (!ctx) return
+      ctx.customPrompt = picked.action.prompt
+      ctx.customLabel = picked.action.label
+      bridge?.emit("chatContextRequested", () => ctx)
+    })
+  )
+
   return {
     registerProxy: (proxyContext, descriptor) => registerProxy(proxyContext, descriptor),
   }

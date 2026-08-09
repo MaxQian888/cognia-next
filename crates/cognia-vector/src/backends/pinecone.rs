@@ -43,7 +43,7 @@ impl PineconeBackend {
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
         );
-        let client = build_client(Some(headers))?;
+        let client = build_client(CONTROL_PLANE, Some(headers))?;
         Ok(Self {
             api_key,
             index_name,

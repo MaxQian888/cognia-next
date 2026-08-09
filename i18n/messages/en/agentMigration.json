@@ -1,0 +1,70 @@
+{
+  "artifacts": {
+    "names": {
+      "commands": "Commands",
+      "mcp": "MCP servers",
+      "memory": "Memory",
+      "sessions": "Sessions",
+      "settings": "Settings",
+      "skills": "Skills",
+      "subagents": "Subagents"
+    },
+    "title": "Choose what to import"
+  },
+  "back": "Back",
+  "cancel": "Cancel",
+  "cardBody": "Move settings, histories, skills, agents, MCP servers, commands, and memory into Cognia.",
+  "cardTitle": "Coding-agent migration",
+  "close": "Close",
+  "continue": "Continue",
+  "description": "Import supported data from an installed coding agent. You can review every category before anything is written.",
+  "errors": {
+    "artifactFailed": "This item could not be imported.",
+    "importFailed": "The migration could not be completed.",
+    "previewFailed": "The migration preview could not be created.",
+    "scanFailed": "Installed coding agents could not be detected."
+  },
+  "import": "Import",
+  "preview": {
+    "action": "Preview",
+    "items": "{count, plural, one {# item} other {# items}}"
+  },
+  "progress": {
+    "artifact": "Importing {artifact}…",
+    "starting": "Starting import…"
+  },
+  "result": {
+    "aborted": "Migration stopped",
+    "complete": "Migration complete",
+    "description": "Review what Cognia imported from the selected coding agent.",
+    "imported": "{count} imported",
+    "title": "Migration results"
+  },
+  "retry": "Try again",
+  "status": {
+    "empty": "Empty",
+    "error": "Error",
+    "ready": "Ready",
+    "shared": "Already shared",
+    "unsupported": "Unsupported"
+  },
+  "step": "Step {current} of {total}",
+  "strategy": {
+    "duplicate": "Keep both",
+    "label": "Conflict handling",
+    "overwrite": "Replace existing",
+    "skip": "Keep existing"
+  },
+  "title": "Import from a coding agent",
+  "vendor": {
+    "installed": "Installed",
+    "notInstalled": "Not found",
+    "scanning": "Looking for installed agents…",
+    "title": "Choose a source"
+  },
+  "vendors": {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "opencode": "OpenCode"
+  }
+}

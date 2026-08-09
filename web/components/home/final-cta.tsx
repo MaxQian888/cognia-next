@@ -62,7 +62,7 @@ export function FinalCta({ locale, copy, releaseState, evidence, docsOrigin }: F
   }
 
   return (
-    <Section id="start" tone="paper">
+    <Section id="start" tone="paper" density="open">
       <Hairline />
       <div className="pt-14 lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-16">
         <div>

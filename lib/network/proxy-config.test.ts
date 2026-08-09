@@ -2,8 +2,8 @@ import { DEFAULT_NETWORK_PROXY_SETTINGS, type NetworkProxySettings } from "@/typ
 import {
   buildProxyUrl,
   isProxyActive,
-  proxyAuthHeader,
   proxyEnvVars,
+  redactProxyUrl,
   shouldBypass,
 } from "./proxy-config"
 
@@ -65,22 +65,7 @@ describe("buildProxyUrl", () => {
     ).toBe("socks5://127.0.0.1:7891")
   })
 
-  it("URL-encodes username and password", () => {
-    expect(
-      buildProxyUrl(
-        make({
-          mode: "manual",
-          protocol: "http",
-          host: "proxy.corp",
-          port: 8080,
-          username: "alice@corp",
-          password: "p:w@rd!",
-        })
-      )
-    ).toBe("http://alice%40corp:p%3Aw%40rd!@proxy.corp:8080")
-  })
-
-  it("omits auth when only one credential is present", () => {
+  it("never embeds the persisted username in the public URL", () => {
     expect(
       buildProxyUrl(
         make({
@@ -89,7 +74,6 @@ describe("buildProxyUrl", () => {
           host: "127.0.0.1",
           port: 7890,
           username: "alice",
-          password: undefined,
         })
       )
     ).toBe("http://127.0.0.1:7890")
@@ -119,6 +103,17 @@ describe("shouldBypass", () => {
   it("matches a domain suffix entry", () => {
     expect(shouldBypass("https://api.internal/foo", bypass)).toBe(true)
     expect(shouldBypass("https://internal/foo", bypass)).toBe(true)
+  })
+
+  it("matches IPv4 and IPv6 CIDR entries without matching adjacent networks", () => {
+    expect(shouldBypass("https://10.42.8.9/path", ["10.42.0.0/16"])).toBe(true)
+    expect(shouldBypass("https://10.43.8.9/path", ["10.42.0.0/16"])).toBe(false)
+    expect(shouldBypass("https://[2001:db8:abcd::2]/path", ["2001:db8::/32"])).toBe(true)
+    expect(shouldBypass("https://[2001:db9::2]/path", ["2001:db8::/32"])).toBe(false)
+  })
+
+  it("ignores malformed CIDR entries", () => {
+    expect(shouldBypass("https://10.42.8.9/path", ["10.42.0.0/99", "bad/24"])).toBe(false)
   })
 
   it("does not match unrelated hosts", () => {
@@ -168,25 +163,14 @@ describe("proxyEnvVars", () => {
   })
 })
 
-describe("proxyAuthHeader", () => {
-  it("returns null when no auth", () => {
-    expect(proxyAuthHeader(undefined)).toBeNull()
-    expect(
-      proxyAuthHeader(make({ mode: "manual", host: "x", port: 1, username: undefined }))
-    ).toBeNull()
-  })
-
-  it("returns null when only one of username/password is set", () => {
-    expect(
-      proxyAuthHeader(make({ mode: "manual", host: "x", port: 1, username: "alice" }))
-    ).toBeNull()
-  })
-
-  it("returns Basic auth header when both creds are set", () => {
-    const header = proxyAuthHeader(
-      make({ mode: "manual", host: "x", port: 1, username: "alice", password: "secret" })
+describe("redactProxyUrl", () => {
+  it("removes userinfo without altering the endpoint", () => {
+    expect(redactProxyUrl("http://alice:secret@proxy.example:8080")).toBe(
+      "http://proxy.example:8080/"
     )
-    // base64("alice:secret") = "YWxpY2U6c2VjcmV0"
-    expect(header).toBe("Basic YWxpY2U6c2VjcmV0")
+  })
+
+  it("returns a safe marker for malformed values", () => {
+    expect(redactProxyUrl("not a url")).toBe("<invalid-proxy-url>")
   })
 })

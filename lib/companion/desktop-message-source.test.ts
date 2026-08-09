@@ -6,6 +6,18 @@ import "fake-indexeddb/auto"
 
 import { messageRepository } from "@/lib/db"
 import { getDb } from "@/lib/db/schema"
+import * as messageMedia from "@/lib/db/message-media"
+import { putMessageMedia } from "@/lib/db/message-media"
+
+jest.mock("@/lib/db/message-media", () => {
+  const actual = jest.requireActual("@/lib/db/message-media")
+  return {
+    ...actual,
+    getMessageMedia: jest.fn((...args: unknown[]) => actual.getMessageMedia(...args)),
+  }
+})
+
+const mockGetMessageMedia = jest.mocked(messageMedia.getMessageMedia)
 
 import {
   __resetInstalledForTests,
@@ -13,6 +25,8 @@ import {
   persistIncomingMessage,
   readMessagesPage,
   readSessionPage,
+  readTranscriptTimeline,
+  readTranscriptTurnMessages,
 } from "./desktop-message-source"
 
 describe("readSessionPage", () => {
@@ -420,8 +434,8 @@ describe("install guard", () => {
     })
     teardown2()
     teardown1()
-    // The second listen/listen/listen triple did NOT fire.
-    expect(listen).toHaveBeenCalledTimes(5)
+    // The second listener set did NOT fire.
+    expect(listen).toHaveBeenCalledTimes(9)
   })
 
   it("forceReinstall: false short-circuits when already installed", async () => {
@@ -437,15 +451,15 @@ describe("install guard", () => {
       bridge: { listen, invoke },
       forceReinstall: true,
     })
-    // 3 listeners registered.
-    expect(listen).toHaveBeenCalledTimes(5)
+    // All bridge listeners registered once.
+    expect(listen).toHaveBeenCalledTimes(9)
 
     // Second call with forceReinstall: false short-circuits — no extra listens.
     const teardown2 = await installDesktopMessageSource({
       bridge: { listen, invoke },
       forceReinstall: false,
     })
-    expect(listen).toHaveBeenCalledTimes(5)
+    expect(listen).toHaveBeenCalledTimes(9)
 
     teardown2()
     teardown1()
@@ -555,6 +569,35 @@ describe("readMessagesPage", () => {
     expect(page.total).toBeUndefined()
     expect(page.next_offset).toBeUndefined()
   })
+
+  it("expands media refs only on the bounded legacy message page", async () => {
+    const hash = "c".repeat(64)
+    await getDb().messages.put({
+      id: "legacy-media",
+      sessionId: "legacy-session",
+      role: "assistant",
+      parts: [{ type: "file", url: `cognia-media:${hash}`, mediaType: "image/png" }],
+      createdAt: 1,
+    } as never)
+    mockGetMessageMedia.mockResolvedValueOnce({
+      hash,
+      mediaType: "image/png",
+      width: 1,
+      height: 1,
+      blob: {
+        arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer,
+      } as Blob,
+      byteSize: 3,
+      createdAt: 1,
+      lastUsedAt: 1,
+    })
+
+    const page = await readMessagesPage("legacy-session", 1, 0)
+
+    expect((page.rows[0]?.parts[0] as { url?: string }).url).toBe(
+      "data:image/png;base64,AQID"
+    )
+  })
 })
 
 describe("persistIncomingMessage", () => {
@@ -586,5 +629,230 @@ describe("persistIncomingMessage", () => {
 
   it("rejects empty sessionId", async () => {
     await expect(persistIncomingMessage("", "x", undefined)).rejects.toThrow(/sessionId/)
+  })
+})
+
+describe("transcript bridge projections", () => {
+  beforeEach(async () => {
+    __resetInstalledForTests()
+    await getDb().messages.clear()
+    await getDb().sessions.clear()
+    await getDb().sessions.put({
+      id: "s1",
+      title: "Transcript",
+      kind: "direct",
+      transcriptRevision: 4,
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+  })
+
+  it("reads newest turns through the index and binds the backward cursor to revision", async () => {
+    await getDb().messages.bulkPut(
+      Array.from({ length: 6 }, (_, index) => ({
+        id: `${index % 2 === 0 ? "u" : "a"}${index}`,
+        sessionId: "s1",
+        role: index % 2 === 0 ? "user" : "assistant",
+        parts: [{ type: "text", text: `message ${index}` }],
+        createdAt: index + 1,
+      })) as never[]
+    )
+
+    const newest = await readTranscriptTimeline({ sessionId: "s1", limit: 2 })
+
+    expect(newest.revision).toBe(4)
+    expect(newest.items.map((item) => item.itemKey)).toEqual(["turn:u2", "turn:u4"])
+    expect(newest.hasMore).toBe(true)
+    expect(newest.nextCursor).toBeDefined()
+
+    const older = await readTranscriptTimeline({
+      sessionId: "s1",
+      limit: 2,
+      cursor: newest.nextCursor,
+    })
+    expect(older.items.map((item) => item.itemKey)).toEqual(["turn:u0"])
+  })
+
+  it("still returns a bounded page when the resumable summary index cannot be written", async () => {
+    await getDb().messages.bulkPut([
+      {
+        id: "u-index",
+        sessionId: "s1",
+        role: "user",
+        parts: [{ type: "text", text: "question" }],
+        createdAt: 1,
+      },
+      {
+        id: "a-index",
+        sessionId: "s1",
+        role: "assistant",
+        parts: [{ type: "text", text: "answer" }],
+        createdAt: 2,
+      },
+    ] as never[])
+    const indexWrite = jest
+      .spyOn(getDb().chatTurnSummaries, "bulkPut")
+      .mockRejectedValueOnce(new Error("quota exceeded"))
+
+    try {
+      const page = await readTranscriptTimeline({ sessionId: "s1", limit: 1 })
+
+      expect(page.items.map((item) => item.itemKey)).toEqual(["turn:u-index"])
+    } finally {
+      indexWrite.mockRestore()
+    }
+  })
+
+  it("pages one turn detail without returning messages from the next turn", async () => {
+    await getDb().messages.bulkPut([
+      {
+        id: "u1",
+        sessionId: "s1",
+        role: "user",
+        parts: [{ type: "text", text: "question" }],
+        createdAt: 1,
+      },
+      {
+        id: "a1",
+        sessionId: "s1",
+        role: "assistant",
+        parts: [{ type: "text", text: "answer" }],
+        createdAt: 2,
+      },
+      {
+        id: "u2",
+        sessionId: "s1",
+        role: "user",
+        parts: [{ type: "text", text: "next" }],
+        createdAt: 3,
+      },
+    ] as never[])
+
+    const page = await readTranscriptTurnMessages({
+      sessionId: "s1",
+      turnKey: "turn:u1",
+      revision: 4,
+      detailRevision: 4,
+    })
+
+    expect(page.messages.map((message) => message.id)).toEqual(["u1", "a1"])
+    expect(page.hasMore).toBe(false)
+    expect(page.approximateBytes).toBeLessThanOrEqual(2 * 1024 * 1024)
+  })
+
+  it("rejects detail reads from a stale session revision", async () => {
+    await expect(
+      readTranscriptTurnMessages({
+        sessionId: "s1",
+        turnKey: "turn:u1",
+        revision: 3,
+        detailRevision: 3,
+      })
+    ).rejects.toMatchObject({ code: "TRANSCRIPT_STALE" })
+  })
+
+  it("serves authorized session media through a raw invoke body", async () => {
+    const hash = "a".repeat(64)
+    await putMessageMedia({
+      hash,
+      mediaType: "image/png",
+      width: 1,
+      height: 1,
+      blob: new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }),
+      byteSize: 3,
+      createdAt: 1,
+      lastUsedAt: 1,
+    })
+    mockGetMessageMedia.mockResolvedValueOnce({
+      hash,
+      mediaType: "image/png",
+      width: 1,
+      height: 1,
+      blob: {
+        type: "image/png",
+        arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer,
+      } as unknown as Blob,
+      byteSize: 3,
+      createdAt: 1,
+      lastUsedAt: 1,
+    })
+    await getDb().messageMediaRefs.put({ messageId: "m1", sessionId: "s1", hash })
+    type Listener = (event: { payload: unknown }) => void
+    const handlers: Record<string, Listener> = {}
+    let resolveInvoke: ((value: unknown[]) => void) | undefined
+    const invoked = new Promise<unknown[]>((resolve) => {
+      resolveInvoke = resolve
+    })
+    await installDesktopMessageSource({
+      forceReinstall: true,
+      bridge: {
+        listen: jest.fn(async (event: string, handler: Listener) => {
+          handlers[event] = handler
+          return () => {}
+        }),
+        invoke: jest.fn(async (...args: unknown[]) => {
+          if (args[0] === "companion_media_response") resolveInvoke?.(args)
+          return undefined
+        }) as never,
+      },
+    })
+
+    handlers["companion://session-media-request"]({
+      payload: {
+        requestId: "media-rid",
+        kind: "session_media",
+        sessionId: "s1",
+        hash,
+        variant: "canonical",
+      },
+    })
+    const [, body, options] = await invoked
+
+    expect(body).toEqual(new Uint8Array([1, 2, 3]))
+    expect(options).toEqual({
+      headers: expect.objectContaining({
+        "X-Cognia-Request-Id": "media-rid",
+        "Content-Type": "image/png",
+      }),
+    })
+  })
+
+  it("denies media hashes that are not referenced by the requested session", async () => {
+    const hash = "b".repeat(64)
+    type Listener = (event: { payload: unknown }) => void
+    const handlers: Record<string, Listener> = {}
+    let resolveInvoke: ((value: unknown[]) => void) | undefined
+    const invoked = new Promise<unknown[]>((resolve) => {
+      resolveInvoke = resolve
+    })
+    await installDesktopMessageSource({
+      forceReinstall: true,
+      bridge: {
+        listen: jest.fn(async (event: string, handler: Listener) => {
+          handlers[event] = handler
+          return () => {}
+        }),
+        invoke: jest.fn(async (...args: unknown[]) => {
+          if (args[0] === "companion_media_response") resolveInvoke?.(args)
+          return undefined
+        }) as never,
+      },
+    })
+
+    handlers["companion://session-media-request"]({
+      payload: {
+        requestId: "denied-rid",
+        kind: "session_media",
+        sessionId: "s1",
+        hash,
+        variant: "canonical",
+      },
+    })
+    const [, body, options] = await invoked
+
+    expect(body).toEqual(new Uint8Array())
+    expect(options).toEqual({
+      headers: expect.objectContaining({ "X-Cognia-Error": "MEDIA_NOT_FOUND" }),
+    })
   })
 })

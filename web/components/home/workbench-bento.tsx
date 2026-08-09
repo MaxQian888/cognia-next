@@ -1,6 +1,7 @@
 import { Hairline } from "@web/components/hairline"
 import { Reveal } from "@web/components/reveal"
 import { Section, SectionHeading } from "@web/components/section"
+import { BentoGrid } from "@web/components/ui/bento-grid"
 import { DEMO_TASK } from "@web/content/demo-task"
 import type { CommonCopy, ReconstructionCopy, WorkbenchCopy } from "@web/content/types"
 
@@ -48,17 +49,17 @@ export function WorkbenchBento({ copy, common, reconstruction }: WorkbenchBentoP
   const { workbench, artifacts } = reconstruction
   const tools = DEMO_TASK.plan.map((step) => step.tool)
 
-  const cell = "relative bg-surface p-6 md:p-8 flex flex-col min-h-40 lg:min-h-48"
+  const cell = "relative bg-surface p-6 md:p-8 flex flex-col min-h-40 lg:min-h-48 min-w-0"
   const label = "flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-muted"
   const body = "mt-4 text-sm leading-relaxed text-ink"
   const station = <span aria-hidden className="size-1 shrink-0 rounded-full bg-action" />
 
   return (
-    <Section id="workbench" tone="paper">
+    <Section id="workbench" tone="paper" density="open">
       <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
 
       <Reveal className="mt-14">
-        <div className="relative overflow-hidden rounded-stage border border-hairline">
+        <div className="relative border-y border-hairline">
           <span className="sr-only">{common.contextPathLabel}</span>
           {/* Drawn, not painted. A cyan rule threading six regions is the one
            * place on the page where the motion *is* the argument — the shared
@@ -68,7 +69,7 @@ export function WorkbenchBento({ copy, common, reconstruction }: WorkbenchBentoP
             <Hairline tone="action" className="opacity-60" />
           </div>
 
-          <div className="grid gap-px bg-hairline lg:grid-cols-4">
+          <BentoGrid className="lg:grid-cols-4">
             <div className={cell}>
               <p className={label}>
                 {station}
@@ -141,7 +142,7 @@ export function WorkbenchBento({ copy, common, reconstruction }: WorkbenchBentoP
                 lines={[`${DEMO_TASK.artifact.file} · ${DEMO_TASK.artifact.version}`]}
               />
             </div>
-          </div>
+          </BentoGrid>
         </div>
       </Reveal>
     </Section>

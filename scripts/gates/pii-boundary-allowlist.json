@@ -259,5 +259,41 @@
     ],
     "reason": "Low-level sidecar protocol adapter receives fully assembled user turns.",
     "protection": "Application feature boundaries gate derived context before sidecar dispatch."
+  },
+  {
+    "file": "lib/ai/chat/standalone-tools.ts",
+    "boundaries": ["ai"],
+    "reason": "Uses AI SDK schema and tool-definition helpers; it does not invoke a model provider.",
+    "protection": "Tool execution delegates to handlePluginToolExec, whose existing plugin PII gate reviews outbound tool arguments."
+  },
+  {
+    "file": "lib/ai/raw-analysis.ts",
+    "boundaries": ["ai"],
+    "reason": "Defines local model middleware and reasoning provenance; it does not initiate a provider request.",
+    "protection": "The owning execution boundary remains responsible for outbound prompts; this middleware only transforms returned stream parts."
+  },
+  {
+    "file": "lib/voice/live/adapter-registry.ts",
+    "boundaries": ["@ai-sdk/openai", "@ai-sdk/google", "@ai-sdk/xai"],
+    "reason": "Constructs the explicitly selected realtime voice provider model.",
+    "protection": "No locally-derived payload is assembled here; Web uses user-provided BYOK credentials and desktop fetch is relayed through the existing Rust credential boundary."
+  },
+  {
+    "file": "lib/voice/live/pcm-codec.ts",
+    "boundaries": ["ai"],
+    "reason": "Reuses AI SDK PCM encode, decode, and resample helpers locally.",
+    "protection": "The imported helpers only transform in-memory audio samples and emit no network request."
+  },
+  {
+    "file": "sidecar/dispatch/mcp-runtime-gateway.mjs",
+    "boundaries": ["@ai-sdk/mcp"],
+    "reason": "Creates an ephemeral MCP client for explicit server capability discovery, not an LLM or embedding send.",
+    "protection": "Every remote MCP transport is created through the existing egress guard, and discovery sends only protocol capability requests to the configured server."
+  },
+  {
+    "file": "sidecar/telemetry.mjs",
+    "boundaries": ["ai", "@ai-sdk/otel"],
+    "reason": "Registers the process-wide AI SDK OpenTelemetry integration when an OTLP endpoint is configured.",
+    "protection": "Per-call telemetry explicitly sets recordInputs and recordOutputs to false, so prompts and completions never enter exported spans."
   }
 ]

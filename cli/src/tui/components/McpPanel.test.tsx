@@ -91,6 +91,24 @@ describe("McpPanel", () => {
     expect(onReconnect).toHaveBeenCalledWith("broken")
   })
 
+  it("shows complete diagnostic details for the selected failed server", () => {
+    const { container } = wrap({
+      servers: [
+        {
+          name: "context7",
+          transport: "stdio",
+          enabled: true,
+          status: "failed",
+          error: "MCP probe timed out after 12000ms\nError: CONTEXT7_API_KEY is missing",
+        },
+      ],
+    })
+    const text = container.textContent ?? ""
+    expect(text).toContain("Connection issue · context7")
+    expect(text).toContain("Timeout while connecting over stdio")
+    expect(text).toContain("CONTEXT7_API_KEY is missing")
+  })
+
   it("Enter on a disabled server enables it (toggle)", () => {
     const { onToggle } = wrap()
     for (let i = 0; i < 2; i++) key("", { downArrow: true }) // row 2 = filesystem (disabled)

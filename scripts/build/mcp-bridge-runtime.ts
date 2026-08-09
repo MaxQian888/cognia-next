@@ -35,6 +35,15 @@ export const memoryStore = (...args: unknown[]) => hostCall("memoryStore", ...ar
 export const memoryUpdate = (...args: unknown[]) => hostCall("memoryUpdate", ...args)
 export const memoryForget = (...args: unknown[]) => hostCall("memoryForget", ...args)
 
+/** Sidecar projection of the host-owned immutable workflow service. */
+export const proxiedWorkflowMcpHost = {
+  listDeployments: () => hostCall("workflowListDeployments"),
+  createRun: (input: unknown) => hostCall("workflowRunCreate", input),
+  getRun: (input: unknown) => hostCall("workflowRunGet", input),
+  listEvents: (input: unknown) => hostCall("workflowEventsList", input),
+  cancelRun: (input: unknown) => hostCall("workflowRunCancel", input),
+}
+
 export const listAllWikiArticles = (...args: unknown[]) =>
   hostCall("listAllWikiArticles", ...args)
 export const bulkCreateWikiArticles = (...args: unknown[]) =>

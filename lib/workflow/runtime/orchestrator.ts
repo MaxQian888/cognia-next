@@ -39,6 +39,7 @@ import type {
   WorkflowRunRow,
   WorkflowTriggeredFrom,
 } from "@/types/workflow/visual"
+import type { WorkflowExecutionBinding } from "@/types/workflow/deployment"
 // Importing the built-ins triggers their registration side effect.
 import "@/lib/workflow/nodes/built-ins"
 import { createRunLogger } from "./event-log"
@@ -76,6 +77,12 @@ import { type ConcurrencyController, createConcurrencyController } from "./concu
  */
 async function releaseRunResources(runId: string): Promise<void> {
   try {
+    const { defaultMcpRuntimeGateway } = await import("@/lib/mcp/runtime-gateway")
+    await defaultMcpRuntimeGateway.closeScope(`run:${runId}`)
+  } catch {
+    // best-effort MCP scope cleanup
+  }
+  try {
     const { closeRunSessions } = await import("@/lib/terminal/headless-session-registry")
     await closeRunSessions(runId)
   } catch {
@@ -98,6 +105,8 @@ const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["succeeded", "failed
 export interface RunWorkflowInput {
   workflow: VisualWorkflow
   trigger: TriggerEvent
+  /** Immutable deployment provenance for formal invocations; absent for draft tests. */
+  executionBinding?: WorkflowExecutionBinding
   /** Override the auto-generated run id (used by the resume path). */
   runId?: string
   /** Override the secret resolver (tests inject in-memory resolvers here). */
@@ -251,12 +260,24 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   let runRow: WorkflowRunRow = {
     id: runId,
     workflowId: workflow.id,
+    ...(input.executionBinding
+      ? {
+          versionId: input.executionBinding.versionId,
+          deploymentId: input.executionBinding.deploymentId,
+          deploymentRevision: input.executionBinding.deploymentRevision,
+          executionBinding: input.executionBinding,
+          ...(input.executionBinding.dependencyLock
+            ? { dependencyLock: input.executionBinding.dependencyLock }
+            : {}),
+        }
+      : {}),
     projectId,
     status: "running",
     triggerKind: trigger.kind,
     ...(trigger.triggerId ? { triggerId: trigger.triggerId } : {}),
     triggerPayload: trigger.payload,
     triggerBinding: trigger.binding,
+    triggerOriginAt: trigger.originAt,
     startedAt,
     workflowSnapshot: validated as VisualWorkflow,
     ...(input.triggeredBy ? { triggeredBy: input.triggeredBy } : {}),
@@ -404,6 +425,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     getPluginEventHooks().dispatchWorkflowError(workflow.id, sortError)
     getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
     emitCompletionFanout("failed", { error: { message } })
+    if (timeoutHandle) clearTimeout(timeoutHandle)
     await releaseRunResources(runId)
     return { runId, status: "failed", error: { message } }
   }
@@ -472,6 +494,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       await persistRunState({ runId, workflowId: workflow.id, status: "failed" })
       getPluginEventHooks().dispatchWorkflowError(workflow.id, new Error(message))
       getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+      if (timeoutHandle) clearTimeout(timeoutHandle)
       await releaseRunResources(runId)
       return { runId, status: "failed", error: { message } }
     }
@@ -665,6 +688,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 logger,
                 honorPinData: input.honorPinData,
                 ...(input.traceId ? { traceId: input.traceId } : {}),
+                ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
               })
             : await runStep({
                 workflow: validated as VisualWorkflow,
@@ -680,6 +704,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 logger,
                 honorPinData: input.honorPinData,
                 ...(input.traceId ? { traceId: input.traceId } : {}),
+                ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
               })
         stepOutputs.set(stepId, result.output)
         completed.add(stepId)

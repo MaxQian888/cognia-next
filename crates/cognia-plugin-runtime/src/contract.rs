@@ -9,6 +9,8 @@ use serde_json::Value;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Catalog {
+    contract_version: String,
+    protocol: ProtocolContract,
     minimum_host_version: String,
     plugin_types: Vec<String>,
     permissions: Vec<String>,
@@ -16,6 +18,15 @@ struct Catalog {
     manifest_contributions: Vec<ManifestContribution>,
     runtime_entries: HashMap<String, RuntimeEntryRule>,
     path_fields: Vec<PathField>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtocolContract {
+    version: String,
+    sdk_version: String,
+    gateway_client_version: String,
+    minimum_gateway_client_version: String,
 }
 
 #[derive(Deserialize)]
@@ -57,6 +68,8 @@ struct RuntimeEntryRule {
 }
 
 struct RuntimeContract {
+    contract_version: String,
+    protocol: ProtocolContract,
     capability_minimums: HashMap<String, [u64; 3]>,
     plugin_types: HashSet<String>,
     permissions: HashSet<String>,
@@ -74,6 +87,8 @@ fn runtime_contract() -> &'static RuntimeContract {
         .expect("canonical plugin contract must be valid JSON");
         let default_minimum = catalog.minimum_host_version.clone();
         RuntimeContract {
+            contract_version: catalog.contract_version,
+            protocol: catalog.protocol,
             capability_minimums: catalog
                 .capabilities
                 .into_iter()
@@ -93,6 +108,26 @@ fn runtime_contract() -> &'static RuntimeContract {
             path_fields: catalog.path_fields,
         }
     })
+}
+
+pub(crate) fn contract_version() -> &'static str {
+    &runtime_contract().contract_version
+}
+
+pub(crate) fn protocol_version() -> &'static str {
+    &runtime_contract().protocol.version
+}
+
+pub(crate) fn sdk_version() -> &'static str {
+    &runtime_contract().protocol.sdk_version
+}
+
+pub(crate) fn gateway_client_version() -> &'static str {
+    &runtime_contract().protocol.gateway_client_version
+}
+
+pub(crate) fn minimum_gateway_client_version() -> &'static str {
+    &runtime_contract().protocol.minimum_gateway_client_version
 }
 
 fn parse_semver(value: &str) -> Option<[u64; 3]> {
@@ -358,6 +393,15 @@ pub(crate) fn validate_manifest_contract(manifest: &Value) -> Result<(), String>
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn exposes_protocol_versions_from_the_canonical_catalog() {
+        assert_eq!(contract_version(), "1.0.0");
+        assert_eq!(protocol_version(), "2.0.0");
+        assert_eq!(sdk_version(), "0.1.0");
+        assert_eq!(gateway_client_version(), "2.0.0");
+        assert_eq!(minimum_gateway_client_version(), "1.0.0");
+    }
 
     #[test]
     fn rejects_unknown_and_host_incompatible_capabilities() {

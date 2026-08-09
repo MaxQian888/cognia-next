@@ -1,7 +1,10 @@
 use crate::{
     ledger,
     resource::{is_sensitive_resource, media_type_for},
-    snapshot::{capture_with_policy, materialize, GeneratedSnapshotEntry, WorkspaceSnapshot},
+    snapshot::{
+        capture_with_policy, materialize, EntryKind, GeneratedSnapshotEntry, SnapshotEntry,
+        WorkspaceSnapshot,
+    },
     store::WorkspaceStore,
     tracking::resolve_tracking_policy,
     BeginTaskRun, ChangeKind, ContributionOrigin, DownloadHandle, IsolationKind,
@@ -563,6 +566,74 @@ impl TaskWorkspaceService {
 
     pub fn get_patch_set(&self, run_id: &str) -> Result<Option<crate::PatchSet>, String> {
         self.store.lock().get_patch_set(run_id)
+    }
+
+    /// Restore the authoritative post-run snapshot into its managed execution
+    /// root. This recreates historical chat state from content-addressed blobs
+    /// and refuses to race a currently running turn on the same task.
+    pub fn restore_run_snapshot(&self, run_id: &str) -> Result<TaskRun, String> {
+        let (run, snapshot, blobs) = {
+            let mut store = self.store.lock();
+            let (run, mut snapshot) = store
+                .get_run::<WorkspaceSnapshot>(run_id)?
+                .ok_or_else(|| format!("unknown task run: {run_id}"))?;
+            if store.list_runs(&run.task_id)?.iter().any(|candidate| {
+                candidate.run_id != run.run_id
+                    && matches!(candidate.state, RunState::Running | RunState::Settling)
+            }) {
+                return Err("cannot restore a snapshot while a task run is active".to_string());
+            }
+            let patch = store
+                .get_patch_set(run_id)?
+                .ok_or_else(|| format!("unknown patch set for run: {run_id}"))?;
+            for file in patch.files {
+                if let Some(old_path) = file.old_path.as_deref() {
+                    snapshot.entries.remove(old_path);
+                }
+                match file.kind {
+                    ChangeKind::Deleted => {
+                        snapshot.entries.remove(&file.path);
+                    }
+                    ChangeKind::Created | ChangeKind::Modified | ChangeKind::Renamed => {
+                        let hash = file
+                            .after_hash
+                            .ok_or_else(|| format!("missing restored hash for {}", file.path))?;
+                        let bytes = store.get_blob(&hash, now_ms())?;
+                        snapshot.entries.insert(
+                            file.path.clone(),
+                            SnapshotEntry {
+                                path: file.path.clone(),
+                                kind: match file.resource_kind {
+                                    ResourceKind::File => EntryKind::File,
+                                    ResourceKind::Symlink => EntryKind::Symlink,
+                                },
+                                hash,
+                                size: bytes.len() as u64,
+                                mode: file.after_mode,
+                                binary: file.binary,
+                                media_type: media_type_for(&file.path, file.binary).to_string(),
+                                sensitive: is_sensitive_resource(&file.path),
+                            },
+                        );
+                    }
+                }
+            }
+            let mut blobs = HashMap::new();
+            for entry in snapshot.entries.values() {
+                blobs.insert(entry.hash.clone(), store.get_blob(&entry.hash, now_ms())?);
+            }
+            (run, snapshot, blobs)
+        };
+        let execution_root = PathBuf::from(&run.execution_root);
+        if !execution_root.is_dir() {
+            return Err(format!(
+                "managed execution root is unavailable: {}",
+                execution_root.display()
+            ));
+        }
+        clear_worktree_contents(&execution_root)?;
+        materialize(&execution_root, &snapshot, &blobs)?;
+        Ok(run)
     }
 
     pub fn read_patch_diff(
@@ -2154,6 +2225,8 @@ mod tests {
 
         let patch = service.get_patch_set("run-hunks").unwrap().unwrap();
         assert_eq!(patch.files[0].hunks.len(), 2);
+        assert_eq!(patch.files[0].hunks[0].additions, 1);
+        assert_eq!(patch.files[0].hunks[0].deletions, 1);
         let first_hunk = patch.files[0].hunks[0].id.clone();
         let outcome = service
             .apply_patch_set(
@@ -2169,6 +2242,10 @@ mod tests {
         assert!(applied.contains("agent line 2\n"));
         assert!(applied.contains("line 22\n"));
         assert!(!applied.contains("agent line 22\n"));
+        let applied_patch = service.get_patch_set("run-hunks").unwrap().unwrap();
+        assert!(applied_patch.applied_selection_known);
+        assert_eq!(applied_patch.applied_selection.len(), 1);
+        assert_eq!(applied_patch.applied_selection[0].hunk_ids.len(), 1);
     }
 
     #[test]
@@ -2369,6 +2446,36 @@ mod tests {
         let changes = service.settle_run(&second.run_id).unwrap();
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].path, "stage-2.txt");
+    }
+
+    #[test]
+    fn restores_a_historical_post_run_snapshot_into_the_reused_worktree() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("base.txt"), "base").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let mut first_input = input(&workspace, "task-restore", "run-1");
+        first_input.workspace_key = Some("chat-1".into());
+        let first = service.begin_run(first_input).unwrap();
+        fs::write(Path::new(&first.execution_root).join("first.txt"), "one").unwrap();
+        service.settle_run("run-1").unwrap();
+
+        let mut second_input = input(&workspace, "task-restore", "run-2");
+        second_input.workspace_key = Some("chat-1".into());
+        let second = service.begin_run(second_input).unwrap();
+        fs::write(Path::new(&second.execution_root).join("second.txt"), "two").unwrap();
+        service.settle_run("run-2").unwrap();
+        assert!(Path::new(&second.execution_root)
+            .join("second.txt")
+            .exists());
+
+        service.restore_run_snapshot("run-1").unwrap();
+        assert!(Path::new(&first.execution_root).join("first.txt").exists());
+        assert!(!Path::new(&first.execution_root).join("second.txt").exists());
+        assert_eq!(
+            fs::read_to_string(Path::new(&first.execution_root).join("base.txt")).unwrap(),
+            "base"
+        );
     }
 
     #[test]

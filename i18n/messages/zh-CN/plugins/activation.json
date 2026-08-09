@@ -1,0 +1,16 @@
+{
+  "cancelled": "启用在「{phase}」阶段被取消",
+  "countLabel": "第 {processed} 步，共 {total} 步",
+  "failed": "启用在「{phase}」阶段失败",
+  "label": "正在启用 {name}",
+  "phase": {
+    "commit": "正在完成启用",
+    "contributions": "正在注册贡献点",
+    "dependencies": "正在启用依赖项",
+    "hooks": "正在执行启用钩子",
+    "preflight": "正在检查兼容性",
+    "runtime": "正在启动插件运行时",
+    "schema": "正在准备数据存储"
+  },
+  "progressAria": "正在启用 {name}——{phase}，第 {processed} 步，共 {total} 步"
+}

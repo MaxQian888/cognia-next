@@ -25,6 +25,7 @@ import type { MentionProviders } from "../../mention/providers"
 import type { TuiState, TuiAction } from "../../state/types"
 import type { Dispatch } from "react"
 import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
+import type { TerminalLayoutBudget } from "../../layout/terminal-layout"
 
 export interface BottomRegionProps {
   state: TuiState
@@ -33,6 +34,8 @@ export interface BottomRegionProps {
   overlayOpen: boolean
   columns: number
   popupRows: number
+  composerRows: number
+  layout: TerminalLayoutBudget
   /** `themePalette.warning` — colour of the backtrack/edit status notices. */
   warningColor: string
   // BottomStatus
@@ -69,6 +72,8 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
     overlayOpen,
     columns,
     popupRows,
+    composerRows,
+    layout,
     warningColor,
     streamStartedAt,
     lastActivityAt,
@@ -97,8 +102,11 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
   useToastExpiry(state.toasts, dispatch)
 
   return (
-    <>
-      <Toasts toasts={state.toasts} />
+    <Box flexDirection="column" flexShrink={0}>
+      {/* Modal overlays own the available terminal rows. Keep transient status
+          queued (and expiring) while one is open, but never let it push a
+          Doctor/MCP/document panel upward or occupy its lower-left corner. */}
+      {!overlayOpen ? <Toasts toasts={state.toasts} /> : null}
       <BottomStatus
         turnStatus={state.turnStatus}
         activity={state.activity}
@@ -151,50 +159,62 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
           )
         })()}
       {!overlayOpen && !cursor.state.find && (
-        <Input
-          input={state.input}
-          dispatch={dispatch}
-          onSubmit={handleSubmit}
-          onHistoryPush={handleHistoryPush}
-          // Inert while a backtrack-to-edit selection is active (App owns ↑/↓/
-          // Enter then); otherwise stays active even during a turn so a `btw`
-          // steer can be typed mid-stream (`handleSubmit` queues it).
-          disabled={!!state.backtrack}
-          cwd={state.config.cwd}
-          listDir={listDir}
-          mentionProviders={mentionProviders}
-          width={columns}
-          popupRows={popupRows}
-          keybindings={keybindings}
-          mode={state.config.permissionMode}
-          vimEnabled={state.config.vim === true}
-          enabledSkillIds={enabledSkillIds}
-          onToggleSkill={toggleSkillEnabled}
-          onPopupOpenChange={handlePopupOpenChange}
-        />
+        <Box flexDirection="column" flexShrink={0}>
+          {/* A zero-height adornment keeps the mascot attached above the
+              composer's right edge without consuming a terminal row. */}
+          {layout.showMascot ? (
+            <Box height={0} alignItems="flex-end" paddingRight={2}>
+              <Mascot
+                mood={selectMascotMood({
+                  turnStatus: state.turnStatus,
+                  hasThinking: state.inflight.thinking.length > 0,
+                  activityRunning: state.activity?.status === "running",
+                })}
+                style={state.config.mascot?.style ?? "clawd"}
+                enabled={state.config.mascot?.enabled !== false}
+              />
+            </Box>
+          ) : null}
+          <Input
+            input={state.input}
+            dispatch={dispatch}
+            onSubmit={handleSubmit}
+            onHistoryPush={handleHistoryPush}
+            // Inert while a backtrack-to-edit selection is active (App owns ↑/↓/
+            // Enter then); otherwise stays active even during a turn so a `btw`
+            // steer can be typed mid-stream (`handleSubmit` queues it).
+            disabled={!!state.backtrack}
+            cwd={state.config.cwd}
+            listDir={listDir}
+            mentionProviders={mentionProviders}
+            width={columns}
+            popupRows={popupRows}
+            composerRows={composerRows}
+            keybindings={keybindings}
+            mode={state.config.permissionMode}
+            vimEnabled={state.config.vim === true}
+            enabledSkillIds={enabledSkillIds}
+            onToggleSkill={toggleSkillEnabled}
+            onPopupOpenChange={handlePopupOpenChange}
+          />
+        </Box>
       )}
-      <Mascot
-        mood={selectMascotMood({
-          turnStatus: state.turnStatus,
-          hasThinking: state.inflight.thinking.length > 0,
-          activityRunning: state.activity?.status === "running",
-        })}
-        style={state.config.mascot?.style ?? "clawd"}
-        enabled={state.config.mascot?.enabled !== false}
-      />
-      <Footer
-        config={state.config}
-        usage={state.usage}
-        totals={state.sessionTotals}
-        contextWindow={state.modelMeta?.contextWindow}
-        rateLimits={state.rateLimits}
-        capabilities={state.backendCapabilities}
-        turnStatus={state.turnStatus}
-        planTitle={footerPlanTitle}
-        columns={columns}
-        rowRef={footerRowRef}
-        segmentsRef={footerSegmentsRef}
-      />
-    </>
+      {layout.tier !== "tiny" ? (
+        <Footer
+          config={state.config}
+          usage={state.usage}
+          totals={state.sessionTotals}
+          contextWindow={state.modelMeta?.contextWindow}
+          rateLimits={state.rateLimits}
+          capabilities={state.backendCapabilities}
+          turnStatus={state.turnStatus}
+          planTitle={footerPlanTitle}
+          columns={columns}
+          rowRef={footerRowRef}
+          segmentsRef={footerSegmentsRef}
+          showHint={layout.showFooterHint}
+        />
+      ) : null}
+    </Box>
   )
 }

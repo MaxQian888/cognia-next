@@ -19,7 +19,7 @@ import { toast } from "sonner"
 import {
   PLUGIN_ENABLE_FAILED_EVENT,
   type PluginEnableFailedEventDetail,
-} from "@/lib/plugin/core/manager"
+} from "@/lib/plugin/error-bus"
 
 /** Dedupe a (pluginId, errorMessage) pair within this window (ms). */
 const DEDUPE_WINDOW_MS = 2_000

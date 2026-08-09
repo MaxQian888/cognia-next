@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
 // Coverage for the share-link local-mirror CRUD layer.
 
-import "fake-indexeddb/auto"
 import {
   recordSharedLink,
   listSharedLinks,
@@ -12,15 +10,17 @@ import {
   pruneExpiredSharedLinks,
   type SharedLinkRow,
 } from "./shared-links"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().sharedLinks.clear()
 })
+afterAll(dbFixture.dispose)
 
 function input(code: string, partial: Partial<SharedLinkRow> = {}) {
   return {
@@ -40,6 +40,25 @@ describe("recordSharedLink", () => {
     expect(row.id).toMatch(/^sl_/)
     expect(row.revoked).toBe(false)
     expect(await getSharedLinkByCode("AAA")).toMatchObject({ code: "AAA", revoked: false })
+  })
+
+  it("persists only secret references while hydrating the public row", async () => {
+    await recordSharedLink(input("SEC", { ownerToken: "owner-secret" }))
+
+    const persisted = await getDb().sharedLinks.where("code").equals("SEC").first()
+    expect(persisted?.url).toBe("https://share.example/v/SEC")
+    expect(persisted?.ownerToken).toBeUndefined()
+    expect(persisted?.secretRefs).toEqual({
+      urlFragment: expect.any(String),
+      ownerToken: expect.any(String),
+    })
+
+    const hydrated = await getSharedLinkByCode("SEC")
+    expect(hydrated).toMatchObject({
+      url: "https://share.example/v/SEC#k=abc",
+      ownerToken: "owner-secret",
+    })
+    expect(hydrated?.secretRefs).toBeUndefined()
   })
 })
 

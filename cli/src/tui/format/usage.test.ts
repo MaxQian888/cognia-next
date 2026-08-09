@@ -182,8 +182,10 @@ describe("usagePanelRows", () => {
     )
     const labels = rows.map((r) => r.label)
     expect(labels).toEqual([
+      "Model",
       "Input",
       "Output",
+      "Total",
       "Cache read",
       "Cache write",
       "Cache hit",

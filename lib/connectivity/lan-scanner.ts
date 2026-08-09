@@ -27,7 +27,7 @@ import { enumerateSlash24, getPrivateLocalIps } from "./local-ip"
  *      within the listening window, we scrape the device's private IPs
  *      via `getPrivateLocalIps()` (WebRTC ICE-candidate trick) and
  *      parallel-probe each `/24` for the cognia 401 signature. Each
- *      probe hit is enriched by a parallel `/api/v1/healthz` call so
+ *      probe hit is enriched by a parallel `/healthz` call so
  *      we still get the SPKI fingerprint on this path (used by the UI's
  *      mismatch detector).
  *
@@ -357,7 +357,7 @@ async function probeServer(
   // uses axum_server::from_tcp_rustls).  The probe must speak TLS; plain HTTP
   // causes an EOF because the server replies with TLS handshake bytes.
   const baseUrl = `https://${ip}:${port}`
-  const url = `${baseUrl}/api/v1/whoami`
+  const url = `${baseUrl}/api/whoami`
   const start = nowMs()
 
   // When on Capacitor native, bypass the broken fetch interceptor

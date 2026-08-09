@@ -142,6 +142,25 @@ describe("runAndCaptureAssistantReply", () => {
     expect(unlistenMock).toHaveBeenCalledTimes(1)
   })
 
+  it("surfaces the SDK session id immediately as well as on the final result", async () => {
+    const onSdkSessionId = jest.fn()
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onSdkSessionId,
+    })
+    await flushUntilSubscribed()
+    fire({
+      type: "sdk_session_id",
+      sessionId: SESSION,
+      sdkSessionId: "sdk-issued",
+    } as unknown as ClaudeEvent)
+    expect(onSdkSessionId).toHaveBeenCalledWith("sdk-issued")
+    fire(assistantEvent("Hello"))
+    fire(sessionEnded())
+
+    await expect(promise).resolves.toEqual(expect.objectContaining({ sdkSessionId: "sdk-issued" }))
+  })
+
   it("emits a usage stream event from an in-stream result message", async () => {
     const events: Array<{ type: string }> = []
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
@@ -1408,10 +1427,13 @@ describe("runAndCaptureAssistantReply — execution broker admission", () => {
 
 describe("subscribeCaptureFromEnvelopes (ADR-0090 Phase 3)", () => {
   const savedFlag = process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS
+  const savedParityFlag = process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1
 
   afterEach(() => {
     if (savedFlag === undefined) delete process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS
     else process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS = savedFlag
+    if (savedParityFlag === undefined) delete process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1
+    else process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1 = savedParityFlag
     subscribeAgentEventsMock.mockReset()
   })
 
@@ -1440,5 +1462,15 @@ describe("subscribeCaptureFromEnvelopes (ADR-0090 Phase 3)", () => {
     subscriber?.({ sessionId: "other", event: { kind: "text-delta", delta: "nope" } })
     subscriber?.({ sessionId: "s1", event: { kind: "lifecycle", phase: "ended" } })
     expect(events).toEqual([{ type: "text-delta", delta: "hi" }])
+  })
+
+  it("also enables the canonical stream for Claude SDK parity rollout", async () => {
+    delete process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS
+    process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1 = "1"
+    subscribeAgentEventsMock.mockResolvedValue(jest.fn())
+    const { subscribeCaptureFromEnvelopes } = await import("./run-and-capture")
+
+    await expect(subscribeCaptureFromEnvelopes("s1", jest.fn())).resolves.not.toBeNull()
+    expect(subscribeAgentEventsMock).toHaveBeenCalledTimes(1)
   })
 })

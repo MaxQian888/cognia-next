@@ -625,6 +625,21 @@ pub struct PetWindowPosition {
     pub y: i32,
 }
 
+/// Global cursor position used only by the local pet WebView for gaze. The
+/// command returns coordinates and performs no persistence, telemetry, or I/O.
+fn pet_cursor_position(x: f64, y: f64) -> PetWindowPosition {
+    PetWindowPosition {
+        x: x.round() as i32,
+        y: y.round() as i32,
+    }
+}
+
+#[tauri::command]
+pub async fn pet_window_get_cursor_position(app: AppHandle) -> Result<PetWindowPosition, String> {
+    let pos = app.cursor_position().map_err(|e| e.to_string())?;
+    Ok(pet_cursor_position(pos.x, pos.y))
+}
+
 /// Read the pet window's current outer position. `None` when the window is
 /// absent (so the renderer can fall back to its persisted coordinates).
 #[tauri::command]
@@ -801,6 +816,13 @@ mod tests {
         assert_eq!(json["x"], 120);
         assert_eq!(json["y"], -45);
         assert!(json.as_object().is_some());
+    }
+
+    #[test]
+    fn cursor_position_rounds_native_coordinates_into_the_wire_dto() {
+        let position = pet_cursor_position(120.6, -45.4);
+        assert_eq!(position.x, 121);
+        assert_eq!(position.y, -45);
     }
 
     #[test]

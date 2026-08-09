@@ -8,7 +8,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { CONFIGS, extractValue, replaceValue, checkConfigs } from "./config-sync.mjs"
+import { CONFIGS, extractValue, replaceValue, checkConfigs, parseArgs } from "./config-sync.mjs"
 
 const RUST = `pub const DEFAULT_PORT: u16 = 27890;\n`
 const TSX = `// Mirrors Rust\nconst DEFAULT_PORT = 27890\n`
@@ -28,6 +28,12 @@ function fixtureReader(overrides = {}) {
     return files[rel]
   }
 }
+
+test("parseArgs supports check mode and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { check: false })
+  assert.deepEqual(parseArgs(["--check"]), { check: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 test("extractValue reads the Rust const, TS const and PROBE_PORTS head", () => {
   assert.equal(extractValue(RUST, CONFIGS[0].canonical.re), "27890")

@@ -1,6 +1,12 @@
 import { isTauri } from "@/lib/native/utils"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+import {
+  PLUGIN_CONTRACT_VERSION,
+  PLUGIN_GATEWAY_CLIENT_VERSION,
+  PLUGIN_PROTOCOL_VERSION,
+  PLUGIN_SDK_VERSION,
+} from "@/packages/plugin-sdk/src/contracts/generated"
 
 async function invokePluginHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   // Always use the shared transport: it resolves to Tauri locally and to the
@@ -55,6 +61,36 @@ export interface PluginApiInvokeResponse<T = unknown> {
   error?: PluginApiError
   runtimeVersion: string
   compat: PluginApiCompat
+}
+
+export interface PluginRuntimeHandshake {
+  sdk_version: string
+  protocol_version: string
+  contract_version: string
+  runtime_id: string
+  capabilities: string[]
+  legacy_adapter: boolean
+}
+
+export function normalizePluginRuntimeHandshake<T extends Record<string, unknown>>(
+  info: T,
+  runtimeId: string
+): T & PluginRuntimeHandshake {
+  const hasHandshake =
+    typeof info.sdk_version === "string" &&
+    typeof info.protocol_version === "string" &&
+    typeof info.contract_version === "string"
+  return {
+    ...info,
+    sdk_version: hasHandshake ? info.sdk_version : PLUGIN_SDK_VERSION,
+    protocol_version: hasHandshake ? info.protocol_version : PLUGIN_PROTOCOL_VERSION,
+    contract_version: hasHandshake ? info.contract_version : PLUGIN_CONTRACT_VERSION,
+    runtime_id: typeof info.runtime_id === "string" ? info.runtime_id : runtimeId,
+    capabilities: Array.isArray(info.capabilities)
+      ? info.capabilities.filter((value): value is string => typeof value === "string")
+      : [],
+    legacy_adapter: hasHandshake ? info.legacy_adapter === true : true,
+  } as T & PluginRuntimeHandshake
 }
 
 export interface InvokePluginApiOptions {
@@ -135,7 +171,7 @@ export async function invokePluginApi<T = unknown>(
   const retries = options.retries ?? (idempotent ? 1 : 0)
   const retryDelayMs = options.retryDelayMs ?? 150
   const request: PluginApiInvokeRequest = {
-    sdkVersion: options.sdkVersion ?? "2.0.0",
+    sdkVersion: options.sdkVersion ?? PLUGIN_GATEWAY_CLIENT_VERSION,
     pluginId,
     requestId,
     api,
@@ -189,7 +225,7 @@ export async function invokePluginApiBatch(
   }
 ): Promise<PluginApiInvokeResponse[]> {
   const payload = {
-    sdkVersion: options?.sdkVersion ?? "2.0.0",
+    sdkVersion: options?.sdkVersion ?? PLUGIN_GATEWAY_CLIENT_VERSION,
     pluginId,
     strategy: options?.strategy ?? "continueOnError",
     requests: requests.map((item) => ({

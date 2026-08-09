@@ -42,11 +42,15 @@ export const COMPUTER_USE_PLUGIN_TOOL_NAMES = [
   "query_elements",
   "expand_element",
   "perform_action",
+  "find_text",
+  "click_text",
   "mcp__cognia-plugin-tools__list_apps",
   "mcp__cognia-plugin-tools__get_app_state",
   "mcp__cognia-plugin-tools__query_elements",
   "mcp__cognia-plugin-tools__expand_element",
   "mcp__cognia-plugin-tools__perform_action",
+  "mcp__cognia-plugin-tools__find_text",
+  "mcp__cognia-plugin-tools__click_text",
 ] as const
 
 export interface ApplyComputerUseInput {

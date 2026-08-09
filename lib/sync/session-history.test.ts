@@ -5,13 +5,20 @@
 import "fake-indexeddb/auto"
 
 import { getDb } from "@/lib/db/schema"
+import { isMediaRef, parseMediaRef } from "@/lib/db/message-media"
 import type { Transport } from "@/lib/tauri/transport-types"
 
 import { __resetHydratedSessionHistoryForTests, hydrateSessionHistory } from "./session-history"
 
-function createTransport(call: jest.Mock): Transport {
+function createTransport(call: jest.Mock, capabilities?: { version: number }): Transport {
   return {
-    call: call as unknown as Transport["call"],
+    call: (async (method: string, args?: Record<string, unknown>) => {
+      if (method === "transcript_capabilities") {
+        if (capabilities) return capabilities
+        throw Object.assign(new Error("method not found"), { code: "METHOD_NOT_FOUND" })
+      }
+      return call(method, args)
+    }) as Transport["call"],
     subscribe: () => () => {},
   }
 }
@@ -44,7 +51,7 @@ describe("hydrateSessionHistory", () => {
 
     const outcome = await hydrateSessionHistory(transport, "s1", { pageSize: 2 })
 
-    expect(outcome).toEqual({ applied: 5, total: 5 })
+    expect(outcome).toEqual({ applied: 5, total: 5, mode: "legacy" })
     expect(call.mock.calls.map(([, args]) => args)).toEqual([
       { session_id: "s1", limit: 2, offset: 0 },
       { session_id: "s1", limit: 2, offset: 2 },
@@ -72,12 +79,37 @@ describe("hydrateSessionHistory", () => {
     const second = hydrateSessionHistory(transport, "s1")
 
     expect(second).toBe(first)
+    await Promise.resolve()
+    await Promise.resolve()
     expect(call).toHaveBeenCalledTimes(1)
     resolvePage?.({ rows: [], total: 0 })
     await expect(Promise.all([first, second])).resolves.toEqual([
-      { applied: 0, total: 0 },
-      { applied: 0, total: 0 },
+      { applied: 0, total: 0, mode: "legacy" },
+      { applied: 0, total: 0, mode: "legacy" },
     ])
+  })
+
+  it("does not hydrate full history when transcript V1 is available", async () => {
+    const legacyCall = jest.fn()
+    const transport = createTransport(legacyCall, { version: 1 })
+
+    await expect(hydrateSessionHistory(transport, "s1")).resolves.toEqual({
+      applied: 0,
+      total: 0,
+      mode: "timeline",
+    })
+    expect(legacyCall).not.toHaveBeenCalled()
+  })
+
+  it("does not downgrade network failures to a legacy full-history read", async () => {
+    const legacyCall = jest.fn()
+    const transport: Transport = {
+      call: jest.fn().mockRejectedValue(new Error("network timeout")) as Transport["call"],
+      subscribe: () => () => {},
+    }
+
+    await expect(hydrateSessionHistory(transport, "s1")).rejects.toThrow("network timeout")
+    expect(legacyCall).not.toHaveBeenCalled()
   })
 
   it("clamps caller-provided page sizes to the protocol bounds", async () => {
@@ -111,7 +143,42 @@ describe("hydrateSessionHistory", () => {
     await expect(hydrateSessionHistory(transport, "s1")).resolves.toEqual({
       applied: 1,
       total: 1,
+      mode: "legacy",
     })
+  })
+
+  it("ingests legacy inline images instead of retaining base64 history rows", async () => {
+    const transport = createTransport(
+      jest.fn(async () => ({
+        rows: [
+          {
+            id: "image-1",
+            sessionId: "s1",
+            role: "assistant",
+            parts: [
+              {
+                type: "file",
+                url: "data:image/png;base64,aGVsbG8=",
+                mediaType: "image/png",
+              },
+            ],
+            createdAt: 1,
+          },
+        ],
+      }))
+    )
+
+    await hydrateSessionHistory(transport, "s1")
+
+    const db = getDb()
+    const row = await db.messages.get("image-1")
+    const ref = (row?.parts[0] as { url?: string } | undefined)?.url
+    expect(isMediaRef(ref)).toBe(true)
+    await expect(db.messageMediaRefs.get(["image-1", parseMediaRef(ref!)!])).resolves.toMatchObject(
+      {
+        sessionId: "s1",
+      }
+    )
   })
 
   it("rejects an invalid page without persisting rows", async () => {

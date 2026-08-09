@@ -50,6 +50,9 @@ describe("isStructuredMcpToolPart", () => {
     expect(isStructuredMcpToolPart(part("tool-wiki_read"))).toBe(true)
     expect(isStructuredMcpToolPart(part("tool-rag_search"))).toBe(true)
     expect(isStructuredMcpToolPart(part("tool-runtime_query"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-spawn_task"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-mcp__cognia-tools__spawn_task"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-mcp__cognia-plugin-tools__spawn_task"))).toBe(true)
   })
 
   it("recognises Claude built-ins", () => {

@@ -74,6 +74,23 @@ describe("filesToBundleResult", () => {
     expect(result.draft.resources).toBeUndefined()
   })
 
+  it("recognizes agents/openai.yaml as Codex configuration instead of an asset", () => {
+    const openaiYaml = `policy:\n  allow_implicit_invocation: false\nvendor:\n  keep: true\n`
+    const result = filesToBundleResult(
+      [
+        { path: "SKILL.md", contents: SKILL_MD },
+        { path: "agents/openai.yaml", contents: openaiYaml },
+        { path: "references/guide.md", contents: "guide" },
+      ],
+      "fallback"
+    )
+    expect(result.draft.codexOpenAiYaml).toBe(openaiYaml)
+    expect(result.draft.invocationPolicy).toBe("explicit")
+    expect(result.draft.resources).toEqual([
+      expect.objectContaining({ path: "references/guide.md" }),
+    ])
+  })
+
   it("throws when no SKILL.md is present", () => {
     expect(() => filesToBundleResult([{ path: "readme.md", contents: "x" }], "fallback")).toThrow(
       /no SKILL\.md/

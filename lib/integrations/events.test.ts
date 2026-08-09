@@ -143,4 +143,47 @@ describe("Integration event publication", () => {
       { type: "text", text: "Ready for review\n\nhttps://example.test/EX-1" },
     ])
   })
+
+  it("dispatches each Workflow trigger once when multiple subscriptions match", async () => {
+    const { account, subscription } = await setup()
+    const second = await createIntegrationSubscription("example-delivery", {
+      integrationId: "example",
+      accountId: account.id,
+      resourceKind: "issue",
+      resourceId: "EX-1",
+      eventTypes: ["issue.updated"],
+      inboxProjectionId: "issue-thread",
+    })
+
+    await publishIntegrationEvent("example-delivery", {
+      schemaVersion: 1,
+      id: "event-many-subscriptions",
+      pluginId: "example-delivery",
+      integrationId: "example",
+      accountId: account.id,
+      deliveryId: "delivery-many-subscriptions",
+      eventType: "issue.updated",
+      resource: { kind: "issue", id: "EX-1" },
+      occurredAt: "2026-07-28T00:00:00.000Z",
+      receivedAt: "2026-07-28T00:00:01.000Z",
+      payload: {
+        issue: { id: "EX-1", title: "Fix duplicate dispatches" },
+        comment: { body: null },
+      },
+    })
+
+    expect(dispatchTrigger).toHaveBeenCalledTimes(1)
+    const subscriptionIds = [subscription.id, second.id].sort()
+    expect(dispatchTrigger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          subscriptionId: subscriptionIds[0],
+          subscriptionIds,
+        }),
+      })
+    )
+    const messages = await getDb().messages.toArray()
+    expect(messages).toHaveLength(1)
+    expect(messages[0].parts).toEqual([{ type: "text", text: "Fix duplicate dispatches" }])
+  })
 })

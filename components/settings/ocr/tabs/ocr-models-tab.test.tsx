@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { OcrModelsTab, type ModelStatus, type OcrModelBridge } from "./ocr-models-tab"
 
@@ -70,6 +70,58 @@ describe("OcrModelsTab", () => {
     render(<OcrModelsTab providerId="ocrs" bridge={bridge} />)
     const button = await screen.findByRole("button", { name: /download models/i })
     await user.click(button)
-    await waitFor(() => expect(downloadMock).toHaveBeenCalledWith("ocrs"))
+    await waitFor(() =>
+      expect(downloadMock).toHaveBeenCalledWith("ocrs", undefined, expect.any(String))
+    )
+  })
+
+  it("turns the download action into Cancel while a request is active", async () => {
+    const user = userEvent.setup()
+    let resolveDownload: ((status: ModelStatus) => void) | undefined
+    const download = jest.fn(
+      () =>
+        new Promise<ModelStatus>((resolve) => {
+          resolveDownload = resolve
+        })
+    )
+    const cancel = jest.fn(async () => true)
+    const bridge = makeBridge()
+    bridge.download = download
+    bridge.cancel = cancel
+
+    render(<OcrModelsTab providerId="ocrs" bridge={bridge} />)
+    await user.click(await screen.findByRole("button", { name: /download models/i }))
+    const cancelButton = await screen.findByRole("button", { name: /cancel download/i })
+    await user.click(cancelButton)
+
+    const requestId = (download.mock.calls as unknown as Array<[string, string?, string?]>)[0]?.[2]
+    expect(requestId).toEqual(expect.any(String))
+    expect(cancel).toHaveBeenCalledWith(requestId)
+    await act(async () => {
+      resolveDownload?.(await bridge.status("ocrs"))
+    })
+    await screen.findByRole("button", { name: /download models/i })
+  })
+
+  it("passes the selected PaddleOCR v6 variant to the native bridge", async () => {
+    const bridge = makeBridge({ backend: "paddle-ocr" })
+    const statusSpy = jest.spyOn(bridge, "status")
+    render(<OcrModelsTab providerId="paddle-ocr" modelVariant="v6-tiny" bridge={bridge} />)
+    await waitFor(() => expect(statusSpy).toHaveBeenCalledWith("paddle-ocr", "v6-tiny"))
+  })
+
+  it("reports preserved legacy Paddle files as non-active", async () => {
+    render(
+      <OcrModelsTab
+        providerId="paddle-ocr"
+        bridge={makeBridge({
+          backend: "paddle-ocr",
+          legacy_files: ["det.onnx", "rec.onnx", "dict.txt"],
+          legacy_model_dir: "/tmp/paddle",
+        })}
+      />
+    )
+
+    expect(await screen.findByText(/legacy PP-OCRv5 files/i)).toHaveTextContent("/tmp/paddle")
   })
 })

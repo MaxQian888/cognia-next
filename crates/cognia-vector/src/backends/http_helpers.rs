@@ -9,7 +9,10 @@ use crate::error::{Result, VectorError};
 const MAX_UPSTREAM_ERROR_BODY_CHARS: usize = 512;
 const TRUNCATED_BODY_SUFFIX: &str = "... (truncated)";
 
-pub fn build_client(default_headers: Option<reqwest::header::HeaderMap>) -> Result<Client> {
+pub fn build_client(
+    target_url: &str,
+    default_headers: Option<reqwest::header::HeaderMap>,
+) -> Result<Client> {
     let mut builder = Client::builder()
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(10))
@@ -17,6 +20,8 @@ pub fn build_client(default_headers: Option<reqwest::header::HeaderMap>) -> Resu
     if let Some(h) = default_headers {
         builder = builder.default_headers(h);
     }
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, target_url)
+        .map_err(|error| VectorError::Configuration(error.to_string()))?;
     builder.build().map_err(|e| VectorError::Http {
         status: 0,
         message: format!("client build: {e}"),

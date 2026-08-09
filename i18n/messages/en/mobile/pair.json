@@ -102,6 +102,7 @@
     "invalid": "That pairing payload couldn't be decoded — copy the full cgnp2|… string from the server and paste it again.",
     "versionMismatch": "This pairing payload is version {got}, which this app doesn't understand. Update the app or the server so both speak the same payload version."
   },
+  "payloadPlaceholder": "cgnp3|…",
   "permissions": {
     "localNetwork": {
       "description": "Grant local-network access so the phone can find the desktop on your Wi-Fi.",
@@ -151,5 +152,6 @@
     "storageNotice": "The device credential is kept in this browser's localStorage: anyone with access to this browser profile — or a script injected into this origin — could use it. Pair from a trusted device and sign out when you're done.",
     "storageNoticeTitle": "Credential stays in this browser",
     "title": "Connect to your server"
-  }
+  },
+  "persistenceError": "The device was registered, but its credential couldn't be saved securely. Pair again."
 }

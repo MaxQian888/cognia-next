@@ -3,8 +3,7 @@
 //! # Endpoints
 //!
 //! - `GET  /healthz`  — liveness probe, no auth required.
-//! - `POST /mcp`      — JSON-RPC MCP request; forwarded to the Node sidecar.
-//! - `POST /mcp/sse`  — SSE streaming endpoint; returns 501 in Phase 1.
+//! - `GET|POST|DELETE /mcp/stream` — the only MCP transport surface.
 //!
 //! # Middleware (outer → inner)
 //!
@@ -26,7 +25,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{
-    extract::{ConnectInfo, Extension, State},
+    extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     middleware::{from_fn_with_state, Next},
     response::{IntoResponse, Response},
@@ -210,7 +209,7 @@ fn unix_time_ms() -> u64 {
 #[derive(Clone)]
 pub(crate) struct AppState {
     client_verifiers: ClientVerifierStore,
-    sidecar: Arc<SidecarProcess>,
+    _sidecar: Arc<SidecarProcess>,
     pub(crate) sessions: Arc<SessionRegistry>,
     /// Per-peer bad-token lockout for the auth middleware. Reuses the proxy
     /// limiter; only the lockout half is applied here (well-authenticated
@@ -254,24 +253,19 @@ pub async fn spawn_server_with_verifiers(
 
     let state = AppState {
         client_verifiers: client_verifiers.clone(),
-        sidecar,
+        _sidecar: sidecar,
         sessions: Arc::clone(&sessions),
         auth_limiter: Arc::new(RateLimiter::default()),
     };
 
     let app = Router::new()
         .route("/healthz", get(healthz))
-        .route("/mcp", post(mcp_post))
-        // Modern streamable-HTTP transport (session-scoped, SSE-capable).
         .route(
             "/mcp/stream",
             post(streamable_http::post_handler)
                 .get(streamable_http::get_handler)
                 .delete(streamable_http::delete_handler),
         )
-        // Back-compat alias: the old 501 stub now delegates to the streamable
-        // POST handler so configs pointing at `/mcp/sse` keep working.
-        .route("/mcp/sse", post(streamable_http::post_handler))
         .layer(from_fn_with_state(state.clone(), auth_middleware))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .with_state(state);
@@ -340,37 +334,6 @@ pub async fn spawn_server_with_verifiers(
 
 async fn healthz() -> impl IntoResponse {
     Json(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }))
-}
-
-async fn mcp_post(
-    State(state): State<AppState>,
-    Extension(authorization): Extension<ClientAuthorization>,
-    body: axum::body::Bytes,
-) -> impl IntoResponse {
-    let request_str = match std::str::from_utf8(&body) {
-        Ok(s) => s.trim().to_string(),
-        Err(_) => return error_body(StatusCode::BAD_REQUEST, "request body must be UTF-8"),
-    };
-
-    if request_str.is_empty() {
-        return error_body(StatusCode::BAD_REQUEST, "request body required");
-    }
-
-    let request_str = match stamp_client_authorization(&request_str, &authorization) {
-        Ok(request) => request,
-        Err(error) => return error_body(StatusCode::BAD_REQUEST, &error),
-    };
-
-    match state.sidecar.round_trip(&request_str).await {
-        Ok(response) => {
-            // Pass the sidecar response through as raw JSON.  Avoid
-            // re-parsing extension fields that the MCP SDK may add.
-            let raw: serde_json::Value =
-                serde_json::from_str(&response).unwrap_or(serde_json::Value::Null);
-            (StatusCode::OK, Json(raw)).into_response()
-        }
-        Err(e) => error_body(StatusCode::BAD_GATEWAY, &format!("sidecar error: {e}")),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -682,161 +645,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_post_rejects_missing_bearer() {
+    async fn legacy_mcp_facades_are_not_mounted() {
         let Ok(sidecar) = spawn_echo_for_tests().await else {
             return;
         };
-
-        let handle = spawn_server(
-            0,
-            "test-token".to_string(),
-            Arc::new(sidecar),
-            echo_sessions(),
-        )
-        .await
-        .expect("bind");
-
-        let client = reqwest::Client::new();
-        let url = format!("http://127.0.0.1:{}/mcp", handle.bound_port);
-        let resp = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .body(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
-            .send()
-            .await
-            .expect("POST");
-
-        assert_eq!(resp.status().as_u16(), 401);
-
-        let _ = handle.shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn mcp_post_rejects_rebinding_host_even_with_valid_token() {
-        let Ok(sidecar) = spawn_echo_for_tests().await else {
-            return;
-        };
-        let handle = spawn_server(
-            0,
-            "correct-token-correct-token-1234".to_string(),
-            Arc::new(sidecar),
-            echo_sessions(),
-        )
-        .await
-        .expect("bind");
-
-        let client = reqwest::Client::new();
-        let url = format!("http://127.0.0.1:{}/mcp", handle.bound_port);
-        // Simulate a DNS-rebinding page: correct bearer, but the Host header is
-        // an attacker domain (resolved to loopback). Must be rejected with 403
-        // before the bearer is even considered.
-        let resp = client
-            .post(&url)
-            .header("Host", "attacker.example")
-            .header("Authorization", "Bearer correct-token-correct-token-1234")
-            .header("Content-Type", "application/json")
-            .body(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
-            .send()
-            .await
-            .expect("POST");
-
-        assert_eq!(resp.status().as_u16(), 403);
-        let _ = handle.shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn mcp_post_rejects_wrong_token() {
-        let Ok(sidecar) = spawn_echo_for_tests().await else {
-            return;
-        };
-
-        let handle = spawn_server(
-            0,
-            "correct-token".to_string(),
-            Arc::new(sidecar),
-            echo_sessions(),
-        )
-        .await
-        .expect("bind");
-
-        let client = reqwest::Client::new();
-        let url = format!("http://127.0.0.1:{}/mcp", handle.bound_port);
-        let resp = client
-            .post(&url)
-            .header("Authorization", "Bearer wrong-token!")
-            .header("Content-Type", "application/json")
-            .body(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
-            .send()
-            .await
-            .expect("POST");
-
-        assert_eq!(resp.status().as_u16(), 401);
-
-        let _ = handle.shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn mcp_post_accepts_correct_token_and_forwards_to_sidecar() {
-        let Ok(sidecar) = spawn_echo_for_tests().await else {
-            return;
-        };
-
-        let handle = spawn_server(
-            0,
-            "correct-token".to_string(),
-            Arc::new(sidecar),
-            echo_sessions(),
-        )
-        .await
-        .expect("bind");
-
-        let client = reqwest::Client::new();
-        let url = format!("http://127.0.0.1:{}/mcp", handle.bound_port);
-        let payload = r#"{"jsonrpc":"2.0","id":42,"method":"tools/list"}"#;
-        let resp = client
-            .post(&url)
-            .header("Authorization", "Bearer correct-token")
-            .header("Content-Type", "application/json")
-            .body(payload)
-            .send()
-            .await
-            .expect("POST /mcp");
-
-        // Echo sidecar returns the same JSON — expect 200 with valid JSON body.
-        assert_eq!(resp.status().as_u16(), 200);
-
-        let body: serde_json::Value = resp.json().await.expect("json body");
-        assert_eq!(body["id"], 42);
-        assert_eq!(body["method"], "tools/list");
-
-        let _ = handle.shutdown.send(());
-    }
-
-    #[tokio::test]
-    async fn mcp_sse_delegates_to_stream_initialize() {
-        let Ok(sidecar) = spawn_echo_for_tests().await else {
-            return;
-        };
-
         let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar), echo_sessions())
             .await
             .expect("bind");
-
         let client = reqwest::Client::new();
-        let url = format!("http://127.0.0.1:{}/mcp/sse", handle.bound_port);
-        // The 501 stub is gone — `/mcp/sse` now delegates to the streamable
-        // POST handler. An `initialize` creates a session (echo replies in kind).
-        let resp = client
-            .post(&url)
-            .header("Authorization", "Bearer tok")
-            .header("Content-Type", "application/json")
-            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
-            .send()
-            .await
-            .expect("POST /mcp/sse");
 
-        assert_eq!(resp.status().as_u16(), 200);
-        assert!(resp.headers().get("mcp-session-id").is_some());
+        for path in ["/mcp", "/mcp/sse"] {
+            let response = client
+                .post(format!("http://127.0.0.1:{}{path}", handle.bound_port))
+                .header("Authorization", "Bearer tok")
+                .header("Content-Type", "application/json")
+                .body(r#"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}"#)
+                .send()
+                .await
+                .expect("legacy facade request");
+            assert_eq!(response.status().as_u16(), 404, "{path}");
+        }
 
         let _ = handle.shutdown.send(());
     }
@@ -913,6 +741,48 @@ mod tests {
             .await
             .expect("DELETE");
         assert_eq!(del.status().as_u16(), 204);
+
+        let _ = handle.shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn mcp_stream_returns_explicit_overload_at_session_capacity() {
+        let Ok(sidecar) = spawn_echo_for_tests().await else {
+            return;
+        };
+        let sessions = Arc::new(SessionRegistry::with_capacity(
+            streamable_http::Spawner::Echo,
+            streamable_http::DEFAULT_IDLE_TTL,
+            1,
+        ));
+        let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar), sessions)
+            .await
+            .expect("bind");
+        let client = reqwest::Client::new();
+        let url = format!("http://127.0.0.1:{}/mcp/stream", handle.bound_port);
+
+        let first = client
+            .post(&url)
+            .header("Authorization", "Bearer tok")
+            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
+            .send()
+            .await
+            .expect("first initialize");
+        assert_eq!(first.status().as_u16(), 200);
+
+        let overloaded = client
+            .post(&url)
+            .header("Authorization", "Bearer tok")
+            .body(r#"{"jsonrpc":"2.0","id":2,"method":"initialize"}"#)
+            .send()
+            .await
+            .expect("overloaded initialize");
+        assert_eq!(overloaded.status().as_u16(), 503);
+        let body: serde_json::Value = overloaded.json().await.expect("JSON overload body");
+        assert_eq!(
+            body["error"],
+            "MCP session capacity exceeded (maximum 1 active sessions)"
+        );
 
         let _ = handle.shutdown.send(());
     }

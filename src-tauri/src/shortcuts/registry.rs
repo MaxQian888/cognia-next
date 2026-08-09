@@ -425,13 +425,16 @@ fn part_from_code(code: Code) -> String {
 /// Seed the built-in shortcut ids on startup. The renderer overrides
 /// any of them via `shortcut_bind` later; this just guarantees the OS-level
 /// hot-keys are registered before the renderer has a chance to hydrate.
+pub const BUILTIN_SHORTCUT_DEFAULTS: &[(&str, &str)] = &[
+    ("tray.show", "ctrl+shift+space"),
+    ("tray.open-logs", "ctrl+shift+l"),
+    ("tray.automation-kill", "ctrl+alt+k"),
+    ("selection.captureClipboard", "alt+shift+c"),
+    ("chat.captureSmartSnapshot", "alt+shift+s"),
+];
+
 pub fn seed_builtins<R: Runtime>(app: &AppHandle<R>, registry: &ShortcutRegistry) {
-    for (id, chord) in [
-        ("tray.show", "ctrl+shift+space"),
-        ("tray.open-logs", "ctrl+shift+l"),
-        ("tray.automation-kill", "ctrl+alt+k"),
-        ("selection.captureClipboard", "alt+shift+c"),
-    ] {
+    for (id, chord) in BUILTIN_SHORTCUT_DEFAULTS {
         if let Err(e) = registry.bind(app, id, chord) {
             log::warn!("failed to seed built-in shortcut {id}={chord}: {e}");
         }
@@ -441,6 +444,13 @@ pub fn seed_builtins<R: Runtime>(app: &AppHandle<R>, registry: &ShortcutRegistry
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtins_include_smart_snapshot_shortcut() {
+        assert!(BUILTIN_SHORTCUT_DEFAULTS
+            .iter()
+            .any(|(id, chord)| *id == "chat.captureSmartSnapshot" && *chord == "alt+shift+s"));
+    }
 
     #[test]
     fn normalize_chord_lowercases_and_sorts_modifiers() {

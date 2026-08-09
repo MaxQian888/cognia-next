@@ -3,6 +3,8 @@ import {
   filterMcpServers,
   filterMcpTools,
   fixHint,
+  connectionIssueDetails,
+  connectionIssueTitle,
   patchServerStatus,
   statusBadge,
   type McpPanelServer,
@@ -15,6 +17,56 @@ const srv = (over: Partial<McpPanelServer> = {}): McpPanelServer => ({
   enabled: true,
   status: "connected",
   ...over,
+})
+
+describe("connectionIssueDetails", () => {
+  it("keeps the transport and multi-line stderr/timeout reason for diagnosis", () => {
+    expect(
+      connectionIssueDetails(
+        srv({
+          name: "context7",
+          transport: "stdio",
+          status: "failed",
+          error: "MCP probe timed out after 12000ms\nError: CONTEXT7_API_KEY is missing",
+        })
+      )
+    ).toEqual([
+      "Timeout while connecting over stdio.",
+      "MCP probe timed out after 12000ms",
+      "Error: CONTEXT7_API_KEY is missing",
+    ])
+  })
+
+  it("explains authorization failures without inventing an error", () => {
+    expect(connectionIssueDetails(srv({ status: "needs_auth" }))).toEqual([
+      "Authentication required for http. Press Enter to authorize.",
+    ])
+  })
+
+  it.each([
+    [srv({ enabled: false, status: "disabled" }), []],
+    [srv({ status: "connected" }), []],
+    [srv({ status: "pending" }), []],
+  ])("omits connection diagnostics for disabled or healthy states", (server, expected) => {
+    expect(connectionIssueDetails(server)).toEqual(expected)
+  })
+
+  it("reports a generic non-timeout failure when the transport has no detail", () => {
+    expect(connectionIssueDetails(srv({ status: "failed", error: undefined }))).toEqual([
+      "Connection over http failed.",
+      "No error detail was reported by the transport.",
+    ])
+  })
+
+  it("keeps only the last three stderr lines", () => {
+    expect(
+      connectionIssueDetails(srv({ status: "failed", error: "one\ntwo\nthree\nfour" }))
+    ).toEqual(["Connection over http failed.", "two", "three", "four"])
+  })
+
+  it("builds the selected-server heading", () => {
+    expect(connectionIssueTitle(srv({ name: "context7" }))).toBe("Connection issue · context7")
+  })
 })
 
 describe("statusBadge", () => {

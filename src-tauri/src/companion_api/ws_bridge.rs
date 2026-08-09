@@ -1,17 +1,17 @@
-//! Bridge WebSocket — `GET /ws/v1/bridge` (ADR-0059 W3, protocol v1).
+//! Bridge WebSocket — `GET /internal/bridge` (ADR-0059 W3, protocol v1).
 //!
 //! The headless Node brain connects here and becomes the data plane: the
-//! three companion bridges (`sync_bridge`, `desktop_messages_bridge`,
-//! `desktop_writes_bridge`) emit their request frames through
-//! [`SocketBridgeTransport`] instead of a Tauri `AppHandle`, and the brain
-//! answers with `respond` frames that route back into the same `resolve()`
-//! machinery the desktop WebView uses.
+//! companion bridges (`sync_bridge`, `desktop_messages_bridge`,
+//! `desktop_writes_bridge`, and the MCP orchestration proxy) emit request
+//! frames through [`SocketBridgeTransport`] instead of a Tauri `AppHandle`,
+//! and the brain answers with `respond` frames that route back into the same
+//! `resolve()` machinery the desktop WebView uses.
 //!
-//! This channel carries ONLY the three bridges' request/respond plus
+//! This channel carries ONLY host-local bridge request/respond plus
 //! lifecycle frames (`hello`/`hello_ack`/`ping`/`pong`/`token_refresh`).
 //! All other server→brain events (`claude://message`, `a2ui://dispatch`,
 //! `external-agent://*`, `connectors://webhook/<id>`) ride the existing
-//! `/ws/v1/events` via `EventBus::publish`.
+//! `/ws/events` via `EventBus::publish`.
 //!
 //! # Wire protocol (v1) — golden fixtures
 //!
@@ -54,10 +54,10 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{interval, Duration, Instant};
 
-use super::bridge_transport::{BridgeTransport, WebViewBridgeTransport};
+use super::bridge_transport::{BridgeRequestGuard, BridgeTransport, WebViewBridgeTransport};
 use super::middleware::DeviceContext;
 use super::SharedState;
 
@@ -86,6 +86,9 @@ const IDLE_TIMEOUT_SECS: u64 = 90;
 /// the events-WS cap. The route is service-scope + loopback-only, so the DoS
 /// surface is the co-located brain process, not the network.
 const MAX_BRIDGE_FRAME_BYTES: usize = 64 * 1024 * 1024;
+const MAX_BRIDGE_QUEUE_FRAMES: usize = 64;
+const MAX_BRIDGE_QUEUE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_BRIDGE_IN_FLIGHT: usize = 128;
 
 /// WS close code for protocol errors (RFC 6455 §7.4.1).
 const CLOSE_PROTOCOL_ERROR: u16 = 1002;
@@ -161,22 +164,57 @@ pub enum BridgeFrame {
 /// WebSocket. Created per-connection by the socket handler; the sender half
 /// feeds the connection's outgoing pump.
 pub struct SocketBridgeTransport {
-    tx: mpsc::UnboundedSender<Message>,
+    tx: mpsc::Sender<QueuedBridgeMessage>,
     conn_id: u64,
+    queued_bytes: Arc<Semaphore>,
+    in_flight: Arc<Semaphore>,
+    disconnected: watch::Sender<bool>,
+}
+
+struct QueuedBridgeMessage {
+    message: Message,
+    _bytes: OwnedSemaphorePermit,
 }
 
 impl SocketBridgeTransport {
-    fn new(tx: mpsc::UnboundedSender<Message>, conn_id: u64) -> Arc<Self> {
-        Arc::new(Self { tx, conn_id })
+    fn new(tx: mpsc::Sender<QueuedBridgeMessage>, conn_id: u64) -> Arc<Self> {
+        let (disconnected, _) = watch::channel(false);
+        Arc::new(Self {
+            tx,
+            conn_id,
+            queued_bytes: Arc::new(Semaphore::new(MAX_BRIDGE_QUEUE_BYTES)),
+            in_flight: Arc::new(Semaphore::new(MAX_BRIDGE_IN_FLIGHT)),
+            disconnected,
+        })
     }
 
     /// Serialize and enqueue a frame. Fails when the connection is gone.
     fn send_frame(&self, frame: &BridgeFrame) -> Result<(), String> {
+        if *self.disconnected.borrow() {
+            return Err("brain bridge disconnected".to_string());
+        }
         let text = serde_json::to_string(frame)
             .map_err(|e| format!("failed to serialize bridge frame: {e}"))?;
+        let byte_count = u32::try_from(text.len())
+            .map_err(|_| "brain bridge overloaded: frame exceeds queue budget".to_string())?;
+        let bytes = Arc::clone(&self.queued_bytes)
+            .try_acquire_many_owned(byte_count)
+            .map_err(|_| "brain bridge overloaded: outgoing byte budget exhausted".to_string())?;
         self.tx
-            .send(Message::Text(text.into()))
-            .map_err(|_| "bridge socket disconnected".to_string())
+            .try_send(QueuedBridgeMessage {
+                message: Message::Text(text.into()),
+                _bytes: bytes,
+            })
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => {
+                    "brain bridge overloaded: outgoing frame queue is full".to_string()
+                }
+                mpsc::error::TrySendError::Closed(_) => "brain bridge disconnected".to_string(),
+            })
+    }
+
+    fn mark_disconnected(&self) {
+        self.disconnected.send_replace(true);
     }
 }
 
@@ -187,6 +225,19 @@ impl BridgeTransport for SocketBridgeTransport {
             event: channel.to_string(),
             payload,
         })
+    }
+
+    fn reserve_request(&self) -> Result<BridgeRequestGuard, String> {
+        if *self.disconnected.borrow() {
+            return Err("brain bridge disconnected".to_string());
+        }
+        let permit = Arc::clone(&self.in_flight)
+            .try_acquire_owned()
+            .map_err(|_| "brain bridge overloaded: in-flight request limit reached".to_string())?;
+        Ok(BridgeRequestGuard::scoped(
+            self.disconnected.subscribe(),
+            permit,
+        ))
     }
 
     fn kind(&self) -> &'static str {
@@ -244,6 +295,7 @@ fn install_socket_bridge(
     };
     if let Some(old) = old {
         log::info!("companion-api ws-bridge: replacing existing brain connection");
+        old.transport.mark_disconnected();
         let _ = old.shutdown.send(true);
     }
     let _ = READY.0.send(true);
@@ -336,7 +388,7 @@ pub fn resolve_bridge_transport(state: &SharedState) -> Result<Arc<dyn BridgeTra
 // Handler
 // ---------------------------------------------------------------------------
 
-/// Axum handler for `GET /ws/v1/bridge`.
+/// Axum handler for `GET /internal/bridge`.
 ///
 /// `require_device_jwt` has already verified the JWT (and enforced loopback
 /// for service scope); this handler additionally rejects non-service scopes —
@@ -453,7 +505,7 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
 
     // ── 3. Install as the process-wide socket bridge ─────────────────────────
     let conn_id = CONN_COUNTER.fetch_add(1, Ordering::SeqCst);
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Message>();
+    let (out_tx, mut out_rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
     let transport = SocketBridgeTransport::new(out_tx, conn_id);
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     install_socket_bridge(
@@ -478,8 +530,8 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
             // Outgoing frame (bridge emit / token refresh).
             out = out_rx.recv() => {
                 match out {
-                    Some(msg) => {
-                        if socket.send(msg).await.is_err() {
+                    Some(queued) => {
+                        if socket.send(queued.message).await.is_err() {
                             break;
                         }
                     }
@@ -534,6 +586,7 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
         }
     }
 
+    transport.mark_disconnected();
     clear_socket_bridge_if(conn_id);
     log::info!("companion-api ws-bridge: brain disconnected (conn {conn_id})");
 }
@@ -603,7 +656,25 @@ fn handle_brain_frame(state: &SharedState, text: &str, transport: &SocketBridgeT
     }
 }
 
-/// Route a `respond` frame to the matching bridge's `resolve()`. All three
+fn resolve_orchestration_response(payload: Value) -> Result<(), String> {
+    let id = payload
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "missing orchestration response id".to_string())?
+        .to_string();
+    let reply =
+        serde_json::from_value::<crate::mcp_server::orchestration_proxy::OrchestrationReply>(
+            payload,
+        )
+        .map_err(|error| error.to_string())?;
+    let services = crate::headless::headless_services()
+        .ok_or_else(|| "headless services are unavailable".to_string())?;
+    services.mcp_server.resolve_orchestration_reply(&id, reply);
+    Ok(())
+}
+
+/// Route a `respond` frame to the matching bridge's `resolve()`. All
 /// resolvers are no-op-safe for unknown / timed-out request ids.
 fn route_respond(state: &SharedState, command: &str, payload: Value) {
     match command {
@@ -629,6 +700,11 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 Err(e) => log::warn!("companion-api ws-bridge: bad write respond payload: {e}"),
             }
         }
+        "orchestration_proxy_response" => {
+            if let Err(error) = resolve_orchestration_response(payload) {
+                log::warn!("companion-api ws-bridge: bad orchestration respond payload: {error}");
+            }
+        }
         other => {
             log::warn!("companion-api ws-bridge: unknown respond command {other:?}, ignoring");
         }
@@ -642,6 +718,20 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
+
+    pub(crate) struct TestBridgeReceiver {
+        rx: mpsc::Receiver<QueuedBridgeMessage>,
+    }
+
+    impl TestBridgeReceiver {
+        pub(crate) async fn recv(&mut self) -> Option<Message> {
+            self.rx.recv().await.map(|queued| queued.message)
+        }
+
+        pub(crate) fn try_recv(&mut self) -> Result<Message, mpsc::error::TryRecvError> {
+            self.rx.try_recv().map(|queued| queued.message)
+        }
+    }
 
     /// The socket-bridge slot is process-global; every test (in ANY module)
     /// that installs, clears, or asserts on it must hold this lock so
@@ -657,8 +747,8 @@ pub(crate) mod test_support {
     /// Install a fake connected brain into the process-global slot without a
     /// real WebSocket. Returns the receiver of the outgoing frame queue so
     /// the test can assert on emitted frames. Hold the slot lock first.
-    pub(crate) fn install_socket_for_testing() -> mpsc::UnboundedReceiver<Message> {
-        let (tx, rx) = mpsc::unbounded_channel::<Message>();
+    pub(crate) fn install_socket_for_testing() -> TestBridgeReceiver {
+        let (tx, rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
         let conn_id = CONN_COUNTER.fetch_add(1, Ordering::SeqCst);
         let transport = SocketBridgeTransport::new(tx, conn_id);
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
@@ -671,7 +761,7 @@ pub(crate) mod test_support {
                 capabilities: Vec::new(),
             },
         );
-        rx
+        TestBridgeReceiver { rx }
     }
 
     /// Clear the slot regardless of owner. Hold the slot lock first.
@@ -697,7 +787,6 @@ mod tests {
         idempotency::IdempotencyCache,
         jwt::{issue_device_jwt, issue_service_jwt},
         middleware, push, rate_limit,
-        redemption_lru::RedemptionLru,
         sync_bridge::SyncBridge,
         sync_registry::SyncTableRegistry,
         CompanionState,
@@ -706,9 +795,7 @@ mod tests {
     use serde_json::json;
     use std::net::SocketAddr;
     use tokio_tungstenite::tungstenite::{
-        client::IntoClientRequest,
-        http::{header::AUTHORIZATION, Request},
-        Message as WsMessage,
+        client::IntoClientRequest, http::Request, Message as WsMessage,
     };
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
@@ -717,8 +804,6 @@ mod tests {
     fn test_state() -> SharedState {
         Arc::new(CompanionState {
             secret: parking_lot::RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -740,7 +825,7 @@ mod tests {
     async fn serve_bridge(state: SharedState) -> SocketAddr {
         let router = axum::Router::new()
             .route(
-                "/ws/v1/bridge",
+                "/internal/bridge",
                 axum::routing::any(super::ws_bridge_handler),
             )
             .layer(axum::middleware::from_fn_with_state(
@@ -772,15 +857,9 @@ mod tests {
     >;
 
     fn authorized_request(addr: SocketAddr, token: &str) -> Request<()> {
-        let mut request = format!("ws://{addr}/ws/v1/bridge")
+        let request = format!("ws://{addr}/internal/bridge?token={token}")
             .into_client_request()
             .expect("valid bridge URL");
-        request.headers_mut().insert(
-            AUTHORIZATION,
-            format!("Bearer {token}")
-                .parse()
-                .expect("valid authorization header"),
-        );
         request
     }
 
@@ -1079,6 +1158,9 @@ mod tests {
         handshake(&mut brain_a).await;
         wait_connected().await;
         let first = socket_bridge_transport().expect("first transport");
+        let mut first_request = first
+            .reserve_request()
+            .expect("first connection accepts requests");
 
         let mut brain_b = connect(addr, &service_token()).await;
         handshake(&mut brain_b).await;
@@ -1111,10 +1193,30 @@ mod tests {
             first.conn_id, second.conn_id,
             "slot must belong to the new connection"
         );
+        tokio::time::timeout(Duration::from_secs(1), first_request.disconnected())
+            .await
+            .expect("replacement cancels only the old connection's requests");
+        let late_request_error = match first.reserve_request() {
+            Ok(_) => panic!("replaced transport must reject late requests"),
+            Err(error) => error,
+        };
+        assert!(late_request_error.contains("disconnected"));
+        let mut second_request = second
+            .reserve_request()
+            .expect("replacement connection accepts requests");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), second_request.disconnected())
+                .await
+                .is_err(),
+            "replacement must not cancel the new connection's requests"
+        );
 
         // B disconnecting clears the slot.
         brain_b.close(None).await.ok();
         wait_disconnected().await;
+        tokio::time::timeout(Duration::from_secs(1), second_request.disconnected())
+            .await
+            .expect("disconnect cancels the active connection's requests");
         assert!(socket_bridge_transport().is_none());
     }
 
@@ -1193,7 +1295,29 @@ mod tests {
             "companion_sync_pull_response",
             json!({ "requestId": "never-registered", "delta": {}, "error": null }),
         );
+        route_respond(
+            &state,
+            "orchestration_proxy_response",
+            json!({ "ok": true }),
+        );
         assert_eq!(state.sync_bridge.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn orchestration_response_routes_to_the_headless_mcp_state() {
+        let _guard = lock_slot().await;
+        crate::headless::install_headless_services(Some(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        ));
+
+        resolve_orchestration_response(json!({
+            "id": "unknown-request",
+            "ok": false,
+            "error": "cancelled",
+        }))
+        .expect("unknown reply ids are an idempotent no-op");
+
+        crate::headless::install_headless_services(None);
     }
 
     #[tokio::test]
@@ -1207,7 +1331,7 @@ mod tests {
 
     #[test]
     fn socket_transport_emit_formats_an_event_frame() {
-        let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+        let (tx, mut rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
         let transport = SocketBridgeTransport::new(tx, 42);
         transport
             .emit(
@@ -1215,7 +1339,7 @@ mod tests {
                 json!({ "request_id": "r1" }),
             )
             .expect("emit");
-        let Message::Text(text) = rx.try_recv().expect("frame queued") else {
+        let Message::Text(text) = rx.try_recv().expect("frame queued").message else {
             panic!("expected text frame");
         };
         let v: Value = serde_json::from_str(text.as_str()).unwrap();
@@ -1228,5 +1352,100 @@ mod tests {
         // Receiver dropped → emit fails (disconnect fail-fast).
         drop(rx);
         assert!(transport.emit("companion://x", json!({})).is_err());
+    }
+
+    #[test]
+    fn socket_transport_bounds_the_outgoing_frame_queue() {
+        let (tx, _rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
+        let transport = SocketBridgeTransport::new(tx, 43);
+
+        for index in 0..MAX_BRIDGE_QUEUE_FRAMES {
+            transport
+                .emit("companion://x", json!({ "index": index }))
+                .expect("within queue budget");
+        }
+        let error = transport
+            .emit("companion://x", json!({ "overflow": true }))
+            .expect_err("queue must reject overflow");
+        assert!(error.contains("overloaded"));
+    }
+
+    #[test]
+    fn socket_transport_bounds_queued_bytes_independently_of_frame_count() {
+        assert_eq!(MAX_BRIDGE_QUEUE_BYTES, 64 * 1024 * 1024);
+        let (tx, _rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
+        let (disconnected, _) = watch::channel(false);
+        let transport = SocketBridgeTransport {
+            tx,
+            conn_id: 45,
+            queued_bytes: Arc::new(Semaphore::new(32)),
+            in_flight: Arc::new(Semaphore::new(MAX_BRIDGE_IN_FLIGHT)),
+            disconnected,
+        };
+
+        let error = transport
+            .emit("companion://x", json!({ "payload": "x".repeat(128) }))
+            .expect_err("byte budget must reject an otherwise available frame slot");
+        assert!(error.contains("overloaded"));
+    }
+
+    #[test]
+    fn socket_transport_bounds_connection_in_flight_requests() {
+        let (tx, _rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
+        let transport = SocketBridgeTransport::new(tx, 44);
+        let mut guards = Vec::new();
+        for _ in 0..MAX_BRIDGE_IN_FLIGHT {
+            guards.push(
+                transport
+                    .reserve_request()
+                    .expect("within in-flight budget"),
+            );
+        }
+        let error = transport
+            .reserve_request()
+            .err()
+            .expect("in-flight overflow must fail");
+        assert!(error.contains("overloaded"));
+        drop(guards);
+        assert!(transport.reserve_request().is_ok());
+    }
+
+    #[tokio::test]
+    async fn connection_in_flight_budget_is_shared_across_bridge_types() {
+        let (tx, _rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
+        let transport = SocketBridgeTransport::new(tx, 46);
+        let guards = (0..MAX_BRIDGE_IN_FLIGHT)
+            .map(|_| transport.reserve_request().expect("within shared budget"))
+            .collect::<Vec<_>>();
+
+        let write_error = super::super::desktop_writes_bridge::DesktopWritesBridge::new()
+            .dispatch(
+                transport.as_ref(),
+                "host_feature_manifest",
+                json!({}),
+                Duration::from_secs(30),
+            )
+            .await
+            .expect_err("desktop-write bridge must share the connection budget");
+        assert!(write_error.contains("overloaded"));
+
+        let message_error = super::super::desktop_messages_bridge::DesktopMessagesBridge::new()
+            .list_sessions(transport.as_ref(), 10, 0, None, Duration::from_secs(30))
+            .await
+            .expect_err("desktop-message bridge must share the connection budget");
+        assert!(message_error.contains("overloaded"));
+
+        let sync_error = super::super::sync_bridge::SyncBridge::new()
+            .pull(
+                transport.as_ref(),
+                "sessions".into(),
+                0,
+                "account".into(),
+                Duration::from_secs(30),
+            )
+            .await
+            .expect_err("sync bridge must share the connection budget");
+        assert!(sync_error.contains("overloaded"));
+        drop(guards);
     }
 }

@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { Goal, GoalConfig } from "@/types/goal"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { appendGoalEvent, createGoal, getGoal, listGoalEvents, updateGoal } from "@/lib/db/goals"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listUsageForSession } from "@/lib/db/session-usage"
 
 const onGoalTerminalMock = jest.fn().mockResolvedValue(undefined)
@@ -49,13 +47,15 @@ function mockClient(handler: (prompt: string) => string | Error): LlmClient {
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   onGoalTerminalMock.mockClear()
 })
+
+afterAll(dbFixture.dispose)
 
 describe("handleTurnComplete — basic outcomes", () => {
   it("returns no_goal when the goalId doesn't exist", async () => {

@@ -82,6 +82,22 @@ export function getThemePack(pluginId: string, packId: string): RegisteredThemeP
   return registry.get(key(pluginId, packId))
 }
 
+/**
+ * Every registered pack's canonical `"<pluginId>.<packId>"` key.
+ *
+ * This is exactly the format a Character Pack's `requires.themePacks` uses —
+ * the registry's internal Map key already had the right shape, so no new state
+ * is needed to answer "is theme pack X available".
+ */
+export function listThemePackKeys(): string[] {
+  return [...registry.keys()]
+}
+
+/** True when `"<pluginId>.<packId>"` names a registered theme pack. */
+export function hasThemePackKey(packKey: string): boolean {
+  return registry.has(packKey)
+}
+
 export function subscribeThemePackRegistry(listener: () => void): () => void {
   listeners.add(listener)
   return () => {

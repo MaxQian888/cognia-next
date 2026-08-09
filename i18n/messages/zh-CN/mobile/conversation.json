@@ -8,6 +8,8 @@
   "clearAfterSendHelp": "成功发送后清空输入框（文字与附件）。",
   "composerSection": "输入框",
   "composerSectionHelp": "本机消息输入框的行为。",
+  "effortSelectorMode": "思考等级滑杆",
+  "effortSelectorModeHelp": "选择模型思考等级时使用滑杆，而不是列表。",
   "inputHistory": "调取输入历史",
   "inputHistoryHelp": "在空输入框按 ↑ / ↓ 调取之前发送过的消息。",
   "persistDrafts": "保留草稿",

@@ -2,7 +2,7 @@
  * Headless registration of the A2UI dispatch subscription (ADR-0059 T-A4).
  *
  * The sidecar's `a2ui_dispatch` lines reach the headless brain over
- * `/ws/v1/events`; the injected bridge feeds them into the same
+ * `/ws/events`; the injected bridge feeds them into the same
  * `useA2UIStore.processMessage` pipeline the desktop uses, so connector
  * A2UI projections (`lib/connectors/a2ui-bridge`) work server-side.
  */

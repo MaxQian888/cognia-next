@@ -25,6 +25,7 @@ import {
   EyeOffIcon,
   MailIcon,
   PencilRulerIcon,
+  PinIcon,
   PinOffIcon,
   PlusIcon,
   SettingsIcon,
@@ -120,7 +121,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
   const railContainers = viewContainers.filter(
     (c) => c.def.location !== "panel" && evaluateContextWhen(c.def.when)
   )
-  const { resolved, unpin, hide, side } = useSidebarLayout()
+  const { resolved, pin, unpin, hide, side } = useSidebarLayout()
   const [moreOpen, setMoreOpen] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
 
@@ -299,19 +300,36 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
                 <PopoverContent side={overlaySide} align="start" className="w-56 p-1">
                   <div className="flex flex-col">
                     {resolved.overflow.map((item) => (
-                      <button
+                      <div
                         key={item.id}
-                        type="button"
-                        onClick={() => openOverflowItem(item.route)}
-                        data-testid={`guild-more-item-${item.id}`}
                         className={cn(
-                          "flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent",
+                          "flex items-center rounded hover:bg-accent",
                           isFeatureActive(item.route) && "bg-primary/10 text-foreground"
                         )}
                       >
-                        <item.Icon className="size-4 text-muted-foreground" />
-                        <span className="flex-1 text-left">{t(item.i18nKey)}</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => openOverflowItem(item.route)}
+                          data-testid={`guild-more-item-${item.id}`}
+                          className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-sm"
+                        >
+                          <item.Icon className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate text-left">
+                            {t(item.i18nKey)}
+                          </span>
+                        </button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={t("customize.pinItem", { item: t(item.i18nKey) })}
+                          data-testid={`guild-more-pin-${item.id}`}
+                          onClick={() => void pin(item.id)}
+                          className="mr-1 size-7 shrink-0"
+                        >
+                          <PinIcon className="size-3.5" />
+                        </Button>
+                      </div>
                     ))}
                     <Separator className="my-1" />
                     <button

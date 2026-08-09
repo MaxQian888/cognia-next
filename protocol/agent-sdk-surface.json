@@ -324,129 +324,320 @@
     },
     "messages": {
       "SDKAPIRetryMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["api_retry"]
+        },
+        "canonical": ["retry"]
       },
       "SDKAssistantMessage": {
         "status": "supported",
+        "wire": {
+          "type": "assistant"
+        },
+        "canonical": ["text-delta", "thinking-delta", "tool-call"],
         "capability": "streaming"
       },
       "SDKAuthStatusMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "auth_status"
+        },
+        "canonical": ["auth"]
       },
       "SDKBackgroundTasksChangedMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["background_tasks_changed"]
+        },
+        "canonical": ["task-inventory"]
       },
       "SDKCommandsChangedMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["commands_changed"]
+        },
+        "canonical": ["commands-changed"]
       },
       "SDKCompactBoundaryMessage": {
         "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["compact_boundary"]
+        },
+        "canonical": ["compact"],
         "capability": "compaction"
       },
       "SDKControlRequestProgressMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["control_request_progress"]
+        },
+        "canonical": ["control-progress"]
       },
       "SDKConversationResetMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "conversation_reset"
+        },
+        "canonical": ["conversation-reset"]
       },
       "SDKElicitationCompleteMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["elicitation_complete"]
+        },
+        "canonical": ["elicitation-resolved"]
       },
       "SDKFilesPersistedEvent": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["files_persisted"]
+        },
+        "canonical": ["files-persisted"]
       },
       "SDKHookProgressMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["hook_progress"]
+        },
+        "canonical": ["hook"]
       },
       "SDKHookResponseMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["hook_response"]
+        },
+        "canonical": ["hook"]
       },
       "SDKHookStartedMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["hook_started"]
+        },
+        "canonical": ["hook"]
       },
       "SDKInformationalMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["informational"]
+        },
+        "canonical": ["informational"]
       },
       "SDKLocalCommandOutputMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["local_command_output"]
+        },
+        "canonical": ["local-command-output"]
       },
       "SDKMemoryRecallMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["memory_recall"]
+        },
+        "canonical": ["memory-recall"]
       },
       "SDKMirrorErrorMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["mirror_error"]
+        },
+        "canonical": ["mirror-error"]
       },
       "SDKModelRefusalFallbackMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["model_refusal_fallback"]
+        },
+        "canonical": ["model-refusal"]
       },
       "SDKModelRefusalNoFallbackMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["model_refusal_no_fallback"]
+        },
+        "canonical": ["model-refusal"]
       },
       "SDKNotificationMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["notification"]
+        },
+        "canonical": ["notification"]
       },
       "SDKPartialAssistantMessage": {
         "status": "supported",
+        "wire": {
+          "type": "stream_event"
+        },
+        "canonical": ["text-delta", "thinking-delta", "tool-call"],
         "capability": "streaming"
       },
       "SDKPermissionDeniedMessage": {
         "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["permission_denied"]
+        },
+        "canonical": ["permission-resolved"],
         "capability": "permissions.interrupt-resume"
       },
       "SDKPluginInstallMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["plugin_install"]
+        },
+        "canonical": ["plugin-install"]
       },
       "SDKPromptSuggestionMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "prompt_suggestion"
+        },
+        "canonical": ["prompt-suggestion"]
       },
       "SDKRateLimitEvent": {
         "status": "supported",
+        "wire": {
+          "type": "rate_limit_event"
+        },
+        "canonical": ["rate-limit"],
         "capability": "rate-limit-handling"
       },
       "SDKResultMessage": {
         "status": "supported",
+        "wire": {
+          "type": "result",
+          "subtypes": [
+            "error_during_execution",
+            "error_max_budget_usd",
+            "error_max_structured_output_retries",
+            "error_max_turns",
+            "success"
+          ]
+        },
+        "canonical": ["usage", "structured-output", "lifecycle", "failure"],
         "capability": "streaming"
       },
       "SDKSessionStateChangedMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["session_state_changed"]
+        },
+        "canonical": ["session-state"]
       },
       "SDKStatusMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["status"]
+        },
+        "canonical": ["activity"]
       },
       "SDKSystemMessage": {
         "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["init"]
+        },
+        "canonical": ["session-init"],
         "capability": "streaming"
       },
       "SDKTaskNotificationMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["task_notification"]
+        },
+        "canonical": ["task"]
       },
       "SDKTaskProgressMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["task_progress"]
+        },
+        "canonical": ["task"]
       },
       "SDKTaskStartedMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["task_started"]
+        },
+        "canonical": ["task"]
       },
       "SDKTaskUpdatedMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["task_updated"]
+        },
+        "canonical": ["task"]
       },
       "SDKThinkingTokensMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["thinking_tokens"]
+        },
+        "canonical": ["usage"]
       },
       "SDKToolProgressMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "tool_progress"
+        },
+        "canonical": ["tool-progress"]
       },
       "SDKToolUseSummaryMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "tool_use_summary"
+        },
+        "canonical": ["tool-summary"]
       },
       "SDKUserMessage": {
         "status": "supported",
+        "wire": {
+          "type": "user"
+        },
+        "canonical": ["user-input", "tool-result"],
         "capability": "tools.results"
       },
       "SDKUserMessageReplay": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "user"
+        },
+        "canonical": ["user-replay"]
       },
       "SDKWorkerShuttingDownMessage": {
-        "status": "planned"
+        "status": "supported",
+        "wire": {
+          "type": "system",
+          "subtypes": ["worker_shutting_down"]
+        },
+        "canonical": ["worker-shutdown"]
       }
     },
     "hookEvents": {

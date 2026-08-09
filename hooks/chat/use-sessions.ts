@@ -8,6 +8,7 @@ import {
   assignSessionToFolder,
   bulkArchiveSessions,
   bulkDeleteSessions,
+  bulkSetSessionsPinned,
   bulkUnarchiveSessions,
   deleteSession,
   getSession,
@@ -67,6 +68,7 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
   const setActiveSession = useChatStore((s) => s.setActiveSession)
   const setMessages = useChatStore((s) => s.setMessages)
   const setMessagesLoadError = useChatStore((s) => s.setMessagesLoadError)
+  const hydrateSessionActiveBranches = useChatStore((s) => s.hydrateSessionActiveBranches)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const messagesReloadNonce = useChatStore((s) => s.messagesReloadNonce)
   // Active workspace — the session list is scoped to it so workspaces stay
@@ -173,11 +175,14 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
       const local = await listMessages(activeSessionId)
       if (isTauri() || isCapacitor() || !hasWebCompanionTarget()) return local
       try {
-        await hydrateSessionHistory(
+        const hydration = await hydrateSessionHistory(
           (await import("@/lib/tauri/transport-instance")).transport,
           activeSessionId
         )
-        return listMessages(activeSessionId)
+        // Transcript-capable hosts are rendered from bounded timeline pages;
+        // keep only the already-synced recent tail in Zustand for the active
+        // turn. Legacy hosts still require the fully hydrated Dexie snapshot.
+        return hydration.mode === "timeline" ? local : listMessages(activeSessionId)
       } catch (error) {
         // Backward-compatible with older companion servers: keep a usable
         // recent tail when the lazy-history RPC is unavailable, but do not
@@ -192,8 +197,10 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
     loadMessages()
       .then(async (msgs) => {
         if (cancelled) return
+        const session = await getSession(activeSessionId)
+        if (cancelled) return
+        hydrateSessionActiveBranches(activeSessionId, session?.activeBranchByGroup ?? {})
         if (msgs.length === 0) {
-          const session = await getSession(activeSessionId)
           const character = session?.characterId
             ? await resolveCharacterById(session.characterId)
             : null
@@ -219,7 +226,13 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
       cancelled = true
     }
     // `messagesReloadNonce` re-runs the load when the retry button bumps it.
-  }, [activeSessionId, setMessages, setMessagesLoadError, messagesReloadNonce])
+  }, [
+    activeSessionId,
+    hydrateSessionActiveBranches,
+    setMessages,
+    setMessagesLoadError,
+    messagesReloadNonce,
+  ])
 
   const select = useCallback(
     (id: string | null) => {
@@ -285,7 +298,7 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
 
   const bulkSetPinned = useCallback(async (ids: readonly string[], pinned: boolean) => {
     if (ids.length === 0) return
-    await Promise.all(ids.map((id) => updateSession(id, { pinned })))
+    await bulkSetSessionsPinned(ids, pinned)
   }, [])
 
   const archive = useCallback(

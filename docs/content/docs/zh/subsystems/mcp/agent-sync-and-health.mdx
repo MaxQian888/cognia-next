@@ -1,21 +1,20 @@
 ---
 title: Agent 同步与健康
-description: Cognia 如何将 MCP 服务器镜像到七个外部 CLI 并验证它们确实可用 —— appsEnabled 投影矩阵、agent 标记与状态栏、drift 检测（missing 与 unmanaged）及一键重新同步、Rust mcp_test.rs 连接探针（stdio/http/sse 握手 → 工具列表），以及为 Health 标签页供数据的 5000 行 mcpAuditLog。
+description: MCP 的持久化 Agent 投影、sidecar Runtime Gateway 能力发现、受防护 Anthropic 远程 relay，以及 Health 中按服务器聚合的持久化运维状态。
 ---
 
 # Agent 同步与健康
 
-<Status variant="stable">Stable · 7 个可写 + 2 个只读 agent · `mcp_test.rs` · `mcpAuditLog`（上限 5000）</Status>
+<Status variant="stable">Stable · 持久化 `mcpSyncJobs` · sidecar Runtime Gateway · `mcpAuditLog`（10k / 30 天）</Status>
 
 <TLDR>
   每个 `McpServer` 行携带一个 `appsEnabled` 矩阵，将 `AgentId → boolean` 映射起来。当你切换某个标记时，
   CRUD 层会防抖地将该服务器写入该 agent 的磁盘 MCP 配置（`lib/claude/sync`）。
   由于文件可能与 Cognia 的视图发生漂移（手工编辑、同步失败），`use-agent-status` 会计算
   每个 agent 的 **drift** —— `missing`（已投影但文件中缺失）和 `unmanaged`（文件中存在，但 Cognia 未知）——
-  由 **drift banner** 呈现，并支持一键重新同步。另外，**test** 按钮
-  会运行一个 Rust 探针（`mcp_test.rs`），通过配置的 transport 执行真实的 `initialize → tools/list`
-  握手，并返回工具计数。**Health 标签页**显示入站 External-Bridge
-  服务器状态以及 `mcpAuditLog` —— 每一次桥接调用，无论允许还是拒绝，上限 5000 行。
+  由 **drift banner** 呈现，并支持一键重新同步。**test** 按钮通过 sidecar Runtime Gateway 做受防护的
+  能力发现。**Health 标签页**同时展示实时 runtime 指标、按服务器失败率、连接 P95、能力新鲜度、
+  Agent 同步延迟、入站 External-Bridge 状态，以及无内容的 `mcpAuditLog`。
 </TLDR>
 
 ## 投影矩阵
@@ -87,49 +86,23 @@ const onResync = async (agentId: AgentId) => {
 **agent 状态栏**（`mcp-agent-status-bar.tsx`）是 Agents 标签页的头部：每个 agent 的文件路径、
 文件内计数对比投影计数（不一致时显示琥珀色），以及一个 per-agent 和一个 sync-all 按钮。
 
-## 连接探针（`mcp_test.rs`）
+## Sidecar Runtime Gateway 能力发现
 
-每个服务器卡片上的 **Test** 按钮会调用 Rust 命令 `test_mcp_server`
-（`src-tauri/src/claude/mcp_test.rs:38`）。它会启动/连接配置的 transport，走完 MCP
-握手，捕获工具列表，然后拆除一切 —— 带有 10 秒握手超时：
+**Test** 按钮和 workflow 工具选择器调用 `discoverMcpServerViaSidecar`。可信宿主先检查 policy 并解析
+`SecretRef`，随后通过 allowlist 中的 `mcp-discover` feature call 到达
+`sidecar/dispatch/mcp-runtime-gateway.mjs`。能力发现使用官方 stdio、Streamable HTTP 与 legacy SSE
+transport，连接/列表超时为 15 秒，不自动重试工具调用，并始终关闭 client 与 DNS guard dispatcher。
+原手写 Rust `test_mcp_server` 命令以及对应 Companion/Tauri 权限面已删除。
 
-```rust title="src-tauri/src/claude/mcp_test.rs:21"
-pub struct McpTestResult {
-    pub ok: bool,
-    pub tool_count: usize,
-    pub tools: Vec<McpToolInfo>,
-    pub error: Option<String>,
-    pub duration_ms: u64,
-}
-```
-
-所有三种 transport 都运行相同的 JSON-RPC 序列 —— `initialize`（协议 `2024-11-05`）→
-`notifications/initialized` → `tools/list`：
-
-```rust title="src-tauri/src/claude/mcp_test.rs:107"
-write_jsonrpc(&mut writer, &serde_json::json!({
-  "jsonrpc": "2.0", "id": 1, "method": "initialize",
-  "params": {
-    "protocolVersion": "2024-11-05",
-    "capabilities": {},
-    "clientInfo": { "name": "cognia", "version": "0.1" }
-  }
-})).await?;
-```
-
-| Transport | 函数 | 说明 |
-| --------- | -------- | ----- |
-| stdio | `test_stdio` (82) | 以管道式 stdin/stdout 启动子进程；退出时始终 kill (181) |
-| http | `test_streamable_http` (233) | POST JSON-RPC；同时处理 `application/json` *和* `text/event-stream`；回显 `mcp-session-id` |
-| sse | `test_sse` (385) | 旧版：读取 `endpoint` 事件，然后向其 POST，从 SSE 流中读取回复 |
-
-结果会填充卡片的 test 徽章（工具计数或错误）。
+远程 Anthropic Agent SDK 配置会转换为由 SDK 管理的 stdio relay。SDK 仍负责子进程生命周期与重连，
+`mcp-stdio-relay.mjs` 则负责上游 HTTP/SSE socket，并应用与 AI SDK/OAuth 相同的受防护 Undici DNS
+lookup，从而关闭 DNS rebinding 缺口。
 
 ## 审计日志
 
-`lib/db/mcp-audit-log.ts` 将每一次**入站** External-Bridge 调用记录到 `mcpAuditLog` Dexie
-表中（行类型 `McpAuditLogRow`，`types/wiki/index.ts:264`）：timestamp、tool/method、scope、allow/deny、
-延迟，以及可选的 reason/error。它的上限是 5000 行，并在每次追加的同一事务中进行修剪：
+`lib/db/mcp-audit-log.ts` 将**出站与入站** MCP 操作的无内容审计记录到 `mcpAuditLog` Dexie
+表中（行类型 `McpAuditLogRow`，`types/wiki/index.ts:264`）：timestamp、phase、server、surface、
+decision、duration 与有界 error code。它按 10,000 行或 30 天（先到者）设定上限，并在每次追加的同一事务中进行修剪：
 
 ```typescript title="lib/db/mcp-audit-log.ts:27"
 export async function appendMcpAuditLog(draft: McpAuditDraft): Promise<McpAuditLogRow> {
@@ -137,7 +110,7 @@ export async function appendMcpAuditLog(draft: McpAuditDraft): Promise<McpAuditL
   const row: McpAuditLogRow = { id: draft.id ?? newId(), ...draft }
   await db.transaction("rw", db.mcpAuditLog, async () => {
     await db.mcpAuditLog.add(row)
-    await pruneOldest(AUDIT_CAP) // AUDIT_CAP = 5000
+    await pruneOldest(AUDIT_CAP) // AUDIT_CAP = 10_000
   })
   return row
 }
@@ -149,9 +122,9 @@ export async function appendMcpAuditLog(draft: McpAuditDraft): Promise<McpAuditL
 
 ### Health 标签页
 
-`components/settings/mcp/mcp-health-tab.tsx`（仅桌面端）显示入站桥接服务器状态
-（通过 `getMcpServerStatus` 获取 running/port/startedAt），并将审计日志渲染为表格 ——
-timestamp · tool · scope · allowed/denied 徽章 · 延迟 —— 带有 denied-only 筛选和一个 clear 按钮。
+`components/settings/mcp/mcp-health-tab.tsx` 通过一个 `loadMcpOperationsSnapshot` 投影读取
+`mcpServers`、`mcpAuditLog`、`mcpCapabilityCache` 与 `mcpSyncJobs`，展示按服务器失败率、连接 P95、
+能力新鲜度与 Agent 同步延迟。入站 bridge 状态与近期审计表仍是同一视图中的独立区块。
 
 ```tsx title="components/settings/mcp/mcp-health-tab.tsx:44"
 const refreshStatus = useCallback(async () => {
@@ -162,8 +135,8 @@ const refreshStatus = useCallback(async () => {
 }, [])
 ```
 
-> 这里的审计日志和桥接状态属于**入站**服务器（Cognia 作为 MCP 服务器）。它们的
-> 生产侧位于 [External Bridge](../external-bridge) 子系统中；本标签页是消费视图。
+> 出站与入站事件只共享审计词汇，不共享原始 payload 或生命周期所有权。
+> [External Bridge](../external-bridge) 仍是独立的入站信任平面。
 
 ## 流程
 
@@ -180,10 +153,10 @@ flowchart TB
   Banner -->|重新同步| Sync
   Sync --> Files
 
-  Test["Test 按钮"] -->|serverToTestRequest| Probe["mcp_test.rs<br/>initialize → tools/list"]
-  Probe --> Badge["✓ N 个工具 / ✗ 错误"]
+  Test["Test 按钮"] --> Gateway["sidecar Runtime Gateway<br/>tools/resources/prompts"]
+  Gateway --> Badge["✓ N 个工具 / ✗ 错误"]
 
-  Bridge["External Bridge 调用"] -->|追加| Audit[("mcpAuditLog 上限 5000")]
+  Bridge["External Bridge 调用"] -->|追加| Audit[("mcpAuditLog 10k / 30 天")]
   Audit --> Health["Health 标签页表格"]
 ```
 

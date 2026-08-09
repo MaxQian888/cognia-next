@@ -10,7 +10,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { A2UIComponentProps, A2UIBaseComponent } from "@/types/a2ui/schema"
 import type { A2UIDropdownMenuItem } from "./a2ui-dropdown-menu"
 

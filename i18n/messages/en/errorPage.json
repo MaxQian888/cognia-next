@@ -16,7 +16,10 @@
   "copied": "Copied",
   "copyErrorId": "Copy ID",
   "copyErrorIdSuccess": "Error ID copied",
+  "copyStack": "Copy stack trace",
+  "componentStack": "Component stack",
   "description": "An unexpected error occurred. The technical details below can help diagnose the issue.",
+  "disablePlugin": "Disable plugin",
   "diagnostics": {
     "appVersion": "App version",
     "category": "Category",
@@ -41,6 +44,7 @@
   "globalTitle": "Cognia stopped working",
   "goHome": "Back to home",
   "hideStack": "Hide stack trace",
+  "noStackFrames": "No stack frames",
   "openLogs": "Open logs",
   "recentErrors": {
     "cascadeHint": "Several errors occurred together — this may be a cascading failure.",
@@ -55,6 +59,7 @@
   },
   "retry": "Try again",
   "showStack": "Show stack trace",
+  "stackActions": "Stack trace actions",
   "title": "Something went wrong",
   "traceTitle": "Error details",
   "tryAgainWhenOnline": "Try again"

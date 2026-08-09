@@ -115,9 +115,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "NODE_OPTIONS=--max-old-space-size=12288 tsup",
+    "build": "node scripts/build-package.mjs",
     "typecheck": "node ../../scripts/plugin/test-sdk-package.mjs",
-    "pack:test": "pnpm --dir ../provider-types build && node ../../scripts/plugin/test-sdk-package.mjs"
+    "pack:test": "pnpm --dir ../provider-types build && pnpm build && node ../../scripts/plugin/test-sdk-package.mjs",
+    "performance:check": "node scripts/check-performance-budget.mjs"
   },
   "dependencies": {
     "@cognia/provider-core": "workspace:*",
@@ -128,7 +129,7 @@
     "@types/json-schema": "^7.0.0",
     "@types/node": ">=20.0.0",
     "@types/react": "^19.0.0",
-    "ai": "^6.0.0",
+    "ai": "^7.0.0",
     "dexie": "^4.0.0",
     "lucide-react": "^1.25.0",
     "react": "^19.0.0",

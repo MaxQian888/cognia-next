@@ -1,4 +1,4 @@
-//! Axum HTTP server for the companion API (`/api/v1/*`).
+//! Axum HTTP server for the unversioned Companion API.
 //!
 //! # Port separation rationale
 //!
@@ -14,8 +14,7 @@
 //! When `bind_loopback_only` is `true`, the server binds to `127.0.0.1`
 //! (only processes on the same machine can reach it).  When `false`, it binds
 //! to `0.0.0.0` (LAN-accessible).  M2.8 exposes a UI toggle; M2.3 defaults to
-//! loopback-only so the pair/issue endpoint is safe before the LAN-bind toggle
-//! lands.
+//! loopback-only until LAN access is explicitly enabled.
 //!
 //! # TLS (M2.9)
 //!
@@ -35,25 +34,37 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use super::{a2a, acp, healthz, rpc, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
+use super::{a2a, acp, healthz, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
 use axum::{
     extract::Request,
-    http::{Method, StatusCode},
+    http::{header, HeaderValue, Method, StatusCode},
     middleware::Next,
     middleware::{from_fn, from_fn_with_state},
     response::{IntoResponse, Response},
-    routing::{any, delete, get, post},
+    routing::{any, delete, get, post, put},
     Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use super::{auth, lark_entry, middleware, SharedState};
+use super::{lark_entry, middleware, SharedState};
 
 /// 64 KiB — pair request bodies are tiny; the generous limit leaves room for
 /// future endpoints (e.g., push-token registration in M4.6).
 const BODY_LIMIT_BYTES: usize = 64 * 1024;
+
+async fn harden_internal_response(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    response
+}
 
 /// Default companion API port.  Configurable via `companion_server_start`.
 /// Used by M2.8 settings UI.
@@ -256,50 +267,31 @@ pub async fn spawn_server(
 
 /// Build the axum `Router` for the companion API.
 ///
-/// Extracted so tests can call it without binding a TCP port (via
-/// `Router::oneshot`).  M2.5 will add `/api/v1/_rpc/:name`; M2.6 will add
-/// the WS upgrade route.
+/// Extracted so tests can call it without binding a TCP port via
+/// `Router::oneshot`.
 ///
 /// # Route structure
 ///
 /// ```text
-/// metered_pre_auth_routes  — pre_auth_rate_limit (per-source-IP token bucket)
-///   POST /api/v1/auth/pair/issue
-///   POST /api/v1/auth/pair
-///   POST /api/v1/auth/pair/redeem-code
+/// auth routes — pre_auth_rate_limit (per-source-IP token bucket)
+///   POST /api/auth/device/challenge
+///   POST /api/auth/device/register
+///   POST /api/auth/token
+///   POST /api/auth/socket-ticket
 ///
-/// unmetered_public_routes  — no middleware
-///   GET  /api/v1/healthz    — service discovery, read-only
+/// public routes — no authentication
+///   GET  /healthz
 ///
-/// protected_routes — require_device_jwt middleware applied
-///   GET  /api/v1/whoami   — identity check for the mobile app post-pair
+/// device routes — device access token plus DPoP proof
+///   GET  /api/whoami
+///   POST /api/_rpc/{name}
+///   GET  /ws/events
 /// ```
 pub fn build_router(state: SharedState) -> Router {
     build_router_for_mode(state, super::deployment::deployment_mode())
 }
 
-fn build_router_for_mode(state: SharedState, mode: super::deployment::DeploymentMode) -> Router {
-    // Pre-auth POST routes that can be brute-forced from the LAN — gated
-    // by a per-source-IP token bucket. See `middleware::pre_auth_rate_limit`
-    // for the bucket parameters and rationale.
-    let metered_pre_auth_routes = match mode {
-        super::deployment::DeploymentMode::SingleUser => Router::new()
-            .route("/api/v1/auth/pair/issue", post(auth::issue_handler))
-            .route("/api/v1/auth/pair", post(auth::pair_handler))
-            // 6-digit numeric code redemption path. Same trust model as
-            // `/api/v1/auth/pair` (callable from the phone over LAN); we
-            // resolve `code -> pair_jwt` server-side then run the same
-            // redeem logic. The 6-digit keyspace (~900K codes) makes this the
-            // primary brute-force target — see the docstring on
-            // `middleware::pre_auth_rate_limit`.
-            .route(
-                "/api/v1/auth/pair/redeem-code",
-                post(auth::redeem_code_handler),
-            )
-            .layer(from_fn(middleware::pre_auth_rate_limit)),
-        super::deployment::DeploymentMode::MultiTenant => Router::new(),
-    };
-
+fn build_router_for_mode(state: SharedState, _mode: super::deployment::DeploymentMode) -> Router {
     // Unmetered public routes — no rate limit, no JWT. Used for service
     // discovery only; do not add anything sensitive here.
     let unmetered_public_routes = Router::new()
@@ -308,12 +300,12 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
         // stable installation identifier so mobile clients can detect
         // cert rotation and confirm they're talking to the right
         // desktop. See `healthz` module docs.
-        .route("/api/v1/healthz", get(healthz::healthz_handler))
-        .route("/api/v1/livez", get(healthz::livez_handler))
-        .route("/api/v1/readyz", get(healthz::readyz_handler))
+        .route("/healthz", get(healthz::healthz_handler))
+        .route("/livez", get(healthz::livez_handler))
+        .route("/readyz", get(healthz::readyz_handler))
         // A2A Agent Card (a2a-protocol.org) — public discovery document. Read
         // only, discovery-safe fields only; the A2A endpoint itself (`/a2a`)
-        // is device-JWT gated below.
+        // requires a DPoP-bound device access token below.
         .route(
             "/.well-known/agent-card.json",
             get(a2a::a2a_agent_card_handler),
@@ -322,130 +314,143 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
     let operator_routes = Router::new()
         .route("/metrics", get(super::metrics::metrics_handler))
         .route(
-            "/api/v1/maintenance/backups",
+            "/operator/maintenance/backups",
             post(super::maintenance::backup_handler),
         )
         .layer(from_fn(middleware::require_loopback_operator));
 
-    // Authenticated routes — JWT verifier middleware applied.
+    // Canonical device routes — short-lived key-bound token + DPoP.
     //
     // The WS upgrade route uses `any()` rather than `get()` so it handles both
     // HTTP/1.1 GET upgrades and HTTP/2 CONNECT upgrades transparently.
     // It is intentionally outside the `RequestBodyLimitLayer` applied below
     // because that layer can interfere with the WS upgrade handshake.
-    let protected_routes = Router::new()
-        .route("/api/v1/whoami", get(auth::whoami_handler))
-        .route("/api/v1/_rpc/{name}", post(rpc::rpc_handler))
+    let device_routes = Router::new()
+        .route("/api/whoami", get(super::api::whoami_handler))
+        .route("/api/_rpc/{name}", post(super::api::rpc_handler))
         .route(
-            "/api/v1/browser/stream-ticket",
-            post(super::browser_gateway::issue_ticket_handler),
+            "/api/sessions/{session_id}/media/{hash}",
+            get(super::session_media::session_media_handler),
         )
         .route(
-            "/api/v1/terminal/socket-ticket",
-            post(ws_terminal::issue_ticket_handler),
+            "/api/operations/{operation_id}",
+            get(super::api::operation_handler),
         )
-        // Legacy JSON/raw-byte terminal protocol. Keep this behind device-JWT
-        // middleware for released clients while `/ws/terminal` uses tickets
-        // and canonical binary frames.
         .route(
-            "/ws/v1/terminal",
-            any(ws_terminal::legacy_ws_terminal_handler),
+            "/api/workflow-deployments/{deployment_id}/runs",
+            post(super::workflow_api::create_run_handler),
         )
-        .route("/ws/v1/events", any(ws::ws_handler))
-        // Headless-brain data plane (ADR-0059 W3). The JWT middleware already
-        // enforces loopback for service-scope tokens; the handler additionally
-        // rejects non-service scopes before the upgrade.
-        .route("/ws/v1/bridge", any(ws_bridge::ws_bridge_handler))
+        .route(
+            "/api/workflow-runs/{run_id}",
+            get(super::workflow_api::get_run_handler),
+        )
+        .route(
+            "/api/workflow-runs/{run_id}/events",
+            get(super::workflow_api::events_handler),
+        )
+        .route(
+            "/api/workflow-runs/{run_id}/cancel",
+            post(super::workflow_api::cancel_run_handler),
+        )
         // Remote Pro IDE relay. The companion owns code-server and revalidates
         // the paired device on every HTTP request and WebSocket upgrade.
         .route(
-            "/ide/v1/relay/{relay_id}",
+            "/ide/relay/{relay_id}",
             any(crate::codeserver::remote::relay_root_handler),
         )
         .route(
-            "/ide/v1/relay/{relay_id}/",
+            "/ide/relay/{relay_id}/",
             any(crate::codeserver::remote::relay_root_handler),
         )
         .route(
-            "/ide/v1/relay/{relay_id}/{*tail}",
+            "/ide/relay/{relay_id}/{*tail}",
             any(crate::codeserver::remote::relay_handler),
         )
-        // ACP server (Agent Client Protocol) — external editors drive cognia
-        // Claude sessions over JSON-RPC. Baseline-chat surface only (the
-        // handler reaches `claude_*` arms through `rpc::dispatch`, whose
-        // control/service gates still apply), so a device JWT suffices.
-        .route("/ws/v1/acp", any(acp::acp_handler))
         // A2A server (Agent2Agent, a2a-protocol.org) — external agents drive
         // cognia over JSON-RPC. Same baseline-chat trust model as ACP: reaches
-        // `claude_*` arms through `rpc::dispatch`, so a device JWT suffices.
+        // `claude_*` commands through `remote_execution`, so a device access
+        // token plus DPoP proof suffices.
         .route("/a2a", post(a2a::a2a_rpc_handler))
-        // Feishu principal-registry admin (`cognia lark …`). Deliberately here
-        // rather than in the public `/integrations/lark` nest: this tier
-        // already accepts the headless brain's loopback-only service token,
-        // which is exactly the trust level an operator channel needs.
-        .route("/api/v1/lark/admin", post(lark_entry::admin_handler))
-        .route(
-            "/api/v1/lark/admin/{request_id}",
-            get(lark_entry::admin_poll_handler),
-        )
         .layer(from_fn_with_state(
             state.clone(),
-            middleware::require_device_jwt,
+            super::api::require_device_access,
         ));
 
-    // v2 keeps the v1 RPC payload shape for one compatibility release, but
-    // replaces its authentication and authorization completely: short-lived
-    // key-bound access token, per-request DPoP proof, manifest capability,
-    // transport target, and UUID idempotency enforcement.
-    let v2_protected_routes = Router::new()
-        .route("/api/v2/_rpc/{name}", post(super::v2::rpc_handler))
-        .layer(from_fn_with_state(
-            state.clone(),
-            super::v2::require_device_access,
-        ));
-    let v2_owner_routes = Router::new()
-        .route("/api/v2/devices", get(super::v2::devices_handler))
+    let owner_routes = Router::new()
+        .route("/api/devices", get(super::api::devices_handler))
         .route(
-            "/api/v2/devices/{device_id}",
-            delete(super::v2::revoke_device_handler),
+            "/api/devices/{device_id}",
+            delete(super::api::revoke_device_handler),
         )
-        .route("/api/v2/invitations", post(super::v2::invitation_handler))
         .route(
-            "/api/v2/policies",
-            get(super::v2::policies_handler).post(super::v2::create_policy_handler),
+            "/api/devices/{device_id}/capabilities",
+            put(super::api::replace_device_capabilities_handler),
+        )
+        .route("/api/invitations", post(super::api::invitation_handler))
+        .route(
+            "/api/policies",
+            get(super::api::policies_handler).post(super::api::create_policy_handler),
         )
         .layer(from_fn_with_state(
             state.clone(),
-            super::v2::require_owner_access,
+            super::api::require_owner_access,
         ));
+
+    // Loopback/service-token traffic is deliberately isolated from the device
+    // plane. It retains its service-principal authentication while sharing the
+    // same command execution authority.
+    let internal_routes = Router::new()
+        .route("/internal/bridge", any(ws_bridge::ws_bridge_handler))
+        .route("/internal/events", any(ws::internal_ws_handler))
+        .route(
+            "/internal/_rpc/{name}",
+            post(super::api::internal_rpc_handler),
+        )
+        .layer(from_fn_with_state(
+            state.clone(),
+            middleware::require_service_jwt,
+        ))
+        .layer(from_fn(harden_internal_response));
+
+    let operator_admin_routes = Router::new()
+        .route("/operator/lark/admin", post(lark_entry::admin_handler))
+        .route(
+            "/operator/lark/admin/{request_id}",
+            get(lark_entry::admin_poll_handler),
+        )
+        .layer(from_fn(middleware::require_loopback_operator));
 
     // Lark dual-entry public surface (plan 2026-07-24) — cloned handle so the
     // headless-only nest below can outlive the `with_state` move.
     let lark_entry_state = state.clone();
 
     let mut router = Router::new()
-        .merge(metered_pre_auth_routes)
         .merge(unmetered_public_routes)
         .merge(operator_routes)
-        .merge(super::v2::router())
-        .route("/ws/v2/events", any(ws::ws_v2_handler))
-        .merge(v2_protected_routes)
-        .merge(v2_owner_routes)
+        .merge(operator_admin_routes)
+        .merge(super::api::router())
+        .route("/ws/events", any(ws::ws_handler))
+        // ACP upgrades redeem a path-bound, single-use socket ticket. The
+        // ticket identity and capability snapshot are passed into the shared
+        // remote execution authority by the protocol adapter.
+        .route("/ws/acp", any(acp::acp_handler))
+        .merge(device_routes)
+        .merge(owner_routes)
+        .merge(internal_routes)
         // Browser stream upgrades authenticate with a 60-second, single-use
         // ticket obtained through the protected route above. Long-lived JWTs
         // are deliberately never placed in the WebSocket URL.
         .route(
-            "/ws/v1/browser/{session_id}",
+            "/ws/browser/{session_id}",
             any(super::browser_gateway::browser_ws_handler),
         )
         // Terminal upgrades use the same single-use-ticket pattern as the
-        // browser stream, so a long-lived device JWT never enters the URL.
+        // browser stream, so a bearer access token never enters the URL.
         .route("/ws/terminal", any(ws_terminal::ws_terminal_handler))
-        .merge(protected_routes)
         .with_state(state.clone());
 
-    // Fleet ingress (`/api/v1/fleet/*`) — its own auth tier: loopback-source
-    // + shared fleet token (see `fleet::routes`). Neither device-JWT (hook
+    // Fleet ingress (`/api/fleet/*`) — its own auth tier: loopback-source
+    // + shared fleet token (see `fleet::routes`). Neither Companion device auth (hook
     // scripts have no pairing) nor pre-auth rate limit (events fire on every
     // tool call and are already token-gated). Merged after `with_state`
     // because the fleet router is stateless (process-global runtime).
@@ -455,7 +460,7 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
     // Deliberately OUTSIDE the JWT middleware: webhook auth is the platform
     // HMAC/signature + replay guard inside `connectors::axum_app`. It still
     // sits inside the pre-auth per-source-IP rate limit and (below) the body
-    // cap. Events publish onto the EventBus → `/ws/v1/events` → the brain's
+    // cap. Events publish onto the EventBus → `/ws/events` → the brain's
     // connector runtime, retiring the cloudflared-tunnel requirement for
     // cloud installs. Nested after `with_state` because the connectors
     // router carries its own (already-resolved) `ConnectorsState`.
@@ -486,28 +491,34 @@ fn build_router_for_mode(state: SharedState, mode: super::deployment::Deployment
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .layer(from_fn(reject_mutations_while_draining));
     if crate::headless::headless_services().is_none() {
-        return router;
+        return router.layer(from_fn_with_state(
+            super::web_origin::WebOriginPolicy::from_env(),
+            super::web_origin::enforce,
+        ));
     }
     // Raw broker content deliberately sits outside the default JSON/webhook
-    // body limit. It has its own 64 MiB cap and the same device-JWT middleware;
-    // the handler additionally requires a loopback-only service-scope token.
+    // body limit. It has its own 64 MiB cap and requires the same loopback-only
+    // service principal as the other Headless routes.
     let content_router = Router::new()
         .route(
-            "/api/v1/ide/content",
+            "/ide/content",
             post(crate::codeserver::content_bridge::upload_content),
         )
         .route(
-            "/api/v1/ide/content/{handle_id}",
+            "/ide/content/{handle_id}",
             get(crate::codeserver::content_bridge::redeem_content),
         )
         .layer(RequestBodyLimitLayer::new(64 * 1024 * 1024))
         .layer(from_fn_with_state(
             state.clone(),
-            middleware::require_device_jwt,
+            middleware::require_service_jwt,
         ))
         .layer(from_fn(reject_mutations_while_draining))
         .with_state(state);
-    router.merge(content_router)
+    router.merge(content_router).layer(from_fn_with_state(
+        super::web_origin::WebOriginPolicy::from_env(),
+        super::web_origin::enforce,
+    ))
 }
 
 async fn reject_mutations_while_draining(request: Request, next: Next) -> Response {
@@ -515,7 +526,7 @@ async fn reject_mutations_while_draining(request: Request, next: Next) -> Respon
         request.method(),
         &Method::GET | &Method::HEAD | &Method::OPTIONS
     );
-    let maintenance = request.uri().path() == "/api/v1/maintenance/backups";
+    let maintenance = request.uri().path() == "/operator/maintenance/backups";
     if !mutating || maintenance {
         return next.run(request).await;
     }
@@ -549,13 +560,23 @@ async fn reject_mutations_while_draining(request: Request, next: Next) -> Respon
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::companion_api::{redemption_lru::RedemptionLru, tls, CompanionState};
+    use crate::companion_api::{tls, CompanionState};
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";
+    static SERVER_LIFECYCLE_TEST_LOCK: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
+        once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));
+
+    struct DrainingReset;
+
+    impl Drop for DrainingReset {
+        fn drop(&mut self) {
+            set_draining_for_test(false);
+        }
+    }
 
     fn test_state() -> SharedState {
         use crate::companion_api::{
@@ -563,8 +584,6 @@ mod tests {
         };
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -598,25 +617,19 @@ mod tests {
             .expect("reqwest client")
     }
 
-    async fn bind_test_router(router: Router) -> SocketAddr {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind test router");
-        let addr = listener.local_addr().expect("test router address");
-        tokio::spawn(async move {
-            let _ = axum::serve(
-                listener,
-                router.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .await;
-        });
-        addr
+    async fn shutdown_and_wait(mut handle: ServerHandle) {
+        let _ = handle.shutdown.send(());
+        if !*handle.terminated.borrow() {
+            let _ = handle.terminated.changed().await;
+        }
+        set_draining_for_test(false);
     }
 
     // ── Smoke: spawn + immediate shutdown ────────────────────────────────
 
     #[tokio::test]
     async fn spawn_and_shutdown_loopback() {
+        let _guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
         let state = test_state();
         let (_tmp, tls_mat) = test_tls();
         let handle = spawn_server(0, true, tls_mat, state)
@@ -624,30 +637,32 @@ mod tests {
             .expect("spawn on ephemeral port");
         assert!(handle.bound_port > 0);
         // Graceful shutdown must not hang.
-        let _ = handle.shutdown.send(());
+        shutdown_and_wait(handle).await;
     }
 
     #[tokio::test]
     async fn spawn_and_shutdown_unspecified() {
+        let _guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
         let state = test_state();
         let (_tmp, tls_mat) = test_tls();
         let handle = spawn_server(0, false, tls_mat, state)
             .await
             .expect("spawn on ephemeral port");
         assert!(handle.bound_port > 0);
-        let _ = handle.shutdown.send(());
+        shutdown_and_wait(handle).await;
     }
 
     // ── HTTPS smoke via reqwest with cert pinning bypass ──────────────────
 
     #[tokio::test]
-    async fn issue_reachable_after_spawn() {
+    async fn challenge_fails_closed_without_security_store_after_spawn() {
+        let _guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
         let state = test_state();
         let (_tmp, tls_mat) = test_tls();
         let handle = spawn_server(0, true, tls_mat, state).await.expect("spawn");
 
         let url = format!(
-            "https://127.0.0.1:{}/api/v1/auth/pair/issue",
+            "https://127.0.0.1:{}/api/auth/device/challenge",
             handle.bound_port
         );
         let client = insecure_client();
@@ -656,21 +671,22 @@ mod tests {
             .json(&serde_json::json!({ "accountId": ACCOUNT_ID }))
             .send()
             .await
-            .expect("POST /api/v1/auth/pair/issue over HTTPS");
-        assert_eq!(resp.status().as_u16(), 200);
+            .expect("POST /api/auth/device/challenge over HTTPS");
+        assert_eq!(resp.status().as_u16(), 503);
 
-        let _ = handle.shutdown.send(());
+        shutdown_and_wait(handle).await;
     }
 
     #[tokio::test]
     async fn https_rejects_plain_http_clients() {
+        let _guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
         // Verify the listener is actually HTTPS — a plain HTTP request must fail.
         let state = test_state();
         let (_tmp, tls_mat) = test_tls();
         let handle = spawn_server(0, true, tls_mat, state).await.expect("spawn");
 
         let url = format!(
-            "http://127.0.0.1:{}/api/v1/auth/pair/issue",
+            "http://127.0.0.1:{}/api/auth/device/challenge",
             handle.bound_port
         );
         // `.no_proxy()` is essential: the default reqwest client honours the
@@ -693,7 +709,7 @@ mod tests {
             "plain HTTP must not succeed against HTTPS listener"
         );
 
-        let _ = handle.shutdown.send(());
+        shutdown_and_wait(handle).await;
     }
 
     #[tokio::test]
@@ -706,7 +722,7 @@ mod tests {
         );
         let mut request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/v1/auth/pair/issue")
+            .uri("/api/auth/pair/issue")
             .body(axum::body::Body::from("{}"))
             .unwrap();
         request
@@ -721,7 +737,105 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_terminal_websocket_route_remains_mounted() {
+    async fn released_terminal_ticket_route_is_removed() {
+        use tower::ServiceExt as _;
+
+        let response = build_router_for_mode(
+            test_state(),
+            crate::companion_api::deployment::DeploymentMode::SingleUser,
+        )
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/v1/terminal/socket-ticket")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn canonical_routes_are_unversioned_and_versioned_aliases_are_absent() {
+        use tower::ServiceExt as _;
+
+        async fn status(path: &str, method: &str) -> StatusCode {
+            let mut request = axum::http::Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from("{}"))
+                .unwrap();
+            request.extensions_mut().insert(axum::extract::ConnectInfo(
+                std::net::SocketAddr::from(([127, 0, 0, 1], 34567)),
+            ));
+            build_router(test_state())
+                .oneshot(request)
+                .await
+                .unwrap()
+                .status()
+        }
+
+        for (path, method) in [
+            ("/healthz", "GET"),
+            ("/api/auth/device/challenge", "POST"),
+            ("/api/_rpc/claude_sidecar_status", "POST"),
+            ("/ws/events", "GET"),
+        ] {
+            assert_ne!(status(path, method).await, StatusCode::NOT_FOUND, "{path}");
+        }
+
+        for (path, method) in [
+            ("/api/v1/healthz", "GET"),
+            ("/api/v1/auth/pair/issue", "POST"),
+            ("/api/v1/_rpc/claude_sidecar_status", "POST"),
+            ("/api/v1/terminal/socket-ticket", "POST"),
+            ("/api/v2/auth/device/challenge", "POST"),
+            ("/api/v2/_rpc/claude_sidecar_status", "POST"),
+            ("/ws/v1/events", "GET"),
+            ("/ws/v1/terminal", "GET"),
+            ("/ws/v2/events", "GET"),
+        ] {
+            assert_eq!(status(path, method).await, StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn internal_rpc_rejects_device_scoped_jwt_even_from_loopback() {
+        use tower::ServiceExt as _;
+
+        let jwt = crate::companion_api::jwt::issue_device_jwt(SECRET, "device-a", ACCOUNT_ID)
+            .expect("device token");
+        let mut request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/internal/_rpc/claude_sidecar_status")
+            .header("authorization", format!("Bearer {jwt}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from("{}"))
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                34567,
+            ))));
+
+        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+        assert_eq!(
+            response.headers().get(header::REFERRER_POLICY),
+            Some(&HeaderValue::from_static("no-referrer"))
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_terminal_websocket_route_is_removed() {
         use tower::ServiceExt as _;
 
         let response = build_router(test_state())
@@ -734,7 +848,24 @@ mod tests {
             .await
             .unwrap();
 
-        assert_ne!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn session_media_routes_require_device_authentication() {
+        use tower::ServiceExt as _;
+
+        for path in [format!("/api/sessions/s1/media/{}", "a".repeat(64))] {
+            let mut request = axum::http::Request::builder()
+                .uri(path)
+                .body(axum::body::Body::empty())
+                .unwrap();
+            request.extensions_mut().insert(axum::extract::ConnectInfo(
+                std::net::SocketAddr::from(([127, 0, 0, 1], 34567)),
+            ));
+            let response = build_router(test_state()).oneshot(request).await.unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+        }
     }
 
     /// ADR-0059 F4/R12: the public `/connectors` ingress mounts only on
@@ -762,7 +893,7 @@ mod tests {
         // load-bearing half of the assertion is "not 200"; 404 (route absent)
         // is the correct signal that the ingress isn't mounted. Genuinely
         // protected routes (acp/a2a/whoami) still return 401 via their JWT
-        // layer — see `acp_route_requires_device_jwt`.
+        // layer — see `acp_route_requires_socket_ticket`.
         assert_eq!(resp.status().as_u16(), 404, "desktop has no ingress");
 
         // The pre-auth rate limiter requires a peer address; oneshot has no
@@ -805,28 +936,27 @@ mod tests {
         crate::headless::install_headless_services(None);
     }
 
-    /// `/ws/v1/acp` sits in the protected block: without a device JWT the
-    /// middleware rejects the upgrade before the handler runs.
+    /// `/ws/acp` accepts only the canonical single-use socket ticket.
     #[tokio::test]
-    async fn acp_route_requires_device_jwt() {
+    async fn acp_route_requires_socket_ticket() {
         use tower::ServiceExt as _;
         let router = build_router(test_state());
         let resp = router
             .oneshot(
                 axum::http::Request::builder()
-                    .uri("/ws/v1/acp")
+                    .uri("/ws/acp")
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(resp.status().as_u16(), 401, "no token → 401 before upgrade");
+        assert_eq!(resp.status().as_u16(), 400, "missing ticket query → 400");
     }
 
-    /// `/a2a` sits in the protected block: without a device JWT the middleware
-    /// rejects the request before the handler runs.
+    /// `/a2a` sits in the protected block: without a DPoP-bound device access
+    /// token the middleware rejects the request before the handler runs.
     #[tokio::test]
-    async fn a2a_route_requires_device_jwt() {
+    async fn a2a_route_requires_dpop_device_access() {
         use tower::ServiceExt as _;
         let router = build_router(test_state());
         let resp = router
@@ -844,94 +974,50 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn browser_stream_ticket_route_is_protected_bound_and_single_use() {
-        use crate::companion_api::browser_gateway::{
-            gateway, BrowserBackend, EnsureBrowserSession,
-        };
-        use tokio_tungstenite::tungstenite::Error as WebSocketError;
+    async fn workflow_api_routes_are_protected_and_unversioned() {
+        use tower::ServiceExt as _;
 
-        let device_id = format!("browser-route-device-{}", uuid::Uuid::new_v4());
-        let session = gateway()
-            .ensure_session(EnsureBrowserSession {
-                account_id: ACCOUNT_ID.to_string(),
-                device_id: device_id.clone(),
-                chat_session_id: format!("browser-route-chat-{}", uuid::Uuid::new_v4()),
-                parent_chat_session_id: None,
-                workspace_id: format!("browser-route-workspace-{}", uuid::Uuid::new_v4()),
-                backend: BrowserBackend::RemoteChromium,
-                profile_id: None,
-            })
-            .expect("seed browser session");
-        let state = test_state();
-        let addr = bind_test_router(build_router(state)).await;
-        let endpoint = format!("http://{addr}/api/v1/browser/stream-ticket");
-        let client = reqwest::Client::new();
-
-        let unauthorized = client
-            .post(&endpoint)
-            .json(&serde_json::json!({ "sessionId": session.id }))
-            .send()
+        let response = build_router(test_state())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/workflow-deployments/deployment-1/runs")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{\"input\":{}}"#))
+                    .unwrap(),
+            )
             .await
-            .expect("unauthorized ticket request");
-        assert_eq!(unauthorized.status(), reqwest::StatusCode::UNAUTHORIZED);
-
-        let jwt = crate::companion_api::jwt::issue_device_jwt(SECRET, &device_id, ACCOUNT_ID)
-            .expect("issue browser route JWT");
-        let issue_ticket = || {
-            client
-                .post(&endpoint)
-                .bearer_auth(&jwt)
-                .json(&serde_json::json!({ "sessionId": session.id }))
-        };
-        let ticket: serde_json::Value = issue_ticket()
-            .send()
-            .await
-            .expect("ticket request")
-            .error_for_status()
-            .expect("ticket response")
-            .json()
-            .await
-            .expect("ticket JSON");
-        let ticket = ticket["ticket"].as_str().expect("ticket string");
-        let wrong_url = format!(
-            "ws://{addr}/ws/v1/browser/{}?ticket={ticket}",
-            uuid::Uuid::new_v4()
-        );
-        match tokio_tungstenite::connect_async(&wrong_url).await {
-            Err(WebSocketError::Http(response)) => {
-                assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED)
-            }
-            other => panic!("wrong-session ticket must be rejected, got {other:?}"),
-        }
-
-        let ticket: serde_json::Value = issue_ticket()
-            .send()
-            .await
-            .expect("replacement ticket request")
-            .error_for_status()
-            .expect("replacement ticket response")
-            .json()
-            .await
-            .expect("replacement ticket JSON");
-        let ticket = ticket["ticket"]
-            .as_str()
-            .expect("replacement ticket string");
-        let stream_url = format!("ws://{addr}/ws/v1/browser/{}?ticket={ticket}", session.id);
-        let (mut socket, response) = tokio_tungstenite::connect_async(&stream_url)
-            .await
-            .expect("valid ticket upgrades");
-        assert_eq!(response.status(), reqwest::StatusCode::SWITCHING_PROTOCOLS);
-        socket.close(None).await.expect("close browser stream");
-
-        match tokio_tungstenite::connect_async(&stream_url).await {
-            Err(WebSocketError::Http(response)) => {
-                assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED)
-            }
-            other => panic!("replayed ticket must be rejected, got {other:?}"),
-        }
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
-    /// The A2A Agent Card is a public discovery document — no JWT required.
+    #[tokio::test]
+    async fn browser_socket_uses_only_the_unversioned_path() {
+        use tower::ServiceExt as _;
+
+        let canonical = build_router(test_state())
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/ws/browser/session-1")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(canonical.status(), StatusCode::NOT_FOUND);
+
+        let legacy = build_router(test_state())
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/ws/v1/browser/session-1")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(legacy.status(), StatusCode::NOT_FOUND);
+    }
+
     #[tokio::test]
     async fn a2a_agent_card_is_public() {
         use tower::ServiceExt as _;
@@ -952,14 +1038,16 @@ mod tests {
     #[tokio::test]
     async fn draining_rejects_new_mutations_but_keeps_probes_available() {
         use tower::ServiceExt as _;
+        let _guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
         set_draining_for_test(true);
+        let _reset = DrainingReset;
         let router = build_router(test_state());
         let mutation = router
             .clone()
             .oneshot(
                 axum::http::Request::builder()
                     .method("POST")
-                    .uri("/api/v1/auth/pair/issue")
+                    .uri("/api/auth/device/challenge")
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
@@ -970,14 +1058,13 @@ mod tests {
         let live = router
             .oneshot(
                 axum::http::Request::builder()
-                    .uri("/api/v1/livez")
+                    .uri("/livez")
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(live.status(), StatusCode::OK);
-        set_draining_for_test(false);
     }
 
     #[test]

@@ -94,6 +94,10 @@ const PROJECT_SCOPED_TABLES = [
   // local rows here handles the Dexie side; the remote vector collection is
   // dropped separately in `deleteProjectCascade` (best-effort, see below).
   "projectChunks",
+  // v145 — durable AgentTeam runtime and immutable local environment profiles.
+  "agentTeamRuns",
+  "projectEnvironments",
+  "projectEnvironmentVersions",
 ] as const
 
 /** Child/event tables dropped by parent id (parent collected via its projectId). */
@@ -105,6 +109,15 @@ const CHILD_TABLES: Array<{ table: string; parentTable: string; fk: string }> = 
   { table: "canvasComments", parentTable: "canvasDocuments", fk: "documentId" },
   { table: "canvasSessions", parentTable: "canvasDocuments", fk: "documentId" },
   { table: "workflowRunEvents", parentTable: "workflowRuns", fk: "runId" },
+  { table: "agentTeamChildRuns", parentTable: "agentTeamRuns", fk: "runId" },
+  { table: "agentTeamTrajectory", parentTable: "agentTeamRuns", fk: "runId" },
+  { table: "agentTeamCheckpoints", parentTable: "agentTeamRuns", fk: "runId" },
+  { table: "agentTeamDecisions", parentTable: "agentTeamRuns", fk: "runId" },
+  { table: "agentTeamSteeringReceipts", parentTable: "agentTeamRuns", fk: "runId" },
+  { table: "agentTeamEvidence", parentTable: "agentTeamRuns", fk: "runId" },
+  { table: "agentTeamDeliveryGraphs", parentTable: "agentTeamRuns", fk: "runId" },
+  { table: "agentTeamDeliveryNodes", parentTable: "agentTeamRuns", fk: "runId" },
+  { table: "agentTeamRetrospectives", parentTable: "agentTeamRuns", fk: "runId" },
 ]
 
 /**
@@ -166,6 +179,23 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
       }
     }
   })
+
+  // Content-addressed runtime objects have no projectId by design because a
+  // digest may be referenced by more than one run. Collect live references
+  // after the cascade and remove only unreferenced objects.
+  const [trajectory, evidence, retrospectives] = await Promise.all([
+    db.agentTeamTrajectory.toArray(),
+    db.agentTeamEvidence.toArray(),
+    db.agentTeamRetrospectives.toArray(),
+  ])
+  const liveContentHashes = new Set<string>([
+    ...trajectory.flatMap((row) => (row.contentHash ? [row.contentHash] : [])),
+    ...evidence.flatMap((row) => (row.contentHash ? [row.contentHash] : [])),
+    ...retrospectives.flatMap((row) => (row.contentHash ? [row.contentHash] : [])),
+  ])
+  const contentHashes = (await db.agentTeamContentObjects.toCollection().primaryKeys()) as string[]
+  const orphanedHashes = contentHashes.filter((hash) => !liveContentHashes.has(hash))
+  if (orphanedHashes.length > 0) await db.agentTeamContentObjects.bulkDelete(orphanedHashes)
 
   purgeProjectBuckets(projectId)
   await purgeProjectVectorCollection(projectId)

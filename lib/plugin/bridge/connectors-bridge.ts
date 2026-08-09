@@ -22,6 +22,12 @@
  * subprocess boundary.
  */
 
+import {
+  __resetKnownConnectorKindsForTesting,
+  registerPluginConnectorKind,
+  unregisterPluginConnectorKindsByPlugin,
+} from "@/lib/connectors/known-kinds"
+import { refreshAllPackWarnings } from "@/lib/plugin/registries/character-pack-registry"
 import type { PluginManifest, PluginConnectorDef } from "@/types/plugin/plugin"
 import type {
   A2UICapabilityMatrix,
@@ -247,10 +253,14 @@ export async function registerPluginAdapters(
       continue
     }
     ids.push(adapter.id)
+    // Character Packs may declare `requires.connectors` against a plugin-owned
+    // kind, so the resolvable set has to learn about it.
+    registerPluginConnectorKind(pluginId, def.type)
   }
 
   if (ids.length > 0) {
     pluginAdapterIds.set(pluginId, ids)
+    refreshAllPackWarnings()
   }
 }
 
@@ -267,6 +277,10 @@ export function unregisterPluginAdapters(pluginId: string): void {
     bus.unregisterAdapter(id)
   }
   pluginAdapterIds.delete(pluginId)
+  unregisterPluginConnectorKindsByPlugin(pluginId)
+  // A pack that required one of this plugin's connector kinds must regain its
+  // warning now that the kind is gone.
+  refreshAllPackWarnings()
 }
 
 /**
@@ -280,4 +294,5 @@ export function getPluginAdapterIds(pluginId: string): readonly string[] {
 /** Test-only: reset the internal registry. */
 export function __resetBridgeForTesting(): void {
   pluginAdapterIds.clear()
+  __resetKnownConnectorKindsForTesting()
 }

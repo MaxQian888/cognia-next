@@ -21,7 +21,7 @@ import type {
   StoredMessage,
   ChatSession,
   Character,
-  McpServer,
+  McpServerSummary,
 } from "@cognia/agent-config-types"
 import { CROSS_PLATFORM_SETTING_KEYS } from "@cognia/agent-config-types/settings-sync"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
@@ -35,6 +35,7 @@ import { invoke } from "@tauri-apps/api/core"
 
 import { readTombstonesSince } from "./tombstones"
 import type { SyncDelta, SyncableTable } from "./types"
+import { portableExecutionContext } from "@/lib/task-workspace/managed-workspace"
 
 /** Page size for paged tables (messages). One round-trip pulls at most this many rows. */
 const MESSAGES_PAGE_SIZE = 500
@@ -159,6 +160,10 @@ export async function readDexieDelta(
       return readMemoriesDelta(since)
     case "agentTeamBoard":
       return readAgentTeamBoardDelta(since)
+    case "agentTasks":
+      return readAgentTasksDelta(since)
+    case "agentTaskAttempts":
+      return readAgentTaskAttemptsDelta(since)
     case "templateDefinitions":
       return readTemplateDefinitionsDelta(since)
     case "templatePackages":
@@ -187,7 +192,11 @@ async function readSkillsDelta(since: number): Promise<SyncDelta<Skill>> {
 }
 
 async function readSessionsDelta(since: number): Promise<SyncDelta<ChatSession>> {
-  const rows = await getDb().sessions.where("updatedAt").above(since).toArray()
+  const rows = (await getDb().sessions.where("updatedAt").above(since).toArray()).map((row) =>
+    row.executionContext
+      ? { ...row, executionContext: portableExecutionContext(row.executionContext) }
+      : row
+  )
   return finalizeDelta("sessions", rows, since)
 }
 
@@ -299,13 +308,8 @@ async function readAdapterInstancesDelta(since: number): Promise<SyncDelta<unkno
   return finalizeDelta("adapterInstances", rows as UpdatedAtRow[], since)
 }
 
-async function readMcpServersDelta(since: number): Promise<SyncDelta<McpServer>> {
-  // mcpServers carries `updatedAt` (set on every create/update) but the index
-  // is `id, name, enabled` — no `updatedAt` index — so we read all and filter,
-  // mirroring readPluginsDelta. The configured-server set is small. The mobile
-  // `/me/mcp` page is a read-only viewer, so deltas only ever flow desktop→phone.
-  const all = await getDb().mcpServers.toArray()
-  const rows = all.filter((row) => Number(row.updatedAt ?? 0) > since)
+async function readMcpServersDelta(since: number): Promise<SyncDelta<McpServerSummary>> {
+  const rows = await getDb().mcpServerSummaries.where("updatedAt").above(since).toArray()
   return finalizeDelta("mcpServers", rows, since)
 }
 
@@ -356,6 +360,16 @@ async function readAgentTeamBoardDelta(since: number): Promise<SyncDelta<unknown
   // desktop projector (`lib/db/agent-team-projection.ts`) — cursor directly.
   const rows = await getDb().agentTeamBoard.where("updatedAt").above(since).toArray()
   return finalizeDelta("agentTeamBoard", rows as UpdatedAtRow[], since)
+}
+
+async function readAgentTasksDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().agentTasks.where("updatedAt").above(since).toArray()
+  return finalizeDelta("agentTasks", rows, since)
+}
+
+async function readAgentTaskAttemptsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().agentTaskAttempts.where("updatedAt").above(since).toArray()
+  return finalizeDelta("agentTaskAttempts", rows, since)
 }
 
 /**

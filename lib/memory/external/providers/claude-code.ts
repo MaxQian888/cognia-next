@@ -64,7 +64,8 @@ async function fileEntry(
 export async function discoverClaudeCode(ctx: DiscoverCtx): Promise<ExternalMemoryFile[]> {
   const { home, roots, cwd, platform, fs } = ctx
   const out: ExternalMemoryFile[] = []
-  const claudeDir = joinPath(home, ".claude")
+  // `$CLAUDE_CONFIG_DIR` relocates the whole tree; `vendorRoots` carries it.
+  const claudeDir = ctx.vendorRoots?.claudeConfigDir || joinPath(home, ".claude")
 
   // 1. User-global — surfaced even when absent so the user knows the slot exists.
   const user = await fileEntry(

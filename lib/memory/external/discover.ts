@@ -8,9 +8,10 @@
 import { pathKey } from "@/lib/claude/instructions/paths"
 import { discoverClaudeCode } from "./providers/claude-code"
 import { discoverCodex } from "./providers/codex"
+import { discoverOpencode } from "./providers/opencode"
 import type { DiscoverCtx, ExternalAgentId, ExternalMemoryFile, ExternalMemoryScope } from "./types"
 
-const AGENT_ORDER: ExternalAgentId[] = ["claude-code", "codex"]
+const AGENT_ORDER: ExternalAgentId[] = ["claude-code", "codex", "opencode"]
 const SCOPE_ORDER: ExternalMemoryScope[] = [
   "user",
   "global",
@@ -22,9 +23,16 @@ const SCOPE_ORDER: ExternalMemoryScope[] = [
 
 /** Discover every external memory file, de-duped and ordered. */
 export async function discoverExternalMemory(ctx: DiscoverCtx): Promise<ExternalMemoryFile[]> {
-  const [claude, codex] = await Promise.all([discoverClaudeCode(ctx), discoverCodex(ctx)])
+  const [claude, codex, opencode] = await Promise.all([
+    discoverClaudeCode(ctx),
+    discoverCodex(ctx),
+    discoverOpencode(ctx),
+  ])
   const byKey = new Map<string, ExternalMemoryFile>()
-  for (const file of [...claude, ...codex]) {
+  // Order matters: a project `AGENTS.md` is read by BOTH Codex and OpenCode,
+  // so whichever provider comes first claims the single row for that one file.
+  // Codex wins because it also owns the `AGENTS.override.md` sibling.
+  for (const file of [...claude, ...codex, ...opencode]) {
     // First writer wins; providers already emit precedence-ordered entries.
     if (!byKey.has(file.id)) byKey.set(file.id, file)
   }

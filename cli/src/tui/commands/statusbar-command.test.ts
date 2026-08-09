@@ -15,20 +15,22 @@ function ctx(args: string, cfg: ResolvedConfig = config): CommandContext {
 const run = (args: string, cfg?: ResolvedConfig) => statusbarCommand.handler!(ctx(args, cfg))
 
 describe("/statusbar", () => {
-  it("opens the theme picker when bare", () => {
+  it("opens the full customization picker when bare", () => {
     const eff = run("")
     expect(eff.kind).toBe("openOverlay")
     if (eff.kind !== "openOverlay" || eff.overlay.kind !== "select") throw new Error("bad effect")
-    expect(eff.overlay.title).toContain("theme")
-    expect(eff.overlay.onSelectCommand).toBe("statusbar theme")
-    expect(eff.overlay.items.map((i) => i.id)).toEqual(["default", "dim", "vivid", "mono"])
+    expect(eff.overlay.title).toContain("Customize")
+    expect(eff.overlay.onSelectCommand).toBe("statusbar")
+    expect(eff.overlay.items.map((i) => i.id)).toEqual(
+      expect.arrayContaining(["preset minimal", "theme vivid", "toggle git", "hints off", "reset"])
+    )
   })
 
   it("marks the current theme in the picker", () => {
     const cfg = { ...config, statusBar: { theme: "dim" as const } }
     const eff = run("", cfg)
     if (eff.kind !== "openOverlay" || eff.overlay.kind !== "select") throw new Error("bad effect")
-    expect(eff.overlay.items.find((i) => i.id === "dim")?.hint).toBe("current")
+    expect(eff.overlay.items.find((i) => i.id === "theme dim")?.hint).toBe("current")
   })
 
   it("sets a valid theme", () => {
@@ -56,6 +58,20 @@ describe("/statusbar", () => {
 
   it("rejects an empty segment list", () => {
     expect(run("segments").kind).toBe("notice")
+  })
+
+  it("toggles individual segments and exposes presets", () => {
+    expect(run("toggle git")).toMatchObject({ kind: "statusBar" })
+    expect(run("preset minimal")).toEqual({
+      kind: "statusBar",
+      patch: { segments: ["model", "mode", "ctx"] },
+    })
+    expect(run("preset unknown").kind).toBe("notice")
+  })
+
+  it("toggles idle command hints", () => {
+    expect(run("hints off")).toEqual({ kind: "statusBar", patch: { showHints: false } })
+    expect(run("hints maybe").kind).toBe("notice")
   })
 
   it("resets to the default layout + theme", () => {

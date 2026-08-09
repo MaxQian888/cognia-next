@@ -1,7 +1,7 @@
 //! A2A axum handlers.
 //!
 //! - [`a2a_agent_card_handler`] — public `GET /.well-known/agent-card.json`.
-//! - [`a2a_rpc_handler`] — device-JWT gated `POST /a2a`, dispatching the A2A
+//! - [`a2a_rpc_handler`] — DPoP device-access gated `POST /a2a`, dispatching the A2A
 //!   JSON-RPC methods (`message/send`, `tasks/get`, `tasks/cancel`).
 //!
 //! `message/send` runs the turn synchronously: subscribe to the EventBus,
@@ -10,7 +10,7 @@
 //! `Task` is stored so a later `tasks/get` resolves.
 
 use axum::{
-    extract::State,
+    extract::{rejection::JsonRejection, State},
     http::HeaderMap,
     response::{IntoResponse, Response},
     Extension, Json,
@@ -22,7 +22,12 @@ use tokio::time::{timeout, Duration, Instant};
 
 use super::super::acp::types::{self, rpc_error_code};
 use super::super::event_bus::{EventFrame, SubscribeResult};
-use super::super::{dispatch_host::DispatchHost, middleware::DeviceContext, rpc, SharedState};
+use super::super::{
+    dispatch_host::DispatchHost,
+    middleware::DeviceContext,
+    remote_execution::{self, ExecutionOutcome, ExecutionRequest, ExecutionTransport},
+    SharedState,
+};
 use super::store;
 use super::turn::{A2aTurn, TurnOutcome};
 use super::wire::{self, a2a_error_code, TaskState};
@@ -34,10 +39,19 @@ const TURN_TIMEOUT_SECS: u64 = 300;
 /// Public Agent Card handler. Builds the advertised origin from the request
 /// `Host` header (the front door is always HTTPS).
 pub async fn a2a_agent_card_handler(headers: HeaderMap) -> Response {
-    let host = headers
+    let Some(host) = headers
         .get("host")
         .and_then(|value| value.to_str().ok())
-        .unwrap_or("localhost");
+        .filter(|host| !host.is_empty())
+    else {
+        return super::super::api::public_error_response(
+            axum::http::StatusCode::BAD_REQUEST,
+            "host_header_required",
+            "a valid Host header is required for A2A discovery",
+            false,
+            json!({}),
+        );
+    };
     Json(super::agent_card(&format!("https://{host}"))).into_response()
 }
 
@@ -46,8 +60,20 @@ pub async fn a2a_agent_card_handler(headers: HeaderMap) -> Response {
 pub async fn a2a_rpc_handler(
     State(state): State<SharedState>,
     Extension(ctx): Extension<DeviceContext>,
-    Json(body): Json<Value>,
+    body: Result<Json<Value>, JsonRejection>,
 ) -> Response {
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => {
+            return super::super::api::public_error_response(
+                rejection.status(),
+                "invalid_a2a_request",
+                "the A2A request body must be valid JSON",
+                false,
+                json!({}),
+            )
+        }
+    };
     let id = body.get("id").cloned().unwrap_or(Value::Null);
     let method = body
         .get("method")
@@ -57,9 +83,9 @@ pub async fn a2a_rpc_handler(
     let params = body.get("params").cloned().unwrap_or(Value::Null);
 
     let result = match method.as_str() {
-        "message/send" => handle_message_send(&state, &ctx, &params).await,
+        "message/send" => handle_message_send(&state, &ctx, &id, &params).await,
         "tasks/get" => handle_tasks_get(&params),
-        "tasks/cancel" => handle_tasks_cancel(&state, &ctx, &params).await,
+        "tasks/cancel" => handle_tasks_cancel(&state, &ctx, &id, &params).await,
         "message/stream" => Err((
             a2a_error_code::UNSUPPORTED_OPERATION,
             "streaming is not supported by this agent (Agent Card advertises streaming:false)"
@@ -80,27 +106,34 @@ pub async fn a2a_rpc_handler(
 /// Run one companion RPC through the shared dispatch surface.
 async fn dispatch(
     state: &SharedState,
-    host: &DispatchHost,
+    _host: &DispatchHost,
     ctx: &DeviceContext,
     name: &str,
     args: Value,
+    wire_request_id: Option<&Value>,
 ) -> Result<Value, String> {
-    rpc::dispatch(
+    let idempotency_key =
+        remote_execution::protocol_idempotency_key(name, ctx, "a2a", wire_request_id);
+    let request = ExecutionRequest::new(
         name,
         args,
-        state,
-        host,
-        &ctx.device_id,
-        Some(ctx.account_id.as_str()),
-        Some(ctx.scope.as_str()),
-    )
-    .await
-    .map_err(|(_status, err)| err.0.message)
+        ctx.clone(),
+        ExecutionTransport::Http,
+        idempotency_key,
+    );
+    match remote_execution::execute(state, request).await {
+        Ok(ExecutionOutcome::Completed { result, .. }) => Ok(result),
+        Ok(ExecutionOutcome::Accepted { operation_id, .. }) => {
+            Ok(json!({ "operationId": operation_id, "status": "running" }))
+        }
+        Err(error) => Err(error.message),
+    }
 }
 
 async fn handle_message_send(
     state: &SharedState,
     ctx: &DeviceContext,
+    request_id: &Value,
     params: &Value,
 ) -> Result<Value, (i64, String)> {
     let message = params.get("message").ok_or((
@@ -109,6 +142,7 @@ async fn handle_message_send(
     ))?;
     let send_content = wire::message_parts_to_send_content(message)
         .map_err(|reason| (rpc_error_code::INVALID_PARAMS, reason))?;
+    let idempotency_seed = a2a_request_seed(message, request_id);
 
     let Some(host) = DispatchHost::from_state(state) else {
         return Err((
@@ -123,8 +157,23 @@ async fn handle_message_send(
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let task_id = uuid::Uuid::new_v4().to_string();
+        .unwrap_or_else(|| {
+            remote_execution::derive_protocol_request_uuid(
+                ctx,
+                "a2a",
+                idempotency_seed,
+                "message-context",
+            )
+        });
+    let task_id = remote_execution::derive_protocol_request_uuid(
+        ctx,
+        "a2a",
+        idempotency_seed,
+        "message-task",
+    );
+    if let Some(existing) = store::lookup_task(&task_id) {
+        return Ok(existing);
+    }
 
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -145,13 +194,49 @@ async fn handle_message_send(
         "prompt": send_content,
         "options": { "includePartialMessages": true },
     });
-    dispatch(state, &host, ctx, "claude_send", args)
-        .await
-        .map_err(|message| (rpc_error_code::INTERNAL_ERROR, message))?;
+    store::record_task(
+        &task_id,
+        wire::build_task(
+            &task_id,
+            &context_id,
+            TaskState::Submitted,
+            Vec::new(),
+            None,
+        ),
+    );
+    if let Err(message) = dispatch(
+        state,
+        &host,
+        ctx,
+        "claude_send",
+        args,
+        Some(idempotency_seed),
+    )
+    .await
+    {
+        store::record_task(
+            &task_id,
+            wire::build_task(
+                &task_id,
+                &context_id,
+                TaskState::Failed,
+                Vec::new(),
+                Some(wire::agent_message(&context_id, &task_id, &message)),
+            ),
+        );
+        return Err((rpc_error_code::INTERNAL_ERROR, message));
+    }
 
     let task = drive_turn(state, Some(&host), ctx, receiver, &context_id, &task_id).await;
     store::record_task(&task_id, task.clone());
     Ok(task)
+}
+
+fn a2a_request_seed<'a>(message: &'a Value, json_rpc_id: &'a Value) -> &'a Value {
+    message
+        .get("messageId")
+        .filter(|value| value.as_str().is_some_and(|id| !id.is_empty()))
+        .unwrap_or(json_rpc_id)
 }
 
 /// Fold EventBus frames into an A2A turn until it terminates, returning the
@@ -197,6 +282,7 @@ async fn drive_turn(
                                 "request_id": request_id,
                                 "decision": "deny",
                             }),
+                            None,
                         )
                         .await;
                     }
@@ -236,6 +322,7 @@ async fn interrupt(
             ctx,
             "claude_interrupt",
             json!({ "session_id": context_id }),
+            None,
         )
         .await;
     }
@@ -255,6 +342,7 @@ fn handle_tasks_get(params: &Value) -> Result<Value, (i64, String)> {
 async fn handle_tasks_cancel(
     state: &SharedState,
     ctx: &DeviceContext,
+    request_id: &Value,
     params: &Value,
 ) -> Result<Value, (i64, String)> {
     let id = params.get("id").and_then(Value::as_str).ok_or((
@@ -290,6 +378,7 @@ async fn handle_tasks_cancel(
             ctx,
             "claude_interrupt",
             json!({ "session_id": context_id }),
+            Some(request_id),
         )
         .await;
     }
@@ -306,8 +395,7 @@ async fn handle_tasks_cancel(
 mod tests {
     use super::*;
     use crate::companion_api::{
-        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
-        pair_code_lru::PairCodeLru, redemption_lru::RedemptionLru, CompanionState,
+        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache, CompanionState,
     };
     use parking_lot::RwLock;
     use std::sync::Arc;
@@ -315,8 +403,6 @@ mod tests {
     fn test_state() -> SharedState {
         Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -337,6 +423,8 @@ mod tests {
             device_id: "dev-1".into(),
             account_id: "acct-1".into(),
             scope: "device".into(),
+            granted_scopes: Vec::new(),
+            authorization_capabilities: None,
         }
     }
 
@@ -349,10 +437,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agent_card_handler_rejects_a_missing_host_header_canonically() {
+        let resp = a2a_agent_card_handler(HeaderMap::new()).await;
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let body: Value = serde_json::from_slice(&bytes).expect("JSON error");
+        assert_eq!(body["error"]["code"], "host_header_required");
+    }
+
+    #[tokio::test]
     async fn message_send_without_dispatch_host_errors() {
         let state = test_state();
         let params = json!({ "message": { "parts": [{ "kind": "text", "text": "hi" }] } });
-        let result = handle_message_send(&state, &test_ctx(), &params).await;
+        let result = handle_message_send(&state, &test_ctx(), &json!(1), &params).await;
         let (code, _) = result.unwrap_err();
         assert_eq!(code, rpc_error_code::INTERNAL_ERROR);
     }
@@ -360,7 +459,7 @@ mod tests {
     #[tokio::test]
     async fn message_send_rejects_missing_message() {
         let state = test_state();
-        let result = handle_message_send(&state, &test_ctx(), &json!({})).await;
+        let result = handle_message_send(&state, &test_ctx(), &json!(1), &json!({})).await;
         assert_eq!(result.unwrap_err().0, rpc_error_code::INVALID_PARAMS);
     }
 
@@ -368,8 +467,17 @@ mod tests {
     async fn message_send_rejects_bad_parts() {
         let state = test_state();
         let params = json!({ "message": { "parts": [] } });
-        let result = handle_message_send(&state, &test_ctx(), &params).await;
+        let result = handle_message_send(&state, &test_ctx(), &json!(1), &params).await;
         assert_eq!(result.unwrap_err().0, rpc_error_code::INVALID_PARAMS);
+    }
+
+    #[test]
+    fn message_id_is_the_stable_a2a_idempotency_seed() {
+        let message = json!({ "messageId": "message-a" });
+        assert_eq!(a2a_request_seed(&message, &json!(9)), "message-a");
+
+        let without_message_id = json!({});
+        assert_eq!(a2a_request_seed(&without_message_id, &json!(9)), 9);
     }
 
     #[tokio::test]
@@ -486,12 +594,13 @@ mod tests {
         let state = test_state();
 
         // Unknown task.
-        let unknown = handle_tasks_cancel(&state, &test_ctx(), &json!({ "id": "x" })).await;
+        let unknown =
+            handle_tasks_cancel(&state, &test_ctx(), &json!(1), &json!({ "id": "x" })).await;
         assert_eq!(unknown.unwrap_err().0, a2a_error_code::TASK_NOT_FOUND);
 
         // Missing id.
         assert_eq!(
-            handle_tasks_cancel(&state, &test_ctx(), &json!({}))
+            handle_tasks_cancel(&state, &test_ctx(), &json!(1), &json!({}))
                 .await
                 .unwrap_err()
                 .0,
@@ -503,7 +612,8 @@ mod tests {
             "done",
             wire::build_task("done", "ctx", TaskState::Completed, Vec::new(), None),
         );
-        let terminal = handle_tasks_cancel(&state, &test_ctx(), &json!({ "id": "done" })).await;
+        let terminal =
+            handle_tasks_cancel(&state, &test_ctx(), &json!(1), &json!({ "id": "done" })).await;
         assert_eq!(terminal.unwrap_err().0, a2a_error_code::TASK_NOT_CANCELABLE);
 
         // A working task is cancelable (no dispatch host → interrupt skipped).
@@ -511,9 +621,10 @@ mod tests {
             "live",
             wire::build_task("live", "ctx-live", TaskState::Working, Vec::new(), None),
         );
-        let canceled = handle_tasks_cancel(&state, &test_ctx(), &json!({ "id": "live" }))
-            .await
-            .unwrap();
+        let canceled =
+            handle_tasks_cancel(&state, &test_ctx(), &json!(1), &json!({ "id": "live" }))
+                .await
+                .unwrap();
         assert_eq!(canceled["status"]["state"], "canceled");
         assert_eq!(
             store::lookup_task("live").unwrap()["status"]["state"],
@@ -528,7 +639,9 @@ mod tests {
         let unsupported = a2a_rpc_handler(
             State(Arc::clone(&state)),
             Extension(test_ctx()),
-            Json(json!({ "jsonrpc": "2.0", "id": 1, "method": "message/stream", "params": {} })),
+            Ok(Json(
+                json!({ "jsonrpc": "2.0", "id": 1, "method": "message/stream", "params": {} }),
+            )),
         )
         .await;
         assert_eq!(unsupported.status(), 200);
@@ -536,9 +649,40 @@ mod tests {
         let unknown = a2a_rpc_handler(
             State(state),
             Extension(test_ctx()),
-            Json(json!({ "jsonrpc": "2.0", "id": 2, "method": "frobnicate" })),
+            Ok(Json(
+                json!({ "jsonrpc": "2.0", "id": 2, "method": "frobnicate" }),
+            )),
         )
         .await;
         assert_eq!(unknown.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn rpc_handler_rejects_invalid_json_with_the_public_error_envelope() {
+        use tower::ServiceExt as _;
+
+        let router = axum::Router::new()
+            .route("/a2a", axum::routing::post(a2a_rpc_handler))
+            .layer(axum::Extension(test_ctx()))
+            .with_state(test_state());
+        let response = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from("{"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let body: Value = serde_json::from_slice(&bytes).expect("JSON error");
+        assert_eq!(body["error"]["code"], "invalid_a2a_request");
+        assert!(body["error"]["requestId"].as_str().is_some());
     }
 }

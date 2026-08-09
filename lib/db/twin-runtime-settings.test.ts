@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 jest.mock("@/lib/tauri", () => ({
   ...jest.requireActual("@/lib/tauri"),
   isTauri: jest.fn(),
@@ -8,18 +5,20 @@ jest.mock("@/lib/tauri", () => ({
 
 import { isTauri } from "@/lib/tauri"
 import { getTwinRuntimeSettings, saveTwinRuntimeSettings } from "./twin-runtime-settings"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
-import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
+import { DEFAULT_TWIN_RUNTIME_SETTINGS, type TwinRuntimeSettings } from "@/types/twin"
 
 const mockedIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
+  await dbFixture.restore()
   mockedIsTauri.mockReturnValue(false)
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
 })
+afterAll(dbFixture.dispose)
 
 describe("twin-runtime-settings CRUD", () => {
   it("returns defaults when no row exists", async () => {
@@ -43,6 +42,13 @@ describe("twin-runtime-settings CRUD", () => {
     expect(loaded.embedding.model).toBe("text-embedding-3-large")
     expect(loaded.storage.qdrant?.url).toBe("http://localhost:6333")
     expect(loaded.llm.apiKey).toBe("sk-anthropic")
+
+    const persisted = await (
+      getDb().settings as unknown as { get(id: string): Promise<{ payload: TwinRuntimeSettings }> }
+    ).get("twin-runtime")
+    expect(persisted.payload.embedding.apiKey).toBe("")
+    expect(persisted.payload.llm.apiKey).toBe("")
+    expect(persisted.payload.storage.qdrant?.apiKey).toBeUndefined()
   })
 
   it("backfills missing nested fields from defaults on read", async () => {
@@ -64,6 +70,27 @@ describe("twin-runtime-settings CRUD", () => {
     expect(loaded.storage.vectorBackend).toBe("pinecone")
     // Older rows never wrote extraNameHints — must backfill to [] not crash.
     expect(loaded.extraNameHints).toEqual([])
+  })
+
+  it("preserves durable references when the Web Vault is unavailable", async () => {
+    await (
+      getDb().settings as unknown as {
+        put(row: unknown): Promise<unknown>
+      }
+    ).put({
+      id: "twin-runtime",
+      payload: DEFAULT_TWIN_RUNTIME_SETTINGS,
+      secretRefs: { embedding: "embedding-api-key" },
+    })
+
+    await saveTwinRuntimeSettings(DEFAULT_TWIN_RUNTIME_SETTINGS)
+
+    const persisted = await (
+      getDb().settings as unknown as {
+        get(id: string): Promise<{ secretRefs?: { embedding?: string } }>
+      }
+    ).get("twin-runtime")
+    expect(persisted.secretRefs?.embedding).toBe("embedding-api-key")
   })
 
   it("round-trips extraNameHints incl. CJK names", async () => {

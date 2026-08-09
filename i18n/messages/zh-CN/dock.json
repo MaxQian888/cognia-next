@@ -1,36 +1,36 @@
 {
+  "a11y": {
+    "host": "工作区停靠面板",
+    "moveHandle": "调整停靠区大小"
+  },
   "commands": {
     "close": "关闭面板",
     "closeOthers": "关闭其他面板",
     "float": "浮动",
     "moveToNewWindow": "移到新窗口",
     "pin": "固定",
+    "redo": "重做布局更改",
     "redock": "送回停靠区",
     "reset": "重置布局",
     "splitDown": "向下拆分",
     "splitLeft": "向左拆分",
     "splitRight": "向右拆分",
     "splitUp": "向上拆分",
-    "undo": "撤销布局更改",
-    "redo": "重做布局更改"
+    "undo": "撤销布局更改"
   },
   "errors": {
     "nativePanelCannotFloat": "{name} 运行在原生视图中，只能留在主布局里。",
     "nativePanelInUse": "{name} 已在别处打开。要移到这里吗？",
     "panelCrashed": "{name} 已停止响应。",
     "panelCrashedRetry": "重新加载面板",
+    "permissionRevoked": "{name} 已不再拥有在此运行的权限。",
     "pluginUnavailable": "{name} 不可用：所属插件已禁用或缺失。",
-    "pluginUnavailableHint": "面板会保留在这里，插件恢复后即可继续使用。",
-    "permissionRevoked": "{name} 已不再拥有在此运行的权限。"
+    "pluginUnavailableHint": "面板会保留在这里，插件恢复后即可继续使用。"
   },
   "tabs": {
     "close": "关闭 {name}",
     "dirty": "{name} 有未保存的更改",
     "preview": "{name} —— 预览标签页，双击可固定",
     "unread": "{count, plural, other {# 条更新}}"
-  },
-  "a11y": {
-    "host": "工作区停靠面板",
-    "moveHandle": "调整停靠区大小"
   }
 }

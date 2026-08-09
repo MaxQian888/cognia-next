@@ -71,6 +71,7 @@ import {
 } from "@cognia/web-search/types"
 import {
   clearProviderKey,
+  HOST_KEY_PRESENT,
   loadAllProviderKeys,
   setProviderKey,
   type KeyringProviderId,
@@ -150,6 +151,8 @@ interface SettingsState {
   setSlashCommandToolEnabled: (enabled: boolean) => Promise<void>
   setTeamCollaborationToolEnabled: (enabled: boolean) => Promise<void>
   setVectorToolEnabled: (enabled: boolean) => Promise<void>
+  setSpawnTaskToolEnabled: (enabled: boolean) => Promise<void>
+  setSessionMessagingToolEnabled: (enabled: boolean) => Promise<void>
   /**
    * Persist the API key to Dexie *and* push it down to the Rust process. If
    * the key changed, also tells the sidecar to restart so the SDK re-reads
@@ -716,7 +719,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         // fresh users so the alias-routing engine activates without manual
         // setup. Idempotent: returns the same object when mappings already
         // exist or no providers are enabled.
-        const s = seedDefaultMappingsIfNeeded(repaired)
+        let s = seedDefaultMappingsIfNeeded(repaired)
         // Persist whatever the repair + seed changed so subsequent loads observe
         // it. The repair is purely subtractive (drops orphans / collapses
         // duplicate sourceKey rows) and the seed only fills an empty
@@ -734,6 +737,27 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           // imported-theme row locally should not delete it on the desktop).
           await saveSettings(patch, { mirrorToHost: false })
         }
+        if (isTauri() && s.networkProxy) {
+          try {
+            const { migrateLegacyProxyPassword } = await import("@/lib/network/proxy-credentials")
+            const migrated = await migrateLegacyProxyPassword(
+              s.networkProxy,
+              async (networkProxy) => {
+                await saveSettings({ networkProxy }, { mirrorToHost: false })
+              }
+            )
+            s = { ...s, networkProxy: migrated.settings }
+          } catch (err) {
+            // Keep the legacy row on disk so the next boot can retry, but
+            // never expose its plaintext password to renderer state or IPC.
+            const { password: _legacyPassword, ...sanitized } =
+              s.networkProxy as typeof s.networkProxy & {
+                password?: string
+              }
+            s = { ...s, networkProxy: sanitized }
+            reportProxyFailure(err)
+          }
+        }
         set({ settings: s, loaded: true, loadFailed: false, loadError: null })
         // Push the API key to the Rust process on first load. The user expects
         // their previously-entered key to be active without a manual save.
@@ -744,20 +768,20 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         // `proxy_config::current()` slot so reqwest clients honour it from
         // the very first outbound request. Lazy-import so the network-proxy
         // store doesn't cycle through this file.
-        if (s.networkProxy) {
-          try {
-            const { applyProxyToRust, maybeAutoDetectProxy } =
-              await import("@/stores/network-proxy")
-            await applyProxyToRust(s.networkProxy)
-            // Fire-and-forget: when mode is `auto`, re-probe local proxies and
-            // adopt the current port without blocking boot.
-            void maybeAutoDetectProxy()
-          } catch (err) {
-            console.warn("networkProxy.applyToRust failed", err)
-            // Outgoing requests are now bypassing a proxy the user configured.
-            // That is a privacy consequence, not a cosmetic one.
-            reportProxyFailure(err)
-          }
+        try {
+          const { applyProxyToRust, maybeAutoDetectProxy } = await import("@/stores/network-proxy")
+          // An absent row is still an explicit Off policy. Native outbound
+          // traffic stays Uninitialized until this acknowledgement arrives,
+          // preventing boot-time requests from racing ahead as direct calls.
+          await applyProxyToRust(s.networkProxy)
+          // Fire-and-forget: when mode is `auto`, re-probe local proxies and
+          // adopt the current port without blocking boot.
+          void maybeAutoDetectProxy()
+        } catch (err) {
+          console.warn("networkProxy.applyToRust failed", err)
+          // Outgoing requests are now blocked rather than silently bypassing
+          // the policy. Surface the failure so the user can repair settings.
+          reportProxyFailure(err)
         }
         // TTS provider keys are loaded lazily (see `ensureProviderKeys`), NOT
         // here — keeping the `1 + N` keyring round-trips off the boot path.
@@ -897,6 +921,20 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     setVectorToolEnabled: async (enabled) => {
       const current = get().settings?.selfInvokeTools
       const next = await saveSettings({ selfInvokeTools: { ...current, vector: enabled } })
+      set({ settings: next })
+    },
+
+    setSpawnTaskToolEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({ selfInvokeTools: { ...current, spawnTask: enabled } })
+      set({ settings: next })
+    },
+
+    setSessionMessagingToolEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({
+        selfInvokeTools: { ...current, sessionMessaging: enabled },
+      })
       set({ settings: next })
     },
 
@@ -1131,7 +1169,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       set((state) => ({
         providerKeys: {
           ...state.providerKeys,
-          [provider]: trimmed.length > 0 ? trimmed : undefined,
+          [provider]: trimmed.length > 0 ? (isTauri() ? HOST_KEY_PRESENT : trimmed) : undefined,
         },
       }))
     },

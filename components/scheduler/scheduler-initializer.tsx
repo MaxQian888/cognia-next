@@ -6,6 +6,7 @@ import { stopSchedulerSystem } from "@/lib/scheduler"
 import { useSchedulerStore } from "@/stores/scheduler"
 import { installExecutionEventBridge } from "@/lib/execution/event-bridge"
 import { loggers } from "@cognia/logging"
+import { reconcileAgentTaskRuntime } from "@/lib/agent-tasks/runtime"
 
 const log = loggers.scheduler
 let schedulerInitializerMounts = 0
@@ -36,7 +37,8 @@ export function SchedulerInitializer() {
 
     if (!isInitialized) {
       initialize()
-        .then(() => {
+        .then(async () => {
+          await reconcileAgentTaskRuntime()
           if (!active) return
           setSchedulerStatus("running")
           log.info("[SchedulerInitializer] Scheduler system initialized")
@@ -46,6 +48,10 @@ export function SchedulerInitializer() {
           log.error("[SchedulerInitializer] Failed to initialize scheduler:", error)
           setSchedulerStatus("stopped")
         })
+    } else {
+      void reconcileAgentTaskRuntime().catch((error) => {
+        log.error("[SchedulerInitializer] Failed to reconcile Agent tasks:", error)
+      })
     }
 
     // Cleanup on component unmount

@@ -96,6 +96,63 @@ describe("GatewayOverviewPanel", () => {
     expect(screen.getByTestId("gateway-snapshot-age")).toHaveTextContent("snapshotNone")
   })
 
+  it("shows the local routing policy revision", () => {
+    setup(
+      status({
+        localRoutingEnabled: true,
+        routingPolicyRevision: "policy-42",
+        routingStrategy: "least-busy",
+      })
+    )
+
+    expect(screen.getByTestId("gateway-routing-authority")).toHaveTextContent(
+      "localRoutingActive:policy-42"
+    )
+    expect(screen.getByTestId("gateway-auto-strategy")).toHaveTextContent("autoStrategy:least-busy")
+  })
+
+  it("warns when a custom strategy degrades to reliability", () => {
+    setup(
+      status({
+        localRoutingEnabled: true,
+        routingStrategy: "reliability",
+        routingStrategyUnavailable: "plugin:private-selector",
+      })
+    )
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "strategyUnavailable:plugin:private-selector"
+    )
+  })
+
+  it("labels legacy routing and handles a missing policy revision", () => {
+    const { rerender } = render(
+      <GatewayOverviewPanel
+        ctx={{ config: DEFAULT_GATEWAY_CONFIG, status: status(), persist: jest.fn() }}
+        starting={false}
+        onToggleEnabled={jest.fn()}
+        onRefreshStatus={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("gateway-routing-authority")).toHaveTextContent("localRoutingLegacy")
+
+    rerender(
+      <GatewayOverviewPanel
+        ctx={{
+          config: DEFAULT_GATEWAY_CONFIG,
+          status: status({ localRoutingEnabled: true, routingPolicyRevision: null }),
+          persist: jest.fn(),
+        }}
+        starting={false}
+        onToggleEnabled={jest.fn()}
+        onRefreshStatus={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("gateway-routing-authority")).toHaveTextContent(
+      "localRoutingActive:routingRevisionUnavailable"
+    )
+  })
+
   it("renders safely before status has hydrated", () => {
     // The shell passes `status: null` until the first IPC round-trip returns;
     // every counter must fall back rather than render "undefined".

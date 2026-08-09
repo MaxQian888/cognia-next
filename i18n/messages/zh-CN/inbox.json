@@ -229,6 +229,13 @@
     "deleteOverrideConfirm": "删除该会话的覆盖？该会话将回退到适配器默认配置。",
     "dialogTitle": "会话覆盖设置",
     "fields": {
+      "activationPolicy": {
+        "label": "激活策略"
+      },
+      "activationTtl": {
+        "label": "激活有效期（小时）",
+        "placeholder": "例如 24"
+      },
       "advancedJson": "高级 (勿扰时段 + 冷却 + 静音)",
       "advancedJsonHelp": "这些字段会写入该会话的 `trigger` 部分覆盖，覆盖适配器级触发策略。",
       "allowComputerUse": "允许 Computer Use 工具",
@@ -257,6 +264,9 @@
       "character": "角色 (id)",
       "characterPlaceholder": "（无）",
       "cooldownMs": "机器人回复后冷却时间 (ms)",
+      "dispatchMode": {
+        "label": "调度模式"
+      },
       "liveActivity": "实时活动卡片",
       "liveActivityHint": "助手工作时在对话中显示实时进度卡片（工具数、用时、当前操作、文件编辑）。默认开启；频道消息过多时可关闭。",
       "mode": "模式",
@@ -299,17 +309,7 @@
       "teamBindingPlaceholder": "（无 —— 由角色回复）",
       "workflowBinding": "可视化工作流（名称或 id）",
       "workflowBindingHelp": "设置后（且未绑定团队 —— 团队优先），入站消息将运行该可视化工作流而非单个角色；消息文本作为触发载荷，进度会回流到会话中。",
-      "workflowBindingPlaceholder": "（无 —— 由角色回复）",
-      "activationPolicy": {
-        "label": "激活策略"
-      },
-      "dispatchMode": {
-        "label": "调度模式"
-      },
-      "activationTtl": {
-        "label": "激活有效期（小时）",
-        "placeholder": "例如 24"
-      }
+      "workflowBindingPlaceholder": "（无 —— 由角色回复）"
     },
     "gearAria": "打开该会话的覆盖设置",
     "noOverrideYet": "尚未配置覆盖 — 当前继承适配器默认。",
@@ -358,6 +358,16 @@
   "inboundA2UI": {
     "rawPayload": "原始负载"
   },
+  "inboundRecovery": {
+    "continueSafely": "安全继续",
+    "description": "有一条或多条入站消息未能处理，需要恢复。",
+    "dismiss": "忽略",
+    "message": "消息 {id}：{reason}",
+    "retryFromStart": "从头重试",
+    "retryWarning": "从头重试会重新处理该消息，并可能重复触发外部副作用。是否继续？",
+    "title": "入站恢复",
+    "unknown": "未知原因"
+  },
   "labels": {
     "addAria": "添加或移除标签",
     "empty": "暂无标签——请在设置中创建。",
@@ -385,6 +395,17 @@
       "draft": "草稿",
       "manual": "手动"
     }
+  },
+  "notices": {
+    "collapse": "收起通知",
+    "expand": "展开通知",
+    "region": "收件箱通知",
+    "severity": {
+      "danger": "错误",
+      "info": "提示",
+      "warning": "警告"
+    },
+    "summary": "{count, plural, other {# 条通知}}"
   },
   "outboundSource": {
     "draftApproved": "草稿已批准",
@@ -488,46 +509,25 @@
       "label": "正在加载缓存…"
     }
   },
-  "unreadPill": {
-    "aria": "{count} 条未读"
-  },
-  "inboundRecovery": {
-    "retryWarning": "从头重试会重新处理该消息，并可能重复触发外部副作用。是否继续？",
-    "title": "入站恢复",
-    "description": "有一条或多条入站消息未能处理，需要恢复。",
-    "message": "消息 {id}：{reason}",
-    "unknown": "未知原因",
-    "continueSafely": "安全继续",
-    "retryFromStart": "从头重试",
-    "dismiss": "忽略"
-  },
   "topicRuntime": {
-    "aria": "Topic 运行时：{policy} · {dispatch}",
-    "badge": "{policy} · {dispatch}",
-    "requested": "请求策略：{value}",
-    "effective": "生效策略：{value}",
-    "readiness": "投递就绪：{value}",
     "activation": "激活状态：{value}",
     "active": "已激活",
-    "inactive": "未激活",
-    "queue": "队列深度：{count}",
     "activeRun": "活跃运行：{value}",
-    "none": "无",
-    "recovery": "需要恢复：{count}",
+    "aria": "Topic 运行时：{policy} · {dispatch}",
+    "badge": "{policy} · {dispatch}",
     "capabilities": "能力：topic={topic}, count={count}",
+    "effective": "生效策略：{value}",
     "fallback": {
       "delivery_unverified": "因投递未验证，回退到逐条 @ 模式"
-    }
-  },
-  "notices": {
-    "collapse": "收起通知",
-    "expand": "展开通知",
-    "region": "收件箱通知",
-    "severity": {
-      "info": "提示",
-      "warning": "警告",
-      "danger": "错误"
     },
-    "summary": "{count, plural, other {# 条通知}}"
+    "inactive": "未激活",
+    "none": "无",
+    "queue": "队列深度：{count}",
+    "readiness": "投递就绪：{value}",
+    "recovery": "需要恢复：{count}",
+    "requested": "请求策略：{value}"
+  },
+  "unreadPill": {
+    "aria": "{count} 条未读"
   }
 }

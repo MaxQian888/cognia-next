@@ -22,7 +22,7 @@ beforeEach(() => {
 it("stores only the secret payload behind a stable credential reference", async () => {
   await expect(
     saveRemoteHostCredential("host-1", {
-      deviceJwt: "jwt.secret",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
       signalingPrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
     })
   ).resolves.toBe("remote-host:host-1")
@@ -30,7 +30,7 @@ it("stores only the secret payload behind a stable credential reference", async 
   expect(setSecret).toHaveBeenCalledWith(
     { namespace: "remote-host", key: "host-1" },
     JSON.stringify({
-      deviceJwt: "jwt.secret",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
       signalingPrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
     })
   )
@@ -40,12 +40,12 @@ it("stores only the secret payload behind a stable credential reference", async 
 it("loads valid credentials and rejects malformed records", async () => {
   getSecret.mockResolvedValueOnce(
     JSON.stringify({
-      deviceJwt: "jwt",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
       signalingPrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
     })
   )
   await expect(loadRemoteHostCredential("host-1")).resolves.toEqual({
-    deviceJwt: "jwt",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
     signalingPrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
   })
 

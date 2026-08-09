@@ -1,8 +1,14 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useSyncExternalStore } from "react"
+import { useEffect, useSyncExternalStore } from "react"
 
+import {
+  getBootCapabilitySnapshot,
+  isBootCapabilityRequested,
+  markBootCapabilityReady,
+  subscribeBootCapabilities,
+} from "@/lib/boot/capabilities"
 import { isTauri } from "@/lib/native/utils"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 
@@ -135,7 +141,21 @@ const TrayPanelInitializer = dynamic(
 
 export function DesktopOnlyInitializers() {
   const isClient = useIsClient()
-  if (!isClient || !isTauri()) return null
+  useSyncExternalStore(
+    subscribeBootCapabilities,
+    getBootCapabilitySnapshot,
+    getBootCapabilitySnapshot
+  )
+  const requested = isBootCapabilityRequested("desktop-tools")
+  const tauri = isClient && isTauri()
+  const role = isClient ? getPetWindowRole() : "web"
+  const secondary = isSecondaryOverlayRole(role)
+
+  useEffect(() => {
+    if (requested && isClient && !secondary) markBootCapabilityReady("desktop-tools")
+  }, [isClient, requested, secondary])
+
+  if (!isClient || !requested || !tauri) return null
 
   // The transparent desktop-pet windows (sprite overlay + click popup) load this
   // same root layout, but every initializer bundled here is a MAIN-window boot
@@ -145,8 +165,7 @@ export function DesktopOnlyInitializers() {
   // calls `fs.read_dir`, which the least-privilege pet capabilities deny, logging
   // a spurious warning. Skip the whole bundle there; the pet windows start their
   // own cross-window bridge from the pet view, and need nothing here.
-  const role = getPetWindowRole()
-  if (isSecondaryOverlayRole(role)) return null
+  if (secondary) return null
 
   return (
     <>

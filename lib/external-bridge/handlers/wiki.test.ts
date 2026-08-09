@@ -1,22 +1,20 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for the wiki MCP handlers — `wiki_search` ranking + `wiki_read`
  * lookup. Drives Dexie via fake-indexeddb so the handlers exercise the
  * real CRUD paths.
  */
 
-import "fake-indexeddb/auto"
 import { __TESTING__, wikiRead, wikiSearch } from "./wiki"
 import { createWikiArticle } from "@/lib/db/wiki-articles"
 import { SELF_CORPUS_ID } from "@/types/wiki"
 import type { WikiArticleDraft } from "@/lib/db/wiki-articles"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 }, 30_000)
 
 function draft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDraft {
@@ -38,6 +36,8 @@ function draft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDraft {
     fileHashes: overrides.fileHashes ?? { "lib/foo/index.ts": "abc" },
   }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("wikiSearch", () => {
   it("returns empty results when there are no articles", async () => {

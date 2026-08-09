@@ -88,11 +88,87 @@ impl WorkspaceStore {
                  );",
             )
             .map_err(|error| format!("initialize task workspace database: {error}"))?;
-        Ok(Self {
+        let store = Self {
             connection,
             blob_dir,
             max_blob_bytes,
-        })
+        };
+        store.apply_registry_migration()?;
+        Ok(store)
+    }
+
+    /// Idempotently create the ADR-0111 Managed Workspace Registry tables.
+    ///
+    /// Called from `open` so first-boot and every subsequent boot share one
+    /// schema path. Tables use `IF NOT EXISTS` so existing installs upgrade
+    /// without a version bump — the tables are additive and do not touch the
+    /// legacy `task_workspaces` / `task_runs` rows.
+    fn apply_registry_migration(&self) -> Result<(), String> {
+        self.connection
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS workspace_registry (
+                   workspace_id TEXT PRIMARY KEY,
+                   owner_type TEXT NOT NULL,
+                   owner_ref TEXT,
+                   state TEXT NOT NULL,
+                   source_root TEXT NOT NULL,
+                   git_common_dir TEXT,
+                   base_kind TEXT NOT NULL,
+                   base_ref TEXT,
+                   head TEXT,
+                   branch TEXT,
+                   isolation_kind TEXT NOT NULL,
+                   execution_root TEXT NOT NULL,
+                   snapshot_task_id TEXT,
+                   size_bytes INTEGER,
+                   last_used_at INTEGER NOT NULL,
+                   locked_by TEXT,
+                   pinned INTEGER NOT NULL DEFAULT 0,
+                   created_at INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_workspace_registry_state
+                   ON workspace_registry(state);
+                 CREATE INDEX IF NOT EXISTS idx_workspace_registry_owner
+                   ON workspace_registry(owner_type, owner_ref);
+                 CREATE INDEX IF NOT EXISTS idx_workspace_registry_source
+                   ON workspace_registry(source_root);
+                 CREATE TABLE IF NOT EXISTS workspace_root_leases (
+                   bundle_id TEXT NOT NULL,
+                   workspace_id TEXT NOT NULL,
+                   logical_root_id TEXT NOT NULL,
+                   role TEXT NOT NULL,
+                   alias_path TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   PRIMARY KEY(bundle_id, logical_root_id),
+                   FOREIGN KEY(workspace_id) REFERENCES workspace_registry(workspace_id)
+                     ON DELETE CASCADE
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_workspace_root_leases_workspace
+                   ON workspace_root_leases(workspace_id);
+                 CREATE TABLE IF NOT EXISTS workspace_sensitive_grants (
+                   workspace_id TEXT NOT NULL,
+                   relative_path TEXT NOT NULL,
+                   granted_by_owner_type TEXT NOT NULL,
+                   granted_by_owner_ref TEXT,
+                   granted_at INTEGER NOT NULL,
+                   PRIMARY KEY(workspace_id, relative_path),
+                   FOREIGN KEY(workspace_id) REFERENCES workspace_registry(workspace_id)
+                     ON DELETE CASCADE
+                 );
+                 CREATE TABLE IF NOT EXISTS workspace_sensitive_audit (
+                   audit_id TEXT PRIMARY KEY,
+                   workspace_id TEXT NOT NULL,
+                   relative_path TEXT NOT NULL,
+                   decision TEXT NOT NULL,
+                   requester_owner_type TEXT NOT NULL,
+                   requester_owner_ref TEXT,
+                   decided_at INTEGER NOT NULL,
+                   reason TEXT
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_workspace_sensitive_audit_ws
+                   ON workspace_sensitive_audit(workspace_id, decided_at);",
+            )
+            .map_err(|error| format!("apply workspace registry migration: {error}"))
     }
 
     pub fn put_blob(&mut self, hash: &str, bytes: &[u8], now: i64) -> Result<(), String> {
@@ -642,6 +718,231 @@ impl WorkspaceStore {
         }
         Ok((stale.len() as u64, reclaimed))
     }
+
+    // -----------------------------------------------------------------
+    // ADR-0111 Managed Workspace Registry CRUD
+    // -----------------------------------------------------------------
+
+    /// Insert-or-replace one Registry row. Callers use this both to create
+    /// new managed workspaces and to persist state transitions.
+    pub fn put_workspace(&self, record: &crate::WorkspaceRecord) -> Result<(), String> {
+        let (base_kind, base_ref) = record.base.to_storage();
+        let base_kind_str = serde_json::to_value(base_kind)
+            .and_then(|value| serde_json::from_value::<String>(value))
+            .map_err(|error| format!("encode base kind: {error}"))?;
+        let owner_type = serialize_enum(&record.owner_type, "owner type")?;
+        let state = serialize_enum(&record.state, "workspace state")?;
+        let isolation_kind = serialize_enum(&record.isolation_kind, "isolation kind")?;
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO workspace_registry (
+                   workspace_id, owner_type, owner_ref, state, source_root,
+                   git_common_dir, base_kind, base_ref, head, branch,
+                   isolation_kind, execution_root, snapshot_task_id, size_bytes,
+                   last_used_at, locked_by, pinned, created_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
+                params![
+                    record.workspace_id,
+                    owner_type,
+                    record.owner_ref,
+                    state,
+                    record.source_root,
+                    record.git_common_dir,
+                    base_kind_str,
+                    base_ref,
+                    record.head,
+                    record.branch,
+                    isolation_kind,
+                    record.execution_root,
+                    record.snapshot_task_id,
+                    record.size_bytes.map(|value| value as i64),
+                    record.last_used_at,
+                    record.locked_by,
+                    record.pinned as i64,
+                    record.created_at,
+                ],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("put workspace {}: {error}", record.workspace_id))
+    }
+
+    /// Read one Registry row.
+    pub fn get_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<crate::WorkspaceRecord>, String> {
+        self.connection
+            .query_row(
+                "SELECT workspace_id, owner_type, owner_ref, state, source_root,
+                        git_common_dir, base_kind, base_ref, head, branch,
+                        isolation_kind, execution_root, snapshot_task_id, size_bytes,
+                        last_used_at, locked_by, pinned, created_at
+                   FROM workspace_registry WHERE workspace_id=?1",
+                [workspace_id],
+                map_workspace_row,
+            )
+            .optional()
+            .map_err(|error| format!("get workspace {workspace_id}: {error}"))?
+            .transpose()
+    }
+
+    /// Enumerate every Registry row, ordered by `last_used_at DESC`.
+    pub fn list_workspaces(&self) -> Result<Vec<crate::WorkspaceRecord>, String> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT workspace_id, owner_type, owner_ref, state, source_root,
+                        git_common_dir, base_kind, base_ref, head, branch,
+                        isolation_kind, execution_root, snapshot_task_id, size_bytes,
+                        last_used_at, locked_by, pinned, created_at
+                   FROM workspace_registry ORDER BY last_used_at DESC",
+            )
+            .map_err(|error| format!("prepare list_workspaces: {error}"))?;
+        let rows = statement
+            .query_map([], map_workspace_row)
+            .map_err(|error| format!("query list_workspaces: {error}"))?;
+        rows.collect::<Result<Result<Vec<_>, String>, _>>()
+            .map_err(|error| format!("read list_workspaces: {error}"))?
+    }
+
+    /// Delete a Registry row (and cascade its leases + grants).
+    ///
+    /// Callers MUST first verify ownership and lock reason — the store enforces
+    /// only referential integrity, not policy.
+    pub fn delete_workspace(&self, workspace_id: &str) -> Result<(), String> {
+        self.connection
+            .execute(
+                "DELETE FROM workspace_registry WHERE workspace_id=?1",
+                [workspace_id],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("delete workspace {workspace_id}: {error}"))
+    }
+
+    /// Persist one root lease for a bundle.
+    pub fn put_root_lease(
+        &self,
+        lease: &crate::WorkspaceRootLease,
+        now: i64,
+    ) -> Result<(), String> {
+        let role = serialize_enum(&lease.role, "root role")?;
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO workspace_root_leases (
+                   bundle_id, workspace_id, logical_root_id, role, alias_path, created_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6)",
+                params![
+                    lease.bundle_id,
+                    lease.workspace_id,
+                    lease.logical_root_id,
+                    role,
+                    lease.alias_path,
+                    now,
+                ],
+            )
+            .map(|_| ())
+            .map_err(|error| {
+                format!(
+                    "put lease {}/{}: {error}",
+                    lease.bundle_id, lease.logical_root_id
+                )
+            })
+    }
+
+    /// List every lease belonging to a bundle, in insertion order.
+    pub fn list_bundle_leases(
+        &self,
+        bundle_id: &str,
+    ) -> Result<Vec<crate::WorkspaceRootLease>, String> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT bundle_id, workspace_id, logical_root_id, role, alias_path
+                   FROM workspace_root_leases WHERE bundle_id=?1 ORDER BY created_at ASC",
+            )
+            .map_err(|error| format!("prepare list_bundle_leases: {error}"))?;
+        let rows = statement
+            .query_map([bundle_id], map_lease_row)
+            .map_err(|error| format!("query list_bundle_leases: {error}"))?;
+        rows.collect::<Result<Result<Vec<_>, String>, _>>()
+            .map_err(|error| format!("read list_bundle_leases: {error}"))?
+    }
+
+    /// Delete every lease of a bundle (used when the bundle is rolled back).
+    pub fn delete_bundle_leases(&self, bundle_id: &str) -> Result<(), String> {
+        self.connection
+            .execute(
+                "DELETE FROM workspace_root_leases WHERE bundle_id=?1",
+                [bundle_id],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("delete leases {bundle_id}: {error}"))
+    }
+
+    /// Record a sensitive-path grant. Idempotent: replaces any existing
+    /// grant on the same (workspace, path).
+    pub fn put_sensitive_grant(&self, grant: &crate::SensitiveGrant) -> Result<(), String> {
+        let owner_type = serialize_enum(&grant.granted_by_owner_type, "grant owner type")?;
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO workspace_sensitive_grants (
+                   workspace_id, relative_path, granted_by_owner_type,
+                   granted_by_owner_ref, granted_at
+                 ) VALUES (?1,?2,?3,?4,?5)",
+                params![
+                    grant.workspace_id,
+                    grant.relative_path,
+                    owner_type,
+                    grant.granted_by_owner_ref,
+                    grant.granted_at,
+                ],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("put sensitive grant: {error}"))
+    }
+
+    /// List every sensitive-path grant. Loaded once at Registry startup into
+    /// the in-memory `SensitiveGrantStore`.
+    pub fn list_sensitive_grants(&self) -> Result<Vec<crate::SensitiveGrant>, String> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT workspace_id, relative_path, granted_by_owner_type,
+                        granted_by_owner_ref, granted_at
+                   FROM workspace_sensitive_grants",
+            )
+            .map_err(|error| format!("prepare list_sensitive_grants: {error}"))?;
+        let rows = statement
+            .query_map([], map_grant_row)
+            .map_err(|error| format!("query list_sensitive_grants: {error}"))?;
+        rows.collect::<Result<Result<Vec<_>, String>, _>>()
+            .map_err(|error| format!("read list_sensitive_grants: {error}"))?
+    }
+
+    /// Append one row to the sensitive-decision audit log. Never mutated.
+    pub fn append_sensitive_audit(&self, entry: &crate::SensitiveAuditEntry) -> Result<(), String> {
+        let decision = serialize_enum(&entry.decision, "audit decision")?;
+        let requester = serialize_enum(&entry.requester_owner_type, "requester owner type")?;
+        self.connection
+            .execute(
+                "INSERT INTO workspace_sensitive_audit (
+                   audit_id, workspace_id, relative_path, decision,
+                   requester_owner_type, requester_owner_ref, decided_at, reason
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![
+                    entry.audit_id,
+                    entry.workspace_id,
+                    entry.relative_path,
+                    decision,
+                    requester,
+                    entry.requester_owner_ref,
+                    entry.decided_at,
+                    entry.reason,
+                ],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("append sensitive audit: {error}"))
+    }
 }
 
 fn restore_tombstones(tombstones: &[(PathBuf, PathBuf)]) {
@@ -677,6 +978,114 @@ fn json_optional<T: serde::de::DeserializeOwned>(
     payload
         .map(|payload| serde_json::from_str(&payload).map_err(|error| error.to_string()))
         .transpose()
+}
+
+/// Encode an enum as its camelCase string variant. Serde is the source of
+/// truth for the mapping so `owner_type` etc. never drift between the wire
+/// shape and SQLite rows.
+fn serialize_enum<T: serde::Serialize>(value: &T, context: &str) -> Result<String, String> {
+    serde_json::to_value(value)
+        .and_then(serde_json::from_value::<String>)
+        .map_err(|error| format!("encode {context}: {error}"))
+}
+
+fn deserialize_enum<T: serde::de::DeserializeOwned>(
+    value: &str,
+    context: &str,
+) -> Result<T, String> {
+    serde_json::from_value(serde_json::Value::String(value.to_string()))
+        .map_err(|error| format!("decode {context} {value:?}: {error}"))
+}
+
+/// Row-mapper for `workspace_registry`. Bubbles rusqlite errors through the
+/// `Result` returned by `query_map`.
+fn map_workspace_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<Result<crate::WorkspaceRecord, String>> {
+    let workspace_id: String = row.get(0)?;
+    let owner_type_raw: String = row.get(1)?;
+    let owner_ref: Option<String> = row.get(2)?;
+    let state_raw: String = row.get(3)?;
+    let source_root: String = row.get(4)?;
+    let git_common_dir: Option<String> = row.get(5)?;
+    let base_kind_raw: String = row.get(6)?;
+    let base_ref: Option<String> = row.get(7)?;
+    let head: Option<String> = row.get(8)?;
+    let branch: Option<String> = row.get(9)?;
+    let isolation_kind_raw: String = row.get(10)?;
+    let execution_root: String = row.get(11)?;
+    let snapshot_task_id: Option<String> = row.get(12)?;
+    let size_bytes: Option<i64> = row.get(13)?;
+    let last_used_at: i64 = row.get(14)?;
+    let locked_by: Option<String> = row.get(15)?;
+    let pinned: i64 = row.get(16)?;
+    let created_at: i64 = row.get(17)?;
+    Ok((|| -> Result<crate::WorkspaceRecord, String> {
+        let owner_type = deserialize_enum(&owner_type_raw, "owner type")?;
+        let state = deserialize_enum(&state_raw, "workspace state")?;
+        let isolation_kind = deserialize_enum(&isolation_kind_raw, "isolation kind")?;
+        let base_kind = deserialize_enum(&base_kind_raw, "base kind")?;
+        let base = crate::WorkspaceBaseSpec::from_storage(base_kind, base_ref.as_deref())?;
+        Ok(crate::WorkspaceRecord {
+            workspace_id,
+            owner_type,
+            owner_ref,
+            state,
+            source_root,
+            git_common_dir,
+            base,
+            head,
+            branch,
+            isolation_kind,
+            execution_root,
+            snapshot_task_id,
+            size_bytes: size_bytes.map(|value| value as u64),
+            last_used_at,
+            locked_by,
+            pinned: pinned != 0,
+            created_at,
+        })
+    })())
+}
+
+/// Row-mapper for `workspace_root_leases`.
+fn map_lease_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<Result<crate::WorkspaceRootLease, String>> {
+    let bundle_id: String = row.get(0)?;
+    let workspace_id: String = row.get(1)?;
+    let logical_root_id: String = row.get(2)?;
+    let role_raw: String = row.get(3)?;
+    let alias_path: String = row.get(4)?;
+    Ok((|| -> Result<crate::WorkspaceRootLease, String> {
+        Ok(crate::WorkspaceRootLease {
+            bundle_id,
+            workspace_id,
+            logical_root_id,
+            role: deserialize_enum(&role_raw, "root role")?,
+            alias_path,
+        })
+    })())
+}
+
+/// Row-mapper for `workspace_sensitive_grants`.
+fn map_grant_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<Result<crate::SensitiveGrant, String>> {
+    let workspace_id: String = row.get(0)?;
+    let relative_path: String = row.get(1)?;
+    let owner_type_raw: String = row.get(2)?;
+    let owner_ref: Option<String> = row.get(3)?;
+    let granted_at: i64 = row.get(4)?;
+    Ok((|| -> Result<crate::SensitiveGrant, String> {
+        Ok(crate::SensitiveGrant {
+            workspace_id,
+            relative_path,
+            granted_by_owner_type: deserialize_enum(&owner_type_raw, "grant owner type")?,
+            granted_by_owner_ref: owner_ref,
+            granted_at,
+        })
+    })())
 }
 
 #[cfg(test)]
@@ -776,5 +1185,148 @@ mod tests {
             store.resource_summary("run-1").unwrap().completeness,
             ResourceTimelineCompleteness::Reconciled
         );
+    }
+
+    // -----------------------------------------------------------------
+    // ADR-0111 Registry CRUD round-trips
+    // -----------------------------------------------------------------
+
+    fn sample_record(id: &str) -> crate::WorkspaceRecord {
+        crate::WorkspaceRecord {
+            workspace_id: id.into(),
+            owner_type: crate::WorkspaceOwnerType::Session,
+            owner_ref: Some("session-1".into()),
+            state: crate::WorkspaceState::Provisioning,
+            source_root: "/workspace".into(),
+            git_common_dir: Some("/workspace/.git".into()),
+            base: crate::WorkspaceBaseSpec::LocalHead,
+            head: Some("abc123".into()),
+            branch: None,
+            isolation_kind: IsolationKind::GitWorktree,
+            execution_root: format!("/tmp/{id}"),
+            snapshot_task_id: None,
+            size_bytes: Some(4096),
+            last_used_at: 100,
+            locked_by: Some("cognia:ws-1".into()),
+            pinned: false,
+            created_at: 100,
+        }
+    }
+
+    #[test]
+    fn workspace_record_survives_a_put_get_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let record = sample_record("ws-1");
+        store.put_workspace(&record).unwrap();
+        let loaded = store.get_workspace("ws-1").unwrap().expect("row present");
+        assert_eq!(loaded, record);
+    }
+
+    #[test]
+    fn list_workspaces_orders_by_last_used_desc() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let mut older = sample_record("ws-older");
+        older.last_used_at = 50;
+        let newer = sample_record("ws-newer");
+        store.put_workspace(&older).unwrap();
+        store.put_workspace(&newer).unwrap();
+        let ordered = store.list_workspaces().unwrap();
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|r| r.workspace_id.as_str())
+                .collect::<Vec<_>>(),
+            ["ws-newer", "ws-older"]
+        );
+    }
+
+    #[test]
+    fn deleting_a_workspace_cascades_to_leases_and_grants() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let record = sample_record("ws-cascade");
+        store.put_workspace(&record).unwrap();
+        store
+            .put_root_lease(
+                &crate::WorkspaceRootLease {
+                    bundle_id: "bundle-1".into(),
+                    workspace_id: "ws-cascade".into(),
+                    logical_root_id: "root-a".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    alias_path: "/tmp/ws-cascade".into(),
+                },
+                123,
+            )
+            .unwrap();
+        store
+            .put_sensitive_grant(&crate::SensitiveGrant {
+                workspace_id: "ws-cascade".into(),
+                relative_path: "secrets.env".into(),
+                granted_by_owner_type: crate::WorkspaceOwnerType::User,
+                granted_by_owner_ref: None,
+                granted_at: 1,
+            })
+            .unwrap();
+        store.delete_workspace("ws-cascade").unwrap();
+        assert!(store.list_bundle_leases("bundle-1").unwrap().is_empty());
+        assert!(store.list_sensitive_grants().unwrap().is_empty());
+    }
+
+    #[test]
+    fn base_spec_pull_request_round_trips_through_storage() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let mut record = sample_record("ws-pr");
+        record.base = crate::WorkspaceBaseSpec::PullRequest {
+            provider: "github".into(),
+            repo: "acme/app".into(),
+            number: 42,
+        };
+        store.put_workspace(&record).unwrap();
+        let loaded = store.get_workspace("ws-pr").unwrap().unwrap();
+        assert_eq!(loaded.base, record.base);
+    }
+
+    #[test]
+    fn sensitive_audit_rows_are_append_only() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let record = sample_record("ws-audit");
+        store.put_workspace(&record).unwrap();
+        for (idx, decision) in [
+            crate::SensitiveDecision::Granted,
+            crate::SensitiveDecision::ReusedGrant,
+            crate::SensitiveDecision::RefusedBackground,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            store
+                .append_sensitive_audit(&crate::SensitiveAuditEntry {
+                    audit_id: format!("audit-{idx}"),
+                    workspace_id: "ws-audit".into(),
+                    relative_path: "path.txt".into(),
+                    decision,
+                    requester_owner_type: crate::WorkspaceOwnerType::Session,
+                    requester_owner_ref: Some("session-1".into()),
+                    decided_at: idx as i64,
+                    reason: None,
+                })
+                .unwrap();
+        }
+        // Duplicate audit_id must fail — audit is append-only.
+        let dup = store.append_sensitive_audit(&crate::SensitiveAuditEntry {
+            audit_id: "audit-0".into(),
+            workspace_id: "ws-audit".into(),
+            relative_path: "path.txt".into(),
+            decision: crate::SensitiveDecision::Granted,
+            requester_owner_type: crate::WorkspaceOwnerType::User,
+            requester_owner_ref: None,
+            decided_at: 99,
+            reason: None,
+        });
+        assert!(dup.is_err(), "duplicate audit_id must be rejected");
     }
 }

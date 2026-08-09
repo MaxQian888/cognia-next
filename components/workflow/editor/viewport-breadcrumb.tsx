@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils"
 import { useRafThrottle } from "@/hooks/workflow/use-raf-throttle"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import type { RFWorkflowNode } from "@/lib/workflow/editor/react-flow-converter"
+import { Panel } from "@/components/ai-elements/panel"
 
 const GROUP_KIND = "annotation.group"
 
@@ -118,36 +119,38 @@ export const ViewportBreadcrumb = memo(function ViewportBreadcrumb({
   }
 
   return (
-    <nav
-      className={cn(
-        "absolute top-3 left-4 z-10 inline-flex items-center gap-1 rounded-md border bg-background/90 px-2 py-1 text-xs shadow-sm backdrop-blur",
-        className
-      )}
-      data-testid="viewport-breadcrumb"
-      aria-label={t("fitAll")}
-    >
-      <button
-        type="button"
-        className="max-w-[200px] truncate font-medium hover:underline"
-        onClick={handleFitAll}
-        title={t("fitAll")}
-        data-testid="viewport-breadcrumb-root"
+    <Panel position="top-left" className="m-0 border-0 bg-transparent p-0">
+      <nav
+        className={cn(
+          "absolute top-3 left-4 z-10 inline-flex items-center gap-1 rounded-md border bg-background/90 px-2 py-1 text-xs shadow-sm backdrop-blur",
+          className
+        )}
+        data-testid="viewport-breadcrumb"
+        aria-label={t("fitAll")}
       >
-        {workflowName}
-      </button>
-      {activeGroup ? (
-        <>
-          <ChevronRight className="size-3 opacity-50" aria-hidden />
-          <button
-            type="button"
-            className="max-w-[160px] truncate text-muted-foreground hover:underline hover:text-foreground"
-            onClick={() => handleFitGroup(activeGroup)}
-            data-testid="viewport-breadcrumb-group"
-          >
-            {activeGroup.label || t("untitledGroup")}
-          </button>
-        </>
-      ) : null}
-    </nav>
+        <button
+          type="button"
+          className="max-w-[200px] truncate font-medium hover:underline"
+          onClick={handleFitAll}
+          title={t("fitAll")}
+          data-testid="viewport-breadcrumb-root"
+        >
+          {workflowName}
+        </button>
+        {activeGroup ? (
+          <>
+            <ChevronRight className="size-3 opacity-50" aria-hidden />
+            <button
+              type="button"
+              className="max-w-[160px] truncate text-muted-foreground hover:underline hover:text-foreground"
+              onClick={() => handleFitGroup(activeGroup)}
+              data-testid="viewport-breadcrumb-group"
+            >
+              {activeGroup.label || t("untitledGroup")}
+            </button>
+          </>
+        ) : null}
+      </nav>
+    </Panel>
   )
 })

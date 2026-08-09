@@ -8,7 +8,7 @@
   "createCharacterFirst": "Create a character first",
   "delete": "Delete",
   "deleteAria": "Delete {name}",
-  "description": "A team is a named bundle of characters that respond together in group chat. Use @CharacterName to address one member; otherwise every member replies once in declared order. Supervisor mode lets one leader dispatch sub-tasks to other members and synthesize.",
+  "description": "A team is a private group conversation between you and multiple Agents. An explicit @ targets only those Agents. Without a mention, smart-primary routing selects one responder, all-response asks the roster, and moderator mode uses the designated leader.",
   "duplicate": "Duplicate",
   "duplicateAria": "Duplicate {name}",
   "duplicatedToast": "Duplicated as \"{name}\".",
@@ -38,6 +38,8 @@
     "orchestration": "Orchestration",
     "overrideHelp": "Each override replaces the corresponding character default for this team only. Leave blank to inherit. Skills always apply on top.",
     "pickColor": "Pick color {color}",
+    "responseCap": "Maximum Agent replies per turn",
+    "responseCapHelp": "Limits fan-out and moderator dispatches. Duplicate replies and repeated dispatches are suppressed.",
     "role": "Role label",
     "rolePlaceholder": "e.g. Critic",
     "supervisor": "Supervisor (the leader)",
@@ -53,8 +55,8 @@
   "newTeam": "New team",
   "orchestration": {
     "manual": "Manual (user picks)",
-    "mention_round_robin": "@mention + round-robin",
-    "round_robin": "Round-robin (always all)",
+    "mention_round_robin": "Smart primary responder",
+    "round_robin": "All Agents respond",
     "supervisor": "Supervisor (one leader dispatches)"
   },
   "remove": "Remove",
@@ -68,6 +70,7 @@
   "validation": {
     "atLeastOneMember": "A team needs at least one member.",
     "nameRequired": "Name is required.",
+    "responseCapInvalid": "The response cap must be an integer from 1 through 12.",
     "supervisorMustBeMember": "The supervisor must be one of the team's members.",
     "supervisorRequired": "Supervisor mode requires a designated supervisor."
   }

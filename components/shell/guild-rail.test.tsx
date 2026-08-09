@@ -167,6 +167,17 @@ test("the More popover still reaches an unpinned feature", async () => {
   expect(routerPush).toHaveBeenCalledWith("/skills")
 })
 
+test("the More popover can pin an item directly without navigating", async () => {
+  const user = userEvent.setup()
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+
+  await user.click(screen.getByTestId("guild-more"))
+  await user.click(screen.getByTestId("guild-more-pin-skills"))
+
+  expect(lastSavedLayout().pinned).toEqual([...DEFAULT_SIDEBAR_LAYOUT.pinned, "skills"])
+  expect(routerPush).not.toHaveBeenCalled()
+})
+
 test("the More popover lists the overflow (auxiliary) items + Customize", async () => {
   const user = userEvent.setup()
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))

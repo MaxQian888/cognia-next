@@ -75,5 +75,5 @@ Unknown response fields, mismatched IDs, mutable/unverified recovery points,
 negative sizes, non-SHA-256 manifests, and mismatched destination volumes are
 rejected. After a verified response, the agent stops the single writer,
 persists a Compose runtime override, activates the new volume, checks
-`/api/v1/readyz`, and automatically restores the previous override if the
+`/readyz`, and automatically restores the previous override if the
 readiness check fails.

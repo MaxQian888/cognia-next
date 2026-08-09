@@ -39,7 +39,19 @@ import {
 import { CharacterPackUpdateDialog } from "@/components/settings/character-pack-update-dialog"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listSkills } from "@/lib/db/skills"
-import type { AppSettings, Character, McpServer, Skill } from "@cognia/agent-config-types"
+import {
+  createKnowledgeBase,
+  getKnowledgeBaseReferences,
+  listKnowledgeBases,
+} from "@/lib/db/knowledge-bases"
+import type { KnowledgeBase, KnowledgeBaseReference } from "@/types/knowledge-base"
+import type {
+  AgentEnvBinding,
+  AppSettings,
+  Character,
+  McpServer,
+  Skill,
+} from "@cognia/agent-config-types"
 // ADR-0020 W2 — Computer Use sub-settings UI reads the live native-tool
 // registry so allowedToolIds is a real picker (one checkbox per
 // registered tool) instead of a free-form text field. `listEntries`
@@ -47,12 +59,19 @@ import type { AppSettings, Character, McpServer, Skill } from "@cognia/agent-con
 import { listNativeAnthropicToolEntries } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 // ADR-0030 — Character pack overlay + local-imported pack file support.
 import {
+  getCharacterPackRegistryVersion,
   getPackCharacterWarnings,
+  getPackTrust,
   getPackWarnings,
   isOverlayCharacterId,
   listCharacterPackEntries,
+  subscribeCharacterPackRegistry,
 } from "@/lib/plugin/registries/character-pack-registry"
 import type { PluginCharacterPackWarning } from "@/lib/plugin/character-pack/validate-requires"
+import {
+  formatPackWarnings,
+  PackTrustChip,
+} from "@/components/settings/character/pack-trust-badges"
 import {
   deleteLocalPack,
   importLocalPack,
@@ -61,10 +80,15 @@ import {
 import { usePluginMetadata } from "@/hooks/plugins/use-plugin-metadata"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
 import type { SandboxShellTier } from "@/types/sandbox"
-import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { isTauri } from "@/lib/tauri"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { TestTtsButton } from "@/components/settings/speech/test-tts-button"
+import { KnowledgeBaseManager } from "@/components/settings/knowledge-base-manager"
+import { AgentTaskBoardDialog } from "@/components/agent/agent-task-board"
+import { SupportAgentControls } from "@/components/support/support-agent-controls"
+import { removeKnowledgeBase } from "@/lib/knowledge-base/ingest/ingest-source"
+import { isSupportAgentId } from "@/lib/support-agent/context"
+import { tryBuildProjectKnowledgeDeps } from "@/lib/project-knowledge/runtime/build-deps"
 import { resolveCharacterVoice } from "@/lib/plugin/character-pack/character-voice"
 import { buildPersona, buildVoiceProfile } from "@/lib/plugin/character-pack/editor-projection"
 import type {
@@ -101,6 +125,7 @@ import {
   CheckSquareIcon,
   CopyIcon,
   DownloadIcon,
+  LibraryBigIcon,
   PackageIcon,
   PencilIcon,
   PlusIcon,
@@ -110,7 +135,14 @@ import {
   UsersRoundIcon,
   XIcon,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ChangeEvent,
+} from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -120,6 +152,8 @@ import { downloadBlob } from "@/lib/files/download"
 import { createLogger } from "@cognia/logging"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 import { useUIStore } from "@/stores/ui/ui-store"
+import { isValidAgentEnvName } from "@/lib/agent/agent-profile-policy"
+import { createAgentEnvSecretRef, saveAgentEnvSecret } from "@/lib/agent/agent-env-keyring"
 
 const log = createLogger("settings.characters")
 
@@ -189,6 +223,7 @@ export function CharactersSection() {
   const characters = useMemo(() => charactersRaw ?? [], [charactersRaw])
   const skills = useLiveQuery(() => listSkills(), []) ?? []
   const mcpServers = useLiveQuery(() => listMcpServers(), []) ?? []
+  const knowledgeBases = useLiveQuery(() => listKnowledgeBases(), []) ?? []
   const [editing, setEditing] = useState<Character | null>(null)
   const [creating, setCreating] = useState(false)
   const [applyUpdateTarget, setApplyUpdateTarget] = useState<Character | null>(null)
@@ -308,6 +343,8 @@ export function CharactersSection() {
 
       <CharacterPacksSubsection />
 
+      <KnowledgeBaseSubsection knowledgeBases={knowledgeBases} />
+
       {characters.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[10rem] flex-1">
@@ -388,6 +425,7 @@ export function CharactersSection() {
               onEditCancel={() => setEditing(null)}
               skillsCatalog={skills}
               mcpCatalog={mcpServers}
+              knowledgeBaseCatalog={knowledgeBases}
               selectionMode={selectionMode}
               selected={selectedIds.has(c.id)}
               onToggleSelect={() => toggleSelect(c.id)}
@@ -585,11 +623,24 @@ export function CharactersSection() {
             avatarEmoji: "✨",
             systemPrompt: "",
             model: "",
+            planModel: "",
+            utilityModel: "",
+            executionEffort: "inherit",
+            executionMaxTurns: "",
+            executionEnvBindings: undefined,
             permissionMode: undefined,
             allowedTools: [],
             disallowedTools: [],
             mcpServerIds: undefined,
             skillIds: [],
+            knowledgeBaseIds: [],
+            memoryRecall: true,
+            memoryCreate: true,
+            memoryUpdate: true,
+            memoryForget: true,
+            memoryAutoLearn: true,
+            memoryReadableScopes: ["global", "workspace", "character", "agent"],
+            memoryWritableScopes: ["global", "workspace", "character", "agent"],
             workingDir: "",
             bareMode: false,
             debugMode: false,
@@ -617,6 +668,7 @@ export function CharactersSection() {
           }}
           skillsCatalog={skills}
           mcpCatalog={mcpServers}
+          knowledgeBaseCatalog={knowledgeBases}
           submitLabel={t("create")}
           onCancel={() => setCreating(false)}
           onSave={async (data) => {
@@ -636,11 +688,155 @@ export function CharactersSection() {
   )
 }
 
+function KnowledgeBaseSubsection({ knowledgeBases }: { knowledgeBases: KnowledgeBase[] }) {
+  const t = useTranslations("settings.characters.knowledgeBases")
+  const [name, setName] = useState("")
+  const [creating, setCreating] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<{
+    knowledgeBase: KnowledgeBase
+    references: KnowledgeBaseReference[]
+  } | null>(null)
+
+  const create = async () => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setCreating(true)
+    try {
+      await createKnowledgeBase({ name: trimmed })
+      setName("")
+      toast.success(t("created", { name: trimmed }))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const inspectDelete = async (knowledgeBase: KnowledgeBase) => {
+    try {
+      const references = await getKnowledgeBaseReferences(knowledgeBase.id)
+      setPendingDelete({ knowledgeBase, references })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return
+    try {
+      const deps = await tryBuildProjectKnowledgeDeps()
+      await removeKnowledgeBase(pendingDelete.knowledgeBase.id, {
+        detachReferences: pendingDelete.references.length > 0,
+        deps,
+      })
+      toast.success(t("deleted", { name: pendingDelete.knowledgeBase.name }))
+      setPendingDelete(null)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  return (
+    <Card className="space-y-3 p-3">
+      <div className="flex items-start gap-2">
+        <LibraryBigIcon className="mt-0.5 size-4" />
+        <div>
+          <Label className="text-xs font-medium">{t("title")}</Label>
+          <p className="text-[11px] text-muted-foreground">{t("description")}</p>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <Input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void create()
+          }}
+          placeholder={t("namePlaceholder")}
+          aria-label={t("name")}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          disabled={creating || !name.trim()}
+          onClick={() => void create()}
+        >
+          <PlusIcon className="mr-1 size-3.5" />
+          {t("create")}
+        </Button>
+      </div>
+      {knowledgeBases.length === 0 ? (
+        <p className="text-[11px] italic text-muted-foreground">{t("empty")}</p>
+      ) : (
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          {knowledgeBases.map((knowledgeBase) => (
+            <div
+              key={knowledgeBase.id}
+              className="flex items-center justify-between rounded-md border px-2 py-1.5"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium">{knowledgeBase.name}</p>
+                {knowledgeBase.description && (
+                  <p className="truncate text-[10px] text-muted-foreground">
+                    {knowledgeBase.description}
+                  </p>
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-7 text-destructive hover:text-destructive"
+                onClick={() => void inspectDelete(knowledgeBase)}
+                aria-label={t("deleteAria", { name: knowledgeBase.name })}
+              >
+                <Trash2Icon className="size-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <KnowledgeBaseManager knowledgeBases={knowledgeBases} />
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete?.references.length
+                ? t("deleteReferenced", { count: pendingDelete.references.length })
+                : t("deleteUnreferenced")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {(pendingDelete?.references.length ?? 0) > 0 && (
+            <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+              {pendingDelete?.references.map((reference) => (
+                <li key={`${reference.kind}:${reference.id}`}>{reference.name}</li>
+              ))}
+            </ul>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmDelete()}>
+              {pendingDelete?.references.length ? t("detachAndDelete") : t("delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
+  )
+}
+
 interface RowProps {
   character: Character
   skills: Skill[]
   skillsCatalog: Skill[]
   mcpCatalog: McpServer[]
+  knowledgeBaseCatalog: KnowledgeBase[]
   editing: boolean
   onEditStart: () => void
   onEditCancel: () => void
@@ -670,6 +866,7 @@ function CharacterRow({
   skills,
   skillsCatalog,
   mcpCatalog,
+  knowledgeBaseCatalog,
   editing,
   onEditStart,
   onEditCancel,
@@ -701,12 +898,35 @@ function CharacterRow({
           avatarColor: character.avatarColor,
           avatarEmoji: character.avatarEmoji ?? "",
           systemPrompt: character.systemPrompt,
-          model: character.model ?? "",
+          model: character.modelRouting?.execute ?? character.model ?? "",
+          planModel: character.modelRouting?.plan ?? "",
+          utilityModel: character.modelRouting?.utility ?? "",
+          executionEffort: character.executionPolicy?.effort ?? "inherit",
+          executionMaxTurns: character.executionPolicy?.maxTurns?.toString() ?? "",
+          executionEnvBindings: character.executionPolicy?.envBindings,
           permissionMode: character.permissionMode,
           allowedTools: character.allowedTools ?? [],
           disallowedTools: character.disallowedTools ?? [],
           mcpServerIds: character.mcpServerIds,
           skillIds: character.skillIds ?? [],
+          knowledgeBaseIds: character.knowledgeBaseIds ?? [],
+          memoryRecall: character.memoryPolicy?.operations.recall ?? true,
+          memoryCreate: character.memoryPolicy?.operations.create ?? true,
+          memoryUpdate: character.memoryPolicy?.operations.update ?? true,
+          memoryForget: character.memoryPolicy?.operations.forget ?? true,
+          memoryAutoLearn: character.memoryPolicy?.autoLearn ?? true,
+          memoryReadableScopes: character.memoryPolicy?.readableScopes ?? [
+            "global",
+            "workspace",
+            "character",
+            "agent",
+          ],
+          memoryWritableScopes: character.memoryPolicy?.writableScopes ?? [
+            "global",
+            "workspace",
+            "character",
+            "agent",
+          ],
           workingDir: character.workingDir ?? "",
           bareMode: Boolean(character.bareMode),
           debugMode: Boolean(character.debugMode),
@@ -737,6 +957,7 @@ function CharacterRow({
         }}
         skillsCatalog={skillsCatalog}
         mcpCatalog={mcpCatalog}
+        knowledgeBaseCatalog={knowledgeBaseCatalog}
         submitLabel={t("save")}
         onCancel={onEditCancel}
         onSave={onSave}
@@ -797,13 +1018,7 @@ function CharacterRow({
   } else if (isCloned && character.sourcePackId) {
     warnings = getPackWarnings(character.sourcePackId)
   }
-  const warningTitle = warnings
-    .map((w) =>
-      w.characterLocalId
-        ? `${w.code} (${w.characterLocalId}): ${w.missingId}`
-        : `${w.code}: ${w.missingId}`
-    )
-    .join("\n")
+  const warningTitle = formatPackWarnings(warnings, t)
 
   return (
     <Card className="p-3">
@@ -910,8 +1125,10 @@ function CharacterRow({
               {skillNames && `: ${skillNames}`}
             </p>
           )}
+          {isSupportAgentId(character.id) && <SupportAgentControls />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <AgentTaskBoardDialog agentId={character.id} agentName={character.name} />
           <Button
             variant="ghost"
             size="icon"
@@ -997,17 +1214,16 @@ function CharacterRow({
 
 function CharacterPacksSubsection() {
   const t = useTranslations("settings.characters")
-  // Subscribe to plugin state so the subsection re-renders when a plugin
-  // enables/disables (the overlay registry changes synchronously with
-  // the store). We read pack entries inside the render path — the call
-  // is cheap and the registry only mutates on enable/disable, never per
-  // keystroke.
-  const _pluginCount = usePluginStore((s) => Object.keys(s.plugins).length)
-  void _pluginCount
-  // Force re-render on every store change. We don't read the data via
-  // the selector because the registry isn't part of the Zustand state —
-  // it's a separate in-memory Map updated by the plugin manager. The
-  // selector subscription serves purely as a "something changed" tick.
+  // Local imports/deletes and dependency-warning refreshes mutate this
+  // in-memory registry without changing the plugin Zustand store. Subscribe to
+  // the registry itself so every mutation reaches the Settings UI immediately.
+  // The numeric snapshot is stable between mutations; using the entries array
+  // as a snapshot would allocate on every render and make React loop forever.
+  useSyncExternalStore(
+    subscribeCharacterPackRegistry,
+    getCharacterPackRegistryVersion,
+    getCharacterPackRegistryVersion
+  )
   const packs = listCharacterPackEntries()
 
   const handleImport = async () => {
@@ -1147,6 +1363,11 @@ function PackRow({
   // so the user knows at a glance that something inside this pack has a
   // missing dependency. Character-level detail is reached by expanding.
   const packWarnings = getPackWarnings(packId)
+  // ADR-0030 — signature trust, which is a different question from the
+  // dependency warnings above: it attests to who authored the pack, not to
+  // what happens to be installed here. Plugin-contributed packs suppress the
+  // "unsigned" chip; see `PackTrustChipProps.showUnsigned`.
+  const packTrust = getPackTrust(packId)
 
   const handleDelete = async () => {
     const result = await deleteLocalPack(packId)
@@ -1213,17 +1434,12 @@ function PackRow({
             <Badge variant="outline" className="text-[10px]">
               {sourceText}
             </Badge>
+            <PackTrustChip trust={packTrust} showUnsigned={isLocal} />
             {packWarnings.length > 0 && (
               <Badge
                 variant="outline"
                 className="border-yellow-500/40 bg-yellow-500/10 text-[10px] text-yellow-700 dark:text-yellow-300"
-                title={packWarnings
-                  .map((w) =>
-                    w.characterLocalId
-                      ? `${w.code} (${w.characterLocalId}): ${w.missingId}`
-                      : `${w.code}: ${w.missingId}`
-                  )
-                  .join("\n")}
+                title={formatPackWarnings(packWarnings, t)}
               >
                 {t("badge.missingDep", { count: packWarnings.length })}
               </Badge>
@@ -1313,11 +1529,24 @@ export type EditorState = {
   avatarEmoji: string
   systemPrompt: string
   model: string
+  planModel: string
+  utilityModel: string
+  executionEffort: NonNullable<Character["executionPolicy"]>["effort"] | "inherit"
+  executionMaxTurns: string
+  executionEnvBindings: NonNullable<Character["executionPolicy"]>["envBindings"]
   permissionMode: AppSettings["permissionMode"]
   allowedTools: string[]
   disallowedTools: string[]
   mcpServerIds: string[] | undefined
   skillIds: string[]
+  knowledgeBaseIds: string[]
+  memoryRecall: boolean
+  memoryCreate: boolean
+  memoryUpdate: boolean
+  memoryForget: boolean
+  memoryAutoLearn: boolean
+  memoryReadableScopes: NonNullable<Character["memoryPolicy"]>["readableScopes"]
+  memoryWritableScopes: NonNullable<Character["memoryPolicy"]>["writableScopes"]
   workingDir: string
   bareMode: boolean
   debugMode: boolean
@@ -1355,6 +1584,106 @@ export type EditorState = {
   availablePlatforms: PluginRuntimeProfile[]
 }
 
+type AgentMemoryScope = EditorState["memoryReadableScopes"][number]
+type MemoryBooleanField =
+  | "memoryRecall"
+  | "memoryCreate"
+  | "memoryUpdate"
+  | "memoryForget"
+  | "memoryAutoLearn"
+
+const AGENT_MEMORY_SCOPES: readonly AgentMemoryScope[] = [
+  "global",
+  "workspace",
+  "character",
+  "agent",
+]
+
+function MemoryPolicyEditor({
+  state,
+  onChange,
+}: {
+  state: EditorState
+  onChange: (next: EditorState) => void
+}) {
+  const t = useTranslations("settings.characters.editor.memoryPolicy")
+  const operationRows: Array<{ field: MemoryBooleanField; label: string }> = [
+    { field: "memoryRecall", label: t("operations.recall") },
+    { field: "memoryCreate", label: t("operations.create") },
+    { field: "memoryUpdate", label: t("operations.update") },
+    { field: "memoryForget", label: t("operations.forget") },
+    { field: "memoryAutoLearn", label: t("operations.autoLearn") },
+  ]
+
+  const toggleScope = (
+    field: "memoryReadableScopes" | "memoryWritableScopes",
+    scope: AgentMemoryScope
+  ) => {
+    const selected = state[field]
+    onChange({
+      ...state,
+      [field]: selected.includes(scope)
+        ? selected.filter((candidate) => candidate !== scope)
+        : [...selected, scope],
+    })
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+      <div className="space-y-1">
+        <Label className="text-xs font-medium">{t("title")}</Label>
+        <p className="text-[10px] text-muted-foreground">{t("description")}</p>
+        <p className="text-[10px] text-muted-foreground">{t("globalCeiling")}</p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {operationRows.map(({ field, label }) => (
+          <div key={field} className="flex items-center justify-between gap-3 rounded border p-2">
+            <Label className="cursor-pointer text-xs" htmlFor={`character-${field}`}>
+              {label}
+            </Label>
+            <Switch
+              id={`character-${field}`}
+              checked={state[field]}
+              onCheckedChange={(checked) => onChange({ ...state, [field]: checked })}
+              aria-label={label}
+            />
+          </div>
+        ))}
+      </div>
+
+      {(
+        [
+          ["memoryReadableScopes", t("readableScopes")],
+          ["memoryWritableScopes", t("writableScopes")],
+        ] as const
+      ).map(([field, label]) => (
+        <fieldset key={field} className="space-y-2">
+          <legend className="text-xs font-medium">{label}</legend>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {AGENT_MEMORY_SCOPES.map((scope) => {
+              const id = `character-${field}-${scope}`
+              return (
+                <div key={scope} className="flex items-center gap-2">
+                  <Checkbox
+                    id={id}
+                    checked={state[field].includes(scope)}
+                    onCheckedChange={() => toggleScope(field, scope)}
+                    aria-label={`${label}: ${t(`scopes.${scope}`)}`}
+                  />
+                  <Label htmlFor={id} className="cursor-pointer text-xs">
+                    {t(`scopes.${scope}`)}
+                  </Label>
+                </div>
+              )
+            })}
+          </div>
+        </fieldset>
+      ))}
+    </div>
+  )
+}
+
 type EditorOutput = {
   name: string
   description?: string
@@ -1362,11 +1691,15 @@ type EditorOutput = {
   avatarEmoji?: string
   systemPrompt: string
   model?: string
+  modelRouting?: Character["modelRouting"]
+  executionPolicy?: Character["executionPolicy"]
   permissionMode?: AppSettings["permissionMode"]
   allowedTools?: string[]
   disallowedTools?: string[]
   mcpServerIds?: string[]
   skillIds?: string[]
+  knowledgeBaseIds?: string[]
+  memoryPolicy?: Character["memoryPolicy"]
   workingDir?: string
   bareMode?: boolean
   debugMode?: boolean
@@ -1391,6 +1724,7 @@ interface EditorProps {
   initial: EditorState
   skillsCatalog: Skill[]
   mcpCatalog: McpServer[]
+  knowledgeBaseCatalog: KnowledgeBase[]
   submitLabel: string
   onCancel: () => void
   onSave: (data: EditorOutput) => Promise<void>
@@ -1429,6 +1763,7 @@ export function CharacterEditor({
   initial,
   skillsCatalog,
   mcpCatalog,
+  knowledgeBaseCatalog,
   submitLabel,
   onCancel,
   onSave,
@@ -1442,6 +1777,7 @@ export function CharacterEditor({
   const [s, setS] = useState<EditorState>(initial)
   const [allowToolsText, setAllowToolsText] = useState(initial.allowedTools.join(", "))
   const [denyToolsText, setDenyToolsText] = useState(initial.disallowedTools.join(", "))
+  const [envSecretValues, setEnvSecretValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([])
 
@@ -1461,6 +1797,7 @@ export function CharacterEditor({
     setS(initial)
     setAllowToolsText(initial.allowedTools.join(", "))
     setDenyToolsText(initial.disallowedTools.join(", "))
+    setEnvSecretValues({})
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [initial])
 
@@ -1496,22 +1833,106 @@ export function CharacterEditor({
       toast.error(t("validation.systemPromptRequired"))
       return
     }
+    const maxTurnsText = s.executionMaxTurns.trim()
+    const maxTurns = maxTurnsText ? Number(maxTurnsText) : undefined
+    if (maxTurns !== undefined && (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 100)) {
+      toast.error(tEditor("execution.maxTurnsInvalid"))
+      return
+    }
+    const envBindings = (s.executionEnvBindings ?? []).map((binding) => ({
+      ...binding,
+      name: binding.name.trim(),
+    }))
+    const envNames = new Set<string>()
+    for (const binding of envBindings) {
+      if (!isValidAgentEnvName(binding.name)) {
+        toast.error(tEditor("execution.envNameInvalid", { name: binding.name || "?" }))
+        return
+      }
+      if (envNames.has(binding.name)) {
+        toast.error(tEditor("execution.envNameDuplicate", { name: binding.name }))
+        return
+      }
+      envNames.add(binding.name)
+    }
+    const initialSecretRefs = new Set(
+      (initial.executionEnvBindings ?? [])
+        .filter(
+          (binding): binding is Extract<AgentEnvBinding, { kind: "secret" }> =>
+            binding.kind === "secret"
+        )
+        .map((binding) => binding.secretRef)
+    )
+    for (const binding of envBindings) {
+      if (
+        binding.kind === "secret" &&
+        !initialSecretRefs.has(binding.secretRef) &&
+        !envSecretValues[binding.secretRef]
+      ) {
+        toast.error(tEditor("execution.envSecretRequired", { name: binding.name }))
+        return
+      }
+    }
     setSaving(true)
     try {
+      for (const binding of envBindings) {
+        if (binding.kind !== "secret") continue
+        const value = envSecretValues[binding.secretRef]
+        if (!value) continue
+        try {
+          await saveAgentEnvSecret(binding.secretRef, value)
+        } catch (error) {
+          log.error("agent_env_secret_save_failed", error, { name: binding.name })
+          toast.error(tEditor("execution.envSecretSaveFailed", { name: binding.name }))
+          return
+        }
+      }
       const allowed = parseChips(allowToolsText)
       const disallowed = parseChips(denyToolsText)
+      const executeModel = s.model.trim() || undefined
+      const planModel = s.planModel.trim() || undefined
+      const utilityModel = s.utilityModel.trim() || undefined
+      const modelRouting =
+        planModel || executeModel || utilityModel
+          ? { plan: planModel, execute: executeModel, utility: utilityModel }
+          : undefined
+      const executionEffort = s.executionEffort === "inherit" ? undefined : s.executionEffort
+      const executionPolicy =
+        executionEffort || maxTurns !== undefined || envBindings.length > 0
+          ? {
+              effort: executionEffort,
+              maxTurns,
+              envBindings: envBindings.length > 0 ? envBindings : undefined,
+            }
+          : undefined
       await onSave({
         name: s.name.trim(),
         description: s.description.trim() || undefined,
         avatarColor: s.avatarColor,
         avatarEmoji: s.avatarEmoji.trim() || undefined,
         systemPrompt: s.systemPrompt,
-        model: s.model.trim() || undefined,
+        // Keep the legacy column for older clients while semantic routing is
+        // the new execution source of truth.
+        model: executeModel,
+        modelRouting,
+        executionPolicy,
         permissionMode: s.permissionMode,
         allowedTools: allowed.length > 0 ? allowed : undefined,
         disallowedTools: disallowed.length > 0 ? disallowed : undefined,
         mcpServerIds: s.mcpServerIds,
         skillIds: s.skillIds.length > 0 ? s.skillIds : undefined,
+        knowledgeBaseIds: s.knowledgeBaseIds.length > 0 ? s.knowledgeBaseIds : undefined,
+        memoryPolicy: {
+          operations: {
+            recall: s.memoryRecall,
+            create: s.memoryCreate,
+            update: s.memoryUpdate,
+            forget: s.memoryForget,
+          },
+          readableScopes: s.memoryReadableScopes,
+          writableScopes: s.memoryWritableScopes,
+          autoLearn: s.memoryAutoLearn,
+        },
         workingDir: s.workingDir.trim() || undefined,
         bareMode: s.bareMode || undefined,
         debugMode: s.debugMode || undefined,
@@ -1687,32 +2108,59 @@ export function CharacterEditor({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-1">
-          <Label className="text-xs">{tEditor("model")}</Label>
-          <Select
-            value={s.model || "__default__"}
-            onValueChange={(v) => setS({ ...s, model: v === "__default__" ? "" : v })}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__default__">{tEditor("useDefault")}</SelectItem>
-              {MODEL_PRESET_VALUES.map((v) => (
-                <SelectItem key={v} value={v}>
-                  {tGeneral(`model.${v}` as `model.${typeof v}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input
-            value={s.model}
-            onChange={(e) => setS({ ...s, model: e.target.value })}
-            placeholder={tEditor("modelIdPlaceholder")}
-            className="font-mono text-xs"
-          />
+      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+        <div>
+          <Label className="text-xs font-medium">{tEditor("routing.title")}</Label>
+          <p className="text-[10px] text-muted-foreground">{tEditor("routing.description")}</p>
         </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="space-y-1">
+            <Label className="text-xs">{tEditor("routing.plan")}</Label>
+            <Input
+              value={s.planModel}
+              onChange={(e) => setS({ ...s, planModel: e.target.value })}
+              placeholder={tEditor("routing.planPlaceholder")}
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{tEditor("routing.execute")}</Label>
+            <Select
+              value={s.model || "__default__"}
+              onValueChange={(v) => setS({ ...s, model: v === "__default__" ? "" : v })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">{tEditor("useDefault")}</SelectItem>
+                {MODEL_PRESET_VALUES.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {tGeneral(`model.${v}` as `model.${typeof v}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              value={s.model}
+              onChange={(e) => setS({ ...s, model: e.target.value })}
+              placeholder={tEditor("modelIdPlaceholder")}
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{tEditor("routing.utility")}</Label>
+            <Input
+              value={s.utilityModel}
+              onChange={(e) => setS({ ...s, utilityModel: e.target.value })}
+              placeholder={tEditor("routing.utilityPlaceholder")}
+              className="font-mono text-xs"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1">
           <Label className="text-xs">{tEditor("permissionMode")}</Label>
           <Select
@@ -1738,6 +2186,185 @@ export function CharacterEditor({
             </SelectContent>
           </Select>
         </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{tEditor("execution.effort")}</Label>
+          <Select
+            value={s.executionEffort}
+            onValueChange={(value) =>
+              setS({ ...s, executionEffort: value as EditorState["executionEffort"] })
+            }
+          >
+            <SelectTrigger aria-label={tEditor("execution.effort")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inherit">{tEditor("execution.inherit")}</SelectItem>
+              {(["low", "medium", "high", "xhigh", "max"] as const).map((effort) => (
+                <SelectItem key={effort} value={effort}>
+                  {tEditor(`execution.effortValues.${effort}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs" htmlFor="agent-max-turns">
+            {tEditor("execution.maxTurns")}
+          </Label>
+          <Input
+            id="agent-max-turns"
+            type="number"
+            min={1}
+            max={100}
+            value={s.executionMaxTurns}
+            onChange={(event) => setS({ ...s, executionMaxTurns: event.target.value })}
+            placeholder={tEditor("execution.maxTurnsPlaceholder")}
+          />
+          <p className="text-[10px] text-muted-foreground">{tEditor("execution.maxTurnsHint")}</p>
+        </div>
+      </div>
+
+      <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <Label className="text-xs font-medium">{tEditor("execution.envTitle")}</Label>
+            <p className="text-[10px] text-muted-foreground">
+              {tEditor("execution.envDescription")}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              setS((current) => ({
+                ...current,
+                executionEnvBindings: [
+                  ...(current.executionEnvBindings ?? []),
+                  { name: "", kind: "plain", value: "" },
+                ],
+              }))
+            }
+          >
+            <PlusIcon className="mr-1 size-3.5" />
+            {tEditor("execution.addEnv")}
+          </Button>
+        </div>
+        {(s.executionEnvBindings ?? []).map((binding, index) => {
+          const rowId = `agent-env-${index}`
+          return (
+            <div
+              key={`${binding.kind}-${binding.kind === "secret" ? binding.secretRef : index}`}
+              className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_7.5rem_1fr_auto]"
+            >
+              <div className="space-y-1">
+                <Label className="text-xs" htmlFor={`${rowId}-name`}>
+                  {tEditor("execution.envName")}
+                </Label>
+                <Input
+                  id={`${rowId}-name`}
+                  value={binding.name}
+                  onChange={(event) =>
+                    setS((current) => ({
+                      ...current,
+                      executionEnvBindings: (current.executionEnvBindings ?? []).map((item, i) =>
+                        i === index ? { ...item, name: event.target.value } : item
+                      ),
+                    }))
+                  }
+                  placeholder={tEditor("execution.envNamePlaceholder")}
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">{tEditor("execution.envKind")}</Label>
+                <Select
+                  value={binding.kind}
+                  onValueChange={(kind) =>
+                    setS((current) => ({
+                      ...current,
+                      executionEnvBindings: (current.executionEnvBindings ?? []).map((item, i) => {
+                        if (i !== index || item.kind === kind) return item
+                        return kind === "secret"
+                          ? {
+                              name: item.name,
+                              kind: "secret" as const,
+                              secretRef: createAgentEnvSecretRef(
+                                editingId ?? "new-agent",
+                                item.name || "ENV"
+                              ),
+                            }
+                          : { name: item.name, kind: "plain" as const, value: "" }
+                      }),
+                    }))
+                  }
+                >
+                  <SelectTrigger aria-label={tEditor("execution.envKind")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="plain">{tEditor("execution.envPlain")}</SelectItem>
+                    <SelectItem value="secret">{tEditor("execution.envSecret")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs" htmlFor={`${rowId}-value`}>
+                  {tEditor("execution.envValue")}
+                </Label>
+                <Input
+                  id={`${rowId}-value`}
+                  type={binding.kind === "secret" ? "password" : "text"}
+                  autoComplete={binding.kind === "secret" ? "new-password" : undefined}
+                  value={
+                    binding.kind === "secret"
+                      ? (envSecretValues[binding.secretRef] ?? "")
+                      : binding.value
+                  }
+                  onChange={(event) => {
+                    if (binding.kind === "secret") {
+                      setEnvSecretValues((current) => ({
+                        ...current,
+                        [binding.secretRef]: event.target.value,
+                      }))
+                      return
+                    }
+                    setS((current) => ({
+                      ...current,
+                      executionEnvBindings: (current.executionEnvBindings ?? []).map((item, i) =>
+                        i === index && item.kind === "plain"
+                          ? { ...item, value: event.target.value }
+                          : item
+                      ),
+                    }))
+                  }}
+                  placeholder={
+                    binding.kind === "secret"
+                      ? tEditor("execution.envSecretPlaceholder")
+                      : tEditor("execution.envPlainPlaceholder")
+                  }
+                  className="font-mono text-xs"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() =>
+                  setS((current) => ({
+                    ...current,
+                    executionEnvBindings: (current.executionEnvBindings ?? []).filter(
+                      (_, i) => i !== index
+                    ),
+                  }))
+                }
+                aria-label={tEditor("execution.removeEnv", { name: binding.name || "?" })}
+              >
+                <Trash2Icon className="size-4" />
+              </Button>
+            </div>
+          )
+        })}
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1927,6 +2554,22 @@ export function CharacterEditor({
         }
         excludeCharacterId={editingId}
       />
+
+      <ItemMultiSelect
+        label={tEditor("knowledgeBases")}
+        helpText={tEditor("knowledgeBasesHint")}
+        items={knowledgeBaseCatalog.map((knowledgeBase) => ({
+          id: knowledgeBase.id,
+          name: knowledgeBase.name,
+          description: knowledgeBase.description,
+        }))}
+        selectedIds={s.knowledgeBaseIds}
+        allowEmpty
+        emptyHint={tEditor("knowledgeBasesEmptyHint")}
+        onChange={(ids) => setS({ ...s, knowledgeBaseIds: ids })}
+      />
+
+      <MemoryPolicyEditor state={s} onChange={setS} />
 
       <ItemMultiSelect
         label={tEditor("skills")}

@@ -129,11 +129,36 @@ export async function migrateLegacyIntegration(
       )
 
       const now = new Date().toISOString()
+      const ingressByAccount = new Map(
+        plan.accounts.flatMap((account) => {
+          const subscription = plan.subscriptions.find(
+            (candidate) =>
+              candidate.accountId === account.id && Boolean(candidate.ingressSecretHandle)
+          )
+          if (!subscription?.ingressSecretHandle) return []
+          const routeId = crypto.randomUUID()
+          return [
+            [
+              account.id,
+              {
+                id: crypto.randomUUID(),
+                accountId: account.id,
+                routeId,
+                secretHandle: subscription.ingressSecretHandle,
+                enabled: true,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ] as const,
+          ]
+        })
+      )
       const accounts: IntegrationAccount[] = plan.accounts.map((account) => ({
         ...account,
         pluginId,
         enabled: account.enabled ?? true,
         health: "unknown",
+        ingressEndpoint: ingressByAccount.get(account.id),
         createdAt: now,
         updatedAt: now,
       }))
@@ -142,7 +167,10 @@ export async function migrateLegacyIntegration(
         pluginId,
         eventTypes: [...new Set(subscription.eventTypes)].sort(),
         enabled: subscription.enabled ?? true,
-        ingressRouteId: subscription.ingressSecretHandle ? crypto.randomUUID() : undefined,
+        ingressRouteId: ingressByAccount.get(subscription.accountId)?.routeId,
+        ingressSecretHandle:
+          ingressByAccount.get(subscription.accountId)?.secretHandle ??
+          subscription.ingressSecretHandle,
         createdAt: now,
         updatedAt: now,
       }))

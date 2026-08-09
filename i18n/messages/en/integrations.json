@@ -4,13 +4,41 @@
     "approvedOrigin": "Approved self-hosted HTTPS origin (optional)",
     "authStrategy": "Authentication method",
     "credentialHandle": "Credential handle",
+    "discoverInstallations": "Discover installations",
     "integration": "Integration",
+    "installation": "Installation",
     "label": "Account label",
     "providerId": "Auth provider ID",
     "remoteAccountId": "Remote account ID",
     "selectAuthStrategy": "Select an authentication method",
     "selectIntegration": "Select an integration",
-    "title": "Accounts"
+    "selectInstallation": "Select an installation",
+    "title": "Accounts",
+    "advanced": "Advanced",
+    "checkHealth": "Check account health",
+    "configured": "Configured",
+    "configFields": {
+      "accountLabel": "Account label",
+      "appId": "App ID",
+      "privateKey": "Private key",
+      "token": "Personal access token"
+    },
+    "dedicatedAppConfirmation": "I confirm this is a dedicated integration app.",
+    "lastSync": "Last sync",
+    "missingPermissions": "Missing permissions",
+    "notConfigured": "Not configured",
+    "rateLimitReset": "Rate limit resets",
+    "recommended": "Recommended",
+    "statusMessages": {
+      "installationRevoked": "The GitHub App installation was revoked.",
+      "installationSuspended": "The GitHub App installation is suspended.",
+      "permissionsMissing": "The GitHub App installation is missing required permissions.",
+      "remoteReconciliationUnavailable": "Remote account reconciliation is unavailable.",
+      "webhookVerified": "The webhook configuration was verified."
+    },
+    "validateAndAdd": "Validate and add",
+    "webhookUrl": "Webhook URL",
+    "webhookVerification": "Webhook verification"
   },
   "approvals": {
     "approve": "Approve",
@@ -58,7 +86,56 @@
     "resourceId": "Resource ID (optional)",
     "resourceKind": "Resource kind (optional)",
     "selectAccount": "Select an account",
-    "title": "Subscriptions"
+    "title": "Subscriptions",
+    "deliverToInbox": "Deliver events to Inbox",
+    "disabledByProvider": "Disabled by the provider",
+    "discover": "Discover",
+    "events": "Events",
+    "eventLabels": {
+      "checkRunCompleted": "Check run completed",
+      "githubAppAuthorizationRevoked": "GitHub App authorization revoked",
+      "installationCreated": "Installation created",
+      "installationDeleted": "Installation deleted",
+      "installationPermissionsAccepted": "Installation permissions accepted",
+      "installationSuspended": "Installation suspended",
+      "installationUnsuspended": "Installation unsuspended",
+      "issueAssigned": "Issue assigned",
+      "issueClosed": "Issue closed",
+      "issueCommentCreated": "Issue comment created",
+      "issueLabeled": "Issue labeled",
+      "issueOpened": "Issue opened",
+      "pullRequestClosed": "Pull request closed",
+      "pullRequestOpened": "Pull request opened",
+      "pullRequestReviewRequested": "Pull request review requested",
+      "pullRequestReviewSubmitted": "Pull request review submitted",
+      "pullRequestSynchronized": "Pull request synchronized",
+      "pushReceived": "Push received",
+      "releasePublished": "Release published",
+      "repositoriesAdded": "Repositories added to installation",
+      "repositoriesRemoved": "Repositories removed from installation"
+    },
+    "failedDeliveries": "Failed deliveries",
+    "loadMore": "Load more",
+    "noFailedDeliveries": "No failed deliveries.",
+    "projection": "Inbox projection",
+    "projectionLabels": {
+      "issueCommentThread": "Issue comment thread",
+      "issueThread": "Issue thread",
+      "pullRequestThread": "Pull request thread"
+    },
+    "repository": "Repository",
+    "requeue": "Requeue",
+    "searchResources": "Search resources",
+    "selectProjection": "Select a projection"
   },
-  "title": "Integrations"
+  "title": "Integrations",
+  "errors": {
+    "accountSetup": "Couldn't set up the integration account.",
+    "confirmDedicatedApp": "Confirm that this is a dedicated integration app.",
+    "installationDiscovery": "Couldn't discover GitHub App installations.",
+    "projectionRequired": "Select an inbox projection.",
+    "resourceDiscovery": "Couldn't discover resources.",
+    "subscriptionSetup": "Couldn't create the subscription."
+  },
+  "unsupportedWeb": "Integration management requires the desktop app."
 }

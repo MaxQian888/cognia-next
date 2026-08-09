@@ -1,11 +1,9 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for the Drafts → Accept unredact-preview helper. We seed a
  * twin source with an encrypted redaction map, then build a draft that
  * references the placeholders and walk the helper end-to-end.
  */
 
-import "fake-indexeddb/auto"
 import {
   applyUnredactSelection,
   findPlaceholders,
@@ -15,14 +13,14 @@ import {
 import { encryptRedactionMap, __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { redactText } from "@cognia/redact"
 import { createTwinSource } from "@/lib/db/twin-sources"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { TwinDraft } from "@/types/twin"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await __resetRedactionKey()
 })
 
@@ -59,6 +57,8 @@ function buildDraft(twinId: string, body: string): TwinDraft {
     createdAt: Date.now(),
   }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("findPlaceholders", () => {
   it("returns deduped placeholders in order", () => {

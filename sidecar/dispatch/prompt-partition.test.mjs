@@ -12,8 +12,8 @@ const sys = (content, providerOptions) => ({
 })
 
 test("emits under the key the installed AI SDK accepts", () => {
-  // ai@6 only accepts `system` on streamText. Flip this pin in the v7 bump.
-  assert.equal(EMITTED_INSTRUCTIONS_KEY, "system")
+  // v7 canonical name; `system` is only a deprecated alias now.
+  assert.equal(EMITTED_INSTRUCTIONS_KEY, "instructions")
 })
 
 test("leaves a system-free conversation untouched", () => {
@@ -32,7 +32,7 @@ test("handles empty and non-array input", () => {
 
 test("hoists a single leading system message", () => {
   const result = partitionPrompt([sys("be terse"), { role: "user", content: "hi" }])
-  assert.deepEqual(result.system, [{ role: "system", content: "be terse" }])
+  assert.deepEqual(result.instructions, [{ role: "system", content: "be terse" }])
   assert.deepEqual(result.messages, [{ role: "user", content: "hi" }])
   assert.equal(result.allowSystemInMessages, undefined)
 })
@@ -47,7 +47,7 @@ test("preserves order and per-message providerOptions across the leading run", (
     { role: "user", content: "hi" },
   ])
 
-  assert.deepEqual(result.system, [
+  assert.deepEqual(result.instructions, [
     { role: "system", content: "base", providerOptions: CACHE_CONTROL },
     { role: "system", content: "stable append", providerOptions: CACHE_CONTROL },
     { role: "system", content: "per-turn tail" },
@@ -57,7 +57,7 @@ test("preserves order and per-message providerOptions across the leading run", (
 
 test("prepends separately-carried leading instructions ahead of history system content", () => {
   const result = partitionPrompt([sys("from history"), { role: "user", content: "hi" }], "composed")
-  assert.deepEqual(result.system, [
+  assert.deepEqual(result.instructions, [
     { role: "system", content: "composed" },
     { role: "system", content: "from history" },
   ])
@@ -65,24 +65,27 @@ test("prepends separately-carried leading instructions ahead of history system c
 
 test("drops blank leading instructions instead of emitting an empty system turn", () => {
   for (const value of [undefined, null, "", "   \n\t "]) {
-    assert.equal(partitionPrompt([{ role: "user", content: "hi" }], value).system, undefined)
+    assert.equal(partitionPrompt([{ role: "user", content: "hi" }], value).instructions, undefined)
   }
 })
 
 test("accepts a single system message or an array as leading instructions", () => {
   assert.deepEqual(
-    partitionPrompt([{ role: "user", content: "x" }], sys("solo", CACHE_CONTROL)).system,
+    partitionPrompt([{ role: "user", content: "x" }], sys("solo", CACHE_CONTROL)).instructions,
     [{ role: "system", content: "solo", providerOptions: CACHE_CONTROL }]
   )
-  assert.deepEqual(partitionPrompt([{ role: "user", content: "x" }], [sys("a"), sys("b")]).system, [
-    { role: "system", content: "a" },
-    { role: "system", content: "b" },
-  ])
+  assert.deepEqual(
+    partitionPrompt([{ role: "user", content: "x" }], [sys("a"), sys("b")]).instructions,
+    [
+      { role: "system", content: "a" },
+      { role: "system", content: "b" },
+    ]
+  )
 })
 
 test("drops blank system messages so they never reach the provider", () => {
   const result = partitionPrompt([sys("   "), sys("real"), { role: "user", content: "hi" }])
-  assert.deepEqual(result.system, [{ role: "system", content: "real" }])
+  assert.deepEqual(result.instructions, [{ role: "system", content: "real" }])
 })
 
 test("leaves mid-history system messages in place and opts them back in", () => {
@@ -95,7 +98,7 @@ test("leaves mid-history system messages in place and opts them back in", () => 
   ]
   const result = partitionPrompt(messages)
 
-  assert.equal(result.system, undefined)
+  assert.equal(result.instructions, undefined)
   assert.deepEqual(result.messages, messages)
   assert.equal(result.allowSystemInMessages, true)
 })
@@ -108,7 +111,7 @@ test("hoists the leading run while still opting in for an interleaved system mes
     { role: "assistant", content: "ok" },
   ])
 
-  assert.deepEqual(result.system, [{ role: "system", content: "base" }])
+  assert.deepEqual(result.instructions, [{ role: "system", content: "base" }])
   assert.deepEqual(result.messages, [
     { role: "user", content: "hi" },
     { role: "system", content: "mid" },
@@ -119,7 +122,7 @@ test("hoists the leading run while still opting in for an interleaved system mes
 
 test("treats an all-system conversation as pure instructions", () => {
   const result = partitionPrompt([sys("a"), sys("b")])
-  assert.deepEqual(result.system, [
+  assert.deepEqual(result.instructions, [
     { role: "system", content: "a" },
     { role: "system", content: "b" },
   ])

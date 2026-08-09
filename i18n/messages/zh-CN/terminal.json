@@ -22,21 +22,21 @@
     },
     "closePane": "关闭分屏",
     "closePanel": "关闭面板",
-    "maximize": "最大化终端面板",
-    "newSession": "新建终端",
-    "resize": "拖动调整终端 dock 高度（方向键亦可）",
-    "restore": "还原终端面板大小",
     "detachError": "无法断开终端：{message}",
-    "spawnDenied": "终端被插件拦截",
-    "spawnError": "无法打开终端：{message}",
-    "splitRight": "向右分屏（Ctrl+\\）",
     "dragToMove": "拖动以移动终端 dock",
     "dropZoneBottom": "拖放到此处可将终端停靠在底部",
     "dropZoneRight": "拖放到此处可将终端停靠在右侧",
+    "maximize": "最大化终端面板",
     "moveToBottom": "将终端停靠到底部",
     "moveToRight": "将终端停靠到右侧",
+    "newSession": "新建终端",
     "overflowTabs": "更多终端标签页",
-    "resizeVertical": "拖动以调整终端面板宽度（也可使用方向键）"
+    "resize": "拖动调整终端 dock 高度（方向键亦可）",
+    "resizeVertical": "拖动以调整终端面板宽度（也可使用方向键）",
+    "restore": "还原终端面板大小",
+    "spawnDenied": "终端被插件拦截",
+    "spawnError": "无法打开终端：{message}",
+    "splitRight": "向右分屏（Ctrl+\\）"
   },
   "emptyState": {
     "desktop": {
@@ -64,6 +64,11 @@
     "error": "打开文件失败：{message}",
     "loading": "加载中…",
     "title": "文件查看器"
+  },
+  "fold": {
+    "collapse": "折叠输出",
+    "expand": "展开输出",
+    "linesHidden": "已隐藏 {count} 行"
   },
   "ghost": {
     "acceptHint": "Tab"
@@ -154,9 +159,44 @@
   "stickyScroll": {
     "label": "固定的命令标题"
   },
+  "template": {
+    "cancel": "取消",
+    "inputPlaceholder": "请输入值",
+    "run": "运行",
+    "selectPlaceholder": "请选择",
+    "title": "填写模板变量"
+  },
   "tab": {
+    "appearance": {
+      "colorLabel": "颜色",
+      "colors": {
+        "blue": "蓝色",
+        "cyan": "青色",
+        "green": "绿色",
+        "none": "无",
+        "orange": "橙色",
+        "pink": "粉色",
+        "purple": "紫色",
+        "red": "红色",
+        "yellow": "黄色"
+      },
+      "iconLabel": "图标",
+      "icons": {
+        "bug": "Bug",
+        "code": "代码",
+        "container": "容器",
+        "database": "数据库",
+        "globe": "网络",
+        "none": "无",
+        "rocket": "火箭",
+        "server": "服务器",
+        "terminal": "终端"
+      },
+      "trigger": "自定义外观"
+    },
     "close": "关闭终端",
     "menu": {
+      "appearance": "更改外观",
       "clear": "清屏",
       "close": "关闭",
       "closeOthers": "关闭其他",
@@ -178,7 +218,106 @@
       "exitedFail": "退出码非零",
       "exitedOk": "已正常退出",
       "idle": "空闲",
+      "newOutput": "有新输出",
       "running": "运行中"
+    }
+  },
+  "aiShell": {
+    "title": "AI Shell",
+    "toggle": "切换 AI Shell（Ctrl+Shift+I）",
+    "inputPlaceholder": "描述你想做什么…",
+    "send": "发送",
+    "context": {
+      "branch": "分支",
+      "cwd": "工作目录",
+      "shell": "Shell"
+    },
+    "plan": {
+      "title": "执行计划",
+      "empty": "未生成任何步骤。",
+      "generating": "正在生成计划…",
+      "ready": "计划就绪 — 审阅后执行。",
+      "executing": "执行中…",
+      "completed": "所有步骤已完成。",
+      "cancelled": "计划已取消。",
+      "error": "生成计划失败。"
+    },
+    "step": {
+      "pending": "待执行",
+      "running": "运行中…",
+      "succeeded": "完成",
+      "failed": "失败（退出码 {code}）",
+      "failedNoCode": "失败",
+      "skipped": "已跳过",
+      "cancelled": "已取消",
+      "confirm": "此步骤可能具有破坏性，是否执行？",
+      "edit": "编辑命令",
+      "skip": "跳过步骤",
+      "retry": "重试步骤"
+    },
+    "actions": {
+      "runAll": "全部执行",
+      "stepByStep": "逐步执行",
+      "cancel": "取消",
+      "stop": "停止执行",
+      "newPlan": "新计划"
+    },
+    "error": {
+      "noModel": "未配置模型，请在设置中选择。",
+      "piiBlocked": "上下文中包含敏感信息 — 请脱敏后重试。",
+      "generating": "生成计划时出错。",
+      "advisory": "诊断"
+    },
+    "advisory": {
+      "title": "错误诊断",
+      "fix": "建议修复：",
+      "noFix": "无法自动修复。",
+      "applyFix": "应用修复",
+      "retryHint": "应用修复后重新运行原始步骤。"
+    },
+    "history": {
+      "title": "AI Shell 历史",
+      "clear": "清除历史",
+      "empty": "暂无消息。"
+    }
+  },
+  "recording": {
+    "title": "录制",
+    "start": "开始录制",
+    "stop": "停止录制",
+    "pause": "暂停录制",
+    "resume": "继续录制",
+    "discard": "丢弃录制",
+    "save": "保存录制",
+    "status": {
+      "idle": "准备就绪",
+      "recording": "录制中…",
+      "paused": "已暂停",
+      "stopped": "录制完成"
+    },
+    "elapsed": "{time}",
+    "frames": "{count} 帧",
+    "player": {
+      "play": "播放",
+      "pause": "暂停",
+      "speed": "速度：{speed}×",
+      "seek": "跳转",
+      "duration": "{time}",
+      "restart": "重新开始"
+    },
+    "export": {
+      "title": "导出",
+      "gif": "导出为 GIF",
+      "cast": "导出为 .cast",
+      "exporting": "导出中…",
+      "done": "导出完成",
+      "error": "导出失败：{message}"
+    },
+    "list": {
+      "title": "录制列表",
+      "empty": "暂无录制。",
+      "delete": "删除录制",
+      "deleteConfirm": "确定删除此录制？此操作不可撤销。"
     }
   }
 }

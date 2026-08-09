@@ -136,6 +136,21 @@ describe("auth provider registry", () => {
       expect(provider.createSession).toHaveBeenCalledTimes(1)
     })
 
+    it("passes host-owned configuration to interactive session creation", async () => {
+      const provider = makeProvider({ id: "configured-provider" })
+      registerAuthenticationProvider(provider)
+
+      await getSession("configured-provider", ["repo"], {
+        createIfNone: true,
+        configuration: { installationId: "42" },
+      })
+
+      expect(provider.createSession).toHaveBeenCalledWith(["repo"], {
+        createIfNone: true,
+        configuration: { installationId: "42" },
+      })
+    })
+
     it("creates a fresh session when forceNewSession is true even if one exists", async () => {
       const provider = makeProvider()
       registerAuthenticationProvider(provider)

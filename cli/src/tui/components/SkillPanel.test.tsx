@@ -71,6 +71,12 @@ describe("SkillPanel", () => {
     expect(onToggle).toHaveBeenCalledWith("web-search")
   })
 
+  it("Tab toggles the highlighted skill", () => {
+    const { onToggle } = wrap()
+    key("", { tab: true })
+    expect(onToggle).toHaveBeenCalledWith("web-search")
+  })
+
   it("Enter opens the detail pager", () => {
     const { onShow } = wrap()
     key("", { downArrow: true })

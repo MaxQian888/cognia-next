@@ -15,6 +15,13 @@ jest.mock("@/lib/claude/ipc", () => ({
   closeSession: jest.fn(async () => undefined),
 }))
 
+const mockSaveAgentEnvSecret = jest.fn(async (_secretRef: string, _value: string) => undefined)
+jest.mock("@/lib/agent/agent-env-keyring", () => ({
+  createAgentEnvSecretRef: (sessionId: string, name: string) => `${sessionId}:${name}:new`,
+  saveAgentEnvSecret: (secretRef: string, value: string) =>
+    mockSaveAgentEnvSecret(secretRef, value),
+}))
+
 jest.mock("@/components/chat/dialogs/clear-conversation-trigger", () => ({
   ClearConversationTrigger: () => null,
 }))
@@ -30,6 +37,10 @@ jest.mock("./header-account-switcher", () => ({
 
 jest.mock("@/components/chat/dialogs/single-export-trigger", () => ({
   SingleExportTrigger: () => null,
+}))
+
+jest.mock("./session-communication-sheet", () => ({
+  SessionCommunicationSheet: () => null,
 }))
 
 // Branch + active-session + toast are exercised by the branch action tests.
@@ -152,6 +163,7 @@ describe("SessionSettingsSheet", () => {
     mockOpenDialog.mockResolvedValue(null)
     mockCloseSession.mockResolvedValue(undefined)
     mockBranch.mockResolvedValue({ id: "branch_1" })
+    mockSaveAgentEnvSecret.mockClear()
     mockSessionSlices = {}
     setActiveSessionMock.mockClear()
     mockEphemeralSkillIds = []
@@ -206,6 +218,139 @@ describe("SessionSettingsSheet", () => {
     expect(screen.getByTestId("cost-badge")).toHaveTextContent("ses_1")
     expect(screen.getByTestId("plan-tasks")).toBeInTheDocument()
     expect(screen.getByTestId("plugin-slot")).toBeInTheDocument()
+  })
+
+  it("shows the effective Agent model and execution summary on mobile", () => {
+    const character = mkCharacter({
+      id: "agent-1",
+      model: "legacy-execute",
+      modelRouting: { plan: "planner", execute: "executor", utility: "fast" },
+      executionPolicy: { effort: "medium", maxTurns: 20 },
+    })
+    const adapter = makeAdapter({ useCharacter: () => character })
+
+    render(
+      <DataAdapterProvider adapter={adapter}>
+        <SessionSettingsSheet
+          session={mkSession({
+            characterId: "agent-1",
+            executionPolicy: { maxTurns: 8 },
+          })}
+          open
+          onOpenChange={jest.fn()}
+          showAmbientStatus
+        />
+      </DataAdapterProvider>
+    )
+
+    const summary = screen.getByTestId("agent-execution-summary")
+    expect(summary).toHaveTextContent("planner")
+    expect(summary).toHaveTextContent("executor")
+    expect(summary).toHaveTextContent("fast")
+    expect(summary).toHaveTextContent("medium")
+    expect(summary).toHaveTextContent("8")
+  })
+
+  it("persists session execution overrides", async () => {
+    const updateSession = jest.fn(async (_id: string, _patch: unknown) => undefined)
+    const adapter = makeAdapter({ updateSession })
+    render(
+      <DataAdapterProvider adapter={adapter}>
+        <SessionSettingsSheet
+          session={mkSession({
+            id: "ses_exec",
+            effort: "high",
+            executionPolicy: {
+              maxTurns: 12,
+              envBindings: [{ name: "MODE", kind: "plain", value: "safe" }],
+            },
+          })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+
+    expect(screen.getByRole("combobox", { name: /execution effort/i })).toHaveTextContent("High")
+    expect(screen.getByRole("spinbutton", { name: /maximum turns/i })).toHaveValue(12)
+    expect(screen.getByRole("textbox", { name: /environment variable name/i })).toHaveValue("MODE")
+    expect(screen.getByRole("textbox", { name: /environment variable value/i })).toHaveValue("safe")
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    })
+
+    await waitFor(() => expect(updateSession).toHaveBeenCalledTimes(1))
+    expect(updateSession.mock.calls[0][1]).toMatchObject({
+      effort: "high",
+      executionPolicy: {
+        maxTurns: 12,
+        envBindings: [{ name: "MODE", kind: "plain", value: "safe" }],
+      },
+    })
+  })
+
+  it("preserves an untouched composite thinking level while saving execution overrides", async () => {
+    const updateSession = jest.fn(async (_id: string, _patch: unknown) => undefined)
+    render(
+      <DataAdapterProvider adapter={makeAdapter({ updateSession })}>
+        <SessionSettingsSheet
+          session={mkSession({
+            effort: "xhigh",
+            thinkingLevel: "ultracode",
+            executionPolicy: { maxTurns: 6 },
+          })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    })
+
+    await waitFor(() => expect(updateSession).toHaveBeenCalledTimes(1))
+    expect(updateSession.mock.calls[0][1]).toMatchObject({
+      effort: "xhigh",
+      thinkingLevel: "ultracode",
+      executionPolicy: { maxTurns: 6 },
+    })
+  })
+
+  it("updates a session secret in the keyring without persisting its value", async () => {
+    const updateSession = jest.fn(async (_id: string, _patch: unknown) => undefined)
+    const secretBinding = {
+      name: "TOKEN",
+      kind: "secret" as const,
+      secretRef: "ses_secret:TOKEN",
+    }
+    render(
+      <DataAdapterProvider adapter={makeAdapter({ updateSession })}>
+        <SessionSettingsSheet
+          session={mkSession({
+            id: "ses_secret",
+            executionPolicy: { envBindings: [secretBinding] },
+          })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+
+    fireEvent.change(screen.getByLabelText(/environment variable value/i), {
+      target: { value: "super-secret" },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    })
+
+    await waitFor(() => expect(updateSession).toHaveBeenCalledTimes(1))
+    expect(mockSaveAgentEnvSecret).toHaveBeenCalledWith("ses_secret:TOKEN", "super-secret")
+    expect(updateSession.mock.calls[0][1]).toMatchObject({
+      executionPolicy: { envBindings: [secretBinding] },
+    })
+    expect(JSON.stringify(updateSession.mock.calls[0][1])).not.toContain("super-secret")
   })
 
   it("Save calls updateSession with the session id and closes the sheet", async () => {

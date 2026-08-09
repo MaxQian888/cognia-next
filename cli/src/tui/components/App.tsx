@@ -10,10 +10,9 @@ import fs from "node:fs"
 import os from "node:os"
 import nodePath from "node:path"
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
-import { Box, useApp, useStdout, type DOMElement } from "ink"
+import { useApp, useBoxMetrics, useStdout, type DOMElement } from "ink"
 
 import { Banner } from "./Banner"
-import { overlayListRows } from "./overlay-layout"
 import { useScroll } from "../hooks/useScroll"
 import { useTranscriptCursor } from "../hooks/useTranscriptCursor"
 import { resolveLayoutMode, readLayoutCapability, type LayoutCapability } from "../layout-mode"
@@ -116,6 +115,7 @@ import { appendHistory } from "../input/history-store"
 import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
 import { useLogIngest } from "../hooks/use-log-ingest"
 import { useTerminalSize } from "../hooks/useTerminalSize"
+import { terminalLayout } from "../layout/terminal-layout"
 import { addToolApproval, readToolApprovals } from "../../agent/tool-approvals"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
@@ -180,6 +180,7 @@ import type { FrameBuffer } from "../selection/frame-buffer"
 import { TranscriptRegion } from "./app/TranscriptRegion"
 import { AppOverlays } from "./app/AppOverlays"
 import { BottomRegion } from "./app/BottomRegion"
+import { TuiViewportFrame } from "./app/TuiViewportFrame"
 import type { AgentTreeHit } from "./BottomStatus"
 import { useGlobalKeys } from "./app/use-global-keys"
 import { useApplyEffect } from "./app/use-apply-effect"
@@ -195,6 +196,7 @@ export type InstallOptionResolver = (
 export type InstallRunner = (deps: {
   method: InstallMethod
   onLine: (line: string) => void
+  signal?: AbortSignal
 }) => Promise<RunInstallResult>
 
 /**
@@ -224,6 +226,7 @@ async function defaultResolveInstallOption(
 async function defaultRunInstall(deps: {
   method: InstallMethod
   onLine: (line: string) => void
+  signal?: AbortSignal
 }): Promise<RunInstallResult> {
   const { runInstall } = await import("../runtime/backend-install")
   return runInstall(deps)
@@ -257,7 +260,7 @@ export interface AppProps {
   resolveInstallOptionFn?: InstallOptionResolver
   /** Run the chosen install method. Injected so tests never spawn an installer. */
   runInstallFn?: InstallRunner
-  pushHandoff?: (sessionId: string) => void | Promise<void>
+  pushHandoff?: (sessionId: string) => boolean | Promise<boolean>
   /** Override the exit + clock for tests. */
   onExit?: () => void
   now?: () => number
@@ -506,6 +509,7 @@ export function App({
   // The install option resolved for the current failure (a ref so the failure
   // page's "install" handler reads the latest without recreating the callback).
   const installOptionRef = useRef<BackendInstallOption | null>(null)
+  const installAbortRef = useRef<AbortController | null>(null)
   const activeBackend = state.config.agentBackend ?? "builtin"
   useEffect(() => {
     // Invalidate an in-flight external catalog read whenever the selected/live
@@ -734,9 +738,9 @@ export function App({
   // list rows fit before scrolling. The live frame reflows the instant this
   // updates; only the heavy `<Static>` repaint below is debounced.
   const { columns, rows } = useTerminalSize()
+  const layoutBudget = terminalLayout(columns, rows)
   // Row budget for inline popups, which sit above the composer so they stay
-  // compact. (`overlayRows`, which depends on the resolved `fullscreen` flag, is
-  // computed once that's known — see below.)
+  // compact while the composer consumes its separate density-tier row budget.
   const popupRows = Math.max(3, Math.min(10, rows - 6))
 
   // One shared MCP probe cache for the whole App session: the startup warm seeds
@@ -777,13 +781,14 @@ export function App({
   // under jsdom with no TTY, keeps the historic layout untouched).
   const capability = layoutCapability ?? readLayoutCapability()
   const fullscreen = resolveLayoutMode(state.config.layout, capability) === "fullscreen"
-  // Row budget for the modal overlay list (e.g. `/model`). Reserves the list's
-  // own chrome (border/title/footer AND the two "↑/↓ N more" scroll-hint rows),
-  // the bottom status/mascot/footer, and — in fullscreen — the fixed top banner.
-  // Under-reserving lets a long list build a box taller than the terminal, which
-  // squeezes the list and clips the highlighted row (the cursor "disappears" as
-  // you scroll down). See overlay-layout.ts for the per-region breakdown.
-  const overlayRows = overlayListRows(rows, fullscreen)
+  const overlayRegionRef = useRef<DOMElement | null>(null)
+  const overlayMetrics = useBoxMetrics(overlayRegionRef)
+  // The region is measured after Yoga allocates the fixed bottom chrome. Until
+  // that first pass, use a conservative fallback; overflow clipping still makes
+  // the actual region authoritative.
+  const overlayViewportRows = overlayMetrics.hasMeasured
+    ? overlayMetrics.height
+    : Math.max(1, rows - (layoutBudget.tier === "tiny" ? 1 : 3))
   // Fullscreen mouse model (default = native click-drag selection). Drives the
   // alt-screen mouse escapes below and whether the wheel scrolls the transcript.
   const mouseMode = state.config.mouse ?? DEFAULT_MOUSE_MODE
@@ -877,7 +882,7 @@ export function App({
   const activeProvider = activeMetaTarget.provider
   useEffect(() => {
     let cancelled = false
-    void countInterruptedCliBackgroundRuns({ home })
+    void countInterruptedCliBackgroundRuns({ home, owner: state.sessionId })
       .then((count) => {
         if (!cancelled) setInterruptedBackgroundSubagents(count)
       })
@@ -887,7 +892,7 @@ export function App({
     return () => {
       cancelled = true
     }
-  }, [home])
+  }, [home, state.sessionId])
 
   useEffect(() => {
     let cancelled = false
@@ -941,8 +946,8 @@ export function App({
   const openModelPicker = useCallback(() => {
     // While an external agent hosts, the built-in provider's catalog is the
     // wrong list — those are not models that agent can run, and picking one used
-    // to send the id straight into its session. Ask the agent instead, and say
-    // so plainly when it cannot enumerate its own models.
+    // to send the id straight into its session. Native Codex has a global
+    // `model/list`; ACP exposes model options only from the live session.
     const caps = state.backendCapabilities
     if (caps && !caps.builtin) {
       if (!supportsFeature(caps, "modelPicker")) {
@@ -954,8 +959,11 @@ export function App({
         dispatch({ type: "NOTICE", message: "The agent is not connected yet." })
         return
       }
+      const isAcp = caps.protocol === "acp"
       const list = listExternalModels ?? defaultBackendModelHost().listExternalModels
-      const unavailableMessage = `${caps.backend} did not report any models.`
+      const unavailableMessage = isAcp
+        ? `${caps.backend} did not expose model options for the active ACP session. Send a message first, then retry.`
+        : `${caps.backend} did not report any models.`
       const requestId = ++externalModelRequestRef.current
       const isCurrentRequest = () => {
         return (
@@ -963,7 +971,8 @@ export function App({
           connectionRef.current?.agentId === agentId
         )
       }
-      void list(agentId).then(
+      const modelsPromise = isAcp ? agent.listModels() : list(agentId)
+      void modelsPromise.then(
         (models) => {
           if (!isCurrentRequest()) return
           if (models.length === 0) {
@@ -1006,6 +1015,7 @@ export function App({
     dispatch,
     syncAndRefreshModelOverlay,
     listExternalModels,
+    agent,
   ])
 
   // When a plan-mode turn proposes a plan (the reducer captured it as
@@ -1085,11 +1095,32 @@ export function App({
     else void agentRef.current.exitCopilot()
   }, [copilotWorkflowId])
 
+  const exitingRef = useRef(false)
   const doExit = useCallback(() => {
+    if (exitingRef.current) return
+    exitingRef.current = true
     dispatch({ type: "EXIT" })
+    agent.abort()
+    getRuntimeAbort()?.abort()
+    // Unmount Ink immediately. Session/backend cleanup is best-effort and may
+    // wait on an unresponsive child process; keeping the TUI mounted until it
+    // settles makes a successful exit look hung and invites another Ctrl+C,
+    // which kills the pnpm process and surfaces as ELIFECYCLE.
     if (onExit) onExit()
     else exit()
-  }, [exit, onExit])
+    void (async () => {
+      try {
+        await agent.close()
+        const lifecycle = lifecycleRef.current
+        if (lifecycle) await lifecycle.dispose()
+        else await disconnectBackend(connectionRef.current)
+        connectionRef.current = null
+      } catch {
+        // Exiting must not be converted into an unhandled rejection when a
+        // backend has already stopped or refuses to acknowledge shutdown.
+      }
+    })()
+  }, [agent, exit, getRuntimeAbort, onExit])
 
   // Startup trust gate: "Yes, proceed" trusts the current cwd and enters chat.
   const trustCwd = useCallback(() => {
@@ -1528,10 +1559,15 @@ export function App({
           display: option.method.display,
         })
         const run = runInstallFn ?? defaultRunInstall
+        const controller = new AbortController()
+        installAbortRef.current = controller
         void run({
           method: option.method,
           onLine: (line) => dispatch({ type: "BACKEND_INSTALL_OUTPUT", chunk: `${line}\n` }),
+          signal: controller.signal,
         }).then((result) => {
+          if (installAbortRef.current === controller) installAbortRef.current = null
+          if (controller.signal.aborted) return
           if (result.ok) {
             // The binary is now on PATH — re-enter the connect flow, which
             // re-probes and proceeds to the handshake.
@@ -1567,6 +1603,12 @@ export function App({
     },
     [doExit, runCommandLine, runInstallFn]
   )
+
+  const cancelBackendInstall = useCallback(() => {
+    installAbortRef.current?.abort()
+    installAbortRef.current = null
+    dispatch({ type: "BACKEND_INSTALL_CANCEL" })
+  }, [])
 
   // Launch-flag command (`--continue` / `--resume [id]`): run exactly once, and
   // only after the startup trust gate has cleared — resuming a session while
@@ -2089,6 +2131,7 @@ export function App({
     now,
     doExit,
     cancelBackendConnect,
+    cancelBackendInstall,
     agent,
     abortRuntime,
     askUser,
@@ -2132,9 +2175,10 @@ export function App({
         provider={identity.provider}
         {...(identity.model ? { model: identity.model } : {})}
         cwd={state.config.cwd}
+        density={layoutBudget.bannerDensity}
       />
     ),
-    [identity, state.config.cwd]
+    [identity, state.config.cwd, layoutBudget.bannerDensity]
   )
   const lastPlanRaw = state.lastPlan?.raw
   const footerPlanTitle = useMemo(
@@ -2258,78 +2302,95 @@ export function App({
     )
   }
 
+  const overlays = (
+    <AppOverlays
+      state={state}
+      dispatch={dispatch}
+      agent={agent}
+      columns={columns}
+      viewportRows={overlayViewportRows}
+      activeModel={activeModel}
+      home={home}
+      resolvePermission={resolvePermission}
+      persist={persist}
+      persistProviderModelFn={persistProviderModelFn}
+      persistBackendModelFn={persistBackendModelFn}
+      persistCredentialFn={persistCredentialFn}
+      persistPluginTools={persistPluginTools}
+      openModelPicker={openModelPicker}
+      applySettings={applySettings}
+      activateSettings={activateSettings}
+      applySubagentModelEdit={applySubagentModelEdit}
+      applyHistorySearch={applyHistorySearch}
+      doResume={doResume}
+      runCommandLine={runCommandLine}
+      submitForm={submitForm}
+      onPlanDecision={onPlanDecision}
+      askUser={askUser}
+      mcpPanelDeps={mcpPanelDeps}
+      clearLogs={clearLogs}
+    />
+  )
+
   return (
     <ThemeProvider palette={themePalette}>
       <RenderPrefsProvider prefs={renderPrefs}>
-        <Box flexDirection="column" width={columns} {...(fullscreen ? { height: rows } : {})}>
-          <TranscriptRegion
-            state={state}
-            fullscreen={fullscreen}
-            banner={banner}
-            identity={identity}
-            activeModel={activeModel}
-            scroll={scroll}
-            scrollContentRef={scrollContentRef}
-            cursor={cursor}
-            mutedColor={themePalette.muted}
-          />
-          <AppOverlays
-            state={state}
-            dispatch={dispatch}
-            agent={agent}
-            columns={columns}
-            overlayRows={overlayRows}
-            activeModel={activeModel}
-            home={home}
-            resolvePermission={resolvePermission}
-            persist={persist}
-            persistProviderModelFn={persistProviderModelFn}
-            persistBackendModelFn={persistBackendModelFn}
-            persistCredentialFn={persistCredentialFn}
-            persistPluginTools={persistPluginTools}
-            openModelPicker={openModelPicker}
-            applySettings={applySettings}
-            activateSettings={activateSettings}
-            applySubagentModelEdit={applySubagentModelEdit}
-            applyHistorySearch={applyHistorySearch}
-            doResume={doResume}
-            runCommandLine={runCommandLine}
-            submitForm={submitForm}
-            onPlanDecision={onPlanDecision}
-            askUser={askUser}
-            mcpPanelDeps={mcpPanelDeps}
-            clearLogs={clearLogs}
-          />
-          <BottomRegion
-            state={state}
-            dispatch={dispatch}
-            cursor={cursor}
-            overlayOpen={overlayOpen}
-            columns={columns}
-            popupRows={popupRows}
-            warningColor={themePalette.warning}
-            streamStartedAt={streamStartedAt}
-            lastActivityAt={lastActivityAt}
-            footerSubagentRunning={footerSubagentRunning}
-            footerBackgroundSubagents={footerBackgroundSubagents}
-            interruptedBackgroundSubagents={interruptedBackgroundSubagents}
-            footerCopilot={footerCopilot}
-            backtrackArmed={backtrackArmed}
-            subagentChipRef={subagentChipRef}
-            agentTreeRef={agentTreeRef}
-            handleSubmit={handleSubmit}
-            handleHistoryPush={handleHistoryPush}
-            listDir={listDir}
-            mentionProviders={mentionProviders}
-            keybindings={keybindings}
-            enabledSkillIds={enabledSkillIds}
-            toggleSkillEnabled={toggleSkillEnabled}
-            handlePopupOpenChange={handlePopupOpenChange}
-            footerPlanTitle={footerPlanTitle}
-            footerRowRef={footerRowRef}
-            footerSegmentsRef={footerSegmentsRef}
-          />
-        </Box>
+        <TuiViewportFrame
+          columns={columns}
+          rows={rows}
+          fullscreen={fullscreen}
+          overlayOpen={overlayOpen}
+          overlayRegionRef={overlayRegionRef}
+          transcript={
+            <TranscriptRegion
+              state={state}
+              fullscreen={fullscreen}
+              banner={banner}
+              identity={identity}
+              activeModel={activeModel}
+              columns={columns}
+              scroll={scroll}
+              scrollContentRef={scrollContentRef}
+              cursor={cursor}
+              mutedColor={themePalette.muted}
+              layout={layoutBudget}
+            />
+          }
+          overlays={overlays}
+          bottom={
+            <BottomRegion
+              state={state}
+              dispatch={dispatch}
+              cursor={cursor}
+              overlayOpen={overlayOpen}
+              columns={columns}
+              popupRows={popupRows}
+              composerRows={layoutBudget.composerRows}
+              layout={layoutBudget}
+              warningColor={themePalette.warning}
+              streamStartedAt={streamStartedAt}
+              lastActivityAt={lastActivityAt}
+              footerSubagentRunning={footerSubagentRunning}
+              footerBackgroundSubagents={footerBackgroundSubagents}
+              interruptedBackgroundSubagents={interruptedBackgroundSubagents}
+              footerCopilot={footerCopilot}
+              backtrackArmed={backtrackArmed}
+              subagentChipRef={subagentChipRef}
+              agentTreeRef={agentTreeRef}
+              handleSubmit={handleSubmit}
+              handleHistoryPush={handleHistoryPush}
+              listDir={listDir}
+              mentionProviders={mentionProviders}
+              keybindings={keybindings}
+              enabledSkillIds={enabledSkillIds}
+              toggleSkillEnabled={toggleSkillEnabled}
+              handlePopupOpenChange={handlePopupOpenChange}
+              footerPlanTitle={footerPlanTitle}
+              footerRowRef={footerRowRef}
+              footerSegmentsRef={footerSegmentsRef}
+            />
+          }
+        />
       </RenderPrefsProvider>
     </ThemeProvider>
   )

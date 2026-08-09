@@ -8,7 +8,7 @@
 "use client"
 
 import { useState } from "react"
-import type { PetProfile } from "@/types/pet"
+import type { PetProfile, PetSkinSelection } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { PetStatCard } from "../pet-stat-card"
@@ -32,6 +32,7 @@ export interface NurtureTabProps {
   onTreat: () => void
   /** Effective skin so the previews match the live pet. */
   skinId?: string
+  selection?: PetSkinSelection
   /** Jump to the console's shop tab (wallet strip click). */
   onOpenShop?: () => void
 }
@@ -47,6 +48,7 @@ export function NurtureTab({
   onClean,
   onTreat,
   skinId,
+  selection,
   onOpenShop,
 }: NurtureTabProps) {
   const grewStats = usePetStore((s) => s.lastGrewStats)
@@ -67,6 +69,7 @@ export function NurtureTab({
           grew={grewStats}
           flavor={profile.evolutionFlavor}
           skinId={skinId}
+          selection={selection}
         />
 
         <PetWalletStrip coins={profile.coins} streak={profile.streak} onOpenShop={onOpenShop} />
@@ -102,6 +105,8 @@ export function NurtureTab({
           state="idle"
           size={160}
           skinId={skinId}
+          selection={selection}
+          renderPriority="console"
         />
       </aside>
     </div>

@@ -50,9 +50,8 @@ use app_lib::companion_api::signaling::{DeviceRegistration, SignalingHub};
 use app_lib::companion_api::{
     deny_list::DenyList, desktop_messages_bridge::DesktopMessagesBridge,
     desktop_writes_bridge::DesktopWritesBridge, event_bus::EventBus, idempotency::IdempotencyCache,
-    pair_code_lru::PairCodeLru, push::PushTokenRegistry, rate_limit::RateLimiter,
-    redemption_lru::RedemptionLru, sync_bridge::SyncBridge, sync_registry::SyncTableRegistry,
-    CompanionState, SharedState,
+    push::PushTokenRegistry, rate_limit::RateLimiter, sync_bridge::SyncBridge,
+    sync_registry::SyncTableRegistry, CompanionState, SharedState,
 };
 use cognia_signaling_core::proto::RoomDescriptorV2;
 use parking_lot::RwLock;
@@ -122,8 +121,6 @@ where
 fn harness_state() -> SharedState {
     Arc::new(CompanionState {
         secret: RwLock::new(vec![0u8; 32]),
-        redemption_lru: RedemptionLru::new(),
-        pair_code_lru: Arc::new(PairCodeLru::new()),
         deny_list: Arc::new(DenyList::new()),
         app_handle: None,
         idempotency: Arc::new(IdempotencyCache::new()),
@@ -163,6 +160,8 @@ static STDERR_LOGGER: StderrLogger = StderrLogger;
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
+    app_lib::proxy_config::clear_inherited_proxy_environment();
+    app_lib::proxy_config::apply_current(Default::default()).map_err(|error| error.to_string())?;
     let level = match std::env::var("COGNIA_LOG").as_deref() {
         Ok("error") => log::LevelFilter::Error,
         Ok("warn") => log::LevelFilter::Warn,

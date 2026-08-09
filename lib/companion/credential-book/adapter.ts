@@ -37,6 +37,12 @@ export interface CredentialBookAdapterOptions {
    * would keep serving the previous account's pairing.
    */
   accountNamespace: () => string | null
+  /**
+   * Runtime-selected host id. `undefined` falls back to the book pointer for
+   * native clients without runtime targets; `null` explicitly selects no
+   * Companion host (for example the browser's standalone target).
+   */
+  activeHostId?: () => string | null | undefined
 }
 
 /** Rebuild the flat config the rest of the app still expects. */
@@ -47,15 +53,19 @@ export async function toCompanionConfig(
   const config: CompanionConfig = {
     targetId: record.hostId,
     baseUrl: record.endpoints.baseUrl,
-    deviceJwt: credential.deviceJwt,
+    devicePrivateKeyJwk: credential.devicePrivateKeyJwk,
+    deviceKeyThumbprint: record.deviceKeyThumbprint,
     deviceId: record.deviceId,
     serverVersion: record.serverVersion,
     accountId: record.accountNamespace,
   }
+  if (record.tenantId) config.tenantId = record.tenantId
   if (record.tlsPin) config.serverFingerprint = record.tlsPin
   if (record.endpoints.lanBaseUrl) config.lanBaseUrl = record.endpoints.lanBaseUrl
   if (record.endpoints.tunnelBaseUrl) config.tunnelBaseUrl = record.endpoints.tunnelBaseUrl
   if (record.rendezvousId) config.rendezvousId = record.rendezvousId
+  if (record.signalingUrl) config.signalingUrl = record.signalingUrl
+  if (record.iceServers) config.iceServers = record.iceServers
   if (record.signalingRoomDescriptor) {
     config.signalingRoomDescriptor = record.signalingRoomDescriptor
     if (credential.signalingPrivateKeyJwk) {
@@ -72,7 +82,7 @@ export class CredentialBookCompanionStorage implements CompanionConfigStorage {
   constructor(private readonly opts: CredentialBookAdapterOptions) {}
 
   async load(): Promise<CompanionConfig | null> {
-    const record = await this.opts.book.getActive(this.namespace())
+    const record = await this.selectedRecord()
     if (!record) return null
     let credential: CompanionHostCredential | null = null
     try {
@@ -92,30 +102,65 @@ export class CredentialBookCompanionStorage implements CompanionConfigStorage {
     // persist, and the in-memory config cache stays authoritative for the
     // process. Throwing here would break SSR and static-export prerender.
     if (typeof window === "undefined") return
-    const accountNamespace = config.accountId ?? this.namespace()
+    if (!config.devicePrivateKeyJwk || !config.deviceKeyThumbprint) {
+      throw new Error("Companion device identity is missing; pair this device again.")
+    }
+    const accountNamespace =
+      this.opts.accountNamespace() ?? config.accountId ?? DEFAULT_ACCOUNT_NAMESPACE
     const hostId = legacyHostId(config)
     const key = { hostId, accountNamespace }
-    const existing = await this.opts.book.get(key)
-    await this.opts.book.upsert({
-      hostId,
-      accountNamespace,
-      label: existing?.label ?? legacyLabel(config),
-      endpoints: {
-        baseUrl: config.baseUrl,
-        lanBaseUrl: config.lanBaseUrl,
-        tunnelBaseUrl: config.tunnelBaseUrl,
-      },
-      tlsPin: config.serverFingerprint ?? null,
-      deviceId: config.deviceId,
-      serverVersion: config.serverVersion,
-      rendezvousId: config.rendezvousId,
-      signalingRoomDescriptor: config.signalingRoomDescriptor,
-    })
-    await this.opts.book.saveCredential(key, {
-      deviceJwt: config.deviceJwt,
-      signalingPrivateKeyJwk: config.signalingPrivateKeyJwk,
-    })
-    await this.opts.book.setActive(key)
+    const [existing, previousActive] = await Promise.all([
+      this.opts.book.get(key),
+      this.opts.book.getActive(accountNamespace),
+    ])
+    const previousCredential = existing ? await this.opts.book.loadCredential(key) : null
+    // Secrets land first. If the secure write fails, the public target book is
+    // untouched; this prevents a half-paired target whose key is unavailable.
+    try {
+      await this.opts.book.saveCredential(key, {
+        devicePrivateKeyJwk: config.devicePrivateKeyJwk,
+        signalingPrivateKeyJwk: config.signalingPrivateKeyJwk,
+      })
+      await this.opts.book.upsert({
+        hostId,
+        accountNamespace,
+        tenantId: config.tenantId ?? existing?.tenantId ?? config.accountId,
+        label: existing?.label ?? legacyLabel(config),
+        endpoints: {
+          baseUrl: config.baseUrl,
+          lanBaseUrl: config.lanBaseUrl,
+          tunnelBaseUrl: config.tunnelBaseUrl,
+        },
+        tlsPin: config.serverFingerprint ?? null,
+        deviceId: config.deviceId,
+        deviceKeyThumbprint: config.deviceKeyThumbprint,
+        serverVersion: config.serverVersion,
+        rendezvousId: config.rendezvousId,
+        signalingRoomDescriptor: config.signalingRoomDescriptor,
+        signalingUrl: config.signalingUrl,
+        iceServers: config.iceServers,
+      })
+      await this.opts.book.setActive(key)
+    } catch (error) {
+      try {
+        // Remove both halves first. `book.remove()` deliberately also deletes
+        // a credential when no public record exists, covering failed upserts.
+        await this.opts.book.remove(key)
+        if (existing) {
+          await this.opts.book.upsert(existing)
+          if (previousCredential) {
+            await this.opts.book.saveCredential(key, previousCredential)
+          }
+        }
+        if (previousActive) await this.opts.book.setActive(hostKeyOf(previousActive))
+      } catch (rollbackError) {
+        throw new Error(
+          `Companion pairing persistence failed and rollback was incomplete: ${errorMessage(rollbackError)}`,
+          { cause: error }
+        )
+      }
+      throw error
+    }
   }
 
   /**
@@ -127,9 +172,24 @@ export class CredentialBookCompanionStorage implements CompanionConfigStorage {
    */
   async clear(): Promise<void> {
     if (typeof window === "undefined") return
-    const record = await this.opts.book.getActive(this.namespace())
+    const record = await this.selectedRecord()
     if (!record) return
     await this.opts.book.remove(hostKeyOf(record))
+  }
+
+  async remove(config: CompanionConfig): Promise<void> {
+    await this.opts.book.remove({
+      accountNamespace: config.accountId ?? this.namespace(),
+      hostId: legacyHostId(config),
+    })
+  }
+
+  private async selectedRecord(): Promise<CompanionHostRecord | null> {
+    const accountNamespace = this.namespace()
+    const activeHostId = this.opts.activeHostId?.()
+    if (activeHostId === null) return null
+    if (activeHostId === undefined) return this.opts.book.getActive(accountNamespace)
+    return this.opts.book.get({ accountNamespace, hostId: activeHostId })
   }
 
   /**
@@ -142,4 +202,8 @@ export class CredentialBookCompanionStorage implements CompanionConfigStorage {
   private namespace(): string {
     return this.opts.accountNamespace() ?? DEFAULT_ACCOUNT_NAMESPACE
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

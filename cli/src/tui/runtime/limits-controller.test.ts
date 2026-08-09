@@ -31,6 +31,11 @@ function openedLimits(actions: TuiAction[]) {
   return a && a.overlay.kind === "limits" ? a.overlay : null
 }
 
+function loadedLimits(actions: TuiAction[]) {
+  return actions.find((action) => action.type === "LIMITS_LOADED") as
+    Extract<TuiAction, { type: "LIMITS_LOADED" }> | undefined
+}
+
 function snap(provider: string): ProviderLimits {
   return {
     provider,
@@ -41,6 +46,28 @@ function snap(provider: string): ProviderLimits {
 }
 
 describe("runLimits", () => {
+  it("opens a loading panel immediately and does not block while providers load", async () => {
+    let resolveLimits!: (snapshots: ProviderLimits[]) => void
+    const pending = new Promise<ProviderLimits[]>((resolve) => {
+      resolveLimits = resolve
+    })
+    const d = deps({ loadLimits: () => pending })
+
+    runLimits(d)
+
+    expect(openedLimits(d.actions)).toMatchObject({
+      snapshots: [],
+      loading: true,
+      activeProvider: "anthropic",
+    })
+    resolveLimits([snap("anthropic")])
+    await Promise.resolve()
+    expect(loadedLimits(d.actions)).toMatchObject({
+      requestId: openedLimits(d.actions)?.requestId,
+      snapshots: [snap("anthropic")],
+    })
+  })
+
   it("opens the limits panel with the loaded snapshots + session analysis", async () => {
     const loadLimits = jest.fn(async () => [snap("anthropic"), snap("moonshot")])
     const d = deps({
@@ -48,18 +75,23 @@ describe("runLimits", () => {
       usageHistory: [200_000, 10_000],
       toolStats: { bash: { calls: 3, errors: 0 }, dispatch_agent: { calls: 1, errors: 0 } },
     })
-    await runLimits(d)
+    runLimits(d)
+    await Promise.resolve()
     expect(loadLimits).toHaveBeenCalledWith(d.config, NOW)
     const overlay = openedLimits(d.actions)
-    expect(overlay?.snapshots.map((s) => s.provider)).toEqual(["anthropic", "moonshot"])
+    expect(loadedLimits(d.actions)?.snapshots.map((s) => s.provider)).toEqual([
+      "anthropic",
+      "moonshot",
+    ])
     expect(overlay?.analysis.turns).toBe(2)
     expect(overlay?.analysis.dispatchCalls).toBe(1)
   })
 
   it("opens an empty panel when no provider yields data", async () => {
     const d = deps({ loadLimits: async () => [] })
-    await runLimits(d)
-    expect(openedLimits(d.actions)?.snapshots).toEqual([])
+    runLimits(d)
+    await Promise.resolve()
+    expect(loadedLimits(d.actions)?.snapshots).toEqual([])
   })
 
   it("uses the default loader when none is injected (offline → only the active placeholder, never throws)", async () => {
@@ -72,15 +104,16 @@ describe("runLimits", () => {
       now: undefined, // also exercises the default Date.now() clock
       config: { ...DEFAULT_RESOLVED_CONFIG, provider: "x", cwd: "/w", providers: {} },
     })
-    await expect(runLimits(d)).resolves.toBeUndefined()
-    const snaps = openedLimits(d.actions)?.snapshots ?? []
+    runLimits(d)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const snaps = loadedLimits(d.actions)?.snapshots ?? []
     expect(snaps).toHaveLength(1)
     expect(snaps[0]).toMatchObject({ accountId: "x", provider: "x", meters: [] })
   })
 
   it("threads the active provider id onto the overlay for the `● active` badge", async () => {
     const d = deps({ loadLimits: async () => [snap("anthropic"), snap("moonshot")] })
-    await runLimits(d)
+    runLimits(d)
     expect(openedLimits(d.actions)?.activeProvider).toBe("anthropic")
   })
 })

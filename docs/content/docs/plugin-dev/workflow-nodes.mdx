@@ -64,15 +64,10 @@ interface StepResult {
 
 ## Inspector form
 
-If you want a custom Inspector form for your node, register it as a surface:
-
-```ts
-ctx.api.extension.mount("workflow-inspector", "action.custom.report", () => {
-  // Return a DOM node containing your form
-})
-```
-
-Without a custom inspector, the generic JSON editor is shown.
+Node parameters use the host's schema-driven Inspector. Do not mount an invented
+`workflow-inspector` UI slot: only extension points listed in the generated
+plugin-point catalog are accepted. A node without a specialized host renderer
+uses the generic JSON editor.
 
 ## Reusable node groups
 

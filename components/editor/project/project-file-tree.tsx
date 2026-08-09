@@ -24,6 +24,7 @@ import {
 import { joinPluginPath } from "@/lib/plugin/bridge/plugin-file-path"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { FileTree } from "@/components/ai-elements/file-tree"
 import { Input } from "@/components/ui/input"
 import {
   ContextMenu,
@@ -282,7 +283,11 @@ export function ProjectFileTree({
           <RefreshCwIcon className="size-3.5" />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto py-1 text-sm">
+      <FileTree
+        className="min-h-0 flex-1 overflow-auto rounded-none border-0 bg-transparent py-1 text-sm [&>div]:p-0"
+        expanded={expanded}
+        selectedPath={activePath ?? undefined}
+      >
         {pendingCreate?.parent === "" ? (
           <CreateInput
             depth={0}
@@ -297,7 +302,7 @@ export function ProjectFileTree({
         {rootIsEmpty && !pendingCreate ? (
           <p className="px-3 py-2 text-xs text-muted-foreground">{t("treeEmpty")}</p>
         ) : null}
-      </div>
+      </FileTree>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>

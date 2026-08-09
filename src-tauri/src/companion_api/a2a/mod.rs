@@ -2,10 +2,10 @@
 //!
 //! Exposes two routes on the companion HTTP front door:
 //! - `GET /.well-known/agent-card.json` — public Agent Card for discovery.
-//! - `POST /a2a` — the A2A JSON-RPC endpoint (device-JWT gated).
+//! - `POST /a2a` — the A2A JSON-RPC endpoint (DPoP device-access gated).
 //!
 //! Like the sibling ACP server, every method reaches the host-generic
-//! `claude_*` dispatch arms through `rpc::dispatch`, so the surface works on
+//! `claude_*` commands through `remote_execution`, so the surface works on
 //! both the desktop Tauri app and the headless `cognia-server`. The frame
 //! translation is *shared* with ACP (`super::acp::translate`); this module only
 //! reshapes the result into A2A `Task`/`Message` terms.
@@ -53,10 +53,16 @@ pub fn agent_card(base_url: &str) -> Value {
             "bearer": {
                 "type": "http",
                 "scheme": "bearer",
-                "description": "Cognia device JWT — pair with the desktop/cloud to obtain one.",
+                "description": "Five-minute Companion access token bound to the active device key.",
+            },
+            "dpop": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "DPoP",
+                "description": "Per-request ES256 proof bound to the access token, HTTP method, and /a2a path.",
             },
         },
-        "security": [{ "bearer": [] }],
+        "security": [{ "bearer": [], "dpop": [] }],
         "skills": [
             {
                 "id": "chat",
@@ -84,6 +90,9 @@ mod tests {
         assert_eq!(card["preferredTransport"], "JSONRPC");
         assert_eq!(card["capabilities"]["streaming"], false);
         assert_eq!(card["securitySchemes"]["bearer"]["scheme"], "bearer");
+        assert_eq!(card["securitySchemes"]["dpop"]["name"], "DPoP");
+        assert!(card["security"][0].get("bearer").is_some());
+        assert!(card["security"][0].get("dpop").is_some());
         assert_eq!(card["skills"][0]["id"], "chat");
         assert!(card["version"].as_str().is_some());
     }

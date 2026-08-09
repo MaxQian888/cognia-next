@@ -30,6 +30,7 @@ import {
 } from "./protocol-adapters/provider-protocol.mjs"
 import { shouldCompact, estimateTokens, makeSummaryMessage, summaryVersion } from "./compaction.mjs"
 import { planStrategy } from "./compaction-strategies.mjs"
+import { queryPreCompactDecision } from "./pre-compact-hook.mjs"
 import { capToolResults } from "./tool-result-cap.mjs"
 import { sanitizeToolMessagePairs } from "./tool-message-pairing.mjs"
 import { buildMcpLogEvent } from "./mcp-log.mjs"
@@ -140,17 +141,22 @@ function toAiSdkUserContent(blocks) {
     const isUrlSource = src && typeof src === "object" && src.type === "url"
 
     if (block.type === "image") {
-      // Already AI SDK shape — leave as-is.
-      if ("image" in block && !src) return block
+      // AI SDK 7 deprecated the dedicated `image` part: images are just files
+      // with an image media type. `mediaType` accepts either a full IANA type
+      // ("image/png") or the bare top-level segment ("image"), which is the
+      // right answer when the source never told us the subtype.
+      if ("image" in block && !src) {
+        return { type: "file", mediaType: block.mediaType ?? "image", data: block.image }
+      }
       if (isBase64Source) {
         return {
-          type: "image",
-          image: `data:${src.media_type ?? ""};base64,${src.data ?? ""}`,
-          ...(src.media_type ? { mediaType: src.media_type } : {}),
+          type: "file",
+          mediaType: src.media_type ?? "image",
+          data: `data:${src.media_type ?? ""};base64,${src.data ?? ""}`,
         }
       }
       if (isUrlSource && typeof src.url === "string") {
-        return { type: "image", image: src.url }
+        return { type: "file", mediaType: src.media_type ?? "image", data: src.url }
       }
       return block
     }
@@ -688,10 +694,11 @@ export function dispatchAiSdk({
     } else if (Array.isArray(content)) {
       // Multimodal content blocks arrive in the Anthropic agent-SDK shape
       // (`{ type:'image', source:{ type:'base64', media_type, data } }`) because
-      // the composer targets the native Anthropic path. AI SDK v6 expects
-      // `{ type:'image', image }` / `{ type:'file', data, mediaType }`, so the
-      // blocks MUST be converted here — otherwise streamText drops every image
-      // and non-Anthropic providers (OpenAI/Gemini/Mistral/…) see text only.
+      // the composer targets the native Anthropic path. AI SDK 7 wants a single
+      // canonical `{ type:'file', mediaType, data }` part (images are just files
+      // with an image media type), so the blocks MUST be converted here —
+      // otherwise streamText drops every image and non-Anthropic providers
+      // (OpenAI/Gemini/Mistral/…) see text only.
       conversation.push({ role: "user", content: toAiSdkUserContent(content) })
     }
   }
@@ -750,11 +757,30 @@ export function dispatchAiSdk({
       if (!shouldCompact(args)) return
     }
 
+    // ── PreCompact plugin hook (ADR-0090 Phase 9) ──────────────────────────
+    // Gives plugins a chance to skip compaction, inject context, or override
+    // the strategy. Falls back gracefully when hostRpc is unavailable.
+    const preCompactDecision = await queryPreCompactDecision(
+      hostRpc,
+      {
+        sessionId,
+        messageCount: conversation.length,
+        tokenCount: lastInputTokens ?? estimateTokens(conversation),
+        compressionRatio: undefined,
+      },
+      { log }
+    )
+    if (preCompactDecision.skip) {
+      log("info", "compaction skipped by plugin preCompact decision")
+      return
+    }
+
     const keepRecent =
       typeof comp.keepRecent === "number" ? comp.keepRecent : COMPACT_KEEP_RECENT_MESSAGES
 
     const plan = planStrategy({
-      strategy: comp.strategy,
+      // Plugin strategy override takes precedence, then user-configured strategy
+      strategy: preCompactDecision.strategyOverride ?? comp.strategy,
       conversation,
       keepRecent,
       preserveSystemMessages: comp.preserveSystemMessages,
@@ -770,11 +796,18 @@ export function dispatchAiSdk({
 
     // The renderer-supplied prompt already folds in the app-level focus; a
     // manual `/compact <focus>` arg layers an extra instruction on top.
+    // Plugin-injected context (bounded to 4 KiB by the hook validator) is
+    // prepended as additional retention guidance.
     const basePrompt = comp.summaryPrompt || DEFAULT_SUMMARY_PROMPT
     const manualFocus = typeof focus === "string" ? focus.trim() : ""
-    const systemPrompt = manualFocus
-      ? `${basePrompt}\n\nFocus especially on: ${manualFocus}`
-      : basePrompt
+    const pluginContext = preCompactDecision.contextToInject ?? ""
+    let systemPrompt = basePrompt
+    if (pluginContext) {
+      systemPrompt = `Important context to preserve:\n${pluginContext}\n\n${systemPrompt}`
+    }
+    if (manualFocus) {
+      systemPrompt = `${systemPrompt}\n\nFocus especially on: ${manualFocus}`
+    }
 
     // Summary executor: alternate cheap model + credentials + adapter, with the
     // output token cap. Returns trimmed text, or null on failure/empty. When AI
@@ -1025,99 +1058,108 @@ export function dispatchAiSdk({
       // Build native AI SDK tools (built-in + plugin) once. Lazy-imported so
       // the bridge (and its `ai` dependency) doesn't load for tool-less turns.
       if (toolsCache === undefined) {
-        const { buildAiSdkTools } = await import("./ai-sdk-tools.mjs")
-        const { createDoomLoopGuard } = await import("./doom-loop.mjs")
-        // Own the tool gate's guard here so it can be reset per turn (F1).
-        const toolDoomGuard = createDoomLoopGuard()
-        doomGuards.push(toolDoomGuard)
-        toolsCache = buildAiSdkTools({
-          // A routed `@agent` narrows the built-in tool allowlist to its own
-          // tools and unions its deny-list on top (same allowlist mechanism
-          // characters / skills / modes use). `disallowedTools` (deny /
-          // restricted mode) is checked separately and still wins.
-          sendOptions: agentScopedSendOptions,
-          emit,
-          sessionId,
-          pendingApprovals,
-          pendingPluginToolCalls,
-          lspResolver: lsp.lspResolver,
-          codeGraphResolver: codeGraph.codeGraphResolver,
-          readTracker,
-          bgShells,
-          hostRpc,
-          taskStore,
-          doomGuard: toolDoomGuard,
-          // PostToolUse rewrite at the execute layer (opt-in) — see
-          // `reviewToolOutput` above.
-          ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
-        })
+        if (agentScopedSendOptions.toolSurface === "none") {
+          // Final dispatcher contract: a disabled tool surface must stay empty
+          // even when stale/global MCP or ToolSearch settings survive upstream.
+          toolsCache = {}
+        } else {
+          const { buildAiSdkTools } = await import("./ai-sdk-tools.mjs")
+          const { createDoomLoopGuard } = await import("./doom-loop.mjs")
+          // Own the tool gate's guard here so it can be reset per turn (F1).
+          const toolDoomGuard = createDoomLoopGuard()
+          doomGuards.push(toolDoomGuard)
+          toolsCache = buildAiSdkTools({
+            // A routed `@agent` narrows the built-in tool allowlist to its own
+            // tools and unions its deny-list on top (same allowlist mechanism
+            // characters / skills / modes use). `disallowedTools` (deny /
+            // restricted mode) is checked separately and still wins.
+            sendOptions: agentScopedSendOptions,
+            emit,
+            sessionId,
+            pendingApprovals,
+            pendingPluginToolCalls,
+            lspResolver: lsp.lspResolver,
+            codeGraphResolver: codeGraph.codeGraphResolver,
+            readTracker,
+            bgShells,
+            hostRpc,
+            taskStore,
+            doomGuard: toolDoomGuard,
+            // PostToolUse rewrite at the execute layer (opt-in) — see
+            // `reviewToolOutput` above.
+            ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
+          })
 
-        // External MCP servers (parity with the Anthropic path, which passes
-        // `mcpServers` to the agent SDK). `streamText` has no MCP concept, so
-        // we connect the user's servers here and merge their (namespaced,
-        // gated) tools. Connect once per session; close on teardown. A failure
-        // logs and degrades to the built-in/plugin tools rather than breaking
-        // the turn.
-        if (sendOptions.mcpServers && Object.keys(sendOptions.mcpServers).length > 0) {
-          try {
-            const buildAiSdkMcpTools =
-              buildMcpToolsOverride ?? (await import("./ai-sdk-mcp.mjs")).buildAiSdkMcpTools
-            const { createToolPermissionGate } = await import("./ai-sdk-tools.mjs")
-            // Own the MCP gate's guard here too so it resets per turn (F1).
-            const mcpDoomGuard = createDoomLoopGuard()
-            doomGuards.push(mcpDoomGuard)
-            const mcpGate = createToolPermissionGate({
-              emit,
-              sessionId,
-              pendingApprovals,
-              sendOptions: agentScopedSendOptions,
-              doomGuard: mcpDoomGuard,
-            })
-            const mcp = await buildAiSdkMcpTools({
-              mcpServers: sendOptions.mcpServers,
-              gate: mcpGate,
-              ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
-              // A routed `@agent` narrows the allowlist to its own tools and
-              // unions its deny-list (parity with the built-in tool path above).
-              allowedTools: agentScopedSendOptions.allowedTools,
-              disallowedTools: agentScopedSendOptions.disallowedTools,
-              log,
-              // Surface each server's stderr + connect/tool diagnostics as
-              // `mcp_log` events for the renderer's MCP log panel (the ai-sdk
-              // path previously logged these only to the sidecar's own stderr).
-              emitMcpLog: (entry) =>
-                emit(buildMcpLogEvent({ sessionId, ts: Date.now(), ...entry })),
-            })
-            mcpClose = mcp.close
-            if (Object.keys(mcp.tools).length > 0) {
-              const merged = { ...toolsCache, ...mcp.tools }
-              // Re-sort so the tools map serializes identically across turns
-              // (prompt-cache prefix stability), matching buildAiSdkTools.
-              toolsCache = Object.fromEntries(
-                Object.keys(merged)
-                  .sort()
-                  .map((k) => [k, merged[k]])
+          // External MCP servers (parity with the Anthropic path, which passes
+          // `mcpServers` to the agent SDK). `streamText` has no MCP concept, so
+          // we connect the user's servers here and merge their (namespaced,
+          // gated) tools. Connect once per session; close on teardown. A failure
+          // logs and degrades to the built-in/plugin tools rather than breaking
+          // the turn.
+          if (sendOptions.mcpServers && Object.keys(sendOptions.mcpServers).length > 0) {
+            try {
+              const buildAiSdkMcpTools =
+                buildMcpToolsOverride ?? (await import("./ai-sdk-mcp.mjs")).buildAiSdkMcpTools
+              const { createToolPermissionGate } = await import("./ai-sdk-tools.mjs")
+              // Own the MCP gate's guard here too so it resets per turn (F1).
+              const mcpDoomGuard = createDoomLoopGuard()
+              doomGuards.push(mcpDoomGuard)
+              const mcpGate = createToolPermissionGate({
+                emit,
+                sessionId,
+                pendingApprovals,
+                sendOptions: agentScopedSendOptions,
+                doomGuard: mcpDoomGuard,
+              })
+              const mcp = await buildAiSdkMcpTools({
+                mcpServers: sendOptions.mcpServers,
+                gate: mcpGate,
+                ...(toolResultReviewEnabled ? { reviewToolOutput } : {}),
+                // A routed `@agent` narrows the allowlist to its own tools and
+                // unions its deny-list (parity with the built-in tool path above).
+                allowedTools: agentScopedSendOptions.allowedTools,
+                disallowedTools: agentScopedSendOptions.disallowedTools,
+                log,
+                // Surface each server's stderr + connect/tool diagnostics as
+                // `mcp_log` events for the renderer's MCP log panel (the ai-sdk
+                // path previously logged these only to the sidecar's own stderr).
+                emitMcpLog: (entry) =>
+                  emit(buildMcpLogEvent({ sessionId, ts: Date.now(), ...entry })),
+              })
+              mcpClose = mcp.close
+              if (Object.keys(mcp.tools).length > 0) {
+                const merged = { ...toolsCache, ...mcp.tools }
+                // Re-sort so the tools map serializes identically across turns
+                // (prompt-cache prefix stability), matching buildAiSdkTools.
+                toolsCache = Object.fromEntries(
+                  Object.keys(merged)
+                    .sort()
+                    .map((k) => [k, merged[k]])
+                )
+              }
+            } catch (err) {
+              log(
+                "warn",
+                `external MCP setup failed, continuing without it: ${err?.message ?? err}`
               )
             }
-          } catch (err) {
-            log("warn", `external MCP setup failed, continuing without it: ${err?.message ?? err}`)
           }
-        }
 
-        // Cross-provider deferred loading. The Anthropic Agent SDK handles
-        // ToolSearch/alwaysLoad natively; AI SDK providers need an explicit
-        // ToolSearch tool plus prepareStep(activeTools). Build it only after
-        // built-in, plugin, and external MCP tools have been permission-filtered
-        // and merged, so discovery can only activate tools the session already
-        // owns. The controller persists for this sidecar session, retaining
-        // discovered tools across manual-loop legs and user turns.
-        if (agentScopedSendOptions.toolSearchEnabled === true) {
-          const { createAiSdkToolSearchController } = await import("./ai-sdk-tool-search.mjs")
-          toolSearchController = createAiSdkToolSearchController({
-            tools: toolsCache,
-            sendOptions: agentScopedSendOptions,
-          })
-          if (toolSearchController) toolsCache = toolSearchController.tools
+          // Cross-provider deferred loading. The Anthropic Agent SDK handles
+          // ToolSearch/alwaysLoad natively; AI SDK providers need an explicit
+          // ToolSearch tool plus prepareStep(activeTools). Build it only after
+          // built-in, plugin, and external MCP tools have been permission-filtered
+          // and merged, so discovery can only activate tools the session already
+          // owns. The controller persists for this sidecar session, retaining
+          // discovered tools across manual-loop legs and user turns.
+          if (agentScopedSendOptions.toolSearchEnabled === true) {
+            const { createAiSdkToolSearchController } = await import("./ai-sdk-tool-search.mjs")
+            toolSearchController = createAiSdkToolSearchController({
+              tools: toolsCache,
+              sendOptions: agentScopedSendOptions,
+            })
+            if (toolSearchController) toolsCache = toolSearchController.tools
+          }
         }
       }
 

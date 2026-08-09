@@ -76,6 +76,8 @@ function passthroughTestProps(props) {
   const out = {}
   if (props && typeof props === "object") {
     if (props["data-testid"]) out["data-testid"] = props["data-testid"]
+    if (props.flexGrow !== undefined) out["data-flex-grow"] = String(props.flexGrow)
+    if (props.flexShrink !== undefined) out["data-flex-shrink"] = String(props.flexShrink)
     if (props.id) out.id = props.id
   }
   return out
@@ -145,6 +147,15 @@ function useFocusManager() {
   return { focus: jest.fn(), focusNext: jest.fn(), focusPrevious: jest.fn(), enableFocus: jest.fn(), disableFocus: jest.fn() }
 }
 
+const setCursorPosition = jest.fn()
+function useCursor() {
+  return { setCursorPosition }
+}
+
+function useBoxMetrics() {
+  return { width: 0, height: 0, left: 0, top: 0, hasMeasured: false }
+}
+
 function measureElement() {
   return { width: 80, height: 24 }
 }
@@ -175,6 +186,8 @@ module.exports = {
   useStderr,
   useFocus,
   useFocusManager,
+  useCursor,
+  useBoxMetrics,
   measureElement,
   render,
   // Test helpers (not part of ink's public API).

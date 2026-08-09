@@ -70,7 +70,10 @@ The recovery ladder is:
 
 WebSocket connect has an eight-second deadline; challenge and subscribe each
 have a five-second deadline. A missing opposite role is `awaiting-peer`, not a
-failed connection.
+failed connection. Each browser signaling session serializes at most 64 active
+or queued outbound operations. Overflow closes only that session and enters the
+existing reconnect ladder, so stale work cannot block or write into its
+replacement.
 
 ## Data and RPC contracts
 
@@ -81,8 +84,12 @@ frames:
 - logical message: 1 MiB maximum;
 - eight concurrent reassemblies and 4 MiB total reserved memory;
 - 15-second assembly/send deadline;
-- browser backpressure at 1 MiB high-water / 256 KiB low-water;
+- browser and Rust-sender backpressure at 1 MiB high-water / 256 KiB low-water;
 - 32 concurrent RPCs and 128 queued inbound frames per peer.
+
+Each peer accepts exactly one ordered, fully reliable `cognia.v2` main channel.
+Unordered, partial-reliable, and duplicate main channels are closed before
+callbacks are registered; `cognia.terminal` remains independent.
 
 RPC requests use
 `{id, method, params, idempotencyKey, protocolVersion: 2}`. Command behavior

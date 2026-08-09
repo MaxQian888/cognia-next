@@ -1,10 +1,8 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for the MCP `resources/*` handlers — listing + reading +
  * scope/uri parsing.
  */
 
-import "fake-indexeddb/auto"
 import {
   listResources,
   parseResourceUri,
@@ -15,15 +13,15 @@ import {
 import { createWikiArticle } from "@/lib/db/wiki-articles"
 import { SELF_CORPUS_ID } from "@/types/wiki"
 import type { WikiArticleDraft } from "@/lib/db/wiki-articles"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listSkills } from "@/lib/db/skills"
 import { listCharacters } from "@/lib/db/characters"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 }, 30_000)
 
 function articleDraft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDraft {
@@ -43,6 +41,8 @@ function articleDraft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDra
     fileHashes: overrides.fileHashes ?? {},
   }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("parseResourceUri", () => {
   it("parses a wiki uri", () => {

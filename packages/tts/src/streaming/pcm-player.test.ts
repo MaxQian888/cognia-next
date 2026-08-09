@@ -214,3 +214,167 @@ describe("PcmPlayer", () => {
     expect(() => player.enqueue(pcm(2400))).toThrow(/Web Audio API is not available/)
   })
 })
+
+// ---- Live-voice additions: barge-in, played clock, long-lived context ------
+
+describe("PcmPlayer.interrupt", () => {
+  it("stops every scheduled source so the user is not talked over", () => {
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({ sampleRate: 24000, audioContextFactory: () => ctx })
+    player.enqueue(pcm(2400))
+    player.enqueue(pcm(2400))
+
+    player.interrupt()
+
+    expect(ctx.sources).toHaveLength(2)
+    for (const source of ctx.sources) expect(source.stop).toHaveBeenCalledWith(0)
+  })
+
+  it("keeps the audio context open, unlike stop()", () => {
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({ audioContextFactory: () => ctx })
+    player.enqueue(pcm(2400))
+
+    player.interrupt()
+
+    expect(ctx.close).not.toHaveBeenCalled()
+    expect(player.getState()).not.toBe("ended")
+  })
+
+  it("rewinds the schedule so the next delta starts immediately", () => {
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({ sampleRate: 24000, audioContextFactory: () => ctx })
+    player.enqueue(pcm(24000)) // one second, scheduled at t=0
+    ctx.currentTime = 0.25
+
+    player.interrupt()
+    player.enqueue(pcm(2400))
+
+    // Without the rewind this would queue behind the interrupted second.
+    expect(ctx.sources[1].started).toBe(0.25)
+  })
+
+  it("ignores a source that finished between scheduling and the cut", () => {
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({ audioContextFactory: () => ctx })
+    player.enqueue(pcm(2400))
+    ctx.sources[0].stop.mockImplementation(() => {
+      throw new Error("InvalidStateError")
+    })
+
+    expect(() => player.interrupt()).not.toThrow()
+  })
+
+  it("does not let a cut source corrupt progress accounting", () => {
+    const progress: number[] = []
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({
+      audioContextFactory: () => ctx,
+      onProgress: (value) => progress.push(value),
+    })
+    player.enqueue(pcm(2400))
+    const cut = ctx.sources[0]
+
+    player.interrupt()
+    cut.onended?.() // the real runtime still fires this after stop()
+
+    expect(progress).toEqual([])
+  })
+
+  it("is inert once the player has been stopped for good", () => {
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({ audioContextFactory: () => ctx })
+    player.enqueue(pcm(2400))
+    player.stop()
+
+    player.interrupt()
+
+    expect(ctx.sources[0].stop).not.toHaveBeenCalled()
+  })
+
+  it("is safe before anything has been queued", () => {
+    expect(() => new PcmPlayer({}).interrupt()).not.toThrow()
+  })
+})
+
+describe("PcmPlayer.playedSeconds", () => {
+  it("is zero before playback starts", () => {
+    expect(new PcmPlayer({}).playedSeconds()).toBe(0)
+  })
+
+  it("tracks elapsed context time within the utterance", () => {
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({ sampleRate: 24000, audioContextFactory: () => ctx })
+    player.enqueue(pcm(24000))
+
+    ctx.currentTime = 0.4
+
+    expect(player.playedSeconds()).toBeCloseTo(0.4, 6)
+  })
+
+  it("never exceeds what was actually scheduled", () => {
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({ sampleRate: 24000, audioContextFactory: () => ctx })
+    player.enqueue(pcm(2400)) // 0.1s
+
+    ctx.currentTime = 5
+
+    expect(player.playedSeconds()).toBeCloseTo(0.1, 6)
+  })
+
+  it("resets after an interrupt so the next turn measures from zero", () => {
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({ sampleRate: 24000, audioContextFactory: () => ctx })
+    player.enqueue(pcm(24000))
+    ctx.currentTime = 0.4
+
+    player.interrupt()
+
+    expect(player.playedSeconds()).toBe(0)
+  })
+})
+
+describe("PcmPlayer keepAlive", () => {
+  it("keeps the context open across turns and returns to idle", () => {
+    const ctx = new FakeContext()
+    const ended = jest.fn()
+    const player = new PcmPlayer({
+      audioContextFactory: () => ctx,
+      keepAlive: true,
+      onEnded: ended,
+    })
+    player.enqueue(pcm(2400))
+
+    ctx.sources[0].onended?.()
+    player.end()
+
+    expect(ended).toHaveBeenCalledTimes(1)
+    expect(ctx.close).not.toHaveBeenCalled()
+    expect(player.getState()).toBe("idle")
+  })
+
+  it("accepts a further turn on the same context", () => {
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({ audioContextFactory: () => ctx, keepAlive: true })
+    player.enqueue(pcm(2400))
+    ctx.sources[0].onended?.()
+    player.end()
+
+    player.enqueue(pcm(2400))
+
+    expect(ctx.createBufferSource).toHaveBeenCalledTimes(2)
+    expect(ctx.close).not.toHaveBeenCalled()
+  })
+
+  it("still closes the context when keepAlive is off (existing TTS behaviour)", () => {
+    const ctx = new FakeContext()
+    const player = new PcmPlayer({ audioContextFactory: () => ctx })
+    player.enqueue(pcm(2400))
+
+    ctx.sources[0].onended?.()
+    player.end()
+
+    expect(ctx.close).toHaveBeenCalled()
+    expect(player.getState()).toBe("ended")
+  })
+})

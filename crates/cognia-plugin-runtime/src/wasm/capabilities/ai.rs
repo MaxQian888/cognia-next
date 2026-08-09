@@ -1,6 +1,13 @@
-//! `cognia:plugin/ai` host import — `generate-text` only in v0.1.
+//! `cognia:plugin/ai` host import — `generate-text` only.
 
+use super::super::errors::{coded, WasmErrorCode};
 use super::super::store::HostState;
+use super::require;
+
+/// The 1 MiB prompt cap. Stricter than the bridge's 4 MiB generic envelope
+/// limit, and enforced earlier, so an oversized prompt never reaches the
+/// pending-request pool.
+pub const MAX_PROMPT_BYTES: usize = 1_000_000;
 
 #[derive(Debug, Clone, Default)]
 pub struct GenerateOptions {
@@ -9,38 +16,46 @@ pub struct GenerateOptions {
     pub model: Option<String>,
 }
 
-/// AI generation is gated on `network:fetch` (the call ultimately hits an
-/// HTTPS endpoint). The host enforces no further cost ceiling at v0.1 —
-/// rate limits live in the AI provider chain.
+/// AI generation requires `ai:chat`.
+///
+/// v0.1 gated this on `network:fetch` on the reasoning that the call ends up
+/// on an HTTPS endpoint. That conflated two different consent decisions:
+/// `network:fetch` grants raw outbound HTTP, while this route spends the user's
+/// model quota and carries prompt text through the host's PII redaction gate.
+/// A plugin that legitimately needs one very often should not get the other.
 pub fn check(state: &HostState) -> Result<(), String> {
-    if state.capabilities.allows("network:fetch") {
-        Ok(())
-    } else {
-        Err(format!(
-            "capability `network:fetch` (required for ai.generate-text) not granted to plugin `{}`",
-            state.plugin_id
-        ))
-    }
+    require(state, "ai:chat")
 }
 
 pub fn validate(prompt: &str, opts: &GenerateOptions) -> Result<(), String> {
     if prompt.is_empty() {
-        return Err("ai.generate-text: prompt is empty".into());
+        return Err(coded(
+            WasmErrorCode::InvalidRequest,
+            "ai.generate-text: prompt is empty",
+        ));
     }
-    if prompt.len() > 1_000_000 {
-        return Err("ai.generate-text: prompt exceeds 1 MiB".into());
+    if prompt.len() > MAX_PROMPT_BYTES {
+        return Err(coded(
+            WasmErrorCode::PayloadTooLarge,
+            format!(
+                "ai.generate-text: prompt is {} bytes, over the {MAX_PROMPT_BYTES} byte limit",
+                prompt.len()
+            ),
+        ));
     }
     if let Some(t) = opts.temperature {
         if !(0.0..=2.0).contains(&t) {
-            return Err(format!(
-                "ai.generate-text: temperature out of range (got {t}, expected 0.0..=2.0)"
+            return Err(coded(
+                WasmErrorCode::InvalidRequest,
+                format!("ai.generate-text: temperature out of range (got {t}, expected 0.0..=2.0)"),
             ));
         }
     }
     if let Some(m) = opts.max_tokens {
         if m == 0 || m > 100_000 {
-            return Err(format!(
-                "ai.generate-text: max_tokens out of range (got {m})"
+            return Err(coded(
+                WasmErrorCode::InvalidRequest,
+                format!("ai.generate-text: max_tokens out of range (got {m}, expected 1..=100000)"),
             ));
         }
     }
@@ -49,32 +64,42 @@ pub fn validate(prompt: &str, opts: &GenerateOptions) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::store::CapabilitySet;
+    use super::super::super::store::test_host_state;
     use super::*;
-    use wasmtime_wasi::{ResourceTable, WasiCtxBuilder};
 
     fn st(caps: &[&str]) -> HostState {
-        HostState {
-            plugin_id: "demo".into(),
-            capabilities: CapabilitySet::from_iter(caps.iter().map(|s| (*s).to_string())),
-            shell_allowlist: Vec::new(),
-            call_timeout_ms: 30_000,
-            limits: wasmtime::StoreLimitsBuilder::new().build(),
-            table: ResourceTable::new(),
-            wasi: WasiCtxBuilder::new().build(),
-        }
+        test_host_state("demo", caps)
     }
 
     #[test]
-    fn check_requires_network_fetch() {
-        assert!(check(&st(&["network:fetch"])).is_ok());
+    fn check_requires_ai_chat_not_network_fetch() {
+        // The v0.2 regression anchor. `network:fetch` grants raw outbound HTTP
+        // and must NOT unlock the user's model quota.
+        assert!(check(&st(&["ai:chat"])).is_ok());
         assert!(check(&st(&[])).is_err());
+
+        let err = check(&st(&["network:fetch"])).unwrap_err();
+        assert!(err.starts_with("CAPABILITY_DENIED: "));
+        assert!(
+            err.contains("ai:chat"),
+            "the denial must name the right capability: {err}"
+        );
     }
 
     #[test]
     fn validate_rejects_empty_prompt() {
         let err = validate("", &GenerateOptions::default()).unwrap_err();
+        assert!(err.starts_with("INVALID_REQUEST: "));
         assert!(err.contains("prompt is empty"));
+    }
+
+    #[test]
+    fn validate_rejects_oversize_prompt_as_payload_too_large() {
+        let big = "x".repeat(MAX_PROMPT_BYTES + 1);
+        let err = validate(&big, &GenerateOptions::default()).unwrap_err();
+        assert!(err.starts_with("PAYLOAD_TOO_LARGE: "));
+        // At the boundary exactly, it passes.
+        assert!(validate(&"x".repeat(MAX_PROMPT_BYTES), &GenerateOptions::default()).is_ok());
     }
 
     #[test]

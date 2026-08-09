@@ -27,7 +27,7 @@
     "muted": "Muted"
   },
   "islandToggle": "Toggle agent island",
-  "newChat": "New Chat",
+  "newChat": "Quick Chat",
   "openLogs": "Open Log Panel",
   "pet": {
     "clean": "Clean",
@@ -55,6 +55,7 @@
     "streaming": "Responding…"
   },
   "toggleWindow": "Show / hide window",
+  "trayPanelToggle": "Quick panel",
   "usage": {
     "auto": "Auto (highest usage)",
     "empty": "No usage data yet",

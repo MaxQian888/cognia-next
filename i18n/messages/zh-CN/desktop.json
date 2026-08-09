@@ -1,22 +1,4 @@
 {
-  "chatRuntime": {
-    "title": "聊天当前为只读",
-    "states": {
-      "available": "聊天可用。",
-      "readOnly": "仍可查看缓存会话，但暂时不能发送消息。",
-      "queued": "当前主机重连后将发送此操作。",
-      "offline": "当前主机离线。草稿只保存在此浏览器中，不会自动发送。",
-      "requiresUnlock": "请先解锁本地 Vault，再使用当前主机。",
-      "requiresPairing": "请将此浏览器与主机配对，或切换到独立模式。",
-      "requiresGrant": "当前设备缺少主机授予的聊天权限。",
-      "incompatible": "当前主机未提供兼容的聊天协议。",
-      "unsupported": "当前运行目标尚未实现聊天能力。"
-    },
-    "actions": {
-      "pair": "配对主机",
-      "connectionSettings": "连接设置"
-    }
-  },
   "barCustomize": {
     "dragHint": "拖拽调整顺序",
     "hidden": "已隐藏",
@@ -127,6 +109,24 @@
     "viewActive": "显示活跃会话",
     "viewArchived": "显示已归档会话"
   },
+  "chatRuntime": {
+    "actions": {
+      "connectionSettings": "连接设置",
+      "pair": "配对主机"
+    },
+    "states": {
+      "available": "聊天可用。",
+      "incompatible": "当前主机未提供兼容的聊天协议。",
+      "offline": "当前主机离线。草稿只保存在此浏览器中，不会自动发送。",
+      "queued": "当前主机重连后将发送此操作。",
+      "readOnly": "仍可查看缓存会话，但暂时不能发送消息。",
+      "requiresGrant": "当前设备缺少主机授予的聊天权限。",
+      "requiresPairing": "请将此浏览器与主机配对，或切换到独立模式。",
+      "requiresUnlock": "请先解锁本地 Vault，再使用当前主机。",
+      "unsupported": "当前运行目标尚未实现聊天能力。"
+    },
+    "title": "聊天当前为只读"
+  },
   "commandPalette": {
     "actions": {
       "checkUpdates": "检查更新",
@@ -137,8 +137,8 @@
       "manageMcp": "管理 MCP 服务器",
       "manageSkills": "管理技能",
       "manageTeams": "管理团队",
-      "newChat": "新建聊天",
-      "newChatHint": "新建",
+      "newChat": "快速聊天",
+      "newChatHint": "持久化任务",
       "openFolder": "打开文件夹为工作区…",
       "openSettings": "打开设置",
       "toggleTheme": "切换主题"
@@ -210,7 +210,8 @@
       "side": "导航栏位置",
       "sideLeft": "左侧",
       "sideRight": "右侧",
-      "title": "自定义侧边栏"
+      "title": "自定义侧边栏",
+      "pinItem": "固定项目"
     },
     "directMessages": "私信",
     "discover": "发现",
@@ -372,7 +373,7 @@
       "label": "文件",
       "newAgentTeam": "新建智能体团队",
       "newCharacter": "新建角色",
-      "newChat": "新建对话",
+      "newChat": "快速对话",
       "newWorkflow": "新建工作流",
       "openLogs": "打开日志",
       "openSettings": "设置…",
@@ -602,7 +603,10 @@
     "select": "选择",
     "unarchive": "取消归档",
     "unpin": "取消置顶",
-    "untitled": "（无标题）"
+    "untitled": "（无标题）",
+    "openInCodexApp": "在 Codex App 中打开",
+    "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
+    "openedInCodexApp": "已在 Codex App 中打开。"
   },
   "shell": {
     "desktopOnlyBodyMiddle": " 启动应用，而不是 ",
@@ -651,6 +655,7 @@
     "terminal": "{count, plural, =0 {终端} other {# 个终端}}",
     "terminalRunning": "终端面板 — 有会话正在运行",
     "terminalToggle": "切换终端面板",
+    "terminalAiShellToggle": "切换 AI Shell 面板",
     "usage": "用量与额度",
     "usageOpen": "打开用量与额度"
   },

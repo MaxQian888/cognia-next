@@ -94,7 +94,21 @@
     "thrashing": "检测到重复的命令/编辑反复操作",
     "title": "摩擦与反复操作"
   },
+  "skillSuggestion": {
+    "action": "审阅并提炼",
+    "description": "这次成功流程可能适合复用为 Skill。",
+    "error": "无法准备 Skill 审阅。",
+    "preparing": "正在准备…",
+    "privacy": "仅在点击后读取会话内容，先在本地脱敏；生成的 Skill 会保持禁用，直到你确认试跑结果。",
+    "ready": "已打开 Skill 审阅。",
+    "title": "将此流程提炼为 Skill"
+  },
   "title": "会话洞察",
+  "tests": {
+    "counts": "{passed} 通过，{failed} 失败",
+    "snapshot": "测试快照 {index}",
+    "title": "测试结果"
+  },
   "units": {
     "tokPerSec": "{value} tok/s"
   }

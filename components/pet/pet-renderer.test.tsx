@@ -1,7 +1,8 @@
-import { render } from "@testing-library/react"
+import { render, waitFor } from "@testing-library/react"
 import { PetRenderer } from "./pet-renderer"
 import type { PetBones } from "@/types/pet"
 import { registerSkin } from "./skins/registry"
+import { resetPetSkinRuntimeForTests } from "@/lib/pet/skin-runtime"
 
 function makeBones(overrides: Partial<PetBones> = {}): PetBones {
   return {
@@ -19,6 +20,8 @@ function makeBones(overrides: Partial<PetBones> = {}): PetBones {
 }
 
 describe("PetRenderer", () => {
+  beforeEach(() => resetPetSkinRuntimeForTests())
+
   it("renders the svg skin by default", () => {
     const { container } = render(<PetRenderer bones={makeBones()} stage="baby" state="idle" />)
     expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
@@ -69,5 +72,22 @@ describe("PetRenderer", () => {
       <PetRenderer bones={bones} stage="adult" state="thinking" skinId="memo-test" reducedMotion />
     )
     expect(renderSkin).toHaveBeenCalledTimes(initialRenderCount + 1)
+  })
+
+  it("keeps non-owning SVG previews static under the one-renderer budget", async () => {
+    const { container } = render(
+      <>
+        <PetRenderer bones={makeBones()} stage="adult" state="idle" renderPriority="thumbnail" />
+        <PetRenderer bones={makeBones()} stage="adult" state="idle" renderPriority="interactive" />
+      </>
+    )
+
+    await waitFor(() => {
+      const skins = container.querySelectorAll('[data-pet-skin-root="svg"]')
+      expect(skins[0]).toHaveAttribute("data-pet-paused", "true")
+      expect(skins[0]).toHaveAttribute("data-pet-render-mode", "placeholder")
+      expect(skins[1]).not.toHaveAttribute("data-pet-paused")
+      expect(skins[1]).toHaveAttribute("data-pet-render-mode", "live")
+    })
   })
 })

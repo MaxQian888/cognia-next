@@ -172,6 +172,8 @@ async function runStepWork(
           toolName,
           args,
           signal,
+          scopeId: `run:${runCtx.runId}`,
+          surface: "plan",
           clientInfo: { name: "cognia-plan", version: "1.0.0" },
         })
         hooks.dispatchMCPToolResult(serverId, toolName, {

@@ -1,10 +1,8 @@
-/** @jest-environment jsdom */
 // Coverage for the notifications CRUD module (ADR-0042, table v68): put/get,
 // dedupe lookup, patch, listing/filter, badge counts, group lookup, retention
 // pruning (TTL + age + cap), and delete/clear. fake-indexeddb exercises the
 // real Dexie query path against in-memory IDB.
 
-import "fake-indexeddb/auto"
 import {
   putNotification,
   getNotification,
@@ -17,15 +15,15 @@ import {
   clearNotifications,
   pruneNotifications,
 } from "./notifications"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
 import type { NotificationRecord } from "@/types/notifications"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function rec(over: Partial<NotificationRecord> = {}): NotificationRecord {
   const t = over.createdAt ?? 1000

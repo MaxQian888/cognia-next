@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { useChatStore, selectBranchSiblings } from "@/stores/chat/chat-store"
 import { cn } from "@/lib/utils"
 import type { UIMessage } from "ai"
+import { setSessionActiveBranchSelection } from "@/lib/db/sessions"
 
 interface BranchNavigatorProps {
   message: UIMessage
@@ -81,8 +82,10 @@ export function BranchNavigator({ message, className }: BranchNavigatorProps) {
     if (!target) return
     // `sessionId` is null only before a session exists (the pre-session
     // ephemeral chat the store's top-level projection stands in for).
-    if (sessionId) setSessionActiveBranch(sessionId, groupId, target.id)
-    else setActiveBranch(groupId, target.id)
+    if (sessionId) {
+      setSessionActiveBranch(sessionId, groupId, target.id)
+      void setSessionActiveBranchSelection(sessionId, groupId, target.id)
+    } else setActiveBranch(groupId, target.id)
   }
 
   return (

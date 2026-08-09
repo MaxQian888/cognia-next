@@ -117,13 +117,13 @@ it("upserts public Companion metadata without storing a credential value", async
     baseUrl: "https://studio.local:7890/path",
     deviceId: "device-1",
     serverVersion: "2.0.0",
-    credentialRef: "companion:companion-studio:device-jwt",
+    credentialRef: "companion-host:acct_runtime:companion-studio:device-private-jwk",
     now: 10,
   })
 
   expect(target).toMatchObject({
     baseUrl: "https://studio.local:7890",
-    credentialRef: "companion:companion-studio:device-jwt",
+    credentialRef: "companion-host:acct_runtime:companion-studio:device-private-jwk",
   })
   expect(target).not.toHaveProperty("deviceJwt")
 })
@@ -138,7 +138,7 @@ it("rejects plaintext Companion endpoints unless the non-production dev flag is 
     baseUrl: "http://127.0.0.1:7890/path",
     deviceId: "device-dev",
     serverVersion: "2.0.0",
-    credentialRef: "companion:companion-dev:device-jwt",
+    credentialRef: "companion-host:acct_runtime:companion-dev:device-private-jwk",
   }
 
   await expect(registry.upsertCompanionTarget(input)).rejects.toThrow(/HTTPS/)
@@ -147,4 +147,28 @@ it("rejects plaintext Companion endpoints unless the non-production dev flag is 
   await expect(registry.upsertCompanionTarget(input)).resolves.toMatchObject({
     baseUrl: "http://127.0.0.1:7890",
   })
+})
+
+it("atomically upserts and activates a completed Companion pairing", async () => {
+  const registry = new RuntimeTargetRegistry()
+  await registry.ensureDefaultActiveTarget(ACCOUNT_ID, 5)
+
+  const target = await registry.upsertAndActivateCompanionTarget({
+    accountId: ACCOUNT_ID,
+    id: "companion-cloud",
+    label: "cloud.example",
+    hostKind: "cloud",
+    baseUrl: "https://cloud.example/path",
+    deviceId: "device-cloud",
+    serverVersion: "2.0.0",
+    credentialRef: "companion-host:acct_runtime:companion-cloud:device-private-jwk",
+    now: 20,
+  })
+
+  expect(target).toMatchObject({
+    id: "companion-cloud",
+    baseUrl: "https://cloud.example",
+    lastUsedAt: 20,
+  })
+  await expect(registry.getActiveTarget(ACCOUNT_ID)).resolves.toEqual(target)
 })

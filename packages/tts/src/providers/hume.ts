@@ -13,6 +13,8 @@ export interface HumeTTSOptions {
   actingInstructions?: string
   sampleRate?: number
   version?: 1 | 2
+  signal?: AbortSignal
+  requestId?: string
 }
 
 export async function generateHumeTTS(text: string, options: HumeTTSOptions): Promise<TTSResponse> {
@@ -29,6 +31,9 @@ export async function generateHumeTTS(text: string, options: HumeTTSOptions): Pr
   try {
     const response = await proxyFetch("https://api.hume.ai/v0/tts", {
       method: "POST",
+      provider: "hume",
+      signal: options.signal,
+      requestId: options.requestId,
       headers: {
         "Content-Type": "application/json",
         "X-Hume-Api-Key": apiKey,

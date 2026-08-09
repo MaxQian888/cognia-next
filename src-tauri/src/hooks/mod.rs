@@ -1,19 +1,9 @@
-// Hook dispatcher — loads hook config from the merged Claude Code settings
-// and runs handlers that match an event + tool. Phase 1 wires:
-//   - `UserPromptSubmit`: invoked by `claude::commands::claude_send` BEFORE
-//     forwarding the prompt to the sidecar. A blocking hook causes the
-//     command to return Err with the hook's reason; non-blocking hooks may
-//     contribute additional context that the caller prepends to the prompt.
-//   - `PreToolUse`: invoked from inside `claude::sidecar`'s stdout reader
-//     when a `permission_request` event arrives. A blocking hook short-
-//     circuits the user-approval round-trip with an automatic deny.
-//
-// Project- and local-scope hooks are loaded only when the workspace has been
-// trusted (Phase 2 ships the trust UI); for now we read the user-scope file
-// only, which lives at `~/.claude/settings.json`.
+// Host-native compatibility hook dispatcher. The built-in Claude Agent SDK
+// rail executes settings hooks inside the Node sidecar so every event has one
+// owner and SDK input/output semantics are preserved. Rust remains the shared
+// executor for external-agent adapters and direct compatibility commands.
 
 pub mod builtin;
-pub mod classify;
 pub mod command;
 pub mod commands;
 pub mod trust;
@@ -21,9 +11,8 @@ pub mod types;
 pub mod webhook;
 
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::Value;
 
-pub use classify::{classify_sidecar_message, extract_tool_results, extract_tool_uses};
 pub use types::{HookDecision, HookEvent, HookEventPayload, HookGroup, HookHandler, HookOutcome};
 
 use crate::settings::{ClaudeSettings, EffectiveSettings};
@@ -125,29 +114,16 @@ async fn run_handler(handler: HookHandler, payload_json: &str) -> HookOutcome {
             url,
             headers,
             timeout,
+        }
+        | HookHandler::Http {
+            url,
+            headers,
+            timeout,
         } => webhook::run_webhook_handler(&url, &headers, timeout, payload_json).await,
         HookHandler::Unsupported => HookOutcome::InternalError {
             reason: "unsupported handler type".to_string(),
         },
     }
-}
-
-/// Convenience wrapper for the prompt-scoped event. Returns the merged decision
-/// so the caller can treat `block` as a hard error and `additional_context`
-/// as a prompt prefix.
-pub async fn run_user_prompt_submit(
-    settings: &EffectiveSettings,
-    session_id: &str,
-    cwd: Option<&str>,
-    prompt_text: &str,
-) -> HookDecision {
-    let payload = HookEventPayload {
-        hook_event_name: "UserPromptSubmit".to_string(),
-        session_id: session_id.to_string(),
-        cwd: cwd.map(String::from),
-        fields: json!({ "prompt": prompt_text }),
-    };
-    run_event(&settings.merged, HookEvent::UserPromptSubmit, "", &payload).await
 }
 
 // PreToolUse execution moved into the sidecar (`dispatch/agent-hooks.mjs`) as an

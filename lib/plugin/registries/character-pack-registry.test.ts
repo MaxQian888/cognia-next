@@ -27,6 +27,12 @@ import {
   unregisterCharacterPacksByPlugin,
 } from "./character-pack-registry"
 import { __resetSkillsForTesting, registerSkill } from "./skill-registry"
+import {
+  getCharacterPackRegistryVersion,
+  getPackTrust,
+  registerCharacterPackWithTrust,
+  subscribeCharacterPackRegistry,
+} from "./character-pack-registry"
 
 function makeCharacter(
   localId: string,
@@ -303,5 +309,110 @@ describe("character-pack-registry", () => {
       const aliceWarnings = getPackCharacterWarnings("workplace", "alice")
       expect(aliceWarnings.map((w) => w.code)).toContain("missing-mcp-preset")
     })
+  })
+})
+
+describe("trust sidecar + subscription (Epic 3)", () => {
+  const pack = (id = "p1") =>
+    ({ id, name: "P", version: "1.0.0", characters: [] }) as unknown as PluginCharacterPackDef
+
+  const verifiedTrust = {
+    state: "verified" as const,
+    algo: "ed25519" as const,
+    publicKey: "PK",
+    fingerprint: "f".repeat(64),
+    shortFingerprint: "ed25519:ffff",
+    signature: { algo: "ed25519" as const, pubKey: "PK", sig: "SIG" },
+  }
+
+  afterEach(() => {
+    __resetCharacterPacksForTesting()
+  })
+
+  it("defaults every pack to unsigned", () => {
+    registerCharacterPack("p1", pack())
+    expect(getPackTrust("p1")).toEqual({ state: "unsigned" })
+  })
+
+  it("reports unsigned for a pack that was never registered", () => {
+    expect(getPackTrust("ghost")).toEqual({ state: "unsigned" })
+  })
+
+  it("records a verified trust state through the host-only entry point", () => {
+    registerCharacterPackWithTrust("p1", pack(), { trust: verifiedTrust })
+    expect(getPackTrust("p1")).toEqual(verifiedTrust)
+  })
+
+  it("downgrades to unsigned when a plugin re-registers over a verified pack id", () => {
+    // The trust-spoofing guard: `registerCharacterPack` is SDK-exported, so a
+    // plugin claiming a previously-verified id must not inherit its badge.
+    registerCharacterPackWithTrust("p1", pack(), { trust: verifiedTrust })
+    registerCharacterPack("p1", pack(), { pluginId: "impostor" })
+    expect(getPackTrust("p1")).toEqual({ state: "unsigned" })
+  })
+
+  it("clears trust on unregister by id", () => {
+    registerCharacterPackWithTrust("p1", pack(), { trust: verifiedTrust })
+    unregisterCharacterPackById("p1")
+    expect(getPackTrust("p1")).toEqual({ state: "unsigned" })
+  })
+
+  it("clears trust on unregister by plugin", () => {
+    registerCharacterPackWithTrust("p1", pack(), { pluginId: "owner", trust: verifiedTrust })
+    unregisterCharacterPacksByPlugin("owner")
+    expect(getPackTrust("p1")).toEqual({ state: "unsigned" })
+  })
+
+  it("clears trust on test reset so state cannot leak between tests", () => {
+    registerCharacterPackWithTrust("p1", pack(), { trust: verifiedTrust })
+    __resetCharacterPacksForTesting()
+    expect(getPackTrust("p1")).toEqual({ state: "unsigned" })
+  })
+
+  it("notifies subscribers on every mutation", () => {
+    const listener = jest.fn()
+    const unsubscribe = subscribeCharacterPackRegistry(listener)
+
+    registerCharacterPack("p1", pack())
+    registerCharacterPackWithTrust("p2", pack("p2"), { trust: verifiedTrust })
+    refreshAllPackWarnings()
+    unregisterCharacterPackById("p1")
+
+    expect(listener).toHaveBeenCalledTimes(4)
+    unsubscribe()
+    registerCharacterPack("p3", pack("p3"))
+    expect(listener).toHaveBeenCalledTimes(4)
+  })
+
+  it("notifies on refreshAllPackWarnings so a cleared warning reaches React", () => {
+    // Without this the sidecar warnings map mutates invisibly and a resolved
+    // dependency keeps rendering its chip until an unrelated re-render.
+    const listener = jest.fn()
+    const unsubscribe = subscribeCharacterPackRegistry(listener)
+    refreshAllPackWarnings()
+    expect(listener).toHaveBeenCalledTimes(1)
+    unsubscribe()
+  })
+
+  it("exposes a monotonic version suitable as a useSyncExternalStore snapshot", () => {
+    const before = getCharacterPackRegistryVersion()
+    registerCharacterPack("p1", pack())
+    const after = getCharacterPackRegistryVersion()
+    expect(after).toBeGreaterThan(before)
+    // Stable between mutations — the property that stops React looping.
+    expect(getCharacterPackRegistryVersion()).toBe(after)
+  })
+
+  it("survives a throwing subscriber without breaking the mutation", () => {
+    const bad = jest.fn(() => {
+      throw new Error("subscriber exploded")
+    })
+    const good = jest.fn()
+    subscribeCharacterPackRegistry(bad)
+    subscribeCharacterPackRegistry(good)
+
+    expect(() => registerCharacterPack("p1", pack())).not.toThrow()
+    expect(good).toHaveBeenCalled()
+    expect(getCharacterPack("p1")).toBeDefined()
   })
 })

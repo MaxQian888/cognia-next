@@ -362,6 +362,7 @@ const hostOperationLoaders: Record<string, () => Promise<HostOperation>> = {
   teamRun: async () => teamRunCore as HostOperation,
   teamList: async () => teamListCore as HostOperation,
   pluginToolInvoke: async () => pluginToolInvokeCore as HostOperation,
+  spawnTask: async () => (await import("./spawn-task")).spawnTaskCore as HostOperation,
   scheduleTask: async () => (await import("./scheduling")).scheduleTaskCore as HostOperation,
   listScheduledTasks: async () =>
     (await import("./scheduling")).listScheduledTasksCore as HostOperation,
@@ -396,6 +397,15 @@ const hostOperationLoaders: Record<string, () => Promise<HostOperation>> = {
   listCharacters: async () => (await import("@/lib/db/characters")).listCharacters as HostOperation,
   getCharacter: async () => (await import("@/lib/db/characters")).getCharacter as HostOperation,
   recordCall: async () => (await import("../audit-log")).recordCall as HostOperation,
+  workflowListDeployments: async () =>
+    (await import("./workflow")).listWorkflowDeploymentsCore as HostOperation,
+  workflowRunCreate: async () =>
+    (await import("./workflow")).createWorkflowRunCore as HostOperation,
+  workflowRunGet: async () => (await import("./workflow")).getWorkflowRunCore as HostOperation,
+  workflowEventsList: async () =>
+    (await import("./workflow")).listWorkflowEventsCore as HostOperation,
+  workflowRunCancel: async () =>
+    (await import("./workflow")).cancelWorkflowRunCore as HostOperation,
 }
 
 /**
@@ -425,6 +435,10 @@ export async function runOrchestrationExec(
   switch (command) {
     case "agent_dispatch":
       return agentDispatchCore(args as unknown as AgentDispatchInput)
+    case "spawn_task":
+      return (await import("./spawn-task")).spawnTaskCore(
+        args as unknown as import("./spawn-task").SpawnTaskInput
+      )
     case "team_run":
       return teamRunCore(args as unknown as TeamRunInput)
     case "team_list":

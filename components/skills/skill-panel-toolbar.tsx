@@ -43,7 +43,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { resolveSkillBundleMirrors } from "@/stores/settings/settings-store"
 import { pickAndReadBinaryFiles, pickAndReadFiles, pickDirectory } from "@/lib/files/file-bridge"
 import { isTauri } from "@/lib/tauri"
-import { loadBundle } from "@/lib/skills/bundle/loader"
+import { loadBundle, type BundleResult } from "@/lib/skills/bundle/loader"
 import { listSkills } from "@/lib/db/skills"
 import { nameFromFilename, parseSkillMarkdown } from "@/lib/claude/skills-io"
 import { scanClaudeSkills, skillsEmptyTrash, skillsListTrash } from "@/lib/claude/ipc"
@@ -64,6 +64,33 @@ function slug(name: string): string {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "") || "skill"
   )
+}
+
+function toBundleImportDraft(
+  result: BundleResult,
+  source: "zip" | "folder",
+  nativeDirectory?: string
+): ImportStaging["drafts"][number] {
+  const draft = result.draft
+  return {
+    name: draft.name,
+    slug: draft.slug,
+    description: draft.description,
+    compatibility: draft.compatibility,
+    metadata: draft.metadata,
+    invocationPolicy: draft.invocationPolicy,
+    frontmatterExtensions: draft.frontmatterExtensions,
+    codexOpenAiYaml: draft.codexOpenAiYaml,
+    content: draft.content,
+    tags: draft.tags,
+    allowedTools: draft.allowedTools,
+    category: draft.category,
+    canonicalId: `bundle:${source}:${draft.slug ?? slug(draft.name)}`,
+    resources: result.resources,
+    validationErrors:
+      result.nonFatalValidationErrors.length > 0 ? result.nonFatalValidationErrors : undefined,
+    ...(nativeDirectory ? { nativeDirectory } : {}),
+  }
 }
 
 export function SkillPanelToolbar() {
@@ -140,10 +167,13 @@ export function SkillPanelToolbar() {
       for (const file of files) {
         try {
           const fallback = nameFromFilename(file.name)
-          const { draft } = parseSkillMarkdown(file.content, {
+          const { draft, portabilityIssues } = parseSkillMarkdown(file.content, {
             fallbackName: fallback,
           })
-          drafts.push(draft)
+          drafts.push({
+            ...draft,
+            validationErrors: portabilityIssues.length > 0 ? portabilityIssues : undefined,
+          })
         } catch (err) {
           parseErrors.push({
             name: file.name,
@@ -195,18 +225,7 @@ export function SkillPanelToolbar() {
         bytes: picked.bytes,
         fallbackName: fallback,
       })
-      const draft: ImportStaging["drafts"][number] = {
-        name: result.draft.name,
-        description: result.draft.description,
-        content: result.draft.content,
-        tags: result.draft.tags,
-        allowedTools: result.draft.allowedTools,
-        category: result.draft.category,
-        canonicalId: `bundle:zip:${slug(result.draft.name)}`,
-        resources: result.resources,
-        validationErrors:
-          result.nonFatalValidationErrors.length > 0 ? result.nonFatalValidationErrors : undefined,
-      }
+      const draft = toBundleImportDraft(result, "zip")
       setImportStaging({
         drafts: [draft],
         sourceLabel: picked.name,
@@ -247,19 +266,7 @@ export function SkillPanelToolbar() {
         path: dir,
         fallbackName: fallback,
       })
-      const draft: ImportStaging["drafts"][number] = {
-        name: result.draft.name,
-        description: result.draft.description,
-        content: result.draft.content,
-        tags: result.draft.tags,
-        allowedTools: result.draft.allowedTools,
-        category: result.draft.category,
-        canonicalId: `bundle:folder:${slug(result.draft.name)}`,
-        resources: result.resources,
-        validationErrors:
-          result.nonFatalValidationErrors.length > 0 ? result.nonFatalValidationErrors : undefined,
-        nativeDirectory: dir,
-      }
+      const draft = toBundleImportDraft(result, "folder", dir)
       setImportStaging({
         drafts: [draft],
         sourceLabel: dir,
@@ -297,11 +304,15 @@ export function SkillPanelToolbar() {
       const parseErrors: ImportStaging["parseErrors"] = []
       for (const file of discovered) {
         try {
-          const { draft } = parseSkillMarkdown(file.content, {
+          const { draft, portabilityIssues } = parseSkillMarkdown(file.content, {
             fallbackName: file.dirName,
           })
           const tags = Array.from(new Set([...(draft.tags ?? []), "claude-code"]))
-          drafts.push({ ...draft, tags })
+          drafts.push({
+            ...draft,
+            tags,
+            validationErrors: portabilityIssues.length > 0 ? portabilityIssues : undefined,
+          })
         } catch (err) {
           parseErrors.push({
             name: file.dirName,

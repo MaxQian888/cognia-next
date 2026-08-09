@@ -41,7 +41,16 @@ export function panelFooterHint(hidden: { above: number; below: number }): strin
 }
 
 /** A scroll command derived purely from a keypress. */
-export type PanelKeyAction = "lineUp" | "lineDown" | "pageUp" | "pageDown" | null
+export type PanelKeyAction =
+  | "lineUp"
+  | "lineDown"
+  | "pageUp"
+  | "pageDown"
+  | "halfPageUp"
+  | "halfPageDown"
+  | "top"
+  | "bottom"
+  | null
 
 /**
  * Map a keypress to a scroll command (pure). Returns `null` for keys the panel
@@ -52,6 +61,10 @@ export function panelKeyAction(input: string, key: Key): PanelKeyAction {
   if (key.downArrow) return "lineDown"
   if (key.pageUp || input === "b") return "pageUp"
   if (key.pageDown || input === " ") return "pageDown"
+  if (key.ctrl && input === "u") return "halfPageUp"
+  if (key.ctrl && input === "d") return "halfPageDown"
+  if (input === "g") return "top"
+  if (input === "G") return "bottom"
   return null
 }
 
@@ -101,6 +114,24 @@ export function usePanelScroll(
             return scrollPage(i, "up", content, viewportRows)
           case "pageDown":
             return scrollPage(i, "down", content, viewportRows)
+          case "halfPageUp":
+            return scrollByLines(
+              i,
+              -Math.max(1, Math.floor(viewportRows / 2)),
+              content,
+              viewportRows
+            )
+          case "halfPageDown":
+            return scrollByLines(
+              i,
+              Math.max(1, Math.floor(viewportRows / 2)),
+              content,
+              viewportRows
+            )
+          case "top":
+            return { top: 0, stick: false }
+          case "bottom":
+            return { top: 0, stick: true }
         }
       })
       return true

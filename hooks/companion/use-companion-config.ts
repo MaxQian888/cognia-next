@@ -101,7 +101,7 @@ export function useCompanionConfig(opts: UseCompanionConfigOptions = {}): UseCom
     }
   }, [reload])
 
-  const paired = config !== null && config.deviceJwt.length > 0
+  const paired = config !== null && Boolean(config.devicePrivateKeyJwk)
   const shortDeviceId = paired && config ? config.deviceId.slice(0, 8) : null
 
   return { config, paired, shortDeviceId, loading, reload }

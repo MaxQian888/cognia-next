@@ -2,4 +2,4 @@
 "cognia-next": patch
 ---
 
-Right-side dock: stop the layout flash when switching to the Workspace or Prompt Templates panel. The resize animation was torn down one frame after it started by the layout echo it triggered itself, and a workspace panel's requested width was clamped by a sizing profile that had not been written yet — together they snapped the dock while its contents were briefly laid out at the destination width, blinking a scrollbar in and out of the panel body.
+Right-side dock: stop layout shake and scrollbar flashes when switching widths or opening Workspace and Prompt Templates. Programmatic resizes now commit one final layout and animate stable panel snapshots instead of reflowing the live conversation on every frame; unsupported engines resize immediately, and the embedded Pro IDE remains on its no-animation path.

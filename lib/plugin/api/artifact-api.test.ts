@@ -30,6 +30,7 @@ const mockArtifacts: Record<
     content: string
     type: string
     language?: string
+    version?: number
     metadata?: Record<string, unknown>
   }
 > = {}
@@ -37,6 +38,9 @@ let mockActiveArtifactId: string | null = null
 let mockPanelView: string | null = null
 let mockPanelOpen = false
 const mockSubscribers: Array<(state: unknown) => void> = []
+const mockSaveArtifactVersion = jest.fn()
+const mockRestoreArtifactVersion = jest.fn()
+const mockGetArtifactVersions = jest.fn(() => [] as Array<Record<string, unknown>>)
 
 // The active artifact is bucketed per conversation now, so the API resolves it
 // through the store's selector plus the chat store's active session.
@@ -60,6 +64,9 @@ jest.mock("@/stores/artifact/artifact-store", () => ({
           Object.assign(mockArtifacts[id], updates)
         }
       }),
+      saveArtifactVersion: mockSaveArtifactVersion,
+      restoreArtifactVersion: mockRestoreArtifactVersion,
+      getArtifactVersions: mockGetArtifactVersions,
       deleteArtifact: jest.fn((id) => {
         delete mockArtifacts[id]
       }),
@@ -103,6 +110,9 @@ jest.mock("@/stores", () => ({
           Object.assign(mockArtifacts[id], updates)
         }
       }),
+      saveArtifactVersion: mockSaveArtifactVersion,
+      restoreArtifactVersion: mockRestoreArtifactVersion,
+      getArtifactVersions: mockGetArtifactVersions,
       deleteArtifact: jest.fn((id) => {
         delete mockArtifacts[id]
       }),
@@ -134,6 +144,8 @@ describe("Artifact API", () => {
     mockPanelView = null
     mockPanelOpen = false
     mockSubscribers.length = 0
+    jest.clearAllMocks()
+    mockGetArtifactVersions.mockReturnValue([])
 
     // Clear renderers
     clearArtifactRenderers()
@@ -223,6 +235,19 @@ describe("Artifact API", () => {
       expect(typeof id).toBe("string")
     })
 
+    it.each(["document", "chart"] as const)("preserves the %s artifact type", async (type) => {
+      const api = createArtifactAPI(testPluginId)
+
+      const id = await api.createArtifact({
+        title: `${type} artifact`,
+        content: "{}",
+        type,
+        language: type === "document" ? "markdown" : "json",
+      })
+
+      expect(mockArtifacts[id].type).toBe(type)
+    })
+
     it("should add deterministic source metadata while preserving explicit overrides", async () => {
       const api = createArtifactAPI(testPluginId)
 
@@ -247,6 +272,40 @@ describe("Artifact API", () => {
         })
       )
     })
+
+    it("stamps authoritative plugin ownership and rejects foreign kinds", async () => {
+      const api = createArtifactAPI(testPluginId)
+      const id = await api.createArtifact({
+        title: "Workbook",
+        content: "{}",
+        type: "code",
+        language: "json",
+        kind: "workbook",
+        schemaVersion: 3,
+        metadata: {
+          plugin: {
+            kind: "evil/workbook",
+            schemaVersion: 999,
+            ownerPluginId: "evil",
+          },
+        },
+      })
+
+      expect(mockArtifacts[id].metadata?.plugin).toEqual({
+        kind: `${testPluginId}/workbook`,
+        schemaVersion: 3,
+        ownerPluginId: testPluginId,
+      })
+      await expect(
+        api.createArtifact({
+          title: "Foreign",
+          content: "{}",
+          type: "code",
+          language: "json",
+          kind: "other/workbook",
+        })
+      ).rejects.toThrow("must be owned")
+    })
   })
 
   describe("updateArtifact", () => {
@@ -257,13 +316,57 @@ describe("Artifact API", () => {
         title: "Original Title",
         content: "original",
         type: "code",
+        version: 1,
+        metadata: {
+          plugin: { kind: "test-plugin/artifact", schemaVersion: 1, ownerPluginId: testPluginId },
+        },
       }
 
       const api = createArtifactAPI(testPluginId)
-      api.updateArtifact("update-test", { title: "Updated Title" })
+      api.updateArtifact("update-test", { title: "Updated Title", expectedVersion: 1 })
 
       // The mock should have been called
       expect(mockArtifacts["update-test"].title).toBe("Updated Title")
+      expect(mockSaveArtifactVersion).toHaveBeenCalledWith("update-test", undefined)
+    })
+
+    it("rejects stale and cross-plugin mutations and preserves immutable ownership metadata", () => {
+      mockArtifacts["owned"] = {
+        id: "owned",
+        sessionId: "session-1",
+        title: "Owned",
+        content: "original",
+        type: "code",
+        version: 2,
+        metadata: {
+          plugin: { kind: "test-plugin/workbook", schemaVersion: 1, ownerPluginId: testPluginId },
+        },
+      }
+      const api = createArtifactAPI(testPluginId)
+
+      expect(() => api.updateArtifact("owned", { content: "stale", expectedVersion: 1 })).toThrow(
+        "version conflict"
+      )
+      expect(mockSaveArtifactVersion).not.toHaveBeenCalled()
+
+      api.updateArtifact("owned", {
+        expectedVersion: 2,
+        metadata: {
+          plugin: { kind: "evil/workbook", schemaVersion: 99, ownerPluginId: "evil" },
+          previewable: true,
+        },
+      })
+      expect(mockArtifacts.owned.metadata).toMatchObject({
+        previewable: true,
+        plugin: { kind: "test-plugin/workbook", schemaVersion: 1, ownerPluginId: testPluginId },
+      })
+
+      expect(() =>
+        createArtifactAPI("other-plugin").updateArtifact("owned", {
+          content: "foreign",
+          expectedVersion: 2,
+        })
+      ).toThrow("does not own")
     })
   })
 
@@ -275,12 +378,66 @@ describe("Artifact API", () => {
         title: "To Delete",
         content: "",
         type: "document",
+        metadata: {
+          plugin: { kind: "test-plugin/artifact", schemaVersion: 1, ownerPluginId: testPluginId },
+        },
       }
 
       const api = createArtifactAPI(testPluginId)
       api.deleteArtifact("delete-test")
 
       expect(mockArtifacts["delete-test"]).toBeUndefined()
+    })
+
+    it("rejects cross-plugin deletion", () => {
+      mockArtifacts.foreign = {
+        id: "foreign",
+        sessionId: "session-1",
+        title: "Foreign",
+        content: "",
+        type: "document",
+        metadata: {
+          plugin: { kind: "owner/artifact", schemaVersion: 1, ownerPluginId: "owner" },
+        },
+      }
+      expect(() => createArtifactAPI(testPluginId).deleteArtifact("foreign")).toThrow(
+        "does not own"
+      )
+      expect(mockArtifacts.foreign).toBeDefined()
+    })
+  })
+
+  describe("artifact history", () => {
+    beforeEach(() => {
+      mockArtifacts.history = {
+        id: "history",
+        sessionId: "session-1",
+        title: "Workbook",
+        content: "v2",
+        type: "code",
+        version: 2,
+        metadata: {
+          plugin: { kind: "test-plugin/workbook", schemaVersion: 1, ownerPluginId: testPluginId },
+        },
+      }
+    })
+
+    it("lists and restores owned versions with optimistic concurrency", () => {
+      const version = {
+        id: "version-1",
+        artifactId: "history",
+        title: "Workbook v1",
+        content: "v1",
+        version: 1,
+        createdAt: new Date(),
+      }
+      mockGetArtifactVersions.mockReturnValue([version])
+      const api = createArtifactAPI(testPluginId)
+
+      expect(api.listVersions("history")).toEqual([version])
+      expect(() => api.restoreVersion("history", "version-1", 1)).toThrow("version conflict")
+      api.restoreVersion("history", "version-1", 2)
+      expect(mockRestoreArtifactVersion).toHaveBeenCalledWith("history", "version-1")
     })
   })
 
@@ -434,10 +591,8 @@ describe("Artifact API", () => {
       const api = createArtifactAPI(testPluginId)
 
       const renderer: ArtifactRenderer = {
-        type: "custom-type",
         name: "Custom Renderer",
-        canRender: () => true,
-        render: () => () => {},
+        mount: () => ({ dispose: () => {} }),
       }
 
       const unregister = api.registerRenderer("custom-type", renderer)
@@ -452,26 +607,22 @@ describe("Artifact API", () => {
       const api = createArtifactAPI(testPluginId)
 
       const renderer: ArtifactRenderer = {
-        type: "my-renderer",
         name: "My Renderer",
-        canRender: () => true,
-        render: () => () => {},
+        mount: () => ({ dispose: () => {} }),
       }
 
       api.registerRenderer("my-renderer", renderer)
 
       const renderers = getArtifactRenderers()
-      expect(renderers[0].type).toBe(`${testPluginId}:my-renderer`)
+      expect(renderers[0].kind).toBe(`${testPluginId}/my-renderer`)
     })
 
     it("should unregister renderer when cleanup is called", () => {
       const api = createArtifactAPI(testPluginId)
 
       const renderer: ArtifactRenderer = {
-        type: "temp-renderer",
         name: "Temp Renderer",
-        canRender: () => true,
-        render: () => () => {},
+        mount: () => ({ dispose: () => {} }),
       }
 
       const unregister = api.registerRenderer("temp-renderer", renderer)
@@ -487,16 +638,12 @@ describe("Artifact API", () => {
       const api = createArtifactAPI(testPluginId)
 
       api.registerRenderer("type-1", {
-        type: "type-1",
         name: "Type 1",
-        canRender: () => true,
-        render: () => () => {},
+        mount: () => ({ dispose: () => {} }),
       })
       api.registerRenderer("type-2", {
-        type: "type-2",
         name: "Type 2",
-        canRender: () => true,
-        render: () => () => {},
+        mount: () => ({ dispose: () => {} }),
       })
 
       const renderers = getArtifactRenderers()
@@ -508,6 +655,7 @@ describe("Artifact API", () => {
 // W2.3: the artifact API is permission-gated; grant the suite's plugin.
 beforeAll(() => {
   initializePluginPermissions("test-plugin", ["artifact:read", "artifact:write"])
+  initializePluginPermissions("other-plugin", ["artifact:read", "artifact:write"])
 })
 
 describe("permission gate", () => {

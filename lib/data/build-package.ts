@@ -1,4 +1,5 @@
-// Reads every Dexie table the user owns and assembles a `BackupPackageV3`.
+// Reads the catalog-declared portable Dexie subset represented by the v3
+// envelope and assembles a `BackupPackageV3`.
 // Built-in rows (characters/skills/teams seeded by the app) are filtered by
 // default — they'd just be re-seeded on import — but `includeBuiltIns: true`
 // can override for "true full snapshot" use cases.
@@ -24,6 +25,8 @@ import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { listAllCanvasCommentRows } from "@/lib/db/context-comments"
 import { exportStoredProfilesRedacted } from "@/lib/db/provider-profiles"
 import { deepStripSecrets } from "@/lib/settings/profile-transfer"
+import { createPagedTableReader } from "./paged-table-reader"
+import { redactMcpServerForExport } from "@/lib/mcp/credentials"
 
 const APP_VERSION = "0.1.0"
 
@@ -45,7 +48,7 @@ export interface BuildBackupExtras {
 }
 
 /**
- * Read every table and assemble the v3 payload. The payload is canonicalized
+ * Read every v3-portable table and assemble the payload. The payload is canonicalized
  * (keys sorted recursively) before its SHA-256 is computed so the manifest's
  * checksum field is stable across JS engines and table-iteration orders.
  */
@@ -60,6 +63,7 @@ export async function buildBackupPackage(
   const includeCoreData = opts.includeCoreData ?? true
   const includePlugins = opts.includePlugins ?? true
   const includeLocalStorage = opts.includeLocalStorage ?? true
+  const readTable = createPagedTableReader({ pageSize: 500, concurrency: 4 })
 
   const [
     settingsRow,
@@ -73,10 +77,10 @@ export async function buildBackupPackage(
     messages,
     sessionState,
     trustedWorkspaces,
-    ttsProviderKeys,
     canvasDocuments,
     canvasVersions,
     canvasComments,
+    contextComments,
     canvasSessions,
     a2uiApps,
     a2uiTemplates,
@@ -100,40 +104,40 @@ export async function buildBackupPackage(
     providerProfileStore,
   ] = await Promise.all([
     getSettings(),
-    db.characters.toArray(),
-    db.skills.toArray(),
-    db.skillResources.toArray(),
-    db.teams.toArray(),
-    db.promptPresets.toArray(),
-    db.mcpServers.toArray(),
-    opts.includeSessions ? db.sessions.toArray() : Promise.resolve([]),
-    opts.includeSessions ? db.messages.toArray() : Promise.resolve([]),
-    opts.includeSessions ? db.sessionState.toArray() : Promise.resolve([]),
-    db.trustedWorkspaces.toArray(),
-    db.tts_provider_keys.toArray(),
-    db.canvasDocuments.toArray(),
-    db.canvasVersions.toArray(),
+    readTable(db.characters),
+    readTable(db.skills),
+    readTable(db.skillResources),
+    readTable(db.teams),
+    readTable(db.promptPresets),
+    readTable(db.mcpServers),
+    opts.includeSessions ? readTable(db.sessions) : Promise.resolve([]),
+    opts.includeSessions ? readTable(db.messages) : Promise.resolve([]),
+    opts.includeSessions ? readTable(db.sessionState) : Promise.resolve([]),
+    readTable(db.trustedWorkspaces),
+    readTable(db.canvasDocuments),
+    readTable(db.canvasVersions),
     listAllCanvasCommentRows(),
-    db.canvasSessions.toArray(),
-    db.a2uiApps.toArray(),
-    db.a2uiTemplates.toArray(),
-    db.a2uiEventHistory.toArray(),
-    db.twinSources.toArray(),
-    db.twinChunks.toArray(),
-    db.twinProfile.toArray(),
-    db.twinDrafts.toArray(),
-    db.twinJobs.toArray(),
-    includeMemories ? db.memories.toArray() : Promise.resolve([]),
-    includeMemories ? db.memoryEvidence.toArray() : Promise.resolve([]),
-    includeMemories ? db.memoryJobs.toArray() : Promise.resolve([]),
-    includeMemories ? db.memoryAuditEvents.toArray() : Promise.resolve([]),
-    db.plugins.toArray(),
-    db.pluginPermissions.toArray(),
-    db.pluginReviews.toArray(),
-    db.pluginAnalytics.toArray(),
-    db.templateDefinitions.toArray(),
-    db.templatePackages.toArray(),
-    db.templateInstances.toArray(),
+    readTable(db.contextComments),
+    readTable(db.canvasSessions),
+    readTable(db.a2uiApps),
+    readTable(db.a2uiTemplates),
+    readTable(db.a2uiEventHistory),
+    readTable(db.twinSources),
+    readTable(db.twinChunks),
+    readTable(db.twinProfile),
+    readTable(db.twinDrafts),
+    readTable(db.twinJobs),
+    includeMemories ? readTable(db.memories) : Promise.resolve([]),
+    includeMemories ? readTable(db.memoryEvidence) : Promise.resolve([]),
+    includeMemories ? readTable(db.memoryJobs) : Promise.resolve([]),
+    includeMemories ? readTable(db.memoryAuditEvents) : Promise.resolve([]),
+    readTable(db.plugins),
+    readTable(db.pluginPermissions),
+    readTable(db.pluginReviews),
+    readTable(db.pluginAnalytics),
+    readTable(db.templateDefinitions),
+    readTable(db.templatePackages),
+    readTable(db.templateInstances),
     exportStoredProfilesRedacted(),
   ])
 
@@ -156,6 +160,7 @@ export async function buildBackupPackage(
     ? plugins
     : plugins.filter((plugin) => plugin.source !== "builtin")
   const keptPluginIds = new Set(filteredPlugins.map((plugin) => plugin.id))
+  const redactedMcp = mcpServers.map(redactMcpServerForExport)
 
   const payload: BackupPayloadV3 = {
     settings,
@@ -164,12 +169,15 @@ export async function buildBackupPackage(
     skillResources: filteredSkillResources,
     teams: filteredTeams,
     promptPresets,
-    mcpServers,
+    mcpServers: redactedMcp.map((entry) => entry.server),
+    mcpCredentialManifest: redactedMcp
+      .filter((entry) => entry.references.length > 0)
+      .map((entry) => ({ serverId: entry.server.id, references: entry.references })),
     trustedWorkspaces,
-    ttsProviderKeys,
     canvasDocuments,
     canvasVersions,
     canvasComments,
+    contextComments,
     canvasSessions,
     // A2UI: built-in apps stay local; only user-created apps round-trip.
     a2uiApps: includeBuiltIns ? a2uiApps : a2uiApps.filter((a) => !a.isBuiltIn),
@@ -211,11 +219,13 @@ export async function buildBackupPackage(
       "teams",
       "promptPresets",
       "mcpServers",
+      "mcpCredentialManifest",
       "trustedWorkspaces",
       "ttsProviderKeys",
       "canvasDocuments",
       "canvasVersions",
       "canvasComments",
+      "contextComments",
       "canvasSessions",
       "a2uiApps",
       "a2uiTemplates",

@@ -13,13 +13,9 @@ const mockCouncilRunPrompt = jest.fn(async () => ({ completion: "merged-by-counc
 jest.mock("@/lib/ai/council/run-council", () => ({
   defaultCouncilRunPrompt: jest.fn(async () => mockCouncilRunPrompt),
 }))
-const mockGetWorkflow = jest.fn()
-jest.mock("@/lib/db/workflows", () => ({
-  getWorkflow: (...a: unknown[]) => mockGetWorkflow(...(a as [])),
-}))
-const mockRunWorkflow = jest.fn()
-jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
-  runWorkflow: (...a: unknown[]) => mockRunWorkflow(...(a as [])),
+const mockExecuteDeployedWorkflow = jest.fn()
+jest.mock("@/lib/workflow/runtime/execution-authority", () => ({
+  executeDeployedWorkflow: (...a: unknown[]) => mockExecuteDeployedWorkflow(...(a as [])),
 }))
 
 import { executeAiEnsemble, defaultAiEnsembleDeps, type AiEnsembleDeps } from "./ai-ensemble"
@@ -195,8 +191,7 @@ describe("executeAiEnsemble", () => {
 describe("defaultAiEnsembleDeps", () => {
   beforeEach(() => {
     mockExecuteAgent.mockReset()
-    mockGetWorkflow.mockReset()
-    mockRunWorkflow.mockReset()
+    mockExecuteDeployedWorkflow.mockReset()
   })
 
   it("runAgent without a schema returns the completion text", async () => {
@@ -216,8 +211,9 @@ describe("defaultAiEnsembleDeps", () => {
   })
 
   it("runSubworkflow runs the orchestrator and returns the output", async () => {
-    mockGetWorkflow.mockResolvedValue({ id: "w" })
-    mockRunWorkflow.mockResolvedValue({ status: "succeeded", output: { ok: true } })
+    mockExecuteDeployedWorkflow.mockResolvedValue({
+      result: { status: "succeeded", output: { ok: true } },
+    })
     const deps = await defaultAiEnsembleDeps()
     expect(await deps.runSubworkflow({ workflowId: "w", payload: {} })).toEqual({
       object: { ok: true },
@@ -225,14 +221,13 @@ describe("defaultAiEnsembleDeps", () => {
   })
 
   it("runSubworkflow throws when the target is missing", async () => {
-    mockGetWorkflow.mockResolvedValue(undefined)
+    mockExecuteDeployedWorkflow.mockRejectedValue(new Error("workflow w not found"))
     const deps = await defaultAiEnsembleDeps()
     await expect(deps.runSubworkflow({ workflowId: "w", payload: {} })).rejects.toThrow(/not found/)
   })
 
   it("runSubworkflow throws when the run does not succeed", async () => {
-    mockGetWorkflow.mockResolvedValue({ id: "w" })
-    mockRunWorkflow.mockResolvedValue({ status: "failed" })
+    mockExecuteDeployedWorkflow.mockResolvedValue({ result: { status: "failed" } })
     const deps = await defaultAiEnsembleDeps()
     await expect(deps.runSubworkflow({ workflowId: "w", payload: {} })).rejects.toThrow(/failed/)
   })

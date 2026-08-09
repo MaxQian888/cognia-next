@@ -1,53 +1,90 @@
 import { startWorkflowFromRemote } from "./start-from-remote"
+const executeDeployedWorkflow = jest.fn()
+jest.mock("./execution-authority", () => {
+  class WorkflowAdmissionError extends Error {
+    constructor(
+      readonly code: string,
+      message: string
+    ) {
+      super(message)
+    }
+  }
+  return {
+    WorkflowAdmissionError,
+    executeDeployedWorkflow: (...args: unknown[]) => executeDeployedWorkflow(...args),
+  }
+})
 
-const runWorkflow = jest.fn()
-jest.mock("./orchestrator", () => ({ runWorkflow: (...a: unknown[]) => runWorkflow(...a) }))
-const getWorkflow = jest.fn()
-jest.mock("@/lib/db/workflows", () => ({ getWorkflow: (...a: unknown[]) => getWorkflow(...a) }))
+import { WorkflowAdmissionError } from "./execution-authority"
 
 describe("startWorkflowFromRemote", () => {
-  beforeEach(() => jest.clearAllMocks())
-
-  it("returns not-found when the workflow is missing", async () => {
-    getWorkflow.mockResolvedValue(undefined)
-    const r = await startWorkflowFromRemote({ workflowId: "wf_x", runParams: {} })
-    expect(r).toEqual({ ok: false, reason: "workflow-not-found", workflowId: "wf_x" })
-    expect(runWorkflow).not.toHaveBeenCalled()
+  beforeEach(() => {
+    jest.clearAllMocks()
+    executeDeployedWorkflow.mockImplementation(
+      async (input: { onAdmitted?: (id: string) => void }) => {
+        input.onAdmitted?.("run_generated")
+        return {
+          invocationId: "wfi_1",
+          runId: "run_generated",
+          reused: false,
+          result: { runId: "run_generated", status: "succeeded" },
+        }
+      }
+    )
   })
 
-  it("fires runWorkflow with source api and returns a runId synchronously", async () => {
-    getWorkflow.mockResolvedValue({ id: "wf_1", nodes: [], edges: [] })
-    const r = await startWorkflowFromRemote({ workflowId: "wf_1", runParams: { a: 1 } })
-    expect(r.ok).toBe(true)
-    if (r.ok) expect(typeof r.runId).toBe("string")
-    expect(runWorkflow).toHaveBeenCalledWith(
+  it("returns not-found when the workflow has no deployment", async () => {
+    executeDeployedWorkflow.mockRejectedValueOnce(
+      new WorkflowAdmissionError("deployment-not-found", "not deployed")
+    )
+    const result = await startWorkflowFromRemote({ workflowId: "wf_x", runParams: {} })
+    expect(result).toEqual({ ok: false, reason: "workflow-not-found", workflowId: "wf_x" })
+  })
+
+  it("routes through the authority with source api", async () => {
+    const result = await startWorkflowFromRemote({ workflowId: "wf_1", runParams: { a: 1 } })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("expected admitted run")
+    expect(result.runId).toMatch(/^run_/)
+    expect(executeDeployedWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({
-        triggeredBy: expect.objectContaining({ source: "api" }),
-        trigger: expect.objectContaining({ kind: "trigger.manual", payload: { a: 1 } }),
+        workflowId: "wf_1",
+        entrypoint: "http",
+        caller: "remote-control",
+        triggerKind: "trigger.manual",
+        payload: { a: 1 },
+        triggeredBy: { source: "api" },
+        requestedRunId: result.runId,
       })
     )
   })
 
-  it("stamps the caller deviceId into triggeredBy when provided (ADR-0060)", async () => {
-    getWorkflow.mockResolvedValue({ id: "wf_1", nodes: [], edges: [] })
+  it("stamps the caller deviceId into provenance", async () => {
     await startWorkflowFromRemote({ workflowId: "wf_1", deviceId: "dev-42" })
-    expect(runWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ triggeredBy: { source: "api", deviceId: "dev-42" } })
+    expect(executeDeployedWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        caller: "device:dev-42",
+        triggeredBy: { source: "api", deviceId: "dev-42" },
+      })
     )
   })
 
-  it("omits deviceId from triggeredBy when the dispatch layer doesn't know it", async () => {
-    getWorkflow.mockResolvedValue({ id: "wf_1", nodes: [], edges: [] })
-    await startWorkflowFromRemote({ workflowId: "wf_1" })
-    expect(runWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ triggeredBy: { source: "api" } })
+  it("honors a server-supplied run id and uses it as the idempotency key", async () => {
+    executeDeployedWorkflow.mockImplementationOnce(
+      async (input: { onAdmitted?: (id: string) => void }) => {
+        input.onAdmitted?.("run_fixed")
+        return {
+          invocationId: "wfi_1",
+          runId: "run_fixed",
+          reused: false,
+          result: { runId: "run_fixed", status: "succeeded" },
+        }
+      }
     )
-  })
-
-  it("honors a caller-supplied runId so the audit layer can correlate", async () => {
-    getWorkflow.mockResolvedValue({ id: "wf_1", nodes: [], edges: [] })
-    const r = await startWorkflowFromRemote({ workflowId: "wf_1", runId: "run_fixed" })
-    expect(r).toEqual({ ok: true, runId: "run_fixed" })
-    expect(runWorkflow).toHaveBeenCalledWith(expect.objectContaining({ runId: "run_fixed" }))
+    const result = await startWorkflowFromRemote({ workflowId: "wf_1", runId: "run_fixed" })
+    expect(result).toEqual({ ok: true, runId: "run_fixed" })
+    expect(executeDeployedWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedRunId: "run_fixed", idempotencyKey: "run_fixed" })
+    )
   })
 })

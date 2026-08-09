@@ -179,7 +179,7 @@ describe("PlanApprovalOverlay", () => {
       <PlanApprovalOverlay
         index={0}
         raw={longPlan}
-        viewportRows={6}
+        viewportRows={22}
         onMove={() => {}}
         onSelect={() => {}}
         onCancel={() => {}}
@@ -202,7 +202,7 @@ describe("PlanApprovalOverlay", () => {
       <PlanApprovalOverlay
         index={0}
         raw={longPlan}
-        viewportRows={6}
+        viewportRows={22}
         onMove={onMove}
         onSelect={onSelect}
         onCancel={() => {}}
@@ -228,7 +228,7 @@ describe("PlanApprovalOverlay", () => {
       <PlanApprovalOverlay
         index={0}
         raw={longPlan}
-        viewportRows={6}
+        viewportRows={22}
         onMove={onMove}
         onSelect={onSelect}
         onCancel={() => {}}
@@ -251,12 +251,27 @@ describe("PlanApprovalOverlay", () => {
       <PlanApprovalOverlay
         index={0}
         raw={longPlan}
-        viewportRows={6}
+        viewportRows={22}
         onMove={() => {}}
         onSelect={() => {}}
         onCancel={() => {}}
       />
     )
     expect(container.textContent ?? "").toContain("g/G top/bottom")
+  })
+
+  it("keeps approval controls ahead of plan content in a tiny viewport", () => {
+    const { container } = render(
+      <PlanApprovalOverlay
+        index={0}
+        raw={longPlan}
+        viewportRows={7}
+        onMove={() => {}}
+        onSelect={() => {}}
+        onCancel={() => {}}
+      />
+    )
+    expect(container.textContent).toContain("Yes, and auto-accept edits")
+    expect(container.textContent).not.toContain("line 1")
   })
 })

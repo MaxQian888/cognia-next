@@ -1,4 +1,4 @@
-import { isWorkspaceRestricted } from "./trust-gate"
+import { isWorkspaceRestricted, resolveWorkspaceTrustForSend } from "./trust-gate"
 import * as trustDb from "@/lib/db/trusted-workspaces"
 import type { Project } from "@/types"
 
@@ -51,4 +51,26 @@ it("returns false when every root is trusted", async () => {
   expect(await isWorkspaceRestricted(project(["/a", "/b"]), { enabled: true, onWeb: false })).toBe(
     false
   )
+})
+
+it("returns roots only when every root has an explicit grant", async () => {
+  trusted.isWorkspaceTrusted.mockResolvedValue(true)
+  await expect(
+    resolveWorkspaceTrustForSend(project(["/a", "/b"]), { enabled: true, onWeb: false })
+  ).resolves.toEqual({ restricted: false, trustedRoots: ["/a", "/b"] })
+
+  trusted.isWorkspaceTrusted.mockImplementation(async (p) => p === "/a")
+  await expect(
+    resolveWorkspaceTrustForSend(project(["/a", "/b"]), { enabled: true, onWeb: false })
+  ).resolves.toEqual({ restricted: true, trustedRoots: [] })
+})
+
+it("does not mint local-content trust when trust is bypassed", async () => {
+  trusted.isWorkspaceTrusted.mockResolvedValue(true)
+  await expect(
+    resolveWorkspaceTrustForSend(project(["/a"]), { enabled: false, onWeb: false })
+  ).resolves.toEqual({ restricted: false, trustedRoots: [] })
+  await expect(
+    resolveWorkspaceTrustForSend(project(["/a"]), { enabled: true, onWeb: true })
+  ).resolves.toEqual({ restricted: false, trustedRoots: [] })
 })

@@ -133,6 +133,7 @@
   "cloneSuccess": "Task cloned successfully",
   "cloneTask": "Clone Task",
   "close": "Close",
+  "code": "code:",
   "command": "Command",
   "commandArgs": "Command Arguments",
   "config": "Config",
@@ -353,8 +354,8 @@
   "kindFilter": {
     "all": "All",
     "app": "App",
-    "backup": "Backup",
     "background-command": "Background Command",
+    "backup": "Backup",
     "connector": "Connector",
     "plugin": "Plugin",
     "system": "System",
@@ -782,6 +783,7 @@
       "unavailableOnWeb": "Native scheduler integration is available in the desktop build only."
     }
   },
+  "showLess": "Show less",
   "showMore": "Show more",
   "slashCommand": {
     "description": "Create a scheduled task or reminder"
@@ -793,6 +795,7 @@
     "nextRun": "Next Run"
   },
   "sourceConversationMissing": "The source IM conversation is no longer bound to a chat session.",
+  "stackTrace": "Stack trace",
   "startedAt": "Started at",
   "statistics": "Statistics",
   "stats": {
@@ -894,6 +897,10 @@
   "timeoutMs": "Timeout (ms)",
   "timezone": "Timezone",
   "timing": "Timing",
+  "occurrenceList": {
+    "moreTimes": "+{count} more",
+    "rowAria": "{name}, {count, plural, one {# upcoming time} other {# upcoming times}}"
+  },
   "title": "Task Scheduler",
   "tools": {
     "createFailed": "Failed to create scheduled task",

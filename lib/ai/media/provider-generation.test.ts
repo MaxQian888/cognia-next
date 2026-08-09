@@ -1,5 +1,5 @@
 import { experimental_generateVideo, generateImage } from "ai"
-import { createGoogleGenerativeAI } from "@ai-sdk/google"
+import { createGoogle } from "@ai-sdk/google"
 import { createXai } from "@ai-sdk/xai"
 import { createFal } from "@ai-sdk/fal"
 import { createReplicate } from "@ai-sdk/replicate"
@@ -34,7 +34,7 @@ jest.mock("@ai-sdk/amazon-bedrock", () => ({
   createAmazonBedrock: jest.fn(() => ({ image: jest.fn(() => "bedrock-image-model") })),
 }))
 jest.mock("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: jest.fn(() => ({
+  createGoogle: jest.fn(() => ({
     image: jest.fn(() => "google-image-model"),
     video: jest.fn(() => "google-video-model"),
   })),
@@ -138,7 +138,7 @@ describe("provider media generation", () => {
     ["openai", createOpenAI, "gpt-image-2"],
     ["azure", createAzure, "gpt-image-1"],
     ["bedrock", createAmazonBedrock, "amazon.nova-canvas-v1:0"],
-    ["google", createGoogleGenerativeAI, "gemini-3.1-flash-image-preview"],
+    ["google", createGoogle, "gemini-3.1-flash-image-preview"],
     ["togetherai", createTogetherAI, "black-forest-labs/FLUX.2-dev"],
     ["fireworks", createFireworks, "accounts/fireworks/models/flux-1-schnell-fp8"],
     ["deepinfra", createDeepInfra, "black-forest-labs/FLUX-2-klein-9b"],
@@ -230,7 +230,7 @@ describe("provider media generation", () => {
       })
     ).resolves.toBe(generatedVideo)
 
-    const googleClient = (createGoogleGenerativeAI as jest.Mock).mock.results[0].value
+    const googleClient = (createGoogle as jest.Mock).mock.results[0].value
     expect(googleClient.video).toHaveBeenCalledWith("veo-3.1-generate-preview")
     expect(experimental_generateVideo).toHaveBeenCalledWith(
       expect.objectContaining({

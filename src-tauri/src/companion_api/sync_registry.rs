@@ -172,6 +172,16 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             has_tombstones: true,
         },
         SyncTableDescriptor {
+            name: "agentTasks".to_string(),
+            description: "Single-Agent task metadata (read-only mirror; controls go through agent task RPCs)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "agentTaskAttempts".to_string(),
+            description: "Immutable Single-Agent task attempts (read-only mirror)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
             name: "templateDefinitions".to_string(),
             description: "Portable template definitions (read-only mobile catalog projection)".to_string(),
             has_tombstones: false,
@@ -205,9 +215,12 @@ mod tests {
         assert!(r.contains("terminalHistory"));
         assert!(r.contains("settings"));
         assert!(r.contains("agentTeamBoard"));
+        assert!(r.contains("agentTasks"));
+        assert!(r.contains("agentTaskAttempts"));
         assert!(r.contains("templateDefinitions"));
         assert!(r.contains("templatePackages"));
         assert!(r.contains("templateInstances"));
+        assert_eq!(r.list().len(), 21);
         assert!(!r.contains("ohai"));
     }
 

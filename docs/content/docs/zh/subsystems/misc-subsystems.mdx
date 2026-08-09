@@ -136,10 +136,10 @@ export interface PushDelivery {
 `proxy-config.ts` 提供纯函数：
 
 - `isProxyActive(cfg)` —— mode ≠ off + 有 host + port > 0。
-- `buildProxyUrl(cfg)` —— 构造 `http(s)://user:pass@host:port` 或 `socks5://...`，凭证 URL 编码。
-- `shouldBypass(targetUrl, bypass[])` —— 按字面 host / 域名后缀（`.internal`）/ loopback 判断。
+- `buildProxyUrl(cfg)` —— 构造不含凭据的公开 endpoint。
+- `shouldBypass(targetUrl, bypass[])` —— 匹配精确 host、`.domain` 后缀、IPv4/IPv6 精确地址、CIDR 与默认 loopback。
 
-`proxy-fetch.ts` 在此基础上提供 `createProxyFetch(cfg)`，返回一个会按需走代理的 `fetch` 替身。这一层只在浏览器侧用 —— 桌面真正的 HTTP / WS 走 `src-tauri/src/proxy_config/` 由 Rust 接管。
+`proxy-fetch.ts` 提供桌面端的非流式 fetch 子集：正确合并 `Request`/`init`，以 base64 传输二进制，支持 redirect、timeout 与真实取消，并拒绝调用方传入 `Proxy-Authorization`。路由和凭据只由 Rust 决定。
 
 ### Rust 侧
 
@@ -156,15 +156,17 @@ pub struct ProxyConfig {
 }
 ```
 
-`current() / set_current()` 暴露 `OnceLock<RwLock<...>>`；每次设置变更前端调 `proxy_set` 命令同步。Rust 这边的核心服务：
+上面的 password 只存在于原生进程内存。Dexie 只保存用户名和非敏感设置；密码存入 OS keyring 的 `cognia-network-proxy/manual-password`。旧明文字段只有在写入并回读成功后才从 Dexie 清除。
+
+运行时状态为 `Uninitialized → Ready | Blocked`；设置和凭据尚未 hydration 时，受管理公网请求以稳定代理错误失败。前端通过 `proxy_apply` 原子发布脱敏配置。Rust 核心服务：
 
 - `build_reqwest_proxy()` —— 给 reqwest builder 用，含 bypass closure。
 - `env_vars()` —— 喂给子进程（sidecar 等）`HTTP_PROXY / HTTPS_PROXY / NO_PROXY` 大小写两份。
 - `basic_auth_header()` —— Base64 编码的 `Proxy-Authorization`，WSS CONNECT 隧道用。
-- `wsproxy::connect_via_proxy()` —— WSS over HTTP CONNECT 拨号器。
-- `detect.rs` —— Auto 模式下扫描本机已运行的代理软件。
+- `wsproxy::connect_via_proxy()` —— WSS 支持 HTTP CONNECT、先 TLS 到 HTTPS proxy 再 CONNECT，以及代理侧 DNS 的 SOCKS5。
+- `detect.rs` —— 扫描本机代理软件，只返回完成 HTTP CONNECT 或 SOCKS5 CONNECT 握手的 endpoint。
 
-`detect.rs` 的策略很直接：对一组常见 loopback 端口（Clash 的 7890/7891、SOCKS 1080、Mihomo 等）做 500 ms TCP probe，并行 fire。命中 Clash/Mihomo 端口时再发一次 `GET http://127.0.0.1:9090/version` 取控制器版本，让设置 UI 显示"检测到 Clash Verge v1.x"，一键采用该端口。
+端口开放不等于代理可用：占用 8080/8888 的普通服务、需要未知认证的代理和伪 SOCKS listener 都会被排除。协议验证通过后，Clash controller metadata 仍用于归属和展示。
 
 `ProxyCandidate` 携带 `kind: "http" | "socks5" | "clash"` 区分协议，UI 列表按探测顺序展示，保持稳定。
 
@@ -173,10 +175,11 @@ pub struct ProxyConfig {
 ```ts
 shouldBypass("http://127.0.0.1:3000", ["127.0.0.1"]) // → true
 shouldBypass("https://api.internal/foo", [".internal"]) // → true（后缀）
+shouldBypass("https://10.42.9.8", ["10.42.0.0/16"]) // → true（CIDR）
 shouldBypass("https://api.example.com", ["localhost"]) // → false
 ```
 
-代理路径的"谁先生效"是有讲究的：浏览器 fetch 走 `lib/network/proxy-fetch.ts` 命中 TS 侧；所有 Tauri 命令发出的 HTTP / WS 走 `proxy_config::current()` 命中 Rust 侧；子进程（Node sidecar、shell 工具）通过 `env_vars()` 注入环境变量自己处理。三条路径的配置来自同一份 `AppSettings.network.proxy`，设置 UI 改一次三方同步。
+Off 与 bypass 路由显式调用 reqwest `.no_proxy()`，因此系统 proxy 环境变量不能覆盖决定；active 配置无效或不可达时也不会回退直连。sidecar 的代理环境完全由 Rust host 管理，继承变量会被清除或替换。Embedded WebView 支持 direct、HTTP 与 SOCKS5；Tauri 无法为 WebView 配置 HTTPS proxy，因此该组合返回 `PROXY_TRANSPORT_UNSUPPORTED`，不会静默直连。
 
 关键文件：`lib/network/{proxy-config,proxy-fetch}.ts` · `src-tauri/src/proxy_config/{mod,commands,detect,wsproxy}.rs`。
 
@@ -403,7 +406,7 @@ export function formatRelative(epochMs: number, now = Date.now()): string {
 下列子系统在仓库继续生长时可能值得独立成页：
 
 - **TTS** —— 当前已有 9 provider + Edge 桥 + auto-play 门控 + 缓存。一旦 STT（语音输入）也接入，加上多语种发音字典，能撑起一个独立 `voice-stack` 页。
-- **Connectivity & Push** —— 当移动端 PWA / 远程控制（`./remote-control`）成熟后，整个发现 + 配对 + 推送链路可以一起搬到 `mobile-architecture` 或新的 `discovery-and-pairing` 页。
+- **Connectivity & Push** —— 发现、配对与推送统一由 Companion 控制面负责；后续跨设备扩展应记录到 `mobile-architecture` 或专门的 `discovery-and-pairing` 页面。
 - **Monaco & Editor Workbench** —— 当前是 shim；如果 cognia-next 真的内置完整的代码编辑表面（更多语言 server、format-on-save、调试视图），独立成 `code-editor` 页。
 - **Wallpaper + Theme** —— 现在归 `theming-and-i18n`，未来若引入动画/视频壁纸或动态主题引擎，独立成 `appearance-engine`。
 

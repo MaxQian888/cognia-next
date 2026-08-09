@@ -1,7 +1,7 @@
 /**
  * CRUD layer for the `codeAdoptionTurns` Dexie table (v108). Written by the
- * turn tracker after each settled turn; read by `metrics.ts` (and, in a future
- * phase, a UI panel). Local-only — this table is intentionally absent from
+ * turn tracker after each settled turn; read by `metrics.ts` and the existing
+ * Task Resources panel. Local-only — this table is intentionally absent from
  * `lib/sync`, so rows never leave the device.
  */
 
@@ -17,6 +17,22 @@ export async function getCodeAdoptionTurn(id: string): Promise<CodeAdoptionTurnR
   return getDb().codeAdoptionTurns.get(id)
 }
 
+/** Resolve the adoption row correlated with a durable Task Workspace run. */
+export async function getCodeAdoptionTurnByTaskWorkspaceRun(
+  taskWorkspaceRunId: string
+): Promise<CodeAdoptionTurnRow | undefined> {
+  const derivedId = taskWorkspaceRunId.startsWith("run:")
+    ? taskWorkspaceRunId.slice("run:".length)
+    : undefined
+  if (derivedId) {
+    const direct = await getDb().codeAdoptionTurns.get(derivedId)
+    if (direct) return direct
+  }
+  return getDb()
+    .codeAdoptionTurns.filter((row) => row.taskWorkspaceRunId === taskWorkspaceRunId)
+    .first()
+}
+
 /** All turns for a session, oldest-first. */
 export async function listCodeAdoptionTurnsBySession(
   sessionId: string
@@ -29,8 +45,16 @@ export async function listRecentCodeAdoptionTurns(limit = 50): Promise<CodeAdopt
   return getDb().codeAdoptionTurns.orderBy("ts").reverse().limit(limit).toArray()
 }
 
-/** Trim to the newest `keep` rows (call after each write to bound growth). */
-export async function pruneCodeAdoptionTurns(keep = 500): Promise<number> {
+/** Oldest-first rows in an explicit time window. */
+export async function listCodeAdoptionTurnsInRange(
+  from: number,
+  to: number
+): Promise<CodeAdoptionTurnRow[]> {
+  return getDb().codeAdoptionTurns.where("ts").between(from, to, true, true).sortBy("ts")
+}
+
+/** Trim to the newest `keep` metric-only rows (call after each write to bound growth). */
+export async function pruneCodeAdoptionTurns(keep = 10_000): Promise<number> {
   const db = getDb()
   const ids = await db.codeAdoptionTurns.orderBy("ts").reverse().offset(keep).primaryKeys()
   if (ids.length === 0) return 0

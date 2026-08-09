@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "registry": "https://elements.ai-sdk.dev/api/registry/registry.json",
+    "package": "ai-elements",
+    "version": "1.9.0",
+    "commit": "0c1f5e8c75273f0e95c8faa031544a8aa2bb1a5b",
+    "verifiedAt": "2026-08-05"
+  },
+  "components": [
+    {
+      "name": "agent",
+      "status": "adopted",
+      "consumers": ["components/agent/mode/custom-mode-editor/index.tsx"]
+    },
+    {
+      "name": "artifact",
+      "status": "adopted",
+      "consumers": ["components/artifacts/artifact-panel-content.tsx"]
+    },
+    {
+      "name": "attachments",
+      "status": "adopted",
+      "consumers": ["components/chat/composer/attachment-preview.tsx"]
+    },
+    {
+      "name": "audio-player",
+      "status": "adopted",
+      "consumers": ["components/chat/renderers/audio-block.tsx"]
+    },
+    {
+      "name": "canvas",
+      "status": "adopted",
+      "consumers": ["components/workflow/editor/flow-canvas.tsx"]
+    },
+    {
+      "name": "chain-of-thought",
+      "status": "adopted",
+      "consumers": ["components/chat/message-parts/subagent-part.tsx"]
+    },
+    {
+      "name": "checkpoint",
+      "status": "adopted",
+      "consumers": ["components/chat/checkpoint-action.tsx"]
+    },
+    {
+      "name": "code-block",
+      "status": "adopted",
+      "consumers": ["components/chat/tool-approval-dialog.tsx"]
+    },
+    {
+      "name": "commit",
+      "status": "adopted",
+      "consumers": ["components/source-control/commit-detail.tsx"]
+    },
+    {
+      "name": "confirmation",
+      "status": "adopted",
+      "consumers": ["components/chat/tool-approval-dialog.tsx"]
+    },
+    {
+      "name": "connection",
+      "status": "adopted",
+      "consumers": ["components/workflow/editor/connection-overlay.tsx"]
+    },
+    {
+      "name": "context",
+      "status": "adopted",
+      "consumers": ["components/chat/context-usage-indicator.tsx"]
+    },
+    {
+      "name": "controls",
+      "status": "adopted",
+      "consumers": ["components/workflow/editor/canvas-toolbar.tsx"]
+    },
+    {
+      "name": "conversation",
+      "status": "adopted",
+      "consumers": ["components/agent/workspace/chat.tsx"]
+    },
+    {
+      "name": "edge",
+      "status": "excluded",
+      "reason": "SmartEdge provides obstacle routing, editable labels, diagnostics, and performance tiers; rendering both would duplicate the edge."
+    },
+    {
+      "name": "environment-variables",
+      "status": "adopted",
+      "consumers": ["components/settings/mcp/kv-editor.tsx"]
+    },
+    {
+      "name": "file-tree",
+      "status": "adopted",
+      "consumers": ["components/editor/project/project-file-tree.tsx"]
+    },
+    {
+      "name": "image",
+      "status": "adopted",
+      "consumers": ["components/chat/renderers/image-block.tsx"]
+    },
+    {
+      "name": "inline-citation",
+      "status": "adopted",
+      "consumers": ["components/chat/message-parts/sources-part.tsx"]
+    },
+    {
+      "name": "jsx-preview",
+      "status": "excluded",
+      "reason": "Executing model JSX in the main React context conflicts with Cognia's iframe sandbox boundary."
+    },
+    {
+      "name": "message",
+      "status": "adopted",
+      "consumers": ["components/chat/message-renderer.tsx"]
+    },
+    {
+      "name": "mic-selector",
+      "status": "adopted",
+      "consumers": ["components/chat/composer/voice-controls.tsx"]
+    },
+    {
+      "name": "model-selector",
+      "status": "adopted",
+      "consumers": ["components/chat/composer/model-picker.tsx"]
+    },
+    {
+      "name": "node",
+      "status": "adopted",
+      "consumers": ["components/workflow/editor/nodes/workflow-node.tsx"]
+    },
+    {
+      "name": "open-in-chat",
+      "status": "excluded",
+      "reason": "It transmits encoded conversation content to third-party chat platforms without Cognia's explicit privacy export flow."
+    },
+    {
+      "name": "package-info",
+      "status": "adopted",
+      "consumers": ["components/plugins/_shared/plugin-dependency-panel.tsx"]
+    },
+    {
+      "name": "panel",
+      "status": "adopted",
+      "consumers": ["components/workflow/editor/viewport-breadcrumb.tsx"]
+    },
+    {
+      "name": "persona",
+      "status": "adopted",
+      "consumers": ["components/chat/composer/live-voice-dialog.tsx"]
+    },
+    {
+      "name": "plan",
+      "status": "adopted",
+      "consumers": ["components/agent/external-agent/plan.tsx"]
+    },
+    { "name": "prompt-input", "status": "adopted", "consumers": ["components/chat/composer.tsx"] },
+    {
+      "name": "queue",
+      "status": "adopted",
+      "consumers": ["components/chat/composer/command-queue-bar.tsx"]
+    },
+    {
+      "name": "reasoning",
+      "status": "adopted",
+      "consumers": ["components/chat/message-renderer.tsx"]
+    },
+    {
+      "name": "sandbox",
+      "status": "adopted",
+      "consumers": ["components/canvas/code-execution-panel.tsx"]
+    },
+    {
+      "name": "schema-display",
+      "status": "adopted",
+      "consumers": ["components/workflow/editor/inspector/data/data-schema-view.tsx"]
+    },
+    {
+      "name": "shimmer",
+      "status": "adopted",
+      "consumers": ["components/chat/thinking-indicator.tsx"]
+    },
+    {
+      "name": "snippet",
+      "status": "adopted",
+      "consumers": ["components/settings/remote-control/tabs/inbound-tab.tsx"]
+    },
+    {
+      "name": "sources",
+      "status": "adopted",
+      "consumers": ["components/chat/message-parts/sources-part.tsx"]
+    },
+    {
+      "name": "speech-input",
+      "status": "adopted",
+      "consumers": ["components/chat/composer/voice-controls.tsx"]
+    },
+    {
+      "name": "stack-trace",
+      "status": "adopted",
+      "consumers": [
+        "components/error/error-trace-details.tsx",
+        "components/error/error-parsed-view.tsx"
+      ]
+    },
+    { "name": "suggestion", "status": "adopted", "consumers": ["components/chat/empty-state.tsx"] },
+    { "name": "task", "status": "adopted", "consumers": ["components/chat/todo-list.tsx"] },
+    {
+      "name": "terminal",
+      "status": "adopted",
+      "consumers": ["components/canvas/code-execution-panel.tsx"]
+    },
+    {
+      "name": "test-results",
+      "status": "adopted",
+      "consumers": ["components/chat/session-insights/session-report-view.tsx"]
+    },
+    { "name": "tool", "status": "adopted", "consumers": ["components/chat/message-renderer.tsx"] },
+    {
+      "name": "toolbar",
+      "status": "adopted",
+      "consumers": ["components/workflow/editor/nodes/node-floating-toolbar.tsx"]
+    },
+    {
+      "name": "transcription",
+      "status": "excluded",
+      "reason": "Cognia persists plain STT text and has no truthful timed segments or seekable source timeline."
+    },
+    {
+      "name": "voice-selector",
+      "status": "adopted",
+      "consumers": ["components/settings/speech/tts-voice-selector.tsx"]
+    },
+    {
+      "name": "web-preview",
+      "status": "adopted",
+      "consumers": ["components/browser/browser-web-fallback.tsx"]
+    }
+  ]
+}

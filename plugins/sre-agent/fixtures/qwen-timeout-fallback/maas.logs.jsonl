@@ -1,0 +1,2 @@
+{"ts":"2026-08-04T12:02:09.150Z","level":"info","service":"maas","event":"budget.reserve","trace_id":"9aa10000000000000000000000000001","tenant_id":"t-001","reserved_usd":0.42}
+{"ts":"2026-08-04T12:05:15.430Z","level":"info","service":"maas","event":"usage.persist","trace_id":"9aa10000000000000000000000000001","tenant_id":"t-001","status":"ok"}

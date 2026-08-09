@@ -29,6 +29,21 @@ describe("candidateDbPaths", () => {
     const paths = candidateDbPaths("/home/u", {} as NodeJS.ProcessEnv)
     expect(paths.some((p) => p.includes("xdg"))).toBe(false)
   })
+
+  it("keeps the known store ahead of the macOS platform fallback", () => {
+    const paths = candidateDbPaths("/Users/u", {} as NodeJS.ProcessEnv, "darwin")
+    expect(paths[0]).toContain(path.join(".local", "share", "opencode"))
+    expect(paths[1]).toContain(path.join("Library", "Application Support", "opencode"))
+  })
+
+  it("honors a redirected Windows APPDATA directory", () => {
+    const paths = candidateDbPaths(
+      "C:\\Users\\u",
+      { APPDATA: "D:\\Profiles\\u\\Roaming" } as unknown as NodeJS.ProcessEnv,
+      "win32"
+    )
+    expect(paths).toContain(path.join("D:\\Profiles\\u\\Roaming", "opencode", "opencode.db"))
+  })
 })
 
 describe("nodeOpencodeReader", () => {

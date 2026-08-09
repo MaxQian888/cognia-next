@@ -19,12 +19,14 @@ import {
   type SkillBundleUploadHandle,
   type SkillsTarget,
 } from "@/lib/claude/ipc"
-import { bulkImportSkills, getSkill, listSkills, updateSkill } from "@/lib/db/skills"
 import {
-  listResourcesForSkill,
-  replaceResourcesForSkill,
-  type SkillResourceDraft,
-} from "@/lib/db/skill-resources"
+  bulkImportSkills,
+  getSkill,
+  listSkills,
+  persistSkillBundle,
+  updateSkill,
+} from "@/lib/db/skills"
+import { listResourcesForSkill, type SkillResourceDraft } from "@/lib/db/skill-resources"
 import { parseSkillMarkdown, serializeSkill, skillFilename } from "@/lib/claude/skills-io"
 import { isTauri } from "@/lib/tauri"
 import { getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
@@ -36,6 +38,7 @@ import {
 import { resolveSkillBundleMirrors, useSettingsStore } from "@/stores/settings/settings-store"
 import type { Skill, SkillResource } from "@cognia/agent-config-types"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { deriveSkillSlug } from "./slug"
 
 export interface SyncResult {
   pushed: number
@@ -179,16 +182,6 @@ async function remoteSkillCall<T>(
   return result
 }
 
-function slug(name: string): string {
-  return (
-    name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "skill"
-  )
-}
-
 /**
  * Hash skill + resources. Used for `syncFingerprint`. Web-mode runs use
  * `crypto.subtle`; if unavailable we fall back to a stringified hash so
@@ -202,6 +195,7 @@ export async function fingerprint(skill: Skill, resources: SkillResource[]): Pro
   const md = serializeSkill(skill)
   const stable = JSON.stringify({
     md,
+    codexOpenAiYaml: skill.codexOpenAiYaml,
     res: resources
       .map((r) => ({
         path: r.path,
@@ -314,13 +308,26 @@ export async function pushOneToNative(
     if (!remoteTarget && skill.syncFingerprint === fp && skill.nativeDirectory) {
       return { ...result, skipped: 1 }
     }
-    const dirName = skill.nativeDirectory
-      ? skill.nativeDirectory.split(/[\\/]/).pop() || slug(skill.name)
-      : slug(skill.name)
+    const dirName = deriveSkillSlug(skill)
     const request: InstallSkillMirroredRequest = {
       dirName,
       content: serializeSkill(skill),
-      resources: toNativeResources(resources),
+      resources: [
+        ...toNativeResources(resources),
+        ...(skill.codexOpenAiYaml !== undefined
+          ? [
+              {
+                kind: "asset" as const,
+                path: "agents/openai.yaml",
+                name: "openai.yaml",
+                content: skill.codexOpenAiYaml,
+                encoding: "utf-8" as const,
+                mimeType: "application/yaml",
+                size: new Blob([skill.codexOpenAiYaml]).size,
+              },
+            ]
+          : []),
+      ],
       clean: true,
       targets: activeMirrorTargets(),
       trashBeforeClean: !!skill.syncFingerprint && skill.syncFingerprint !== fp,
@@ -418,6 +425,11 @@ export async function pullAllFromNative(): Promise<SyncResult> {
       const { draft } = parseSkillMarkdown(skill.content, {
         fallbackName: skill.dirName,
       })
+      const codexYaml = skill.resources.find((resource) =>
+        /(^|\/)agents\/openai\.ya?ml$/i.test(resource.path.replace(/\\/g, "/"))
+      )
+      if (codexYaml?.encoding === "utf-8") draft.codexOpenAiYaml = codexYaml.content
+      const bundledResources = skill.resources.filter((resource) => resource !== codexYaml)
       const drafts = [
         {
           ...draft,
@@ -446,11 +458,17 @@ export async function pullAllFromNative(): Promise<SyncResult> {
         // Second gate: recompute fingerprint after a candidate-update build
         // and skip if it matches what we already stored. Avoids needless
         // Dexie writes when only mtime changed (e.g., touch).
-        const candidateResources = fromNativeResources(skill.resources, existing.id)
+        const candidateResources = fromNativeResources(bundledResources, existing.id)
         const fpInput: Skill = {
           ...existing,
+          slug: drafts[0].slug ?? existing.slug,
           name: drafts[0].name,
           description: drafts[0].description,
+          compatibility: drafts[0].compatibility,
+          metadata: drafts[0].metadata,
+          invocationPolicy: drafts[0].invocationPolicy,
+          frontmatterExtensions: drafts[0].frontmatterExtensions,
+          codexOpenAiYaml: drafts[0].codexOpenAiYaml,
           content: drafts[0].content,
           allowedTools: drafts[0].allowedTools,
           tags: drafts[0].tags,
@@ -482,26 +500,39 @@ export async function pullAllFromNative(): Promise<SyncResult> {
           result.skipped += 1
           continue
         }
-        await updateSkill(existing.id, {
-          name: drafts[0].name,
-          description: drafts[0].description,
-          content: drafts[0].content,
-          allowedTools: drafts[0].allowedTools,
-          tags: drafts[0].tags,
-          category: drafts[0].category,
-          version: drafts[0].version,
-          author: drafts[0].author,
-          license: drafts[0].license,
-          source: "imported",
-          syncOrigin: "native",
-          nativeDirectory: drafts[0].nativeDirectory,
-          syncFingerprint: candidateFp,
-          lastSyncedAt: Date.now(),
-          lastSyncError: null,
+        await persistSkillBundle({
+          skill: {
+            ...existing,
+            slug: drafts[0].slug ?? existing.slug,
+            name: drafts[0].name,
+            description: drafts[0].description,
+            compatibility: drafts[0].compatibility,
+            metadata: drafts[0].metadata,
+            invocationPolicy: drafts[0].invocationPolicy,
+            frontmatterExtensions: drafts[0].frontmatterExtensions,
+            codexOpenAiYaml: drafts[0].codexOpenAiYaml,
+            content: drafts[0].content,
+            allowedTools: drafts[0].allowedTools,
+            tags: drafts[0].tags,
+            category: drafts[0].category,
+            version: drafts[0].version,
+            author: drafts[0].author,
+            license: drafts[0].license,
+            source: "imported",
+            syncOrigin: "native",
+            nativeDirectory: drafts[0].nativeDirectory,
+            syncFingerprint: candidateFp,
+            lastSyncedAt: Date.now(),
+            lastSyncError: null,
+            updatedAt: Date.now(),
+          },
+          resources: candidateResources,
         })
-        await replaceResourcesForSkill(existing.id, candidateResources)
       } else {
-        const report = await bulkImportSkills(drafts, "skip")
+        const report = await bulkImportSkills(
+          [{ ...drafts[0], resources: fromNativeResources(bundledResources, "") }],
+          "skip"
+        )
         if (report.created > 0) {
           // Look up the freshly-created row to attach resources.
           const refreshed = await listSkills()
@@ -509,11 +540,10 @@ export async function pullAllFromNative(): Promise<SyncResult> {
             (r) => r.name.toLowerCase() === drafts[0].name.toLowerCase()
           )
           if (created) {
-            const drafts2 = fromNativeResources(skill.resources, created.id)
-            await replaceResourcesForSkill(created.id, drafts2)
+            const drafts2 = fromNativeResources(bundledResources, created.id)
             // Compute the fingerprint from the drafts directly — the
-            // replaceResourcesForSkill return value is the stored rows but
-            // we don't need to read those back (the fields contributing to
+            // The atomic importer already stored these rows; we don't need
+            // to read them back (the fields contributing to
             // the fingerprint are identical between draft and stored
             // shape). This keeps the post-import update independent of
             // whatever shape the replacer returns in tests.

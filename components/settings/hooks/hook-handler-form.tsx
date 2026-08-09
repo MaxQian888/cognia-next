@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * HookHandlerForm — discriminated form for `HookHandler` (`command` | `webhook`).
+ * HookHandlerForm — discriminated form for command and HTTP hook handlers.
  *
  * Phase 5 of the ClaudeCode 完整化 plan. Renders inside `HookGroupEditor`,
  * which owns the array of handlers in a single `HookGroup`. This form is
@@ -38,6 +38,8 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
   const setType = (type: HookHandler["type"]) => {
     if (type === "command") {
       onChange({ type: "command", command: "", timeout: undefined })
+    } else if (type === "http") {
+      onChange({ type: "http", url: "", headers: {}, timeout: undefined })
     } else {
       onChange({ type: "webhook", url: "", headers: {}, timeout: undefined })
     }
@@ -60,7 +62,8 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="command">{t("typeCommand")}</SelectItem>
-              <SelectItem value="webhook">{t("typeWebhook")}</SelectItem>
+              <SelectItem value="http">{t("typeHttp")}</SelectItem>
+              <SelectItem value="webhook">{t("typeWebhookLegacy")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -114,10 +117,10 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
         <>
           <p
             className="flex items-start gap-1.5 rounded border border-dashed bg-muted/40 p-1.5 text-[0.6875rem] text-muted-foreground"
-            data-testid="handler-webhook-unsupported"
+            data-testid="handler-http-capability"
           >
             <InfoIcon className="mt-px size-3 shrink-0" aria-hidden />
-            <span>{t("webhookUnsupported")}</span>
+            <span>{t("httpCapability")}</span>
           </p>
           <div className="space-y-1">
             <Label className="text-xs">{t("urlLabel")}</Label>

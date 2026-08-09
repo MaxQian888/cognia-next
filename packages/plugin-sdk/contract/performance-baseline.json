@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-06",
+  "fixture": "manager-context-browser-chunks-v1",
+  "environment": "Architecture audit build; raw and gzip manager/context browser chunks",
+  "measurementStatus": "chunk-baseline-locked; lifecycle fixture pending first calibrated run",
+  "budgets": {
+    "latencyRegressionRatio": 0.05,
+    "chunkRegressionRatio": 0.02
+  },
+  "lifecycle": {},
+  "chunk": {
+    "rawBytes": 697344,
+    "gzipBytes": 205824
+  }
+}

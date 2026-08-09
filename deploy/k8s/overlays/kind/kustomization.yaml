@@ -17,5 +17,7 @@ configMapGenerator:
       # Matches the `kubectl port-forward svc/cognia-server 27890:27890`
       # smoke recipe in deploy/k8s/README.md.
       - publicUrl=https://127.0.0.1:27890
+      - signalingUrl=ws://signaling:7892/v2/signaling
+      - publicSignalingUrl=wss://127.0.0.1:27890/v2/signaling
 generatorOptions:
   disableNameSuffixHash: true

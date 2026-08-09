@@ -42,6 +42,13 @@ describe("ProductStage with a captured pair", () => {
     )
     expect(screen.getByText("Running the task")).toBeInTheDocument()
   })
+
+  it("can mark the authentic product boundary with a Magic UI border beam", () => {
+    const { container } = render(
+      <ProductStage section="hero" locale="en" alt="The workspace" signalBorder />
+    )
+    expect(container.querySelector('[data-slot="border-beam"]')).toBeInTheDocument()
+  })
 })
 
 describe("ProductStage without a captured pair", () => {
@@ -50,6 +57,13 @@ describe("ProductStage without a captured pair", () => {
     expect(container.querySelector("img")).toBeNull()
     expect(container.querySelector('[data-placeholder="product-stage"]')).toBeInTheDocument()
     expect(container.querySelector('[data-reconstruction="frame"]')).toBeInTheDocument()
+  })
+
+  it("can carry the signal border around a reconstructed product frame", () => {
+    const { container } = render(
+      <ProductStage section="workbench" locale="en" alt="Workbench" signalBorder />
+    )
+    expect(container.querySelector('[data-slot="border-beam"]')).toBeInTheDocument()
   })
 
   it("refuses a half-captured pair rather than showing the light shot in dark mode", () => {

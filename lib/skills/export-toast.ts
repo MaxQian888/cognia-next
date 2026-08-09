@@ -2,8 +2,10 @@
 
 import { toast } from "sonner"
 import type { Skill } from "@cognia/agent-config-types"
-import { serializeSkill, skillFilename } from "@/lib/claude/skills-io"
-import { pickDirectory, saveFilesToDir } from "@/lib/files/file-bridge"
+import { listResourcesForSkill } from "@/lib/db/skill-resources"
+import { saveBinaryFileAs } from "@/lib/files/file-bridge"
+import { serializeSkillsBundle } from "@/lib/skills/bundle/serializer"
+import { deriveSkillSlug } from "@/lib/skills/slug"
 import { loggers } from "@cognia/logging"
 
 type TranslatorValues = Record<string, string | number | Date>
@@ -18,7 +20,7 @@ export interface ExportOutcome {
 }
 
 /**
- * Drives the "pick directory → write skills as SKILL.md → toast → log" flow
+ * Drives the complete bundle zip export flow
  * shared by the batch action bar, the panel toolbar, and any future caller.
  *
  * @param skills    Skills to export.
@@ -38,32 +40,22 @@ export async function exportSkillsToDirWithFeedback(
     return { ran: false, writtenCount: 0, failedCount: 0, total }
   }
 
-  const dir = await pickDirectory()
-  // Browser fallback returns null but `saveFilesToDir` still triggers per-file
-  // downloads in that case, so we don't bail out here.
-
-  const files = skills.map((sk) => ({
-    name: skillFilename(sk.name),
-    content: serializeSkill(sk),
-  }))
-
-  const result = await saveFilesToDir(dir, files)
-  const failed = result.errored.length
-  const written = result.writtenCount
-
-  if (failed > 0) {
-    toast.warning(tToasts("exportedPartial", { ok: written, total: files.length, failed }))
-    loggers.skills.warn("export partial", {
-      ...ctx,
-      ok: written,
-      total: files.length,
-      failed,
-      errored: result.errored,
-    })
-  } else {
-    toast.success(tToasts("exportedCount", { count: written }))
-    loggers.skills.info("export ok", { ...ctx, count: written })
-  }
-
-  return { ran: true, writtenCount: written, failedCount: failed, total }
+  const bundles = await Promise.all(
+    skills.map(async (skill) => ({ skill, resources: await listResourcesForSkill(skill.id) }))
+  )
+  const bytes = await serializeSkillsBundle(bundles)
+  const defaultName =
+    skills.length === 1
+      ? `${deriveSkillSlug(skills[0])}.zip`
+      : `skills-${new Date().toISOString().slice(0, 10)}.zip`
+  const saved = await saveBinaryFileAs({
+    defaultName,
+    bytes,
+    mimeType: "application/zip",
+    filters: [{ name: "Skill bundle", extensions: ["zip"] }],
+  })
+  if (!saved) return { ran: false, writtenCount: 0, failedCount: 0, total }
+  toast.success(tToasts("exportedCount", { count: total }))
+  loggers.skills.info("bundle export ok", { ...ctx, count: total, defaultName })
+  return { ran: true, writtenCount: total, failedCount: 0, total }
 }

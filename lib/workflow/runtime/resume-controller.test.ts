@@ -1,9 +1,6 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
 import { resumeInFlightRuns } from "./resume-controller"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
 // Mock the Tauri bridge so tests don't depend on a Tauri window. Each test
@@ -22,15 +19,16 @@ import { reloadInFlightRuns } from "./tauri-bridge"
 
 const mockedReload = reloadInFlightRuns as jest.MockedFunction<typeof reloadInFlightRuns>
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().workflowRuns.clear()
   await getDb().workflowRunEvents.clear()
   mockedReload.mockReset()
 })
+afterAll(dbFixture.dispose)
 
 describe("resumeInFlightRuns", () => {
   it("returns an all-zero summary when there are no in-flight rows", async () => {

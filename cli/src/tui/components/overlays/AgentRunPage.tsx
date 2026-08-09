@@ -16,7 +16,8 @@
  * sidecar.
  */
 import React from "react"
-import { Box, Text, useInput, useStdout, type Key } from "ink"
+import { Box, Text, type Key } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import {
   PANEL_CHROME_ROWS,
@@ -27,6 +28,7 @@ import {
 import { useTheme } from "../../theme/context"
 import { parseMouseEvent } from "../../input/mouse"
 import { toolDisplayName } from "../../format/tools"
+import { contentRows } from "../../layout/terminal-layout"
 import {
   agentRowBadge,
   formatElapsed,
@@ -98,9 +100,7 @@ export function AgentRunPage({
   pollMs = 300,
 }: AgentRunPageProps): React.ReactElement {
   const theme = useTheme()
-  const { stdout } = useStdout()
-  const viewport =
-    viewportRows ?? Math.max(4, ((stdout?.rows as number | undefined) ?? 24) - PANEL_CHROME_ROWS)
+  const viewport = Math.max(1, contentRows(viewportRows ?? 24, PANEL_CHROME_ROWS))
   // Follow the tail while the run streams (Claude Code behaviour); scrolling up
   // disengages the pin, scrolling back to the bottom re-engages it.
   const scroll = usePanelScroll(viewport, { top: 0, stick: true })
@@ -125,7 +125,7 @@ export function AgentRunPage({
     return () => clearInterval(handle)
   }, [isActive, status, pollMs, liveId, getEntry, nowProp])
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (key.escape || key.return) return onClose()
       const mouse = parseMouseEvent(input)

@@ -1,0 +1,21 @@
+{
+  "note": "The v0.1 WASM plugin contract is frozen. These files are historical artifacts, are not compiled, and must never change. To evolve the contract, add a new `since_v0_N` linker — do not edit these. Regenerate ONLY when intentionally re-freezing: pnpm freeze:wasm-api",
+  "root": "crates/cognia-plugin-runtime/frozen/v0_1",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "b1441980597066abae3eb23623356254cd8e92f1ef427c8f304410240245195e",
+      "bytes": 2108
+    },
+    {
+      "path": "cognia-plugin.wit",
+      "sha256": "068e972ede012fb98643cfc9f18ba6e93a4592677a22f93dc066631f224b9620",
+      "bytes": 4554
+    },
+    {
+      "path": "since_v0_1.rs",
+      "sha256": "87e443532e8050857045df1c8648014019ae002fa801cf9c91750550ebef22d7",
+      "bytes": 18155
+    }
+  ]
+}

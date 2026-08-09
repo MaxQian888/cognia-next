@@ -1,0 +1,102 @@
+import {
+  appendAgentTeamTrajectory,
+  getAgentTeamRun,
+  listAgentTeamChildRuns,
+  updateAgentTeamRun,
+} from "@/lib/db/agent-team-runtime"
+import type { AgentTeamRunStatus } from "@/types/agent/agent-team-runtime"
+import { getDurableTeamCoordinator, type DurableTeamCoordinator } from "./durable-runtime"
+
+export type DurableRunControlAction = "pause" | "resume" | "sleep" | "wake" | "stop" | "terminate"
+
+const TERMINAL_CHILDREN = new Set(["completed", "failed", "cancelled", "terminated"])
+
+export interface DurableRunControlOptions {
+  coordinator?: DurableTeamCoordinator
+  now?: () => number
+}
+
+/**
+ * Run-wide control surface shared by the command center and team workspace.
+ * Provider handles stay process-local; every requested and resulting state is
+ * persisted so another renderer can project the same control outcome.
+ */
+export async function controlDurableRun(
+  runId: string,
+  action: DurableRunControlAction,
+  options: DurableRunControlOptions = {}
+): Promise<void> {
+  const coordinator = options.coordinator ?? getDurableTeamCoordinator()
+  const now = options.now ?? Date.now
+  const run = await getAgentTeamRun(runId)
+  if (!run) throw new Error(`Unknown durable AgentTeam run: ${runId}`)
+  const children = (await listAgentTeamChildRuns(runId)).filter(
+    (child) => !TERMINAL_CHILDREN.has(child.status)
+  )
+  const at = now()
+  const requestedStatus: AgentTeamRunStatus =
+    action === "pause"
+      ? "pausing"
+      : action === "sleep"
+        ? "sleeping"
+        : action === "stop"
+          ? "cancelled"
+          : action === "terminate"
+            ? "terminated"
+            : "running"
+  await updateAgentTeamRun(runId, { status: requestedStatus, updatedAt: at })
+  if (action === "pause" || action === "sleep") coordinator.setRunPaused(runId, true)
+  if (action === "resume" || action === "wake") coordinator.setRunPaused(runId, false)
+  const operation =
+    action === "pause"
+      ? coordinator.pauseChild
+      : action === "resume"
+        ? coordinator.resumeChild
+        : action === "sleep"
+          ? coordinator.sleepChild
+          : action === "wake"
+            ? coordinator.wakeChild
+            : coordinator.terminateChild
+  await Promise.all(children.map((child) => operation(child.id)))
+  const finalStatus: AgentTeamRunStatus =
+    action === "pause"
+      ? "paused"
+      : action === "sleep"
+        ? "sleeping"
+        : action === "stop"
+          ? "cancelled"
+          : action === "terminate"
+            ? "terminated"
+            : "running"
+  const completedAt =
+    finalStatus === "cancelled" || finalStatus === "terminated" ? now() : undefined
+  await updateAgentTeamRun(runId, {
+    status: finalStatus,
+    ...(completedAt ? { completedAt } : {}),
+    updatedAt: now(),
+  })
+  await appendAgentTeamTrajectory({
+    runId,
+    kind: "run_controlled",
+    correlationId: `run-control:${runId}:${at}`,
+    payload: { action, childCount: children.length },
+    createdAt: now(),
+  })
+}
+
+export async function controlDurableRuns(
+  runIds: string[],
+  action: DurableRunControlAction,
+  options: DurableRunControlOptions = {}
+): Promise<Array<{ runId: string; error?: string }>> {
+  return Promise.all(
+    [...new Set(runIds)].map(async (runId) => {
+      try {
+        await controlDurableRun(runId, action, options)
+        return { runId }
+      } catch (error) {
+        return { runId, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+  )
+}

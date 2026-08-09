@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import {
   upsertAnnotation,
   getAnnotationByTrace,
@@ -8,15 +6,17 @@ import {
   markSavedAsCase,
   deleteAnnotation,
 } from "./trace-annotations"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().traceAnnotations.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("trace annotations (error analysis)", () => {
   it("creates an annotation keyed by traceId", async () => {

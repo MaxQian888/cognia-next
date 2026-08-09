@@ -11,6 +11,7 @@ import {
   authenticatedIntegrationRequest,
   cancelIntegrationActionJob,
   executeIntegrationAction,
+  setGithubIssueLoopExecutorForTesting,
   setIntegrationAuthenticatedRequestExecutorForTesting,
 } from "./action-runner"
 
@@ -28,6 +29,7 @@ describe("Integration action runner", () => {
 
   afterEach(() => {
     setIntegrationAuthenticatedRequestExecutorForTesting()
+    setGithubIssueLoopExecutorForTesting()
   })
 
   async function setup(
@@ -143,6 +145,63 @@ describe("Integration action runner", () => {
     })
   })
 
+  it("routes the first-party Issue Loop through the allowlisted host executor", async () => {
+    const hostExecutor = jest.fn(async () => ({ pullRequestNumber: 11 }))
+    setGithubIssueLoopExecutorForTesting(hostExecutor)
+    registerIntegrationDefinitions({
+      pluginId: "github-delivery",
+      definitions: [
+        {
+          id: "github",
+          label: "GitHub",
+          authStrategies: [
+            {
+              id: "pat",
+              type: "personal-access-token",
+              label: "PAT",
+              providerId: "github-pat",
+            },
+          ],
+          resourceKinds: ["repository"],
+          eventTypes: [],
+          actions: [
+            {
+              id: "runIssueLoop",
+              label: "Issue Loop",
+              handler: "pluginRunIssueLoop",
+              inputSchema: { type: "object" },
+              risk: "write",
+              idempotency: "required",
+            },
+          ],
+        },
+      ],
+      handlers: {
+        "github:runIssueLoop": async () => {
+          throw new Error("plugin handler must not receive host privileges")
+        },
+      },
+    })
+    const account = await createIntegrationAccount("github-delivery", {
+      integrationId: "github",
+      providerId: "github-pat",
+      authSessionId: "opaque",
+      remoteAccountId: "acct",
+      label: "GitHub account",
+    })
+    const awaiting = await executeIntegrationAction("github-delivery", {
+      integrationId: "github",
+      accountId: account.id,
+      actionId: "runIssueLoop",
+      input: {},
+      idempotencyKey: "issue-loop-1",
+    })
+
+    const completed = await approveIntegrationActionJob(awaiting.id)
+    expect(completed).toMatchObject({ status: "succeeded", output: { pullRequestNumber: 11 } })
+    expect(hostExecutor).toHaveBeenCalledTimes(1)
+  })
+
   it("never bypasses approval for destructive actions and supports cancellation", async () => {
     const account = await setup()
     const awaiting = await executeIntegrationAction("example-delivery", {
@@ -160,7 +219,13 @@ describe("Integration action runner", () => {
 
   it("honors retry-after signals for idempotent actions", async () => {
     const account = await setup(async () => {
-      throw Object.assign(new Error("rate limited"), { retryAfter: "30" })
+      throw Object.assign(new Error("rate limited"), {
+        retryAfter: "30",
+        requestId: "github-request-1",
+        status: 429,
+        category: "rate_limit",
+        rateLimitReset: "1786240000",
+      })
     })
     const awaiting = await executeIntegrationAction("example-delivery", {
       integrationId: "example",
@@ -173,6 +238,16 @@ describe("Integration action runner", () => {
     const retrying = await approveIntegrationActionJob(awaiting.id)
     expect(retrying.status).toBe("retry_wait")
     expect(new Date(retrying.nextAttemptAt!).getTime()).toBeGreaterThanOrEqual(before + 29_000)
+    await expect(
+      getDb().integrationAudit.where("kind").equals("action.issue.update").first()
+    ).resolves.toMatchObject({
+      detail: expect.objectContaining({
+        requestId: "github-request-1",
+        status: 429,
+        statusClass: "rate_limit",
+        nextRetryAt: retrying.nextAttemptAt,
+      }),
+    })
   })
 
   it("injects provider-specific credential headers inside the host boundary", async () => {
@@ -244,6 +319,88 @@ describe("Integration action runner", () => {
       const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers
       expect(headers.get("private-token")).toBe("token secret-value")
       expect(headers.get("authorization")).toBeNull()
+    } finally {
+      global.fetch = originalFetch
+      dispose()
+    }
+  })
+
+  it("resolves short-lived credentials inside the host request boundary", async () => {
+    setIntegrationAuthenticatedRequestExecutorForTesting()
+    registerIntegrationDefinitions({
+      pluginId: "app-delivery",
+      definitions: [
+        {
+          id: "app",
+          label: "App",
+          authStrategies: [
+            {
+              id: "app",
+              type: "app",
+              label: "App",
+              providerId: "dynamic-app",
+              requestAuth: { type: "bearer" },
+            },
+          ],
+          resourceKinds: [],
+          eventTypes: [],
+          actions: [],
+          allowedOrigins: ["https://api.example.test"],
+        },
+      ],
+      handlers: {},
+    })
+    const resolveRequestCredential = jest.fn(async () => ({
+      accessToken: "short-lived-token",
+      expiresAt: "2026-08-09T12:00:00.000Z",
+    }))
+    const dispose = registerAuthenticationProvider({
+      id: "dynamic-app",
+      label: "Dynamic App",
+      pluginId: null,
+      getSessions: async () => [
+        {
+          id: "app-session",
+          accessToken: "host-owned-placeholder",
+          account: { id: "42", label: "Installation 42" },
+          scopes: [],
+        },
+      ],
+      createSession: async () => {
+        throw new Error("not used")
+      },
+      removeSession: async () => undefined,
+      resolveRequestCredential,
+    })
+    const account = await createIntegrationAccount("app-delivery", {
+      integrationId: "app",
+      providerId: "dynamic-app",
+      authSessionId: "app-session",
+      remoteAccountId: "42",
+      label: "Installation 42",
+    })
+    const originalFetch = global.fetch
+    const fetchMock = jest.fn().mockResolvedValue({
+      status: 200,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: async () => ({ ok: true }),
+      text: async () => "",
+    } as Response)
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    try {
+      await authenticatedIntegrationRequest(
+        "app-delivery",
+        account.id,
+        "https://api.example.test/app/installations/42"
+      )
+
+      expect(resolveRequestCredential).toHaveBeenCalledWith("app-session", {
+        accountId: account.id,
+        origin: "https://api.example.test",
+      })
+      const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers
+      expect(headers.get("authorization")).toBe("Bearer short-lived-token")
     } finally {
       global.fetch = originalFetch
       dispose()

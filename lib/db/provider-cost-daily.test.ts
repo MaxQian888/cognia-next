@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // Coverage for the providerCostDaily rollup module — id/day helpers, atomic
 // upsert-increment, today aggregation, range query, and pruning. Uses
 // fake-indexeddb so the real Dexie query path runs against in-memory IDB.
 
-import "fake-indexeddb/auto"
 import {
   buildCostDailyId,
   getCostRange,
@@ -12,19 +10,21 @@ import {
   localDayString,
   pruneProviderCostOlderThan,
 } from "./provider-cost-daily"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 const DAY_MS = 86_400_000
 
 // A fixed reference instant: 2026-06-05T12:00 local time.
 const NOON = new Date(2026, 5, 5, 12, 0, 0).getTime()
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 describe("localDayString", () => {
   it("formats the local day as YYYY-MM-DD with zero padding", () => {

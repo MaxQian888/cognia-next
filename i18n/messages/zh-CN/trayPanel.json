@@ -1,0 +1,50 @@
+{
+  "actions": {
+    "agentRuns": {
+      "label": "智能体运行"
+    },
+    "delegate": {
+      "autoSendLabel": "立即发送",
+      "description": "无需打开主窗口，直接把任务交给 Cognia。",
+      "label": "委派任务",
+      "promptLabel": "任务",
+      "promptPlaceholder": "描述你希望 Cognia 做什么…",
+      "targetLabel": "发送到"
+    },
+    "newChat": {
+      "label": "新建会话"
+    },
+    "openApp": {
+      "label": "打开 Cognia"
+    },
+    "scheduler": {
+      "label": "定时任务"
+    },
+    "settings": {
+      "label": "设置"
+    },
+    "stopAutomation": {
+      "label": "停止自动化"
+    }
+  },
+  "dismiss": "关闭面板",
+  "empty": "暂无操作 — 可在「设置 › 桌面」中添加。",
+  "errors": {
+    "badTarget": "「{value}」不是有效的目标。",
+    "deliveryFailed": "Cognia 主窗口未响应。",
+    "emptyEffect": "该操作没有可执行的内容。",
+    "illegalTrigger": "该操作不能在面板打开时自动执行。",
+    "required": "请先填写必填项。",
+    "runFailed": "执行该操作失败。",
+    "runFailedFor": "执行「{action}」失败",
+    "unknownCommand": "未知命令：{id}",
+    "unknownPlaceholder": "未知占位符：{ids}"
+  },
+  "openSettings": "打开设置",
+  "run": "执行",
+  "targets": {
+    "activeSession": "当前会话",
+    "newSession": "新建会话"
+  },
+  "title": "Cognia"
+}

@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
 // Coverage for the skills CRUD layer + bulk-import + render helpers.
 
-import "fake-indexeddb/auto"
 import {
   activeEffectiveSkillIds,
   bulkImportSkills,
@@ -24,22 +22,25 @@ import {
   upsertSkillByCanonicalId,
 } from "./skills"
 import { createResource, listResourcesForSkill } from "./skill-resources"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().skills.clear()
   await getDb().skillResources.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("createSkill", () => {
   it("inserts a row with sensible defaults", async () => {
     const s = await createSkill({ name: "  Concise  ", content: "Be brief." })
     expect(s.id).toMatch(/^skill_/)
     expect(s.name).toBe("Concise")
+    expect(s.slug).toBe("concise")
     expect(s.category).toBe("custom")
     expect(s.source).toBe("custom")
     expect(s.status).toBe("enabled")
@@ -146,6 +147,43 @@ describe("duplicateSkill", () => {
 
   it("throws when source is missing", async () => {
     await expect(duplicateSkill("missing")).rejects.toThrow(/not found/)
+  })
+
+  it("copies the complete resource bundle and allocates a distinct slug", async () => {
+    const source = await createSkill({
+      name: "Portable",
+      description: "Portable skill",
+      content: "body",
+      metadata: { custom: "value" },
+      codexOpenAiYaml: "interface:\n  display_name: Portable\n",
+      resources: [
+        { kind: "reference", name: "Guide", path: "references/guide.md", content: "guide" },
+      ],
+    })
+    const copy = await duplicateSkill(source.id)
+    expect(copy.slug).toBe("portable-2")
+    expect(copy.metadata).toEqual({ custom: "value" })
+    expect(copy.codexOpenAiYaml).toContain("display_name")
+    expect(await listResourcesForSkill(copy.id)).toEqual([
+      expect.objectContaining({ path: "references/guide.md", content: "guide" }),
+    ])
+  })
+})
+
+describe("transactional bundle persistence", () => {
+  it("rolls back the skill row when a resource replacement fails", async () => {
+    await expect(
+      createSkill({
+        name: "Atomic",
+        description: "Atomic bundle",
+        content: "body",
+        resources: [
+          { kind: "script", name: "One", path: "scripts/run.sh", content: "one" },
+          { kind: "script", name: "Two", path: "Scripts/RUN.sh", content: "two" },
+        ],
+      })
+    ).rejects.toThrow(/already exists/)
+    expect((await listSkills()).find((skill) => skill.name === "Atomic")).toBeUndefined()
   })
 })
 

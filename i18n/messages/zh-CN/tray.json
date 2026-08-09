@@ -27,7 +27,7 @@
     "muted": "静音"
   },
   "islandToggle": "切换 Agent 灵动岛",
-  "newChat": "新建对话",
+  "newChat": "快速对话",
   "openLogs": "打开日志面板",
   "pet": {
     "clean": "清洁",
@@ -55,6 +55,7 @@
     "streaming": "回复中…"
   },
   "toggleWindow": "显示 / 隐藏窗口",
+  "trayPanelToggle": "快捷面板",
   "usage": {
     "auto": "自动（用量最高）",
     "empty": "暂无额度数据",

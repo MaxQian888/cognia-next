@@ -25,7 +25,7 @@ scripts/
 | ----------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | `build/copy-monaco-assets.mjs`            | Copy Monaco's `min/vs` bundle into `public/monaco/vs` so Tauri can load it offline.           | `predev`, `prebuild` hooks; `pnpm monaco:copy`                                             | —                                                                      |
 | `build/download-cubism-core.mjs`          | Download the Live2D Cubism Core runtime into `public/` (overridable via `CUBISM_CORE_URL`).   | `predev`, `prebuild` hooks                                                                 | `build/download-cubism-core.test.mjs`                                  |
-| `build/build-vscode-ext-host-sidecar.mjs` | Install + `tsc`-build the out-of-workspace `sidecar/vscode-ext-host` Node sidecar.            | `prebuild` hook; `pnpm sidecar:vscode:build` / `sidecar:vscode:install` (`--install-only`) | —                                                                      |
+| `build/build-vscode-ext-host-sidecar.mjs` | Install + `tsc`-build the out-of-workspace `sidecar/vscode-ext-host` Node sidecar.            | `prebuild` hook; `pnpm sidecar:vscode:build` / `sidecar:vscode:install` (`--install-only`) | `build/build-vscode-ext-host-sidecar.test.mjs`                         |
 | `build/clean-stale-turbopack-cache.mjs`   | Purge `.next/dev` when it exceeds `TURBOPACK_CACHE_MAX_GB` (default 10 GB); never aborts dev. | `predev` hook                                                                              | `build/clean-stale-turbopack-cache.test.mjs` (`pnpm clean:cache:test`) |
 | `build/build-cli.mjs`                     | esbuild-bundle the standalone `cli/` agent into `cli/dist`.                                   | `pnpm cli:build`                                                                           | —                                                                      |
 
@@ -42,18 +42,25 @@ scripts/
 
 ## `sync/` — sync / generation scripts
 
-| Script                         | Purpose                                                                                                       | Trigger                                                             | Test                                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------- |
-| `sync/sync-models-dev.mjs`     | Generate the models.dev manifest, search index, provider shards, and compact capability fallback.             | `pnpm sync:models-dev`                                              | `lib/ai/providers/models-dev-shard-loader.test.ts` |
-| `sync/sync-plugin-sdk-wit.mjs` | Copy the canonical WIT contract into the `plugin-sdk` mirror (fixes drift flagged by `check-plugin-sdk-wit`). | `pnpm sync:plugin-sdk-wit`                                          | —                                                  |
-| `sync/release-sync-keys.mjs`   | Propagate the Ed25519 release public key from `crates/cognia-cli` into its Rust + TS mirrors.                 | `pnpm release:sync-keys`; `pnpm release:sync-keys:check` (CI drift) | —                                                  |
-| `sync/sort-i18n.mjs`           | Recursively key-sort `en.json`/`zh-CN.json` (values untouched, ICU-safe); `--check` for CI.                   | `pnpm i18n:sort`; `pnpm i18n:sort:check`                            | `sync/sort-i18n.test.mjs` (`pnpm i18n:sort:test`)  |
+| Script                         | Purpose                                                                                                       | Trigger                                                             | Test                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `sync/sync-models-dev.mjs`     | Generate the models.dev manifest, search index, provider shards, and compact capability fallback.             | `pnpm sync:models-dev`                                              | `sync/sync-models-dev.test.mjs`; `lib/ai/providers/models-dev-shard-loader.test.ts` |
+| `sync/sync-plugin-sdk-wit.mjs` | Copy the canonical WIT contract into the `plugin-sdk` mirror (fixes drift flagged by `check-plugin-sdk-wit`). | `pnpm sync:plugin-sdk-wit`                                          | —                                                                                   |
+| `sync/release-sync-keys.mjs`   | Propagate the Ed25519 release public key from `crates/cognia-cli` into its Rust + TS mirrors.                 | `pnpm release:sync-keys`; `pnpm release:sync-keys:check` (CI drift) | —                                                                                   |
+| `sync/sort-i18n.mjs`           | Recursively key-sort `en.json`/`zh-CN.json` (values untouched, ICU-safe); `--check` for CI.                   | `pnpm i18n:sort`; `pnpm i18n:sort:check`                            | `sync/sort-i18n.test.mjs` (`pnpm i18n:sort:test`)                                   |
 
 ## `smoke/` — smoke scripts
 
-| Script                      | Purpose                                                                            | Trigger             | Test |
-| --------------------------- | ---------------------------------------------------------------------------------- | ------------------- | ---- |
-| `smoke/signaling-smoke.mjs` | Boot the standalone signaling server and drive WS clients through its guard paths. | `pnpm webrtc:smoke` | —    |
+| Script                        | Purpose                                                                              | Trigger              | Test |
+| ----------------------------- | ------------------------------------------------------------------------------------ | -------------------- | ---- |
+| `smoke/signaling-smoke.mjs`   | Boot the standalone signaling server and drive WS clients through its guard paths.   | `pnpm webrtc:smoke`  | —    |
+| `smoke/webrtc-pair-smoke.mjs` | Drive a real Chromium ↔ Rust DataChannel through the live signaling service.         | `pnpm webrtc:pair`   | —    |
+| `smoke/compose-smoke.mjs`     | Drive the deployed signaling/share/Headless/Caddy tiers with canonical cgnp3 + DPoP. | `pnpm compose:smoke` | —    |
+
+The Compose E2E workflow additionally runs `pnpm test:e2e:web-headless` against
+the real same-origin Web/Caddy/Headless/signaling stack. Its dedicated
+`tests/real-e2e/` lane is intentionally separate from the default mock-backed
+Playwright projects.
 
 ## Data / config files (kept at `scripts/` root)
 
@@ -76,6 +83,22 @@ review; it is not a general ignore file.
   `node --test` (not Jest).
 - `.ts` scripts run via `ts-node --project scripts/tsconfig.audit.json`; their
   tests are Jest (`*.test.ts`).
+- Treat [`dev/headless.mjs`](./dev/headless.mjs) as the baseline for a
+  user-facing development or operations CLI: use `commander` for help and
+  option parsing, then validate the parsed shape with `zod`. Do not hand-roll
+  flag scanning when either installed library expresses the contract.
+- Use `execa` with an executable plus an argument array for one-shot child
+  processes. Never interpolate user-controlled values into a shell command.
+  Keep `node:child_process` only where its streaming, IPC, or long-lived child
+  lifecycle is the behavior being implemented, and cover that boundary with a
+  co-located test.
+- Use `glob` for recursive file discovery instead of maintaining custom directory
+  walkers. Use `write-file-atomic` for generated files and downloaded assets
+  instead of implementing temporary-file naming and rename cleanup by hand.
+- Preserve each script's operational contract while modernizing it. For
+  example, best-effort dev guards may log and continue on preflight failure;
+  validation must make that outcome explicit rather than turning it into a
+  silent fallback.
 - A script that mutates files should be **idempotent** and offer a `--check`
   mode so it can double as a CI drift gate.
 - Scripts derive the repo root from their own location (`__dirname`); after the

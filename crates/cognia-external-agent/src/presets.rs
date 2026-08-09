@@ -142,6 +142,13 @@ impl SpawnPolicy {
         Self::new(workspaces_dir, smoke)
     }
 
+    /// Resolve a client-supplied workspace root against the server-owned
+    /// workspaces directory. This is the filesystem RPC trust boundary: a
+    /// caller may choose a workspace below the root, never redefine the root.
+    pub fn validate_workspace_root(&self, requested: &str) -> Result<String, PolicyViolation> {
+        self.validate_cwd(Some(requested))
+    }
+
     /// Validate a spawn request. Returns the sanitized config (allowlisted
     /// env, canonicalized cwd) or the violation that denies it.
     pub fn validate(
@@ -402,6 +409,26 @@ mod tests {
         let mut cfg = config("claude", &[]);
         cfg.cwd = Some("proj/../..".into());
         assert!(p.validate(cfg).is_err(), "dot-dot escape must be denied");
+    }
+
+    #[test]
+    fn workspace_root_validation_rejects_client_selected_host_directories() {
+        let (tmp, policy) = policy(false);
+        let workspace = tmp.path().join("workspaces/project");
+        std::fs::create_dir_all(&workspace).unwrap();
+        assert_eq!(
+            PathBuf::from(
+                policy
+                    .validate_workspace_root(workspace.to_str().unwrap())
+                    .unwrap()
+            )
+            .canonicalize()
+            .unwrap(),
+            workspace.canonicalize().unwrap()
+        );
+        assert!(policy
+            .validate_workspace_root(tmp.path().to_str().unwrap())
+            .is_err());
     }
 
     // ── Policy matrix: env ───────────────────────────────────────────────────

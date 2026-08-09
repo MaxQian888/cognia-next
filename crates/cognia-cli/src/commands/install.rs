@@ -19,9 +19,9 @@ use std::path::{Path, PathBuf};
 use crate::engine::bridge_client::{get_json, load_endpoint, post_json, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
-const INSTALL_BUNDLE_PATH: &str = "/api/v1/dev/plugins/install";
-const INSTALL_DIRECTORY_PATH: &str = "/api/v1/dev/plugins/install-directory";
-const LIST_PATH: &str = "/api/v1/dev/plugins/installed";
+const INSTALL_BUNDLE_PATH: &str = "/api/dev/plugins/install";
+const INSTALL_DIRECTORY_PATH: &str = "/api/dev/plugins/install-directory";
+const LIST_PATH: &str = "/api/dev/plugins/installed";
 
 #[derive(Debug, Deserialize)]
 struct InstallResponse {
@@ -575,7 +575,7 @@ mod tests {
         let server_thread = std::thread::spawn(move || {
             if let Ok(req) = server.recv() {
                 assert_eq!(req.method(), &tiny_http::Method::Get);
-                assert_eq!(req.url(), "/api/v1/dev/plugins/installed");
+                assert_eq!(req.url(), "/api/dev/plugins/installed");
                 let resp = tiny_http::Response::from_string(r#"{"ok":true,"plugins":[]}"#)
                     .with_header(
                         tiny_http::Header::from_bytes(
@@ -588,7 +588,7 @@ mod tests {
             }
             if let Ok(mut req) = server.recv() {
                 assert_eq!(req.method(), &tiny_http::Method::Post);
-                assert_eq!(req.url(), "/api/v1/dev/plugins/install-directory");
+                assert_eq!(req.url(), "/api/dev/plugins/install-directory");
                 let mut body = String::new();
                 let _ = req.as_reader().read_to_string(&mut body);
                 let parsed: serde_json::Value =

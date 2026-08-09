@@ -68,9 +68,10 @@ export interface StandaloneToolsResult {
  * byte-identical to what shipped before.
  */
 export function buildStandaloneTools(
-  sendOptions: Pick<SendOptions, "pluginTools">,
+  sendOptions: Pick<SendOptions, "pluginTools" | "toolSurface">,
   sessionId: string
 ): StandaloneToolsResult | undefined {
+  if (sendOptions.toolSurface === "none") return undefined
   const entries = sendOptions.pluginTools
   if (!entries || entries.length === 0) return undefined
 

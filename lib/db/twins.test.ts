@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 /**
  * Tests for the `twins` Dexie table (schema v29) and its CRUD module.
  * Covers basic CRUD, archive toggling, clone semantics, cascade delete
@@ -6,7 +5,6 @@
  * backfill that auto-registers pre-existing twinIds.
  */
 
-import "fake-indexeddb/auto"
 import {
   archiveTwin,
   backfillTwinRegistryFromUsage,
@@ -24,7 +22,8 @@ import { createTwinChunk } from "./twin-chunks"
 import { ensureTwinProfile } from "./twin-profile"
 import { createTwinDraft } from "./twin-drafts"
 import { createTwinJob } from "./twin-jobs"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import type { Character } from "@cognia/agent-config-types"
 import { syncTwinCronToScheduler } from "@/lib/twin/cron/cron-bridge"
 
@@ -39,13 +38,14 @@ jest.mock("@/lib/twin/runtime/build-deps", () => ({
   tryBuildTwinDeps: jest.fn(async () => ({ store: { deleteCollection: mockDeleteCollection } })),
 }))
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
+  await dbFixture.restore()
   jest.clearAllMocks()
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
 })
+afterAll(dbFixture.dispose)
 
 function buildCharacter(overrides: Partial<Character> = {}): Character {
   const now = Date.now()

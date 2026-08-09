@@ -86,9 +86,9 @@ test("parseArgs handles flags and rejects bad input", () => {
     out: "cov",
     inputs: ["a.json", "b/"],
   })
-  assert.throws(() => parseArgs(["a.json", "--wat"]), /Unknown argument/)
+  assert.throws(() => parseArgs(["a.json", "--wat"]), /unknown option/i)
   assert.throws(() => parseArgs(["--check"]), /No coverage inputs/)
-  assert.throws(() => parseArgs(["--out"]), /--out requires a directory/)
+  assert.throws(() => parseArgs(["--out"]), /argument missing/i)
 })
 
 test("resolveInput maps directories to their coverage-final.json", () => {

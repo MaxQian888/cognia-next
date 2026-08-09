@@ -18,6 +18,10 @@
       "label": "使用紧凑输入区布局"
     },
     "description": "控制消息输入框的输入、发送与草稿行为。",
+    "effortSelectorMode": {
+      "hint": "将思考等级显示为连续滑杆，而不是列表。",
+      "label": "使用滑杆选择思考等级"
+    },
     "inputHistory": {
       "hint": "在空输入框中按上/下方向键调出历史消息。",
       "label": "调出输入历史"

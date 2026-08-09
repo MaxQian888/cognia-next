@@ -34,7 +34,8 @@ import { transport } from "@/lib/tauri"
 function makeConfig(overrides: Partial<CompanionConfig> = {}): CompanionConfig {
   return {
     baseUrl: "https://box.example:27890",
-    deviceJwt: "device-jwt",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-key" },
+    deviceKeyThumbprint: "device-thumbprint",
     deviceId: "device-1",
     serverVersion: "1.2.3",
     serverFingerprint: "sha256:paired-spki",
@@ -87,10 +88,14 @@ describe("addHost", () => {
     expect(host.config.baseUrl).toBe("https://box.example:27890")
   })
 
-  it("never persists remote JWT or signaling private keys to localStorage", () => {
+  it("never persists device or signaling private keys to localStorage", () => {
     useRemoteHostStore.getState().addHost({
       config: makeConfig({
-        deviceJwt: "jwt-must-not-persist",
+        devicePrivateKeyJwk: {
+          kty: "EC",
+          crv: "P-256",
+          d: "device-private-must-not-persist",
+        },
         signalingPrivateKeyJwk: {
           kty: "EC",
           crv: "P-256",
@@ -100,32 +105,55 @@ describe("addHost", () => {
     })
 
     const persisted = window.localStorage.getItem("cognia-remote-hosts")
-    expect(persisted).not.toContain("jwt-must-not-persist")
+    expect(persisted).not.toContain("device-private-must-not-persist")
     expect(persisted).not.toContain("rtc-private-must-not-persist")
     expect(persisted).toContain("credentialRef")
   })
 
   it("dedupes by normalized baseUrl: re-pairing refreshes the config, keeps id + label", () => {
     const store = useRemoteHostStore.getState()
-    const first = store.addHost({ label: "Box", config: makeConfig({ deviceJwt: "jwt-1" }) })
+    const first = store.addHost({
+      label: "Box",
+      config: makeConfig({
+        devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-key-1" },
+      }),
+    })
     const second = store.addHost({
-      config: makeConfig({ baseUrl: "https://box.example:27890/", deviceJwt: "jwt-2" }),
+      config: makeConfig({
+        baseUrl: "https://box.example:27890/",
+        devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-key-2" },
+      }),
     })
     expect(useRemoteHostStore.getState().hosts).toHaveLength(1)
     expect(second.id).toBe(first.id)
     expect(second.label).toBe("Box")
-    expect(second.config.deviceJwt).toBe("jwt-2")
+    expect(second.config.devicePrivateKeyJwk?.d).toBe("device-key-2")
   })
 
   it("leaves other hosts intact when re-pairing one", () => {
     const store = useRemoteHostStore.getState()
-    const a = store.addHost({ config: makeConfig({ baseUrl: "https://a:1", deviceJwt: "a1" }) })
-    const b = store.addHost({ config: makeConfig({ baseUrl: "https://b:1", deviceJwt: "b1" }) })
-    store.addHost({ config: makeConfig({ baseUrl: "https://a:1", deviceJwt: "a2" }) })
+    const a = store.addHost({
+      config: makeConfig({
+        baseUrl: "https://a:1",
+        devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "a1" },
+      }),
+    })
+    const b = store.addHost({
+      config: makeConfig({
+        baseUrl: "https://b:1",
+        devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "b1" },
+      }),
+    })
+    store.addHost({
+      config: makeConfig({
+        baseUrl: "https://a:1",
+        devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "a2" },
+      }),
+    })
     const hosts = useRemoteHostStore.getState().hosts
     expect(hosts).toHaveLength(2)
-    expect(hosts.find((h) => h.id === a.id)?.config.deviceJwt).toBe("a2")
-    expect(hosts.find((h) => h.id === b.id)?.config.deviceJwt).toBe("b1")
+    expect(hosts.find((h) => h.id === a.id)?.config.devicePrivateKeyJwk?.d).toBe("a2")
+    expect(hosts.find((h) => h.id === b.id)?.config.devicePrivateKeyJwk?.d).toBe("b1")
   })
 })
 
@@ -158,8 +186,11 @@ describe("activateHost / deactivate", () => {
     expect(getActiveRemoteTransport()).toBe(fakeRemote)
     expect(getActiveRemoteEndpoint()).toEqual({
       baseUrl: "https://box.example:27890",
-      deviceJwt: "device-jwt",
       deviceId: "device-1",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-key" },
+      deviceKeyThumbprint: "device-thumbprint",
+      accountId: undefined,
+      serverVersion: "1.2.3",
       serverFingerprint: "sha256:paired-spki",
     })
     expect(useRemoteHostStore.getState().hosts[0].lastActiveAt).toBeGreaterThan(0)
@@ -221,12 +252,12 @@ describe("activateHost / deactivate", () => {
     useRemoteHostStore.setState((state) => ({
       hosts: state.hosts.map((candidate) =>
         candidate.id === host.id
-          ? { ...candidate, config: { ...candidate.config, deviceJwt: "" } }
+          ? { ...candidate, config: { ...candidate.config, devicePrivateKeyJwk: undefined } }
           : candidate
       ),
     }))
     ;(mockLoadRemoteHostCredential as jest.Mock).mockResolvedValue({
-      deviceJwt: "vault-jwt",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "vault-device-key" },
       signalingPrivateKeyJwk: { kty: "EC", crv: "P-256", d: "vault-private" },
     })
 
@@ -235,7 +266,7 @@ describe("activateHost / deactivate", () => {
 
     expect(mockLoadRemoteHostCredential).toHaveBeenCalledWith(host.id)
     expect(useRemoteHostStore.getState().activeHostId).toBe(host.id)
-    expect(getActiveRemoteEndpoint()?.deviceJwt).toBe("vault-jwt")
+    expect(getActiveRemoteEndpoint()?.devicePrivateKeyJwk?.d).toBe("vault-device-key")
   })
 
   it("fails closed when a persisted host has no secure credential", async () => {
@@ -243,7 +274,7 @@ describe("activateHost / deactivate", () => {
     useRemoteHostStore.setState((state) => ({
       hosts: state.hosts.map((candidate) =>
         candidate.id === host.id
-          ? { ...candidate, config: { ...candidate.config, deviceJwt: "" } }
+          ? { ...candidate, config: { ...candidate.config, devicePrivateKeyJwk: undefined } }
           : candidate
       ),
     }))
@@ -327,8 +358,11 @@ describe("default transport factory", () => {
     expect(getActiveRemoteTransport()).not.toBeNull()
     expect(getActiveRemoteEndpoint()).toEqual({
       baseUrl: "https://box.example:27890",
-      deviceJwt: "device-jwt",
       deviceId: "device-1",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-key" },
+      deviceKeyThumbprint: "device-thumbprint",
+      accountId: undefined,
+      serverVersion: "1.2.3",
       serverFingerprint: "sha256:paired-spki",
     })
   })
@@ -336,10 +370,18 @@ describe("default transport factory", () => {
 
 describe("re-pair while active", () => {
   it("re-installs the endpoint with the refreshed credential", () => {
-    const host = useRemoteHostStore.getState().addHost({ config: makeConfig({ deviceJwt: "old" }) })
+    const host = useRemoteHostStore.getState().addHost({
+      config: makeConfig({
+        devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "old" },
+      }),
+    })
     useRemoteHostStore.getState().activateHost(host.id)
-    useRemoteHostStore.getState().addHost({ config: makeConfig({ deviceJwt: "new" }) })
-    expect(getActiveRemoteEndpoint()?.deviceJwt).toBe("new")
+    useRemoteHostStore.getState().addHost({
+      config: makeConfig({
+        devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "new" },
+      }),
+    })
+    expect(getActiveRemoteEndpoint()?.devicePrivateKeyJwk?.d).toBe("new")
   })
 })
 
@@ -612,9 +654,9 @@ describe("host feature manifest", () => {
 })
 
 describe("persisted host migration", () => {
-  it("moves legacy credentials to the vault and strips persisted secrets", async () => {
+  it("drops bearer-token hosts and clears their old vault credentials", async () => {
     const legacyConfig = makeConfig({
-      deviceJwt: "legacy-jwt",
+      devicePrivateKeyJwk: undefined,
       signalingPrivateKeyJwk: {
         kty: "EC",
         crv: "P-256",
@@ -643,16 +685,9 @@ describe("persisted host migration", () => {
 
     await useRemoteHostStore.persist.rehydrate()
 
-    expect(mockSaveRemoteHostCredential).toHaveBeenCalledWith("legacy-host", legacyConfig)
-    const migrated = useRemoteHostStore.getState().hosts[0]
-    expect(migrated).toMatchObject({
-      id: "legacy-host",
-      credentialRef: "remote-host:legacy-host",
-      connectionState: "disconnected",
-      connectionError: undefined,
-    })
-    expect(migrated.config.deviceJwt).toBe("")
-    expect(migrated.config.signalingPrivateKeyJwk).toBeUndefined()
+    expect(mockSaveRemoteHostCredential).not.toHaveBeenCalled()
+    expect(mockClearRemoteHostCredential).toHaveBeenCalledWith("legacy-host")
+    expect(useRemoteHostStore.getState().hosts).toEqual([])
     expect(useRemoteHostStore.getState().activeHostId).toBeNull()
   })
 })

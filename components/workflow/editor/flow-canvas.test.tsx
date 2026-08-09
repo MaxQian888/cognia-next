@@ -53,6 +53,8 @@ jest.mock("@xyflow/react", () => {
       )
     },
     Background: () => null,
+    Panel: ({ children, ...props }: React.ComponentProps<"div">) =>
+      React.createElement("div", props, children),
     BackgroundVariant: { Dots: "dots", Lines: "lines" },
     ViewportPortal: ({ children }: { children: React.ReactNode }) =>
       React.createElement(React.Fragment, null, children),

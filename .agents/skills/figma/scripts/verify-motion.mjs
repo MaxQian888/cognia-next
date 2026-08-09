@@ -1,151 +1,290 @@
 #!/usr/bin/env node
 /**
- * Objective fidelity gate for figma-motion imports (skill step 2b).
+ * Objective fidelity gate for Figma Motion imports (skill step 2b).
  *
- * Compares the HyperFrames render against Figma's own `export_video` output
- * using MOTION-ENERGY deltas: for each sample window [t, t+interval], the
- * frame difference ref(t+i)-ref(t) is compared (PSNR) against
- * render(t+i)-render(t). Static import divergence (fonts, rasterized edges,
- * subpixel geometry — the hybrid-fidelity ceiling) cancels out of both
- * deltas, so the score isolates choreography: trajectories, timing, easing.
+ * Compares the HyperFrames render against Figma's `export_video` output
+ * using motion-energy deltas. Static import divergence (fonts, rasterized
+ * edges, and subpixel geometry) cancels out of both deltas, so the score
+ * isolates choreography: trajectories, timing, and easing.
  *
  * Calibration (SDS "Unlocked" card, 2026-07): a faithful translation scored
  * min 20.3dB / mean 27.7dB; a diverging one (invented retract keyframes,
- * wrong durations) scored min 5.0dB / mean 23.1dB. Default threshold 15dB
- * sits between with margin on both sides.
- *
- *   node verify-motion.mjs --reference figma-export.mp4 --render out.mp4 \
- *     [--crop WxH+X+Y] [--interval 0.2] [--min-motion-psnr 15]
+ * wrong durations) scored min 5.0dB / mean 23.1dB. The default threshold of
+ * 15dB sits between with margin on both sides.
  *
  * --crop selects the card region inside the (usually larger) composition
- * frame. Measure it from the render (the card's left/top edge + scaled
- * size), don't guess: a wrong crop reads as motion divergence.
+ * frame. Measure it from the render (the card's left/top edge and scaled
+ * size), rather than guessing: a wrong crop reads as motion divergence.
  */
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { Command, CommanderError } from "commander"
+import { execa } from "execa"
+import { z } from "zod"
 
-function arg(name, fallback) {
-  const i = process.argv.indexOf(`--${name}`);
-  return i > -1 ? process.argv[i + 1] : fallback;
-}
-const reference = arg("reference");
-const render = arg("render");
-if (!reference || !render) {
-  console.error(
-    "usage: verify-motion.mjs --reference ref.mp4 --render out.mp4 [--crop WxH+X+Y] [--interval 0.2] [--min-motion-psnr 15]",
-  );
-  process.exit(2);
-}
-const crop = arg("crop", null);
-const interval = Number(arg("interval", "0.2"));
-const minMotion = Number(arg("min-motion-psnr", "15"));
+const EXIT_USAGE = 2
+const EXIT_PREFLIGHT = 3
+const DEFAULT_INTERVAL_SECONDS = 0.2
+const DEFAULT_MIN_MOTION_PSNR = 15
 
-const ffprobe = (file) =>
-  Number(
-    execFileSync("ffprobe", [
+class UsageError extends Error {}
+class PreflightError extends Error {}
+
+const positiveNumber = (option) =>
+  z
+    .coerce.number({ error: `${option} must be a number greater than 0` })
+    .finite(`${option} must be a finite number greater than 0`)
+    .gt(0, `${option} must be greater than 0`)
+
+const cliOptionsSchema = z.object({
+  crop: z
+    .string()
+    .regex(/^\d+x\d+\+\d+\+\d+$/, "--crop must use WxH+X+Y, for example 1280x720+40+80")
+    .optional(),
+  interval: positiveNumber("--interval"),
+  minMotionPsnr: positiveNumber("--min-motion-psnr"),
+  reference: z.string().trim().min(1, "--reference must not be empty"),
+  render: z.string().trim().min(1, "--render must not be empty"),
+})
+
+function createProgram() {
+  return new Command()
+    .name("node .agents/skills/figma/scripts/verify-motion.mjs")
+    .description("Compare a HyperFrames motion render with Figma's export_video reference.")
+    .configureHelp({ helpWidth: 120 })
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .requiredOption("--reference <path>", "Figma export_video MP4 used as the motion reference.")
+    .requiredOption("--render <path>", "HyperFrames MP4 to validate.")
+    .option("--crop <WxH+X+Y>", "Render crop measured from the actual card edges.")
+    .option("--interval <seconds>", "Sampling interval in seconds.", String(DEFAULT_INTERVAL_SECONDS))
+    .option(
+      "--min-motion-psnr <decibels>",
+      "Minimum acceptable motion-energy PSNR.",
+      String(DEFAULT_MIN_MOTION_PSNR)
+    )
+    .addHelpText(
+      "after",
+      "\nExamples:\n" +
+        "  node .agents/skills/figma/scripts/verify-motion.mjs --reference figma.mp4 --render out.mp4\n" +
+        "  node .agents/skills/figma/scripts/verify-motion.mjs --reference figma.mp4 --render out.mp4 --crop 1280x720+40+80\n"
+    )
+}
+
+function parseCli(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    if (error instanceof CommanderError) throw new UsageError(error.message)
+    throw error
+  }
+  const result = cliOptionsSchema.safeParse(program.opts())
+  if (!result.success) throw new UsageError(result.error.issues[0].message)
+  return result.data
+}
+
+function commandFailure(label, result) {
+  const status = result.signal ? `signal ${result.signal}` : `exit code ${result.exitCode}`
+  const output = result.all?.trim()
+  return new PreflightError(`${label} failed with ${status}${output ? `: ${output}` : ""}`)
+}
+
+async function runTool(command, args, label) {
+  let result
+  try {
+    result = await execa(command, args, { all: true, reject: false })
+  } catch (error) {
+    throw new PreflightError(`${label} could not start: ${error.message}`)
+  }
+  if (result.exitCode !== 0 || result.signal) throw commandFailure(label, result)
+  return result
+}
+
+function readPositiveNumber(value, label) {
+  const number = Number(value.trim())
+  if (!Number.isFinite(number) || number <= 0) {
+    throw new PreflightError(`${label} did not report a positive finite value`)
+  }
+  return number
+}
+
+function readNonNegativeNumber(value, label) {
+  const number = Number(value.trim())
+  if (!Number.isFinite(number) || number < 0) {
+    throw new PreflightError(`${label} did not report a non-negative finite value`)
+  }
+  return number
+}
+
+async function readDuration(file) {
+  const result = await runTool(
+    "ffprobe",
+    ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file],
+    `ffprobe duration for ${file}`
+  )
+  return readPositiveNumber(result.stdout, `ffprobe duration for ${file}`)
+}
+
+async function readDimensions(file) {
+  const result = await runTool(
+    "ffprobe",
+    [
       "-v",
       "error",
+      "-select_streams",
+      "v",
       "-show_entries",
-      "format=duration",
+      "stream=width,height",
       "-of",
       "csv=p=0",
       file,
-    ])
-      .toString()
-      .trim(),
-  );
-const refDur = ffprobe(reference);
-const renderDur = ffprobe(render);
-const end = Math.min(refDur, renderDur) - interval - 0.01;
-
-const dims = execFileSync("ffprobe", [
-  "-v",
-  "error",
-  "-select_streams",
-  "v",
-  "-show_entries",
-  "stream=width,height",
-  "-of",
-  "csv=p=0",
-  reference,
-])
-  .toString()
-  .trim()
-  .split(",")
-  .map(Number);
-const [rw, rh] = dims;
-
-let cropFilter = "";
-if (crop) {
-  const m = crop.match(/^(\d+)x(\d+)\+(\d+)\+(\d+)$/);
-  if (!m) {
-    console.error("bad --crop, expected WxH+X+Y");
-    process.exit(2);
+    ],
+    `ffprobe dimensions for ${file}`
+  )
+  const [width, height] = result.stdout.trim().split(",").map(Number)
+  if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0) {
+    throw new PreflightError(`ffprobe dimensions for ${file} did not report positive integer dimensions`)
   }
-  cropFilter = `crop=${m[1]}:${m[2]}:${m[3]}:${m[4]},`;
+  return { width, height }
 }
 
-const dir = mkdtempSync(join(tmpdir(), "verify-motion-"));
-const frame = (src, t, vf, dst) => {
-  const args = ["-y", "-v", "error", "-ss", String(t), "-i", src, "-frames:v", "1"];
-  if (vf) args.push("-vf", vf);
-  execFileSync("ffmpeg", args.concat(dst));
-};
-const diff = (a, b, dst) =>
-  execFileSync("ffmpeg", [
-    "-y",
-    "-v",
-    "error",
-    "-i",
-    a,
-    "-i",
-    b,
-    "-filter_complex",
-    "blend=all_mode=difference",
-    dst,
-  ]);
-const psnr = (a, b) => {
-  // spawnSync with array args (no shell): psnr stats land on stderr
-  const r = spawnSync("ffmpeg", ["-i", a, "-i", b, "-lavfi", "psnr", "-f", "null", "-"], {
-    encoding: "utf8",
-  });
-  const m = (r.stderr || "").match(/average:([\d.]+|inf)/);
-  return m ? (m[1] === "inf" ? 99 : Number(m[1])) : NaN;
-};
-
-const renderVf = `${cropFilter}scale=${rw}:${rh}`;
-const results = [];
-for (let t = 0; t <= end; t = Math.round((t + interval) * 1000) / 1000) {
-  const t1 = Math.round((t + interval) * 1000) / 1000;
-  frame(reference, t, null, join(dir, "ra.png"));
-  frame(reference, t1, null, join(dir, "rb.png"));
-  frame(render, t, renderVf, join(dir, "oa.png"));
-  frame(render, t1, renderVf, join(dir, "ob.png"));
-  diff(join(dir, "ra.png"), join(dir, "rb.png"), join(dir, "rd.png"));
-  diff(join(dir, "oa.png"), join(dir, "ob.png"), join(dir, "od.png"));
-  results.push({
-    t,
-    motion: psnr(join(dir, "rd.png"), join(dir, "od.png")),
-    abs: psnr(join(dir, "rb.png"), join(dir, "ob.png")),
-  });
+async function extractFrame(source, time, filter, destination) {
+  const args = ["-y", "-v", "error", "-ss", String(time), "-i", source, "-frames:v", "1"]
+  if (filter) args.push("-vf", filter)
+  args.push(destination)
+  await runTool("ffmpeg", args, `ffmpeg frame extraction at ${time}s`)
 }
-rmSync(dir, { recursive: true, force: true });
 
-const min = Math.min(...results.map((r) => r.motion));
-const mean = results.reduce((s, r) => s + r.motion, 0) / results.length;
-for (const r of results)
-  console.log(
-    `window ${r.t.toFixed(2)}s→${(r.t + interval).toFixed(2)}s  motion-psnr=${r.motion.toFixed(2)}dB  (abs=${r.abs.toFixed(1)}dB)${r.motion < minMotion ? "  <-- BELOW THRESHOLD" : ""}`,
-  );
-console.log(
-  `\nwindows=${results.length} min-motion=${min.toFixed(2)}dB mean-motion=${mean.toFixed(2)}dB threshold=${minMotion}dB`,
-);
-if (min < minMotion) {
-  console.log(
-    "VERDICT: FAIL — choreography diverges from the Figma export (check timings, invented keyframes, durations)",
-  );
-  process.exit(1);
+async function difference(left, right, destination) {
+  await runTool(
+    "ffmpeg",
+    [
+      "-y",
+      "-v",
+      "error",
+      "-i",
+      left,
+      "-i",
+      right,
+      "-filter_complex",
+      "blend=all_mode=difference",
+      destination,
+    ],
+    "ffmpeg motion-energy difference"
+  )
 }
-console.log("VERDICT: PASS — motion matches the Figma export within the static-fidelity ceiling");
+
+async function measurePsnr(reference, render) {
+  const result = await runTool(
+    "ffmpeg",
+    ["-i", reference, "-i", render, "-lavfi", "psnr", "-f", "null", "-"],
+    "ffmpeg PSNR measurement"
+  )
+  const average = result.all.match(/average:\s*([\d.]+|inf)/i)?.[1]
+  if (!average) throw new PreflightError("ffmpeg PSNR measurement did not report a PSNR average")
+  return average.toLowerCase() === "inf" ? 99 : readNonNegativeNumber(average, "ffmpeg PSNR measurement")
+}
+
+function cropFilter(crop, dimensions) {
+  if (!crop) return `scale=${dimensions.width}:${dimensions.height}`
+  const [, width, height, x, y] = crop.match(/^(\d+)x(\d+)\+(\d+)\+(\d+)$/)
+  return `crop=${width}:${height}:${x}:${y},scale=${dimensions.width}:${dimensions.height}`
+}
+
+function sampleTimes(end, interval) {
+  const times = []
+  for (let index = 0; ; index += 1) {
+    const time = Number((index * interval).toFixed(6))
+    if (time > end) break
+    times.push(time)
+  }
+  if (times.length === 0) {
+    throw new PreflightError("reference and render videos must be longer than the sampling interval")
+  }
+  return times
+}
+
+async function verifyMotion(options) {
+  const [referenceDuration, renderDuration, referenceDimensions] = await Promise.all([
+    readDuration(options.reference),
+    readDuration(options.render),
+    readDimensions(options.reference),
+  ])
+  const end = Math.min(referenceDuration, renderDuration) - options.interval - 0.01
+  const times = sampleTimes(end, options.interval)
+  const renderFilter = cropFilter(options.crop, referenceDimensions)
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "verify-motion-"))
+  const results = []
+
+  try {
+    for (const time of times) {
+      const nextTime = Number((time + options.interval).toFixed(6))
+      const paths = {
+        referenceA: join(temporaryDirectory, "reference-a.png"),
+        referenceB: join(temporaryDirectory, "reference-b.png"),
+        referenceDelta: join(temporaryDirectory, "reference-delta.png"),
+        renderA: join(temporaryDirectory, "render-a.png"),
+        renderB: join(temporaryDirectory, "render-b.png"),
+        renderDelta: join(temporaryDirectory, "render-delta.png"),
+      }
+      await extractFrame(options.reference, time, undefined, paths.referenceA)
+      await extractFrame(options.reference, nextTime, undefined, paths.referenceB)
+      await extractFrame(options.render, time, renderFilter, paths.renderA)
+      await extractFrame(options.render, nextTime, renderFilter, paths.renderB)
+      await difference(paths.referenceA, paths.referenceB, paths.referenceDelta)
+      await difference(paths.renderA, paths.renderB, paths.renderDelta)
+      results.push({
+        absolute: await measurePsnr(paths.referenceB, paths.renderB),
+        motion: await measurePsnr(paths.referenceDelta, paths.renderDelta),
+        time,
+      })
+    }
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true })
+  }
+
+  const motionScores = results.map((result) => result.motion)
+  return {
+    mean: motionScores.reduce((sum, value) => sum + value, 0) / motionScores.length,
+    min: Math.min(...motionScores),
+    results,
+  }
+}
+
+function formatReport(report, interval, minimum) {
+  const windows = report.results.map(
+    ({ absolute, motion, time }) =>
+      `window ${time.toFixed(2)}s→${(time + interval).toFixed(2)}s  ` +
+      `motion-psnr=${motion.toFixed(2)}dB  (abs=${absolute.toFixed(1)}dB)${motion < minimum ? "  <-- BELOW THRESHOLD" : ""}`
+  )
+  const summary =
+    `\nwindows=${report.results.length} min-motion=${report.min.toFixed(2)}dB ` +
+    `mean-motion=${report.mean.toFixed(2)}dB threshold=${minimum}dB`
+  const verdict =
+    report.min < minimum
+      ? "VERDICT: FAIL — choreography diverges from the Figma export (check timings, invented keyframes, durations)"
+      : "VERDICT: PASS — motion matches the Figma export within the static-fidelity ceiling"
+  return [...windows, summary, verdict].join("\n")
+}
+
+async function main() {
+  const options = parseCli(process.argv.slice(2))
+  if (!options) return 0
+  const report = await verifyMotion(options)
+  process.stdout.write(`${formatReport(report, options.interval, options.minMotionPsnr)}\n`)
+  return report.min < options.minMotionPsnr ? 1 : 0
+}
+
+main()
+  .then((exitCode) => {
+    process.exitCode = exitCode
+  })
+  .catch((error) => {
+    const usage = error instanceof UsageError
+    process.stderr.write(`${usage ? "Usage error" : "Preflight error"}: ${error.message}\n`)
+    process.exitCode = usage ? EXIT_USAGE : EXIT_PREFLIGHT
+  })

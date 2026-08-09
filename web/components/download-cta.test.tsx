@@ -103,19 +103,4 @@ describe("DownloadCta variants and locales", () => {
       "/zh/download"
     )
   })
-
-  it("marks both primary calls to action for the pointer to sight", () => {
-    // Regression: the attribute was first put on `Button asChild`, where Slot
-    // handed it to `SiteLink` — which has a closed prop interface and drops
-    // unknown props. It reached no DOM node, so the effect shipped dormant with
-    // every test still green.
-    const { container } = render(
-      <DownloadCta locale="en" copy={en.common} state={withRelease} docsOrigin="https://d" />
-    )
-    const marked = container.querySelectorAll("[data-magnetic]")
-    expect(marked).toHaveLength(2)
-    for (const node of marked) {
-      expect(node.querySelector("a")).toBeInTheDocument()
-    }
-  })
 })

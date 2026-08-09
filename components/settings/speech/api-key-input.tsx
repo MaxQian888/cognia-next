@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useSettingsStore } from "@/stores/settings"
-import { type KeyringProviderId } from "@/lib/tts/keyring"
+import { HOST_KEY_PRESENT, type KeyringProviderId } from "@/lib/tts/keyring"
 import { loggers } from "@cognia/logging"
 
 interface Props {
@@ -26,7 +26,9 @@ interface Props {
  */
 export function ApiKeyInput({ provider, label, placeholder }: Props) {
   const t = useTranslations("settings.speech.apiKey")
-  const stored = useSettingsStore((s) => s.providerKeys[provider] ?? "")
+  const storedValue = useSettingsStore((s) => s.providerKeys[provider] ?? "")
+  const stored = storedValue === HOST_KEY_PRESENT ? "" : storedValue
+  const configured = Boolean(storedValue)
   const setProviderApiKey = useSettingsStore((s) => s.setProviderApiKey)
   const clearProviderApiKey = useSettingsStore((s) => s.clearProviderApiKey)
   const ensureProviderKeys = useSettingsStore((s) => s.ensureProviderKeys)
@@ -82,7 +84,7 @@ export function ApiKeyInput({ provider, label, placeholder }: Props) {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label className="text-xs">{label}</Label>
-        {stored ? (
+        {configured ? (
           <Badge variant="secondary" className="text-[10px]">
             {t("configured")}
           </Badge>
@@ -116,7 +118,7 @@ export function ApiKeyInput({ provider, label, placeholder }: Props) {
         <Button size="sm" onClick={handleSave} disabled={busy || !dirty}>
           {busy ? t("saving") : t("save")}
         </Button>
-        {stored && (
+        {configured && (
           <Button size="sm" variant="outline" onClick={handleClear} disabled={busy}>
             {t("clear")}
           </Button>

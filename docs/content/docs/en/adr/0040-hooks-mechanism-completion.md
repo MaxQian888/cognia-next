@@ -66,3 +66,22 @@ Observational hooks can contribute `additionalContext` (surfaced as a compact lo
 - Project/local hooks are usable but safely gated behind workspace trust, enforced in Rust.
 - No Dexie schema change (the trust table already existed).
 - Limitation: external-agent tools that auto-execute without a `permission_request` can only be observed (via `tool_use_start`), not blocked — a protocol boundary, documented rather than worked around.
+
+## Addendum (2026-08-06) — versioned capabilities and execution ownership
+
+The original injection model above is superseded for the built-in Claude Agent SDK rail. The
+sidecar now owns SDK-native hook dispatch because it is the only layer that can preserve the
+SDK's event-specific inputs, outputs, concurrency, and abort behavior. Rust remains the owner of
+external-agent and compatibility command execution. An event occurrence has exactly one owner;
+the Rust host must not pre-run `UserPromptSubmit` and then inject the same hook into the SDK.
+
+Hook support is a versioned capability matrix, not one global event or handler list. The pinned
+Claude Agent SDK surface is checked against its 31 public events. Codex and OpenCode adapters
+publish only capabilities verified from their installed runtime/client. TypeScript, Rust, CLI,
+Settings, and Fleet share event identities and parity gates while retaining provider-specific
+matcher, timeout, concurrency, blocking, and output semantics.
+
+Unsupported handlers and outputs are explicit diagnostics rather than silent no-ops. Legacy
+`webhook` settings remain readable as Cognia's HTTP-handler compatibility form. Every outbound
+HTTP/model/MCP path is subject to the shared PII gate, and persisted traces contain only
+sanitized inputs, decisions, timing, and errors.

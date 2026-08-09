@@ -18,6 +18,7 @@ path = "src/lib.rs"
 
 [dependencies]
 cognia-instrument = { path = "../cognia-instrument" }
+cognia-net = { path = "../cognia-net" }
 tauri = { version = "=2.11.1" }
 log = "0.4"
 # VectorBackend + the 5 cloud backends are `#[async_trait]` (dyn-dispatched

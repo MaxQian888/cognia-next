@@ -58,6 +58,7 @@ export async function importModelFromEntries(
       motionGroups: manifest.motionGroups,
       expressionIds: manifest.expressionIds,
       totalBytes,
+      compatibility: validated.model.compatibility,
     },
     validated.model.entries.map((e) => ({ path: e.path, blob: e.blob }))
   )

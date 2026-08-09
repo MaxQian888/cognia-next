@@ -20,11 +20,12 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { setPluginEnabled } from "@/lib/db/plugins"
+import { togglePluginEnabled } from "@/lib/plugin/core/toggle-plugin-enabled"
 import { usePluginDiagnostics } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
+import { PluginActivationProgress } from "../plugin-activation-progress"
 import { PluginStatusPill } from "../plugin-status-badge"
 import { PluginAvatar } from "../plugin-avatar"
 
@@ -76,6 +77,11 @@ export function PluginDetailHeader({ plugin }: Props) {
           ) : null}
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
             <PluginStatusPill status={plugin.status} enabled={plugin.enabled} loading={isLoading} />
+            <PluginActivationProgress
+              pluginId={plugin.id}
+              pluginName={plugin.name}
+              variant="detail"
+            />
             <PluginSignatureBadge state={signatureState} compact />
             <Badge variant="outline" className="text-xs">
               {plugin.source}
@@ -85,7 +91,7 @@ export function PluginDetailHeader({ plugin }: Props) {
         <div className="flex items-center gap-2 shrink-0">
           <Switch
             checked={plugin.enabled}
-            onCheckedChange={(next) => void setPluginEnabled(plugin.id, next)}
+            onCheckedChange={(next) => void togglePluginEnabled(plugin.id, next)}
             aria-label={plugin.enabled ? tCard("disable") : tCard("enable")}
             data-testid="plugin-detail-enable-toggle"
           />

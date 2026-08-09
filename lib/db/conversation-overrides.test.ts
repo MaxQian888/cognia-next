@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/conversation-overrides.ts — per-conversation settings CRUD.
  */
 
-import "fake-indexeddb/auto"
 import {
   upsertByConversationKey,
   readForResolution,
@@ -20,14 +18,14 @@ import {
   markResponded,
 } from "./conversation-overrides"
 import { listAssignmentEvents } from "./conversation-assignment-events"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function baseInput() {
   return {

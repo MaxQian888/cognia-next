@@ -166,7 +166,7 @@ describe("installMarketplaceItem", () => {
     expect(out.skill).toEqual(existing)
   })
 
-  it("threads non-fatal validation errors onto the persisted draft and sets status='error'", async () => {
+  it("persists portability findings without disabling an otherwise runnable skill", async () => {
     mockedRegFetch.mockResolvedValue({
       content: "MD",
       canonicalId: "registry:id-1",
@@ -181,7 +181,7 @@ describe("installMarketplaceItem", () => {
     expect(mockedUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         draft: expect.objectContaining({
-          status: "error",
+          status: "enabled",
           validationErrors: expect.any(Array),
         }),
       })
@@ -202,7 +202,7 @@ describe("installMarketplaceItem", () => {
     )
   })
 
-  it("keeps status='error' even when disabledByDefault is set (broken row)", async () => {
+  it("keeps a portability-only row disabled when disabledByDefault is set", async () => {
     mockedRegFetch.mockResolvedValue({
       content: "MD",
       canonicalId: "registry:id-1",
@@ -212,7 +212,7 @@ describe("installMarketplaceItem", () => {
     mockedUpsert.mockResolvedValue({ skill: { id: "x" }, created: true })
     await installMarketplaceItem(item(), { disabledByDefault: true })
     expect(mockedUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({ draft: expect.objectContaining({ status: "error" }) })
+      expect.objectContaining({ draft: expect.objectContaining({ status: "disabled" }) })
     )
   })
 })
@@ -238,6 +238,7 @@ describe("installMarketplaceItem — skills.sh multi-file branch", () => {
     mockedParse.mockReturnValue({
       draft: { name: "find-skills", content: "body" },
       warnings: [],
+      portabilityIssues: [],
     })
     mockedUpsert.mockResolvedValue({ skill: { id: "sh-1" }, created: true })
 
@@ -273,6 +274,7 @@ describe("installMarketplaceItem — skills.sh multi-file branch", () => {
     mockedParse.mockReturnValue({
       draft: { name: "find-skills", content: "body" },
       warnings: [],
+      portabilityIssues: [],
     })
     mockedUpsert.mockResolvedValue({ skill: { id: "sh-2" }, created: true })
     await installMarketplaceItem(shItem())

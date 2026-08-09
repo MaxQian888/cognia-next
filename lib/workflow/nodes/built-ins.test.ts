@@ -1,8 +1,7 @@
-/**
- * @jest-environment jsdom
- */
 import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { markSent } from "@/lib/db/outbound-jobs"
 // Importing built-ins triggers their side-effecting registrations.
 import "./built-ins"
@@ -84,11 +83,11 @@ const trigger: TriggerEvent = {
   originAt: 1_700_000_000,
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   stopTaskScheduler()
   await schedulerDb.clearAll()
   unregisterTaskExecutor("custom")
@@ -101,6 +100,7 @@ beforeEach(async () => {
   mockSubscribeInbound.mockClear()
   inboundObservers.length = 0
 })
+afterAll(dbFixture.dispose)
 
 function makeCtx<T extends Record<string, unknown>>(
   kind: WorkflowNodeKind,
@@ -2274,6 +2274,7 @@ describe("flow.subworkflow", () => {
   it("invokes another workflow and returns its output", async () => {
     // Seed a small subworkflow.
     const { createWorkflow } = await import("@/lib/db/workflows")
+    const { publishWorkflow } = await import("@/lib/workflow/publish/publish-workflow")
     const sub = await createWorkflow({
       name: "Sub",
       nodes: [
@@ -2294,10 +2295,101 @@ describe("flow.subworkflow", () => {
       ],
       edges: [{ id: "e1", source: "n_start", target: "n_set" }],
     })
+    await publishWorkflow(sub.id, 1)
     const r = await exec("flow.subworkflow", makeCtx("flow.subworkflow", { workflowId: sub.id }))
     const out = r.output as { runId: string; status: string }
     expect(out.runId).toMatch(/^run_/)
     expect(out.status).toBe("succeeded")
+  })
+
+  it("uses loop iteration provenance in the child invocation identity", async () => {
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const { getDb } = await import("@/lib/db/schema")
+    const { publishWorkflow } = await import("@/lib/workflow/publish/publish-workflow")
+    const sub = await createWorkflow({ name: "Loop child", nodes: [], edges: [] })
+    await publishWorkflow(sub.id, 1)
+
+    const first = {
+      ...makeCtx("flow.subworkflow", { workflowId: sub.id }),
+      iteration: { loopId: "loop", iterationIndex: 0 },
+    } as StepExecutionContext<Record<string, unknown>>
+    const second = {
+      ...makeCtx("flow.subworkflow", { workflowId: sub.id }),
+      iteration: { loopId: "loop", iterationIndex: 1 },
+    } as StepExecutionContext<Record<string, unknown>>
+
+    await exec("flow.subworkflow", first)
+    await exec("flow.subworkflow", second)
+
+    const invocations = await getDb().workflowInvocations.toArray()
+    expect(invocations).toHaveLength(2)
+    expect(invocations.map((invocation) => invocation.idempotencyKey).sort()).toEqual([
+      "loop#0#n_test",
+      "loop#1#n_test",
+    ])
+  })
+
+  it("executes the child version locked by the admitted parent", async () => {
+    const { createWorkflow, updateWorkflow } = await import("@/lib/db/workflows")
+    const { getDb } = await import("@/lib/db/schema")
+    const { publishWorkflow } = await import("@/lib/workflow/publish/publish-workflow")
+    const child = await createWorkflow({
+      name: "Locked child",
+      nodes: [
+        {
+          id: "set",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "set", params: { variable: "version", value: "first" } },
+        },
+      ],
+      edges: [],
+    })
+    const first = await publishWorkflow(child.id, 1)
+    await updateWorkflow(child.id, {
+      nodes: [
+        {
+          id: "set",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "set", params: { variable: "version", value: "second" } },
+        },
+      ],
+    })
+    await publishWorkflow(child.id, 2)
+
+    const ctx = {
+      ...makeCtx("flow.subworkflow", { workflowId: child.id }),
+      executionBinding: {
+        versionId: "parent-version",
+        deploymentId: "parent-deployment",
+        deploymentRevision: 1,
+        entrypoint: "http" as const,
+        caller: "test",
+        dependencyLock: {
+          workflows: {
+            n_test: {
+              workflowId: child.id,
+              versionId: first.versionId,
+              deploymentId: first.deploymentId,
+              deploymentRevision: first.deploymentRevision,
+              dependencyLock: { workflows: {}, indexes: {} },
+            },
+          },
+          indexes: {},
+        },
+      },
+    } as StepExecutionContext<Record<string, unknown>>
+
+    const result = await exec("flow.subworkflow", ctx)
+    const childRun = await getDb().workflowRuns.get((result.output as { runId: string }).runId)
+
+    expect(childRun).toMatchObject({
+      versionId: first.versionId,
+      output: { variable: "version", value: "first" },
+    })
   })
 
   it("rejects a missing workflowId", async () => {

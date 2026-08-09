@@ -13,6 +13,5 @@ export {
   useNetworkProxy,
   useProxyStore,
   type ProxyConfig,
-  type ProxyManualCredentials,
   type ProxyStoreState,
 } from "@/stores/network-proxy"

@@ -28,7 +28,9 @@ jest.mock("@/lib/chat/start-session", () => ({
   startNewSession: (...args: unknown[]) => startNewSessionMock(...args),
 }))
 
-jest.mock("@/hooks/chat", () => ({ useSessionNotifications: jest.fn() }))
+jest.mock("@/hooks/chat/use-session-notifications", () => ({
+  useSessionNotifications: jest.fn(),
+}))
 jest.mock("@/hooks/system", () => ({ useTauriEvents: jest.fn() }))
 jest.mock("@/lib/tauri/notification", () => ({
   ensureNotificationPermission: jest.fn(async () => undefined),

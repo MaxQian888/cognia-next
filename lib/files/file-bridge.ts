@@ -86,6 +86,13 @@ export interface SaveFileOptions {
   filters?: { name: string; extensions: string[] }[]
 }
 
+export interface SaveBinaryFileOptions {
+  defaultName: string
+  bytes: Uint8Array
+  filters?: { name: string; extensions: string[] }[]
+  mimeType?: string
+}
+
 /**
  * Save a file's contents to disk. In Tauri shows a native save dialog and
  * writes through the Rust file commands. In the browser, triggers a download
@@ -115,6 +122,33 @@ export async function saveFileAs(opts: SaveFileOptions): Promise<boolean> {
   a.href = url
   a.download = opts.defaultName
   a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+  return true
+}
+
+/** Save an opaque byte payload without UTF-8 conversion (zip and media exports). */
+export async function saveBinaryFileAs(opts: SaveBinaryFileOptions): Promise<boolean> {
+  if (isTauri()) {
+    let defaultPath = opts.defaultName
+    try {
+      defaultPath = `${await defaultExportDir()}/${opts.defaultName}`
+    } catch {
+      // Keep the bare filename when the preferred export directory is unavailable.
+    }
+    const chosen = await save({ defaultPath, filters: opts.filters })
+    if (!chosen) return false
+    const fs = await import("@tauri-apps/plugin-fs")
+    await fs.writeFile(chosen, opts.bytes)
+    return true
+  }
+  const blob = new Blob([opts.bytes as BlobPart], {
+    type: opts.mimeType ?? "application/octet-stream",
+  })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = opts.defaultName
+  anchor.click()
   setTimeout(() => URL.revokeObjectURL(url), 0)
   return true
 }

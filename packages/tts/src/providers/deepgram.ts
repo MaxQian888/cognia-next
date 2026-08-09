@@ -14,6 +14,8 @@ export interface DeepgramTTSOptions {
   encoding?: "mp3" | "linear16" | "aac" | "opus" | "flac"
   container?: "none" | "wav"
   sampleRate?: number
+  signal?: AbortSignal
+  requestId?: string
 }
 
 export async function generateDeepgramTTS(
@@ -37,6 +39,9 @@ export async function generateDeepgramTTS(
 
     const response = await proxyFetch(`${DEEPGRAM_API_BASE}?${params.toString()}`, {
       method: "POST",
+      provider: "deepgram",
+      signal: options.signal,
+      requestId: options.requestId,
       headers: {
         Authorization: `Token ${apiKey}`,
         "Content-Type": "application/json",

@@ -309,15 +309,80 @@ function normalizeNested(obj: Record<string, unknown>): OpencodeSession | null {
   }
 }
 
-function summarize(session: OpencodeSession): SessionSummary {
+function contentRevision(session: OpencodeSession, children: OpencodeSession[]): string {
+  const content = JSON.stringify([
+    session,
+    ...[...children].sort((a, b) => a.id.localeCompare(b.id)),
+  ])
+  let hash = 0x811c9dc5
+  for (let i = 0; i < content.length; i += 1) {
+    hash ^= content.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return `opencode:${content.length}:${(hash >>> 0).toString(36)}`
+}
+
+function summarize(
+  session: OpencodeSession,
+  descendants: OpencodeSession[],
+  updatedAt = session.updatedAt
+): SessionSummary {
   return {
     ref: { sourceId: "opencode", originalSessionId: session.id, locator: session.id },
     title: session.title,
     sourceId: "opencode",
     messageCount: session.messages.length,
-    updatedAt: session.updatedAt,
+    updatedAt,
+    watchRevision: contentRevision(session, descendants),
     cwd: session.cwd,
   }
+}
+
+function sessionTree(sessions: OpencodeSession[]): {
+  roots: OpencodeSession[]
+  descendantsOf: (id: string) => OpencodeSession[]
+} {
+  const importable = sessions.filter((session) => session.messages.length > 0)
+  const known = new Set(importable.map((session) => session.id))
+  const childrenByParent = new Map<string, OpencodeSession[]>()
+  for (const session of importable) {
+    if (!session.parentId || !known.has(session.parentId)) continue
+    const children = childrenByParent.get(session.parentId) ?? []
+    children.push(session)
+    childrenByParent.set(session.parentId, children)
+  }
+
+  const descendantsOf = (id: string): OpencodeSession[] => {
+    const descendants: OpencodeSession[] = []
+    const visited = new Set([id])
+    const visit = (parentId: string) => {
+      for (const child of childrenByParent.get(parentId) ?? []) {
+        if (visited.has(child.id)) continue
+        visited.add(child.id)
+        descendants.push(child)
+        visit(child.id)
+      }
+    }
+    visit(id)
+    return descendants
+  }
+
+  const roots: OpencodeSession[] = []
+  const covered = new Set<string>()
+  const addRoot = (session: OpencodeSession) => {
+    roots.push(session)
+    covered.add(session.id)
+    for (const descendant of descendantsOf(session.id)) covered.add(descendant.id)
+  }
+  for (const session of importable) {
+    if (!session.parentId || !known.has(session.parentId)) addRoot(session)
+  }
+  // Malformed cyclic graphs have no natural root. Keep one representative per
+  // uncovered component importable, and let `descendantsOf` break the cycle.
+  for (const session of importable) {
+    if (!covered.has(session.id)) addRoot(session)
+  }
+  return { roots, descendantsOf }
 }
 
 // One import run reuses the same `SessionScanInput` object for every ref, so a
@@ -353,8 +418,8 @@ export const opencodeSessionSource: AgentSessionSourceAdapter = {
   // dir walk — but the roots still matter: they feed the fs-watcher
   // (`collectWatchRoots`), and the watcher already recognizes `.db` files. An
   // empty list here meant OpenCode never got incremental re-imports.
-  scanRoots(home: string) {
-    return opencodeDataDirs(home)
+  scanRoots(home, roots) {
+    return opencodeDataDirs(home, roots?.opencodeDataDir, roots?.opencodePlatformDataDir)
   },
 
   detect(files: PickedSessionFile[]) {
@@ -379,17 +444,17 @@ export const opencodeSessionSource: AgentSessionSourceAdapter = {
 
   async listSessions(input: SessionScanInput) {
     const sessions = await collectSessions(input)
-    const known = new Set(sessions.map((s) => s.id))
-    return (
-      sessions
-        .filter((s) => s.messages.length > 0)
-        // Child (subagent) sessions ride along as `nested` conversations of their
-        // parent (see parseSession) — only list them when the parent is missing
-        // from the store (otherwise they'd be unreachable).
-        .filter((s) => !s.parentId || !known.has(s.parentId))
-        .map(summarize)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-    )
+    const tree = sessionTree(sessions)
+    return tree.roots
+      .map((session) => {
+        const descendants = tree.descendantsOf(session.id)
+        const updatedAt = descendants.reduce(
+          (newest, descendant) => Math.max(newest, descendant.updatedAt),
+          session.updatedAt
+        )
+        return summarize(session, descendants, updatedAt)
+      })
+      .sort((a, b) => b.updatedAt - a.updatedAt)
   },
 
   async parseSession(ref: SessionRef, input: SessionScanInput) {
@@ -406,10 +471,11 @@ export const opencodeSessionSource: AgentSessionSourceAdapter = {
       })
     }
     const conv = opencodeToConversation(found)
-    // Attach subagent (child) sessions as nested conversations (ADR-0062), so
-    // they import alongside their parent instead of as orphan top-level rows.
-    const nested = sessions
-      .filter((s) => s.parentId === found.id && s.messages.length > 0)
+    // Attach the full descendant tree as nested conversations (ADR-0062), so
+    // subagents at any depth import alongside their root without becoming
+    // orphan top-level rows. `sessionTree` protects malformed cycles.
+    const nested = sessionTree(sessions)
+      .descendantsOf(found.id)
       .map((s) => opencodeToConversation(s))
     if (nested.length > 0) conv.nested = nested
     return conv

@@ -43,6 +43,7 @@ import { ComputerUseCard } from "./mcp-renderers/computer-use-card"
 import { EditCard } from "./mcp-renderers/edit-card"
 import { WriteCard } from "./mcp-renderers/write-card"
 import { LsCard } from "./mcp-renderers/ls-card"
+import { SpawnTaskCard } from "./mcp-renderers/spawn-task-card"
 import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
 
 type CardComponent = (props: { part: ToolUIPart; sessionId?: string }) => React.JSX.Element | null
@@ -53,6 +54,8 @@ const REGISTRY: Record<string, CardComponent> = {
   wiki_read: WikiReadCard,
   rag_search: RagSearchCard,
   runtime_query: RuntimeQueryCard,
+  spawn_task: SpawnTaskCard,
+  "mcp__cognia-plugin-tools__spawn_task": SpawnTaskCard,
   // Plan-mode signal tools. `exit_plan_mode` also covers the namespaced
   // cognia form (`mcp__cognia-tools__exit_plan_mode`) via normalizeToolName;
   // `ExitPlanMode` is the native Anthropic equivalent. Both carry the plan as

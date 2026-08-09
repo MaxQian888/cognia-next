@@ -11,7 +11,8 @@
  * below the rows shows the focused row's one-line description.
  */
 import React from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
@@ -72,7 +73,7 @@ export function SettingsOverlay({
   const rows = active?.rows ?? []
   const current = rows[index]
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (key.escape) {
         onClose()

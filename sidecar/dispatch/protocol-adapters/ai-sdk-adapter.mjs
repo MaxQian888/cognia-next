@@ -18,25 +18,15 @@ import {
 import { buildBedrockProviderOptions } from "../bedrock.mjs"
 import { partitionPrompt } from "../prompt-partition.mjs"
 import { aiSdkTelemetry, withTraceparent } from "../../telemetry.mjs"
+import { EFFORT_TO_BUDGET, OPENAI_EFFORT_VALUES } from "./reasoning-effort-tables.mjs"
 
 export { isGenuineOpenAiEndpoint, isResponsesOnlyEndpoint }
 
-// Fallback budget tiers when a reasoning "thinking level" (effort) is set but
-// no explicit token budget is. Used only for the budget-driven providers
-// (anthropic / google) so an effort-only config still TURNS reasoning ON
-// instead of silently leaving it off. Conservative, round numbers — the
-// caller can always pass an explicit `maxThinkingTokens` to override.
-// Covers the WHOLE app effort union ("low".."max", see SendOptions.effort):
-// the two top tiers (xhigh/max) were missing, so selecting them with no
-// explicit budget mapped to `undefined` and silently DISABLED thinking — the
-// highest levels did the opposite of what they say.
-const EFFORT_TO_BUDGET = Object.freeze({
-  low: 4096,
-  medium: 12288,
-  high: 24576,
-  xhigh: 32768,
-  max: 49152,
-})
+// The budget tiers (anthropic/google) and the OpenAI-accepted effort values now
+// live in the dependency-free `reasoning-effort-tables.mjs`, so the renderer can
+// read the SAME constants to decide which tiers to OFFER without importing this
+// module (which drags in the whole AI SDK). Re-exported for existing importers.
+export { EFFORT_TO_BUDGET, OPENAI_EFFORT_VALUES }
 
 /**
  * Map an effort "thinking level" to a token budget for the budget-driven
@@ -48,10 +38,6 @@ function effortToBudget(effort) {
   if (!effort) return null
   return EFFORT_TO_BUDGET[effort] ?? EFFORT_TO_BUDGET.high
 }
-
-// OpenAI's `reasoningEffort` accepts none|minimal|low|medium|high|xhigh. The
-// app's effort union additionally carries "max", which OpenAI rejects (400).
-const OPENAI_EFFORT_VALUES = new Set(["none", "minimal", "low", "medium", "high", "xhigh"])
 
 /**
  * Normalize the app's effort level to a value OpenAI's `reasoningEffort`
@@ -317,8 +303,8 @@ async function buildRawModel({
       return client(model)
     }
     case "google": {
-      const { createGoogleGenerativeAI } = await import("@ai-sdk/google")
-      const client = createGoogleGenerativeAI({ apiKey, baseURL })
+      const { createGoogle } = await import("@ai-sdk/google")
+      const client = createGoogle({ apiKey, baseURL })
       return client(model)
     }
     case "mistral": {
@@ -403,15 +389,16 @@ export function makeAiSdkAdapter(protocol) {
         ...partitionPrompt(req.messages),
         ...(req.modelParams ?? {}),
       }
-      const experimentalTelemetry = aiSdkTelemetry({
+      const telemetryOptions = aiSdkTelemetry({
         sessionId: req.sessionId,
         traceId: req.traceId,
         provider: providerId ?? protocol,
         traceparent: req.traceparent,
       })
-      if (experimentalTelemetry) {
-        const { traceparent: _traceparent, ...publicTelemetry } = experimentalTelemetry
-        streamArgs.experimental_telemetry = publicTelemetry
+      if (telemetryOptions) {
+        // `experimental_telemetry` graduated to `telemetry` in AI SDK 7.
+        const { traceparent: _traceparent, ...publicTelemetry } = telemetryOptions
+        streamArgs.telemetry = publicTelemetry
       }
       // Enable reasoning per provider (thinking budget / reasoning effort),
       // deep-merged onto any providerOptions the modelParams already carried
@@ -460,9 +447,16 @@ export function makeAiSdkAdapter(protocol) {
           (steps?.length ?? 0) >= (req.maxSteps ?? 16) ||
           (typeof req.stopWhenExtra === "function" ? req.stopWhenExtra(steps) === true : false)
       }
-      // streamText's result already matches AdapterResult (fullStream /
-      // response / usage) — return it directly.
-      return withTraceparent(req.traceparent, () => streamTextFn(streamArgs))
+      // AI SDK 7 renamed the full event stream from `fullStream` to `stream`.
+      // `fullStream` still exists as a deprecated alias, so returning the result
+      // untouched would keep working — but only until the next major. Map it
+      // explicitly instead, and keep `fullStream` as the name of OUR contract:
+      // `types.mjs` AdapterResult, `code-adapter.mjs` and
+      // `openai-compatible-variant-adapter.mjs` all produce that field, and
+      // `event-adapter.mjs` consumes it. This is the one place the SDK's name
+      // and the internal name have to meet.
+      const result = await withTraceparent(req.traceparent, () => streamTextFn(streamArgs))
+      return { ...result, fullStream: result.stream ?? result.fullStream }
     },
   }
 }

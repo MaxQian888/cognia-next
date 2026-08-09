@@ -9,6 +9,7 @@
 // can't blow up the IPC channel.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -38,6 +39,15 @@ pub fn shell_exec(
     cwd: String,
     timeout_secs: Option<u64>,
 ) -> Result<ShellResult, String> {
+    shell_exec_with_env(cmd, cwd, timeout_secs, BTreeMap::new())
+}
+
+pub(crate) fn shell_exec_with_env(
+    cmd: String,
+    cwd: String,
+    timeout_secs: Option<u64>,
+    environment: BTreeMap<String, String>,
+) -> Result<ShellResult, String> {
     let trimmed = cmd.trim();
     if trimmed.is_empty() {
         return Err("empty command".into());
@@ -61,6 +71,7 @@ pub fn shell_exec(
     };
     command
         .current_dir(&cwd_path)
+        .envs(environment)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());

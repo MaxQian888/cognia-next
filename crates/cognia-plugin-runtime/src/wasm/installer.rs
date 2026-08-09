@@ -217,8 +217,10 @@ pub async fn plugin_wasm_install_from_url(
     expected_public_key_base64: Option<String>,
 ) -> Result<WasmInstallResult, String> {
     // Step 1 — fetch the bundle.
-    let client = reqwest::Client::builder()
-        .user_agent("cognia-plugin-installer/0.1")
+    let builder = reqwest::Client::builder().user_agent("cognia-plugin-installer/0.1");
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, &bundle_url)
+        .map_err(|error| error.to_string())?;
+    let client = builder
         .build()
         .map_err(|e| format!("http client init: {e}"))?;
     let response = client

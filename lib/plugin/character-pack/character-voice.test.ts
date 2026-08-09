@@ -99,6 +99,7 @@ describe("resolveCharacterVoice", () => {
     const providers: Array<{ p: string; field: string }> = [
       { p: "system", field: "systemVoice" },
       { p: "openai", field: "openaiVoice" },
+      { p: "local-openai-compatible", field: "localOpenaiVoice" },
       { p: "openai-realtime", field: "realtimeVoice" },
       { p: "gemini", field: "geminiVoice" },
       { p: "edge", field: "edgeVoice" },

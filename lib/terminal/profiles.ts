@@ -22,6 +22,13 @@ export interface TerminalProfile {
   args?: string[]
   /** Optional extra environment variables. */
   env?: Record<string, string>
+  /**
+   * Commands to run automatically after the shell initializes.
+   * Executed sequentially — each command is sent to the PTY with a trailing
+   * `\r`. The session waits for a prompt (OSC 633 prompt_start) or a short
+   * fallback delay between commands.
+   */
+  startupCommands?: string[]
 }
 
 /** Find a profile by id, or `undefined`. */
@@ -112,4 +119,22 @@ export function nextProfileId(existing: readonly TerminalProfile[] | undefined):
     id = `profile-${n}`
   }
   return id
+}
+
+/**
+ * Parse the settings-UI "one command per line" textarea into a profile
+ * `startupCommands` array. Blank lines are dropped. Returns `undefined`
+ * for an all-blank input so the profile stores no empty array.
+ */
+export function parseStartupCommands(text: string): string[] | undefined {
+  const cmds = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  return cmds.length > 0 ? cmds : undefined
+}
+
+/** Inverse of {@link parseStartupCommands} — commands back to textarea text. */
+export function formatStartupCommands(commands: readonly string[] | undefined): string {
+  return commands?.join("\n") ?? ""
 }

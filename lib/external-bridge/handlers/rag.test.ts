@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for the `rag_search` MCP handler. Drives the shared BM25 + flagship
  * pipeline (sanitize → expand → BM25 → fuse → rerank → grade → confidence →
@@ -6,20 +5,20 @@
  * exercise it end to end.
  */
 
-import "fake-indexeddb/auto"
 import { __TESTING__, ragSearch } from "./rag"
 import { UNTRUSTED_OPEN } from "../untrusted"
 import { createWikiArticle } from "@/lib/db/wiki-articles"
 import { bulkCreateWikiSections } from "@/lib/db/wiki-sections"
 import type { WikiArticleDraft } from "@/lib/db/wiki-articles"
 import { SELF_CORPUS_ID } from "@/types/wiki"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 }, 30_000)
 
 function articleDraft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDraft {
@@ -61,6 +60,8 @@ async function seedArticleWithSections(
 function isUntrustedWrapped(text: string): boolean {
   return text.startsWith(`${UNTRUSTED_OPEN}\n`) && text.endsWith("\n</untrusted_content>")
 }
+
+afterAll(dbFixture.dispose)
 
 describe("ragSearch — wiki", () => {
   it("returns empty for empty queries", async () => {

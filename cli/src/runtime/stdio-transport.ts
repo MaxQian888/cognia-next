@@ -21,6 +21,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 
 import {
   A2UI_EVENT,
+  AGENT_EVENT,
   COMMAND,
   SIDECAR_EVENT,
   commandToInbound,
@@ -138,6 +139,7 @@ export class StdioTransport implements Transport {
     }
     // A2UI dispatches also go to their dedicated channel, mirroring the desktop.
     if (value.type === "a2ui_dispatch") this.dispatch(A2UI_EVENT, value)
+    if (value.type === "agent_event") this.dispatch(AGENT_EVENT, value)
     this.dispatch(SIDECAR_EVENT, value)
   }
 

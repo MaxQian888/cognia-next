@@ -25,12 +25,18 @@ import { PairedOnly } from "@/components/mobile/me/paired-only"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { Badge } from "@/components/ui/badge"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
-import { listMcpServers } from "@/lib/db/mcp-servers"
-import type { McpServer } from "@cognia/agent-config-types"
+import { getDb } from "@/lib/db/schema"
+import type { McpServerSummary } from "@cognia/agent-config-types"
 
 function McpBody() {
   const t = useTranslations("mobile.mcp")
-  const servers = useLiveQuery(() => listMcpServers(), [])
+  const servers = useLiveQuery(
+    async () => {
+      const rows = await getDb().mcpServerSummaries.toArray()
+      return rows.sort((a, b) => a.displayName.localeCompare(b.displayName))
+    },
+    []
+  )
 
   return (
     <div className="flex flex-col gap-4">
@@ -40,7 +46,7 @@ function McpBody() {
 
       {servers && servers.length > 0 ? (
         <MeSection title={t("sectionTitle")} testid="me-section-mcp">
-          {servers.map((server: McpServer) => {
+          {servers.map((server: McpServerSummary) => {
             const remote = server.transport !== "stdio"
             return (
               <Item key={server.id} size="sm" className="px-0" data-testid={`mcp-row-${server.id}`}>
@@ -48,7 +54,7 @@ function McpBody() {
                   <ServerIcon className="size-4 text-muted-foreground" aria-hidden />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle className="text-xs">{server.name}</ItemTitle>
+                  <ItemTitle className="text-xs">{server.displayName}</ItemTitle>
                   <ItemDescription className="text-[11px]">
                     <span className="font-mono">{server.transport}</span>
                     {remote ? <> · {t("remoteAuthNote")}</> : null}

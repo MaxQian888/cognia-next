@@ -68,9 +68,15 @@ jest.mock("./pet-model-config-dialog", () => ({
 
 import { PetModelManager } from "./pet-model-manager"
 
-function setup(settings: Partial<PetSettings> = {}) {
+function setup(settings: Partial<PetSettings> = {}, coreReady?: boolean) {
   const onPatch = jest.fn()
-  render(<PetModelManager settings={{ ...DEFAULT_PET_SETTINGS, ...settings }} onPatch={onPatch} />)
+  render(
+    <PetModelManager
+      settings={{ ...DEFAULT_PET_SETTINGS, ...settings }}
+      onPatch={onPatch}
+      coreReady={coreReady}
+    />
+  )
   return { onPatch }
 }
 
@@ -106,6 +112,31 @@ describe("PetModelManager", () => {
     expect(screen.getByText("MyModelA")).toBeInTheDocument()
     expect(screen.getByText("MyModelB")).toBeInTheDocument()
     expect(screen.getByText("Active")).toBeInTheDocument()
+  })
+
+  it("shows exact compatibility diagnostics and blocks invalid activation", () => {
+    modelList = [
+      {
+        ...model("m1", "Hiyori"),
+        compatibility: {
+          version: 1,
+          status: "invalid",
+          diagnostics: [
+            { code: "missingReferenced", severity: "error", path: "textures/main.png" },
+          ],
+          usableMotionGroups: [],
+          usableExpressionIds: [],
+          usableParameterIds: [],
+          resourceCost: { totalBytes: 1000, fileCount: 2, textureBytes: 0 },
+        },
+      },
+    ]
+    setup({ activeLive2dModelId: "m1" }, true)
+
+    expect(screen.getByText(/requested skin.*live2d/i)).toBeInTheDocument()
+    expect(screen.getByText(/effective skin.*vector mascot/i)).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("textures/main.png")
+    expect(screen.getByRole("radio")).toBeDisabled()
   })
 
   it("sets a model active through onPatch", () => {

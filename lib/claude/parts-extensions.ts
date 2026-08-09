@@ -204,7 +204,7 @@ export interface SourcesPartItem {
    * - `memory`    — long-term memory recalled for this turn (autonomous memory)
    * - `footnote`  — markdown footnote definition in the assistant text
    */
-  origin: "anthropic" | "twin-rag" | "twin-style" | "memory" | "footnote"
+  origin: "anthropic" | "twin-rag" | "twin-style" | "agent-knowledge-base" | "memory" | "footnote"
   /** Optional similarity / confidence score (0..1). */
   score?: number
   /**
@@ -216,6 +216,12 @@ export interface SourcesPartItem {
     twinId: string
     sourceId: string
     /** vector doc id of the chunk (matches `TwinChunk.vectorDocId`). */
+    chunkId: string
+  }
+  /** Reusable Knowledge Base provenance for future source-manager deep links. */
+  knowledgeBaseRef?: {
+    knowledgeBaseId: string
+    sourceId: string
     chunkId: string
   }
 }
@@ -276,6 +282,26 @@ export function isCanvasInlinePart(part: unknown): part is CanvasInlinePart {
     p.type === "canvas" &&
     typeof p.canvasId === "string" &&
     typeof p.title === "string"
+  )
+}
+
+/** Model-authored aggregate summary associated with one or more tool calls. */
+export interface ToolUseSummaryPart {
+  type: "data-tool-summary"
+  data: {
+    summary: string
+    toolCallIds: string[]
+  }
+}
+
+export function isToolUseSummaryPart(part: unknown): part is ToolUseSummaryPart {
+  const candidate = part as { type?: unknown; data?: { summary?: unknown; toolCallIds?: unknown } }
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    candidate.type === "data-tool-summary" &&
+    typeof candidate.data?.summary === "string" &&
+    Array.isArray(candidate.data.toolCallIds)
   )
 }
 

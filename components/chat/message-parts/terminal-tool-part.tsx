@@ -34,6 +34,7 @@ import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useChatStore } from "@/stores/chat/chat-store"
+import { resolveToolDisplayTitle } from "@/lib/chat/tool-summary"
 
 interface TerminalToolPartProps {
   part: ToolUIPart
@@ -171,12 +172,40 @@ export const TerminalToolPart = memo(function TerminalToolPart({
   part,
   defaultOpen,
 }: TerminalToolPartProps) {
+  const readOnlyHint = (
+    part as ToolUIPart & {
+      toolMetadata?: { readOnlyHint?: boolean | null }
+    }
+  ).toolMetadata?.readOnlyHint
+  const presentation = part as ToolUIPart & { toolName?: unknown }
+  const isDynamicTool = (part as { type: string }).type === "dynamic-tool"
+  const dynamicToolName =
+    typeof presentation.toolName === "string" && presentation.toolName.trim()
+      ? presentation.toolName
+      : "tool"
+  const displayTitle = resolveToolDisplayTitle(part)
+
   return (
     <Tool
       defaultOpen={defaultOpen ?? part.state === "input-available"}
       data-testid="terminal-tool-part"
     >
-      <ToolHeader type={part.type} state={part.state} />
+      {isDynamicTool ? (
+        <ToolHeader
+          type="dynamic-tool"
+          toolName={dynamicToolName}
+          state={part.state}
+          title={displayTitle}
+          readOnlyHint={readOnlyHint}
+        />
+      ) : (
+        <ToolHeader
+          type={part.type}
+          state={part.state}
+          title={displayTitle}
+          readOnlyHint={readOnlyHint}
+        />
+      )}
       <ToolContent>
         <TerminalToolBody part={part} />
       </ToolContent>

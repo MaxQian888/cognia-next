@@ -13,7 +13,8 @@
  *   • Esc                        → `onCancel`
  */
 import React from "react"
-import { Box, Text, useInput } from "ink"
+import { Box, Text } from "ink"
+import { useModalInput } from "../../input/input-router"
 
 import { isMouseSequence } from "../../input/mouse"
 import { useTheme } from "../../theme/context"
@@ -38,7 +39,7 @@ export function HistorySearch({
   onCancel: () => void
 }) {
   const theme = useTheme()
-  useInput((input, key) => {
+  useModalInput((input, key) => {
     if (key.escape) {
       onCancel()
       return

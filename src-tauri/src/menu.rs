@@ -22,7 +22,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let handle = app.handle();
 
     // -------------------- File --------------------
-    let new_chat = MenuItemBuilder::new("New Chat")
+    let new_chat = MenuItemBuilder::new("Quick Chat")
         .id("new-chat")
         .accelerator("CmdOrCtrl+N")
         .build(handle)?;

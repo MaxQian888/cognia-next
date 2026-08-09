@@ -1,17 +1,17 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { serializeIlinkSegments } from "./serialize"
 import type { A2UIMessageSegment } from "@/types/connectors/segment"
 import { __resetNumericActionRegistryForTesting } from "./numeric-action-registry"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   __resetNumericActionRegistryForTesting()
 })
+afterAll(dbFixture.dispose)
 
 describe("serializeIlinkSegments", () => {
   it("joins text + markdown into one chunk", async () => {

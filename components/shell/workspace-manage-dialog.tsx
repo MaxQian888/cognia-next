@@ -214,7 +214,7 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>

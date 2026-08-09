@@ -135,7 +135,11 @@ export function AccountSecurityTab({ account }: AccountSecurityTabProps) {
             size="sm"
             className="shrink-0 gap-1.5"
             disabled={!unlockedAccountId}
-            onClick={() => lock()}
+            onClick={() =>
+              void Promise.resolve(lock()).catch((cause) =>
+                setError(toErrorMessage(cause, t("operationFailed")))
+              )
+            }
             data-testid="account-security-lock-now"
           >
             <LockKeyholeIcon className="size-3.5" />

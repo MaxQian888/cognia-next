@@ -4,13 +4,41 @@
     "approvedOrigin": "已授权的 self-hosted HTTPS origin（可选）",
     "authStrategy": "认证方式",
     "credentialHandle": "凭据句柄",
+    "discoverInstallations": "发现安装实例",
     "integration": "Integration",
+    "installation": "安装实例",
     "label": "账号名称",
     "providerId": "认证提供方 ID",
     "remoteAccountId": "远端账号 ID",
     "selectAuthStrategy": "选择认证方式",
     "selectIntegration": "选择 Integration",
-    "title": "账号"
+    "selectInstallation": "选择安装实例",
+    "title": "账号",
+    "advanced": "高级",
+    "checkHealth": "检查账号健康状态",
+    "configured": "已配置",
+    "configFields": {
+      "accountLabel": "账号名称",
+      "appId": "App ID",
+      "privateKey": "私钥",
+      "token": "个人访问令牌"
+    },
+    "dedicatedAppConfirmation": "我确认这是专用的集成应用。",
+    "lastSync": "最近同步",
+    "missingPermissions": "缺少权限",
+    "notConfigured": "未配置",
+    "rateLimitReset": "速率限制重置时间",
+    "recommended": "推荐",
+    "statusMessages": {
+      "installationRevoked": "GitHub App 安装实例已被撤销。",
+      "installationSuspended": "GitHub App 安装实例已暂停。",
+      "permissionsMissing": "GitHub App 安装实例缺少所需权限。",
+      "remoteReconciliationUnavailable": "暂时无法与远端账号核对状态。",
+      "webhookVerified": "Webhook 配置已验证。"
+    },
+    "validateAndAdd": "验证并添加",
+    "webhookUrl": "Webhook 地址",
+    "webhookVerification": "Webhook 验证"
   },
   "approvals": {
     "approve": "批准",
@@ -58,7 +86,56 @@
     "resourceId": "资源 ID（可选）",
     "resourceKind": "资源类型（可选）",
     "selectAccount": "选择账号",
-    "title": "订阅"
+    "title": "订阅",
+    "deliverToInbox": "将事件投递到收件箱",
+    "disabledByProvider": "已被提供方停用",
+    "discover": "发现",
+    "events": "事件",
+    "eventLabels": {
+      "checkRunCompleted": "检查运行已完成",
+      "githubAppAuthorizationRevoked": "GitHub App 授权已撤销",
+      "installationCreated": "安装实例已创建",
+      "installationDeleted": "安装实例已删除",
+      "installationPermissionsAccepted": "安装实例权限已接受",
+      "installationSuspended": "安装实例已暂停",
+      "installationUnsuspended": "安装实例已恢复",
+      "issueAssigned": "议题已分配",
+      "issueClosed": "议题已关闭",
+      "issueCommentCreated": "议题评论已创建",
+      "issueLabeled": "议题标签已更新",
+      "issueOpened": "议题已创建",
+      "pullRequestClosed": "拉取请求已关闭",
+      "pullRequestOpened": "拉取请求已创建",
+      "pullRequestReviewRequested": "已请求拉取请求审查",
+      "pullRequestReviewSubmitted": "拉取请求审查已提交",
+      "pullRequestSynchronized": "拉取请求已同步",
+      "pushReceived": "已收到推送",
+      "releasePublished": "版本已发布",
+      "repositoriesAdded": "仓库已加入安装实例",
+      "repositoriesRemoved": "仓库已从安装实例移除"
+    },
+    "failedDeliveries": "失败投递",
+    "loadMore": "加载更多",
+    "noFailedDeliveries": "没有失败投递。",
+    "projection": "收件箱投影",
+    "projectionLabels": {
+      "issueCommentThread": "议题评论线程",
+      "issueThread": "议题线程",
+      "pullRequestThread": "拉取请求线程"
+    },
+    "repository": "仓库",
+    "requeue": "重新入队",
+    "searchResources": "搜索资源",
+    "selectProjection": "选择投影"
   },
-  "title": "Integrations"
+  "title": "Integrations",
+  "errors": {
+    "accountSetup": "无法配置集成账号。",
+    "confirmDedicatedApp": "请确认这是专用的集成应用。",
+    "installationDiscovery": "无法发现 GitHub App 安装实例。",
+    "projectionRequired": "请选择收件箱投影。",
+    "resourceDiscovery": "无法发现资源。",
+    "subscriptionSetup": "无法创建订阅。"
+  },
+  "unsupportedWeb": "集成管理需要桌面应用。"
 }

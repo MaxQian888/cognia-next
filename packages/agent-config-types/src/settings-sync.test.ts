@@ -115,6 +115,21 @@ describe("derived key lists", () => {
     expect(writable.has("turnProvider")).toBe(false)
   })
 
+  it("keeps local OpenAI speech endpoint preferences on the desktop host", () => {
+    for (const key of [
+      "localOpenaiBaseUrl",
+      "localOpenaiModel",
+      "localOpenaiVoice",
+      "localOpenaiSpeed",
+      "localOpenaiResponseFormat",
+      "localOpenaiTimeoutMs",
+    ] as Key[]) {
+      expect(SETTINGS_SYNC[key].category).toBe("desktop-only")
+      expect(CROSS_PLATFORM_SETTING_KEYS).not.toContain(key)
+      expect(MOBILE_WRITABLE_SETTING_KEYS).not.toContain(key)
+    }
+  })
+
   it("lets the fields a /me page edits travel in both directions", () => {
     // A field a mobile page writes is part of the mobile contract by
     // definition, which is exactly what `desktop-only` denies. `evalSettings`

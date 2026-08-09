@@ -20,6 +20,7 @@
 //!   `AutomationHandle` methods (and `tool_exec` for bash / text-editor). The
 //!   single match site every wire format converges on.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
@@ -29,7 +30,7 @@ use super::commands::{
     emit_audit, err_to_string, now_ms, record_allow, record_deny, record_policy_deny,
     AutomationState,
 };
-use super::consent::{ConsentBroker, ConsentThumbnail};
+use super::consent::{ConsentBroker, ConsentRequestEvent, ConsentThumbnail};
 use super::cua_route;
 use super::permission::{
     maybe_upgrade_to_consent, Call, Decision, PermissionGate, Surface, TargetMeta, Tier,
@@ -94,6 +95,10 @@ pub struct Enforcement {
     pub audit: AuditRing,
     pub consent: ConsentBroker,
     pub policy: PolicyState,
+    /// Headless consent event sink. Desktop calls use `AppHandle::emit` and
+    /// leave this unset; cognia-server publishes onto its authenticated bus.
+    pub consent_event_sink:
+        Option<Arc<dyn Fn(&ConsentRequestEvent) -> std::result::Result<(), String> + Send + Sync>>,
 }
 
 /// Largest base64 thumbnail payload we will attach to a consent request.
@@ -154,6 +159,7 @@ impl Enforcement {
             audit: state.audit.clone(),
             consent: state.consent.clone(),
             policy: state.policy.clone(),
+            consent_event_sink: None,
         }
     }
 }
@@ -179,6 +185,7 @@ where
         &state.consent,
         &state.policy,
         Some(&state.handle),
+        None,
         gctx,
         command,
         do_call,
@@ -199,9 +206,6 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T>>,
 {
-    // No handle: this is the headless MCP proxy, where `app` is `None` and a
-    // `RequireConsent` decision can only resolve to deny — there is no consent
-    // surface to show a thumbnail on.
     run_gated_impl(
         app,
         &enf.gate,
@@ -209,6 +213,7 @@ where
         &enf.consent,
         &enf.policy,
         None,
+        enf.consent_event_sink.as_ref(),
         gctx,
         command,
         do_call,
@@ -224,6 +229,9 @@ async fn run_gated_impl<T, F, Fut>(
     consent: &ConsentBroker,
     policy: &PolicyState,
     handle: Option<&AutomationHandle>,
+    consent_event_sink: Option<
+        &Arc<dyn Fn(&ConsentRequestEvent) -> std::result::Result<(), String> + Send + Sync>,
+    >,
     gctx: GateContext,
     command: &str,
     do_call: F,
@@ -283,9 +291,6 @@ where
             if prompt.session_key.is_none() {
                 prompt.session_key = gctx.session_key.clone();
             }
-            // Headless (no AppHandle) can't render the overlay → decline. This
-            // is the path the External Bridge MCP proxy takes; a PerCall tier
-            // there means "deny" rather than "silently allow".
             let allow = match app {
                 Some(app) => {
                     // Capture before prompting so the approver sees the screen
@@ -305,7 +310,20 @@ where
                         )
                         .await
                 }
-                None => false,
+                None => match consent_event_sink {
+                    Some(sink) => {
+                        let sink = Arc::clone(sink);
+                        consent
+                            .request_with_emitter(
+                                prompt.clone(),
+                                gate.settings().consent_timeout_ms(),
+                                None,
+                                move |event| sink(event),
+                            )
+                            .await
+                    }
+                    None => false,
+                },
             };
             if allow {
                 // Explicit consent does not bypass the per-action allowlist.

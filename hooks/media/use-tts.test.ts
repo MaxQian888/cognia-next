@@ -86,6 +86,7 @@ beforeEach(() => {
   orchestratorState.isLoading = false
   orchestratorState.isPlaying = false
   orchestratorState.isPaused = false
+  delete (window as unknown as { Capacitor?: unknown }).Capacitor
 })
 
 describe("useTTS", () => {
@@ -112,6 +113,20 @@ describe("useTTS", () => {
       "hi",
       expect.objectContaining({ provider: "elevenlabs" })
     )
+  })
+
+  it("forces device system playback on a native mobile runtime", async () => {
+    ;(window as unknown as { Capacitor: { isNativePlatform: () => boolean } }).Capacitor = {
+      isNativePlatform: () => true,
+    }
+    const { result } = renderHook(() => useTTS({ provider: "openai" }))
+
+    await act(async () => {
+      await result.current.speak("hi", "elevenlabs")
+    })
+
+    expect(result.current.currentProvider).toBe("system")
+    expect(speakMock).toHaveBeenCalledWith("hi", expect.objectContaining({ provider: "system" }))
   })
 
   it("respects useSettings:false branch (uses defaults)", async () => {

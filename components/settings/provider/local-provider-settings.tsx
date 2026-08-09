@@ -1,31 +1,23 @@
 "use client"
 
-/**
- * LocalProviderSettings - Unified settings panel for all local AI providers
- *
- * Provides a consolidated view of all local inference engines with:
- * - Auto-detection of running providers
- * - Quick configuration and connection testing
- * - Model management for supported providers
- */
-
-import { useState, useEffect, useCallback, useMemo } from "react"
-import {
-  Server,
-  Loader2,
-  ChevronDown,
-  ChevronUp,
-  ExternalLink,
-  Download,
-  Scan,
-  Zap,
-} from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Download, ExternalLink, Key } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { loggers } from "@cognia/logging"
+import type {
+  ProviderModelDiscoveryEntry,
+  UserProviderSettings,
+} from "@cognia/provider-types/provider"
+import type {
+  LocalProviderName,
+  LocalServerStatus,
+  LocalModelInfo,
+} from "@cognia/provider-types/local-provider"
+import { LOCAL_PROVIDER_CONFIGS } from "@cognia/provider-core/providers/local-providers"
+import {
+  createLocalProviderService,
+  getInstallInstructions,
+} from "@cognia/provider-core/providers/local-provider-service"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Dialog,
   DialogContent,
@@ -33,397 +25,249 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import type { LocalProviderName } from "@cognia/provider-types/local-provider"
-import { LOCAL_PROVIDER_CONFIGS } from "@cognia/provider-core/providers/local-providers"
-import {
-  getProviderCapabilities,
-  checkAllProvidersInstallation,
-  getInstallInstructions,
-  type InstallCheckResult,
-} from "@cognia/provider-core/providers/local-provider-service"
 import { useSettingsStore } from "@/stores/settings"
-import { useLocalProvidersScan } from "@/hooks/provider/use-local-provider"
 import { LocalProviderCard } from "./local-provider-card"
-import { LocalProviderModelManager } from "./local-provider-model-manager"
 import { LocalProviderSetupWizard } from "./local-provider-setup-wizard"
-
-// Group providers by category
-const PROVIDER_GROUPS = {
-  recommended: ["ollama", "lmstudio", "jan"] as LocalProviderName[],
-  advanced: ["llamacpp", "llamafile", "vllm", "localai"] as LocalProviderName[],
-  specialized: ["textgenwebui", "koboldcpp", "tabbyapi"] as LocalProviderName[],
-}
+import { TransportHeadersEditor } from "./transport-headers-editor"
 
 export interface LocalProviderSettingsProps {
-  onProviderSelect?: (providerId: LocalProviderName) => void
+  providerId: LocalProviderName
 }
 
-const log = loggers.native.child("local-provider-settings")
+function toDiscoveredModels(models: LocalModelInfo[]): ProviderModelDiscoveryEntry[] {
+  return models.map((model) => ({
+    id: model.id,
+    name: model.id,
+    provider: model.owned_by,
+    contextLength: model.context_length,
+  }))
+}
 
-export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
-  const t = useTranslations("providers")
-
-  const providerSettings = useSettingsStore((state) => state.providerSettings)
-  const updateProviderSettings = useSettingsStore((state) => state.updateProviderSettings)
-
-  const [isScanning, setIsScanning] = useState(false)
-  const [scanResults, setScanResults] = useState<Map<LocalProviderName, InstallCheckResult>>(
-    new Map()
+function resolveNextDefaultModel(
+  current: UserProviderSettings | undefined,
+  models: ProviderModelDiscoveryEntry[]
+): string | undefined {
+  if (models.length === 0) return undefined
+  const currentDefault = current?.defaultModel?.trim()
+  if (currentDefault && models.some((model) => model.id === currentDefault)) {
+    return undefined
+  }
+  return (
+    current?.enabledModels?.find((id) => models.some((model) => model.id === id)) ?? models[0]?.id
   )
-  const [expandedGroup, setExpandedGroup] = useState<string>("recommended")
-  const [selectedProvider, setSelectedProvider] = useState<LocalProviderName | null>(null)
-  const [showModelManager, setShowModelManager] = useState(false)
+}
+
+export function LocalProviderSettings({ providerId }: LocalProviderSettingsProps) {
+  const t = useTranslations("providers")
+  const providerSettings = useSettingsStore((state) => state.providerSettings)
+  const setProviderConfig = useSettingsStore((state) => state.setProviderConfig)
+
+  const [status, setStatus] = useState<LocalServerStatus | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [showSetupWizard, setShowSetupWizard] = useState(false)
-  const [setupWizardProvider, setSetupWizardProvider] = useState<LocalProviderName | null>(null)
 
-  // Use the unified hook for quick server status scan
-  const {
-    detected: serverStatusResults,
-    isScanning: isServerScanning,
-    scan: serverScan,
-  } = useLocalProvidersScan()
+  const settings = providerSettings[providerId]
+  const config = LOCAL_PROVIDER_CONFIGS[providerId]
+  const installInfo = getInstallInstructions(providerId)
+  const effectiveBaseUrl = settings?.baseURL?.trim() || config.defaultBaseURL
+  const apiKey = settings?.apiKey?.trim() || undefined
+  const customHeaders = settings?.customHeaders
 
-  /**
-   * The user's configured base URLs, keyed by provider. Threaded into the scan
-   * so a server moved off its default port is probed where it actually lives —
-   * without this the probe silently rebuilds every service on the default and
-   * reports a running server as offline.
-   */
-  const baseUrlOverrides = useMemo(() => {
-    const overrides: Partial<Record<LocalProviderName, string>> = {}
-    for (const providerId of Object.keys(LOCAL_PROVIDER_CONFIGS) as LocalProviderName[]) {
-      const configured = providerSettings[providerId]?.baseURL
-      if (configured) overrides[providerId] = configured
-    }
-    return overrides
-  }, [providerSettings])
+  const serviceOptions = useMemo(
+    () => ({ baseUrl: effectiveBaseUrl, apiKey, customHeaders }),
+    [effectiveBaseUrl, apiKey, customHeaders]
+  )
 
-  // Scan for installed providers
-  const scanProviders = useCallback(async () => {
-    setIsScanning(true)
+  const refreshStatus = useCallback(async () => {
+    setIsRefreshing(true)
     try {
-      const results = await checkAllProvidersInstallation(baseUrlOverrides)
-      const resultMap = new Map<LocalProviderName, InstallCheckResult>()
-      results.forEach((r) => resultMap.set(r.providerId, r))
-      setScanResults(resultMap)
-      // Also trigger the hook-based server status scan
-      serverScan(baseUrlOverrides)
-    } catch (error) {
-      log.error("Failed to scan providers", error)
+      const nextStatus = await createLocalProviderService(providerId, serviceOptions).getStatus()
+      setStatus(nextStatus)
+      return nextStatus
     } finally {
-      setIsScanning(false)
+      setIsRefreshing(false)
     }
-  }, [serverScan, baseUrlOverrides])
+  }, [providerId, serviceOptions])
 
-  // Initial scan on mount
   useEffect(() => {
-    const timer = setTimeout(() => {
-      scanProviders()
+    const timeoutId = setTimeout(() => {
+      void refreshStatus()
     }, 0)
-    return () => clearTimeout(timer)
-  }, [scanProviders])
 
-  // Get provider status - enriched with hook-based server status
-  const getProviderStatus = (providerId: LocalProviderName) => {
-    const result = scanResults.get(providerId)
-    const serverStatus = serverStatusResults.get(providerId)
-    const settings = providerSettings[providerId]
-    return {
-      isConnected: result?.running ?? serverStatus?.connected ?? false,
-      isInstalled: result?.installed ?? false,
-      version: result?.version ?? serverStatus?.version,
-      error: result?.error ?? serverStatus?.error,
-      enabled: settings?.enabled ?? false,
-      baseUrl: settings?.baseURL || LOCAL_PROVIDER_CONFIGS[providerId].defaultBaseURL,
-      latency: serverStatus?.latency_ms,
-      modelsCount: serverStatus?.models_count,
-    }
-  }
+    return () => clearTimeout(timeoutId)
+  }, [refreshStatus])
 
-  /**
-   * Only "running" is reported, and there used to be an "installed" stat
-   * beside it. The two were computed from fields the probe assigned the SAME
-   * value, so they rendered identical numbers forever. That is not a display
-   * bug to patch — it is what an HTTP probe can honestly tell us: a server that
-   * answers is both installed and running, and silence proves nothing at all
-   * (not installed / installed but stopped / listening on another port are
-   * indistinguishable). Showing two numbers implied a distinction we cannot
-   * make, so the one we can stand behind is the one shown.
-   */
-  const runningCount = Array.from(scanResults.values()).filter((r) => r.running).length
-  const isAnyScanning = isScanning || isServerScanning
-
-  // Pick the best provider for the "quick start" shortcuts: the first
-  // recommended one that isn't already running, falling back to the first
-  // recommended provider. Keeps the footer actions from being Ollama-locked.
-  const quickStartProvider =
-    PROVIDER_GROUPS.recommended.find((id) => !scanResults.get(id)?.running) ??
-    PROVIDER_GROUPS.recommended[0]
-  const browseModelsUrl = getInstallInstructions(quickStartProvider).modelsUrl
-
-  // Handle provider toggle
-  const handleToggleProvider = (providerId: LocalProviderName, enabled: boolean) => {
-    updateProviderSettings(providerId, { enabled })
-  }
-
-  // Handle base URL change
-  const handleBaseUrlChange = (providerId: LocalProviderName, baseURL: string) => {
-    updateProviderSettings(providerId, { baseURL })
-  }
-
-  // Handle test connection
-  const handleTestConnection = async (providerId: LocalProviderName) => {
-    const settings = providerSettings[providerId]
-    const baseUrl = settings?.baseURL || LOCAL_PROVIDER_CONFIGS[providerId].defaultBaseURL
-
-    try {
-      const { LocalProviderService } =
-        await import("@cognia/provider-core/providers/local-provider-service")
-      const service = new LocalProviderService(providerId, baseUrl)
-      const status = await service.getStatus()
-
-      // Update scan results
-      setScanResults((prev) => {
-        const next = new Map(prev)
-        next.set(providerId, {
-          providerId,
-          // Reachable ⇒ provably installed. Unreachable ⇒ unknown, not absent.
-          installed: status.connected ? true : undefined,
-          running: status.connected,
-          version: status.version,
-          error: status.error,
-        })
-        return next
+  const persistDiscoveredModels = useCallback(
+    async (models: LocalModelInfo[]) => {
+      const discoveredModels = toDiscoveredModels(models)
+      const nextDefaultModel = resolveNextDefaultModel(settings, discoveredModels)
+      await setProviderConfig(providerId, {
+        discoveredModels,
+        discoveredModelsLastFetched: Date.now(),
+        ...(nextDefaultModel ? { defaultModel: nextDefaultModel } : {}),
       })
+    },
+    [providerId, setProviderConfig, settings]
+  )
 
-      return {
-        success: status.connected,
-        message: status.connected
-          ? t("connectedSummary", {
-              // `||`, not `??`: LocalProviderService derives version from
-              // `data.version || data.build?.version`, which yields "" when a
-              // server reports an empty one. `??` would pass "" through to the
-              // `other` branch and render a dangling "Connected v".
-              version: status.version || "none",
-              count: status.models_count ?? 0,
-            })
-          : status.error || t("connectionFailed"),
-        latency: status.latency_ms,
+  const handleTestConnection = useCallback(async () => {
+    setIsRefreshing(true)
+    try {
+      const service = createLocalProviderService(providerId, serviceOptions)
+      const nextStatus = await service.getStatus()
+      setStatus(nextStatus)
+
+      if (nextStatus.connected) {
+        let models: LocalModelInfo[]
+        try {
+          models = await service.listModels()
+        } catch (error) {
+          const message = error instanceof Error ? error.message : t("connectionFailed")
+          await setProviderConfig(providerId, {
+            verificationStatus: "unverified",
+            lastVerifiedAt: Date.now(),
+            verificationMessage: message,
+            healthStatus: "error",
+          })
+          return {
+            success: false,
+            message,
+            latency: nextStatus.latency_ms,
+          }
+        }
+        await persistDiscoveredModels(models)
+        const message = t("connectedSummary", {
+          version: nextStatus.version || t("unknownVersion"),
+          count: models.length,
+        })
+        await setProviderConfig(providerId, {
+          verificationStatus: "verified",
+          lastVerifiedAt: Date.now(),
+          verificationMessage: message,
+          healthStatus: "healthy",
+        })
+        return {
+          success: true,
+          message,
+          latency: nextStatus.latency_ms,
+        }
       }
-    } catch (error) {
+
+      const message = nextStatus.error || t("connectionFailed")
+      await setProviderConfig(providerId, {
+        verificationStatus: "unverified",
+        lastVerifiedAt: Date.now(),
+        verificationMessage: message,
+        healthStatus: "error",
+      })
       return {
         success: false,
-        message: error instanceof Error ? error.message : t("connectionFailed"),
+        message,
+        latency: nextStatus.latency_ms,
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t("connectionFailed")
+      await setProviderConfig(providerId, {
+        verificationStatus: "unverified",
+        lastVerifiedAt: Date.now(),
+        verificationMessage: message,
+        healthStatus: "error",
+      })
+      return {
+        success: false,
+        message,
+      }
+    } finally {
+      setIsRefreshing(false)
     }
-  }
-
-  // Handle manage models
-  const handleManageModels = (providerId: LocalProviderName) => {
-    setSelectedProvider(providerId)
-    setShowModelManager(true)
-  }
-
-  // Handle setup wizard
-  const handleSetupWizard = (providerId: LocalProviderName) => {
-    setSetupWizardProvider(providerId)
-    setShowSetupWizard(true)
-  }
-
-  // Render provider group
-  const renderProviderGroup = (
-    groupId: string,
-    providerIds: LocalProviderName[],
-    title: string,
-    description: string
-  ) => {
-    const isExpanded = expandedGroup === groupId
-    const groupRunning = providerIds.filter((id) => scanResults.get(id)?.running).length
-
-    return (
-      <Collapsible
-        key={groupId}
-        open={isExpanded}
-        onOpenChange={() => setExpandedGroup(isExpanded ? "" : groupId)}
-      >
-        <CollapsibleTrigger asChild>
-          <Button variant="ghost" className="w-full justify-between p-3 h-auto">
-            <div className="flex items-center gap-3">
-              <Server className="h-4 w-4 text-muted-foreground" />
-              <div className="text-left">
-                <div className="font-medium">{title}</div>
-                <div className="text-xs text-muted-foreground">{description}</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {groupRunning > 0 && (
-                <Badge variant="success">
-                  {groupRunning} {t("running")}
-                </Badge>
-              )}
-              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </div>
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="px-3 pb-3 space-y-3">
-          {providerIds.map((providerId) => {
-            const status = getProviderStatus(providerId)
-            const capabilities = getProviderCapabilities(providerId)
-
-            return (
-              <LocalProviderCard
-                key={providerId}
-                providerId={providerId}
-                enabled={status.enabled}
-                baseUrl={status.baseUrl}
-                isConnected={status.isConnected}
-                isLoading={isAnyScanning}
-                version={status.version}
-                // W6a: getProviderStatus has computed both of these all along;
-                // they were hard-passed as undefined here, so the card's
-                // latency/model-count branch could never render.
-                modelsCount={status.modelsCount}
-                latency={status.latency}
-                error={status.error}
-                onToggle={(enabled) => handleToggleProvider(providerId, enabled)}
-                onBaseUrlChange={(url) => handleBaseUrlChange(providerId, url)}
-                onTestConnection={() => handleTestConnection(providerId)}
-                onManageModels={
-                  capabilities.canPullModels || capabilities.canListModels
-                    ? () => handleManageModels(providerId)
-                    : undefined
-                }
-                onSetup={() => handleSetupWizard(providerId)}
-              />
-            )
-          })}
-        </CollapsibleContent>
-      </Collapsible>
-    )
-  }
+  }, [persistDiscoveredModels, providerId, serviceOptions, setProviderConfig, t])
 
   return (
     <TooltipProvider>
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Server className="h-5 w-5" />
-                {t("localProvidersTitle")}
-              </CardTitle>
-              <CardDescription>{t("localProvidersDescription")}</CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              {runningCount > 0 && (
-                <Badge variant="success">
-                  <Zap className="h-3 w-3 mr-1" />
-                  {runningCount} {t("running")}
-                </Badge>
-              )}
-              <Button variant="outline" size="sm" onClick={scanProviders} disabled={isAnyScanning}>
-                {isAnyScanning ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                ) : (
-                  <Scan className="h-4 w-4 mr-1" />
-                )}
-                {t("scan")}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
+      <div className="space-y-6" data-testid="local-provider-settings">
+        <LocalProviderCard
+          providerId={providerId}
+          enabled={settings?.enabled ?? false}
+          baseUrl={effectiveBaseUrl}
+          isConnected={status?.connected ?? false}
+          isLoading={isRefreshing}
+          version={status?.version}
+          modelsCount={status?.models_count}
+          latency={status?.latency_ms}
+          error={status?.error}
+          onToggle={(enabled) => void setProviderConfig(providerId, { enabled })}
+          onBaseUrlChange={(baseURL) => void setProviderConfig(providerId, { baseURL })}
+          onTestConnection={handleTestConnection}
+          onSetup={() => setShowSetupWizard(true)}
+          showToggle={false}
+        />
 
-        <CardContent className="space-y-1">
-          {/* Quick stats */}
-          <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
-            <span className="flex items-center gap-1">
-              <Zap className="h-3.5 w-3.5 text-primary" />
-              {runningCount} {t("running")}
-            </span>
-          </div>
-
-          {/* Provider groups */}
-          <div className="space-y-1 border rounded-lg">
-            {renderProviderGroup(
-              "recommended",
-              PROVIDER_GROUPS.recommended,
-              t("providerGroups.recommended"),
-              t("providerGroups.recommendedDesc")
-            )}
-            {renderProviderGroup(
-              "advanced",
-              PROVIDER_GROUPS.advanced,
-              t("providerGroups.advanced"),
-              t("providerGroups.advancedDesc")
-            )}
-            {renderProviderGroup(
-              "specialized",
-              PROVIDER_GROUPS.specialized,
-              t("providerGroups.specialized"),
-              t("providerGroups.specializedDesc")
-            )}
+        <div className="space-y-4 rounded-lg border p-4">
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5 text-sm font-medium">
+              <Key className="h-3.5 w-3.5" />
+              {t("apiKey")}
+            </Label>
+            <Input
+              type="password"
+              value={settings?.apiKey ?? ""}
+              onChange={(event) =>
+                void setProviderConfig(providerId, { apiKey: event.target.value })
+              }
+              placeholder={t("apiKeyPlaceholder")}
+              autoComplete="new-password"
+              data-lpignore="true"
+              data-form-type="other"
+            />
+            <p className="text-xs text-muted-foreground">{t("localProviderApiKeyHint")}</p>
           </div>
 
-          {/* Quick actions */}
-          <div className="flex gap-2 pt-4">
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              onClick={() => handleSetupWizard(quickStartProvider)}
-            >
-              <Download className="h-4 w-4 mr-1" />
-              {t("quickSetup")}
+          <TransportHeadersEditor
+            idPrefix={`local-provider-${providerId}-headers`}
+            value={settings?.customHeaders}
+            onChange={(next) => void setProviderConfig(providerId, { customHeaders: next })}
+          />
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowSetupWizard(true)}>
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              {t("setupGuide")}
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <a href={browseModelsUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="h-4 w-4 mr-1" />
+              <a href={installInfo.modelsUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
                 {t("browseModels")}
               </a>
             </Button>
+            <Button variant="outline" size="sm" asChild>
+              <a href={installInfo.docsUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                {t("providerDocumentation", { provider: config.name })}
+              </a>
+            </Button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {/* Model Manager Dialog */}
-      <Dialog open={showModelManager} onOpenChange={setShowModelManager}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {selectedProvider &&
-                t("providerModels", { provider: LOCAL_PROVIDER_CONFIGS[selectedProvider].name })}
-            </DialogTitle>
-            <DialogDescription>{t("manageInstalledModels")}</DialogDescription>
-          </DialogHeader>
-          {selectedProvider && (
-            <LocalProviderModelManager
-              providerId={selectedProvider}
-              baseUrl={providerSettings[selectedProvider]?.baseURL}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Setup Wizard Dialog */}
       <Dialog open={showSetupWizard} onOpenChange={setShowSetupWizard}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>
-              {setupWizardProvider &&
-                t("providerSetup", { provider: LOCAL_PROVIDER_CONFIGS[setupWizardProvider]?.name })}
-            </DialogTitle>
+            <DialogTitle>{t("providerSetup", { provider: config.name })}</DialogTitle>
             <DialogDescription>{t("followStepsToStart")}</DialogDescription>
           </DialogHeader>
-          {setupWizardProvider && (
-            <LocalProviderSetupWizard
-              providerId={setupWizardProvider}
-              onComplete={() => {
-                setShowSetupWizard(false)
-                scanProviders()
-              }}
-            />
-          )}
+          <LocalProviderSetupWizard
+            providerId={providerId}
+            baseUrl={effectiveBaseUrl}
+            apiKey={apiKey}
+            customHeaders={customHeaders}
+            onComplete={() => {
+              setShowSetupWizard(false)
+              void refreshStatus()
+            }}
+          />
         </DialogContent>
       </Dialog>
     </TooltipProvider>

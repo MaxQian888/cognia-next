@@ -24,6 +24,7 @@ const ALL_EVENTS: HookEvent[] = [
   "Stop",
   "StopFailure",
   "Notification",
+  "MessageDisplay",
   "PermissionRequest",
   "PermissionDenied",
   "Elicitation",
@@ -31,6 +32,7 @@ const ALL_EVENTS: HookEvent[] = [
   "TaskCreated",
   "TaskCompleted",
   "SubagentStop",
+  "SubagentStart",
   "TeammateIdle",
   "PreCompact",
   "PostCompact",
@@ -40,6 +42,8 @@ const ALL_EVENTS: HookEvent[] = [
   "CwdChanged",
   "InstructionsLoaded",
   "ConfigChange",
+  "Setup",
+  "DirectoryAdded",
 ]
 
 // The dormant set as it stood before the catalog folded it in.

@@ -22,6 +22,7 @@ import { DiffBlock } from "@/components/chat/renderers/diff-block"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { ErrorParsedView } from "@/components/error/error-parsed-view"
 import { inferLanguageFromPath, resolveToolOutputRender } from "@/lib/chat/tool-output-format"
+import { ToolSemanticBadges } from "@/components/ai-elements/tool-semantic-badges"
 
 export type ToolProps = ComponentProps<typeof Collapsible>
 
@@ -106,6 +107,7 @@ export const getRiskBadge = (level: "high" | "medium") => {
 
 export type ToolHeaderProps = {
   title?: string
+  readOnlyHint?: boolean | null
   className?: string
 } & (
   | { type: ToolUIPart["type"]; state: ToolUIPart["state"]; toolName?: never }
@@ -119,6 +121,7 @@ export type ToolHeaderProps = {
 export const ToolHeader = ({
   className,
   title,
+  readOnlyHint,
   type,
   state,
   toolName,
@@ -135,6 +138,7 @@ export const ToolHeader = ({
       <div className="flex flex-wrap items-center gap-2">
         <WrenchIcon className="size-4 text-muted-foreground" />
         <span className="font-medium text-sm">{title ?? derivedName}</span>
+        <ToolSemanticBadges readOnlyHint={readOnlyHint} />
         {getStatusBadge(state)}
         {riskLevel && getRiskBadge(riskLevel)}
       </div>

@@ -8,7 +8,7 @@ use super::dto::{TrayActionPayload, TrayMenuItem};
 pub fn bootstrap_items() -> Vec<TrayMenuItem> {
     vec![
         action("tray-show", "Show Cognia", "show"),
-        action("tray-new-chat", "New Chat", "new-chat"),
+        action("tray-new-chat", "Quick Chat", "new-chat"),
         TrayMenuItem::Separator {
             id: "tray-sep-1".into(),
         },

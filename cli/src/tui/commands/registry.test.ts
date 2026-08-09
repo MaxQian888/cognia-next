@@ -128,6 +128,34 @@ describe("command registry", () => {
     expect(effect).toMatchObject({ kind: "openOverlay", overlay: { kind: "settings", section: 0 } })
   })
 
+  it("/transcript opens every cell in the full-content pager", () => {
+    const effect = getCommand("transcript")?.handler?.({
+      state: {
+        cells: [
+          { id: "u", kind: "user", text: "question" },
+          { id: "a", kind: "assistant", raw: "**answer**" },
+          {
+            id: "t",
+            kind: "tool",
+            callKey: "t",
+            toolName: "Read",
+            input: { path: "a.txt" },
+            status: "done",
+            result: "full tool output",
+            collapsed: true,
+          },
+        ],
+      },
+      config: {},
+      version: "0",
+      args: "",
+    } as never) as { kind: string; overlay: { kind: string; body: string } }
+    expect(effect).toMatchObject({ kind: "openOverlay", overlay: { kind: "document" } })
+    expect(effect.overlay.body).toContain("question")
+    expect(effect.overlay.body).toContain("answer")
+    expect(effect.overlay.body).toContain("full tool output")
+  })
+
   it("bare /help opens the category overlay; /help <command> opens a focused detail document", () => {
     const help = getCommand("help")
     const ctx = (args: string) => ({ state: {}, config: {}, version: "0", args }) as never

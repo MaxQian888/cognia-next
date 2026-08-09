@@ -26,6 +26,13 @@ describe("cross-window-protocol", () => {
     { v: 1, t: "activity", at: 1717575600000 },
     { v: 1, t: "open-console", tab: "shop" },
     { v: 1, t: "open-console", tab: "achievements" },
+    { v: 1, t: "appearance", selection: { skinId: "live2d", modelId: "m1" } },
+    {
+      v: 1,
+      t: "look-target",
+      target: { x: 0.5, y: -0.25, updatedAt: 1717575600000, source: "screen" },
+    },
+    { v: 1, t: "look-target", target: null },
   ]
 
   it("exposes the shared channel name", () => {
@@ -86,6 +93,11 @@ describe("cross-window-protocol", () => {
       ["open-console with unknown tab", { v: 1, t: "open-console", tab: "settings" }],
       ["open-console with non-string tab", { v: 1, t: "open-console", tab: 3 }],
       ["open-console with missing tab", { v: 1, t: "open-console" }],
+      ["appearance with unknown skin", { v: 1, t: "appearance", selection: { skinId: "vrm" } }],
+      [
+        "look-target outside normalized bounds",
+        { v: 1, t: "look-target", target: { x: 2, y: 0, updatedAt: 1, source: "screen" } },
+      ],
     ]
 
     it.each(rejected)("rejects %s → null", (_label, raw) => {

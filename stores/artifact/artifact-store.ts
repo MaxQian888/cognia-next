@@ -15,7 +15,7 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
 import { nanoid } from "nanoid"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
 import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -1561,7 +1561,9 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         const version: ArtifactVersion = {
           id: nanoid(),
           artifactId: id,
+          title: artifact.title,
           content: artifact.content,
+          metadata: artifact.metadata,
           version: artifact.version,
           createdAt: new Date(),
           changeDescription: description,
@@ -1597,7 +1599,9 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         const currentVersion: ArtifactVersion = {
           id: nanoid(),
           artifactId: id,
+          title: artifact.title,
           content: artifact.content,
+          metadata: artifact.metadata,
           version: artifact.version,
           createdAt: new Date(),
           changeDescription: autoSaveDescription ?? "Auto-saved before restore",
@@ -1614,7 +1618,9 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
               ...s.artifacts,
               [id]: {
                 ...artifact,
+                title: version.title ?? artifact.title,
                 content: version.content,
+                metadata: version.metadata,
                 version: artifact.version + 1,
                 updatedAt: new Date(),
               },

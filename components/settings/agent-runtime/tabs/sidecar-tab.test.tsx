@@ -55,6 +55,9 @@ jest.mock("@/lib/slash-commands/registry", () => ({
 jest.mock("@/hooks/chat/use-sdk-session-capabilities", () => ({
   useSdkSessionCapabilities: () => ({ models: null, commands: null, refresh: jest.fn() }),
 }))
+jest.mock("@/components/settings/agent-runtime/sdk-parity-card", () => ({
+  SdkParityCard: () => <div data-testid="sdk-parity-card" />,
+}))
 const routerReplaceMock = jest.fn()
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace: (...args: unknown[]) => routerReplaceMock(...args) }),
@@ -148,6 +151,7 @@ describe("SidecarTab", () => {
     expect(screen.getByTestId("count-tile-slash-commands")).toBeInTheDocument()
     expect(screen.getByTestId("count-tile-hooks")).toBeInTheDocument()
     expect(screen.getByTestId("count-tile-mcp")).toBeInTheDocument()
+    expect(screen.getByTestId("sdk-parity-card")).toBeInTheDocument()
   })
 })
 

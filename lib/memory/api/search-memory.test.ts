@@ -15,6 +15,11 @@ jest.mock("@/lib/memory/retrieve/retriever", () => ({
   retrieveMemories: (...args: unknown[]) => mockRetrieveMemories(...(args as [])),
 }))
 
+const mockResolvePolicy = jest.fn()
+jest.mock("@/lib/memory/agent-policy", () => ({
+  resolvePersistedAgentMemoryPolicy: (...args: unknown[]) => mockResolvePolicy(...args),
+}))
+
 const HIT = { memory: { id: "m1", text: "fact" }, relevance: 0.9, score: 0.8 }
 
 beforeEach(() => {
@@ -22,6 +27,10 @@ beforeEach(() => {
   mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
   mockTryBuildMemoryDeps.mockResolvedValue({ loadCandidates: jest.fn(), touch: jest.fn() })
   mockRetrieveMemories.mockResolvedValue([HIT])
+  mockResolvePolicy.mockResolvedValue({
+    canRecall: true,
+    readableScopes: ["global", "workspace", "character", "agent"],
+  })
 })
 
 describe("searchMemoriesExternal", () => {
@@ -47,6 +56,29 @@ describe("searchMemoriesExternal", () => {
       reason: "backend_unavailable",
     })
     expect(mockRetrieveMemories).not.toHaveBeenCalled()
+  })
+
+  it("enforces the acting Agent recall permission", async () => {
+    mockResolvePolicy.mockResolvedValue({ canRecall: false, readableScopes: [] })
+    await expect(
+      searchMemoriesExternal({ query: "q", policyCharacterId: "agent-1" })
+    ).resolves.toEqual({ ok: false, reason: "policy_denied" })
+    expect(mockTryBuildMemoryDeps).not.toHaveBeenCalled()
+  })
+
+  it("filters candidate scopes before retrieval", async () => {
+    const loadCandidates = jest.fn(async () => [
+      { id: "g", scope: "global" },
+      { id: "c", scope: "character" },
+    ])
+    mockTryBuildMemoryDeps.mockResolvedValue({
+      loadCandidates,
+      loadProcedural: jest.fn(async () => []),
+    })
+    mockResolvePolicy.mockResolvedValue({ canRecall: true, readableScopes: ["character"] })
+    await searchMemoriesExternal({ query: "q", policyCharacterId: "agent-1" })
+    const scopedDeps = mockRetrieveMemories.mock.calls[0][1]
+    await expect(scopedDeps.loadCandidates()).resolves.toEqual([{ id: "c", scope: "character" }])
   })
 
   it("threads the user's config into the retriever", async () => {

@@ -1,11 +1,7 @@
-/**
- * `defineSubagent` is a pure identity function whose only job is compile-time
- * type narrowing for plugin authors. The runtime guarantee is "what you put
- * in is what you get out, by reference" — the test below pins that contract
- * so future refactors can't accidentally introduce a clone or default-fill.
- */
+/** `defineSubagent` preserves string-only defs and resolves typed tool refs. */
 
 import { defineSubagent } from "./define-subagent"
+import { defineTool } from "./define-tool"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 
 describe("defineSubagent", () => {
@@ -42,5 +38,23 @@ describe("defineSubagent", () => {
       maxTurns: 8,
       effort: "high",
     })
+  })
+
+  it("accepts typed tool definitions and projects them to runtime names", () => {
+    const queryLogs = defineTool({
+      name: "query_logs",
+      description: "Query operational logs",
+      parametersSchema: { type: "object", properties: {} },
+    })
+
+    expect(
+      defineSubagent({
+        id: "diagnostician",
+        name: "Diagnostician",
+        description: "Diagnoses incidents",
+        prompt: "Inspect the incident.",
+        tools: [queryLogs, "Read"],
+      }).tools
+    ).toEqual(["query_logs", "Read"])
   })
 })

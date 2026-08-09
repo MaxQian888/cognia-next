@@ -54,7 +54,7 @@ describe("NetworkTestTab", () => {
       ok: true,
       latencyMs: 123,
       status: 200,
-      proxyUrl: "http://127.0.0.1:7890",
+      route: { kind: "proxy", protocol: "http", host: "127.0.0.1", port: 7890 },
     })
     render(<NetworkTestTab />)
     await act(async () => {
@@ -101,8 +101,13 @@ describe("NetworkTestTab", () => {
     expect(screen.getByText("test.webUnsupported")).toBeInTheDocument()
   })
 
-  it("falls back to direct connection text when proxyUrl is absent", async () => {
-    invokeMock.mockResolvedValue({ ok: true, latencyMs: 12, status: 204 })
+  it("renders direct connection text only for an explicit direct route", async () => {
+    invokeMock.mockResolvedValue({
+      ok: true,
+      latencyMs: 12,
+      status: 204,
+      route: { kind: "direct", reason: "off" },
+    })
     render(<NetworkTestTab />)
     await act(async () => {
       fireEvent.click(screen.getByText("test.run"))

@@ -36,7 +36,11 @@ import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 
 import { useSettingsStore } from "@/stores/settings"
-import { applyProxyToRust } from "@/stores/network-proxy"
+import {
+  applyProxyToRust,
+  getProxyRuntimeStatus,
+  updateProxyPassword,
+} from "@/stores/network-proxy"
 import {
   DEFAULT_NETWORK_PROXY_SETTINGS,
   type NetworkProxySettings,
@@ -61,7 +65,10 @@ export function NetworkGeneralTab() {
   const [hostDraft, setHostDraft] = useState(cfg.host)
   const [portDraft, setPortDraft] = useState(cfg.port ? String(cfg.port) : "")
   const [usernameDraft, setUsernameDraft] = useState(cfg.username ?? "")
-  const [passwordDraft, setPasswordDraft] = useState(cfg.password ?? "")
+  const [passwordDraft, setPasswordDraft] = useState("")
+  const [passwordIntent, setPasswordIntent] = useState<"keep" | "replace">("keep")
+  const [credentialConfigured, setCredentialConfigured] = useState(false)
+  const [credentialError, setCredentialError] = useState(false)
 
   // Re-sync drafts whenever the persisted values change from *outside* this
   // tab (Detection-tab Apply, startup auto-detect). Firing on the concrete
@@ -72,8 +79,21 @@ export function NetworkGeneralTab() {
     setHostDraft(cfg.host)
     setPortDraft(cfg.port ? String(cfg.port) : "")
     setUsernameDraft(cfg.username ?? "")
-    setPasswordDraft(cfg.password ?? "")
-  }, [cfg.host, cfg.port, cfg.username, cfg.password])
+  }, [cfg.host, cfg.port, cfg.username])
+
+  useEffect(() => {
+    let cancelled = false
+    void getProxyRuntimeStatus()
+      .then((status) => {
+        if (!cancelled) setCredentialConfigured(status.credentialConfigured)
+      })
+      .catch(() => {
+        if (!cancelled) setCredentialError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const persist = async (patch: Partial<NetworkProxySettings>) => {
     const next: NetworkProxySettings = { ...cfg, ...patch }
@@ -94,9 +114,29 @@ export function NetworkGeneralTab() {
     const next = usernameDraft || undefined
     if (next !== (cfg.username || undefined)) void persist({ username: next })
   }
-  const commitPassword = () => {
-    const next = passwordDraft || undefined
-    if (next !== (cfg.password || undefined)) void persist({ password: next })
+  const commitPassword = async () => {
+    if (passwordIntent !== "replace" || !passwordDraft) return
+    try {
+      const configured = await updateProxyPassword({ kind: "replace", value: passwordDraft })
+      setCredentialConfigured(configured)
+      setPasswordDraft("")
+      setPasswordIntent("keep")
+      setCredentialError(false)
+    } catch {
+      setCredentialError(true)
+    }
+  }
+
+  const clearPassword = async () => {
+    try {
+      await updateProxyPassword({ kind: "clear" })
+      setCredentialConfigured(false)
+      setPasswordDraft("")
+      setPasswordIntent("keep")
+      setCredentialError(false)
+    } catch {
+      setCredentialError(true)
+    }
   }
 
   // Push the *current* config to Rust on first mount so a freshly-launched
@@ -213,7 +253,7 @@ export function NetworkGeneralTab() {
             placeholder={t("form.optionalPlaceholder")}
             disabled={disabled}
             aria-label={t("form.username")}
-            autoComplete="off"
+            autoComplete="new-password"
           />
         </div>
         <div className="space-y-2">
@@ -221,16 +261,40 @@ export function NetworkGeneralTab() {
           <Input
             type="password"
             value={passwordDraft}
-            onChange={(e) => setPasswordDraft(e.target.value)}
-            onBlur={commitPassword}
+            onChange={(e) => {
+              setPasswordDraft(e.target.value)
+              setPasswordIntent(e.target.value ? "replace" : "keep")
+            }}
+            onBlur={() => void commitPassword()}
             onKeyDown={(e) => {
               if (e.key === "Enter") e.currentTarget.blur()
             }}
-            placeholder={t("form.optionalPlaceholder")}
+            placeholder={
+              credentialConfigured
+                ? t("form.passwordConfiguredPlaceholder")
+                : t("form.optionalPlaceholder")
+            }
             disabled={disabled}
             aria-label={t("form.password")}
             autoComplete="off"
           />
+          {credentialConfigured && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={disabled}
+              onClick={() => void clearPassword()}
+              aria-label={t("form.clearPassword")}
+            >
+              {t("form.clearPassword")}
+            </Button>
+          )}
+          {credentialError && (
+            <p role="alert" className="text-xs text-destructive">
+              {t("form.passwordKeyringError")}
+            </p>
+          )}
         </div>
       </div>
 
@@ -256,7 +320,7 @@ export function NetworkGeneralTab() {
           <Input
             value={bypassDraft}
             onChange={(e) => setBypassDraft(e.target.value)}
-            placeholder=".internal"
+            placeholder={/* i18n-exempt: technical domain suffix example */ ".internal"}
             disabled={disabled}
             onKeyDown={(e) => {
               if (e.key === "Enter") {

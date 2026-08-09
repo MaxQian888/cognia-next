@@ -15,6 +15,9 @@ const mockTryBuildVectorSink = jest.fn()
 
 jest.mock("@/lib/db/settings", () => ({ getSettings: () => mockGetSettings() }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: () => mockGetSession() }))
+jest.mock("@/lib/db/characters", () => ({
+  resolveCharacterById: jest.fn(async () => undefined),
+}))
 jest.mock("@/lib/db/messages", () => ({ listMessages: () => mockListMessages() }))
 jest.mock("@/lib/db/memory-governance", () => ({
   appendMemoryAuditEvent: (...args: unknown[]) => mockAppendAudit(...args),

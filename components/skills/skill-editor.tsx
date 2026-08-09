@@ -56,8 +56,12 @@ interface Props {
 }
 
 interface FormState {
+  slug: string
   name: string
   description: string
+  compatibility: string
+  metadata: string
+  invocationPolicy: "implicit" | "explicit"
   content: string
   category: SkillCategory
   allowedTools: string
@@ -69,8 +73,12 @@ interface FormState {
 
 function emptyState(): FormState {
   return {
+    slug: "",
     name: "",
     description: "",
+    compatibility: "",
+    metadata: "",
+    invocationPolicy: "implicit",
     content: "",
     category: "custom",
     allowedTools: "",
@@ -83,8 +91,14 @@ function emptyState(): FormState {
 
 function fromSkill(s: Skill): FormState {
   return {
+    slug: s.slug ?? "",
     name: s.name,
     description: s.description ?? "",
+    compatibility: s.compatibility ?? "",
+    metadata: Object.entries(s.metadata ?? {})
+      .map(([key, value]) => `${key}=${value}`)
+      .join("\n"),
+    invocationPolicy: s.invocationPolicy ?? "implicit",
     content: s.content,
     category: (s.category as SkillCategory) ?? "custom",
     allowedTools: (s.allowedTools ?? []).join(", "),
@@ -100,6 +114,20 @@ function parseChips(text: string): string[] {
     .split(/[,\n]/)
     .map((s) => s.trim())
     .filter(Boolean)
+}
+
+function parseMetadata(text: string): Record<string, string> | undefined {
+  const entries = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line): [string, string] => {
+      const separator = line.indexOf("=")
+      if (separator < 1) return [line, ""]
+      return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()]
+    })
+    .filter(([key]) => Boolean(key))
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
 }
 
 export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAiAssist }: Props) {
@@ -119,13 +147,18 @@ export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAi
   const validation: SkillValidationError[] = useMemo(
     () =>
       validateSkill({
+        slug: form.slug,
         name: form.name,
         description: form.description,
+        compatibility: form.compatibility,
+        metadata: parseMetadata(form.metadata),
         content: form.content,
       }),
     [form]
   )
-  const hasErrors = validation.length > 0
+  const hasErrors = validation.some((issue) =>
+    mode === "create" ? issue.severity !== "warning" : issue.severity === "runtime"
+  )
   const fieldErrors = useMemo(() => {
     const map = new Map<string, string>()
     for (const e of validation) {
@@ -141,8 +174,12 @@ export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAi
       const allowed = parseChips(form.allowedTools)
       const tags = parseChips(form.tags)
       await onSave({
+        slug: form.slug.trim(),
         name: form.name.trim(),
-        description: form.description.trim() || undefined,
+        description: form.description.trim(),
+        compatibility: form.compatibility.trim() || undefined,
+        metadata: parseMetadata(form.metadata),
+        invocationPolicy: form.invocationPolicy,
         content: form.content,
         allowedTools: allowed.length ? allowed : undefined,
         tags: tags.length ? tags : undefined,
@@ -166,6 +203,17 @@ export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAi
             placeholder={t("namePlaceholder")}
           />
         </Field>
+        <Field label={t("slug")} error={fieldErrors.get("slug")} hint={t("slugHint")}>
+          <Input
+            value={form.slug}
+            onChange={(e) => setForm({ ...form, slug: e.target.value })}
+            placeholder={t("slugPlaceholder")}
+            className="font-mono text-xs"
+          />
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label={t("category")}>
           <Select
             value={form.category}
@@ -183,6 +231,22 @@ export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAi
             </SelectContent>
           </Select>
         </Field>
+        <Field label={t("invocationPolicy")}>
+          <Select
+            value={form.invocationPolicy}
+            onValueChange={(value) =>
+              setForm({ ...form, invocationPolicy: value as FormState["invocationPolicy"] })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="implicit">{t("invocationImplicit")}</SelectItem>
+              <SelectItem value="explicit">{t("invocationExplicit")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
       </div>
 
       <Field label={t("description")} error={fieldErrors.get("description")}>
@@ -190,6 +254,24 @@ export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAi
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           placeholder={t("descriptionPlaceholder")}
+        />
+      </Field>
+
+      <Field label={t("compatibility")} error={fieldErrors.get("compatibility")}>
+        <Input
+          value={form.compatibility}
+          onChange={(e) => setForm({ ...form, compatibility: e.target.value })}
+          placeholder={t("compatibilityPlaceholder")}
+        />
+      </Field>
+
+      <Field label={t("metadata")} error={fieldErrors.get("metadata")} hint={t("metadataHint")}>
+        <Textarea
+          rows={3}
+          value={form.metadata}
+          onChange={(e) => setForm({ ...form, metadata: e.target.value })}
+          placeholder={t("metadataPlaceholder")}
+          className="font-mono text-xs"
         />
       </Field>
 

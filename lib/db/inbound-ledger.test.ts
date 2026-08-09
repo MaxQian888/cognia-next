@@ -1,20 +1,16 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/inbound-ledger.ts — dedup ledger for inbound messages.
  */
 
-import "fake-indexeddb/auto"
 import { recordInbound, isInboundRecorded, pruneOldest } from "./inbound-ledger"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
-// The first cold open of the full schema (100+ Dexie versions) can exceed
-// jest's default 5 s hook timeout on a loaded machine.
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-}, 30_000)
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("inbound-ledger", () => {
   it("recordInbound returns true on first call for a message", async () => {

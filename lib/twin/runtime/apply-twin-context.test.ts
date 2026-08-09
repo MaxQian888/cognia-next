@@ -46,7 +46,7 @@ jest.mock("@cognia/rag/query-expansion", () => {
 
 import { applyTwinContext, __flushStyleBackfills } from "./apply-twin-context"
 import type { ApplyTwinContextDeps } from "./apply-twin-context"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { bulkCreateTwinChunks } from "@/lib/db/twin-chunks"

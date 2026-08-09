@@ -7,6 +7,7 @@
  * co-located test.
  */
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
+import type { CanonicalContentPart } from "@cognia/agent-config-types/agent-execution"
 import type { AskUserRequest } from "@/lib/claude/ask-user-tool"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "@/lib/claude/adapter"
@@ -44,6 +45,7 @@ import type { ModelMeta } from "../runtime/model-meta"
 import type { FormOverlayState } from "./form"
 import type { SessionAnalysis } from "../format/usage-analysis"
 import type { ProviderLimits } from "@/types/subscription"
+import type { TuiA2UISurface } from "../a2ui/surface"
 
 export type PermissionMode = (typeof PERMISSION_MODES)[number]
 
@@ -123,6 +125,30 @@ export interface NoticeCell {
   message: string
 }
 
+export interface CommentaryCell {
+  id: string
+  kind: "commentary"
+  messageId: string
+  text: string
+  done: boolean
+}
+
+export interface ContentPartCell {
+  id: string
+  kind: "content-part"
+  partId: string
+  part: CanonicalContentPart
+}
+
+export interface CanonicalEventCell {
+  id: string
+  kind: "canonical-event"
+  eventId: string
+  level: "info" | "warning" | "error"
+  title: string
+  summary: string
+}
+
 /** A `!command` shell-out and its captured output. */
 export interface BashCell {
   id: string
@@ -155,6 +181,9 @@ export type Cell =
   | TodoCell
   | ErrorCell
   | NoticeCell
+  | CommentaryCell
+  | ContentPartCell
+  | CanonicalEventCell
   | BashCell
   | PlanCell
 
@@ -423,6 +452,17 @@ export interface DoctorReport {
   crashReportCount: number
   latestCrash?: CrashReportItem
   logDirBytes: number
+  /** Local-only renderer counters; contains no prompts, paths, or payloads. */
+  tuiRenderer?: {
+    engine: "virtualized" | "legacy"
+    renderDurationMs: { latest: number; p95: number }
+    resizeDurationMs: { latest: number; p95: number }
+    blockCacheHitRate: number
+    visibleBlocks: number
+    totalBlocks: number
+    unknownParts: number
+    capabilities: { graphics: string; hyperlinks: boolean; tty: boolean; color: boolean }
+  }
   /** Cognia parity on an external backend; absent on the built-in agent. */
   cogniaParity?: CogniaParityReport
 }
@@ -566,6 +606,10 @@ export type Overlay =
   | {
       kind: "limits"
       snapshots: ProviderLimits[]
+      /** True while provider snapshots are being refreshed in the background. */
+      loading?: boolean
+      /** Correlates background results so an older refresh cannot replace a newer one. */
+      requestId?: number
       analysis: SessionAnalysis
       now: number
       /** Live API rate-limit reading captured this session (optional). */
@@ -603,6 +647,7 @@ export type Overlay =
   // highlighted by `lang`). Used by skill/tool detail and the `/view` file
   // viewer. Scroll position lives in the component (view-only state).
   | { kind: "document"; title: string; body: string; format: DocumentFormat; lang?: string }
+  | { kind: "a2ui"; surface: TuiA2UISurface }
   // Guided argument form. Navigation/edits go through FORM_UPDATE.
   | { kind: "form"; form: FormOverlayState }
   // Plan-approval prompt shown after a plan-mode turn proposes a plan. The user
@@ -954,6 +999,23 @@ export type TuiAction =
   | { type: "INFLIGHT_TEXT"; delta: string }
   | { type: "INFLIGHT_THINKING"; delta: string }
   | {
+      type: "COMMENTARY_DELTA"
+      eventId: string
+      messageId: string
+      delta: string
+      done: boolean
+    }
+  | { type: "CONTENT_PART_UPSERT"; partId: string; part: CanonicalContentPart }
+  | { type: "CONTENT_PART_REMOVE"; partId: string }
+  | {
+      type: "CANONICAL_EVENT_NOTICE"
+      eventId: string
+      level: "info" | "warning" | "error"
+      title: string
+      summary: string
+      ephemeral?: boolean
+    }
+  | {
       type: "TOOL_CALL"
       callKey: string
       toolName: string
@@ -993,6 +1055,9 @@ export type TuiAction =
     }
   // Streaming usage (from the SDK result message, via the capture stream)
   | { type: "SET_USAGE"; usage: UsageInfo }
+  // ACP occupancy snapshots are authoritative for the gauge but are not
+  // billable per-turn totals and therefore must not accumulate session usage.
+  | { type: "SET_CONTEXT_USAGE"; used: number; size: number }
   | { type: "SET_RATE_LIMITS"; snapshot: RateLimitSnapshot }
   // A context-compaction boundary crossed (auto threshold or a manual `/compact`),
   // surfaced from the capture stream / the manual-compact runner.
@@ -1120,6 +1185,7 @@ export type TuiAction =
   | { type: "SET_CONFIG_PATCH"; patch: Partial<ResolvedConfig> }
   // Overlays
   | { type: "OVERLAY_OPEN"; overlay: Overlay }
+  | { type: "LIMITS_LOADED"; requestId: number; snapshots: ProviderLimits[] }
   | { type: "OVERLAY_CLOSE" }
   | { type: "OVERLAY_MOVE"; delta: number }
   | { type: "OVERLAY_SET_INDEX"; index: number }
@@ -1218,6 +1284,8 @@ export type TuiAction =
   | { type: "BACKEND_INSTALL_OUTPUT"; chunk: string }
   /** The install failed — return to the failure page, which shows `message`. */
   | { type: "BACKEND_INSTALL_FAIL"; message: string }
+  /** The operator cancelled the install — return to recovery without an error. */
+  | { type: "BACKEND_INSTALL_CANCEL" }
   /** Switch the active backend id. Clears the capabilities that belonged to the
    * previous one so nothing renders stale support while the next connect runs. */
   | { type: "SET_BACKEND"; backend: string }

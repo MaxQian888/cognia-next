@@ -1,21 +1,21 @@
 ---
 title: Agent Sync & Health
-description: How Cognia mirrors MCP servers into seven external CLIs and verifies they actually work — the appsEnabled projection matrix, agent chips and status bar, drift detection (missing vs unmanaged) with one-click re-sync, the Rust mcp_test.rs connection probe (stdio/http/sse handshake → tool list), and the 5000-row mcpAuditLog feeding the Health tab.
+description: Durable Agent projection, sidecar Runtime Gateway discovery, guarded remote Anthropic relays, and persisted per-server operations in the MCP Health view.
 ---
 
 # Agent Sync & Health
 
-<Status variant="stable">Stable · 7 writable + 2 read-only agents · `mcp_test.rs` · `mcpAuditLog` (cap 5000)</Status>
+<Status variant="stable">Stable · durable `mcpSyncJobs` · sidecar Runtime Gateway · `mcpAuditLog` (10k / 30d)</Status>
 
 <TLDR>
   Each `McpServer` row carries an `appsEnabled` matrix mapping `AgentId → boolean`. When you flip a chip,
   the CRUD layer debounces a write of that server into the agent's on-disk MCP config (`lib/claude/sync`).
   Because files can drift from Cognia's view (hand-edits, failed syncs), `use-agent-status` computes
   per-agent **drift** — `missing` (projected but absent from file) and `unmanaged` (in file, unknown to
-  Cognia) — surfaced by the **drift banner** with a one-click re-sync. Separately, the **test** button
-  runs a Rust probe (`mcp_test.rs`) that performs a real `initialize → tools/list` handshake over the
-  configured transport and returns the tool count. The **Health tab** shows the inbound External-Bridge
-  server status plus the `mcpAuditLog` — every bridge call, allowed or denied, capped at 5000 rows.
+  Cognia) — surfaced by the **drift banner** with a one-click re-sync. The **test** button uses the
+  sidecar Runtime Gateway for guarded capability discovery. The **Health tab** combines live runtime
+  counters with persisted per-server failure rate, connect p95, capability freshness, Agent sync lag,
+  inbound External-Bridge status, and the content-free `mcpAuditLog`.
 </TLDR>
 
 ## The projection matrix
@@ -87,49 +87,24 @@ const onResync = async (agentId: AgentId) => {
 The **agent status bar** (`mcp-agent-status-bar.tsx`) is the Agents-tab header: per-agent file path,
 in-file count vs projected count (amber when they disagree), and a per-agent + a sync-all button.
 
-## The connection probe (`mcp_test.rs`)
+## Sidecar Runtime Gateway discovery
 
-The **Test** button on each server card calls the Rust command `test_mcp_server`
-(`src-tauri/src/claude/mcp_test.rs:38`). It spawns/connects the configured transport, walks the MCP
-handshake, captures the tool list, and tears everything down — with a 10-second handshake timeout:
+The **Test** button and workflow tool picker call `discoverMcpServerViaSidecar`. The trusted host
+checks policy and resolves `SecretRef` values, then the allowlisted `mcp-discover` feature call reaches
+`sidecar/dispatch/mcp-runtime-gateway.mjs`. Discovery uses the official stdio, Streamable HTTP, and
+legacy SSE transports, has a 15-second connect/list timeout, never retries tool calls, and always closes
+the client and DNS-guard dispatcher. The former hand-written Rust `test_mcp_server` command and its
+Companion/Tauri permission surface have been removed.
 
-```rust title="src-tauri/src/claude/mcp_test.rs:21"
-pub struct McpTestResult {
-    pub ok: bool,
-    pub tool_count: usize,
-    pub tools: Vec<McpToolInfo>,
-    pub error: Option<String>,
-    pub duration_ms: u64,
-}
-```
-
-All three transports run the same JSON-RPC sequence — `initialize` (protocol `2024-11-05`) →
-`notifications/initialized` → `tools/list`:
-
-```rust title="src-tauri/src/claude/mcp_test.rs:107"
-write_jsonrpc(&mut writer, &serde_json::json!({
-  "jsonrpc": "2.0", "id": 1, "method": "initialize",
-  "params": {
-    "protocolVersion": "2024-11-05",
-    "capabilities": {},
-    "clientInfo": { "name": "cognia", "version": "0.1" }
-  }
-})).await?;
-```
-
-| Transport | Function | Notes |
-| --------- | -------- | ----- |
-| stdio | `test_stdio` (82) | spawns child with piped stdin/stdout; always kills on exit (181) |
-| http | `test_streamable_http` (233) | POST JSON-RPC; handles `application/json` *and* `text/event-stream`; echoes `mcp-session-id` |
-| sse | `test_sse` (385) | legacy: reads `endpoint` event, then POSTs to it, reads replies off the SSE stream |
-
-The result populates the card's test badge (tool count or error).
+Remote Anthropic Agent SDK entries are converted to SDK-managed stdio relays. The SDK still owns the
+child lifecycle and reconnect behavior, while `mcp-stdio-relay.mjs` owns the upstream HTTP/SSE socket
+and applies the same guarded Undici DNS lookup used by AI SDK and OAuth, closing the rebinding gap.
 
 ## The audit log
 
-`lib/db/mcp-audit-log.ts` records every **inbound** External-Bridge call into the `mcpAuditLog` Dexie
-table (row type `McpAuditLogRow`, `types/wiki/index.ts:264`): timestamp, tool/method, scope, allow/deny,
-latency, and optional reason/error. It is capped at 5000 rows, pruned in the same transaction as each
+`lib/db/mcp-audit-log.ts` records content-free **outbound and inbound** MCP operations into the `mcpAuditLog` Dexie
+table (row type `McpAuditLogRow`, `types/wiki/index.ts:264`): timestamp, phase, server, surface,
+decision, duration, and bounded error code. It is capped at 10,000 rows or 30 days, pruned in the same transaction as each
 append:
 
 ```typescript title="lib/db/mcp-audit-log.ts:27"
@@ -138,7 +113,7 @@ export async function appendMcpAuditLog(draft: McpAuditDraft): Promise<McpAuditL
   const row: McpAuditLogRow = { id: draft.id ?? newId(), ...draft }
   await db.transaction("rw", db.mcpAuditLog, async () => {
     await db.mcpAuditLog.add(row)
-    await pruneOldest(AUDIT_CAP) // AUDIT_CAP = 5000
+    await pruneOldest(AUDIT_CAP) // AUDIT_CAP = 10_000
   })
   return row
 }
@@ -150,9 +125,10 @@ export async function appendMcpAuditLog(draft: McpAuditDraft): Promise<McpAuditL
 
 ### Health tab
 
-`components/settings/mcp/mcp-health-tab.tsx` (desktop-only) shows the inbound bridge server status
-(running/port/startedAt via `getMcpServerStatus`) and renders the audit log as a table —
-timestamp · tool · scope · allowed/denied badge · latency — with a denied-only filter and a clear button.
+`components/settings/mcp/mcp-health-tab.tsx` reads one `loadMcpOperationsSnapshot` projection over
+`mcpServers`, `mcpAuditLog`, `mcpCapabilityCache`, and `mcpSyncJobs`. It renders per-server failure rate,
+connect p95, capability freshness, and Agent sync lag beside the live Gateway counters. The inbound
+bridge status and recent audit table remain separate sections in the same view.
 
 ```tsx title="components/settings/mcp/mcp-health-tab.tsx:44"
 const refreshStatus = useCallback(async () => {
@@ -163,8 +139,8 @@ const refreshStatus = useCallback(async () => {
 }, [])
 ```
 
-> The audit log and bridge status here belong to the **inbound** server (Cognia AS an MCP server). Their
-> producer side lives in the [External Bridge](../external-bridge) subsystem; this tab is the consumer view.
+> Outbound and inbound events share the audit vocabulary, not raw payloads or lifecycle ownership. The
+> [External Bridge](../external-bridge) remains a separate inbound trust plane.
 
 ## Flow
 
@@ -181,10 +157,10 @@ flowchart TB
   Banner -->|Re-sync| Sync
   Sync --> Files
 
-  Test["Test button"] -->|serverToTestRequest| Probe["mcp_test.rs<br/>initialize → tools/list"]
-  Probe --> Badge["✓ N tools / ✗ error"]
+  Test["Test button"] --> Gateway["sidecar Runtime Gateway<br/>tools/resources/prompts"]
+  Gateway --> Badge["✓ N tools / ✗ error"]
 
-  Bridge["External Bridge call"] -->|append| Audit[("mcpAuditLog cap 5000")]
+  Bridge["External Bridge call"] -->|append| Audit[("mcpAuditLog 10k / 30d")]
   Audit --> Health["Health tab table"]
 ```
 

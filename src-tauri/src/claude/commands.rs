@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 use tracing::Instrument as _;
 
 use super::host::{SidecarHost, TauriSidecarHost};
-use super::sidecar::{emit_hook_fire, spawn as spawn_sidecar, SidecarState};
+use super::sidecar::{spawn as spawn_sidecar, SidecarState};
 use crate::hooks;
 
 /// Options the frontend can pass per-send. Mirrors a subset of the SDK's
@@ -312,12 +312,15 @@ pub async fn agent_send(
     .await
 }
 
+// The `agent_*` commands accept the renderer's idempotency key; the deprecated
+// `claude_*` aliases do not, because nothing that calls them stamps one.
 #[tauri::command]
 pub async fn agent_interrupt(
     state: State<'_, SidecarState>,
     session_id: String,
+    command_id: Option<String>,
 ) -> Result<(), String> {
-    claude_interrupt_impl(&state, session_id).await
+    claude_interrupt_impl_with_id(&state, session_id, command_id).await
 }
 
 #[tauri::command]
@@ -325,8 +328,9 @@ pub async fn agent_compact(
     state: State<'_, SidecarState>,
     session_id: String,
     focus: Option<String>,
+    command_id: Option<String>,
 ) -> Result<(), String> {
-    claude_compact_impl(&state, session_id, focus).await
+    claude_compact_impl_with_id(&state, session_id, focus, command_id).await
 }
 
 #[tauri::command]
@@ -337,14 +341,20 @@ pub async fn agent_resolve_permission(
     decision: String,
     message: Option<String>,
     updated_input: Option<Value>,
+    command_id: Option<String>,
+    // Deny only: end the turn instead of letting the model route around the
+    // refusal. Absent means a plain refusal, which is the safe default.
+    interrupt: Option<bool>,
 ) -> Result<(), String> {
-    claude_approve_impl(
+    claude_approve_impl_with_id(
         &state,
         session_id,
         request_id,
         decision,
         message,
         updated_input,
+        command_id,
+        interrupt,
     )
     .await
 }
@@ -353,8 +363,9 @@ pub async fn agent_resolve_permission(
 pub async fn agent_close_session(
     state: State<'_, SidecarState>,
     session_id: String,
+    command_id: Option<String>,
 ) -> Result<(), String> {
-    claude_close_session_impl(&state, session_id).await
+    claude_close_session_impl_with_id(&state, session_id, command_id).await
 }
 
 #[tauri::command]
@@ -415,67 +426,26 @@ pub async fn claude_send_with_host(
         None => Value::Object(Default::default()),
     };
 
-    // ---- UserPromptSubmit hooks ---------------------------------------------
-    // Run before the prompt reaches the SDK so a hook can short-circuit the
-    // turn entirely. The hook receives the raw prompt + cwd; if it blocks, we
-    // surface the reason as the IPC error. AdditionalContext is appended via
-    // an `appendSystemPrompt`-style merge — it lands in front of the user
-    // message rather than the system prompt because that matches the CLI's
-    // documented semantics for UserPromptSubmit.
+    // Resolve trusted settings once and inject them into the SDK-native hook
+    // pipeline. The SDK owns every built-in lifecycle event, including
+    // UserPromptSubmit. Running that event here as well would execute each
+    // configured handler twice because `buildAgentHooks` registers all SDK
+    // lifecycle events.
     let cwd = opts_value
         .get("cwd")
         .and_then(|v| v.as_str())
         .map(String::from);
     // Remember the send-time cwd so the sidecar's lifecycle-hook observer can
     // resolve project/local-scope settings for this session's later events.
-    state.register_session_cwd(&session_id, cwd.clone()).await;
-    let prompt_text = extract_prompt_text(&prompt);
     // Project/local hooks load only for a trusted cwd; untrusted → user scope.
     let trusted_cwd = hooks::trust::resolve_trusted_cwd(cwd.as_deref());
     let settings = hooks::load_effective_settings(trusted_cwd.as_deref());
 
-    // Convergence (ADR-0040 follow-up): hand the trusted, merged settings.json
-    // hooks to the sidecar so it runs tool-scoped hooks (PreToolUse / PostToolUse
-    // / PostToolUseFailure) as SDK-native `options.hooks` — where `updatedInput`
-    // / `updatedToolOutput` and blocking work in-process. Injected HERE, HOST-side,
-    // AFTER the trust gate, so a compromised renderer cannot smuggle untrusted
-    // project hooks in via `options`. Session-scoped events (UserPromptSubmit
-    // below, and the observational lifecycle hooks) stay HOST-run in this phase;
-    // the sidecar's `buildAgentHooks` only registers the tool-scoped events, so
-    // passing the full config causes no double-firing.
+    // Injected host-side after the trust gate, so a compromised renderer cannot
+    // smuggle untrusted project hooks through `options`.
     if let Some(hooks_value) = settings.merged.hooks.clone() {
         if let Value::Object(map) = &mut opts_value {
             map.insert("hooks".to_string(), hooks_value);
-        }
-    }
-
-    let mut prompt = prompt;
-    if !prompt_text.is_empty() {
-        let decision = hooks::run_user_prompt_submit(
-            &settings,
-            &session_id,
-            trusted_cwd.as_deref(),
-            &prompt_text,
-        )
-        .await;
-        // Surface a consequential UserPromptSubmit fire as a hook row before the
-        // decision fields are consumed below (block short-circuits the turn,
-        // additional_context is folded into the prompt).
-        emit_hook_fire(
-            host.as_ref(),
-            &session_id,
-            &hooks::hook_event_name(hooks::HookEvent::UserPromptSubmit),
-            None,
-            &decision,
-        );
-        if let Some(reason) = decision.block {
-            return Err(format!("hook blocked: {reason}"));
-        }
-        if let Some(extra) = decision.additional_context {
-            prompt = prepend_context_to_prompt(&prompt, &extra);
-        }
-        for w in decision.warnings {
-            log::warn!("UserPromptSubmit: {w}");
         }
     }
 
@@ -488,49 +458,6 @@ pub async fn claude_send_with_host(
     state.write_command(&msg).await
 }
 
-/// Extract a flat text representation of `prompt` for hook payloads. Strings
-/// pass through; arrays of content blocks are joined on the `text` blocks.
-fn extract_prompt_text(prompt: &Value) -> String {
-    if let Some(s) = prompt.as_str() {
-        return s.to_string();
-    }
-    if let Some(arr) = prompt.as_array() {
-        let mut buf = String::new();
-        for block in arr {
-            if block.get("type").and_then(|v| v.as_str()) == Some("text") {
-                if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
-                    if !buf.is_empty() {
-                        buf.push('\n');
-                    }
-                    buf.push_str(t);
-                }
-            }
-        }
-        return buf;
-    }
-    String::new()
-}
-
-/// Prepend hook-supplied additional context to a prompt. For string prompts
-/// we wrap the context in an `<additional-context>` block so the model can
-/// treat it as a system-style insertion. For multimodal prompts we insert a
-/// new text block at index 0.
-fn prepend_context_to_prompt(prompt: &Value, extra: &str) -> Value {
-    let wrapped = format!("<additional-context>\n{}\n</additional-context>\n\n", extra);
-    if let Some(s) = prompt.as_str() {
-        return Value::String(format!("{wrapped}{s}"));
-    }
-    if let Some(arr) = prompt.as_array() {
-        let mut blocks: Vec<Value> = vec![json!({
-          "type": "text",
-          "text": wrapped.trim_end().to_string(),
-        })];
-        blocks.extend(arr.iter().cloned());
-        return Value::Array(blocks);
-    }
-    prompt.clone()
-}
-
 // ---------------------------------------------------------------------------
 // Host-generic command bodies (ADR-0059 R7)
 //
@@ -539,8 +466,38 @@ fn prepend_context_to_prompt(prompt: &Value, extra: &str) -> Value {
 // `#[tauri::command]` wrappers delegate so desktop behavior is unchanged.
 // ---------------------------------------------------------------------------
 
+/// Attach the renderer's idempotency key to an outgoing sidecar command.
+///
+/// The sidecar dedupes on `commandId` (`agent-host.mjs:dropDuplicateCommand`),
+/// and `AgentExecutionHandle` has always stamped one — but the `agent_*`
+/// commands never DECLARED the parameter, so Tauri dropped it before the
+/// payload was built. Deduplication was therefore dead from the desktop
+/// renderer: a retried permission response was applied twice.
+///
+/// Optional because legacy `claude_*` callers do not stamp one, and a command
+/// with no id must still be delivered (just not deduped).
+fn with_command_id(mut msg: Value, command_id: Option<String>) -> Value {
+    if let (Some(obj), Some(id)) = (msg.as_object_mut(), command_id) {
+        if !id.is_empty() {
+            obj.insert("commandId".into(), Value::String(id));
+        }
+    }
+    msg
+}
+
 pub async fn claude_interrupt_impl(state: &SidecarState, session_id: String) -> Result<(), String> {
-    let msg = json!({ "type": "interrupt", "sessionId": session_id });
+    claude_interrupt_impl_with_id(state, session_id, None).await
+}
+
+pub async fn claude_interrupt_impl_with_id(
+    state: &SidecarState,
+    session_id: String,
+    command_id: Option<String>,
+) -> Result<(), String> {
+    let msg = with_command_id(
+        json!({ "type": "interrupt", "sessionId": session_id }),
+        command_id,
+    );
     state.write_command(&msg).await
 }
 
@@ -549,7 +506,19 @@ pub async fn claude_compact_impl(
     session_id: String,
     focus: Option<String>,
 ) -> Result<(), String> {
-    let msg = json!({ "type": "compact", "sessionId": session_id, "focus": focus });
+    claude_compact_impl_with_id(state, session_id, focus, None).await
+}
+
+pub async fn claude_compact_impl_with_id(
+    state: &SidecarState,
+    session_id: String,
+    focus: Option<String>,
+    command_id: Option<String>,
+) -> Result<(), String> {
+    let msg = with_command_id(
+        json!({ "type": "compact", "sessionId": session_id, "focus": focus }),
+        command_id,
+    );
     state.write_command(&msg).await
 }
 
@@ -561,18 +530,46 @@ pub async fn claude_approve_impl(
     message: Option<String>,
     updated_input: Option<Value>,
 ) -> Result<(), String> {
+    claude_approve_impl_with_id(
+        state,
+        session_id,
+        request_id,
+        decision,
+        message,
+        updated_input,
+        None,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn claude_approve_impl_with_id(
+    state: &SidecarState,
+    session_id: String,
+    request_id: String,
+    decision: String,
+    message: Option<String>,
+    updated_input: Option<Value>,
+    command_id: Option<String>,
+    interrupt: Option<bool>,
+) -> Result<(), String> {
     let valid = matches!(decision.as_str(), "allow" | "allow_always" | "deny");
     if !valid {
         return Err(format!("invalid decision: {decision}"));
     }
-    let payload = json!({
-      "type": "permission_response",
-      "sessionId": session_id,
-      "requestId": request_id,
-      "decision": decision,
-      "message": message,
-      "updatedInput": updated_input,
-    });
+    let payload = with_command_id(
+        json!({
+          "type": "permission_response",
+          "sessionId": session_id,
+          "requestId": request_id,
+          "decision": decision,
+          "message": message,
+          "updatedInput": updated_input,
+          "interrupt": interrupt,
+        }),
+        command_id,
+    );
     state.write_command(&payload).await
 }
 
@@ -580,7 +577,18 @@ pub async fn claude_close_session_impl(
     state: &SidecarState,
     session_id: String,
 ) -> Result<(), String> {
-    let msg = json!({ "type": "close", "sessionId": session_id });
+    claude_close_session_impl_with_id(state, session_id, None).await
+}
+
+pub async fn claude_close_session_impl_with_id(
+    state: &SidecarState,
+    session_id: String,
+    command_id: Option<String>,
+) -> Result<(), String> {
+    let msg = with_command_id(
+        json!({ "type": "close", "sessionId": session_id }),
+        command_id,
+    );
     state.write_command(&msg).await
 }
 
@@ -700,14 +708,29 @@ pub async fn claude_close_session(
 pub fn is_allowed_control_method(method: &str) -> bool {
     matches!(
         method,
-        "getContextUsage"
+        "accountInfo"
+            | "applyFlagSettings"
+            | "backgroundTasks"
+            | "getContextUsage"
+            | "initializationResult"
             | "mcpServerStatus"
+            | "readFile"
             | "reconnectMcpServer"
-            | "toggleMcpServer"
-            | "supportedModels"
-            | "supportedCommands"
+            | "reinitialize"
+            | "reloadPlugins"
+            | "reloadSkills"
+            | "rewindFiles"
+            | "seedReadState"
+            | "setMaxThinkingTokens"
+            | "setMcpPermissionModeOverride"
+            | "setMcpServers"
             | "setModel"
             | "steer"
+            | "stopTask"
+            | "supportedAgents"
+            | "supportedCommands"
+            | "supportedModels"
+            | "toggleMcpServer"
     )
 }
 
@@ -749,6 +772,76 @@ pub async fn claude_session_control(
     state.write_command(&payload).await
 }
 
+/// Allowlisted session-level Claude Agent SDK functions the renderer may drive
+/// (see `sidecar/dispatch/session-api.mjs`). Kept separate from
+/// [`is_allowed_control_method`] because these are module-level SDK exports
+/// that operate on transcripts with no live session — five of them MUTATE a
+/// user's session files, so an over-broad allowlist here deletes data rather
+/// than merely erroring.
+pub fn is_allowed_session_api_method(method: &str) -> bool {
+    matches!(
+        method,
+        "deleteSession"
+            | "forkSession"
+            | "getSessionInfo"
+            | "getSessionMessages"
+            | "getSubagentMessages"
+            | "importSessionToStore"
+            | "listSessions"
+            | "listSubagents"
+            | "renameSession"
+            | "resolveSettings"
+            | "tagSession"
+    )
+}
+
+/// Build the `session_api` JSON line written to the sidecar stdin. Pure so it
+/// is unit-testable without a running sidecar.
+fn build_session_api_payload(
+    request_id: String,
+    method: String,
+    params: Option<Value>,
+    send_options: Option<Value>,
+) -> Value {
+    json!({
+        "type": "session_api",
+        "requestId": request_id,
+        "method": method,
+        "params": params,
+        // Names the SessionStore backend for this call. The sidecar resolves it
+        // to a live store; it never accepts a store from the renderer.
+        "sendOptions": send_options,
+    })
+}
+
+/// Call a session-level SDK function. Fire-and-forget over stdin — the sidecar
+/// replies asynchronously with a `session_api_response` event (correlated by
+/// `request_id`) that the renderer settles via `lib/claude/ipc.ts:sessionApi`.
+///
+/// Unlike [`claude_session_control`] this spawns the sidecar if it is not
+/// already up: these calls are the only way to reach a session's transcripts,
+/// and requiring a live chat first would make session management unreachable
+/// from Settings on a cold start.
+#[tauri::command]
+pub async fn agent_session_api(
+    app: AppHandle,
+    state: State<'_, SidecarState>,
+    request_id: String,
+    method: String,
+    params: Option<Value>,
+    send_options: Option<Value>,
+) -> Result<(), String> {
+    if request_id.is_empty() {
+        return Err("agent_session_api: requestId must not be empty".into());
+    }
+    if !is_allowed_session_api_method(&method) {
+        return Err(format!("unsupported session api method: {method}"));
+    }
+    spawn_sidecar(Arc::new(TauriSidecarHost(app)), state.inner().clone()).await?;
+    let payload = build_session_api_payload(request_id, method, params, send_options);
+    state.write_command(&payload).await
+}
+
 fn build_feature_call_payload(mut request: Value) -> Result<Value, String> {
     let object = request
         .as_object_mut()
@@ -771,6 +864,7 @@ fn build_feature_call_payload(mut request: Value) -> Result<Value, String> {
             | "embedding"
             | "bedrock-discover"
             | "opencode-v2-discover"
+            | "mcp-discover"
     ) {
         return Err(format!("unsupported feature call operation: {operation}"));
     }
@@ -975,6 +1069,8 @@ mod tests {
 
         let host = RecordingSidecarHost::with_script(script);
         let state = SidecarState::new();
+        crate::proxy_config::apply_current(Default::default())
+            .expect("test sidecar must start with an explicit direct proxy policy");
 
         claude_send_with_host(
             host.clone(),
@@ -1026,6 +1122,32 @@ mod tests {
     }
 
     #[test]
+    fn attaches_the_renderer_idempotency_key_when_one_was_sent() {
+        let msg = with_command_id(
+            json!({ "type": "close", "sessionId": "s1" }),
+            Some("cmd-7-abc".into()),
+        );
+        assert_eq!(msg["commandId"], "cmd-7-abc");
+        assert_eq!(msg["type"], "close");
+    }
+
+    #[test]
+    fn omits_the_key_entirely_when_absent_or_empty() {
+        // The sidecar's dedupe is keyed on presence; an empty string would be a
+        // key every command shares, collapsing unrelated commands into one.
+        for id in [None, Some(String::new())] {
+            let msg = with_command_id(json!({ "type": "interrupt", "sessionId": "s1" }), id);
+            assert!(msg.get("commandId").is_none());
+        }
+    }
+
+    #[test]
+    fn leaves_a_non_object_payload_untouched() {
+        let msg = with_command_id(json!("not-an-object"), Some("cmd-1".into()));
+        assert_eq!(msg, json!("not-an-object"));
+    }
+
+    #[test]
     fn accepts_every_live_execution_spec_version() {
         for version in SUPPORTED_EXECUTION_SPEC_VERSION_MIN..=SUPPORTED_EXECUTION_SPEC_VERSION_MAX {
             let spec = json!({ "specVersion": version, "runtimeAdapter": "claude-agent-sdk" });
@@ -1064,20 +1186,42 @@ mod tests {
     #[test]
     fn allows_only_known_control_methods() {
         for m in [
+            "accountInfo",
+            "applyFlagSettings",
+            "backgroundTasks",
             "getContextUsage",
+            "initializationResult",
             "mcpServerStatus",
+            "readFile",
             "reconnectMcpServer",
-            "toggleMcpServer",
-            "supportedModels",
-            "supportedCommands",
+            "reinitialize",
+            "reloadPlugins",
+            "reloadSkills",
+            "rewindFiles",
+            "seedReadState",
+            "setMaxThinkingTokens",
+            "setMcpPermissionModeOverride",
+            "setMcpServers",
             "setModel",
             "steer",
+            "stopTask",
+            "supportedAgents",
+            "supportedCommands",
+            "supportedModels",
+            "toggleMcpServer",
         ] {
             assert!(is_allowed_control_method(m), "{m} should be allowed");
         }
         for m in [
+            // `close` and `interrupt` are real Query methods reached through
+            // their own commands; admitting them here would give the control
+            // frame a second, unaudited way to end a session.
             "close",
             "interrupt",
+            "setPermissionMode",
+            // Declared `not-exposed` in protocol/agent-control-methods.json.
+            "streamInput",
+            "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET",
             "evalSync",
             "__proto__",
             "",
@@ -1112,6 +1256,67 @@ mod tests {
         );
         assert_eq!(p["method"], "getContextUsage");
         assert!(p["params"].is_null());
+    }
+
+    #[test]
+    fn allows_only_known_session_api_methods() {
+        for m in [
+            "deleteSession",
+            "forkSession",
+            "getSessionInfo",
+            "getSessionMessages",
+            "getSubagentMessages",
+            "importSessionToStore",
+            "listSessions",
+            "listSubagents",
+            "renameSession",
+            "resolveSettings",
+            "tagSession",
+        ] {
+            assert!(is_allowed_session_api_method(m), "{m} should be allowed");
+        }
+        for m in [
+            // Control methods travel on the `control` frame; letting them in
+            // here would be a second, unaudited route to a live query.
+            "setModel",
+            "steer",
+            "interrupt",
+            // Not SDK session functions at all.
+            "query",
+            "startup",
+            "__proto__",
+            "",
+            "deleteSessions",
+        ] {
+            assert!(!is_allowed_session_api_method(m), "{m} should be rejected");
+        }
+    }
+
+    #[test]
+    fn builds_session_api_payload_carrying_params_and_send_options() {
+        let p = build_session_api_payload(
+            "req9".into(),
+            "renameSession".into(),
+            Some(json!({ "sessionId": "s1", "title": "New" })),
+            Some(json!({ "cwd": "/w" })),
+        );
+        assert_eq!(p["type"], "session_api");
+        assert_eq!(p["requestId"], "req9");
+        assert_eq!(p["method"], "renameSession");
+        assert_eq!(p["params"]["title"], "New");
+        // The frame names the store BACKEND via sendOptions; the sidecar
+        // resolves it. A `sessionId` on the frame itself would be meaningless —
+        // these calls run without a live session.
+        assert_eq!(p["sendOptions"]["cwd"], "/w");
+        assert!(p.get("sessionId").is_none());
+    }
+
+    #[test]
+    fn builds_session_api_payload_without_params_or_send_options() {
+        let p = build_session_api_payload("req10".into(), "listSessions".into(), None, None);
+        assert_eq!(p["method"], "listSessions");
+        assert!(p["params"].is_null());
+        assert!(p["sendOptions"].is_null());
     }
 
     #[test]
@@ -1418,6 +1623,11 @@ mod tests {
         assert!(build_feature_call_payload(json!({
             "requestId": "request-3",
             "operation": "opencode-v2-discover"
+        }))
+        .is_ok());
+        assert!(build_feature_call_payload(json!({
+            "requestId": "request-4",
+            "operation": "mcp-discover"
         }))
         .is_ok());
     }

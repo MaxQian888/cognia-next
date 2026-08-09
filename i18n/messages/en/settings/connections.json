@@ -640,12 +640,45 @@
     "appSecretPlaceholder": "App secret…",
     "appSecretRequired": "App Secret is required.",
     "atStrategy": {
+      "activationTtl": {
+        "help": "How long the conversation stays activated after the last inbound message.",
+        "label": "Activation TTL (hours)"
+      },
       "defaultNotice": "Default — change to suit this bot's role.",
+      "diagnostics": {
+        "capabilities": "Capabilities: topic={topic}, streaming={stream}, mutation={mutate}",
+        "effective": "Effective policy: {value}",
+        "no": "No",
+        "requested": "Requested policy: {value}",
+        "title": "Runtime diagnostics",
+        "unverifiedFallback": "Falling back because delivery is unverified.",
+        "yes": "Yes"
+      },
+      "dispatch": {
+        "help": "How active runs are dispatched for this adapter.",
+        "options": {
+          "inherit": "Inherit",
+          "queue": "Queue",
+          "steer": "Steer"
+        },
+        "title": "Dispatch mode"
+      },
       "help": "Controls when the bot responds in group chats. DMs always pass regardless of the strategy.",
       "options": {
         "always": "Always respond to every message",
         "directOnly": "Direct messages only — never respond in groups",
         "mentionOnly": "Mention only — require @bot in groups (default)"
+      },
+      "readiness": {
+        "help": "Whether the adapter can verify every message delivery.",
+        "startProbe": "Start readiness probe",
+        "states": {
+          "all_messages_verified": "All messages verified",
+          "mentions_only_verified": "Mentions only verified",
+          "none_verified": "None verified",
+          "unknown": "Unknown"
+        },
+        "title": "Delivery readiness"
       },
       "sibling": {
         "budgetAria": "Sibling bot reply budget per chat per hour",
@@ -658,40 +691,7 @@
         },
         "title": "Sibling bots"
       },
-      "title": "Mention strategy",
-      "dispatch": {
-        "title": "Dispatch mode",
-        "help": "How active runs are dispatched for this adapter.",
-        "options": {
-          "inherit": "Inherit",
-          "queue": "Queue",
-          "steer": "Steer"
-        }
-      },
-      "activationTtl": {
-        "label": "Activation TTL (hours)",
-        "help": "How long the conversation stays activated after the last inbound message."
-      },
-      "readiness": {
-        "title": "Delivery readiness",
-        "help": "Whether the adapter can verify every message delivery.",
-        "states": {
-          "unknown": "Unknown",
-          "all_messages_verified": "All messages verified",
-          "mentions_only_verified": "Mentions only verified",
-          "none_verified": "None verified"
-        },
-        "startProbe": "Start readiness probe"
-      },
-      "diagnostics": {
-        "title": "Runtime diagnostics",
-        "requested": "Requested policy: {value}",
-        "effective": "Effective policy: {value}",
-        "unverifiedFallback": "Falling back because delivery is unverified.",
-        "capabilities": "Capabilities: topic={topic}, streaming={stream}, mutation={mutate}",
-        "yes": "Yes",
-        "no": "No"
-      }
+      "title": "Mention strategy"
     },
     "authorizeButton": "Connect account",
     "authorizeNeedsAppId": "Save the App ID first — authorization needs it.",
@@ -719,35 +719,21 @@
     "encryptionEnabledHelp": "Turn on when Lark App → Event subscriptions → Encrypt Key is configured.",
     "encryptionEnabledLabel": "Encrypted events",
     "entrySurfaces": {
-      "title": "Web entry & Lark surfaces",
-      "webBaseLabel": "Web entry base URL",
-      "webBaseHelp": "Public https URL of the Cognia web app reachable from inside Lark clients. Chat Tab / menu links and SSO bounces are built on it; leave empty to keep external links disabled.",
-      "webBasePlaceholder": "https://cognia.example.com",
-      "flagsLabel": "Entry feature flags (this adapter)",
-      "flagsHelp": "Per-adapter overrides for the gray release. Unset flags fall back to environment / global defaults (all off).",
       "flag": {
-        "larkPrincipalRegistry": "Principal registry (unified identity)",
-        "larkWebSso": "Web SSO login",
         "larkChatTab": "Chat Tab sync",
         "larkGroupMenu": "Group menu sync",
-        "larkNativeSlash": "Command menu batch",
         "larkMessageShortcut": "Message shortcut import",
-        "larkPlusMenu": "Plus-menu new task"
+        "larkNativeSlash": "Command menu batch",
+        "larkPlusMenu": "Plus-menu new task",
+        "larkPrincipalRegistry": "Principal registry (unified identity)",
+        "larkWebSso": "Web SSO login"
       },
-      "strictAuthLabel": "Callback authorization mode",
-      "strictAuthHelp": "audit runs every check and records would-deny decisions without blocking; enforce blocks them. Flip to enforce only after the audit stream is quiet (see the runbook).",
-      "strictAuth": {
-        "off": "Off",
-        "audit": "Audit",
-        "enforce": "Enforce"
-      },
-      "surfacesLabel": "Chat surfaces",
-      "surfacesEmpty": "No chat surfaces recorded yet — they appear when the bot is added to chats with Chat Tab / group menu enabled.",
+      "flagsHelp": "Per-adapter overrides for the gray release. Unset flags fall back to environment / global defaults (all off).",
+      "flagsLabel": "Entry feature flags (this adapter)",
       "resync": "Resync surfaces",
-      "resyncing": "Resyncing…",
       "resyncDone": "Resync finished: {synced} synced, {errors} failed, {skipped} skipped.",
       "resyncFailed": "Resync failed. Check the adapter credentials and try again.",
-      "statusAria": "Surface status",
+      "resyncing": "Resyncing…",
       "status": {
         "blocked": "Blocked",
         "error": "Error",
@@ -755,7 +741,21 @@
         "rebuild_required": "Rebuild required",
         "removed": "Removed",
         "synced": "Synced"
-      }
+      },
+      "statusAria": "Surface status",
+      "strictAuth": {
+        "audit": "Audit",
+        "enforce": "Enforce",
+        "off": "Off"
+      },
+      "strictAuthHelp": "audit runs every check and records would-deny decisions without blocking; enforce blocks them. Flip to enforce only after the audit stream is quiet (see the runbook).",
+      "strictAuthLabel": "Callback authorization mode",
+      "surfacesEmpty": "No chat surfaces recorded yet — they appear when the bot is added to chats with Chat Tab / group menu enabled.",
+      "surfacesLabel": "Chat surfaces",
+      "title": "Web entry & Lark surfaces",
+      "webBaseHelp": "Public https URL of the Cognia web app reachable from inside Lark clients. Chat Tab / menu links and SSO bounces are built on it; leave empty to keep external links disabled.",
+      "webBaseLabel": "Web entry base URL",
+      "webBasePlaceholder": "https://cognia.example.com"
     },
     "openCompanion": "Open Companion settings",
     "openCompanionAria": "Open Mobile Companion → Tunnel",
@@ -763,37 +763,37 @@
     "openConsoleAria": "Open Lark Open Platform → Event subscriptions for this app",
     "openConsoleSecurityAria": "Open Lark Open Platform → Security settings for this app",
     "principals": {
-      "title": "Feishu identity registry",
+      "actionFailed": "Action failed: {reason}",
       "help": "Maps tenant + app + open_id to this Cognia account. With the principal registry flag on, only bound people can run anything — everyone else is parked with a bind code.",
-      "tenantLabel": "Tenant",
-      "tenantUnknown": "Tenant unknown — run the bot identity probe and wait for one inbound event so the tenant key is known.",
-      "tenantUnregistered": "Not registered yet. Registering admits this tenant and binds it to the current account.",
-      "tenantRegister": "Register tenant",
-      "tenantDisable": "Disable tenant",
-      "tenantEnable": "Enable tenant",
-      "tenantStatus": {
-        "active": "Active",
-        "disabled": "Disabled"
-      },
-      "requestsLabel": "Pending bind requests",
-      "requestsEmpty": "No pending bind requests.",
-      "requestApprove": "Approve",
-      "requestReject": "Reject",
-      "requestApproveAria": "Approve bind request {code}",
-      "requestRejectAria": "Reject bind request {code}",
-      "principalsLabel": "Bound principals",
-      "principalsEmpty": "No principals bound yet.",
       "principalDisable": "Disable",
       "principalEnable": "Enable",
-      "principalUnlink": "Unlink",
       "principalStatus": {
         "active": "Active",
         "disabled": "Disabled",
         "unlinked": "Unlinked"
       },
       "principalStatusAria": "Principal status",
-      "actionFailed": "Action failed: {reason}",
-      "seeded": "Registry seeded from existing contacts."
+      "principalUnlink": "Unlink",
+      "principalsEmpty": "No principals bound yet.",
+      "principalsLabel": "Bound principals",
+      "requestApprove": "Approve",
+      "requestApproveAria": "Approve bind request {code}",
+      "requestReject": "Reject",
+      "requestRejectAria": "Reject bind request {code}",
+      "requestsEmpty": "No pending bind requests.",
+      "requestsLabel": "Pending bind requests",
+      "seeded": "Registry seeded from existing contacts.",
+      "tenantDisable": "Disable tenant",
+      "tenantEnable": "Enable tenant",
+      "tenantLabel": "Tenant",
+      "tenantRegister": "Register tenant",
+      "tenantStatus": {
+        "active": "Active",
+        "disabled": "Disabled"
+      },
+      "tenantUnknown": "Tenant unknown — run the bot identity probe and wait for one inbound event so the tenant key is known.",
+      "tenantUnregistered": "Not registered yet. Registering admits this tenant and binds it to the current account.",
+      "title": "Feishu identity registry"
     },
     "quickCommands": {
       "help": "Configure the menu in the Lark console (Bot → Bot menu) with an event_key, subscribe application.bot.menu_v6, then map each event_key to an action here. Feishu has no API to create menus — registration is console-only."
@@ -884,7 +884,12 @@
       "unsupportedNoProbe": "This adapter doesn't expose an active identity probe.",
       "wechatOaNoProbe": "WeChat Official Account adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
       "wechatPersonalNoProbe": "Personal WeChat adapters don't expose an active identity probe.",
-      "wecomNoProbe": "WeCom adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured."
+      "wecomNoProbe": "WeCom adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured.",
+      "avatarPublishHint": "Publish this avatar in the Lark developer console for consistent bot identity.",
+      "downloadAvatar": "Download avatar",
+      "openDeveloperConsole": "Open developer console",
+      "recommendedAvatarHint": "Use the generated avatar for this Lark app.",
+      "recommendedAvatarTitle": "Recommended avatar"
     }
   },
   "matrix": {
@@ -1034,13 +1039,13 @@
     "retryAria": "Retry {id}"
   },
   "outboundTuning": {
+    "balanceHelp": "When this bot's outbound rate limit is exhausted, deliveries spill over to the first enabled bot below that still has capacity (in order). A re-routed message is never re-routed a second time.",
+    "balanceLabel": "Load-balancing bots",
+    "balanceToggleAria": "Toggle load balancing via {name}",
     "breakerCooldownMsLabel": "Breaker cooldown (ms)",
     "breakerFailureThresholdPctLabel": "Breaker failure threshold (%)",
     "breakerMinEventsLabel": "Breaker min events",
     "breakerWindowMsLabel": "Breaker window (ms)",
-    "balanceHelp": "When this bot's outbound rate limit is exhausted, deliveries spill over to the first enabled bot below that still has capacity (in order). A re-routed message is never re-routed a second time.",
-    "balanceLabel": "Load-balancing bots",
-    "balanceToggleAria": "Toggle load balancing via {name}",
     "failoverHelp": "When this bot's circuit breaker is open, deliveries are re-routed through the first enabled bot below (in order). A re-routed message never fails over a second time.",
     "failoverLabel": "Failover bots",
     "failoverNoSiblings": "No other enabled bot on this platform — add a sibling bot to enable failover.",
@@ -1063,13 +1068,13 @@
     "runningSummary": "{running} of {total} enabled adapters running",
     "serverHeading": "Inbound Server (webhooks)",
     "state": {
+      "degraded": "Degraded",
+      "disabled": "Disabled",
+      "down": "Down",
+      "notRunning": "Not running",
       "running": "Running",
       "starting": "Starting",
-      "degraded": "Degraded",
-      "down": "Down",
-      "unknown": "Unknown",
-      "notRunning": "Not running",
-      "disabled": "Disabled"
+      "unknown": "Unknown"
     },
     "stateAria": "Adapter state: {state}",
     "statusNotNeeded": "Not needed — every enabled adapter dials out",
@@ -1141,13 +1146,13 @@
     "toLabel": "To (HH:MM)"
   },
   "runOperators": {
-    "title": "Run operators",
+    "countLabel": "{count, plural, =0 {no operators} =1 {1 operator} other {# operators}}",
+    "empty": "No operators configured — only a run's own requester can act on it.",
     "help": "Platform user ids allowed to approve, cancel or steer runs they did not start. Also the fallback approver when a workflow approval card has no known requester — leave it empty and those cards can never be actioned.",
+    "hint": "Comma-separated platform user ids (Lark open_id, Telegram numeric id, Discord snowflake…), as the platform reports them on inbound events.",
     "label": "Operator user ids",
     "placeholder": "ou_abc123, ou_def456",
-    "hint": "Comma-separated platform user ids (Lark open_id, Telegram numeric id, Discord snowflake…), as the platform reports them on inbound events.",
-    "empty": "No operators configured — only a run's own requester can act on it.",
-    "countLabel": "{count, plural, =0 {no operators} =1 {1 operator} other {# operators}}"
+    "title": "Run operators"
   },
   "sendTest": {
     "bodyLabel": "Body",

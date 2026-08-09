@@ -8,8 +8,8 @@
 
 use super::discovery::{self, DiscoveredAnthropicAuth};
 use super::AnthropicProvider;
-use crate::provider::{ProviderId, SubscriptionProvider};
-use crate::vault::{self, Account, AnthropicCredentialData, ProviderCredential, ProviderVault};
+use crate::provider::SubscriptionProvider;
+use crate::vault::{Account, AnthropicCredentialData, ProviderCredential};
 
 /// Read-only probe for an existing Claude Code CLI subscription login
 /// (`~/.claude/.credentials.json` or the `"Claude Code-credentials"` keyring
@@ -22,7 +22,7 @@ pub async fn anthropic_oauth_discover() -> Result<Option<DiscoveredAnthropicAuth
         .map_err(|error| format!("Claude credential discovery task failed: {error}"))?
 }
 
-/// Persist the result of a successful TS-side PKCE exchange.
+/// Validate and construct the result of a successful TS-side PKCE exchange.
 ///
 /// The renderer holds the access/refresh token pair after the PKCE round-trip
 /// and posts them down here. We validate the credential, generate a new
@@ -57,10 +57,7 @@ pub async fn anthropic_oauth_save_pkce_result(
         preset_id: None,
     };
 
-    let mut vault = vault::load_for_account(&local_account_id, ProviderId::Anthropic)?
-        .unwrap_or_else(ProviderVault::empty);
-    vault.upsert_account(account.clone());
-    vault::save_for_account(&local_account_id, ProviderId::Anthropic, &vault)?;
+    let _ = local_account_id;
     Ok(account)
 }
 
@@ -101,10 +98,6 @@ mod tests {
         }
     }
 
-    fn keyring_available() -> bool {
-        std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
-    }
-
     #[tokio::test]
     async fn save_pkce_rejects_empty_access_token() {
         let mut c = sample();
@@ -122,12 +115,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn save_pkce_persists_into_vault() {
-        if !keyring_available() {
-            return;
-        }
-        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
-
+    async fn save_pkce_constructs_a_validated_account_without_persisting() {
         let account = anthropic_oauth_save_pkce_result(
             LOCAL_ACCOUNT_ID.into(),
             sample(),
@@ -136,28 +124,17 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(account.label.as_deref(), Some("Test Alias"));
-
-        let vault = vault::load_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic)
-            .unwrap()
-            .unwrap();
-        assert_eq!(vault.accounts.len(), 1);
-        assert_eq!(vault.accounts[0].id, account.id);
-
-        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic).unwrap();
+        assert!(matches!(
+            account.credential,
+            ProviderCredential::Anthropic(_)
+        ));
     }
 
     #[tokio::test]
     async fn save_pkce_derives_label_when_omitted() {
-        if !keyring_available() {
-            return;
-        }
-        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
-
         let account = anthropic_oauth_save_pkce_result(LOCAL_ACCOUNT_ID.into(), sample(), None)
             .await
             .unwrap();
         assert_eq!(account.label.as_deref(), Some("pro · user@example.com"));
-
-        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic).unwrap();
     }
 }

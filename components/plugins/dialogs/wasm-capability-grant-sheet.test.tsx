@@ -153,11 +153,15 @@ describe("WasmCapabilityGrantSheet", () => {
     expect(screen.queryByText(/^dangerousWarning:/)).not.toBeInTheDocument()
   })
 
-  it("renders not-yet-implemented caps disabled and excludes them from the grant", () => {
+  it("grants clipboard capabilities now that the v0.2 host implements them", () => {
+    // Until api-version 0.2 the clipboard host imports were stubs returning
+    // `cognia:not-implemented`, so this sheet rendered them permanently
+    // disabled. v0.2 serves them in-process through the Tauri clipboard
+    // plugin — leaving them in WASM_UNIMPLEMENTED_PERMISSIONS would have made
+    // a working capability unreachable: implemented in Rust, never granted.
     const onConfirm = jest.fn()
     const manifest: PluginManifest = {
       ...baseManifest,
-      // clipboard:read is a WASM host stub (typed not-implemented).
       permissions: ["notification", "clipboard:read"],
       optionalPermissions: [],
     }
@@ -170,18 +174,16 @@ describe("WasmCapabilityGrantSheet", () => {
         onConfirm={onConfirm}
       />
     )
-    const stub = screen.getByRole("checkbox", {
+    const clipboard = screen.getByRole("checkbox", {
       name: 'togglePermissionAriaLabel:{"permission":"clipboard:read"}',
     })
-    // Disabled, unchecked, and the hint is shown.
-    expect(stub).toBeDisabled()
-    expect(stub).toHaveAttribute("data-state", "unchecked")
-    expect(screen.getByText("unimplementedHint")).toBeInTheDocument()
-    // Confirming does not grant the stubbed capability, but keeps the real one.
+    expect(clipboard).toBeEnabled()
+    expect(screen.queryByText("unimplementedHint")).not.toBeInTheDocument()
+
     fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
     const decision = onConfirm.mock.calls[0][0]
     expect(decision.grantedPermissions).toContain("notification")
-    expect(decision.grantedPermissions).not.toContain("clipboard:read")
+    expect(decision.grantedPermissions).toContain("clipboard:read")
   })
 
   it("calls onCancel and closes when the user backs out", () => {

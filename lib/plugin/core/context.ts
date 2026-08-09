@@ -8,7 +8,12 @@ import { createPluginSystemLogger, loggers } from "./logger"
 import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
 import { PluginDataDialog } from "@/components/plugins/dialogs/plugin-data-dialog"
 import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
-import { assertEgressAllowed } from "@/lib/plugin/security/network-allowlist"
+import {
+  assertNetworkRequestAllowed,
+  type NetworkHttpMethod,
+} from "@/lib/plugin/security/network-allowlist"
+import { sanitizePluginNetworkEgress } from "@/lib/plugin/api/plugin-pii-gate"
+import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { getPluginSecurityPosture } from "@/lib/plugin/security/security-posture"
 import type {
   Plugin,
@@ -82,6 +87,7 @@ import { registerNodeExecutor, unregisterNodeExecutor } from "@/lib/workflow/nod
 import { registerMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { registerNativeAnthropicTool } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { registerSkill } from "@/lib/plugin/registries/skill-registry"
+import { refreshAllPackWarnings } from "@/lib/plugin/registries/character-pack-registry"
 import {
   registerGuardrail,
   unregisterGuardrailById,
@@ -126,6 +132,9 @@ import {
   createPermissionAPI,
   createMediaAPI,
   createStorageAPI,
+  createFilesAPI,
+  revokePluginFileHandles,
+  createSkillsAPI,
   createContextPanelAPI,
   createTemplatesAPI,
 } from "../api"
@@ -197,6 +206,8 @@ import type {
   PluginAgentRunResult,
 } from "@/types/plugin/plugin-agent-sdk"
 import type { FullPluginContext as PublicFullPluginContext } from "@cognia/plugin-sdk/context"
+import { withPluginDisposableScope } from "./disposable-scope"
+import { withGovernedPluginContext } from "../contracts/governed-context"
 
 /** @deprecated `PluginContext` is now the complete activated context. */
 export type FullPluginContext = PluginContext
@@ -300,6 +311,8 @@ export function createFullPluginContext(
     i18n: createI18nAPI(pluginId),
     canvas: createCanvasAPI(pluginId),
     artifact: createArtifactAPI(pluginId),
+    files: createFilesAPI(pluginId),
+    skills: createSkillsAPI(pluginId, plugin.manifest.builtInSkills),
     media: createMediaAPI(pluginId, manager),
     notifications: createNotificationCenterAPI(pluginId),
     storage: createStorageAPI(pluginId),
@@ -360,7 +373,7 @@ export function createFullPluginContext(
   // v2 namespaces (`ocr`, `workspace`). Both are stateless wrappers; the
   // underlying registries already auto-clean on disable through the
   // bridge layer's `clear*ForPlugin(pluginId)` hooks.
-  return {
+  const fullContext = {
     ...baseContext,
     ...contextAPI,
     events: enhancedEvents,
@@ -392,6 +405,15 @@ export function createFullPluginContext(
     companion: createCompanionAPI(pluginId),
     pet: createPetAPI({ pluginId, capabilities: plugin.manifest.capabilities ?? [] }),
   } satisfies PublicFullPluginContext
+  const governedContext = withGovernedPluginContext(fullContext, {
+    pluginId,
+    hasPermission: (permission) => permissionsAPI.hasPermission(permission),
+  })
+  const scope = manager.getPluginDisposableScope?.(pluginId)
+  scope?.track(() => revokePluginFileHandles(pluginId), "ctx.files.handles")
+  return (
+    scope ? withPluginDisposableScope(scope, "ctx", governedContext) : governedContext
+  ) as FullPluginContext
 }
 
 /**
@@ -685,11 +707,26 @@ function gateToolEnabledRun(pluginId: string, toolsEnabled: boolean | undefined)
 function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAPI {
   return {
     registerTool: (tool: PluginTool) => {
-      manager.getRegistry().registerTool(pluginId, tool)
-      usePluginStore.getState().registerPluginTool(pluginId, tool)
+      const ownedTool = { ...tool, pluginId }
+      manager.getRegistry().registerTool(pluginId, ownedTool)
+      usePluginStore.getState().registerPluginTool(pluginId, ownedTool)
+      let registered = true
+      return () => {
+        if (!registered) return
+        registered = false
+        const current = manager.getRegistry().getTool(tool.name)
+        if (current?.pluginId === pluginId) {
+          manager.getRegistry().unregisterTool(tool.name)
+          usePluginStore.getState().unregisterPluginTool(pluginId, tool.name)
+        }
+      }
     },
 
     unregisterTool: (name: string) => {
+      const current = manager.getRegistry().getTool(name)
+      if (current?.pluginId !== pluginId) {
+        throw new Error(`plugin ${pluginId} does not own tool ${name}`)
+      }
       manager.getRegistry().unregisterTool(name)
       usePluginStore.getState().unregisterPluginTool(pluginId, name)
     },
@@ -701,6 +738,13 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       }
       manager.getRegistry().registerMode(pluginId, prefixedMode)
       usePluginStore.getState().registerPluginMode(pluginId, prefixedMode)
+      let registered = true
+      return () => {
+        if (!registered) return
+        registered = false
+        manager.getRegistry().unregisterMode(prefixedMode.id)
+        usePluginStore.getState().unregisterPluginMode(pluginId, prefixedMode.id)
+      }
     },
 
     unregisterMode: (id: string) => {
@@ -738,6 +782,26 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       const { result } = await invokePluginTool(pluginId, name, args ?? {}, {
         ...(opts?.signal ? { signal: opts.signal } : {}),
         reason: `plugin ${pluginId} invoked tool ${name}`,
+      })
+      return result
+    },
+
+    invokeDependencyTool: async (dependencyId, name, args, opts) => {
+      if (!pluginHasApiPermission(pluginId, "agent:control")) {
+        throw new Error(
+          'agent.invokeDependencyTool requires the "agent:control" permission — declare it in the plugin manifest.'
+        )
+      }
+      const caller = manager.getPlugin(pluginId)
+      if (!caller?.manifest.dependencies?.[dependencyId]) {
+        throw new Error(`plugin ${pluginId} has not declared dependency ${dependencyId}`)
+      }
+      if (!name) throw new Error("agent.invokeDependencyTool requires a tool name")
+      const { result } = await invokePluginTool(dependencyId, name, args ?? {}, {
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+        ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
+        ...(opts?.messageId ? { messageId: opts.messageId } : {}),
+        reason: `plugin ${pluginId} invoked dependency tool ${dependencyId}/${name}`,
       })
       return result
     },
@@ -839,14 +903,17 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
     // don't have to track ids individually — bulk cleanup is automatic.
     registerMcpServerPreset: (def: PluginMcpServerPresetDef) => {
       registerMcpServerPreset(def.id, def, { pluginId })
+      refreshAllPackWarnings()
     },
 
     registerNativeAnthropicTool: (def: PluginNativeAnthropicToolDef) => {
       registerNativeAnthropicTool(def.id, def, { pluginId })
+      refreshAllPackWarnings()
     },
 
     registerSkill: (def: PluginSkillDef) => {
       registerSkill(def.id, def, { pluginId })
+      refreshAllPackWarnings()
     },
 
     registerExternalAgentPreset: (def: PluginExternalAgentPresetDef) => {
@@ -1125,8 +1192,18 @@ const NETWORK_GUARD_MAP: Partial<Record<keyof PluginNetworkAPI, PluginPermission
   patch: "network:fetch",
   fetch: "network:fetch",
   download: "network:fetch",
-  upload: "network:fetch",
+  upload: "network:upload",
 }
+
+const NETWORK_HTTP_METHODS = new Set<NetworkHttpMethod>([
+  "GET",
+  "POST",
+  "PUT",
+  "DELETE",
+  "PATCH",
+  "HEAD",
+  "OPTIONS",
+])
 
 const FS_GUARD_MAP: Partial<Record<keyof PluginFileSystemAPI, PluginPermission>> = {
   readText: "filesystem:read",
@@ -1178,6 +1255,23 @@ function createNetworkAPI(
   networkAccess?: PluginManifest["networkAccess"]
 ): PluginNetworkAPI {
   const rateLimiter = getPluginRateLimiter()
+  const auditEgress = (
+    url: string,
+    method: NetworkHttpMethod,
+    options?: Pick<NetworkRequestOptions, "dataClassification" | "piiPolicy">,
+    fileContentPolicy?: UploadOptions["fileContentPolicy"]
+  ): void => {
+    const target = new URL(url)
+    getPermissionGuard().recordUsage(
+      pluginId,
+      fileContentPolicy ? "network:upload" : "network:fetch",
+      `egress ${method} ${target.origin}${target.pathname} ` +
+        `classification=${options?.dataClassification ?? "unspecified"} ` +
+        (fileContentPolicy
+          ? `metadataPii=${options?.piiPolicy ?? "redact"} fileContent=${fileContentPolicy}/raw`
+          : `pii=${options?.piiPolicy ?? "redact"}`)
+    )
+  }
   const parseBrowserResponse = async <T>(
     response: Response,
     responseType?: NetworkRequestOptions["responseType"]
@@ -1212,22 +1306,58 @@ function createNetworkAPI(
     options?: NetworkRequestOptions
   ): Promise<NetworkResponse<T>> => {
     rateLimiter.check(pluginId, "network:fetch")
-    // Renderer-side egress allowlist. The Tauri path is also clamped in Rust
-    // (defense-in-depth); this is the SOLE enforcement in web/mobile mode where
-    // there is no Rust host. Mirrors `manifest.networkAccess.allowedDomains`.
-    assertEgressAllowed(pluginId, url, networkAccess, getPluginSecurityPosture())
+    const method = (options?.method ?? "GET").toUpperCase() as NetworkHttpMethod
+    if (!NETWORK_HTTP_METHODS.has(method)) {
+      throw new Error(`network policy denied unsupported HTTP method: ${String(options?.method)}`)
+    }
+    const egress = sanitizePluginNetworkEgress(pluginId, {
+      url,
+      headers: options?.headers,
+      body: options?.body,
+      piiPolicy: options?.piiPolicy,
+    })
+    // Renderer-side egress policy. The Tauri path mirrors this in Rust for
+    // defense-in-depth; this is the enforcement point in web/mobile mode.
+    assertNetworkRequestAllowed(
+      pluginId,
+      egress.url,
+      method,
+      networkAccess,
+      getPluginSecurityPosture()
+    )
+    auditEgress(egress.url, method, options)
+    const requestOptions = {
+      ...options,
+      method,
+      headers: egress.headers,
+      body: egress.body,
+    }
+    delete requestOptions.dataClassification
+    delete requestOptions.piiPolicy
     if (!isPluginGatewayAvailable()) {
-      const response = await fetch(url, {
-        method: options?.method,
-        headers: options?.headers,
-        body: options?.body as BodyInit | null | undefined,
+      const headers = { ...(requestOptions.headers ?? {}) }
+      const body =
+        requestOptions.body === undefined || typeof requestOptions.body === "string"
+          ? requestOptions.body
+          : JSON.stringify(requestOptions.body)
+      if (body !== undefined && typeof requestOptions.body !== "string") {
+        const hasContentType = Object.keys(headers).some(
+          (header) => header.toLowerCase() === "content-type"
+        )
+        if (!hasContentType) headers["content-type"] = "application/json"
+      }
+      const response = await fetch(egress.url, {
+        method,
+        headers,
+        body,
+        signal: requestOptions.signal,
       })
       return parseBrowserResponse<T>(response, options?.responseType)
     }
 
     return invokePluginApi<NetworkResponse<T>>(pluginId, "network:fetch", {
-      url,
-      options: options || {},
+      url: egress.url,
+      options: requestOptions,
     })
   }
 
@@ -1255,12 +1385,25 @@ function createNetworkAPI(
       options?: DownloadOptions
     ): Promise<DownloadResult> => {
       rateLimiter.check(pluginId, "network:download")
+      const egress = sanitizePluginNetworkEgress(pluginId, {
+        url,
+        headers: options?.headers,
+        piiPolicy: options?.piiPolicy,
+      })
+      assertNetworkRequestAllowed(
+        pluginId,
+        egress.url,
+        "GET",
+        networkAccess,
+        getPluginSecurityPosture()
+      )
+      auditEgress(egress.url, "GET", options)
       if (!isPluginGatewayAvailable()) {
-        const response = await fetch(url)
+        const response = await fetch(egress.url, { headers: egress.headers })
         if (!response.ok) {
           throw new PluginGatewayError({
             code: "NOT_SUPPORTED",
-            message: `Failed to download ${url}: ${response.status} ${response.statusText}`,
+            message: `Failed to download ${egress.url}: ${response.status} ${response.statusText}`,
             requestId: `browser-network-download-${pluginId}`,
             api: "network:download",
             pluginId,
@@ -1285,9 +1428,9 @@ function createNetworkAPI(
       // The host streams the body into the plugin's data sandbox; `onProgress`
       // can't cross the IPC boundary, so only the static request shape is sent.
       return invokePluginApi<DownloadResult>(pluginId, "network:download", {
-        url,
+        url: egress.url,
         destPath,
-        headers: options?.headers,
+        headers: egress.headers,
       })
     },
 
@@ -1297,13 +1440,37 @@ function createNetworkAPI(
       options?: UploadOptions
     ): Promise<NetworkResponse<unknown>> => {
       rateLimiter.check(pluginId, "network:upload")
-      return invokePluginApi<NetworkResponse<unknown>>(pluginId, "network:upload", {
+      const egress = sanitizePluginNetworkEgress(pluginId, {
         url,
-        filePath,
         headers: options?.headers,
+        piiPolicy: options?.piiPolicy,
+      })
+      assertNetworkRequestAllowed(
+        pluginId,
+        egress.url,
+        "POST",
+        networkAccess,
+        getPluginSecurityPosture()
+      )
+      const fileContentPolicy = options?.fileContentPolicy ?? "block"
+      if (fileContentPolicy !== "allow") {
+        throw new Error("network:upload file content is blocked; set fileContentPolicy to allow")
+      }
+      if (!options?.dataClassification) {
+        throw new Error(
+          "network:upload requires dataClassification when fileContentPolicy is allow"
+        )
+      }
+      auditEgress(egress.url, "POST", options, fileContentPolicy)
+      return invokePluginApi<NetworkResponse<unknown>>(pluginId, "network:upload", {
+        url: egress.url,
+        filePath,
+        headers: egress.headers,
         // When set, the host sends multipart/form-data with this field name;
         // otherwise the file bytes are the raw request body.
         fieldName: options?.fieldName,
+        fileContentPolicy,
+        dataClassification: options?.dataClassification,
       })
     },
   }

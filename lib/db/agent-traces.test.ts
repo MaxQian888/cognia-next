@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
 // Coverage for the agent-trace span CRUD + aggregator layer.
 
-import "fake-indexeddb/auto"
 import {
   __clearAgentTracesForTesting,
   aggregateAll,
@@ -21,18 +19,18 @@ import {
   queryRecentTraces,
   countTraces,
 } from "./agent-traces"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await __clearAgentTracesForTesting()
-  // Cold-opening the (now high-version) Dexie schema under fake-indexeddb can
-  // exceed the default 5s hook budget on the first test — give it room.
-}, 30_000)
+})
+afterAll(dbFixture.dispose)
 
 function span(over: Partial<AgentTraceSpan>): AgentTraceSpan {
   const id = over.id ?? over.spanId ?? "span-" + Math.random().toString(36).slice(2, 10)
@@ -482,5 +480,19 @@ describe("queryRecentTraces", () => {
     expect(await countTraces()).toBe(0)
     await seed()
     expect(await countTraces()).toBe(4)
+  })
+
+  it("keeps hot list/window/count/prune paths off full-table materialization", async () => {
+    await seed()
+    const fullTableRead = jest.spyOn(getDb().agentTraces, "toArray")
+
+    await queryRecent(2)
+    await queryByWindow({ since: 20, until: 120 })
+    await queryRecentTraces(2)
+    await countTraces()
+    await pruneOlderThan(20)
+
+    expect(fullTableRead).not.toHaveBeenCalled()
+    fullTableRead.mockRestore()
   })
 })

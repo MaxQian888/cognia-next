@@ -640,12 +640,45 @@
     "appSecretPlaceholder": "App secret…",
     "appSecretRequired": "App Secret 不能为空。",
     "atStrategy": {
+      "activationTtl": {
+        "help": "最后一条入站消息后，会话保持激活的时长。",
+        "label": "激活有效期（小时）"
+      },
       "defaultNotice": "默认值 — 按机器人角色调整。",
+      "diagnostics": {
+        "capabilities": "能力：topic={topic}, streaming={stream}, mutation={mutate}",
+        "effective": "生效策略：{value}",
+        "no": "否",
+        "requested": "请求策略：{value}",
+        "title": "运行时诊断",
+        "unverifiedFallback": "因投递未验证，已回退。",
+        "yes": "是"
+      },
+      "dispatch": {
+        "help": "该适配器如何派发活跃运行。",
+        "options": {
+          "inherit": "继承默认",
+          "queue": "队列",
+          "steer": "引导"
+        },
+        "title": "调度模式"
+      },
       "help": "控制机器人在群聊中何时回应。私聊不受策略影响，始终通过。",
       "options": {
         "always": "始终响应每一条消息",
         "directOnly": "仅私聊 — 群聊永不回应",
         "mentionOnly": "仅 @ 机器人 — 群聊中需要被 @（默认）"
+      },
+      "readiness": {
+        "help": "适配器是否能验证每条消息的投递。",
+        "startProbe": "开始就绪探测",
+        "states": {
+          "all_messages_verified": "所有消息已验证",
+          "mentions_only_verified": "仅 @ 消息已验证",
+          "none_verified": "未验证",
+          "unknown": "未知"
+        },
+        "title": "投递就绪状态"
       },
       "sibling": {
         "budgetAria": "同群机器人每群每小时回复额度",
@@ -658,40 +691,7 @@
         },
         "title": "同群机器人"
       },
-      "title": "响应策略",
-      "dispatch": {
-        "title": "调度模式",
-        "help": "该适配器如何派发活跃运行。",
-        "options": {
-          "inherit": "继承默认",
-          "queue": "队列",
-          "steer": "引导"
-        }
-      },
-      "activationTtl": {
-        "label": "激活有效期（小时）",
-        "help": "最后一条入站消息后，会话保持激活的时长。"
-      },
-      "readiness": {
-        "title": "投递就绪状态",
-        "help": "适配器是否能验证每条消息的投递。",
-        "states": {
-          "unknown": "未知",
-          "all_messages_verified": "所有消息已验证",
-          "mentions_only_verified": "仅 @ 消息已验证",
-          "none_verified": "未验证"
-        },
-        "startProbe": "开始就绪探测"
-      },
-      "diagnostics": {
-        "title": "运行时诊断",
-        "requested": "请求策略：{value}",
-        "effective": "生效策略：{value}",
-        "unverifiedFallback": "因投递未验证，已回退。",
-        "capabilities": "能力：topic={topic}, streaming={stream}, mutation={mutate}",
-        "yes": "是",
-        "no": "否"
-      }
+      "title": "响应策略"
     },
     "authorizeButton": "连接账号",
     "authorizeNeedsAppId": "请先保存 App ID —— 授权需要它。",
@@ -719,35 +719,21 @@
     "encryptionEnabledHelp": "若飞书应用 → 事件订阅 → Encrypt Key 已配置则开启此项。",
     "encryptionEnabledLabel": "事件加密",
     "entrySurfaces": {
-      "title": "Web 入口与飞书表面",
-      "webBaseLabel": "Web 入口基础 URL",
-      "webBaseHelp": "飞书客户端内可访问的 Cognia Web 应用公网 https 地址。Chat Tab / 菜单链接与 SSO 跳转都基于它构建；留空则外部链接保持关闭。",
-      "webBasePlaceholder": "https://cognia.example.com",
-      "flagsLabel": "入口功能开关（本适配器）",
-      "flagsHelp": "灰度发布的按适配器覆盖。未设置的开关回退到环境变量 / 全局默认（全部关闭）。",
       "flag": {
-        "larkPrincipalRegistry": "主体注册表（统一身份）",
-        "larkWebSso": "Web SSO 登录",
         "larkChatTab": "Chat Tab 同步",
         "larkGroupMenu": "群菜单同步",
-        "larkNativeSlash": "命令菜单批次",
         "larkMessageShortcut": "消息快捷导入",
-        "larkPlusMenu": "加号菜单新任务"
+        "larkNativeSlash": "命令菜单批次",
+        "larkPlusMenu": "加号菜单新任务",
+        "larkPrincipalRegistry": "主体注册表（统一身份）",
+        "larkWebSso": "Web SSO 登录"
       },
-      "strictAuthLabel": "回调授权模式",
-      "strictAuthHelp": "audit 运行全部校验并记录本应拒绝的决策但不拦截；enforce 会拦截。仅在审计流安静后切到 enforce（见运维手册）。",
-      "strictAuth": {
-        "off": "关闭",
-        "audit": "审计",
-        "enforce": "强制"
-      },
-      "surfacesLabel": "会话表面",
-      "surfacesEmpty": "尚无会话表面记录——机器人加入开启 Chat Tab / 群菜单的会话后会出现在这里。",
+      "flagsHelp": "灰度发布的按适配器覆盖。未设置的开关回退到环境变量 / 全局默认（全部关闭）。",
+      "flagsLabel": "入口功能开关（本适配器）",
       "resync": "重新同步表面",
-      "resyncing": "同步中…",
       "resyncDone": "同步完成：成功 {synced}，失败 {errors}，跳过 {skipped}。",
       "resyncFailed": "同步失败。请检查适配器凭证后重试。",
-      "statusAria": "表面状态",
+      "resyncing": "同步中…",
       "status": {
         "blocked": "已阻断",
         "error": "错误",
@@ -755,7 +741,21 @@
         "rebuild_required": "需重建",
         "removed": "已移除",
         "synced": "已同步"
-      }
+      },
+      "statusAria": "表面状态",
+      "strictAuth": {
+        "audit": "审计",
+        "enforce": "强制",
+        "off": "关闭"
+      },
+      "strictAuthHelp": "audit 运行全部校验并记录本应拒绝的决策但不拦截；enforce 会拦截。仅在审计流安静后切到 enforce（见运维手册）。",
+      "strictAuthLabel": "回调授权模式",
+      "surfacesEmpty": "尚无会话表面记录——机器人加入开启 Chat Tab / 群菜单的会话后会出现在这里。",
+      "surfacesLabel": "会话表面",
+      "title": "Web 入口与飞书表面",
+      "webBaseHelp": "飞书客户端内可访问的 Cognia Web 应用公网 https 地址。Chat Tab / 菜单链接与 SSO 跳转都基于它构建；留空则外部链接保持关闭。",
+      "webBaseLabel": "Web 入口基础 URL",
+      "webBasePlaceholder": "https://cognia.example.com"
     },
     "openCompanion": "打开伴侣设置",
     "openCompanionAria": "打开 移动端伴侣 → Tunnel",
@@ -763,37 +763,37 @@
     "openConsoleAria": "在飞书开放平台打开当前应用的事件订阅页",
     "openConsoleSecurityAria": "在飞书开放平台打开当前应用的安全设置页",
     "principals": {
-      "title": "飞书身份注册表",
+      "actionFailed": "操作失败：{reason}",
       "help": "把 租户 + 应用 + open_id 映射到当前 Cognia 账号。启用主体注册表后，只有已绑定的人才能触发执行，其他人一律被挂起并收到一个绑定码。",
-      "tenantLabel": "租户",
-      "tenantUnknown": "租户未知——请先运行机器人身份探测，并等待一条入站事件带回 tenant key。",
-      "tenantUnregistered": "尚未注册。注册即表示接纳该租户，并把它绑定到当前账号。",
-      "tenantRegister": "注册租户",
-      "tenantDisable": "停用租户",
-      "tenantEnable": "启用租户",
-      "tenantStatus": {
-        "active": "已启用",
-        "disabled": "已停用"
-      },
-      "requestsLabel": "待审批绑定申请",
-      "requestsEmpty": "暂无待审批的绑定申请。",
-      "requestApprove": "通过",
-      "requestReject": "拒绝",
-      "requestApproveAria": "通过绑定申请 {code}",
-      "requestRejectAria": "拒绝绑定申请 {code}",
-      "principalsLabel": "已绑定主体",
-      "principalsEmpty": "尚未绑定任何主体。",
       "principalDisable": "停用",
       "principalEnable": "启用",
-      "principalUnlink": "解绑",
       "principalStatus": {
         "active": "已启用",
         "disabled": "已停用",
         "unlinked": "已解绑"
       },
       "principalStatusAria": "主体状态",
-      "actionFailed": "操作失败：{reason}",
-      "seeded": "已从既有联系人播种注册表。"
+      "principalUnlink": "解绑",
+      "principalsEmpty": "尚未绑定任何主体。",
+      "principalsLabel": "已绑定主体",
+      "requestApprove": "通过",
+      "requestApproveAria": "通过绑定申请 {code}",
+      "requestReject": "拒绝",
+      "requestRejectAria": "拒绝绑定申请 {code}",
+      "requestsEmpty": "暂无待审批的绑定申请。",
+      "requestsLabel": "待审批绑定申请",
+      "seeded": "已从既有联系人播种注册表。",
+      "tenantDisable": "停用租户",
+      "tenantEnable": "启用租户",
+      "tenantLabel": "租户",
+      "tenantRegister": "注册租户",
+      "tenantStatus": {
+        "active": "已启用",
+        "disabled": "已停用"
+      },
+      "tenantUnknown": "租户未知——请先运行机器人身份探测，并等待一条入站事件带回 tenant key。",
+      "tenantUnregistered": "尚未注册。注册即表示接纳该租户，并把它绑定到当前账号。",
+      "title": "飞书身份注册表"
     },
     "quickCommands": {
       "help": "在飞书开发者后台（机器人 → 机器人菜单）配置菜单并设置 event_key，订阅 application.bot.menu_v6 事件，然后在此把每个 event_key 映射到一个动作。飞书没有创建菜单的 API——只能在后台配置。"
@@ -884,7 +884,12 @@
       "unsupportedNoProbe": "该适配器没有主动探测身份的接口。",
       "wechatOaNoProbe": "微信公众号适配器没有主动探测身份的接口 — 下方的 AppID 是配置时录入的。",
       "wechatPersonalNoProbe": "个人微信适配器没有主动探测身份的接口。",
-      "wecomNoProbe": "企业微信适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。"
+      "wecomNoProbe": "企业微信适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。",
+      "avatarPublishHint": "请在飞书开发者后台发布此头像，以保持机器人身份一致。",
+      "downloadAvatar": "下载头像",
+      "openDeveloperConsole": "打开开发者后台",
+      "recommendedAvatarHint": "建议为此飞书应用使用生成的头像。",
+      "recommendedAvatarTitle": "推荐头像"
     }
   },
   "matrix": {
@@ -1034,13 +1039,13 @@
     "retryAria": "重试 {id}"
   },
   "outboundTuning": {
+    "balanceHelp": "当此机器人的出站限流耗尽时，消息按顺序溢出到下方第一个仍有余量的可用机器人。已转移的消息不会再次转移。",
+    "balanceLabel": "负载均衡机器人",
+    "balanceToggleAria": "切换经 {name} 负载均衡",
     "breakerCooldownMsLabel": "熔断冷却（毫秒）",
     "breakerFailureThresholdPctLabel": "熔断失败率阈值（%）",
     "breakerMinEventsLabel": "熔断最少事件数",
     "breakerWindowMsLabel": "熔断统计窗口（毫秒）",
-    "balanceHelp": "当此机器人的出站限流耗尽时，消息按顺序溢出到下方第一个仍有余量的可用机器人。已转移的消息不会再次转移。",
-    "balanceLabel": "负载均衡机器人",
-    "balanceToggleAria": "切换经 {name} 负载均衡",
     "failoverHelp": "当此机器人的熔断器打开时，消息按顺序改由下方第一个可用机器人送达。已转移的消息不会再次转移。",
     "failoverLabel": "故障转移机器人",
     "failoverNoSiblings": "此平台暂无其他已启用的机器人——添加同平台机器人后可启用故障转移。",
@@ -1063,13 +1068,13 @@
     "runningSummary": "已启用 {total} 个适配器，其中 {running} 个运行中",
     "serverHeading": "入站服务器（Webhook / 反向 WS）",
     "state": {
+      "degraded": "已降级",
+      "disabled": "已禁用",
+      "down": "已断开",
+      "notRunning": "未运行",
       "running": "运行中",
       "starting": "启动中",
-      "degraded": "已降级",
-      "down": "已断开",
-      "unknown": "未知",
-      "notRunning": "未运行",
-      "disabled": "已禁用"
+      "unknown": "未知"
     },
     "stateAria": "适配器状态：{state}",
     "statusNotNeeded": "无需启动 — 当前启用的适配器均为主动外连",
@@ -1141,13 +1146,13 @@
     "toLabel": "结束（HH:MM）"
   },
   "runOperators": {
-    "title": "运行操作员",
+    "countLabel": "{count, plural, =0 {无操作员} other {# 位操作员}}",
+    "empty": "未配置操作员——只有运行的发起人本人可以操作。",
     "help": "允许审批、取消或干预非本人发起运行的平台用户 ID。当工作流审批卡片没有已知的发起人时，也会回退到这份名单——留空则这类卡片永远无法被处理。",
+    "hint": "以逗号分隔的平台用户 ID（飞书 open_id、Telegram 数字 ID、Discord snowflake……），须与平台在入站事件中上报的一致。",
     "label": "操作员用户 ID",
     "placeholder": "ou_abc123, ou_def456",
-    "hint": "以逗号分隔的平台用户 ID（飞书 open_id、Telegram 数字 ID、Discord snowflake……），须与平台在入站事件中上报的一致。",
-    "empty": "未配置操作员——只有运行的发起人本人可以操作。",
-    "countLabel": "{count, plural, =0 {无操作员} other {# 位操作员}}"
+    "title": "运行操作员"
   },
   "sendTest": {
     "bodyLabel": "内容",

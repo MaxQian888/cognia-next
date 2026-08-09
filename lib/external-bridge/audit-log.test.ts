@@ -41,16 +41,17 @@ describe("recordCall", () => {
     expect(row?.reason).toBe("scope OFF")
   })
 
-  it("captures handler errors that fired after the gate allowed the call", async () => {
+  it("captures only a bounded error code when an allowed handler fails", async () => {
     const row = await recordCall({
       tool: "wiki_read",
       scope: "wiki:cognia",
       check: { allowed: true },
       latencyMs: 12,
-      errorMessage: "slug not found",
+      errorCode: "handler-error",
     })
     expect(row?.allowed).toBe(true)
-    expect(row?.errorMessage).toBe("slug not found")
+    expect(row?.errorCode).toBe("handler-error")
+    expect(row?.errorMessage).toBeUndefined()
   })
 
   it("handles `n/a` scope for protocol-level methods", async () => {

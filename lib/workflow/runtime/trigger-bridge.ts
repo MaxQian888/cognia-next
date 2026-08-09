@@ -9,10 +9,9 @@
  * scoped run logger; they don't crash the listener.
  */
 
-import { getWorkflow } from "@/lib/db/workflows"
 import type { TriggerEvent, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { runWorkflow } from "./orchestrator"
+import { executeDeployedWorkflow, WorkflowAdmissionError } from "./execution-authority"
 import { listenTriggerEvents } from "./tauri-bridge"
 
 export type TriggerBridgeDisposer = () => void
@@ -51,28 +50,41 @@ export async function dispatchTrigger(
     triggeredBy?: WorkflowTriggeredFrom
   }
 ): Promise<void> {
-  const workflow = await getWorkflow(event.workflowId)
-  if (!workflow) {
-    console.warn(`workflow trigger bridge: workflow ${event.workflowId} not found; ignoring`)
-    return
-  }
   const triggerId = resolveTriggerId(event)
-  if (triggerId) {
-    const triggerNode = workflow.nodes.find((node) => node.id === triggerId)
-    if (!triggerNode || triggerNode.type !== event.kind || triggerNode.data.disabled === true) {
-      console.warn(
-        `workflow trigger bridge: trigger ${triggerId} is missing, disabled, or not ${event.kind}; ignoring`
-      )
-      return
-    }
-  }
   const normalizedEvent =
     triggerId && event.triggerId !== triggerId ? { ...event, triggerId } : event
   // Single canonical fan-in for every trigger path (cron / webhook / connector
   // / chat / plugin all route through here). Resume does NOT call this, so a
   // resumed run correctly does not re-fire the trigger hook.
-  getPluginEventHooks().dispatchWorkflowTriggerFired(event.workflowId, event.kind, event.payload)
-  await runWorkflow({ workflow, trigger: normalizedEvent, triggeredBy: opts?.triggeredBy })
+  try {
+    await executeDeployedWorkflow({
+      workflowId: event.workflowId,
+      entrypoint: "trigger",
+      caller: event.kind,
+      triggerKind: normalizedEvent.kind,
+      triggerId: normalizedEvent.triggerId,
+      triggerBinding: normalizedEvent.binding,
+      triggerOriginAt: normalizedEvent.originAt,
+      payload: normalizedEvent.payload,
+      triggeredBy: opts?.triggeredBy,
+      onAdmitted: () =>
+        getPluginEventHooks().dispatchWorkflowTriggerFired(
+          event.workflowId,
+          event.kind,
+          event.payload
+        ),
+    })
+  } catch (error) {
+    if (error instanceof WorkflowAdmissionError && error.code === "deployment-not-found") {
+      console.warn(`workflow trigger bridge: workflow ${event.workflowId} not deployed; ignoring`)
+      return
+    }
+    if (error instanceof WorkflowAdmissionError && error.code === "trigger-binding-invalid") {
+      console.warn(`workflow trigger bridge: ${error.message}; ignoring`)
+      return
+    }
+    throw error
+  }
 }
 
 function resolveTriggerId(event: TriggerEvent): string | undefined {

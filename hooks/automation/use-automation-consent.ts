@@ -6,13 +6,13 @@
  * Subscribes to the `automation:consent-request` channel — emitted host-side by
  * `ConsentBroker::request` (`src-tauri/src/automation/consent.rs`) when a
  * computer-use action hits the `PerCall` permission tier, and forwarded to
- * paired devices over `/ws/v1/events` (`companion_api/commands.rs`
+ * paired devices over `/ws/events` (`companion_api/commands.rs`
  * `register_tauri_event`). Each prompt is queued (dedupe by broker id, since a
  * WS reconnect can replay a frame) with a renderer-side countdown, and
  * resolved through `desktop.consentRespond` → `automation_consent_respond`.
  *
  * `transport.subscribe` / `transport.call` route over Tauri IPC on desktop and
- * the companion WS / `/api/v1/_rpc/*` on mobile, so this hook is platform
+ * the companion WS / `/api/_rpc/*` on mobile, so this hook is platform
  * neutral. The mobile consent sheet is its only consumer today; the desktop
  * `<ConsentOverlay>` keeps its own Tauri-`listen` path. Logic mirrors that
  * overlay (`components/automation/consent-overlay.tsx`) so the two stay in step.

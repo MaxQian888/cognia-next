@@ -43,7 +43,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use super::redemption_lru::RedemptionLru;
+use super::replay_cache::ReplayCache;
 use super::SharedState;
 
 // ---------------------------------------------------------------------------
@@ -259,7 +259,7 @@ fn expect_scope(actual: &str, expected: &str) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 /// Single-use tracker for entry-token JTIs (same semantics as pair JWTs).
-static ENTRY_JTI_LRU: Lazy<RedemptionLru> = Lazy::new(RedemptionLru::new);
+static ENTRY_JTI_LRU: Lazy<ReplayCache> = Lazy::new(ReplayCache::new);
 
 #[derive(Clone)]
 struct SsoPending {
@@ -551,7 +551,14 @@ pub async fn callback_handler(
         );
     };
 
-    let client = reqwest::Client::new();
+    let client = match managed_lark_client(LARK_TOKEN_URL) {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!(target: "lark_entry", %error, "lark token proxy routing unavailable");
+            super::metrics::record_lark_counter("lark_sso_failures_total");
+            return error_json(StatusCode::BAD_GATEWAY, "sso_proxy_unavailable");
+        }
+    };
     let token_resp = client
         .post(LARK_TOKEN_URL)
         .json(&json!({
@@ -952,7 +959,7 @@ static JSSDK_TICKET_CACHE: Lazy<Mutex<HashMap<String, (String, i64)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 async fn fetch_jssdk_ticket(app_id: &str, app_secret: &str) -> Result<String, String> {
-    let client = reqwest::Client::new();
+    let client = managed_lark_client(LARK_TENANT_TOKEN_URL)?;
     let token_resp: Value = client
         .post(LARK_TENANT_TOKEN_URL)
         .json(&json!({ "app_id": app_id, "app_secret": app_secret }))
@@ -982,6 +989,15 @@ async fn fetch_jssdk_ticket(app_id: &str, app_secret: &str) -> Result<String, St
         .and_then(Value::as_str)
         .map(|ticket| ticket.to_string())
         .ok_or_else(|| "jssdk ticket missing".to_string())
+}
+
+fn managed_lark_client(target: &str) -> Result<reqwest::Client, String> {
+    let (builder, _) =
+        crate::proxy_config::apply_reqwest_policy(reqwest::Client::builder(), target)
+            .map_err(|error| error.to_string())?;
+    builder
+        .build()
+        .map_err(|error| format!("managed Lark client build failed: {error}"))
 }
 
 /// SHA-1 hex of the JSSDK verify string — Lark's documented signature input.
@@ -1433,15 +1449,12 @@ mod tests {
 
     fn test_state() -> SharedState {
         use super::super::{
-            deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
-            pair_code_lru::PairCodeLru, CompanionState,
+            deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache, CompanionState,
         };
         use parking_lot::RwLock;
         use std::sync::Arc;
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),

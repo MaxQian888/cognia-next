@@ -149,18 +149,19 @@ impl ProviderEndpoints {
 #[tauri::command]
 pub async fn turn_provision(input: TurnProvisionInput) -> Result<TurnProvisionResult, String> {
     let token = resolve_token(&input).await?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
+    let endpoints = ProviderEndpoints::production();
+    let target = match input.kind.as_str() {
+        "cloudflare-calls" => endpoints.cloudflare_keys.as_str(),
+        "twilio" => endpoints.twilio_accounts.as_str(),
+        _ => return Err("turn provisioning failed: unsupported-provider".to_string()),
+    };
+    let builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20));
+    let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, target)
+        .map_err(|error| error.to_string())?;
+    let client = builder
         .build()
         .map_err(|e| format!("turn provisioning failed: client-init ({e})"))?;
-    provision_with(
-        &input,
-        &token,
-        &client,
-        &ProviderEndpoints::production(),
-        now_ms(),
-    )
-    .await
+    provision_with(&input, &token, &client, &endpoints, now_ms()).await
 }
 
 async fn provision_with(

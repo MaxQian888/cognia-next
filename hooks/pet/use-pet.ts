@@ -10,12 +10,14 @@ import { useMemo } from "react"
 import { getDb } from "@/lib/db/schema"
 import { computePetView, type PetView } from "@/lib/pet/runtime/pet-view"
 import { emitPetEvent } from "@/lib/pet/events/pet-event-bus"
-import type { PetProfile } from "@/types/pet"
+import type { PetCharacterBinding, PetProfile } from "@/types/pet"
+import { migrateLegacyPetBinding } from "@/lib/pet/binding/resolve-skin"
 
 export interface UsePetResult {
   profile: PetProfile | undefined
   view: PetView | undefined
   loading: boolean
+  binding: PetCharacterBinding | undefined
   feed: () => void
   play: () => void
   petStroke: () => void
@@ -28,10 +30,14 @@ export interface UsePetResult {
 
 export function usePet(activeCharacterId?: string | null): UsePetResult {
   const profile = useLiveQuery(() => getDb().petProfile.get("global"), [])
-  const binding = useLiveQuery(
-    () => (activeCharacterId ? getDb().petCharacterBindings.get(activeCharacterId) : undefined),
-    [activeCharacterId]
-  )
+  const binding = useLiveQuery(async () => {
+    if (!activeCharacterId) return undefined
+    const stored = await getDb().petCharacterBindings.get(activeCharacterId)
+    if (!stored) return undefined
+    const migrated = migrateLegacyPetBinding(stored)
+    if (migrated !== stored) await getDb().petCharacterBindings.put(migrated)
+    return migrated
+  }, [activeCharacterId])
 
   const view = useMemo(
     // eslint-disable-next-line react-hooks/purity -- need-decay is computed against the wall clock captured when profile/binding change; an effect-based clock would add a render and shift timing.
@@ -43,6 +49,7 @@ export function usePet(activeCharacterId?: string | null): UsePetResult {
     profile,
     view,
     loading: profile === undefined,
+    binding: binding ?? undefined,
     feed: () => emitPetEvent({ source: "user", kind: "fed" }),
     play: () => emitPetEvent({ source: "user", kind: "played" }),
     petStroke: () => emitPetEvent({ source: "user", kind: "petted" }),

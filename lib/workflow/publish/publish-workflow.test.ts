@@ -1,8 +1,5 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWorkflow, getWorkflow, updateWorkflow } from "@/lib/db/workflows"
 import {
   publishWorkflow,
@@ -14,12 +11,13 @@ import {
 } from "./publish-workflow"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 const inputSchema = {
   type: "object",
@@ -81,7 +79,7 @@ describe("toolNameForWorkflow", () => {
 })
 
 describe("publishWorkflow", () => {
-  it("stamps the interface + publication and registers a kind:workflow skill", async () => {
+  it("creates an immutable version, deploys it, and registers a kind:workflow skill", async () => {
     const wf = await createWorkflow({ name: "Summarizer", nodes: nodesWithInterface(), edges: [] })
     const result = await publishWorkflow(wf.id, 123)
 
@@ -90,8 +88,33 @@ describe("publishWorkflow", () => {
     expect(result.workflowInterface).toEqual({ inputSchema, outputSchema })
 
     const reloaded = await getWorkflow(wf.id)
-    expect(reloaded?.published).toEqual({ at: 123, toolName: "wf_summarizer" })
+    expect(reloaded?.published).toEqual({
+      at: 123,
+      toolName: "wf_summarizer",
+      versionId: result.versionId,
+      deploymentId: result.deploymentId,
+      deploymentRevision: 1,
+    })
     expect(reloaded?.interface).toEqual({ inputSchema, outputSchema })
+
+    const version = await getDb().workflowVersions.get(result.versionId)
+    expect(version).toMatchObject({
+      id: result.versionId,
+      workflowId: wf.id,
+      sequence: 1,
+      name: "Summarizer",
+      interface: { inputSchema, outputSchema },
+      digest: expect.stringMatching(/^wfv1:[0-9a-f]{32}$/),
+    })
+    expect(version?.definition.published).toBeUndefined()
+    const deployment = await getDb().workflowDeployments.get(result.deploymentId)
+    expect(deployment).toMatchObject({
+      workflowId: wf.id,
+      environment: "production",
+      versionId: result.versionId,
+      revision: 1,
+      status: "active",
+    })
 
     const skill = await getDb().skills.get(result.skillId)
     expect(skill?.kind).toBe("workflow")
@@ -111,9 +134,36 @@ describe("publishWorkflow", () => {
     const second = await publishWorkflow(wf.id, 2)
     expect(second.created).toBe(false)
     expect(second.skillId).toBe(first.skillId)
+    expect(second.versionId).not.toBe(first.versionId)
+    expect(second.deploymentId).toBe(first.deploymentId)
+    expect(second.deploymentRevision).toBe(2)
+    expect(await getDb().workflowVersions.count()).toBe(2)
     const all = await getDb().skills.toArray()
     const matching = all.filter((s) => s.canonicalId === workflowSkillCanonicalId(wf.id))
     expect(matching).toHaveLength(1)
+  })
+
+  it("keeps the deployed version immutable when the draft implementation changes", async () => {
+    const wf = await createWorkflow({ name: "Immutable", nodes: nodesWithInterface(), edges: [] })
+    const published = await publishWorkflow(wf.id, 123)
+
+    await updateWorkflow(wf.id, {
+      nodes: [
+        ...nodesWithInterface(),
+        {
+          id: "n_prompt",
+          type: "ai.prompt",
+          typeVersion: 1,
+          position: { x: 100, y: 100 },
+          data: { label: "changed", params: { prompt: "changed after publish" } },
+        },
+      ],
+    })
+
+    const version = await getDb().workflowVersions.get(published.versionId)
+    expect(version?.definition.nodes).toEqual(nodesWithInterface())
+    expect((await getWorkflow(wf.id))?.nodes).toHaveLength(3)
+    expect((await getWorkflow(wf.id))?.published?.versionId).toBe(published.versionId)
   })
 
   it("serializes concurrent publish attempts into one generated skill", async () => {
@@ -131,28 +181,46 @@ describe("publishWorkflow", () => {
     expect(matching).toHaveLength(1)
   })
 
-  it("keeps a published workflow and its generated skill aligned across renames", async () => {
+  it("keeps the deployed identity stable across draft renames", async () => {
     const wf = await createWorkflow({ name: "Old name", nodes: nodesWithInterface(), edges: [] })
     const published = await publishWorkflow(wf.id, 123)
 
     await updateWorkflow(wf.id, { name: "New name", description: "Updated description" })
 
     const reloaded = await getWorkflow(wf.id)
-    expect(reloaded?.published).toEqual({ at: 123, toolName: "wf_new_name" })
+    expect(reloaded?.published).toMatchObject({ at: 123, toolName: "wf_old_name" })
     const skill = await getDb().skills.get(published.skillId)
     expect(skill).toMatchObject({
       id: published.skillId,
-      name: "New name",
-      description: "Updated description",
+      name: "Old name",
       canonicalId: workflowSkillCanonicalId(wf.id),
       kind: "workflow",
       workflowId: wf.id,
     })
-    expect(skill?.content).toContain('"name": "New name"')
+    expect(skill?.content).toContain('"name": "Old name"')
   })
 
   it("throws for an unknown workflow", async () => {
     await expect(publishWorkflow("wf_nope", 1)).rejects.toThrow(/not found/)
+  })
+
+  it("blocks new publications that still contain legacy data.code@1", async () => {
+    const wf = await createWorkflow({
+      name: "Legacy code",
+      nodes: [
+        {
+          id: "code",
+          type: "data.code",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "code", params: { code: "return input" } },
+        },
+      ],
+      edges: [],
+    })
+
+    await expect(publishWorkflow(wf.id, 1)).rejects.toThrow(/data\.code@1/)
+    expect(await getDb().workflowVersions.count()).toBe(0)
   })
 })
 

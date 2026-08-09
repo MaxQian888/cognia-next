@@ -1,0 +1,31 @@
+{
+  "latestVersion": 150,
+  "versionDeclarations": 148,
+  "schemaHistorySha256": "4ad64ce3093b7971b6569df58211c59b526b4c81e4d368e64e69e507c4b60b83",
+  "staticTableCount": 234,
+  "companionSyncTableCount": 21,
+  "companionSyncTables": [
+    "adapterInstances",
+    "agentTaskAttempts",
+    "agentTasks",
+    "agentTeamBoard",
+    "characters",
+    "conversationOverrides",
+    "goals",
+    "mcpServers",
+    "memories",
+    "messages",
+    "plugins",
+    "sessions",
+    "settings",
+    "skills",
+    "templateDefinitions",
+    "templateInstances",
+    "templatePackages",
+    "terminalHistory",
+    "twinProfile",
+    "workflowRuns",
+    "workflows"
+  ],
+  "catalog": "lib/data-governance/table-catalog.ts"
+}

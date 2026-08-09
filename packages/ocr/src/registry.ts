@@ -67,7 +67,14 @@ export function shellAllows(provider: OcrProvider, platform: NativePlatform): bo
     case "web":
       return provider.shells.browser
     case "headless":
-      return false
+      // Headless hosts may expose only server-safe native backends. Apple
+      // Vision and Windows.Media.Ocr are tied to an interactive desktop
+      // platform even when the server binary happens to run on that OS.
+      return (
+        provider.shells.tauri &&
+        provider.id !== "apple-vision" &&
+        provider.id !== "windows-media-ocr"
+      )
   }
 }
 

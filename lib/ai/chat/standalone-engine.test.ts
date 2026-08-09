@@ -25,7 +25,8 @@ jest.mock("ai", () => ({
   // the assertions readable while still proving what gets handed to streamText.
   tool: (def: unknown) => def,
   jsonSchema: (schema: unknown) => schema,
-  stepCountIs: (n: number) => ({ __stopAfterSteps: n }),
+  // v7 renamed `stepCountIs` to `isStepCount`.
+  isStepCount: (n: number) => ({ __stopAfterSteps: n }),
 }))
 jest.mock("@/lib/claude/plugin-tool-ipc", () => ({
   handlePluginToolExec: jest.fn(async () => ({ result: "ok" })),
@@ -34,8 +35,9 @@ jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: { getState: () => ({ settings: {} }) },
 }))
 let mockPiiSafe = true
+let mockPiiResults: boolean[] = []
 jest.mock("@cognia/redact", () => ({
-  hasNoLeakingPiiDeep: () => mockPiiSafe,
+  hasNoLeakingPiiDeep: () => mockPiiResults.shift() ?? mockPiiSafe,
 }))
 
 const mockResolve = resolveStandaloneProvider as jest.MockedFunction<
@@ -84,7 +86,7 @@ function routingPlan(): RoutingPlan {
 
 function fakeStream(parts: unknown[], usage?: unknown) {
   return (() => ({
-    fullStream: (async function* () {
+    stream: (async function* () {
       for (const p of parts) yield p
     })(),
     usage: Promise.resolve(usage ?? { promptTokens: 3, completionTokens: 7 }),
@@ -112,6 +114,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockResolve.mockReturnValue(resolved)
   mockPiiSafe = true
+  mockPiiResults = []
 })
 
 describe("runStandaloneTurn", () => {
@@ -244,7 +247,7 @@ describe("runStandaloneTurn", () => {
   })
 
   it("fails closed before resending private history to a fallback provider", async () => {
-    mockPiiSafe = false
+    mockPiiResults = [true, true, false]
     const impl = jest.fn().mockImplementationOnce(() => {
       throw new Error("primary unavailable")
     })
@@ -263,9 +266,26 @@ describe("runStandaloneTurn", () => {
     })
   })
 
+  it("fails closed before sending derived system context to the first provider", async () => {
+    mockPiiSafe = false
+    const impl = jest.fn(fakeStream([{ type: "text-delta", text: "never sent" }]))
+
+    const { events, promise } = run({
+      sendOptions: { systemPrompt: "Local transcript with alice@example.com" } as SendOptions,
+      streamTextImpl: impl as never,
+    })
+    await promise
+
+    expect(impl).not.toHaveBeenCalled()
+    expect(events.at(-1)).toMatchObject({
+      type: "session_ended",
+      error: expect.stringContaining("derived context contains private data"),
+    })
+  })
+
   it("never replays a routed standalone turn after visible output commits it", async () => {
     const impl = (() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield { type: "text-delta", text: "partial" }
         throw new Error("failed after output")
       })(),
@@ -317,7 +337,7 @@ describe("runStandaloneTurn", () => {
     // string, so per-segment providerOptions survive the AI SDK 7 split.
     expect(streamSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        system: [{ role: "system", content: "SYS" }],
+        instructions: [{ role: "system", content: "SYS" }],
         model: { __model: true },
       })
     )
@@ -326,12 +346,12 @@ describe("runStandaloneTurn", () => {
   it("omits the system field when there is no system prompt", async () => {
     const streamSpy = jest.fn(fakeStream([{ type: "text-delta", text: "x" }]))
     await run({ streamTextImpl: streamSpy as never, sendOptions: {} as SendOptions }).promise
-    expect(streamSpy.mock.calls[0][0]).not.toHaveProperty("system")
+    expect(streamSpy.mock.calls[0][0]).not.toHaveProperty("instructions")
   })
 
   it("falls back to the real `ai` streamText when no impl is injected", async () => {
     ;(streamText as unknown as jest.Mock).mockReturnValue({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield { type: "text-delta", text: "viaAi" }
       })(),
       usage: Promise.resolve({ promptTokens: 1, completionTokens: 1 }),
@@ -391,7 +411,7 @@ describe("runStandaloneTurn", () => {
 
   it("still seals cleanly when the usage promise rejects", async () => {
     const stream = (() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield { type: "text-delta", text: "hi" }
       })(),
       usage: Promise.reject(new Error("no usage")),

@@ -38,6 +38,20 @@ describe("PetAppearanceControls", () => {
     expect(patch).toHaveBeenCalledWith({ size: expect.any(Number) })
   })
 
+  it("enables gaze following by default and lets the user disable it", () => {
+    const patch = jest.fn()
+    render(
+      <PetAppearanceControls
+        pet={{ ...DEFAULT_PET_SETTINGS, gazeFollowing: undefined }}
+        patch={patch}
+      />
+    )
+    const gaze = screen.getByRole("switch", { name: /follow pointer/i })
+    expect(gaze).toBeChecked()
+    fireEvent.click(gaze)
+    expect(patch).toHaveBeenCalledWith({ gazeFollowing: false })
+  })
+
   it("warns when the live2d skin is selected but the core is missing", () => {
     coreAvailable = false
     render(

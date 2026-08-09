@@ -109,12 +109,57 @@ declare global {
     __cogniaE2EOcrMock?: (input: unknown) => unknown
     __cogniaSaveCompanionConfig?: (config: {
       baseUrl: string
-      deviceJwt: string
+      devicePrivateKeyJwk: JsonWebKey
+      deviceKeyThumbprint: string
       deviceId: string
       serverVersion: string
       serverFingerprint?: string
     }) => Promise<void>
     __cogniaClearCompanionConfig?: () => Promise<void>
+    /**
+     * Real Web Companion E2E seam. It always resolves the live module transport
+     * so a first-time pairing that replaces `WebStubTransport` is visible
+     * without reloading the page.
+     */
+    __cogniaE2ECompanion?: {
+      call(method: string, params?: Record<string, unknown>): Promise<unknown>
+      request(
+        method: "GET" | "POST" | "PUT" | "DELETE",
+        path: string,
+        body?: unknown
+      ): Promise<{ status: number; body: unknown }>
+      pair(pairPayload: string): Promise<{
+        accountId: string
+        targetId: string
+        databaseName: string
+        deviceId: string
+        baseUrl: string
+      }>
+      targets(): Promise<
+        Array<{
+          id: string
+          kind: "standalone" | "companion" | "legacy-readonly"
+          baseUrl?: string
+          deviceId?: string
+        }>
+      >
+      switchTarget(targetId: string): Promise<void>
+      runtime(): Promise<{
+        accountId: string
+        targetId: string
+        databaseName: string
+        deviceId: string | null
+        baseUrl: string | null
+      } | null>
+      subscribe(event: string): void
+      unsubscribe(event: string): void
+      events(event: string): unknown[]
+      connectionState(): string | null
+      activeTier(): string | null
+      reconnectWs(): void
+      reconnectRtc(): string
+      disableRtc(): void
+    }
     /**
      * Patch the AppSettings singleton through the settings store (memory +
      * Dexie). Specs need this because `__cogniaResetDb` wipes the settings
@@ -170,6 +215,7 @@ export function ExposeTestGlobals(): null {
     if (typeof window === "undefined") return
 
     let cancelled = false
+    let detachCompanionE2E = () => {}
 
     void (async () => {
       // Install the real-pair WebRTC seam before opening Dexie. The broader
@@ -244,12 +290,14 @@ export function ExposeTestGlobals(): null {
         // only saveCompanionConfig/clearCompanionConfig update. A raw storage
         // write leaves that cache null and every transport.call() rejects
         // with not_paired even though storage holds the config.
-        { saveCompanionConfig, clearCompanionConfig },
+        { saveCompanionConfig, clearCompanionConfig, loadCompanionConfig },
         { buildWorkflowFixture },
+        transportModule,
       ] = await Promise.all([
         import("@/lib/db/schema"),
         import("@/lib/tauri/transport-companion"),
         import("./workflow-fixtures"),
+        import("@/lib/tauri/transport-instance"),
       ])
 
       const ACCOUNT_DB_PREFIX = "cognia-account-"
@@ -477,6 +525,150 @@ export function ExposeTestGlobals(): null {
       window.__cogniaClearCompanionConfig = async () => {
         await clearCompanionConfig()
       }
+      const companionEventLogs = new Map<string, unknown[]>()
+      const companionEventUnsubscribers = new Map<string, () => void>()
+      detachCompanionE2E = () => {
+        for (const unsubscribe of companionEventUnsubscribers.values()) unsubscribe()
+        companionEventUnsubscribers.clear()
+        companionEventLogs.clear()
+      }
+      const liveCompanionTransport = () =>
+        transportModule.transport as typeof transportModule.transport & {
+          getConnectionState?: () => string
+          getActiveTier?: () => string
+          reconnectWs?: () => void
+          reconnectRtc?: () => string
+          disableWebRtcTier?: () => void
+        }
+      const companionRequest = async (
+        method: "GET" | "POST" | "PUT" | "DELETE",
+        path: string,
+        body?: unknown
+      ): Promise<{ status: number; body: unknown }> => {
+        if (!path.startsWith("/") || path.includes("#")) {
+          throw new Error("Companion E2E request path must be absolute and fragment-free")
+        }
+        const config = loadCompanionConfig()
+        if (!config) throw new Error("Companion E2E request requires an active pairing")
+        const [{ companionAuthorizationHeaders }, { pinnedFetch }] = await Promise.all([
+          import("@/lib/tauri/companion-auth"),
+          import("@/lib/tauri/pinned-fetch"),
+        ])
+        const headers: Record<string, string> = await companionAuthorizationHeaders(
+          config,
+          method,
+          new URL(path, config.baseUrl).pathname
+        )
+        let serializedBody: string | undefined
+        if (body !== undefined) {
+          headers["Content-Type"] = "application/json"
+          serializedBody = JSON.stringify(body)
+        }
+        const response = await pinnedFetch(`${config.baseUrl.replace(/\/+$/, "")}${path}`, {
+          method,
+          headers,
+          body: serializedBody,
+          serverFingerprint: config.serverFingerprint,
+        })
+        const responseBody = await response.json().catch(() => null)
+        return { status: response.status, body: responseBody }
+      }
+      const runtimeSummary = async () => {
+        const { getActiveRuntimeTargetContext } =
+          await import("@/lib/runtime/runtime-target-context")
+        const context = getActiveRuntimeTargetContext()
+        if (!context) return null
+        const config = loadCompanionConfig()
+        return {
+          accountId: context.accountId,
+          targetId: context.targetId,
+          databaseName: getDb().name,
+          deviceId: config?.deviceId ?? null,
+          baseUrl: config?.baseUrl ?? null,
+        }
+      }
+      window.__cogniaE2ECompanion = {
+        call(method, params) {
+          return liveCompanionTransport().call(method, params)
+        },
+        request: companionRequest,
+        async pair(pairPayload) {
+          const { registerPairPayload } = await import("@/components/mobile/pair/pair-api")
+          const result = await registerPairPayload(pairPayload)
+          if (result.kind !== "ok") throw new Error(result.message)
+          await saveCompanionConfig(result.config)
+          const summary = await runtimeSummary()
+          if (!summary || !summary.deviceId || !summary.baseUrl) {
+            throw new Error("Pairing completed without an active Companion runtime target")
+          }
+          return {
+            ...summary,
+            deviceId: summary.deviceId,
+            baseUrl: summary.baseUrl,
+          }
+        },
+        async targets() {
+          const [{ getActiveRuntimeTargetContext }, { RuntimeTargetRegistry }] = await Promise.all([
+            import("@/lib/runtime/runtime-target-context"),
+            import("@/lib/runtime/target-registry"),
+          ])
+          const context = getActiveRuntimeTargetContext()
+          if (!context) return []
+          const registry = new RuntimeTargetRegistry()
+          try {
+            return (await registry.listTargets(context.accountId)).map((target) => ({
+              id: target.id,
+              kind: target.kind,
+              baseUrl: target.baseUrl,
+              deviceId: target.deviceId,
+            }))
+          } finally {
+            registry.close()
+          }
+        },
+        async switchTarget(targetId) {
+          const [{ getActiveRuntimeTargetContext }, { switchAccountRuntimeTarget }] =
+            await Promise.all([
+              import("@/lib/runtime/runtime-target-context"),
+              import("@/lib/runtime/account-runtime-target"),
+            ])
+          const context = getActiveRuntimeTargetContext()
+          if (!context) throw new Error("Runtime target switching requires an active account")
+          await switchAccountRuntimeTarget(context.accountId, targetId)
+        },
+        runtime: runtimeSummary,
+        subscribe(event) {
+          if (companionEventUnsubscribers.has(event)) return
+          const log = companionEventLogs.get(event) ?? []
+          companionEventLogs.set(event, log)
+          companionEventUnsubscribers.set(
+            event,
+            liveCompanionTransport().subscribe(event, (payload) => log.push(payload))
+          )
+        },
+        unsubscribe(event) {
+          companionEventUnsubscribers.get(event)?.()
+          companionEventUnsubscribers.delete(event)
+        },
+        events(event) {
+          return [...(companionEventLogs.get(event) ?? [])]
+        },
+        connectionState() {
+          return liveCompanionTransport().getConnectionState?.() ?? null
+        },
+        activeTier() {
+          return liveCompanionTransport().getActiveTier?.() ?? null
+        },
+        reconnectWs() {
+          liveCompanionTransport().reconnectWs?.()
+        },
+        reconnectRtc() {
+          return liveCompanionTransport().reconnectRtc?.() ?? "no-tier"
+        },
+        disableRtc() {
+          liveCompanionTransport().disableWebRtcTier?.()
+        },
+      }
       window.__cogniaSetSettings = async (patch) => {
         const { useSettingsStore } = await import("@/stores/settings")
         type SavePatch = Parameters<ReturnType<typeof useSettingsStore.getState>["save"]>[0]
@@ -534,6 +726,7 @@ export function ExposeTestGlobals(): null {
 
     return () => {
       cancelled = true
+      detachCompanionE2E()
       delete window.__cogniaResetDb
       delete window.__cogniaSeedWorkflow
       delete window.__cogniaSeedCharacter
@@ -547,6 +740,7 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaMockBaseUrls
       delete window.__cogniaSaveCompanionConfig
       delete window.__cogniaClearCompanionConfig
+      delete window.__cogniaE2ECompanion
       delete window.__cogniaSetSettings
       delete window.__cogniaE2EOpenUrl
       delete window.__cogniaE2EOpenUrlCalls

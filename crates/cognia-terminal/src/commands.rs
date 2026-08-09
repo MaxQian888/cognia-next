@@ -360,7 +360,10 @@ mod tests {
                 PathBuf::from("/app/cli"),
             ]
         );
-        assert_eq!(injection.append, vec![PathBuf::from("/home/dev/.cargo/bin")]);
+        assert_eq!(
+            injection.append,
+            vec![PathBuf::from("/home/dev/.cargo/bin")]
+        );
     }
 
     #[test]

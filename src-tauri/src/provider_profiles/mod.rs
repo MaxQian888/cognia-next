@@ -953,9 +953,66 @@ pub fn gateway_snapshot_json(
         })
         .collect();
 
+    let mut alias_entries: std::collections::BTreeMap<&str, Vec<Value>> =
+        std::collections::BTreeMap::new();
+    for deployment in docs
+        .deployment_profiles
+        .iter()
+        .filter(|deployment| deployment.enabled != Some(false))
+    {
+        let Some(roles) = deployment.model_roles.as_ref().and_then(Value::as_object) else {
+            continue;
+        };
+        for (role, alias) in [
+            ("fast", "fast"),
+            ("primary", "balanced"),
+            ("powerful", "powerful"),
+        ] {
+            let Some(model_id) = roles.get(role).and_then(Value::as_str) else {
+                continue;
+            };
+            if deployment.models.iter().any(|model| model.id == model_id) {
+                alias_entries.entry(alias).or_default().push(serde_json::json!({
+                    "providerId": deployment.id,
+                    "deploymentId": deployment.id,
+                    "modelId": model_id,
+                    "available": true,
+                    "locality": if deployment.region.as_deref() == Some("local") { "local" } else { "remote" },
+                }));
+            }
+        }
+    }
+    let aliases: Vec<Value> = alias_entries
+        .iter()
+        .map(|(alias, entries)| {
+            serde_json::json!({
+                "alias": alias,
+                "distribution": "priority",
+                "entries": entries,
+            })
+        })
+        .collect();
+    let candidate_aliases: Vec<&str> = ["fast", "balanced", "powerful"]
+        .into_iter()
+        .filter(|alias| alias_entries.contains_key(alias))
+        .collect();
+    let routing_policy = (!candidate_aliases.is_empty()).then(|| serde_json::json!({
+        "schemaVersion": 2,
+        "policyRevision": format!("profile-{profile_version}"),
+        "auto": {
+            "modelId": "auto",
+            "strategy": "reliability",
+            "candidateAliases": candidate_aliases,
+            "thresholds": { "balanced": 0.34, "powerful": 0.67 },
+        },
+        "tierAliases": alias_entries.keys().map(|alias| ((*alias).to_string(), (*alias).to_string())).collect::<std::collections::BTreeMap<_, _>>(),
+        "maxFallbackAttempts": 3,
+    }));
+
     serde_json::json!({
-        "aliases": [],
+        "aliases": aliases,
         "providers": providers,
+        "routingPolicy": routing_policy,
         "generatedAtMs": generated_at_ms,
         "profileVersion": profile_version,
         "authority": "profile-store",
@@ -1295,6 +1352,13 @@ mod tests {
         let snapshot = gateway_snapshot_json(&d, 7, 1234, &resolver);
         assert_eq!(snapshot["authority"], "profile-store");
         assert_eq!(snapshot["profileVersion"], 7);
+        assert_eq!(snapshot["aliases"][0]["alias"], "balanced");
+        assert_eq!(snapshot["routingPolicy"]["schemaVersion"], 2);
+        assert_eq!(snapshot["routingPolicy"]["auto"]["modelId"], "auto");
+        assert_eq!(
+            snapshot["routingPolicy"]["auto"]["candidateAliases"],
+            serde_json::json!(["balanced"])
+        );
         let provider = &snapshot["providers"][0];
         assert_eq!(provider["id"], "glm-anthropic");
         assert_eq!(provider["deploymentId"], "glm-anthropic");

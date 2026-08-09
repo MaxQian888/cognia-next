@@ -33,8 +33,9 @@ You need:
 1. From the desktop, generate a pair QR (Settings → Mobile companion →
    Pair device → Generate QR).
 2. On the phone, run the in-app pair flow: Discover → Pair → scan the
-   QR. The phone redeems `POST /api/v1/auth/pair`; this returns a
-   `RoomDescriptorV2` and installs a non-extractable mobile role key.
+   `cgnp3` QR. The phone completes challenge + P-256 registration at
+   `POST /api/auth/device/register`; this returns a `RoomDescriptorV2` and
+   stores the independent mobile-role signaling key in secure storage.
 3. Within ~5 seconds the desktop's WebRTC card should show the new
    device transitioning **offline → awaiting → negotiating → connected**.
 4. On the mobile Settings panel, the Transport row should land on

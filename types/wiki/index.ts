@@ -6,7 +6,7 @@
  *   • `wikiArticles` — generated module-level articles (Markdown + sections + sourceRefs)
  *   • `wikiSections` — split-out section bodies for partial updates / per-section RAG
  *   • `wikiManifest` — Merkle table of file SHA-256s + per-scope build metadata
- *   • `mcpAuditLog` — capped log (5000 newest) of every MCP call routed through the bridge
+ *   • `mcpAuditLog` — 30-day / 10,000-row log of MCP calls routed through the bridge
  *
  * Wiki articles are produced by `lib/wiki/orchestrator.ts` which drives:
  *   1. file-walker → enumerate code files in a scope
@@ -110,6 +110,11 @@ export type BridgeScope =
    * agent may not rewrite the assistant's working instructions — ADR-0069).
    */
   | "memory:write"
+  /**
+   * Discover and execute immutable workflow deployments through External
+   * Bridge MCP lifecycle and dynamically typed tools. Default OFF.
+   */
+  | "workflow:run"
 
 export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:cognia",
@@ -131,6 +136,14 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "inbound:write",
   "memory:read",
   "memory:write",
+  "workflow:run",
+] as const
+
+export const WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES = [
+  "workflow_list",
+  "workflow_status",
+  "workflow_events",
+  "workflow_cancel",
 ] as const
 
 /** Scopes enabled by default for a fresh install. Public-code wiki + RAG only. */
@@ -481,7 +494,7 @@ export type WikiStagedArticle = WikiArticle & { buildId: string }
 export type WikiStagedSection = WikiSection & { buildId: string }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MCP audit log — capped 5000-row record of every bridge call.
+// MCP audit log — content-free record shared by outbound runtime + inbound bridge.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -505,4 +518,11 @@ export interface McpAuditLogRow {
   reason?: string
   /** Optional error message (when allowed=true but handler threw). */
   errorMessage?: string
+  direction?: "outbound" | "inbound"
+  phase?: "connect" | "discover" | "call" | "close"
+  serverId?: string
+  executionSurface?: "chat" | "workflow" | "plan" | "cli" | "settings" | "agent-sync" | "bridge"
+  decision?: "allow" | "deny" | "ask"
+  durationMs?: number
+  errorCode?: string
 }

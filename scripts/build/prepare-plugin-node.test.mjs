@@ -7,8 +7,15 @@ import { fileURLToPath } from "node:url"
 import {
   PLUGIN_NODE_VERSION,
   archiveFor,
+  parseArgs,
   verifyArchive,
 } from "./prepare-plugin-node.mjs"
+
+test("parseArgs supports verification and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { check: false })
+  assert.deepEqual(parseArgs(["--check"]), { check: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 test("archiveFor pins every supported desktop target", () => {
   assert.match(archiveFor("darwin", "arm64").file, new RegExp(`v${PLUGIN_NODE_VERSION}`))

@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // Provider Profile Store accessors — derived-set replacement, CAS version
 // bumps, legacy lookups, and redacted export/import against real Dexie over
 // fake-indexeddb.
 
-import "fake-indexeddb/auto"
 import type { DerivedProfiles } from "@cognia/provider-types/profile-migration"
 
 import {
@@ -17,7 +15,7 @@ import {
   listTransportProfiles,
   putDerivedProfiles,
 } from "./provider-profiles"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 function derivedFixture(suffix = ""): DerivedProfiles {
   return {
@@ -43,12 +41,13 @@ function derivedFixture(suffix = ""): DerivedProfiles {
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 describe("putDerivedProfiles", () => {
   it("replaces the document set wholesale and bumps profileVersion monotonically", async () => {

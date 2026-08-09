@@ -1,12 +1,13 @@
 /**
  * TTS Types — ported verbatim from D:\Project\Cognia\types\media\tts.ts.
- * Supports 12 providers: system (Web Speech), OpenAI, OpenAI Realtime, Gemini,
+ * Supports system, cloud, realtime, and local OpenAI-compatible providers: OpenAI,
  * Edge, ElevenLabs, LMNT, Hume, Cartesia, Deepgram, Xiaomi, and Mistral.
  */
 
 export type TTSProvider =
   | "system"
   | "openai"
+  | "local-openai-compatible"
   | "gemini"
   | "edge"
   | "elevenlabs"
@@ -19,15 +20,15 @@ export type TTSProvider =
   | "openai-realtime"
 
 /**
- * Web-mode fallback row for the `tts_provider_keys` Dexie table. On the desktop
- * the keys live in the OS keyring; in the browser (no keyring) `lib/tts/keyring.ts`
- * falls back to this table. `schema.ts` imports + re-exports this type, so
- * existing `@/lib/db/schema` import sites keep working. See `lib/db/CONVENTIONS.md`.
+ * Legacy web fallback row for the `tts_provider_keys` Dexie table. New writes
+ * use the encrypted Browser Vault (or the OS keyring on desktop); this shape is
+ * retained so old cleartext rows can be migrated safely on read.
  */
 export interface TtsProviderKeyRow {
   /** "tts.providerKey.<provider>" */
   id: string
-  value: string
+  /** Legacy cleartext value. Never written by current code. */
+  value?: string
 }
 
 export interface TTSProviderInfo {
@@ -35,8 +36,11 @@ export interface TTSProviderInfo {
   name: string
   description: string
   requiresApiKey: boolean
+  /** The provider accepts a key when its deployment is protected, but does not require one. */
+  supportsOptionalApiKey?: boolean
   /** Which provider's API key to use (some share, e.g., gemini → google). */
   apiKeyProvider?: string
+  /** True only when audio bytes arrive incrementally from the transport. */
   supportsStreaming: boolean
   maxTextLength: number
 }
@@ -56,8 +60,18 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     description: "High-quality neural voices from OpenAI",
     requiresApiKey: true,
     apiKeyProvider: "openai",
-    supportsStreaming: true,
+    supportsStreaming: false,
     maxTextLength: 4096,
+  },
+  "local-openai-compatible": {
+    id: "local-openai-compatible",
+    name: "Local OpenAI-compatible",
+    description: "Loopback OpenAI-compatible speech endpoint (LocalAI, Kokoro, or Piper)",
+    requiresApiKey: false,
+    supportsOptionalApiKey: true,
+    apiKeyProvider: "local-openai-compatible",
+    supportsStreaming: false,
+    maxTextLength: 10000,
   },
   gemini: {
     id: "gemini",
@@ -73,7 +87,7 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     name: "Edge TTS",
     description: "Microsoft Edge neural voices (free)",
     requiresApiKey: false,
-    supportsStreaming: true,
+    supportsStreaming: false,
     maxTextLength: 10000,
   },
   elevenlabs: {
@@ -82,7 +96,7 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     description: "Industry-leading AI voice synthesis",
     requiresApiKey: true,
     apiKeyProvider: "elevenlabs",
-    supportsStreaming: true,
+    supportsStreaming: false,
     maxTextLength: 10000,
   },
   lmnt: {
@@ -91,7 +105,7 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     description: "Ultra-low latency voice synthesis",
     requiresApiKey: true,
     apiKeyProvider: "lmnt",
-    supportsStreaming: true,
+    supportsStreaming: false,
     maxTextLength: 3000,
   },
   hume: {
@@ -100,7 +114,7 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     description: "Emotionally expressive voice synthesis",
     requiresApiKey: true,
     apiKeyProvider: "hume",
-    supportsStreaming: true,
+    supportsStreaming: false,
     maxTextLength: 5000,
   },
   cartesia: {
@@ -109,7 +123,7 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     description: "Ultra-low latency streaming TTS with 42 languages",
     requiresApiKey: true,
     apiKeyProvider: "cartesia",
-    supportsStreaming: true,
+    supportsStreaming: false,
     maxTextLength: 10000,
   },
   deepgram: {
@@ -118,7 +132,7 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     description: "Enterprise-grade low-latency TTS",
     requiresApiKey: true,
     apiKeyProvider: "deepgram",
-    supportsStreaming: true,
+    supportsStreaming: false,
     maxTextLength: 10000,
   },
   xiaomi: {
@@ -181,6 +195,8 @@ export const OPENAI_TTS_MODELS = [
 ] as const
 
 export type OpenAITTSModel = (typeof OPENAI_TTS_MODELS)[number]["id"]
+
+export type BufferedTTSResponseFormat = "mp3" | "opus" | "aac" | "flac" | "wav"
 
 export const GEMINI_TTS_VOICES = [
   { id: "Zephyr", name: "Zephyr", description: "Bright" },
@@ -277,7 +293,8 @@ export const ELEVENLABS_TTS_VOICES = [
   { id: "sam", name: "Sam", description: "Raspy, young male" },
 ] as const
 
-export type ElevenLabsTTSVoice = (typeof ELEVENLABS_TTS_VOICES)[number]["id"]
+/** ElevenLabs voice ids are account-scoped and discovered at runtime. */
+export type ElevenLabsTTSVoice = string
 
 export const ELEVENLABS_TTS_MODELS = [
   {
@@ -442,7 +459,7 @@ export const MISTRAL_TTS_MODELS = [
 ] as const
 
 export type MistralTTSModel = (typeof MISTRAL_TTS_MODELS)[number]["id"]
-export type MistralTTSResponseFormat = "mp3" | "wav" | "pcm" | "flac" | "opus"
+export type MistralTTSResponseFormat = Exclude<BufferedTTSResponseFormat, "aac">
 
 export const XIAOMI_TTS_STYLES = [
   { id: "开心", name: "Happy", tag: "[开心]" },
@@ -514,7 +531,14 @@ export interface TTSSettings {
   openaiModel: OpenAITTSModel
   openaiSpeed: number
   openaiInstructions: string
-  openaiResponseFormat: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm"
+  openaiResponseFormat: BufferedTTSResponseFormat
+
+  localOpenaiBaseUrl: string
+  localOpenaiModel: string
+  localOpenaiVoice: string
+  localOpenaiSpeed: number
+  localOpenaiResponseFormat: BufferedTTSResponseFormat
+  localOpenaiTimeoutMs: number
 
   geminiVoice: GeminiTTSVoice
   geminiModel: GeminiTTSModel
@@ -580,6 +604,13 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   openaiSpeed: 1.0,
   openaiInstructions: "",
   openaiResponseFormat: "mp3",
+
+  localOpenaiBaseUrl: "",
+  localOpenaiModel: "",
+  localOpenaiVoice: "",
+  localOpenaiSpeed: 1.0,
+  localOpenaiResponseFormat: "mp3",
+  localOpenaiTimeoutMs: 60_000,
 
   geminiVoice: "Kore",
   geminiModel: "gemini-3.1-flash-tts-preview",
@@ -679,6 +710,7 @@ export type TTSErrorType =
   | "text-too-long"
   | "voice-not-found"
   | "audio-playback-error"
+  | "pii-blocked"
   | "cancelled"
 
 export interface TTSError {
@@ -695,6 +727,7 @@ const ERROR_MESSAGES: Record<TTSErrorType, string> = {
   "text-too-long": "Text exceeds maximum length for this provider",
   "voice-not-found": "Selected voice is not available",
   "audio-playback-error": "Failed to play audio",
+  "pii-blocked": "Speech synthesis was blocked because the text contains sensitive data",
   cancelled: "Speech synthesis was cancelled",
 }
 
@@ -768,6 +801,17 @@ export const KEYED_TTS_PROVIDERS: TTSProvider[] = [
  */
 export const RETIRED_TTS_PROVIDERS: TTSProvider[] = ["edge", "openai-realtime"]
 
+export function normalizeTTSProvider(value: unknown): TTSProvider {
+  if (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(TTS_PROVIDERS, value) &&
+    !RETIRED_TTS_PROVIDERS.includes(value as TTSProvider)
+  ) {
+    return value as TTSProvider
+  }
+  return "system"
+}
+
 /**
  * Stable list of *selectable* TTS provider IDs in display order (system
  * first). Retired providers (see `RETIRED_TTS_PROVIDERS`) are excluded.
@@ -775,6 +819,7 @@ export const RETIRED_TTS_PROVIDERS: TTSProvider[] = ["edge", "openai-realtime"]
 export const ORDERED_TTS_PROVIDERS: TTSProvider[] = [
   "system",
   "openai",
+  "local-openai-compatible",
   "gemini",
   "elevenlabs",
   "cartesia",

@@ -46,7 +46,7 @@ describe("pinnedFetch", () => {
       data: '{"hi":"there"}',
       status: 200,
       headers: { "content-type": "application/json" },
-      url: "https://192.168.1.42:7890/api/v1/whoami",
+      url: "https://192.168.1.42:7890/api/whoami",
     }))
     ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
       isNativePlatform: () => true,
@@ -58,7 +58,7 @@ describe("pinnedFetch", () => {
       },
     }
 
-    const r = await pinnedFetch("https://192.168.1.42:7890/api/v1/whoami", {
+    const r = await pinnedFetch("https://192.168.1.42:7890/api/whoami", {
       method: "GET",
       serverFingerprint: "deadbeef",
     })
@@ -68,7 +68,7 @@ describe("pinnedFetch", () => {
     const arg = (request as unknown as jest.Mock).mock.calls[0][0] as Record<string, unknown>
     expect(arg.serverTrustMode).toBe("pinned")
     expect(arg.serverFingerprint).toBe("deadbeef")
-    expect(arg.url).toBe("https://192.168.1.42:7890/api/v1/whoami")
+    expect(arg.url).toBe("https://192.168.1.42:7890/api/whoami")
   })
 
   it("fails closed when the native plugin cannot attest SPKI enforcement", async () => {
@@ -91,7 +91,7 @@ describe("pinnedFetch", () => {
       data: "{}",
       status: 200,
       headers: {},
-      url: "https://abc-def-ghi.trycloudflare.com/api/v1/whoami",
+      url: "https://abc-def-ghi.trycloudflare.com/api/whoami",
     }))
     ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
       isNativePlatform: () => true,
@@ -103,7 +103,7 @@ describe("pinnedFetch", () => {
       },
     }
 
-    await pinnedFetch("https://abc-def-ghi.trycloudflare.com/api/v1/whoami", {
+    await pinnedFetch("https://abc-def-ghi.trycloudflare.com/api/whoami", {
       serverFingerprint: "deadbeef",
     })
 
@@ -116,7 +116,7 @@ describe("pinnedFetch", () => {
       data: "{}",
       status: 200,
       headers: {},
-      url: "https://192.168.1.42:7890/api/v1/auth/pair/issue",
+      url: "https://192.168.1.42:7890/api/auth/device/register",
     }))
     ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
       isNativePlatform: () => true,
@@ -128,7 +128,7 @@ describe("pinnedFetch", () => {
       },
     }
 
-    await pinnedFetch("https://192.168.1.42:7890/api/v1/auth/pair/issue", { method: "POST" })
+    await pinnedFetch("https://192.168.1.42:7890/api/auth/device/register", { method: "POST" })
 
     const arg = (request as unknown as jest.Mock).mock.calls[0][0] as Record<string, unknown>
     expect(arg.serverTrustMode).toBe("default")

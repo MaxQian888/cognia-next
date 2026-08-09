@@ -1,0 +1,119 @@
+/// cognia-next WASM plugin contract — v0.1.0
+///
+/// A plugin imports the cognia capabilities it needs (each capability is
+/// gated by the host's `CapabilityGranter`) and exports a small set of
+/// lifecycle hooks the host invokes by name. Each guest export receives
+/// JSON-encoded `list<u8>` payloads so the wire format does not change
+/// when the contract grows; only the JSON schemas evolve.
+///
+/// Inspired by Zed's `zed:extension` world (`crates/extension_api/wit/`).
+/// The version is also embedded as a `cognia:api-version` custom section
+/// in the produced `.wasm` so the host can route to the right linker
+/// across breaking changes. See `src-tauri/src/plugin_api/wasm/wit/`.
+
+package cognia:plugin@0.1.0;
+
+interface logger {
+    enum log-level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    }
+    log: func(level: log-level, scope: string, message: string);
+}
+
+interface notification {
+    enum notification-kind {
+        info,
+        success,
+        warning,
+        error,
+    }
+    notify: func(title: string, body: string, kind: notification-kind);
+}
+
+interface secrets {
+    /// Returns `none` when the key is not present in the host keyring.
+    /// Errors are host-side I/O failures only; access denials surface as
+    /// a guest-visible trap from the capability gate.
+    get: func(key: string) -> result<option<string>, string>;
+    set: func(key: string, value: string) -> result<_, string>;
+    delete: func(key: string) -> result<_, string>;
+}
+
+interface process {
+    record exec-options {
+        cwd: option<string>,
+        env: list<tuple<string, string>>,
+        timeout-ms: option<u32>,
+    }
+    record exec-result {
+        code: s32,
+        stdout: list<u8>,
+        stderr: list<u8>,
+    }
+    /// Execute a one-shot subprocess. Requires `process:spawn` or
+    /// `shell:execute` capability AND that `program` appears in the plugin's
+    /// declared `shellCommands` allowlist. DENY-by-default: a plugin that
+    /// declares no `shellCommands` may spawn nothing, even with the
+    /// capability granted — full parity with the TS `ctx.shell.execute` gate.
+    exec: func(program: string, args: list<string>, options: exec-options) -> result<exec-result, string>;
+}
+
+interface clipboard {
+    read-text: func() -> result<string, string>;
+    write-text: func(value: string) -> result<_, string>;
+}
+
+interface ai {
+    record generate-options {
+        max-tokens: option<u32>,
+        temperature: option<f32>,
+        model: option<string>,
+    }
+    /// Host runs the prompt through the user's configured Anthropic
+    /// provider chain. Returns the full text in one shot; streaming is a
+    /// v0.2 addition.
+    generate-text: func(prompt: string, options: generate-options) -> result<string, string>;
+}
+
+interface workflow {
+    /// Re-enter the host's workflow runtime with a fire-and-forget event.
+    /// Useful for plugins that want to act as a trigger source on a
+    /// background timer or websocket.
+    emit-event: func(workflow-id: string, kind: string, payload: list<u8>) -> result<_, string>;
+}
+
+/// The plugin world v0.1.0. Hosts implement every `import`, guests
+/// implement every `export`. cognia-specific WIT lives here; the WASI
+/// Preview 2 worlds (filesystem/clocks/io/random/http/cli) are added to
+/// the same component at link time on the host side without appearing
+/// in this file (they are standard WIT and the host pulls them from the
+/// wasmtime-wasi crate).
+world cognia-plugin {
+    import logger;
+    import notification;
+    import secrets;
+    import process;
+    import clipboard;
+    import ai;
+    import workflow;
+
+    /// One-shot setup. Receives the JSON-encoded plugin config (from
+    /// `manifest.defaultConfig` merged with any user overrides). Returns
+    /// `err(string)` if activation should be considered failed.
+    export init: func(config: list<u8>) -> result<_, string>;
+
+    /// Generic event dispatch — the host calls this for every hook the
+    /// plugin opts into (`on-message-send`, `on-session-create`, …).
+    /// `kind` carries the hook name; `payload` is JSON-encoded.
+    export on-event: func(kind: string, payload: list<u8>) -> result<list<u8>, string>;
+
+    /// Plugins that register custom workflow nodes implement this.
+    export workflow-node-execute: func(node-kind: string, inputs: list<u8>) -> result<list<u8>, string>;
+
+    /// Plugins that register custom agent tools implement this.
+    export tool-execute: func(tool-name: string, args: list<u8>) -> result<list<u8>, string>;
+}

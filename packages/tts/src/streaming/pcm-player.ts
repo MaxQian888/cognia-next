@@ -19,6 +19,17 @@ export interface PcmPlayerOptions {
   audioContextFactory?: () => AudioContextLike
   onProgress?: (progress: number) => void
   onEnded?: () => void
+  /**
+   * Keep the audio context open when the current utterance drains.
+   *
+   * A TTS request plays once and is done, so the default is to close the
+   * context and free the hardware. A live-voice conversation reuses one player
+   * across many assistant turns — Chromium caps concurrent contexts at roughly
+   * six, and re-opening one per turn also re-triggers autoplay gating. With
+   * this set the player reports the turn as ended and returns to `idle`,
+   * ready for the next delta, instead of transitioning to `ended`.
+   */
+  keepAlive?: boolean
 }
 
 /** The subset of the Web Audio API the player relies on. */
@@ -97,6 +108,9 @@ export class PcmPlayer {
   private totalSources = 0
   private inputEnded = false
   private state: PlayerState = "idle"
+  private readonly keepAlive: boolean
+  /** Sources scheduled but not yet finished, so `interrupt()` can cut them. */
+  private readonly liveSources = new Set<AudioBufferSourceLike>()
 
   constructor(options: PcmPlayerOptions = {}) {
     this.sampleRate = options.sampleRate ?? 24000
@@ -104,6 +118,7 @@ export class PcmPlayer {
     this.onProgress = options.onProgress
     this.onEnded = options.onEnded
     this.factory = options.audioContextFactory ?? defaultAudioContextFactory
+    this.keepAlive = options.keepAlive ?? false
   }
 
   /** Queue one PCM16 delta for playback. Lazily opens the audio context. */
@@ -127,7 +142,11 @@ export class PcmPlayer {
       this.started = true
     }
     this.totalSources++
+    this.liveSources.add(source)
     source.onended = () => {
+      // A source cut by `interrupt()` is already untracked; its counters were
+      // cleared with it, so double-counting here would corrupt progress.
+      if (!this.liveSources.delete(source)) return
       this.endedSources++
       this.emitProgress()
       this.maybeFinish()
@@ -158,6 +177,7 @@ export class PcmPlayer {
 
   stop(): void {
     this.state = "ended"
+    this.liveSources.clear()
     if (this.ctx) {
       void this.ctx.close()
       this.ctx = null
@@ -165,8 +185,56 @@ export class PcmPlayer {
     }
   }
 
+  /**
+   * Cut playback immediately but keep the player usable — the barge-in
+   * primitive. Every scheduled source is stopped and the schedule rewinds to
+   * "now", so the next `enqueue()` starts speaking without waiting out audio
+   * the user already talked over.
+   *
+   * Unlike {@link stop} this leaves the audio context open: re-opening one per
+   * interruption would burn through Chromium's concurrent-context cap and
+   * re-trigger autoplay gating mid-conversation.
+   */
+  interrupt(): void {
+    if (this.state === "ended") return
+    for (const source of this.liveSources) {
+      try {
+        source.stop(0)
+      } catch {
+        // Already finished between the last event-loop turn and now.
+      }
+    }
+    this.liveSources.clear()
+    this.resetSchedule()
+  }
+
+  /**
+   * Seconds of audio actually played since the current utterance started.
+   *
+   * Barge-in needs this: the provider must be told how much of its own
+   * response the user really heard (`conversation.item.truncate`), or its
+   * transcript diverges from the conversation the user experienced.
+   */
+  playedSeconds(): number {
+    if (!this.ctx || !this.started) return 0
+    const played = this.ctx.currentTime - this.firstStartTime
+    return Math.max(0, Math.min(played, this.scheduledDuration))
+  }
+
   getState(): PlayerState {
     return this.state
+  }
+
+  /** Rewind scheduling state to "nothing queued", keeping the context open. */
+  private resetSchedule(): void {
+    this.nextStartTime = this.ctx?.currentTime ?? 0
+    this.firstStartTime = 0
+    this.started = false
+    this.scheduledDuration = 0
+    this.endedSources = 0
+    this.totalSources = 0
+    this.inputEnded = false
+    if (this.state !== "paused") this.state = "idle"
   }
 
   private ensureContext(): AudioContextLike {
@@ -189,6 +257,13 @@ export class PcmPlayer {
   private maybeFinish(): void {
     if (this.state === "ended") return
     if (this.inputEnded && this.endedSources >= this.totalSources && this.totalSources > 0) {
+      if (this.keepAlive) {
+        // One assistant turn drained; the conversation continues.
+        this.onProgress?.(1)
+        this.resetSchedule()
+        this.onEnded?.()
+        return
+      }
       this.state = "ended"
       this.onProgress?.(1)
       if (this.ctx) {

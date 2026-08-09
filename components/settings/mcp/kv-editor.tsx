@@ -2,93 +2,124 @@
 
 import { PlusIcon, Trash2Icon } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { useState } from "react"
 
+import {
+  EnvironmentVariable,
+  EnvironmentVariableCopyButton,
+  EnvironmentVariableGroup,
+  EnvironmentVariables,
+  EnvironmentVariablesContent,
+  EnvironmentVariablesHeader,
+  EnvironmentVariablesTitle,
+  EnvironmentVariablesToggle,
+} from "@/components/ai-elements/environment-variables"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import type { KvRow } from "./mcp-server-utils"
 
 interface KvEditorProps {
-  /** Pre-translated section label (e.g. "Environment variables"). */
   label: string
   rows: KvRow[]
   onChange: (rows: KvRow[]) => void
   keyPlaceholder?: string
   valuePlaceholder?: string
+  /** Secret-bearing env editors start masked; ordinary HTTP headers remain visible. */
+  maskValues?: boolean
 }
 
-/**
- * Dynamic key/value row editor used for stdio `env` and http/sse `headers`.
- * Extracted from the legacy `mcp-servers-section.tsx` so the editor sheet can
- * reuse it; the only behavioral change is i18n for its add / empty / remove
- * affordances.
- */
 export function KvEditor({
   label,
   rows,
   onChange,
   keyPlaceholder,
   valuePlaceholder,
+  maskValues = false,
 }: KvEditorProps) {
   const t = useTranslations("mcp.editor")
+  const [showValues, setShowValues] = useState(!maskValues)
+
   const updateRow = (index: number, patch: Partial<KvRow>) => {
-    onChange(rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
+    onChange(rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)))
   }
   const removeRow = (index: number) => {
-    onChange(rows.filter((_, i) => i !== index))
+    onChange(rows.filter((_, rowIndex) => rowIndex !== index))
   }
   const addRow = () => {
     onChange([...rows, { key: "", value: "" }])
   }
+
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+    <EnvironmentVariables
+      className="overflow-hidden rounded-md bg-transparent"
+      onShowValuesChange={setShowValues}
+      showValues={showValues}
+    >
+      <EnvironmentVariablesHeader className="px-2 py-1.5">
+        <EnvironmentVariablesTitle className="text-[10px] uppercase tracking-wider text-muted-foreground">
           {label}
-        </Label>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-[10px]"
-          onClick={addRow}
-        >
-          <PlusIcon className="mr-1 size-3" />
-          {t("kvAdd")}
-        </Button>
-      </div>
-      {rows.length === 0 ? (
-        <p className="text-[10px] italic text-muted-foreground">{t("kvEmpty")}</p>
-      ) : (
-        <div className="space-y-1">
-          {rows.map((row, i) => (
-            <div key={i} className="flex items-center gap-1">
-              <Input
-                value={row.key}
-                onChange={(e) => updateRow(i, { key: e.target.value })}
-                placeholder={keyPlaceholder}
-                className="h-7 flex-1 font-mono text-xs"
-              />
-              <Input
-                value={row.value}
-                onChange={(e) => updateRow(i, { value: e.target.value })}
-                placeholder={valuePlaceholder}
-                className="h-7 flex-[2] font-mono text-xs"
-              />
+        </EnvironmentVariablesTitle>
+        <div className="flex items-center gap-1">
+          {maskValues && (
+            <EnvironmentVariablesToggle
+              aria-label={showValues ? t("hideValues") : t("showValues")}
+            />
+          )}
+          <Button
+            className="h-6 px-2 text-[10px]"
+            onClick={addRow}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <PlusIcon className="mr-1 size-3" />
+            {t("kvAdd")}
+          </Button>
+        </div>
+      </EnvironmentVariablesHeader>
+      <EnvironmentVariablesContent>
+        {rows.length === 0 ? (
+          <p className="px-2 py-2 text-[10px] italic text-muted-foreground">{t("kvEmpty")}</p>
+        ) : (
+          rows.map((row, index) => (
+            <EnvironmentVariable
+              className="gap-1 px-2 py-1"
+              key={index}
+              name={row.key}
+              value={row.value}
+            >
+              <EnvironmentVariableGroup className="min-w-0 flex-1">
+                <Input
+                  className="h-7 flex-1 font-mono text-xs"
+                  onChange={(event) => updateRow(index, { key: event.target.value })}
+                  placeholder={keyPlaceholder}
+                  value={row.key}
+                />
+                <Input
+                  className="h-7 flex-[2] font-mono text-xs"
+                  onChange={(event) => updateRow(index, { value: event.target.value })}
+                  placeholder={valuePlaceholder}
+                  type={maskValues && !showValues ? "password" : "text"}
+                  value={row.value}
+                />
+              </EnvironmentVariableGroup>
+              {maskValues && (
+                <EnvironmentVariableCopyButton aria-label={t("copyValue")} copyFormat="value" />
+              )}
               <Button
+                aria-label={t("kvRemove")}
+                className="size-7 text-muted-foreground hover:text-destructive"
+                onClick={() => removeRow(index)}
+                size="icon"
                 type="button"
                 variant="ghost"
-                size="icon"
-                className="size-7 text-muted-foreground hover:text-destructive"
-                onClick={() => removeRow(i)}
-                aria-label={t("kvRemove")}
               >
                 <Trash2Icon className="size-3" />
               </Button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+            </EnvironmentVariable>
+          ))
+        )}
+      </EnvironmentVariablesContent>
+    </EnvironmentVariables>
   )
 }

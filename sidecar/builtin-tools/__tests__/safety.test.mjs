@@ -161,6 +161,15 @@ test("DANGEROUS_PATTERNS catches representative strings", () => {
   assert.ok(DANGEROUS_PATTERNS.some((p) => p.test("> /dev/sda")))
 })
 
+test("DANGEROUS_PATTERNS does not misclassify a malformed find expression", () => {
+  const command =
+    'find /Users/bytedance/Project/cognia-next -maxdepth 1 -type f -name "*.ts\\" -o -name \\"*.tsx" -o -name "*.json\\" -o -name \\"*.md" | sort'
+  assert.equal(
+    DANGEROUS_PATTERNS.some((pattern) => pattern.test(command)),
+    false
+  )
+})
+
 test("toolText wraps a string in MCP content shape", () => {
   const r = toolText("hello")
   assert.deepEqual(r, { content: [{ type: "text", text: "hello" }] })

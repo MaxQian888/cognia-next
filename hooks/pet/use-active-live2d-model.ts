@@ -11,7 +11,7 @@ import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getPetModel, type PetModelRow } from "@/lib/db/pet-models"
 import { ensureCubismCore, resetCubismCoreLoaderForTests } from "@/lib/pet/live2d/core-loader"
-import type { PetSettings } from "@/types/pet"
+import type { PetSettings, PetSkinSelection } from "@/types/pet"
 
 export interface ActiveLive2dModel {
   modelId: string | undefined
@@ -66,8 +66,17 @@ export function useCubismCoreAvailable(enabled = true): boolean | undefined {
 }
 
 /** Active model id + row (live) and the Cubism Core readiness gate. */
-export function useActiveLive2dModel(settings: PetSettings): ActiveLive2dModel {
-  const modelId = settings.activeLive2dModelId
+export function useActiveLive2dModel(
+  settings: PetSettings,
+  selection?: PetSkinSelection
+): ActiveLive2dModel {
+  const selectedSkinId = selection?.skinId ?? settings.skinId
+  const modelId =
+    selection?.skinId === "live2d"
+      ? selection.modelId
+      : selection
+        ? undefined
+        : settings.activeLive2dModelId
   const row = useLiveQuery(
     () => (modelId ? getPetModel(modelId) : Promise.resolve(undefined)),
     [modelId],
@@ -76,6 +85,6 @@ export function useActiveLive2dModel(settings: PetSettings): ActiveLive2dModel {
   // Only load the core when this user has the Live2D skin selected AND an active
   // model — otherwise the gate is moot (`resolveEffectiveSkin` returns "svg")
   // and SVG users must not download the core.
-  const coreReady = useCubismCoreAvailable(settings.skinId === "live2d" && Boolean(modelId))
+  const coreReady = useCubismCoreAvailable(selectedSkinId === "live2d" && Boolean(modelId))
   return { modelId, row, coreReady }
 }

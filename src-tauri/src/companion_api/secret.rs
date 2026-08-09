@@ -53,7 +53,8 @@ pub fn store(new_secret: &[u8]) -> Result<(), String> {
 }
 
 /// Remove the stored secret.  Next `load_or_generate` call will produce a new
-/// one, invalidating all existing device JWTs.
+/// one, invalidating outstanding loopback service principals. Public device
+/// access tokens use the process-ephemeral DPoP authority instead.
 #[allow(dead_code)]
 pub fn clear() -> Result<(), String> {
     crate::secret_store::delete(SERVICE, ACCOUNT)

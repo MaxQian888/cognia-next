@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import {
   pruneRetainedTables,
   startStorageRetentionSweeper,
@@ -7,7 +5,8 @@ import {
   RETENTION_SWEEP_INTERVAL_MS,
   type RetentionTarget,
 } from "./retention"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { saveSettings, getSettings } from "@/lib/db/settings"
 
 // Wrap getSettings so one test can force the read to reject; every other call
@@ -19,11 +18,11 @@ jest.mock("@/lib/db/settings", () => {
 
 const MS_PER_DAY = 86_400_000
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().agentTraces.clear()
 })
 
@@ -40,6 +39,8 @@ function span(id: string, startTime: number) {
   } as unknown as import("@/types/agent-trace/span").AgentTraceSpan
 }
 
+afterAll(dbFixture.dispose)
+
 describe("pruneRetainedTables", () => {
   it("short-circuits without touching targets for days <= 0", async () => {
     const prune = jest.fn(async () => 5)
@@ -52,6 +53,20 @@ describe("pruneRetainedTables", () => {
     const prune = jest.fn(async () => 1)
     expect(await pruneRetainedTables(Number.NaN, [{ id: "x", prune }])).toEqual([])
     expect(prune).not.toHaveBeenCalled()
+  })
+
+  it("still deletes independently expired rows when trace retention is keep-forever", async () => {
+    const windowPrune = jest.fn(async () => 1)
+    const expiryPrune = jest.fn(async () => 2)
+
+    await expect(
+      pruneRetainedTables(0, [
+        { id: "window", policy: "configured-window", prune: windowPrune },
+        { id: "expiry", policy: "row-expiry", prune: expiryPrune },
+      ])
+    ).resolves.toEqual([{ id: "expiry", removed: 2 }])
+    expect(windowPrune).not.toHaveBeenCalled()
+    expect(expiryPrune).toHaveBeenCalledTimes(1)
   })
 
   it("passes a cutoff of now - days and aggregates removed counts", async () => {

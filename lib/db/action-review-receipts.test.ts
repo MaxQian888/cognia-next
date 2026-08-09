@@ -1,10 +1,9 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import {
   ACTION_REVIEW_CONTRACT_VERSION,
   type ActionReviewReceipt,
 } from "@cognia/agent-config-types/action-review"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   ACTION_REVIEW_RECEIPT_CAP,
   ACTION_REVIEW_RETENTION_DAYS,
@@ -68,12 +67,11 @@ function makeReceipt(
   }
 }
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("toReceiptRow", () => {
   it("flattens the query columns off the nested receipt", () => {

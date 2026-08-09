@@ -1,0 +1,4 @@
+interface:
+  display_name: "Performance Daily Report"
+  short_description: "稳定采集 Slardar 指标，生成、预览并投递每日性能报告"
+  default_prompt: "Use $performance-daily-report to generate yesterday’s Slardar performance card, preview it, and deliver it to a confirmed Feishu recipient."

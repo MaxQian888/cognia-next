@@ -1,0 +1,8 @@
+lockfileVersion: "1.0"
+extensions:
+  - identifier: skills:skills.byted.org/aiden/report/performance-daily-report:1.0.2
+    agents: []
+    link: copy
+    source:
+      kind: zip
+      blob_digest: sha256:fa69763c13221be42580e842eba03a0c7fe95fa69b09628d02772ce75bcb23b9

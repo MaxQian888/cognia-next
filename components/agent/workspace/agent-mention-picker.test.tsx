@@ -48,7 +48,7 @@ const teammateAlice: MentionTarget = {
   description: "Frontend specialist",
   nameCollision: false,
   // teammate object is not used by the renderer
-  teammate: { name: "Alice" } as never,
+  teammate: { id: "tm-1", name: "Alice", avatarId: "designer" } as never,
 }
 
 function renderRow(target: MentionTarget, highlighted = false) {
@@ -68,6 +68,10 @@ describe("AgentMentionRow", () => {
     expect(screen.getByText("Claude")).toBeInTheDocument()
     expect(screen.getByText("Anthropic Claude API")).toBeInTheDocument()
     expect(screen.getByText("Virtual")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-team-avatar-__virtual_claude__")).toHaveAttribute(
+      "data-avatar-id",
+      "researcher"
+    )
   })
 
   it("renders teammate without the virtual chip", () => {
@@ -77,6 +81,10 @@ describe("AgentMentionRow", () => {
     expect(screen.queryByText("Virtual")).toBeNull()
     expect(screen.getByText("@Alice")).toBeInTheDocument()
     expect(screen.getByText("Frontend specialist")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-team-avatar-tm-1")).toHaveAttribute(
+      "data-avatar-id",
+      "designer"
+    )
   })
 
   it("applies highlight class when highlighted is true", () => {

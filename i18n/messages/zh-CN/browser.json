@@ -1,4 +1,15 @@
 {
+  "adjust": {
+    "accept": "接受反馈",
+    "accepted": "调整反馈已可发送，实时预览已还原。",
+    "color": "颜色（例如 #2563eb）",
+    "font": "字体（例如 16px Inter）",
+    "label": "浏览器调整",
+    "preview": "预览",
+    "revert": "还原",
+    "spacing": "间距（例如 8px 12px）",
+    "text": "替换文本"
+  },
   "actions": {
     "back": "后退",
     "cancelSelect": "取消选择",
@@ -21,8 +32,8 @@
       "approve": "认可",
       "change": "修改",
       "fix": "修复",
-      "question": "问题",
-      "label": "标注意图"
+      "label": "标注意图",
+      "question": "问题"
     },
     "queued": "已加入 {count} 条标注",
     "remove": "移除标注",
@@ -32,8 +43,8 @@
     "severity": {
       "blocking": "阻塞",
       "important": "重要",
-      "suggestion": "建议",
-      "label": "标注严重程度"
+      "label": "标注严重程度",
+      "suggestion": "建议"
     },
     "status": {
       "acknowledged": "已确认",
@@ -74,8 +85,8 @@
     "keychainHint": "macOS 可能请求访问钥匙串；拒绝后预览不会发生变化。",
     "profileLabel": "配置",
     "reason": {
-      "checking": "正在检查本机 Chromium 配置…",
       "checkFailed": "无法检查本机 Chromium 配置，请重启桌面 App 后重试。",
+      "checking": "正在检查本机 Chromium 配置…",
       "featureDisabled": "请先在「设置 → 桌面」中启用 Chromium Cookie 导入。",
       "noProfiles": "这台 Mac 上未找到兼容的 Chromium 配置。",
       "openPage": "请先打开一个公网网页，再导入 Cookie。",
@@ -105,7 +116,8 @@
     "title": "预览网页"
   },
   "errors": {
-    "navigate": "无法导航到该地址"
+    "navigate": "无法导航到该地址",
+    "httpsProxyUnsupported": "此浏览器预览不支持 HTTPS 代理。"
   },
   "find": {
     "close": "关闭查找",
@@ -135,6 +147,8 @@
     "addAssertion": "断言文本…",
     "assertionPlaceholder": "预期出现的文本",
     "collapse": "折叠录制面板",
+    "delete": "删除流程",
+    "deleted": "流程已删除",
     "empty": "在页面上操作 —— 你的点击、输入和按键都会记录到这里。",
     "expand": "展开录制面板",
     "export": "导出",
@@ -142,8 +156,6 @@
     "exportJson": "流程 JSON",
     "exportPlaywright": "Playwright 测试",
     "exported": "已复制到剪贴板",
-    "delete": "删除流程",
-    "deleted": "流程已删除",
     "name": "名称",
     "recording": "录制中 —— {count} 步",
     "removeStep": "删除该步骤",
@@ -166,20 +178,20 @@
     "startHint": "请先加载页面",
     "step": {
       "click": "点击 {target}",
-      "doubleClick": "双击 {target}",
       "direction": {
         "down": "下",
         "left": "左",
         "right": "右",
         "up": "上"
       },
+      "doubleClick": "双击 {target}",
       "fill": "填写 {target}",
       "hover": "悬停在 {target}",
       "navigate": "打开 {url}",
       "pressKey": "按下 {key}",
+      "scroll": "向{direction}滚动 {amount}px",
       "secret": "填写 {target}（密钥）",
       "select": "在 {target} 中选择 {value}",
-      "scroll": "向{direction}滚动 {amount}px",
       "waitFor": "预期出现「{text}」"
     },
     "stop": "停止",

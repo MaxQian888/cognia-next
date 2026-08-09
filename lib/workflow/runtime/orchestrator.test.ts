@@ -1,8 +1,3 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
-
 // Mock plugin hook dispatcher (Tier 2 of ADR 0016) so we can verify the
 // orchestrator emits onWorkflowStart / onWorkflowStepComplete /
 // onWorkflowComplete / onWorkflowError without booting the plugin store.
@@ -61,23 +56,26 @@ async function flushFanout(): Promise<void> {
 }
 
 import { runWorkflow } from "./orchestrator"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listRunEvents } from "./event-log"
 import type { TriggerEvent, VisualWorkflow } from "@/types/workflow/visual"
+import type { WorkflowExecutionBinding } from "@/types/workflow/deployment"
 
 // Cold-opening the full schema ladder on fresh fake-indexeddb regularly
 // exceeds Jest's 5 s default on a busy machine (grew again with v95–v98).
 jest.setTimeout(30_000)
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().workflowRuns.clear()
   await getDb().workflowRunEvents.clear()
   jest.clearAllMocks()
 })
+afterAll(dbFixture.dispose)
 
 const trigger: TriggerEvent = {
   workflowId: "wf_x",
@@ -108,6 +106,50 @@ function buildWorkflow(
 }
 
 describe("runWorkflow — end-to-end happy paths", () => {
+  it("persists formal dependency and original trigger provenance", async () => {
+    const executionBinding: WorkflowExecutionBinding = {
+      invocationId: "wfi_test",
+      versionId: "wfv_test_1",
+      deploymentId: "wfd_test",
+      deploymentRevision: 7,
+      entrypoint: "trigger",
+      caller: "trigger.cron",
+      dependencyLock: {
+        workflows: {
+          child: {
+            workflowId: "wf_child",
+            versionId: "wfv_child_2",
+            deploymentId: "wfd_child",
+            deploymentRevision: 2,
+          },
+        },
+        indexes: {},
+      },
+    }
+    const provenanceTrigger: TriggerEvent = {
+      ...trigger,
+      originAt: 1234,
+      binding: {
+        adapterId: "lark",
+        sessionId: "session-1",
+        conversationKey: "chat-1",
+      },
+    }
+
+    const result = await runWorkflow({
+      workflow: buildWorkflow([], []),
+      trigger: provenanceTrigger,
+      executionBinding,
+    })
+
+    expect(await getDb().workflowRuns.get(result.runId)).toMatchObject({
+      executionBinding,
+      dependencyLock: executionBinding.dependencyLock,
+      triggerOriginAt: 1234,
+      triggerBinding: provenanceTrigger.binding,
+    })
+  })
+
   it("runs a 4-node linear workflow and produces output", async () => {
     const wf = buildWorkflow(
       [
@@ -810,6 +852,8 @@ describe("runWorkflow — startStepId (run from here)", () => {
   })
 
   it("fails fast when startStepId is not in the workflow", async () => {
+    const setTimeoutSpy = jest.spyOn(global, "setTimeout")
+    const clearTimeoutSpy = jest.spyOn(global, "clearTimeout")
     const wf = buildWorkflow(
       [
         {
@@ -822,9 +866,20 @@ describe("runWorkflow — startStepId (run from here)", () => {
       ],
       []
     )
-    const result = await runWorkflow({ workflow: wf, trigger, startStepId: "n_missing" })
-    expect(result.status).toBe("failed")
-    expect(result.error?.message).toContain("startStepId n_missing not present")
+    try {
+      const result = await runWorkflow({ workflow: wf, trigger, startStepId: "n_missing" })
+      expect(result.status).toBe("failed")
+      expect(result.error?.message).toContain("startStepId n_missing not present")
+
+      const timeoutCallIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 60_000)
+      expect(timeoutCallIndex).toBeGreaterThanOrEqual(0)
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(
+        setTimeoutSpy.mock.results[timeoutCallIndex]?.value
+      )
+    } finally {
+      clearTimeoutSpy.mockRestore()
+      setTimeoutSpy.mockRestore()
+    }
   })
 
   it("bounds the run to the descendant subgraph (sibling branches are skipped)", async () => {

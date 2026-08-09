@@ -1,13 +1,9 @@
 import { act, render, screen } from "@testing-library/react"
 import type { PetSkinRenderProps } from "@/types/pet"
 
-const useActiveSpritePack = jest.fn()
-jest.mock("@/hooks/pet/use-active-sprite-pack", () => ({
-  useActiveSpritePack: () => useActiveSpritePack(),
-}))
-jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (select: (state: unknown) => unknown) =>
-    select({ settings: { petSettings: { activeSpritePackId: "momo" } } }),
+const loadSpriteSkinAsset = jest.fn()
+jest.mock("@/lib/pet/skin-assets", () => ({
+  loadSpriteSkinAsset: (...args: unknown[]) => loadSpriteSkinAsset(...args),
 }))
 jest.mock("./svg-skin", () => ({
   svgSkin: { id: "svg", render: () => <div data-testid="sprite-fallback" /> },
@@ -22,14 +18,15 @@ const props: PetSkinRenderProps = {
   oneShot: null,
   reducedMotion: false,
   size: 104,
+  selection: { skinId: "sprite-v2", packId: "momo" },
 }
 
 describe("spriteV2Skin", () => {
   beforeEach(() => {
     jest.useFakeTimers()
-    useActiveSpritePack.mockReturnValue({
-      packId: "momo",
-      row: { id: "momo", spritesheet: new Blob(["atlas"], { type: "image/webp" }) },
+    loadSpriteSkinAsset.mockResolvedValue({
+      id: "momo",
+      spritesheet: new Blob(["atlas"], { type: "image/webp" }),
     })
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
@@ -100,7 +97,7 @@ describe("spriteV2Skin", () => {
     expect(sprite.style.backgroundPosition).toContain("-96px")
   })
 
-  it("honors reduced motion and releases the object URL", async () => {
+  it("honors reduced motion and keeps the runtime-cached object URL on unmount", async () => {
     const { unmount } = render(<>{spriteV2Skin.render({ ...props, reducedMotion: true })}</>)
     await act(async () => Promise.resolve())
     const sprite = screen.getByTestId("pet-sprite-v2")
@@ -109,7 +106,7 @@ describe("spriteV2Skin", () => {
     expect(sprite.style.backgroundPosition).toBe("0px 0px")
 
     unmount()
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:sprite")
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
   })
 
   it("keeps the current frame while paused", async () => {
@@ -120,9 +117,33 @@ describe("spriteV2Skin", () => {
     expect(sprite.style.backgroundPosition).toBe("0px 0px")
   })
 
+  it("uses shared visible fallbacks for held, speaking, mood, and flavor", async () => {
+    render(
+      <>
+        {spriteV2Skin.render({
+          ...props,
+          held: true,
+          speaking: true,
+          mood: "lonely",
+          flavor: "radiant",
+        })}
+      </>
+    )
+    await act(async () => Promise.resolve())
+    const sprite = screen.getByTestId("pet-sprite-v2")
+    expect(sprite).toHaveStyle({ transform: "rotate(7deg) translateY(3%)" })
+    expect(sprite.style.filter).toContain("brightness(1.08)")
+    expect(sprite.parentElement).toHaveAttribute("data-pet-speaking", "true")
+    expect(sprite.parentElement).toHaveAttribute("data-pet-mood", "lonely")
+  })
+
   it("uses the SVG fallback when the configured pack is missing", () => {
-    useActiveSpritePack.mockReturnValue({ packId: "missing", row: undefined })
-    render(<>{spriteV2Skin.render(props)}</>)
+    loadSpriteSkinAsset.mockResolvedValue(undefined)
+    render(
+      <>
+        {spriteV2Skin.render({ ...props, selection: { skinId: "sprite-v2", packId: "missing" } })}
+      </>
+    )
     expect(screen.getByTestId("sprite-fallback")).toBeInTheDocument()
   })
 })

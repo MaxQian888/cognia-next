@@ -9,7 +9,8 @@
  * Ctrl+X delete · Esc clears the filter, then closes.
  */
 import React, { useRef, useState } from "react"
-import { Box, Text, useInput, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
+import { useModalInput } from "../input/input-router"
 
 import { useTheme } from "../theme/context"
 import { isMouseSequence } from "../input/mouse"
@@ -94,7 +95,7 @@ export function SkillPanel({
       ),
   })
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (handleMouse(input)) return
       if (key.escape) {
@@ -136,6 +137,10 @@ export function SkillPanel({
       }
       if (key.downArrow) {
         setIndex((i) => Math.min(filtered.length - 1, i + 1))
+        return
+      }
+      if (key.tab) {
+        if (current) onToggle(current.id)
         return
       }
       if (input === " ") {

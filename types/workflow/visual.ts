@@ -488,6 +488,8 @@ export interface VisualWorkflow {
    * valid identifiers so they resolve through the expression tokenizer.
    */
   variables?: Record<string, string>
+  /** Reusable Knowledge Bases queried when this workflow runs. */
+  knowledgeBaseIds?: string[]
   /** UI-only test data pinned per node so the inspector can replay outputs. */
   pinData?: Record<string, unknown>
   /** Cross-run mutable state. Persisted on the workflow row, not snapshots. */
@@ -519,6 +521,12 @@ export interface WorkflowPublication {
   at: number
   /** Display-only slug; execution always uses the shared typed workflow runner. */
   toolName: string
+  /** Immutable artifact selected by the production deployment. */
+  versionId?: string
+  /** Stable production deployment pointer. Optional only during legacy migration. */
+  deploymentId?: string
+  /** Revision of the pointer when this projection was written. */
+  deploymentRevision?: number
 }
 
 export interface WorkflowNode<TParams = Record<string, unknown>> {
@@ -800,6 +808,15 @@ export interface WorkflowRunLease {
 export interface WorkflowRunRow {
   id: string
   workflowId: string
+  /** Immutable artifact used for this formal invocation. */
+  versionId?: string
+  /** Deployment pointer resolved before the run was admitted. */
+  deploymentId?: string
+  deploymentRevision?: number
+  /** Formal ingress provenance; draft/editor runs intentionally omit it. */
+  executionBinding?: import("./deployment").WorkflowExecutionBinding
+  /** Immutable child workflow/index versions resolved before formal admission. */
+  dependencyLock?: import("./deployment").WorkflowDependencyLock
   /**
    * Owning workspace id — Workspace isolation column (Dexie v86). Workflow
    * DEFINITIONS stay profile-shared; only their RUN history is per-project.
@@ -813,6 +830,8 @@ export interface WorkflowRunRow {
   triggerId?: string
   triggerPayload: unknown
   triggerBinding?: WorkflowTriggerBinding
+  /** Original producer timestamp; distinct from local run admission time. */
+  triggerOriginAt?: number
   input?: unknown
   output?: unknown
   error?: WorkflowRunError
@@ -921,6 +940,8 @@ export type RunEventLogLevel = "debug" | "info" | "warn" | "error"
 export interface WorkflowRunEventRow {
   id: string
   runId: string
+  /** Durable per-run cursor. Present on v145+ rows; migration backfills history. */
+  sequence?: number
   ts: number
   type: RunEventType
   /** Node id if the event is step-scoped; absent for run-scoped events. */
@@ -978,6 +999,10 @@ export interface StepExecutionContext<TParams = Record<string, unknown>> {
   runId: string
   workflowId: string
   stepId: string
+  /** Loop-container provenance for this concrete step execution. */
+  iteration?: { loopId: string; iterationIndex: number }
+  /** Formal run provenance, including the pre-admission dependency lock. */
+  executionBinding?: import("./deployment").WorkflowExecutionBinding
   /**
    * Optional run-scoped agent-trace id. When set (e.g. by the eval workflow
    * target), AI nodes emit their LLM spans under this trace so the run can be

@@ -22,6 +22,7 @@ import {
   resolveAgentExecutionSpec,
   type AgentExecutionEnvironment,
 } from "./resolve-agent-execution-spec"
+import { resolveActiveCertification } from "./certification-store"
 
 export class AgentCapabilityUnsatisfiedError extends Error {
   readonly missing: AgentCapabilityId[]
@@ -82,6 +83,84 @@ export interface AgentExecutionTurnOptions {
   taskWorkspace?: AgentExecutionTaskWorkspaceOptions
 }
 
+async function resolveExecution(
+  config: ExecuteAgentConfig,
+  environment: AgentExecutionEnvironment,
+  options: AgentExecutionTurnOptions | undefined,
+  flags: Awaited<ReturnType<(typeof import("./feature-flags"))["getAgentExecutionFlags"]>>
+) {
+  const input = {
+    surface: options?.surface ?? "agent-executor",
+    environment: {
+      ...environment,
+      prohibitCompletionFallback:
+        environment.prohibitCompletionFallback ?? environment.isHeadlessHost,
+    },
+    flags,
+    ...(options?.policy ? { policy: options.policy } : {}),
+    identity: {
+      ...(config.sessionId ? { sessionId: config.sessionId } : {}),
+      ...options?.identity,
+    },
+    legacy: {
+      providerId: config.provider ?? config.defaultProvider,
+      modelId: config.model,
+      toolsEnabled: config.toolsEnabled,
+      requireTools: options?.requireTools,
+    },
+  } satisfies Parameters<typeof resolveAgentExecutionSpec>[0]
+  const preliminary = resolveAgentExecutionSpec(input)
+  if (preliminary.spec.runtimePolicySource !== "auto") return preliminary
+
+  const certification = await resolveActiveCertification({
+    runtime: preliminary.spec.runtimeAdapter,
+    ingressProtocol: config.provider ?? config.defaultProvider ?? "inherit",
+    routeMode: preliminary.spec.route.kind,
+    translationMode: "passthrough",
+    deploymentRef:
+      preliminary.spec.deploymentRef ?? config.provider ?? config.defaultProvider ?? "inherit",
+    model: preliminary.spec.modelBindings.primary,
+    requires: [...(options?.policy?.requires ?? [])],
+    prefers: [...(options?.policy?.prefers ?? [])],
+  })
+  if (!certification?.accepted) {
+    if (!certification?.blockedRequired?.length) return preliminary
+    return {
+      ...preliminary,
+      missingRequired: [
+        ...new Set([...preliminary.missingRequired, ...certification.blockedRequired]),
+      ],
+    }
+  }
+  return resolveAgentExecutionSpec({ ...input, certifiedPath: certification.certifiedPath })
+}
+
+/** Resolve the rollout decision for shadow metadata without executing a rail. */
+export async function resolveAgentExecutionShadowSpec(
+  config: ExecuteAgentConfig,
+  environment: AgentExecutionEnvironment,
+  options?: AgentExecutionTurnOptions
+) {
+  const { getAgentExecutionFlags } = await import("./feature-flags")
+  return resolveExecution(config, environment, options, getAgentExecutionFlags())
+}
+
+/** Evaluate and record the new resolver while the legacy branch still owns execution. */
+export async function recordAgentExecutionShadow(
+  config: ExecuteAgentConfig,
+  environment: AgentExecutionEnvironment,
+  options?: AgentExecutionTurnOptions
+): Promise<void> {
+  const resolution = await resolveAgentExecutionShadowSpec(config, environment, options)
+  void trackEvent("agent.execution.shadow", {
+    runtimeAdapter: resolution.spec.runtimeAdapter,
+    executionKind: resolution.spec.executionKind,
+    routeKind: resolution.spec.route.kind,
+    missingRequiredCount: resolution.missingRequired.length,
+    compatibilityEvidence: resolution.spec.compatibility.evidence,
+  })
+}
+
 /**
  * One-shot agent turn through the unified authority. `environment` comes from
  * the caller (host truth: isTauri()/headless host status), never re-derived
@@ -99,27 +178,7 @@ export async function executeAgentTurn(
   ])
 
   const surface = options?.surface ?? "agent-executor"
-  const resolution = resolveAgentExecutionSpec({
-    surface,
-    environment: {
-      ...environment,
-      // Headless/managed installs never consume legacy completion fallback.
-      prohibitCompletionFallback:
-        environment.prohibitCompletionFallback ?? environment.isHeadlessHost,
-    },
-    flags: getAgentExecutionFlags(),
-    ...(options?.policy ? { policy: options.policy } : {}),
-    identity: {
-      ...(config.sessionId ? { sessionId: config.sessionId } : {}),
-      ...options?.identity,
-    },
-    legacy: {
-      providerId: config.provider ?? config.defaultProvider,
-      modelId: config.model,
-      toolsEnabled: config.toolsEnabled,
-      requireTools: options?.requireTools,
-    },
-  })
+  const resolution = await resolveExecution(config, environment, options, getAgentExecutionFlags())
   const { spec } = resolution
 
   // Fail-before-spend: hard capabilities the frozen runtime cannot serve
@@ -258,21 +317,17 @@ export async function openAgentSession(input: {
     import("./feature-flags"),
     import("./agent-execution-handle"),
   ])
-  const resolution = resolveAgentExecutionSpec({
-    surface: input.options?.surface ?? "agent-executor",
-    environment: {
-      ...input.environment,
-      prohibitCompletionFallback:
-        input.environment.prohibitCompletionFallback ?? input.environment.isHeadlessHost,
+  const resolution = await resolveExecution(
+    {
+      sessionId: input.sessionId,
+      provider: input.legacy?.providerId,
+      model: input.legacy?.modelId,
+      toolsEnabled: input.legacy?.toolsEnabled,
     },
-    flags: getAgentExecutionFlags(),
-    ...(input.options?.policy ? { policy: input.options.policy } : {}),
-    identity: { sessionId: input.sessionId, ...input.options?.identity },
-    legacy: {
-      ...input.legacy,
-      requireTools: input.options?.requireTools,
-    },
-  })
+    input.environment,
+    input.options,
+    getAgentExecutionFlags()
+  )
   if (resolution.missingRequired.length > 0) {
     throw new AgentCapabilityUnsatisfiedError(resolution.missingRequired)
   }

@@ -229,6 +229,13 @@
     "deleteOverrideConfirm": "Remove the override for this conversation? It will fall back to the adapter defaults.",
     "dialogTitle": "Conversation settings",
     "fields": {
+      "activationPolicy": {
+        "label": "Activation policy"
+      },
+      "activationTtl": {
+        "label": "Activation TTL (hours)",
+        "placeholder": "e.g. 24"
+      },
       "advancedJson": "Advanced (quiet hours + cooldown + muted)",
       "advancedJsonHelp": "These fields populate the per-conversation `trigger` partial that overrides the adapter trigger policy.",
       "allowComputerUse": "Allow Computer Use tools",
@@ -257,6 +264,9 @@
       "character": "Character (id)",
       "characterPlaceholder": "(none)",
       "cooldownMs": "Cooldown after bot reply (ms)",
+      "dispatchMode": {
+        "label": "Dispatch mode"
+      },
       "liveActivity": "Live activity card",
       "liveActivityHint": "Show a live progress card in chat while the assistant is working (tool count, elapsed time, current action, file edits). On by default; turn off for noisy channels.",
       "mode": "Mode",
@@ -299,17 +309,7 @@
       "teamBindingPlaceholder": "(none — replies use the character)",
       "workflowBinding": "Visual Workflow (name or id)",
       "workflowBindingHelp": "When set (and no team is bound — a team wins), inbound messages run this Visual Workflow instead of a single character; the message text is the trigger payload and progress streams back to the conversation.",
-      "workflowBindingPlaceholder": "(none — replies use the character)",
-      "activationPolicy": {
-        "label": "Activation policy"
-      },
-      "dispatchMode": {
-        "label": "Dispatch mode"
-      },
-      "activationTtl": {
-        "label": "Activation TTL (hours)",
-        "placeholder": "e.g. 24"
-      }
+      "workflowBindingPlaceholder": "(none — replies use the character)"
     },
     "gearAria": "Open per-conversation override settings",
     "noOverrideYet": "No override yet — defaults are inherited from the adapter.",
@@ -358,6 +358,16 @@
   "inboundA2UI": {
     "rawPayload": "Raw payload"
   },
+  "inboundRecovery": {
+    "continueSafely": "Continue safely",
+    "description": "One or more inbound messages could not be processed and need recovery.",
+    "dismiss": "Dismiss",
+    "message": "Message {id}: {reason}",
+    "retryFromStart": "Retry from start",
+    "retryWarning": "Retrying from the start will re-process the message and may repeat external side effects. Continue?",
+    "title": "Inbound recovery",
+    "unknown": "Unknown reason"
+  },
   "labels": {
     "addAria": "Add or remove labels",
     "empty": "No labels yet — create them in Settings.",
@@ -385,6 +395,17 @@
       "draft": "Draft",
       "manual": "Manual"
     }
+  },
+  "notices": {
+    "collapse": "Hide notices",
+    "expand": "Show notices",
+    "region": "Inbox notices",
+    "severity": {
+      "danger": "Error",
+      "info": "Information",
+      "warning": "Warning"
+    },
+    "summary": "{count, plural, =1 {1 notice} other {# notices}}"
   },
   "outboundSource": {
     "draftApproved": "Approved draft",
@@ -488,46 +509,25 @@
       "label": "Loading from cache…"
     }
   },
-  "unreadPill": {
-    "aria": "{count} unread"
-  },
-  "inboundRecovery": {
-    "retryWarning": "Retrying from the start will re-process the message and may repeat external side effects. Continue?",
-    "title": "Inbound recovery",
-    "description": "One or more inbound messages could not be processed and need recovery.",
-    "message": "Message {id}: {reason}",
-    "unknown": "Unknown reason",
-    "continueSafely": "Continue safely",
-    "retryFromStart": "Retry from start",
-    "dismiss": "Dismiss"
-  },
   "topicRuntime": {
-    "aria": "Topic runtime: {policy} · {dispatch}",
-    "badge": "{policy} · {dispatch}",
-    "requested": "Requested: {value}",
-    "effective": "Effective: {value}",
-    "readiness": "Readiness: {value}",
     "activation": "Activation: {value}",
     "active": "Active",
-    "inactive": "Inactive",
-    "queue": "Queue depth: {count}",
     "activeRun": "Active run: {value}",
-    "none": "None",
-    "recovery": "Recovery required: {count}",
+    "aria": "Topic runtime: {policy} · {dispatch}",
+    "badge": "{policy} · {dispatch}",
     "capabilities": "Capabilities: topic={topic}, count={count}",
+    "effective": "Effective: {value}",
     "fallback": {
       "delivery_unverified": "Fallback to mention-each because delivery is unverified"
-    }
-  },
-  "notices": {
-    "collapse": "Hide notices",
-    "expand": "Show notices",
-    "region": "Inbox notices",
-    "severity": {
-      "info": "Information",
-      "warning": "Warning",
-      "danger": "Error"
     },
-    "summary": "{count, plural, =1 {1 notice} other {# notices}}"
+    "inactive": "Inactive",
+    "none": "None",
+    "queue": "Queue depth: {count}",
+    "readiness": "Readiness: {value}",
+    "recovery": "Recovery required: {count}",
+    "requested": "Requested: {value}"
+  },
+  "unreadPill": {
+    "aria": "{count} unread"
   }
 }

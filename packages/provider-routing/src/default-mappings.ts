@@ -6,13 +6,13 @@
 
 import { nanoid } from "nanoid"
 import type { ModelMapping } from "@cognia/provider-types/model-mapping"
+import { getBundledCatalogRepository } from "@cognia/provider-core/providers/catalog-baseline"
+import type { CatalogRepository } from "@cognia/provider-core/providers/catalog-repository"
 import {
   listRoutingCandidates,
   ROUTING_CANDIDATE_POLICIES,
-  getBundledCatalogRepository,
-  type CatalogRepository,
   type CatalogRoutingRole,
-} from "@cognia/provider-core"
+} from "@cognia/provider-core/providers/routing-candidates"
 
 const TIER_NAMES: Record<CatalogRoutingRole, string> = {
   fast: "Fast",

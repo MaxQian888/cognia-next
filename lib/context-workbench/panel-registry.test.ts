@@ -149,4 +149,27 @@ describe("context panel registry", () => {
       "z-panel",
     ])
   })
+
+  it("lists all distinct activities from registered panels", () => {
+    const registry = createContextPanelRegistry()
+    registry.register(panel("p1", { activity: "inspect" }))
+    registry.register(panel("p2", { activity: "ai" }))
+    registry.register(panel("p3", { activity: "inspect" }))
+    registry.register(panel("p4", { activity: "custom-activity" }))
+
+    const activities = registry.listActivities()
+    expect(activities.sort()).toEqual(["ai", "custom-activity", "inspect"])
+  })
+
+  it("listActivities reflects unregistration", () => {
+    const registry = createContextPanelRegistry()
+    registry.register(panel("p1", { activity: "inspect", pluginId: "my-plugin" }))
+    registry.register(panel("p2", { activity: "plugin-only", pluginId: "my-plugin" }))
+
+    expect(registry.listActivities()).toContain("plugin-only")
+
+    registry.unregisterPlugin("my-plugin")
+
+    expect(registry.listActivities()).not.toContain("plugin-only")
+  })
 })

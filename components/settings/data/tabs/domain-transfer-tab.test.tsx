@@ -40,6 +40,9 @@ jest.mock("@/components/data/import/chat-import-dialog", () => ({
 jest.mock("@/components/data/import/domain-import-dialog", () => ({
   DomainImportDialog: ({ trigger }: { trigger: React.ReactNode }) => <>{trigger}</>,
 }))
+jest.mock("@/components/agent-migration/agent-migration-dialog", () => ({
+  AgentMigrationDialog: ({ trigger }: { trigger: React.ReactNode }) => <>{trigger}</>,
+}))
 jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }))
@@ -70,6 +73,7 @@ describe("DomainTransferTab", () => {
     expect(screen.getByText("ChatGPT")).toBeInTheDocument()
     expect(screen.getByText("Claude.ai")).toBeInTheDocument()
     expect(screen.getByText("Gemini / Bard")).toBeInTheDocument()
+    expect(screen.getByText("Coding-agent migration")).toBeInTheDocument()
 
     expect(screen.getByText("Skills")).toBeInTheDocument()
     expect(screen.getByText("Reusable instruction blobs.")).toBeInTheDocument()

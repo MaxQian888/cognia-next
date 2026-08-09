@@ -18,6 +18,19 @@ jest.mock("@/stores/account/account-store", () => ({
   },
 }))
 
+jest.mock("@/lib/files/allowed-roots-sync", () => ({
+  registerDialogPathInRust: jest.fn(),
+}))
+
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: {
+    getState: () => ({
+      createProject: jest.fn(),
+      addSessionToProject: jest.fn(),
+    }),
+  },
+}))
+
 import {
   __resetInstalledForTests,
   installDesktopSyncSource,
@@ -43,6 +56,7 @@ describe("readDexieDelta", () => {
     await db.plugins.clear()
     await db.adapterInstances.clear()
     await db.mcpServers.clear()
+    await db.mcpServerSummaries.clear()
     await db.terminalHistory.clear()
     await db.conversationOverrides.clear()
     await db.settings.clear()
@@ -81,6 +95,38 @@ describe("readDexieDelta", () => {
     const delta = await readDexieDelta("sessions", 5)
     expect(delta.rows.map((r) => (r as { id: string }).id)).toEqual(["s2"])
     expect(delta.next_since).toBe(10)
+  })
+
+  it("never syncs a managed workspace's device-local filesystem paths", async () => {
+    const db = getDb()
+    await db.sessions.put({
+      id: "s-managed",
+      title: "Managed",
+      kind: "direct",
+      createdAt: 0,
+      updatedAt: 10,
+      executionContext: {
+        location: "managedWorktree",
+        workspaceBinding: { kind: "managed", workspaceId: "managed-workspace:s-managed" },
+        managedWorkspace: { availability: "available", localRoot: "/Users/a/private" },
+        projectId: "",
+        projectRoot: "/Users/a/private",
+        worktreePath: "/Users/a/private/.run",
+        branch: "codex/private",
+        taskWorkspace: { taskId: "task-workspace:s-managed", workspaceKey: "s-managed" },
+      },
+    } as never)
+
+    const delta = await readDexieDelta("sessions", 0)
+    const row = delta.rows[0] as Record<string, unknown>
+    expect(row.executionContext).toEqual(
+      expect.objectContaining({
+        projectRoot: "",
+        managedWorkspace: { availability: "missing-on-device" },
+      })
+    )
+    expect(JSON.stringify(row)).not.toContain("/Users/a/private")
+    expect(JSON.stringify(row)).not.toContain("codex/private")
   })
 
   it("includes embedded resource sessions in authenticated device sync without changing visibility", async () => {
@@ -314,8 +360,7 @@ describe("readDexieDelta", () => {
       { id: "adapter-old", updatedAt: 4 } as never,
       { id: "adapter-new", updatedAt: 50 } as never,
     ])
-    await db.mcpServers.bulkPut([
-      { id: "mcp-missing" } as never,
+    await db.mcpServerSummaries.bulkPut([
       { id: "mcp-old", updatedAt: 6 } as never,
       { id: "mcp-new", updatedAt: 60 } as never,
     ])

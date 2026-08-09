@@ -2,7 +2,7 @@
  * CLI→desktop handoff client.
  *
  * Detects a running desktop via the loopback endpoint file + a `/health` ping,
- * then POSTs a session transcript to `/api/v1/dev/sessions/handoff`. The
+ * then POSTs a session transcript to `/api/dev/sessions/handoff`. The
  * desktop materialises it (`importHandoffSession`) and opens it. All IO
  * (filesystem + fetch) is injected so this unit-tests without a live desktop.
  */
@@ -13,8 +13,8 @@ import fs from "node:fs"
 import { endpointFilePath, parseEndpoint, type BridgeEndpoint } from "./endpoint"
 
 export const DEV_TOKEN_HEADER = "X-Cognia-Dev-Token"
-export const HEALTH_PATH = "/api/v1/dev/health"
-export const HANDOFF_PATH = "/api/v1/dev/sessions/handoff"
+export const HEALTH_PATH = "/api/dev/health"
+export const HANDOFF_PATH = "/api/dev/sessions/handoff"
 
 export interface HandoffMessage {
   role: "user" | "assistant" | "system"

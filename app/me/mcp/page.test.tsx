@@ -12,13 +12,27 @@ jest.mock("@/hooks/companion/use-companion-config")
 // The page reads the synced server list via `useLiveQuery(() => listMcpServers())`.
 // Drive it from a single module-level fixture the tests can reassign.
 let serverRows: McpServer[] | undefined = []
+let liveQuery: (() => Promise<unknown[]>) | undefined
+const summaryRows = [
+  { id: "z", displayName: "Zulu" },
+  { id: "a", displayName: "Alpha" },
+]
+const toArrayMock = jest.fn(async () => summaryRows)
+const orderByMock = jest.fn(() => {
+  throw new Error("SchemaError: KeyPath displayName on object store mcpServerSummaries is not indexed")
+})
 
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => serverRows,
+  useLiveQuery: (query: () => Promise<unknown[]>) => {
+    liveQuery = query
+    return serverRows
+  },
 }))
 
-jest.mock("@/lib/db/mcp-servers", () => ({
-  listMcpServers: async () => serverRows,
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({
+    mcpServerSummaries: { toArray: toArrayMock, orderBy: orderByMock },
+  }),
 }))
 
 const mockPaired = (paired: boolean) =>
@@ -80,5 +94,15 @@ describe("MobileMcpPage", () => {
     render(<MobileMcpPage />)
     expect(screen.getByTestId("mcp-empty")).toBeInTheDocument()
     expect(screen.queryByTestId("mcp-row-fs")).toBeNull()
+  })
+
+  it("sorts summaries after reading the unindexed table", async () => {
+    render(<MobileMcpPage />)
+    await expect(liveQuery?.()).resolves.toEqual([
+      { id: "a", displayName: "Alpha" },
+      { id: "z", displayName: "Zulu" },
+    ])
+    expect(toArrayMock).toHaveBeenCalled()
+    expect(orderByMock).not.toHaveBeenCalled()
   })
 })

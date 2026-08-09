@@ -17,6 +17,16 @@ import type { SubAgentTokenUsage, SubAgentPriority } from "./sub-agent"
 import type { TwinSettings } from "@/types/twin"
 import type { ExternalAgentPresetId } from "@/lib/ai/agent/external/presets"
 import type { ProjectEditorSession } from "@/types/editor/project-editor"
+import type {
+  AgentTeamEnvironmentRef,
+  AgentTeamEvidencePolicy,
+  AgentTeamGithubDeliveryPolicy,
+  AgentTeamRepositoryBinding,
+  AgentTeamResourcePolicy,
+  AgentTeamRetrospectivePolicy,
+  AgentTeamRuntimeVersion,
+  AgentTeamWriteMode,
+} from "./agent-team-runtime"
 
 // ============================================================================
 // Team Core Types
@@ -26,6 +36,25 @@ import type { ProjectEditorSession } from "@/types/editor/project-editor"
  * Team member role
  */
 export type TeamMemberRole = "lead" | "teammate"
+
+/** Built-in portrait identifiers for Agent Team members and bot identities. */
+export type AgentTeamAvatarId =
+  | "coordinator"
+  | "researcher"
+  | "coder"
+  | "designer"
+  | "planner"
+  | "data-analyst"
+  | "writer"
+  | "browser-scout"
+  | "workflow-engineer"
+  | "memory-archivist"
+  | "security-guardian"
+  | "reviewer"
+  | "operator"
+  | "translator"
+  | "creative-agent"
+  | "general-assistant"
 
 /**
  * Team status
@@ -86,7 +115,15 @@ export type TeamExecutionPattern =
  * which falls back to "overview" for unknown tabs.
  */
 export type AgentTeamWorkspaceTab =
-  "overview" | "tasks" | "chat" | "activity" | "worktrees" | "editor" | "members" | "settings"
+  | "overview"
+  | "tasks"
+  | "chat"
+  | "activity"
+  | "operations"
+  | "worktrees"
+  | "editor"
+  | "members"
+  | "settings"
 
 /**
  * Persisted per-team state of the project Editor tab. Restores the open file
@@ -351,6 +388,20 @@ export const EMPTY_RESOLVED_CAPABILITIES: ResolvedCapabilities = {
  * Team configuration
  */
 export interface AgentTeamConfig {
+  /** Durable local runtime rollout. Existing persisted teams default to legacy. */
+  runtimeVersion?: AgentTeamRuntimeVersion
+  /** Writable child coordination policy. Durable-v2 defaults to single-writer. */
+  writeMode?: AgentTeamWriteMode
+  /** Exactly one primary repository; dependency repositories are optional. */
+  repositories?: AgentTeamRepositoryBinding[]
+  /** Immutable environment profile version captured when a run starts. */
+  environmentRef?: AgentTeamEnvironmentRef
+  resourcePolicy?: AgentTeamResourcePolicy
+  evidencePolicy?: AgentTeamEvidencePolicy
+  retrospectivePolicy?: AgentTeamRetrospectivePolicy
+  githubDeliveryPolicy?: AgentTeamGithubDeliveryPolicy
+  /** Immutable operator constraints copied into the durable decision ledger at run start. */
+  userConstraints?: Array<{ title: string; detail: string }>
   /** Maximum number of teammates */
   maxTeammates: number
   /** Maximum concurrent active teammates */
@@ -656,6 +707,8 @@ export interface AgentTeamConfig {
  * Default team configuration
  */
 export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
+  runtimeVersion: "legacy",
+  writeMode: "single-writer",
   maxTeammates: 10,
   maxConcurrentTeammates: 5,
   executionMode: "coordinated",
@@ -875,6 +928,8 @@ export interface AgentTeammate {
   description: string
   /** Role in the team */
   role: TeamMemberRole
+  /** Stable built-in portrait. Older persisted teammates resolve one on read. */
+  avatarId?: AgentTeamAvatarId
   /** Current status */
   status: TeammateStatus
   /** Configuration */
@@ -1511,6 +1566,7 @@ export interface AddTeammateInput {
   name: string
   description?: string
   role?: TeamMemberRole
+  avatarId?: AgentTeamAvatarId
   config?: TeammateConfig
   spawnPrompt?: string
 }

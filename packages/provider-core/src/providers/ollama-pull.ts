@@ -26,11 +26,14 @@
  */
 
 import type { OllamaPullProgress } from "@cognia/provider-types/ollama"
+import { validateStaticHeaders } from "@cognia/provider-types/transport-header-policy"
 import { isTauri } from "./runtime-adapters"
 
 export interface PullOllamaModelArgs {
   baseUrl: string
   modelName: string
+  apiKey?: string
+  customHeaders?: Record<string, string>
   onProgress?: (progress: OllamaPullProgress) => void
   signal?: AbortSignal
 }
@@ -64,18 +67,25 @@ function normalizeBaseUrl(baseUrl: string): string {
 export async function pullOllamaModelStreaming(
   args: PullOllamaModelArgs
 ): Promise<PullOllamaModelHandle> {
-  const { baseUrl, modelName, onProgress, signal } = args
+  const { baseUrl, modelName, apiKey, customHeaders, onProgress, signal } = args
   const url = normalizeBaseUrl(baseUrl)
+  const violations = validateStaticHeaders(customHeaders)
+  if (violations.length > 0) {
+    const details = violations.map(({ name, reason }) => `${name}: ${reason}`).join(", ")
+    throw new Error(`Invalid custom headers (${details})`)
+  }
 
   if (isTauri()) {
-    return pullViaTauri(url, modelName, onProgress, signal)
+    return pullViaTauri(url, modelName, apiKey, customHeaders, onProgress, signal)
   }
-  return pullViaFetch(url, modelName, onProgress, signal)
+  return pullViaFetch(url, modelName, apiKey, customHeaders, onProgress, signal)
 }
 
 async function pullViaTauri(
   url: string,
   modelName: string,
+  apiKey?: string,
+  customHeaders?: Record<string, string>,
   onProgress?: (progress: OllamaPullProgress) => void,
   signal?: AbortSignal
 ): Promise<PullOllamaModelHandle> {
@@ -113,6 +123,8 @@ async function pullViaTauri(
       baseUrl: url,
       modelName,
       pullId,
+      apiKey: apiKey?.trim() || undefined,
+      customHeaders,
     })
     return { success, unsubscribe: () => unlisten?.() }
   } catch (error) {
@@ -126,12 +138,22 @@ async function pullViaTauri(
 async function pullViaFetch(
   url: string,
   modelName: string,
+  apiKey?: string,
+  customHeaders?: Record<string, string>,
   onProgress?: (progress: OllamaPullProgress) => void,
   signal?: AbortSignal
 ): Promise<PullOllamaModelHandle> {
+  const headers: Record<string, string> = {
+    ...(customHeaders ?? {}),
+    "Content-Type": "application/json",
+  }
+  if (apiKey?.trim()) {
+    headers.Authorization = `Bearer ${apiKey.trim()}`
+  }
+
   const response = await fetch(`${url}/api/pull`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ name: modelName, stream: true }),
     signal,
   })

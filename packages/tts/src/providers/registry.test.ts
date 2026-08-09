@@ -42,6 +42,14 @@ describe("TTS provider registry", () => {
       instructions: "",
       responseFormat: "mp3",
     },
+    "local-openai-compatible": {
+      baseUrl: "",
+      model: "",
+      voice: "",
+      speed: 1,
+      responseFormat: "mp3",
+      timeoutMs: 60000,
+    },
     gemini: { voice: "Kore", model: "gemini-3.1-flash-tts-preview" },
     edge: {
       voice: "en-US-JennyNeural",
@@ -87,6 +95,18 @@ describe("TTS provider registry", () => {
       model: "gpt-4o-mini-tts",
       speed: 1.0,
       instructions: "",
+      responseFormat: "mp3",
+    })
+    expect(
+      getAdapter("local-openai-compatible").cacheKeyFields({
+        ...DEFAULT_SPEECH_SETTINGS,
+        localOpenaiBaseUrl: "http://localhost:8880/v1/",
+      })
+    ).toEqual({
+      baseUrl: "http://localhost:8880/v1",
+      model: "",
+      voice: "",
+      speed: 1,
       responseFormat: "mp3",
     })
     // Edge only includes customSSML when the toggle is on.

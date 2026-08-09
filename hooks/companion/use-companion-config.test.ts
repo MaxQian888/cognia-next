@@ -60,7 +60,8 @@ function makeStorage(initial: CompanionConfig | null): CompanionConfigStorage & 
 
 const CONFIG_A: CompanionConfig = {
   baseUrl: "https://example.test:7890",
-  deviceJwt: "jwt-a",
+  devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+  deviceKeyThumbprint: "device-thumbprint",
   deviceId: "ABCDEFGH1234",
   serverVersion: "0.1.0",
 }

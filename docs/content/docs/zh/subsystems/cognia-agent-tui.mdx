@@ -101,6 +101,36 @@ stdout/stdin——CI、管道,或 `TERM=dumb`)强制 `scrollback`,使默认在�
 `COGNIA_LAYOUT` 可按次覆盖。取舍(全屏放弃原生 scrollback)与解决滚轮/历史冲突的
 SGR 鼠标滚轮滚动记录在 ADR-0052。
 
+### 虚拟化 transcript 与自适应终端预算
+
+`fullscreen` 现通过与宽度相关的 `TerminalBlock` 和前缀和 block index 渲染，只挂载可见
+cell 以及上下各两个 viewport 的 overscan。viewport 以 cell id 与 cell 内行号锚定，因此
+resize 校正和流式追加不会拉走已向上滚动的读者；`End` 或 `G` 会恢复 follow-tail。
+`COGNIA_TUI_RENDERER=legacy` 在一个兼容版本内保留旧 renderer。`/transcript` 在两种布局
+中都可打开完整、可搜索、可复制的记录。
+
+终端 chrome 分成四档：完整（100 列及以上）、缩略（60–99）、紧凑（40–59），以及 tiny
+（低于 40 列或 12 行）。tiny 会移除非必要 banner/mascot 行，并把 viewport 让给 overlay，
+同时保留 permission/activity 状态与 composer 路径。native scrollback resize 重绘默认只
+回放最近 10,000 个渲染行，由 `render.terminalResizeReplayMaxRows` 控制；设为 `0` 可取消
+上限，但不会截断 session 数据。
+
+canonical `content-part` envelope 可承载 sources、文件 metadata、A2UI surface、artifact/canvas
+引用和 custom fallback，持久日志不保存 binary body。每个已知 canonical event 都明确归入
+transcript、status、overlay 或 audit；未来事件会显示脱敏的 unsupported-event 提示。
+`/doctor` 会报告 renderer、cache/window、耗时计数器和终端能力降级，不记录 prompt、path
+或 payload。
+
+### 终端 smoke 矩阵
+
+- macOS 与 Windows：在 20×8、40×12、80×24、160×50 下运行 native node-pty suite，验证
+  wheel、resize、interrupt 与 alternate-screen cleanup。
+- Linux CI：分别在 native、tmux 和 Zellij 中重复 suite。
+- SSH：验证 resize 传播、`TERM` 转发、OSC-8 fallback 与断连清理。
+- non-TTY 与 `TERM=dumb`：验证自动回退 scrollback，且输出不含 alternate-screen escape。
+- proprietary terminal：手工检查 wheel/select、CJK/emoji 换行、`/transcript` 搜索/复制、
+  A2UI 与 permission focus、图片 fallback，以及 `Ctrl+C` 后 cleanup。
+
 ## 流式可靠性 —— 多轮上下文与空闲超时
 
 针对非 Anthropic 提供商（任意 OpenAI 兼容中继，含 OpenCode 类端点）的两类故障在此处理：
@@ -374,4 +404,12 @@ MCP/插件/技能管理、计划捕获、limits、doctor——都有可用的 CL
 ## 测试
 
 `input/`、`state/`、`commands/`、`runtime/`、`format/`、`markdown/`、`mention/` 下的每个纯模块都有
-同目录 `*.test.ts`；Ink 组件用 `ink-testing-library` 测试。用 `pnpm cli:test` 运行整套。
+同目录 `*.test.ts`；Ink 组件使用 DOM-backed Jest mock 做快速行为测试，并由真实 Ink/Yoga
+子进程探针通过生产 `TuiViewportFrame` 运行，并由通过确定性 session 挂载 `App` 的可选 native PTY 尺寸矩阵补充。用 `pnpm cli:test` 运行整套。
+
+## 视口与输入不变量
+
+根节点的终端尺寸是唯一权威来源。全屏弹层在固定底部 chrome 分配后测量高度，panel 内容
+在该预算内窗口化，输入框在密度档位的行预算内持续显示 grapheme-safe 光标。唯一 active
+输入 provider 按 critical、modal、global、composer 优先级路由，并在按键被消费后停止。
+真实 Ink/Yoga 帧探针与 `App` 使用同一个生产 frame；PTY 尺寸矩阵则直接挂载 `App`，共同补充 DOM mock 下的快速组件测试。

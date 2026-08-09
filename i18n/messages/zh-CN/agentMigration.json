@@ -1,0 +1,70 @@
+{
+  "artifacts": {
+    "names": {
+      "commands": "命令",
+      "mcp": "MCP 服务器",
+      "memory": "记忆",
+      "sessions": "会话",
+      "settings": "设置",
+      "skills": "技能",
+      "subagents": "子智能体"
+    },
+    "title": "选择要导入的内容"
+  },
+  "back": "返回",
+  "cancel": "取消",
+  "cardBody": "将设置、历史记录、技能、智能体、MCP 服务器、命令和记忆迁移到 Cognia。",
+  "cardTitle": "编程智能体迁移",
+  "close": "关闭",
+  "continue": "继续",
+  "description": "从已安装的编程智能体导入受支持的数据。写入前可逐项预览。",
+  "errors": {
+    "artifactFailed": "此项内容无法导入。",
+    "importFailed": "无法完成迁移。",
+    "previewFailed": "无法生成迁移预览。",
+    "scanFailed": "无法检测已安装的编程智能体。"
+  },
+  "import": "导入",
+  "preview": {
+    "action": "预览",
+    "items": "{count} 项"
+  },
+  "progress": {
+    "artifact": "正在导入{artifact}…",
+    "starting": "正在开始导入…"
+  },
+  "result": {
+    "aborted": "迁移已停止",
+    "complete": "迁移完成",
+    "description": "查看从所选编程智能体导入到 Cognia 的内容。",
+    "imported": "已导入 {count} 项",
+    "title": "迁移结果"
+  },
+  "retry": "重试",
+  "status": {
+    "empty": "无内容",
+    "error": "错误",
+    "ready": "可导入",
+    "shared": "已共享",
+    "unsupported": "不支持"
+  },
+  "step": "第 {current} 步，共 {total} 步",
+  "strategy": {
+    "duplicate": "两者都保留",
+    "label": "冲突处理",
+    "overwrite": "替换现有内容",
+    "skip": "保留现有内容"
+  },
+  "title": "从编程智能体导入",
+  "vendor": {
+    "installed": "已安装",
+    "notInstalled": "未找到",
+    "scanning": "正在查找已安装的智能体…",
+    "title": "选择来源"
+  },
+  "vendors": {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "opencode": "OpenCode"
+  }
+}

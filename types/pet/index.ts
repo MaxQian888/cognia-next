@@ -31,7 +31,19 @@ export type {
   PetAchievement,
   PetAchievementRecord,
 } from "./achievements"
-export type { PetSkin, PetSkinRenderProps, PetFacing, PetLocomotion } from "./skin"
+export type {
+  PetSkin,
+  PetSkinId,
+  PetSkinSelection,
+  PetSkinCapabilities,
+  PetRenderMode,
+  PetLookTarget,
+  PetAssetDiagnostic,
+  PetAssetDiagnosticCode,
+  PetSkinRenderProps,
+  PetFacing,
+  PetLocomotion,
+} from "./skin"
 export type {
   PetAnchor,
   PetMotionPreference,
@@ -53,5 +65,11 @@ export {
   DEFAULT_PET_SOUND,
   DEFAULT_PET_TWIN_AWARENESS,
 } from "./settings"
-export type { Live2dTransform, Live2dMotionOverride, Live2dMotionOverrides } from "./live2d"
+export type {
+  Live2dTransform,
+  Live2dMotionOverride,
+  Live2dMotionOverrides,
+  Live2dParameterRole,
+  Live2dParameterMapping,
+} from "./live2d"
 export { DEFAULT_LIVE2D_TRANSFORM } from "./live2d"

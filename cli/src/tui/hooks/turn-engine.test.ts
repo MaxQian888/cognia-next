@@ -7,6 +7,7 @@ import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
 import { createGateController, runTurn, type TurnSession } from "./turn-engine"
 import type { TuiAction } from "../state/types"
 import { CliDbSnapshotError } from "../../db/bootstrap"
+import { resetRenderDiagnostics, snapshotRenderDiagnostics } from "../runtime/render-diagnostics"
 
 const okResult = (overrides?: Partial<RunAndCaptureResult>): RunAndCaptureResult => ({
   text: "done",
@@ -162,6 +163,64 @@ describe("createGateController auto-approve", () => {
 })
 
 describe("runTurn", () => {
+  it("routes canonical envelopes to the reducer, hooks, tool tracking, and diagnostics", async () => {
+    resetRenderDiagnostics()
+    const actions: TuiAction[] = []
+    const captures: string[] = []
+    const toolCalls: Array<[string, unknown]> = []
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        const base = {
+          schemaVersion: 1 as const,
+          sequence: 0,
+          sessionId: "s",
+          runId: "r",
+          turnId: "t",
+          attemptId: "a",
+          hostRef: "cli",
+          runtime: "claude-agent-sdk",
+          timestamp: new Date(0).toISOString(),
+        }
+        opts.onEnvelope?.({
+          ...base,
+          eventId: "e1",
+          event: { kind: "tool-call", toolName: "Read", input: { path: "a.ts" } },
+        })
+        opts.onEnvelope?.({
+          ...base,
+          sequence: 1,
+          eventId: "e2",
+          event: {
+            kind: "content-part",
+            partId: "bad",
+            operation: "upsert",
+            part: { type: "file", name: "secret", uri: "data:text/plain,not-allowed" },
+          },
+        })
+        return okResult()
+      },
+    }
+
+    await runTurn({
+      session,
+      prompt: "go",
+      dispatch: (action) => actions.push(action),
+      gate: async () => ({ decision: "allow" }),
+      hooks: { onCapture: (event) => captures.push(event.type), onStop: () => {} },
+      onToolCall: (name, input) => toolCalls.push([name, input]),
+    })
+
+    expect(actions).toContainEqual(
+      expect.objectContaining({ type: "TOOL_UPDATE", toolName: "Read", input: { path: "a.ts" } })
+    )
+    expect(actions).toContainEqual(
+      expect.objectContaining({ type: "CANONICAL_EVENT_NOTICE", title: "Rejected content part" })
+    )
+    expect(captures).toContain("tool-call")
+    expect(toolCalls).toEqual([["Read", { path: "a.ts" }]])
+    expect(snapshotRenderDiagnostics({}).unknownParts).toBe(1)
+  })
+
   it("streams capture events into reducer actions and commits", async () => {
     const actions: TuiAction[] = []
     const session: TurnSession = {

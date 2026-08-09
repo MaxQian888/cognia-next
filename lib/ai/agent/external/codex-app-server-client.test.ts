@@ -1580,11 +1580,36 @@ describe("CodexAppServerAdapter", () => {
       })
       feed("item/started", {
         threadId: "thr_1",
-        item: { id: "m1", type: "mcpToolCall", tool: "search", arguments: { q: "x" } },
+        item: {
+          id: "m1",
+          type: "mcpToolCall",
+          tool: "calendar.create_event",
+          arguments: { date: "2026-08-07" },
+          readOnlyHint: false,
+          appContext: {
+            connectorId: "calendar",
+            linkId: "primary",
+            appName: "Calendar",
+            actionName: "create_event",
+          },
+        },
       })
       feed("item/completed", {
         threadId: "thr_1",
-        item: { id: "m1", type: "mcpToolCall", tool: "search", result: "ok", error: "boom" },
+        item: {
+          id: "m1",
+          type: "mcpToolCall",
+          tool: "calendar.create_event",
+          result: "ok",
+          error: "boom",
+          readOnlyHint: true,
+          appContext: {
+            connectorId: "calendar",
+            linkId: "primary",
+            appName: "Calendar",
+            actionName: "update_event",
+          },
+        },
       })
       feed("item/reasoning/summaryTextDelta", {
         threadId: "thr_1",
@@ -1612,10 +1637,10 @@ describe("CodexAppServerAdapter", () => {
       })
       feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
 
-      const events: Array<{ type: string }> = []
+      const events: Array<Record<string, unknown>> = []
       let r = await first
       while (!r.done) {
-        events.push(r.value)
+        events.push(r.value as unknown as Record<string, unknown>)
         r = await it.next()
       }
       const types = events.map((e) => e.type)
@@ -1624,6 +1649,40 @@ describe("CodexAppServerAdapter", () => {
       expect(types).toContain("tool_result")
       expect(types).toContain("thinking")
       expect(types).toContain("plan_update")
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "tool_use_start",
+          toolName: "calendar.create_event",
+          title: "Calendar · Create event",
+          toolMetadata: {
+            kind: "mcp",
+            readOnlyHint: false,
+            appContext: {
+              connectorId: "calendar",
+              linkId: "primary",
+              appName: "Calendar",
+              actionName: "create_event",
+            },
+          },
+        })
+      )
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "tool_result",
+          toolUseId: "m1",
+          title: "Calendar · Update event",
+          toolMetadata: {
+            kind: "mcp",
+            readOnlyHint: true,
+            appContext: {
+              connectorId: "calendar",
+              linkId: "primary",
+              appName: "Calendar",
+              actionName: "update_event",
+            },
+          },
+        })
+      )
     })
 
     it("streams item/plan/delta as thinking, dedupes the plan item, and records turn/diff", async () => {
@@ -2024,6 +2083,89 @@ describe("CodexAppServerAdapter", () => {
       await expect(adapter.setConfigOption(session.id, "bogus", "x")).rejects.toThrow(
         /unknown config option/i
       )
+    })
+
+    it("folds a thinking level the model does not publish onto its deepest supported tier", async () => {
+      // The composer's ladder reaches `max`; a Codex model typically stops at
+      // `high`. Sending `max` verbatim is at best ignored and at worst rejects
+      // the turn, so it folds DOWN — the direction every wire normalizer folds.
+      responders["model/list"] = () => ({
+        data: [
+          {
+            id: "gpt-5.2-codex",
+            isDefault: true,
+            defaultReasoningEffort: "medium",
+            // Deliberately not in ascending order: the server lists these in
+            // whatever order it likes, and a positional scan would pick `low`.
+            supportedReasoningEfforts: [
+              { reasoningEffort: "high" },
+              { reasoningEffort: "low" },
+              { reasoningEffort: "medium" },
+            ],
+          },
+        ],
+      })
+      const adapter = await connectedAdapter()
+      await adapter.listModels()
+      const session = await adapter.createSession()
+      await adapter.setConfigOption(session.id, "reasoningEffort", "max")
+
+      const it = iterator(adapter, session.id, userMessage("go"))
+      const first = it.next()
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+
+      const turn = lastWritten((m) => m.method === "turn/start")!
+      expect((turn.params as { effort?: string }).effort).toBe("high")
+    })
+
+    it("passes a supported thinking level through untouched", async () => {
+      responders["model/list"] = () => ({
+        data: [
+          {
+            id: "gpt-5.2-codex",
+            isDefault: true,
+            supportedReasoningEfforts: [
+              { reasoningEffort: "low" },
+              { reasoningEffort: "medium" },
+              { reasoningEffort: "high" },
+            ],
+          },
+        ],
+      })
+      const adapter = await connectedAdapter()
+      await adapter.listModels()
+      const session = await adapter.createSession()
+      await adapter.setConfigOption(session.id, "reasoningEffort", "low")
+
+      const it = iterator(adapter, session.id, userMessage("go"))
+      const first = it.next()
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+
+      expect(
+        (lastWritten((m) => m.method === "turn/start")!.params as { effort?: string }).effort
+      ).toBe("low")
+    })
+
+    it("leaves the level alone when the model catalog was never fetched", async () => {
+      // Guessing against an unknown ladder is worse than letting the server
+      // decide, so an unclamped value goes out as-is.
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      await adapter.setConfigOption(session.id, "reasoningEffort", "max")
+
+      const it = iterator(adapter, session.id, userMessage("go"))
+      const first = it.next()
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+
+      expect(
+        (lastWritten((m) => m.method === "turn/start")!.params as { effort?: string }).effort
+      ).toBe("max")
     })
 
     it("resets the effort to the model default when the model changes", async () => {

@@ -5,11 +5,32 @@
 import "fake-indexeddb/auto"
 import { IDBFactory } from "fake-indexeddb"
 
+import type { LangfuseTransport } from "./transports/langfuse-transport"
+
+const mockIsTauri = jest.fn(() => false)
+const mockPostTauriTelemetryJson = jest.fn<Promise<{ ok: boolean }>, unknown[]>(async () => ({
+  ok: true,
+}))
+const mockConfigureTauriSidecarTelemetry = jest.fn<Promise<void>, unknown[]>(async () => undefined)
+
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: () => mockIsTauri(),
+}))
+jest.mock("./transports/tauri-fetch-shim", () => ({
+  configureTauriSidecarTelemetry: (...args: unknown[]) =>
+    mockConfigureTauriSidecarTelemetry(...args),
+  createTauriOtlpFetch: jest.fn(() => fetch),
+  postTauriTelemetryJson: (...args: unknown[]) => mockPostTauriTelemetryJson(...args),
+}))
+
 // `bootstrap.ts` ships an IIFE-style `hasBootstrapped` flag at module scope.
 // Each test resets the module registry and the localStorage / IDB factory so
 // the suite stays isolated.
 beforeEach(() => {
   jest.resetModules()
+  jest.clearAllMocks()
+  mockIsTauri.mockReturnValue(false)
   localStorage.clear()
   const factory = new IDBFactory()
   ;(globalThis as { indexedDB: IDBFactory }).indexedDB = factory
@@ -51,6 +72,82 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     // toggle is on. Langfuse and OTel attach (they run as no-ops without
     // credentials).
     expect(names).not.toContain("remote")
+  })
+
+  it("wires the shared Langfuse ingestion batch through native credential injection", async () => {
+    mockIsTauri.mockReturnValue(true)
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        langfuse: true,
+        langfuseConfig: {
+          publicKey: "pk-native",
+          secretKeyConfigured: true,
+          host: "https://langfuse.example/",
+          minLevel: "warn",
+        },
+      })
+    )
+    const mod = await import("./bootstrap")
+    mod.bootstrapLogger()
+    const { getTransport } = await import("@cognia/logging/core")
+    const transport = getTransport<InstanceType<typeof LangfuseTransport>>("langfuse")
+    expect(transport).toBeDefined()
+
+    transport?.log({
+      id: "log-native",
+      timestamp: "2026-08-09T00:00:00.000Z",
+      level: "error",
+      message: "native failure",
+      module: "bootstrap-test",
+      traceId: "trace-native",
+    })
+    await transport?.flush()
+
+    expect(mockPostTauriTelemetryJson).toHaveBeenCalledWith(
+      "https://langfuse.example/api/public/ingestion",
+      expect.stringContaining('"event-create"'),
+      { kind: "langfuse", publicKey: "pk-native" }
+    )
+    const body = JSON.parse(mockPostTauriTelemetryJson.mock.calls[0][1] as string)
+    expect(body.batch).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "trace-create" }),
+        expect.objectContaining({ type: "event-create" }),
+      ])
+    )
+  })
+
+  it("does not attach the native exporter when the Rust Langfuse secret is absent", async () => {
+    mockIsTauri.mockReturnValue(true)
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        langfuse: true,
+        langfuseConfig: {
+          publicKey: "pk-native",
+          secretKeyConfigured: false,
+          host: "https://langfuse.example/",
+          minLevel: "warn",
+        },
+      })
+    )
+    const mod = await import("./bootstrap")
+    mod.bootstrapLogger()
+    const { getTransport } = await import("@cognia/logging/core")
+    const transport = getTransport<InstanceType<typeof LangfuseTransport>>("langfuse")
+
+    transport?.log({
+      id: "log-native-no-secret",
+      timestamp: "2026-08-09T00:00:00.000Z",
+      level: "error",
+      message: "native failure",
+      module: "bootstrap-test",
+      traceId: "trace-native-no-secret",
+    })
+    await transport?.flush()
+
+    expect(mockPostTauriTelemetryJson).not.toHaveBeenCalled()
   })
 
   it("persists user-applied settings to localStorage and reads them back", async () => {

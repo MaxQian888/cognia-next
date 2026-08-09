@@ -24,12 +24,22 @@ import type {
   GatewayRoutingSnapshot,
 } from "@/types/gateway"
 import type { ModelMapping } from "@cognia/provider-types/model-mapping"
+import type { RoutingStrategy } from "@cognia/provider-types/auto-router"
+import { getCatalogModelMetadata } from "@/lib/ai/providers/models-dev-sync"
+import { resolveModelPricingUsd } from "@/lib/usage/pricing"
+import { getProviderRoutingRuntimeAdapters } from "@cognia/provider-routing/runtime-adapters"
 
 export interface SnapshotSettingsSlice {
   defaultProvider?: string
   providerSettings?: ProviderSettingsSnapshotInput["providerSettings"]
   customProviders?: ProviderSettingsSnapshotInput["customProviders"]
   modelMappings?: ModelMapping[]
+  routingConfig?: {
+    strategy?: RoutingStrategy | (string & {})
+    maxFallbackAttempts?: number
+    providerConstraints?: import("@cognia/provider-types/model-mapping").ProviderConstraint[]
+    circuitBreaker?: import("@cognia/provider-types/model-mapping").RoutingCircuitBreakerSettings
+  }
 }
 
 /**
@@ -183,14 +193,63 @@ function buildProviders(slice: SnapshotSettingsSlice): GatewayProviderSnapshot[]
   return out
 }
 
-function buildAliases(slice: SnapshotSettingsSlice): GatewayAliasSnapshot[] {
+function buildAliases(
+  slice: SnapshotSettingsSlice,
+  profileMeta?: SnapshotProfileMeta
+): GatewayAliasSnapshot[] {
+  const runtime = getProviderRoutingRuntimeAdapters()
   return (slice.modelMappings ?? [])
     .filter((m) => m.enabled && m.providers.length > 0)
     .map((m) => ({
       alias: m.alias,
+      distribution: m.distribution,
       // Mapping entries are already in priority order; weighted mappings still
       // expose the same set (the gateway walks them top-down as a chain).
-      entries: m.providers.map((e) => ({ providerId: e.providerId, modelId: e.modelId })),
+      entries: m.providers.map((e) => {
+        const catalog = getCatalogModelMetadata(e.providerId, e.modelId)
+        const profileCapabilities = profileMeta?.byLegacyId[e.providerId]?.models[e.modelId]
+        const pricing = resolveModelPricingUsd(e.providerId, e.modelId)
+        const deploymentId = profileMeta?.byLegacyId[e.providerId]?.deploymentId
+        const health = deploymentId
+          ? (runtime.getDeploymentHealth(deploymentId) ?? runtime.getHealthMetrics(e.providerId))
+          : runtime.getHealthMetrics(e.providerId)
+        const pricingPer1M = Math.max(pricing?.promptPer1M ?? 0, pricing?.completionPer1M ?? 0)
+        const capabilities = {
+          ...(catalog?.supportsTools !== undefined ? { tools: catalog.supportsTools } : {}),
+          ...(catalog?.supportsVision !== undefined ? { vision: catalog.supportsVision } : {}),
+          ...(catalog?.supportsStructuredOutput !== undefined
+            ? { structuredOutput: catalog.supportsStructuredOutput }
+            : {}),
+          ...(catalog?.supportsStreaming !== undefined
+            ? { streaming: catalog.supportsStreaming }
+            : {}),
+          ...(catalog?.contextLength !== undefined ? { contextTokens: catalog.contextLength } : {}),
+          ...profileCapabilities,
+        }
+        return {
+          providerId: e.providerId,
+          modelId: e.modelId,
+          ...(profileMeta?.byLegacyId[e.providerId]?.deploymentId
+            ? { deploymentId: profileMeta.byLegacyId[e.providerId].deploymentId }
+            : {}),
+          ...(profileMeta?.byLegacyId[e.providerId]?.enabled !== undefined
+            ? { available: profileMeta.byLegacyId[e.providerId].enabled }
+            : {}),
+          ...(profileMeta?.byLegacyId[e.providerId]?.region
+            ? {
+                locality:
+                  profileMeta.byLegacyId[e.providerId].region === "local" ? "local" : "remote",
+              }
+            : {}),
+          ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
+          ...(pricingPer1M > 0 ? { pricingPer1M } : {}),
+          ...(health?.latencyP50 !== undefined ? { latencyMs: health.latencyP50 } : {}),
+          ...(health?.successRate !== undefined ? { successRate: health.successRate } : {}),
+          ...(e.weight !== undefined ? { weight: e.weight } : {}),
+          ...(e.conditions ? { conditions: e.conditions } : {}),
+        }
+      }),
+      ...(m.parameterDefaults ? { parameterDefaults: m.parameterDefaults } : {}),
     }))
 }
 
@@ -204,7 +263,16 @@ export interface SnapshotProfileMeta {
   /** legacy provider id → derived deployment id + transport. */
   byLegacyId: Record<
     string,
-    { deploymentId: string; transport?: import("@/types/gateway").GatewayTransportSnapshot }
+    {
+      deploymentId: string
+      enabled?: boolean
+      region?: string
+      models: Record<
+        string,
+        NonNullable<import("@/types/gateway").GatewaySnapshotEntry["capabilities"]>
+      >
+      transport?: import("@/types/gateway").GatewayTransportSnapshot
+    }
   >
 }
 
@@ -223,10 +291,68 @@ export function buildGatewaySnapshot(
       ...(derived.transport ? { transport: derived.transport } : {}),
     }
   })
+  const aliases = buildAliases(slice, profileMeta)
+  const preferredAutoAliases = ["fast", "balanced", "powerful"].filter((alias) =>
+    aliases.some((candidate) => candidate.alias.toLowerCase() === alias)
+  )
+  const candidateAliases =
+    preferredAutoAliases.length > 0 ? preferredAutoAliases : aliases.map((alias) => alias.alias)
+  const requestedStrategy = slice.routingConfig?.strategy ?? "reliability"
+  const builtInStrategies = new Set([
+    "reliability",
+    "quality",
+    "cost",
+    "speed",
+    "balanced",
+    "adaptive",
+    "least-busy",
+    "difficulty",
+  ])
+  const strategy = builtInStrategies.has(requestedStrategy) ? requestedStrategy : "reliability"
+  const runtime = getProviderRoutingRuntimeAdapters()
+
   return {
     providers,
-    aliases: buildAliases(slice),
+    aliases,
     generatedAtMs,
+    ...(candidateAliases.length > 0
+      ? {
+          routingPolicy: {
+            schemaVersion: 2 as const,
+            policyRevision: String(profileMeta?.profileVersion ?? generatedAtMs),
+            auto: {
+              modelId: "auto",
+              strategy,
+              candidateAliases,
+              ...(strategy !== requestedStrategy ? { strategyUnavailable: requestedStrategy } : {}),
+              thresholds: { balanced: 0.34, powerful: 0.67 },
+            },
+            maxFallbackAttempts: slice.routingConfig?.maxFallbackAttempts ?? 3,
+            tierAliases: Object.fromEntries(
+              ["fast", "balanced", "powerful"].flatMap((tier) =>
+                candidateAliases.includes(tier) ? [[tier, tier]] : []
+              )
+            ),
+            ...(slice.routingConfig?.providerConstraints
+              ? {
+                  providerConstraints: slice.routingConfig.providerConstraints.map((constraint) => {
+                    const rate = runtime.getRate(constraint.providerId)
+                    return {
+                      ...constraint,
+                      currentRequestsPerMinute: rate.rpm,
+                      currentTokensPerMinute: rate.tpm,
+                      currentDailyCost: runtime.getTodaySpend(constraint.providerId),
+                      circuitOpen: !runtime.isCircuitBreakerAvailable(constraint.providerId),
+                    }
+                  }),
+                }
+              : {}),
+            ...(slice.routingConfig?.circuitBreaker
+              ? { circuitBreaker: slice.routingConfig.circuitBreaker }
+              : {}),
+          },
+        }
+      : {}),
     // R3: versioned + authority-stamped so the Rust CAS check can reject
     // stale/conflicting publishers instead of last-writer-wins.
     ...(profileMeta !== undefined
@@ -256,6 +382,30 @@ export async function loadSnapshotProfileMeta(): Promise<SnapshotProfileMeta | u
     const transport = transportById.get(deployment.transportProfileRef)
     byLegacyId[legacy] = {
       deploymentId: deployment.id,
+      enabled: deployment.enabled,
+      region: deployment.region,
+      models: Object.fromEntries(
+        deployment.models.map((model) => [
+          model.id,
+          {
+            ...(model.userOverride?.capabilities?.tools !== undefined
+              ? { tools: model.userOverride.capabilities.tools }
+              : {}),
+            ...(model.userOverride?.capabilities?.attachments !== undefined
+              ? { vision: model.userOverride.capabilities.attachments }
+              : {}),
+            ...(model.userOverride?.capabilities?.structuredOutput !== undefined
+              ? { structuredOutput: model.userOverride.capabilities.structuredOutput }
+              : {}),
+            ...(model.userOverride?.capabilities?.streaming !== undefined
+              ? { streaming: model.userOverride.capabilities.streaming }
+              : {}),
+            ...(model.userOverride?.limits?.context !== undefined
+              ? { contextTokens: model.userOverride.limits.context }
+              : {}),
+          },
+        ])
+      ),
       ...(transport
         ? {
             transport: {

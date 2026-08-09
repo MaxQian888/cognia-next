@@ -17,6 +17,11 @@ import workspaceToolsManifest from "@/plugins/workspace-tools/plugin.json"
 import agentTeamExamplesManifest from "@/plugins/agent-team-examples/plugin.json"
 import backendRefactorManifest from "@/plugins/cognia-backend-refactor/plugin.json"
 import workModeManifest from "@/plugins/cognia-work-mode/plugin.json"
+import officeManifest from "@/plugins/cognia-office/plugin.json"
+import pdfManifest from "@/plugins/cognia-pdf/plugin.json"
+import documentsManifest from "@/plugins/cognia-documents/plugin.json"
+import visualizeManifest from "@/plugins/cognia-visualize/plugin.json"
+import presentationsManifest from "@/plugins/cognia-presentations/plugin.json"
 import zhihuContentPipelineManifest from "@/plugins/zhihu-content-pipeline/plugin.json"
 import appearanceDemoManifest from "@/plugins/cognia-appearance-demo/plugin.json"
 import schedulingDemoManifest from "@/plugins/cognia-scheduling-demo/plugin.json"
@@ -38,6 +43,7 @@ import petDailyQuestsManifest from "@/plugins/pet-daily-quests/plugin.json"
 import strixSecurityManifest from "@/plugins/strix-security/plugin.json"
 import contextInspectorManifest from "@/plugins/context-inspector/plugin.json"
 import uiSurfaceReferenceManifest from "@/plugins/ui-surface-reference/plugin.json"
+import sreAgentManifest from "@/plugins/sre-agent/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -53,6 +59,11 @@ import workflowAiModule from "@/plugins/workflow-ai/src/index"
 import agentTeamExamplesModule from "@/plugins/agent-team-examples/src/index"
 import backendRefactorModule from "@/plugins/cognia-backend-refactor/src/index"
 import workModeModule from "@/plugins/cognia-work-mode/src/index"
+import officeModule from "@/plugins/cognia-office/src/index"
+import pdfModule from "@/plugins/cognia-pdf/src/index"
+import documentsModule from "@/plugins/cognia-documents/src/index"
+import visualizeModule from "@/plugins/cognia-visualize/src/index"
+import presentationsModule from "@/plugins/cognia-presentations/src/index"
 import zhihuContentPipelineModule from "@/plugins/zhihu-content-pipeline/src/index"
 import appearanceDemoModule from "@/plugins/cognia-appearance-demo/src/index"
 import schedulingDemoModule from "@/plugins/cognia-scheduling-demo/src/index"
@@ -74,6 +85,7 @@ import petDailyQuestsModule from "@/plugins/pet-daily-quests/src/index"
 import strixSecurityModule from "@/plugins/strix-security/src/index"
 import contextInspectorModule from "@/plugins/context-inspector/src/index"
 import * as uiSurfaceReferenceModule from "@/plugins/ui-surface-reference/src/index"
+import sreAgentModule from "@/plugins/sre-agent/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -214,6 +226,36 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     load: async () => resolvePluginModule(backendRefactorModule),
   },
   {
+    manifest: builtinManifest(officeManifest, officeModule),
+    path: "builtin://cognia-office",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(officeModule),
+  },
+  {
+    manifest: builtinManifest(pdfManifest, pdfModule),
+    path: "builtin://cognia-pdf",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(pdfModule),
+  },
+  {
+    manifest: builtinManifest(documentsManifest, documentsModule),
+    path: "builtin://cognia-documents",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(documentsModule),
+  },
+  {
+    manifest: builtinManifest(visualizeManifest, visualizeModule),
+    path: "builtin://cognia-visualize",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(visualizeModule),
+  },
+  {
+    manifest: builtinManifest(presentationsManifest, presentationsModule),
+    path: "builtin://cognia-presentations",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(presentationsModule),
+  },
+  {
     // Outcome-to-deliverable Work experience. Its rich module manifest carries
     // the mode, skills, specialist subagents, and team template; activate()
     // registers the artifact/review/parallel-dispatch tools.
@@ -221,6 +263,15 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-work-mode",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(workModeModule),
+  },
+  {
+    // Read-only incident diagnostician. The packaged manifest materializes
+    // both tool contracts and its subagent so discovery, consent, and the
+    // runtime registry all observe the same contribution graph.
+    manifest: builtinManifest(sreAgentManifest, sreAgentModule),
+    path: "builtin://sre-agent",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(sreAgentModule),
   },
   {
     manifest: builtinManifest(zhihuContentPipelineManifest, zhihuContentPipelineModule),

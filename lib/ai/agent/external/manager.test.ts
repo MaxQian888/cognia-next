@@ -88,6 +88,12 @@ class MockAdapter {
   extensionSupport?: () => Record<string, unknown>
   logoutImpl?: jest.Mock<Promise<void>, []>
   deleteSessionImpl?: jest.Mock<Promise<void>, [string]>
+  respondToElicitationImpl: jest.Mock<Promise<void>, [unknown]> = jest.fn(
+    async (_response: unknown) => {}
+  )
+  cancelRequestImpl: jest.Mock<Promise<void>, [number | string]> = jest.fn(
+    async (_requestId: number | string) => {}
+  )
 
   get connectionStatus() {
     return this._connectionStatus
@@ -174,6 +180,12 @@ class MockAdapter {
     }
   }
   async respondToPermission(_sid: string, _r: AcpPermissionResponse) {}
+  async respondToElicitation(response: unknown) {
+    return this.respondToElicitationImpl(response)
+  }
+  async cancelRequest(requestId: number | string) {
+    return this.cancelRequestImpl(requestId)
+  }
   async cancel(sid: string) {
     return this.cancelImpl(sid)
   }
@@ -187,10 +199,18 @@ class MockAdapter {
     return this.setConfigOptionImpl(_sid, _id, _v)
   }
   getConfigOptions(sid: string) {
-    return this.getConfigOptionsImpl?.(sid)
+    const result = this.getConfigOptionsImpl?.(sid) as
+      { status: "ok"; data: unknown } | { status: "unsupported" } | unknown[] | undefined
+    if (Array.isArray(result)) return result
+    return result && typeof result === "object" && "status" in result && result.status === "ok"
+      ? result.data
+      : undefined
   }
   getSessionModels(sid: string) {
-    return this.getSessionModelsImpl?.(sid)
+    const result = this.getSessionModelsImpl?.(sid) as
+      { status: "ok"; data: unknown } | { status: "unsupported" } | unknown | undefined
+    if (!result || typeof result !== "object" || !("status" in result)) return result
+    return result.status === "ok" && "data" in result ? result.data : undefined
   }
   listSessions(options?: unknown) {
     if (!this.listSessionsImpl) return undefined
@@ -457,6 +477,18 @@ describe("Capability helpers (unsupported / ok / error)", () => {
     await expect(m.setConfigOption("agent-1", "s_1", "k", "v")).rejects.toThrow()
   })
 
+  it("elicitation responses and request cancellation delegate to the active adapter", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const response = { requestId: "elicit-1", action: "cancel" } as const
+
+    await m.respondToElicitation("agent-1", response)
+    await m.cancelRequest("agent-1", 17)
+
+    expect(currentMock.respondToElicitationImpl).toHaveBeenCalledWith(response)
+    expect(currentMock.cancelRequestImpl).toHaveBeenCalledWith(17)
+  })
+
   it("getAuthMethods returns ok by default; isAuthenticationRequired/authenticate error if missing", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
@@ -627,6 +659,30 @@ describe("execute — model selection", () => {
     expect(opts.metadata?.selectedModel).toBe("gpt-5.6-sol")
   })
 
+  it("applies a requested model through ACP config options on a new session", async () => {
+    const m = await connectedManager()
+    currentMock.getConfigOptionsImpl = jest.fn((_sessionId: string) => ({
+      status: "ok",
+      data: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "claude-sonnet-4-5",
+          options: [
+            { value: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
+            { value: "claude-opus-4-1", name: "Claude Opus 4.1" },
+          ],
+        },
+      ],
+    }))
+    await m.execute("agent-1", "hi", { model: "claude-opus-4-1" })
+
+    expect(currentMock.setConfigOptionImpl).toHaveBeenCalledWith("s_1", "model", "claude-opus-4-1")
+    expect(currentMock.setSessionModelImpl).not.toHaveBeenCalled()
+  })
+
   it("omits selectedModel entirely when no model is requested", async () => {
     // So the agent keeps whatever its own configuration selects.
     const m = await connectedManager()
@@ -636,6 +692,31 @@ describe("execute — model selection", () => {
 
     const opts = createSession.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> }
     expect(opts.metadata?.selectedModel).toBeUndefined()
+  })
+
+  it("bridges the requested thinking level as metadata.reasoningEffort", async () => {
+    // Same class of regression as `model` above: the composer's thinking level
+    // reached only the built-in runtime, so on an external agent the control
+    // was silently inert.
+    const m = await connectedManager()
+    const createSession = jest.spyOn(currentMock, "createSession")
+
+    await m.execute("agent-1", "hi", { reasoningEffort: "xhigh" })
+
+    const opts = createSession.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> }
+    expect(opts.metadata?.reasoningEffort).toBe("xhigh")
+  })
+
+  it("omits reasoningEffort entirely when none is requested", async () => {
+    // Absent — not null — so the Codex client's `defaultReasoningEffort`
+    // fallback (which only fires on `undefined`) still applies.
+    const m = await connectedManager()
+    const createSession = jest.spyOn(currentMock, "createSession")
+
+    await m.execute("agent-1", "hi")
+
+    const opts = createSession.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> }
+    expect(opts.metadata?.reasoningEffort).toBeUndefined()
   })
 
   it("switches a reused session onto a newly requested model", async () => {

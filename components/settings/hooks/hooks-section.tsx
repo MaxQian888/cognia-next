@@ -73,6 +73,7 @@ import { cn } from "@/lib/utils"
 import { HookGroupEditor, validateMatcher } from "./hook-group-editor"
 import { validateHandler } from "./hook-handler-form"
 import { BuiltinHooksCard } from "./builtin-hooks-card"
+import { hookRuntimeCapability } from "@/lib/claude/hooks/capabilities"
 import { createLogger } from "@cognia/logging"
 import {
   CLAUDE_CODE_RELATED,
@@ -105,6 +106,7 @@ export function HooksSection({ cwd }: Props) {
   const tc = useTranslations("hooks")
   const router = useRouter()
   const searchParams = useSearchParams()
+  const runtimeCapability = hookRuntimeCapability("claude-agent-sdk")
 
   const [scope, setScope] = useState<Scope>("user")
   // Full settings doc per scope so we round-trip extras + permissions + …
@@ -295,6 +297,12 @@ export function HooksSection({ cwd }: Props) {
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
             <h2 className="text-base font-semibold">{t("title")}</h2>
+            <Badge variant="outline" className="text-[10px]" data-testid="hooks-runtime">
+              {t("runtimeSummary", {
+                version: runtimeCapability.version,
+                count: runtimeCapability.events.length,
+              })}
+            </Badge>
             {totalGroups > 0 ? (
               <Badge variant="secondary" className="text-[10px]" data-testid="hooks-summary">
                 {t("summary", { count: totalGroups })}

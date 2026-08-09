@@ -436,8 +436,9 @@ export async function applySettings(
   isCurrent: () => boolean = () => true
 ): Promise<void> {
   const enabled = settings.webrtcEnabled ?? true
-  const signalingUrl = settings.signalingUrl ?? DEFAULT_SIGNALING_URL
-  const ice = settings.iceServers ?? DEFAULT_STUN
+  const targetConfig = loadCompanionConfig()
+  const signalingUrl = targetConfig?.signalingUrl ?? settings.signalingUrl ?? DEFAULT_SIGNALING_URL
+  const ice = targetConfig?.iceServers ?? settings.iceServers ?? DEFAULT_STUN
   const turn = settings.turnServers ?? []
   if (!enabled) {
     tx.disableWebRtcTier()

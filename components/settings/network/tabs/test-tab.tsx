@@ -88,13 +88,15 @@ export function NetworkTestTab() {
                 <span className="text-muted-foreground">{t("test.latencyMs")}: </span>
                 <span className="font-mono">{result.latencyMs} ms</span>
               </div>
-              {result.proxyUrl && (
+              {result.route?.kind === "proxy" && (
                 <div className="col-span-2">
                   <span className="text-muted-foreground">{t("test.proxyUrl")}: </span>
-                  <span className="font-mono break-all">{result.proxyUrl}</span>
+                  <span className="font-mono break-all">
+                    {result.route.protocol}://{result.route.host}:{result.route.port}
+                  </span>
                 </div>
               )}
-              {!result.proxyUrl && (
+              {result.route?.kind === "direct" && (
                 <div className="col-span-2 text-muted-foreground">{t("test.directConnection")}</div>
               )}
               {result.error && (

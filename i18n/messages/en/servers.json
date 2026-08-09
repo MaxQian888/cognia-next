@@ -156,7 +156,6 @@
     "objectStoreRegion": "Object-store region",
     "oidcAudience": "OIDC audience",
     "oidcIssuer": "OIDC issuer",
-    "platformSection": "Platform settings",
     "placeholders": {
       "controllerUrl": "https://ops.example.com",
       "keyVersion": "key-2026-08",
@@ -177,6 +176,7 @@
       "tlsRef": "cognia-server-tls",
       "workspaceRuntimeImage": "ghcr.io/owner/cognia-workspace-runtime@sha256:…"
     },
+    "platformSection": "Platform settings",
     "projectName": "Compose project name",
     "publicUrl": "Public URL",
     "runnerImage": "Runner image digest",
@@ -195,8 +195,8 @@
     "tlsProvider": "TLS provider",
     "tlsRef": "TLS secret or credential reference",
     "topology": "Topology",
-    "validate": "Register and deploy",
     "valid": "Deployment registered and queued",
+    "validate": "Register and deploy",
     "validating": "Registering…",
     "workspaceRuntimeImage": "Workspace runtime image digest"
   }

@@ -1,0 +1,13 @@
+{
+  "create": "创建工作流",
+  "creating": "正在创建…",
+  "emptyDescription": "已发布的工作流模板会显示在这里。",
+  "emptyTitle": "暂无工作流模板",
+  "noDescription": "暂无描述",
+  "trust": {
+    "built-in": "内置",
+    "signed-unknown": "已签名，发布者未知",
+    "unsigned": "未签名",
+    "verified-publisher": "已验证发布者"
+  }
+}

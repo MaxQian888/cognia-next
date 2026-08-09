@@ -13,8 +13,33 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("./account-list", () => ({
-  AccountList: ({ provider }: { provider: string }) => (
-    <div data-testid={`account-list-${provider}`} />
+  AccountList: ({
+    provider,
+    onUpdate,
+  }: {
+    provider: string
+    onUpdate?: (account: unknown) => void
+  }) => (
+    <div data-testid={`account-list-${provider}`}>
+      <button
+        data-testid="update-discovered"
+        onClick={() =>
+          onUpdate?.({
+            id: "existing-discovered",
+            credential: { provider: "opencode-discovered", subProvider: "anthropic" },
+          })
+        }
+      />
+      <button
+        data-testid="update-zen"
+        onClick={() =>
+          onUpdate?.({
+            id: "existing-zen",
+            credential: { provider: "opencode-zen", accessToken: "old", storedAtMs: 0 },
+          })
+        }
+      />
+    </div>
   ),
 }))
 
@@ -31,8 +56,13 @@ jest.mock("./provider-quota-panel", () => ({
 }))
 
 jest.mock("./add-account-dialog/opencode", () => ({
-  OpencodeAddAccountDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="opencode-add-dialog" /> : null,
+  OpencodeAddAccountDialog: ({
+    open,
+    existingAccount,
+  }: {
+    open: boolean
+    existingAccount?: { id: string }
+  }) => (open ? <div data-testid="opencode-add-dialog">{existingAccount?.id}</div> : null),
 }))
 
 const toastSuccess = jest.fn()
@@ -44,9 +74,16 @@ jest.mock("@/components/ui/sonner", () => ({
   },
 }))
 
-const adoptMock = jest.fn(async (_: string) => ({ id: "acc-1" }))
+const adoptedAccount = {
+  id: "acc-1",
+  provider: "opencode",
+  variant: "opencode-zen",
+  createdAtMs: 0,
+  lastUsedAtMs: 0,
+}
+const adoptMock = jest.fn(async (_: string, _accountId: string | null) => adoptedAccount)
 jest.mock("@/lib/subscription/core/transport", () => ({
-  opencodeAdoptDiscovered: (sub: string) => adoptMock(sub),
+  opencodeAdoptDiscovered: (sub: string, accountId: string | null) => adoptMock(sub, accountId),
 }))
 
 const discoveryState: {
@@ -114,7 +151,7 @@ describe("ProviderTabOpencode", () => {
   it("adopts a discovered entry and reports success", async () => {
     render(<ProviderTabOpencode />)
     fireEvent.click(screen.getByTestId("opencode-adopt-opencode"))
-    await waitFor(() => expect(adoptMock).toHaveBeenCalledWith("opencode"))
+    await waitFor(() => expect(adoptMock).toHaveBeenCalledWith("opencode", null))
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
   })
 
@@ -124,6 +161,20 @@ describe("ProviderTabOpencode", () => {
     fireEvent.click(screen.getByTestId("opencode-adopt-anthropic"))
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(String(toastError.mock.calls[0][0])).toContain("keyring locked")
+  })
+
+  it("re-adopts a discovered credential into the same account ID", async () => {
+    render(<ProviderTabOpencode />)
+    fireEvent.click(screen.getByTestId("update-discovered"))
+
+    await waitFor(() => expect(adoptMock).toHaveBeenCalledWith("anthropic", "existing-discovered"))
+  })
+
+  it("opens the same-ID editor for a managed-plan account", () => {
+    render(<ProviderTabOpencode />)
+    fireEvent.click(screen.getByTestId("update-zen"))
+
+    expect(screen.getByTestId("opencode-add-dialog")).toHaveTextContent("existing-zen")
   })
 
   it("shows the empty state when nothing whitelisted was discovered", () => {

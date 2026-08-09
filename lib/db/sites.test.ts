@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-
-import "fake-indexeddb/auto"
 import {
   claimNextSiteOperation,
   createSiteDeployment,
@@ -24,14 +21,15 @@ import {
   setSiteLifecycle,
   siteResourceCanBePurged,
 } from "./sites"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function siteInput() {
   return {

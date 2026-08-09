@@ -1,19 +1,19 @@
-/** @jest-environment jsdom */
 /**
  * Tests for performance-tier-prefs.ts — Dexie load/save round-trips.
  */
 
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getSettings } from "@/lib/db/settings"
 import { loadPerformanceTierPref, savePerformanceTierPref } from "./performance-tier-prefs"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 describe("loadPerformanceTierPref", () => {
   it("returns 'auto' when no preference has been saved yet", async () => {

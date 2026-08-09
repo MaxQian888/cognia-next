@@ -14,12 +14,27 @@ export interface BeginTurnMeta {
   sessionId: string
   runId: number
   model: string | null
-  /** `"in-app"` in Phase 1. */
+  /** Runtime attribution, for example `"in-app"` or `"external"`. */
   agentKind: string
 }
 
 /** Mirrors the Rust `BeginOutcome` serde shape (unused by callers, typed for tests). */
 export type BeginOutcome = { status: "started" } | { status: "skipped"; reason: string }
+
+export interface TrackingAttempt extends BeginTurnMeta {
+  cwd: string
+  status: "started" | "unavailable"
+  reason?: string
+}
+
+const trackingAttempts = new Map<string, TrackingAttempt>()
+
+/** Consume the begin-side coverage record when the matching turn settles. */
+export function consumeCodeAdoptionTrackingAttempt(turnKey: string): TrackingAttempt | undefined {
+  const attempt = trackingAttempts.get(turnKey)
+  trackingAttempts.delete(turnKey)
+  return attempt
+}
 
 /**
  * Open an attribution window for a turn. No-ops when not in Tauri or when the
@@ -30,8 +45,9 @@ export async function beginCodeAdoptionTurn(
   meta: BeginTurnMeta
 ): Promise<void> {
   if (!isTauri() || !cwd) return
+  const turnKey = `${meta.sessionId}:${meta.runId}`
   try {
-    await invoke<BeginOutcome>("code_adoption_turn_begin", {
+    const outcome = await invoke<BeginOutcome>("code_adoption_turn_begin", {
       args: {
         cwd,
         sessionId: meta.sessionId,
@@ -40,7 +56,14 @@ export async function beginCodeAdoptionTurn(
         agentKind: meta.agentKind,
       },
     })
+    trackingAttempts.set(turnKey, {
+      ...meta,
+      cwd,
+      status: outcome.status === "started" ? "started" : "unavailable",
+      ...(outcome.status === "skipped" ? { reason: outcome.reason } : {}),
+    })
   } catch {
+    trackingAttempts.set(turnKey, { ...meta, cwd, status: "unavailable", reason: "beginFailed" })
     // best-effort — attribution must never disrupt a turn
   }
 }

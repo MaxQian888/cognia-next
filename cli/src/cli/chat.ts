@@ -94,7 +94,7 @@ export interface ChatDeps {
     config: ReturnType<typeof defaultLoadConfig>
     createSession: typeof createAgentSession
     createExternalSession: typeof createExternalAgentSession
-    pushHandoff: (sessionId: string) => void | Promise<void>
+    pushHandoff: (sessionId: string) => boolean | Promise<boolean>
     initialCommand?: string
     sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"]
   }) => Promise<number>
@@ -140,9 +140,7 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
       config,
       createSession: builtinCreateSession,
       createExternalSession: externalCreateSession,
-      pushHandoff: (sessionId: string) => {
-        void pushHandoff(sessionId, undefined, { out })
-      },
+      pushHandoff: (sessionId: string) => pushHandoff(sessionId, undefined, { out }),
       initialCommand,
       ...(bypassRequested(args) ? { sessionOnlyPermissionMode: "bypassPermissions" } : {}),
     })

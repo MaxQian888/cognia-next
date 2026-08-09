@@ -41,6 +41,7 @@ function mk<S extends z.ZodTypeAny>(input: {
     summary: string
     details?: { label: string; value: string }[]
   }
+  buildArgs?: (args: z.infer<S>) => string[]
 }): BuiltInSkill<S> {
   const skill: BuiltInSkill<S> = {
     id: input.id,
@@ -54,7 +55,10 @@ function mk<S extends z.ZodTypeAny>(input: {
     inputSchema: input.schema,
     execute: async (args, ctx) =>
       runLarkCli({
-        args: [...input.subcommand, ...argsToFlags(args as Record<string, unknown>)],
+        args: [
+          ...input.subcommand,
+          ...(input.buildArgs?.(args) ?? argsToFlags(args as Record<string, unknown>)),
+        ],
         confirmed: ctx.hitlBypass === true,
         adapterId: larkAdapterIdFromCtx(ctx),
       }),
@@ -91,7 +95,7 @@ registerBuiltInSkill(
         .number()
         .int()
         .min(1)
-        .max(50)
+        .max(20)
         .optional()
         .describe("Max results to return (1–50)."),
     }),
@@ -131,7 +135,15 @@ registerBuiltInSkill(
         .optional()
         .describe('Required when mode="section": the section/block id.'),
     }),
-    subcommand: ["docs", "+fetch", "--api-version", "v2"],
+    subcommand: ["docs", "+fetch"],
+    buildArgs: (args) =>
+      argsToFlags({
+        doc: args.docToken,
+        scope: args.mode,
+        detail: args.format,
+        keyword: args.keyword,
+        startBlockId: args.sectionId,
+      }),
     mutation: "read",
     imAccess: "always",
   })
@@ -158,7 +170,14 @@ registerBuiltInSkill(
         .optional()
         .describe("Optional Drive folder token to create the doc in; omit for the root."),
     }),
-    subcommand: ["docs", "+create", "--api-version", "v2"],
+    subcommand: ["docs", "+create"],
+    buildArgs: (args) =>
+      argsToFlags({
+        title: args.title,
+        content: args.body,
+        docFormat: args.format === "markdown" ? "markdown" : "xml",
+        parentToken: args.folderToken,
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Create Lark doc",
@@ -205,7 +224,14 @@ registerBuiltInSkill(
           "Block id (block_* ops) or the existing string to match (str_replace). Get block ids via lark.doc.fetch with format=with-ids."
         ),
     }),
-    subcommand: ["docs", "+update", "--api-version", "v2"],
+    subcommand: ["docs", "+update"],
+    buildArgs: (args) =>
+      argsToFlags({
+        doc: args.docToken,
+        command: args.operation,
+        content: args.payload,
+        ...(args.operation === "str_replace" ? { pattern: args.anchor } : { blockId: args.anchor }),
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Update Lark doc",
@@ -233,7 +259,14 @@ registerBuiltInSkill(
         .optional()
         .describe("Optional block id to insert the image after; omit to append at the end."),
     }),
-    subcommand: ["docs", "+upload-image", "--api-version", "v2"],
+    subcommand: ["docs", "+media-insert"],
+    buildArgs: (args) =>
+      argsToFlags({
+        doc: args.docToken,
+        file: args.imagePath,
+        selectionWithEllipsis: args.anchorBlockId,
+        type: "image",
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Upload image",
@@ -256,6 +289,7 @@ registerBuiltInSkill(
       docToken: docTokenParam,
     }),
     subcommand: ["drive", "+delete"],
+    buildArgs: (args) => argsToFlags({ fileToken: args.docToken, type: "docx" }),
     mutation: "destructive",
     imAccess: "opt-in",
     confirmTitle: "Delete Lark doc",

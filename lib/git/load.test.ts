@@ -35,17 +35,25 @@ function status(branch: string): GitStatus {
 beforeEach(() => {
   gitRepoStateMock.mockReset()
   gitStatusMock.mockReset()
-  gitBranchesMock.mockReset()
-  gitStashListMock.mockReset()
-  gitConflictsMock.mockReset()
+  gitBranchesMock.mockReset().mockResolvedValue([])
+  gitStashListMock.mockReset().mockResolvedValue([])
+  gitConflictsMock.mockReset().mockResolvedValue([])
   useGitStore.getState().reset()
   useGitStore.setState({ rootDir: "/r" })
 })
 
 describe("loadGitRepo", () => {
   it("clears state when rootDir is null", async () => {
+    useGitStore.setState({
+      branches: [{ name: "stale" }] as never,
+      stashes: [{ index: 0 }] as never,
+      conflicts: [{ path: "stale" }] as never,
+    })
     await loadGitRepo(null)
     expect(useGitStore.getState().status).toBeNull()
+    expect(useGitStore.getState().branches).toEqual([])
+    expect(useGitStore.getState().stashes).toEqual([])
+    expect(useGitStore.getState().conflicts).toEqual([])
     expect(gitRepoStateMock).not.toHaveBeenCalled()
   })
 
@@ -78,6 +86,25 @@ describe("loadGitRepo", () => {
     expect(useGitStore.getState().loadError).toBe("boom")
   })
 
+  it("uses a structured Git error detail", async () => {
+    gitRepoStateMock.mockRejectedValue({ kind: "commandFailed", detail: "typed detail" })
+
+    await expect(loadGitRepo("/r")).rejects.toEqual({
+      kind: "commandFailed",
+      detail: "typed detail",
+    })
+
+    expect(useGitStore.getState().loadError).toBe("typed detail")
+  })
+
+  it("stringifies a non-Error rejection", async () => {
+    gitRepoStateMock.mockRejectedValue("offline")
+
+    await expect(loadGitRepo("/r")).rejects.toBe("offline")
+
+    expect(useGitStore.getState().loadError).toBe("offline")
+  })
+
   it("does not let an older request overwrite a newer repository load", async () => {
     let resolveOld!: (value: typeof repoState) => void
     gitRepoStateMock
@@ -99,17 +126,94 @@ describe("loadGitRepo", () => {
     expect(useGitStore.getState().repoState?.rootDir).toBe("/new")
     expect(useGitStore.getState().status?.branch).toBe("new")
   })
+
+  it("rebinds a nested workspace path to the discovered repository root", async () => {
+    useGitStore.setState({ rootDir: "/r/packages/app" })
+    gitRepoStateMock
+      .mockResolvedValueOnce({ ...repoState, rootDir: "/r" })
+      .mockResolvedValueOnce(repoState)
+    gitStatusMock.mockResolvedValue(status("main"))
+    gitBranchesMock.mockResolvedValue([])
+    gitStashListMock.mockResolvedValue([])
+    gitConflictsMock.mockResolvedValue([])
+
+    await loadGitRepo("/r/packages/app")
+
+    expect(useGitStore.getState().rootDir).toBe("/r")
+    expect(gitStatusMock).toHaveBeenCalledWith("/r")
+  })
 })
 
 describe("refreshGitStatus", () => {
-  it("updates status + conflicts only", async () => {
+  it("updates every mutable repository list", async () => {
     gitRepoStateMock.mockResolvedValue(repoState)
     gitStatusMock.mockResolvedValue(status("dev"))
     gitConflictsMock.mockResolvedValue([{ path: "a" }])
     await refreshGitStatus("/r")
     expect(useGitStore.getState().status?.branch).toBe("dev")
     expect(useGitStore.getState().conflicts).toHaveLength(1)
-    expect(gitBranchesMock).not.toHaveBeenCalled()
+    expect(gitBranchesMock).toHaveBeenCalledWith("/r")
+    expect(gitStashListMock).toHaveBeenCalledWith("/r")
+  })
+
+  it("wins over an older full load for every mutable repository field", async () => {
+    let resolveOldStatus!: (value: GitStatus) => void
+    gitRepoStateMock.mockResolvedValue(repoState)
+    gitStatusMock
+      .mockImplementationOnce(
+        () => new Promise<GitStatus>((resolve) => (resolveOldStatus = resolve))
+      )
+      .mockResolvedValueOnce(status("dev"))
+    gitBranchesMock
+      .mockResolvedValueOnce([{ name: "old" }])
+      .mockResolvedValueOnce([{ name: "dev" }])
+    gitStashListMock.mockResolvedValue([])
+    gitConflictsMock.mockResolvedValue([])
+
+    const oldLoad = loadGitRepo("/r")
+    // Let the full load consume the intentionally deferred first status call
+    // before starting the newer watcher refresh.
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(gitStatusMock).toHaveBeenCalledTimes(1)
+    await refreshGitStatus("/r")
+    resolveOldStatus(status("old"))
+    await oldLoad
+
+    expect(useGitStore.getState().status?.branch).toBe("dev")
+    expect(useGitStore.getState().branches).toEqual([{ name: "dev" }])
+    expect(useGitStore.getState().loadingStatus).toBe(false)
+  })
+
+  it("rebinds a nested watcher path to the discovered repository root", async () => {
+    useGitStore.setState({ rootDir: "/r/packages/app" })
+    gitRepoStateMock
+      .mockResolvedValueOnce({ ...repoState, rootDir: "/r" })
+      .mockResolvedValueOnce(repoState)
+    gitStatusMock.mockResolvedValue(status("main"))
+
+    await refreshGitStatus("/r/packages/app")
+
+    expect(useGitStore.getState().rootDir).toBe("/r")
+    expect(gitStatusMock).toHaveBeenCalledWith("/r")
+    expect(useGitStore.getState().loadingStatus).toBe(false)
+  })
+
+  it("clears mutable lists when the repository disappears", async () => {
+    useGitStore.setState({
+      status: status("main"),
+      branches: [{ name: "main" }] as never,
+      stashes: [{ index: 0 }] as never,
+      conflicts: [{ path: "a.txt" }] as never,
+    })
+    gitRepoStateMock.mockResolvedValue({ ...repoState, isRepo: false, rootDir: null })
+
+    await refreshGitStatus("/r")
+
+    expect(useGitStore.getState().status).toBeNull()
+    expect(useGitStore.getState().branches).toEqual([])
+    expect(useGitStore.getState().stashes).toEqual([])
+    expect(useGitStore.getState().conflicts).toEqual([])
   })
 
   it("records refresh errors for an inline retry without clearing existing status", async () => {

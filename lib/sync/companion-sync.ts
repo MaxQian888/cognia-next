@@ -34,6 +34,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import { clearCursors, loadCursors, saveCursor } from "./cursor-store"
 import { syncAdapterInstances } from "./handlers/adapter-instances"
 import { syncAgentTeamBoard } from "./handlers/agent-team-board"
+import { syncAgentTaskAttempts, syncAgentTasks } from "./handlers/agent-tasks"
 import { syncAppSettings } from "./handlers/app-settings"
 import { syncCharacters } from "./handlers/characters"
 import { syncConversationOverrides } from "./handlers/conversation-overrides"
@@ -66,6 +67,8 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   { table: "characters", run: syncCharacters },
   { table: "skills", run: syncSkills },
   { table: "sessions", run: syncSessions },
+  { table: "agentTasks", run: syncAgentTasks },
+  { table: "agentTaskAttempts", run: syncAgentTaskAttempts },
   { table: "messages", run: syncMessages },
   // Wave 4 / ADR-0026 — five more tables wired so the mobile shell can
   // serve workflow viewer, twin profile, plugin toggles, connector policy,

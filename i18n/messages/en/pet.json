@@ -12,13 +12,13 @@
       "description": "Maxed your bond.",
       "title": "Best Friends"
     },
-    "chatterbox": {
-      "description": "Chatted with your pet 100 times.",
-      "title": "Chatterbox"
-    },
     "chaosGremlin": {
       "description": "Maxed the chaos stat through frantic bursts of work.",
       "title": "Chaos Gremlin"
+    },
+    "chatterbox": {
+      "description": "Chatted with your pet 100 times.",
+      "title": "Chatterbox"
     },
     "devotedCaretaker": {
       "description": "Kept your pet's care quality consistently high.",
@@ -125,8 +125,13 @@
   "binding": {
     "clear": "Clear",
     "empty": "No characters yet.",
+    "inheritAppearance": "Inherit global appearance",
+    "live2dOption": "Live2D · {name}",
+    "skinFor": "Skin for {name}",
     "speciesFor": "Species for {name}",
-    "useGlobal": "Use global pet"
+    "spriteOption": "Sprite · {name}",
+    "useGlobal": "Use global pet",
+    "useSvg": "Built-in vector mascot"
   },
   "bubbles": {
     "achievementUnlocked": ["We earned a badge!", "Achievement get!"],
@@ -165,16 +170,16 @@
       "0": "Zzz…",
       "1": "So cozy…"
     },
-    "streakDay": {
-      "0": "Day {days} together! Coins are flowing!",
-      "1": "{days}-day streak — we're on fire!"
-    },
     "snarky": {
       "error": ["Who wrote this? …Oh.", "Not my bug."],
       "fed": ["Finally.", "Acceptable."],
       "petted": ["I'll allow it.", "Hmph. Nice."],
       "played": ["I let you win.", "Again. Obviously."],
       "success": ["I did most of that.", "As expected."]
+    },
+    "streakDay": {
+      "0": "Day {days} together! Coins are flowing!",
+      "1": "{days}-day streak — we're on fire!"
     },
     "success": ["Nailed it!", "Done and done.", "Yay!"],
     "talked": ["I'm listening!", "Tell me more?", "Hehe, okay!"],
@@ -237,30 +242,6 @@
       "shop": "Shop"
     },
     "title": "Your Pet"
-  },
-  "journal": {
-    "dayTotals": "{count} events · +{xp} XP",
-    "empty": "Nothing in the diary yet — care for your pet and its days will show up here.",
-    "kinds": {
-      "cleaned": "Got cleaned up",
-      "fed": "Had a meal",
-      "goalComplete": "Celebrated a finished goal",
-      "goalProgress": "Cheered goal progress",
-      "inboundMessage": "Noticed a new message",
-      "petted": "Got petted",
-      "played": "Played together",
-      "review": "Looked over some results",
-      "scheduledRun": "Watched a scheduled task",
-      "scheduledRunStarting": "Saw a task kick off",
-      "slept": "Took a nap",
-      "success": "Celebrated a success",
-      "talked": "Had a chat",
-      "teamRun": "Watched the agent team work",
-      "treated": "Got a treat",
-      "workflowRun": "Followed a workflow run"
-    },
-    "loading": "Opening the diary…",
-    "xp": "+{xp} XP"
   },
   "customize": {
     "appearance": {
@@ -352,6 +333,30 @@
   },
   "inventory": {
     "title": "Items"
+  },
+  "journal": {
+    "dayTotals": "{count} events · +{xp} XP",
+    "empty": "Nothing in the diary yet — care for your pet and its days will show up here.",
+    "kinds": {
+      "cleaned": "Got cleaned up",
+      "fed": "Had a meal",
+      "goalComplete": "Celebrated a finished goal",
+      "goalProgress": "Cheered goal progress",
+      "inboundMessage": "Noticed a new message",
+      "petted": "Got petted",
+      "played": "Played together",
+      "review": "Looked over some results",
+      "scheduledRun": "Watched a scheduled task",
+      "scheduledRunStarting": "Saw a task kick off",
+      "slept": "Took a nap",
+      "success": "Celebrated a success",
+      "talked": "Had a chat",
+      "teamRun": "Watched the agent team work",
+      "treated": "Got a treat",
+      "workflowRun": "Followed a workflow run"
+    },
+    "loading": "Opening the diary…",
+    "xp": "+{xp} XP"
   },
   "live2d": {
     "loadFailed": "The Live2D model couldn't be loaded — showing the SVG pet instead."

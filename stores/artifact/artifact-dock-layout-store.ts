@@ -18,6 +18,7 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
 import type { ContextPanelMode } from "@/types/context-workbench"
+import { SIDECHAT_PANEL_ID } from "@/lib/tasks/spawn-task-core"
 
 /**
  * The dock's *sizing* profile. Derived from whichever workbench panel is
@@ -171,6 +172,8 @@ export interface ArtifactDockLayoutState {
   consumeRevealIntent: (panelId: string) => void
   /** Reveal the browser panel in the expanded chat right rail. */
   openBrowser: () => void
+  /** Reveal the active session's sidechat without carrying workspace state. */
+  revealSidechat: () => void
   revealWorkspaceFile: (request: {
     sessionId: string
     rootPath: string
@@ -381,6 +384,14 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           mobileSheetOpen: true,
           workspaceRevealRequest: null,
           workspaceContext: null,
+        }),
+      revealSidechat: () =>
+        set({
+          revealIntent: { panelId: SIDECHAT_PANEL_ID, mode: "narrow" },
+          dockCollapsed: false,
+          userDismissed: false,
+          unreadArtifact: false,
+          mobileSheetOpen: true,
         }),
       revealWorkspaceFile: (request) =>
         set({

@@ -11,16 +11,40 @@
     "showKey": "Show key"
   },
   "live": {
-    "apiKey": "OpenAI API key",
-    "description": "Configure low-latency, full-duplex speech with automatic turn detection and interruption.",
+    "apiKey": "API key",
+    "description": "Low-latency, full-duplex speech with automatic turn detection and interruption, across several providers.",
+    "enabled": "Enable live voice",
+    "enabledHint": "Adds the live voice button to the composer.",
+    "fallback": "Try other providers on failure",
+    "fallbackHint": "Only before the microphone opens — a live session never switches provider.",
     "instructions": "Conversation instructions",
     "instructionsPlaceholder": "Be concise, conversational, and confirm before consequential actions.",
     "model": "Realtime model",
-    "privacy": "Microphone audio is streamed to OpenAI only while a live voice session is active.",
+    "noProviders": "No live voice provider is available in this region yet.",
+    "preferred": "Primary provider",
+    "preferredHint": "Tried first; others are fallbacks.",
+    "preferredPlaceholder": "Pick a provider",
+    "privacy": "Microphone audio is streamed to the selected provider only while a live voice session is active. It cannot be redacted locally.",
+    "providers": {
+      "google": "Gemini",
+      "openai": "OpenAI",
+      "xai": "Grok"
+    },
+    "providersTitle": "Providers",
+    "region": "Region",
+    "regionCn": "Chinese mainland",
+    "regionGlobal": "Global",
+    "regionHint": "Sessions never fall back across this boundary.",
     "title": "Live voice",
-    "voice": "Voice"
+    "voice": "Voice",
+    "voiceDefault": "Provider default"
   },
   "provider": {
+    "apiKeyPlaceholder": {
+      "elevenlabs": "sk_…",
+      "generic": "sk-…",
+      "google": "AIza…"
+    },
     "audioFormat": "Audio format",
     "cartesiaEmotion": "Emotion",
     "cartesiaEmotionPlaceholder": "e.g. positivity:high, sadness:medium",
@@ -42,11 +66,12 @@
       "lmnt": "LMNT API key",
       "mistral": "Mistral API key",
       "openai": "OpenAI API key",
-      "xiaomi": "Xiaomi MiMo API key"
+      "xiaomi": "Xiaomi MiMo API key",
+      "local-openai-compatible": "Local OpenAI-compatible"
     },
-    "model": "Model",
     "mistralVoiceIdHint": "Enter a Voice Library ID created in the Mistral console.",
     "mistralVoiceIdPlaceholder": "voice_…",
+    "model": "Model",
     "realtimeDesktopOnly": "OpenAI Realtime streams over a WebSocket and only works in the desktop app.",
     "realtimeIntro": "Low-latency streaming voices that start speaking on the first audio chunk. Uses your OpenAI API key.",
     "speed": "Speed",
@@ -55,6 +80,11 @@
     "voiceAutoPlaceholder": "Auto-select for language",
     "voiceInstructions": "Voice instructions (gpt-4o-mini-tts only)",
     "voiceInstructionsPlaceholder": "Speak in a cheerful, encouraging tone.",
+    "voiceNoResults": "No matching voices",
+    "voicePausePreview": "Stop voice preview",
+    "voicePreview": "Preview voice",
+    "voiceSearchPlaceholder": "Search voices…",
+    "voiceSelectorTitle": "Select a voice",
     "voicesLoading": "Loading installed voices… (browser-provided)",
     "xiaomiDialect": "Dialect",
     "xiaomiDialectPlaceholder": "e.g. 东北话, 四川话, 粤语",
@@ -62,11 +92,14 @@
     "xiaomiStyle": "Style",
     "xiaomiStyleHint": "Style tags: 开心, 悲伤, 生气, 东北话, 四川话, 粤语, 台湾腔, 变快, 变慢, 唱歌, 孙悟空, 林黛玉",
     "xiaomiStylePlaceholder": "No style",
-    "apiKeyPlaceholder": {
-      "elevenlabs": "sk_…",
-      "generic": "sk-…",
-      "google": "AIza…"
-    }
+    "elevenVoiceIdPlaceholder": "ElevenLabs voice ID",
+    "localEndpoint": "Local endpoint",
+    "localEndpointHint": "Use the base URL of an OpenAI-compatible speech server.",
+    "localEndpointPlaceholder": "http://127.0.0.1:8000/v1",
+    "localModelPlaceholder": "Local model name",
+    "localOpenaiIntro": "Connect to a local OpenAI-compatible text-to-speech server.",
+    "localVoicePlaceholder": "Voice name",
+    "timeoutSeconds": "Timeout (seconds)"
   },
   "stt": {
     "description": "The composer's voice-input button uses your browser's Web Speech API. Pick the language you usually speak and the microphone you want to use.",
@@ -115,6 +148,8 @@
     "streamingHint": "Some providers stream first-byte audio for lower latency.",
     "testVoice": "Test voice",
     "title": "Text-to-speech",
-    "volume": "Volume"
+    "volume": "Volume",
+    "mobileSystemPlayback": "Mobile uses system audio playback.",
+    "webCloudWarning": "Web playback sends text to the configured cloud provider."
   }
 }

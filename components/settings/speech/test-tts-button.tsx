@@ -29,10 +29,13 @@ interface TestTtsButtonProps {
 export function TestTtsButton({ voiceOverlay, sampleText }: TestTtsButtonProps = {}) {
   const t = useTranslations("settings.speech.tts")
   const sttLanguage = useSettingsStore((s) => s.settings?.sttLanguage ?? "en-US")
-  const { speak, stop, isPlaying, isLoading } = useTTS({ source: "settings", voiceOverlay })
+  const { speak, stop, isPlaying, isLoading } = useTTS({
+    source: "settings",
+    voiceOverlay: { ...voiceOverlay, ttsFallbackEnabled: false },
+  })
 
   const handleClick = () => {
-    if (isPlaying) {
+    if (isPlaying || isLoading) {
       loggers.tts.info("settings.testVoice.stopped")
       stop()
       return
@@ -51,7 +54,7 @@ export function TestTtsButton({ voiceOverlay, sampleText }: TestTtsButtonProps =
   }
 
   return (
-    <Button type="button" variant="outline" size="sm" onClick={handleClick} disabled={isLoading}>
+    <Button type="button" variant="outline" size="sm" onClick={handleClick}>
       {isLoading ? (
         <Loader2 className="size-4 animate-spin" />
       ) : isPlaying ? (
@@ -59,9 +62,7 @@ export function TestTtsButton({ voiceOverlay, sampleText }: TestTtsButtonProps =
       ) : (
         <Play className="size-4" />
       )}
-      <span className="ml-2">
-        {isLoading ? t("loading") : isPlaying ? t("stop") : t("testVoice")}
-      </span>
+      <span className="ml-2">{isLoading || isPlaying ? t("stop") : t("testVoice")}</span>
     </Button>
   )
 }

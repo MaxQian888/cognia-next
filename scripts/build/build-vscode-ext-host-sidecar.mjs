@@ -12,35 +12,30 @@
 //   1. `npm install` (only if node_modules is missing or stale).
 //   2. `npm run build` (tsc) to produce `dist/host.js`.
 
-import { spawnSync } from "node:child_process"
 import { existsSync, statSync } from "node:fs"
-import { join, dirname } from "node:path"
+import { join, dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import { execaSync } from "execa"
+import { z } from "zod"
 
 import { newestMtimeMs } from "./lib/newest-mtime.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const sidecarRoot = join(__dirname, "..", "..", "sidecar", "vscode-ext-host")
-const installOnly = process.argv.includes("--install-only")
 
 function run(cmd, args, opts = {}) {
-  // On Windows we must invoke via the shell so .cmd shims (npm/pnpm) are
-  // resolved through PATHEXT. `shell: false` + an explicit `.cmd` suffix
-  // works for some Node versions but races on spawn-error during inherit-
-  // stdio handoff under Tauri's beforeBuildCommand. Using `shell: true`
-  // is the cross-platform safe path.
-  const isWin = process.platform === "win32"
-  const result = spawnSync(cmd, args, {
+  const result = execaSync(cmd, args, {
     cwd: sidecarRoot,
     stdio: "inherit",
-    shell: isWin,
+    reject: false,
     ...opts,
   })
-  if (result.status !== 0) {
+  if (result.exitCode !== 0 || result.signal) {
     process.stderr.write(
-      `[build-vscode-ext-host-sidecar] '${cmd} ${args.join(" ")}' exited with ${result.status}\n`
+      `[build-vscode-ext-host-sidecar] '${cmd} ${args.join(" ")}' exited with ${result.exitCode ?? result.signal}\n`
     )
-    process.exit(result.status ?? 1)
+    process.exit(result.exitCode ?? 1)
   }
 }
 
@@ -57,7 +52,7 @@ function shouldInstall() {
   }
 }
 
-function main() {
+function main({ installOnly = false } = {}) {
   if (!existsSync(sidecarRoot)) {
     process.stderr.write(`[build-vscode-ext-host-sidecar] not found at ${sidecarRoot}; skipping\n`)
     return
@@ -100,4 +95,30 @@ function main() {
   process.stdout.write(`[build-vscode-ext-host-sidecar] ok -> ${dist}\n`)
 }
 
-main()
+const cliSchema = z.object({ installOnly: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm sidecar:vscode:build")
+    .description("Install and build the VS Code extension-host sidecar.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--install-only", "Install dependencies without building the sidecar.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  const options = parseArgs(process.argv.slice(2))
+  if (options) main(options)
+}

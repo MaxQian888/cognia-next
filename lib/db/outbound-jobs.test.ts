@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 /**
  * Tests for lib/db/outbound-jobs.ts — outbound delivery queue CRUD.
  */
 
-import "fake-indexeddb/auto"
 import {
   enqueueOutbound,
   pickNextDue,
@@ -23,21 +21,19 @@ import {
   findOlderActiveOutboundSibling,
   OUTBOUND_TERMINAL_RETENTION_MS,
   STALE_SENDING_GRACE_MS,
+  __setOutboundQueueSoftCapForTesting,
   type EnqueueInput,
 } from "./outbound-jobs"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
 import { saveSettings } from "./settings"
+import { createDbTestFixture } from "./test-fixture"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 
-// Generous hook timeout: several tests bulk-seed 5000-row tables, and the
-// subsequent `getDb().delete()` + full schema re-migration can exceed jest's
-// 5 s default under CI/machine load.
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-}, 60_000)
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize, 60_000)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function makeRequest(idempotencyKey = crypto.randomUUID()): OutboundRequest {
   return {
@@ -418,8 +414,35 @@ describe("outbound-jobs", () => {
       OUTBOUND_QUEUE_SOFT_CAP: number
     }
 
+    let restoreSoftCap: () => void
+    beforeEach(() => {
+      restoreSoftCap = __setOutboundQueueSoftCapForTesting(3)
+    })
+    afterEach(() => restoreSoftCap())
+
     it("exports a 5000-row soft cap", () => {
       expect(OUTBOUND_QUEUE_SOFT_CAP).toBe(5000)
+    })
+
+    it("restricts the soft-cap override to valid test values", () => {
+      expect(() => __setOutboundQueueSoftCapForTesting(0)).toThrow(/positive safe integer/)
+
+      const mutableEnv = process.env as Record<string, string | undefined>
+      const previous = mutableEnv.NODE_ENV
+      mutableEnv.NODE_ENV = "production"
+      try {
+        expect(() => __setOutboundQueueSoftCapForTesting(2)).toThrow(/only available/)
+      } finally {
+        if (previous === undefined) {
+          delete mutableEnv.NODE_ENV
+        } else {
+          mutableEnv.NODE_ENV = previous
+        }
+      }
+
+      const restore = __setOutboundQueueSoftCapForTesting(2)
+      restore()
+      restore()
     })
 
     it("no-ops the cap enforcement when count <= cap", async () => {
@@ -447,14 +470,11 @@ describe("outbound-jobs", () => {
     })
 
     it("ages oldest pending row(s) to deadlettered + emits per-victim audit", async () => {
-      // Force the cap to 3 via a temporary module mock would be ideal,
-      // but the cap is a const for ergonomics. Instead, pre-seed rows
-      // directly into Dexie so the table holds 5000 entries before the
-      // next enqueue call. Each pre-seeded row uses unique createdAt so
-      // FIFO ordering is deterministic.
+      // The test-only cap is 3. Pre-seed exactly three active rows so the
+      // next enqueue crosses the boundary while preserving deterministic FIFO.
       const db = getDb()
       const baseAt = Date.now() - 10_000_000
-      const seedRows = Array.from({ length: 5000 }, (_, idx) => ({
+      const seedRows = Array.from({ length: 3 }, (_, idx) => ({
         id: `seed-${idx}`,
         adapterId: "adp_full",
         conversationKey: `c_${idx}`,
@@ -467,9 +487,9 @@ describe("outbound-jobs", () => {
         source: "ai-run" as const,
       }))
       await db.outboundQueue.bulkAdd(seedRows)
-      expect(await db.outboundQueue.count()).toBe(5000)
+      expect(await db.outboundQueue.count()).toBe(3)
 
-      // The next enqueue pushes the table to 5001 → cap fires → the
+      // The next enqueue pushes the table to 4 → cap fires → the
       // oldest pending row (`seed-0`) is aged to `deadlettered`.
       await enqueue({
         adapterId: "adp_new",
@@ -480,13 +500,13 @@ describe("outbound-jobs", () => {
       const victim = await db.outboundQueue.get("seed-0")
       expect(victim?.status).toBe("deadlettered")
       expect(victim?.lastErrorCode).toBe("queue_capped")
-      // Total count stays at 5001 — aging changes status, not row count.
+      // Total count stays at 4 — aging changes status, not row count.
       // The cap throttles pending growth; aged rows are preserved so the
       // operator can inspect them via the Outbound tab. The pending
-      // count is the number to watch — it stayed at 5000 (the cap value).
-      expect(await db.outboundQueue.count()).toBe(5001)
+      // count is the number to watch — it stayed at 3 (the test cap value).
+      expect(await db.outboundQueue.count()).toBe(4)
       const pendingCount = await db.outboundQueue.filter((r) => r.status === "pending").count()
-      expect(pendingCount).toBe(5000)
+      expect(pendingCount).toBe(3)
 
       // Audit row was written for the aged victim.
       const audit = await db.connectorAudit.where("kind").equals("outbound.queue_capped").toArray()
@@ -499,11 +519,11 @@ describe("outbound-jobs", () => {
     it("does not age sending or already-deadlettered rows", async () => {
       // Pre-seed a row in `sending` status (in flight) and another in
       // `deadlettered` (terminal). Both must survive the cap enforcement.
-      // Active rows = 4999 pending + 1 sending (the deadlettered row is
+      // Active rows = 2 pending + 1 sending (the deadlettered row is
       // terminal and does NOT count), so the next enqueue crosses the cap.
       const db = getDb()
       const baseAt = Date.now() - 10_000_000
-      const seedRows = Array.from({ length: 4999 }, (_, idx) => ({
+      const seedRows = Array.from({ length: 2 }, (_, idx) => ({
         id: `bulk-${idx}`,
         adapterId: "adp_mix",
         conversationKey: `c_${idx}`,
@@ -548,7 +568,7 @@ describe("outbound-jobs", () => {
         },
         ...seedRows,
       ])
-      expect(await db.outboundQueue.count()).toBe(5001)
+      expect(await db.outboundQueue.count()).toBe(4)
 
       // Trip the cap with one more enqueue.
       await enqueue({
@@ -568,36 +588,41 @@ describe("outbound-jobs", () => {
   // ── P0 — the cap counts BACKLOG, not history ─────────────────────────
   describe("soft cap ignores terminal rows", () => {
     it("terminal rows alone above the cap never dead-letter a fresh enqueue", async () => {
-      // 5001 terminal rows (the pre-fix bug: these counted against the cap,
-      // so this seed alone would have dead-lettered EVERY new enqueue —
-      // total outbound outage). With the fix only active rows count.
-      const db = getDb()
-      const baseAt = Date.now() - 10_000_000
-      await db.outboundQueue.bulkAdd(
-        Array.from({ length: 5001 }, (_, idx) => ({
-          id: `hist-${idx}`,
-          adapterId: "adp_hist",
-          conversationKey: `c_${idx}`,
-          request: makeRequest(`hist_${idx}`),
-          status: (idx % 2 === 0 ? "sent" : "deadlettered") as "sent" | "deadlettered",
-          attempts: 1,
-          createdAt: baseAt + idx,
-          nextAttemptAt: baseAt + idx,
-          idempotencyKey: `hist_${idx}`,
-          source: "ai-run" as const,
-        }))
-      )
+      const restoreSoftCap = __setOutboundQueueSoftCapForTesting(3)
+      try {
+        // Four terminal rows (the pre-fix bug: these counted against the cap,
+        // so this seed alone would have dead-lettered EVERY new enqueue —
+        // total outbound outage). With the fix only active rows count.
+        const db = getDb()
+        const baseAt = Date.now() - 10_000_000
+        await db.outboundQueue.bulkAdd(
+          Array.from({ length: 4 }, (_, idx) => ({
+            id: `hist-${idx}`,
+            adapterId: "adp_hist",
+            conversationKey: `c_${idx}`,
+            request: makeRequest(`hist_${idx}`),
+            status: (idx % 2 === 0 ? "sent" : "deadlettered") as "sent" | "deadlettered",
+            attempts: 1,
+            createdAt: baseAt + idx,
+            nextAttemptAt: baseAt + idx,
+            idempotencyKey: `hist_${idx}`,
+            source: "ai-run" as const,
+          }))
+        )
 
-      const fresh = await enqueue({
-        adapterId: "adp_live",
-        conversationKey: "c_live",
-        request: makeRequest("k_live"),
-      })
+        const fresh = await enqueue({
+          adapterId: "adp_live",
+          conversationKey: "c_live",
+          request: makeRequest("k_live"),
+        })
 
-      const stored = await db.outboundQueue.get(fresh.id)
-      expect(stored?.status).toBe("pending")
-      const capped = await db.connectorAudit.where("kind").equals("outbound.queue_capped").count()
-      expect(capped).toBe(0)
+        const stored = await db.outboundQueue.get(fresh.id)
+        expect(stored?.status).toBe("pending")
+        const capped = await db.connectorAudit.where("kind").equals("outbound.queue_capped").count()
+        expect(capped).toBe(0)
+      } finally {
+        restoreSoftCap()
+      }
     }, 30_000)
   })
 

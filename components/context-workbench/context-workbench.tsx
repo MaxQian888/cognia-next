@@ -27,7 +27,24 @@ import {
   RotateCcwIcon,
   Rows3Icon,
   SlidersHorizontalIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "lucide-react"
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  horizontalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -55,6 +72,7 @@ import {
   setActiveContextForHost,
   touchActiveContextHost,
 } from "@/lib/context-workbench/active-context"
+import { pushPanelHistory, usePanelHistory } from "@/hooks/context-workbench/use-panel-history"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
@@ -66,6 +84,7 @@ import {
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { workbenchRailLayoutOf } from "@/components/shell/use-workbench-rail-layout"
 import { isWorkbenchActivityHidden, workbenchRailIndex } from "@/lib/shell/workbench-rail"
+import { applyDragReorder } from "@/lib/shell/sidebar-nav"
 import {
   getContextResourceKey,
   type ContextActivity,
@@ -332,6 +351,101 @@ function mergePanels(
   })
 }
 
+// --- Sortable Activity Button (Phase 1.4) ---
+// Extracted so each activity button can participate in @dnd-kit's sortable
+// context. The `useSortable` hook requires a unique id per item and paints
+// the transform/transition during drag. A grip indicator appears on hover to
+// hint that reordering is possible without an extra dialog.
+
+interface SortableActivityButtonProps {
+  activity: string
+  group: ContextPanelDefinition[]
+  activePanelId: string | null
+  resource: ContextResource
+  pendingPanelIds: string[]
+  activeActivity: string | undefined
+  attentionActivity: string | undefined
+  scopeKey: string
+  onActivate: (panel: ContextPanelDefinition, source: "rail") => void
+  getPanelLabel: (panel: ContextPanelDefinition) => string
+}
+
+function SortableActivityButton({
+  activity,
+  group,
+  activePanelId,
+  resource,
+  pendingPanelIds,
+  activeActivity,
+  attentionActivity,
+  scopeKey,
+  onActivate,
+  getPanelLabel,
+}: SortableActivityButtonProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: activity,
+  })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+  }
+
+  const panel = group.find((candidate) => candidate.id === activePanelId) ?? group[0]
+  const Icon = panel.icon
+  const badge =
+    group.reduce((total, candidate) => total + (candidate.getBadge?.(resource) ?? 0), 0) +
+    group.filter((candidate) => pendingPanelIds.includes(candidate.id)).length
+  const label = getPanelLabel(panel)
+  const isActive = activeActivity === activity
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          ref={setNodeRef}
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={label}
+          aria-pressed={isActive}
+          data-workbench-activity-button
+          data-testid={`workbench-activity-${activity}`}
+          onClick={() => onActivate(panel, "rail")}
+          className={cn(
+            "relative cursor-grab active:cursor-grabbing",
+            isActive && "text-foreground"
+          )}
+          style={style}
+          {...attributes}
+          {...listeners}
+        >
+          <MotionSelectionIndicator
+            groupId={`workbench-activity-${scopeKey}`}
+            active={isActive}
+            className="absolute inset-0 rounded-md bg-secondary"
+          />
+          <span className="relative flex items-center justify-center">
+            {Icon ? <Icon className="size-4" /> : <Rows3Icon className="size-4" />}
+          </span>
+          {badge > 0 ? (
+            <Badge className="absolute -right-1 -top-1 z-10 h-4 min-w-4 px-1 text-[9px]">
+              {badge > 99 ? "99+" : badge}
+            </Badge>
+          ) : attentionActivity === activity ? (
+            <span
+              data-testid="context-workbench-activity-attention"
+              aria-hidden
+              className="absolute -right-0.5 -top-0.5 z-10 size-2 rounded-full bg-primary"
+            />
+          ) : null}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="left">{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function ContextWorkbench({
   workbenchInstanceId,
   resource,
@@ -362,6 +476,7 @@ export function ContextWorkbench({
     contextPanelRegistry.getRevision
   )
   const scopeKey = `${workbenchInstanceId}::${getContextResourceKey(resource)}`
+  const panelHistory = usePanelHistory(scopeKey)
   const persistedLayout = useContextWorkbenchStore((state) => state.layouts[scopeKey])
   const layout = persistedLayout ?? FALLBACK_CONTEXT_WORKBENCH_LAYOUT
   const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
@@ -381,7 +496,16 @@ export function ContextWorkbench({
   // — that hook reads the whole `settings` object, and this component is
   // mounted in four hosts and re-renders on every panel switch.
   const storedRailLayout = useSettingsStore((state) => state.settings?.workbenchRail)
+  const saveSettings = useSettingsStore((state) => state.save)
   const railLayout = useMemo(() => workbenchRailLayoutOf(storedRailLayout), [storedRailLayout])
+
+  // --- Activity rail inline drag-to-reorder (Phase 1.4) ---
+  // Distance threshold = 8px to cleanly distinguish click from drag. Higher
+  // than customizer-list's 4px because the rail buttons sit closer together
+  // and are often target-tapped quickly on hover.
+  const railDragSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  )
 
   /**
    * The rail is showing but the panel body is not — from either of the two
@@ -560,6 +684,24 @@ export function ContextWorkbench({
           workbenchRailIndex(left, railLayout) - workbenchRailIndex(right, railLayout)
       )
   }, [railLayout, resolvedPanels])
+
+  const handleRailDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const currentIds = activityGroups.map(([activity]) => activity)
+      const next = applyDragReorder(
+        currentIds,
+        String(event.active.id),
+        event.over ? String(event.over.id) : null
+      )
+      if (!next) return
+      // Persist the reordered activity ids. Non-catalog ids (from plugins) are
+      // preserved at the tail so they aren't accidentally dropped.
+      const untouched = railLayout.order.filter((id) => !next.includes(id))
+      void saveSettings({ workbenchRail: { ...railLayout, order: [...next, ...untouched] } })
+    },
+    [activityGroups, railLayout, saveSettings]
+  )
+
   const activePanel = resolvedPanels.find((panel) => panel.id === layout.activePanelId)
   const activeGroup = activePanel
     ? (activityGroups.find(([activity]) => activity === activePanel.activity)?.[1] ?? [])
@@ -620,6 +762,9 @@ export function ContextWorkbench({
     lastActivePanelRef.current.set(scopeKey, activeId)
     if (!activePanel) return
 
+    // Record this navigation for the back/forward history.
+    pushPanelHistory(scopeKey, activePanel.id)
+
     let seen = lifecyclePanelsRef.current.get(scopeKey)
     if (!seen) {
       seen = new Set(persistedLayout?.activatedPanelIds ?? [])
@@ -646,6 +791,18 @@ export function ContextWorkbench({
     scopeKey,
     sessionScopeKey,
   ])
+
+  const handleHistoryBack = useCallback(() => {
+    const panelId = panelHistory.goBack()
+    if (panelId)
+      navigatePanel(scopeKey, panelId, layout.mode === "collapsed" ? "narrow" : layout.mode)
+  }, [panelHistory, navigatePanel, scopeKey, layout.mode])
+
+  const handleHistoryForward = useCallback(() => {
+    const panelId = panelHistory.goForward()
+    if (panelId)
+      navigatePanel(scopeKey, panelId, layout.mode === "collapsed" ? "narrow" : layout.mode)
+  }, [panelHistory, navigatePanel, scopeKey, layout.mode])
 
   const handleCollapse = () => {
     // Focus is a full-screen takeover that outlives the host's own collapse
@@ -919,64 +1076,34 @@ export function ContextWorkbench({
             data-testid="context-workbench-activity-rail"
             onKeyDown={handleActivityKeyDown}
           >
-            {activityGroups.map(([activity, group]) => {
-              const panel =
-                group.find((candidate) => candidate.id === layout.activePanelId) ?? group[0]
-              const Icon = panel.icon
-              const badge =
-                group.reduce(
-                  (total, candidate) => total + (candidate.getBadge?.(resource) ?? 0),
-                  0
-                ) +
-                group.filter((candidate) => layout.pendingPanelIds.includes(candidate.id)).length
-              const label = getPanelLabel(panel)
-              const isActive = activePanel?.activity === activity
-              return (
-                <Tooltip key={activity}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      // Always `ghost`: the selected background is the shared
-                      // indicator below, which slides between activities
-                      // instead of blinking off one and on at the next.
-                      variant="ghost"
-                      aria-label={label}
-                      aria-pressed={isActive}
-                      data-workbench-activity-button
-                      onClick={() => handleActivate(panel, "rail")}
-                      className={cn("relative", isActive && "text-foreground")}
-                    >
-                      <MotionSelectionIndicator
-                        groupId={`workbench-activity-${scopeKey}`}
-                        active={isActive}
-                        className="absolute inset-0 rounded-md bg-secondary"
-                      />
-                      <span className="relative flex items-center justify-center">
-                        {Icon ? <Icon className="size-4" /> : <Rows3Icon className="size-4" />}
-                      </span>
-                      {badge > 0 ? (
-                        <Badge className="absolute -right-1 -top-1 z-10 h-4 min-w-4 px-1 text-[9px]">
-                          {badge > 99 ? "99+" : badge}
-                        </Badge>
-                      ) : attentionActivity === activity ? (
-                        // A countless "something arrived" marker, for hosts that
-                        // know they have news but not how much of it — the chat
-                        // dock's fresh artifact. Yields to a real badge rather
-                        // than stacking on it, so one glyph never sits on
-                        // another in a 48px column.
-                        <span
-                          data-testid="context-workbench-activity-attention"
-                          aria-hidden
-                          className="absolute -right-0.5 -top-0.5 z-10 size-2 rounded-full bg-primary"
-                        />
-                      ) : null}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="left">{label}</TooltipContent>
-                </Tooltip>
-              )
-            })}
+            <DndContext
+              sensors={railDragSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleRailDragEnd}
+            >
+              <SortableContext
+                items={activityGroups.map(([activity]) => activity)}
+                strategy={
+                  railIsHorizontal ? horizontalListSortingStrategy : verticalListSortingStrategy
+                }
+              >
+                {activityGroups.map(([activity, group]) => (
+                  <SortableActivityButton
+                    key={activity}
+                    activity={activity}
+                    group={group}
+                    activePanelId={layout.activePanelId}
+                    resource={resource}
+                    pendingPanelIds={layout.pendingPanelIds}
+                    activeActivity={activePanel?.activity}
+                    attentionActivity={attentionActivity}
+                    scopeKey={scopeKey}
+                    onActivate={handleActivate}
+                    getPanelLabel={getPanelLabel}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
             {/* Pinning suppresses automatic reveals, which is impossible to
                 guess from a bare pin glyph — these two were the only rail
                 buttons without a tooltip to explain them. */}
@@ -1069,6 +1196,34 @@ export function ContextWorkbench({
                 the layout controls — so the controls fold into a menu on the
                 narrow end rather than squashing everything. */}
             <header className="@container/wb-header flex h-10 shrink-0 items-center gap-1 border-b px-2">
+              {/* Panel history back/forward — hidden on mobile and when
+                  the header is very narrow (<12rem) to not crowd the tabs. */}
+              <div className="hidden shrink-0 items-center @[12rem]/wb-header:flex">
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  disabled={!panelHistory.canGoBack}
+                  aria-label={t("contextWorkbench.actions.historyBack")}
+                  title={t("contextWorkbench.actions.historyBack")}
+                  onClick={handleHistoryBack}
+                  data-testid="panel-history-back"
+                >
+                  <ChevronLeftIcon className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  disabled={!panelHistory.canGoForward}
+                  aria-label={t("contextWorkbench.actions.historyForward")}
+                  title={t("contextWorkbench.actions.historyForward")}
+                  onClick={handleHistoryForward}
+                  data-testid="panel-history-forward"
+                >
+                  <ChevronRightIcon className="size-4" />
+                </Button>
+              </div>
               {headerLeading}
               {activeGroup.length > 1 && headerLeading ? (
                 <DropdownMenu>

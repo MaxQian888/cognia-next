@@ -33,6 +33,20 @@ describe("getSidebarCatalog", () => {
     expect(cat).toHaveLength(SIDEBAR_NAV_META.filter((m) => !m.desktopOnly).length)
   })
 
+  it("keeps desktop-only items hidden on mobile even before runtime targeting settles", () => {
+    const runtime: RuntimeSnapshot = {
+      target: null,
+      vaultState: "unavailable",
+      connectionState: "offline",
+    }
+
+    const ids = getSidebarCatalog("mobile", runtime).map((item) => item.id)
+
+    expect(ids).not.toContain("performance")
+    expect(ids).not.toContain("source-control")
+    expect(ids).not.toContain("browser")
+  })
+
   it("drops desktop-only items on web too (ADR-0059 F5 — no dead ends in a browser)", () => {
     const cat = getSidebarCatalog("web")
     const ids = cat.map((c) => c.id)

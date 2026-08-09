@@ -53,7 +53,13 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
     try {
       const drafts: SkillDraft[] = staging.drafts.map((d) => ({
         name: d.name,
+        slug: d.slug,
         description: d.description,
+        compatibility: d.compatibility,
+        metadata: d.metadata,
+        invocationPolicy: d.invocationPolicy,
+        frontmatterExtensions: d.frontmatterExtensions,
+        codexOpenAiYaml: d.codexOpenAiYaml,
         content: d.content,
         tags: d.tags,
         allowedTools: d.allowedTools,

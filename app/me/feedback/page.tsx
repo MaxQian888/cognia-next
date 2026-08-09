@@ -18,8 +18,8 @@ import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { APP_VERSION } from "@/lib/app-version"
 import { snapshotSyncStates } from "@/lib/sync/companion-sync"
 import { useCopy } from "@/hooks/ui/use-copy"
-
-const ISSUES_URL = "https://github.com/anthropics/claude-code/issues/new"
+import { SupportFeedbackDialog } from "@/components/support/support-feedback-dialog"
+import { ISSUES_URL } from "@/lib/constants/external-urls"
 
 function diagnosticsPayload(): string {
   const ua = typeof navigator !== "undefined" ? navigator.userAgent : "unknown"
@@ -64,7 +64,7 @@ export default function MobileFeedbackPage() {
             label={tFeedback("openIssueLabel")}
             description={tFeedback("openIssueDescription")}
             value={<ExternalLinkIcon className="size-3.5" aria-hidden="true" />}
-            href={ISSUES_URL}
+            href={`${ISSUES_URL}/new`}
             testid="feedback-row-open-issue"
           />
           <MeRow
@@ -74,6 +74,7 @@ export default function MobileFeedbackPage() {
             onClick={() => void copyDiagnostics()}
             testid="feedback-row-copy"
           />
+          <SupportFeedbackDialog />
         </MeSection>
         <MeSection title={tFeedback("diagnosticsTitle")} testid="feedback-section-diagnostics">
           <MeRow

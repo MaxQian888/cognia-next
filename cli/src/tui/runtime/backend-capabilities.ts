@@ -160,13 +160,12 @@ export function usesCodexOptions(presetId: string | undefined): boolean {
 }
 
 /**
- * Presets that can enumerate their own models (`model/list`).
+ * Presets that can enumerate their own models without a session (`model/list`).
  *
  * Narrower than {@link usesCodexOptions} on purpose: only the NATIVE app-server
  * speaks that method. The `codex` preset is the `@zed-industries/codex-acp`
- * shim, and ACP has no model-list call — so a picker there would either show the
- * built-in provider's catalog (the fabrication this whole area is fixing) or an
- * empty list. It reports unsupported with a reason instead.
+ * shim, and ACP has no model-list call. ACP model selection is negotiated per
+ * session via `configOptions`, so ACP is handled separately below.
  */
 const MODEL_LISTING_PRESETS = new Set(["codex-app-server"])
 
@@ -251,6 +250,7 @@ export function canHostCogniaTools(negotiated: AcpCapabilities | undefined): boo
  */
 export function externalCapabilities(input: ExternalCapabilityInput): BackendCapabilities {
   const codexChannel = usesCodexOptions(input.presetId ?? input.backend)
+  const acpConfigChannel = input.protocol === "acp"
   const unsupported = (reason: string): FeatureSupport => ({ supported: false, reason })
   const host = input.toolHost
   const attachable = host ? host.attachable : canHostCogniaTools(input.negotiated)
@@ -286,12 +286,12 @@ export function externalCapabilities(input: ExternalCapabilityInput): BackendCap
       // the dispatch tool was actually projected — a bridge that never started
       // has no dispatch tool no matter what the manifest said it would carry.
       subagentModels: projected(host?.subagentDispatch ? 1 : 0),
-      // Only the native Codex app-server can enumerate its own models. On any
-      // other agent `/model` would be listing the built-in provider's catalog,
-      // which is not what that agent runs.
-      modelPicker: supportsModelListing(input.presetId ?? input.backend)
-        ? SUPPORTED
-        : unsupported(REASON.noProtocolSlot),
+      // Native Codex enumerates models through `model/list`; ACP agents expose
+      // their model selector from the live session's `configOptions` instead.
+      modelPicker:
+        supportsModelListing(input.presetId ?? input.backend) || acpConfigChannel
+          ? SUPPORTED
+          : unsupported(REASON.noProtocolSlot),
     },
   }
 }

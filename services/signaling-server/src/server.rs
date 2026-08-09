@@ -8,10 +8,10 @@ use axum::{
     Json, Router,
 };
 use serde_json::json;
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
+use tower_http::{limit::RequestBodyLimitLayer, trace::TraceLayer};
 use tracing::info;
 
-use cognia_signaling_core::policy::RoomLimits;
+use cognia_signaling_core::policy::{is_valid_allowed_origin, RoomLimits};
 
 use crate::{
     ip_limits::{default_max_conn_per_ip, trust_proxy_headers_from_env, IpLimits},
@@ -34,8 +34,9 @@ pub struct AppState {
     /// Room admission caps (peer count, desktop cardinality). Shared verbatim
     /// with the Cloudflare Worker via `cognia-signaling-core::policy`.
     pub room_limits: RoomLimits,
-    /// Allowed WebSocket `Origin` values. Empty = allow all (the default);
-    /// see [`cognia_signaling_core::policy::is_origin_allowed`].
+    /// Allowed cross-origin WebSocket `Origin` values. Empty denies browser
+    /// cross-origin access; native clients and same-origin browsers remain
+    /// available.
     pub allowed_origins: Arc<Vec<String>>,
     /// Whether proxy-set client IP headers are trusted for the per-IP gate.
     pub trust_proxy_headers: bool,
@@ -62,17 +63,27 @@ pub fn room_limits_from_env() -> RoomLimits {
 }
 
 /// Parse the comma-separated `SIGNALING_ALLOWED_ORIGINS` env var into a list.
-/// Blank / unset yields an empty list (allow all).
-pub fn allowed_origins_from_env() -> Vec<String> {
-    std::env::var("SIGNALING_ALLOWED_ORIGINS")
-        .ok()
-        .map(|s| {
-            s.split(',')
-                .map(|o| o.trim().to_string())
-                .filter(|o| !o.is_empty())
-                .collect()
+/// Blank / unset yields an empty list (same-origin only). Invalid entries are
+/// rejected rather than ignored so a deployment cannot accidentally rely on a
+/// wildcard, plaintext, or path-bearing value.
+pub fn allowed_origins_from_env() -> anyhow::Result<Vec<String>> {
+    parse_allowed_origins(&std::env::var("SIGNALING_ALLOWED_ORIGINS").unwrap_or_default())
+}
+
+fn parse_allowed_origins(raw: &str) -> anyhow::Result<Vec<String>> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(|origin| {
+            if is_valid_allowed_origin(origin) {
+                Ok(origin.to_string())
+            } else {
+                anyhow::bail!(
+                    "SIGNALING_ALLOWED_ORIGINS entry must be an exact HTTPS origin: {origin}"
+                )
+            }
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 pub fn router(state: AppState) -> Router {
@@ -81,7 +92,6 @@ pub fn router(state: AppState) -> Router {
         .route("/metrics", get(metrics_handler))
         .route("/v2/signaling", any(ws_upgrade))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
-        .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -132,7 +142,7 @@ fn build_state(
 pub async fn serve(addr: SocketAddr) -> anyhow::Result<()> {
     let max_per_ip = default_max_conn_per_ip();
     let room_limits = room_limits_from_env();
-    let allowed_origins = allowed_origins_from_env();
+    let allowed_origins = allowed_origins_from_env()?;
     let trust_proxy_headers = trust_proxy_headers_from_env();
     let app = router(build_state(
         max_per_ip,
@@ -202,7 +212,7 @@ pub async fn serve_for_test_with(
     serve_for_test_full(
         max_conn_per_ip,
         room_limits_from_env(),
-        allowed_origins_from_env(),
+        allowed_origins_from_env()?,
         false,
     )
     .await
@@ -309,11 +319,23 @@ mod tests {
     fn allowed_origins_from_env_parses_csv() {
         // Drive the parser directly (no global env mutation, to stay
         // thread-safe under the test runner).
-        let parsed: Vec<String> = "https://a.example, https://b.example ,,"
-            .split(',')
-            .map(|o| o.trim().to_string())
-            .filter(|o| !o.is_empty())
-            .collect();
+        let parsed = parse_allowed_origins("https://a.example, https://b.example ,,").unwrap();
         assert_eq!(parsed, vec!["https://a.example", "https://b.example"]);
+    }
+
+    #[test]
+    fn allowed_origins_reject_wildcards_plaintext_and_paths() {
+        for invalid in [
+            "*",
+            "http://app.example",
+            "capacitor://localhost",
+            "https://*.example",
+            "https://app.example/path",
+        ] {
+            assert!(
+                parse_allowed_origins(invalid).is_err(),
+                "accepted {invalid}"
+            );
+        }
     }
 }

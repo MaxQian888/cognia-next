@@ -1,6 +1,6 @@
 //! Per-key fixed-window rate limiter.
 //!
-//! The global [`cognia_remote_control::rate_limit::FixedWindowRateLimiter`]
+//! The global [`cognia_net::inbound_policy::FixedWindowRateLimiter`]
 //! bounds total inbound traffic; this bounds each API key independently so one
 //! noisy key can't starve the others. Keyed by the key id, one 60-second
 //! window each. `limit == 0` blocks the key entirely (a hard pause).

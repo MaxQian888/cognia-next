@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+
 import { parse } from "yaml"
 
 import { renderDeploymentTarget } from "./deployment-renderer"
@@ -6,6 +8,25 @@ import { parseDeploymentTarget } from "./deployment-target"
 const digest = (name: string, byte: string) => `ghcr.io/owner/${name}@sha256:${byte.repeat(64)}`
 
 describe("DeploymentTarget renderer", () => {
+  it("keeps self-host signaling on the internal service and public ingress path", () => {
+    const compose = parse(readFileSync("deploy/compose/docker-compose.yml", "utf8"))
+    expect(compose.services["cognia-server"].environment.COGNIA_SIGNALING_URL).toBe(
+      "${COGNIA_SIGNALING_URL:-ws://signaling:7892/v2/signaling}"
+    )
+
+    const ingress = parse(readFileSync("deploy/k8s/base/ingress.yaml", "utf8"))
+    expect(ingress.spec.rules[0].http.paths).toMatchObject([
+      {
+        path: "/v2/signaling",
+        backend: { service: { name: "signaling", port: { number: 7892 } } },
+      },
+      {
+        path: "/",
+        backend: { service: { name: "cognia-server", port: { number: 27890 } } },
+      },
+    ])
+  })
+
   it("renders a placeholder-free Kubernetes overlay without materializing credentials", () => {
     const target = parseDeploymentTarget({
       apiVersion: "deploy.cognia.dev/v1alpha1",
@@ -69,6 +90,12 @@ describe("DeploymentTarget renderer", () => {
     expect(rendered.files["kustomization.yaml"]).toContain("encrypted-rwo")
     expect(rendered.files["kustomization.yaml"]).toContain("cognia-snapshots")
     expect(rendered.files["kustomization.yaml"]).toContain("revision-42")
+    expect(overlay.configMapGenerator[0].literals).toEqual(
+      expect.arrayContaining([
+        "signalingUrl=ws://signaling:7892/v2/signaling",
+        "publicSignalingUrl=wss://server.example.com/v2/signaling",
+      ])
+    )
     expect(overlay.resources).toEqual(["namespace.yaml", "../../base"])
     expect(rendered.files["kustomization.yaml"]).not.toContain("deploy-agent")
     expect(Object.values(rendered.files).join("\n")).not.toMatch(/REPLACE_|\.invalid|latest/)
@@ -124,6 +151,8 @@ describe("DeploymentTarget renderer", () => {
       environment: {
         COGNIA_CONFIG_REVISION: "revision-8",
         COGNIA_PUBLIC_URL: "https://server.example.com/",
+        COGNIA_SIGNALING_URL: "ws://signaling:7892/v2/signaling",
+        COGNIA_PUBLIC_SIGNALING_URL: "wss://server.example.com/v2/signaling",
       },
     })
     if (rendered.topology !== "compose") throw new Error("wrong topology")

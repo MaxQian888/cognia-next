@@ -30,7 +30,10 @@ pub mod placeholder;
 #[cfg(all(feature = "ocr-tesseract"))]
 pub mod tesseract;
 
-pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
+async fn install_backends(registry: &NativeOcrRegistry, allow_platform_bound: bool) {
+    #[cfg(not(target_os = "macos"))]
+    let _ = allow_platform_bound;
+
     #[cfg(feature = "ocr-tesseract")]
     {
         registry
@@ -62,7 +65,15 @@ pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
     // target, no feature flag (nothing to download, no extra toolchain).
     #[cfg(target_os = "macos")]
     {
-        registry.register(Box::new(apple::AppleVisionBackend)).await;
+        if allow_platform_bound {
+            registry.register(Box::new(apple::AppleVisionBackend)).await;
+        } else {
+            registry
+                .register(Box::new(placeholder::PlaceholderBackend::new(
+                    "apple-vision",
+                )))
+                .await;
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -115,6 +126,19 @@ pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
             .register(Box::new(placeholder::PlaceholderBackend::new("paddle-ocr")))
             .await;
     }
+}
+
+/// Install backends for an interactive desktop host. Platform-native bindings
+/// such as Apple Vision may be available here.
+pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
+    install_backends(registry, true).await;
+}
+
+/// Install backends safe to advertise from the headless server. The registry
+/// remains dense, but platform-bound desktop providers are placeholders and
+/// therefore excluded from `available_ids()`.
+pub async fn install_server_backends(registry: &NativeOcrRegistry) {
+    install_backends(registry, false).await;
 }
 
 /// Default placeholder so the dispatch table is dense even when no real
@@ -176,6 +200,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn server_backends_exclude_platform_bound_desktop_engines() {
+        let registry = NativeOcrRegistry::new();
+        install_server_backends(&registry).await;
+
+        let all = registry.list_ids().await;
+        let available = registry.available_ids().await;
+        assert!(all.contains(&"apple-vision"));
+        assert!(all.contains(&"windows-media-ocr"));
+        assert!(!available.contains(&"apple-vision"));
+        assert!(!available.contains(&"windows-media-ocr"));
+    }
+
+    #[tokio::test]
     async fn placeholder_dispatch_reports_missing_binding() {
         let registry = NativeOcrRegistry::new();
         install_platform_backends(&registry).await;
@@ -184,6 +221,7 @@ mod tests {
             bytes: vec![],
             mime_type: "image/png".to_string(),
             languages: vec!["en".to_string()],
+            model_variant: None,
         };
         let result = registry.dispatch(&payload).await;
         // On a non-Windows CI machine the placeholder kicks in. On Windows

@@ -196,6 +196,7 @@ async fn start_gateway(upstream: SocketAddr, pool_keys: &[&str]) -> Gateway {
         Arc::clone(&snapshot),
         Arc::new(Mutex::new(std::collections::HashMap::new())),
         Arc::new(KeyRotationMap::default()),
+        Arc::new(cognia_gateway::route_planner::RoutePlannerState::default()),
         Arc::new(KeyCooldownMap::default()),
         Arc::new(ConcurrencyLimiter::default()),
         Arc::new(NoopObserver),

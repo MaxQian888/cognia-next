@@ -2,7 +2,7 @@
  * The composer: a multiline editor with command history, a `/` command palette,
  * `@` file-path completion, and large-paste collapsing. All editing/keymap logic
  * is pure (`input/*`, `commands/*`); this component wires those to Ink's
- * `useInput` and the reducer's input state, and renders the buffer + popups.
+ * the routed composer input handler and reducer state, and renders the buffer + popups.
  *
  * Global keys (Ctrl+C exit, Esc-while-busy interrupt) are owned by the App; this
  * handler treats `exit`/`interrupt` intents as no-ops.
@@ -10,7 +10,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Box, Text, useInput, type DOMElement } from "ink"
+import { Box, Text, useCursor, type DOMElement } from "ink"
 
 import { SlashPalette } from "./SlashPalette"
 import { MentionPalette, orderByGroup } from "./MentionPalette"
@@ -20,9 +20,13 @@ import { bufferFromText, bufferText, moveTo, onFirstLine, onLastLine } from "../
 import { historyDown, historyUp } from "../input/history"
 import { interpretKey, type KeyFlags } from "../input/keymap"
 import { parseMouseEvent } from "../input/mouse"
-import { clickToCursor } from "../input/mouse-cursor"
+import { screenColToBufferCol } from "../input/mouse-cursor"
 import { composerPopupRowAtClick } from "../input/composer-popup-click"
 import { absoluteTopLeft } from "../input/element-position"
+import { useComposerInput } from "../input/input-router"
+import { nextGraphemeBoundary } from "../text/graphemes"
+import { stringWidth } from "../markdown/width"
+import { composerViewport } from "../input/composer-viewport"
 import { windowList } from "./list-window"
 import { buildMentionView } from "./mention-view"
 import {
@@ -117,8 +121,9 @@ const LineView = React.memo(function LineView({
   // No cursor on this row → render with mention-token highlighting.
   if (cursorCol < 0 || disabled) return <HighlightedLine line={line} />
   const before = line.slice(0, cursorCol)
-  const at = line.slice(cursorCol, cursorCol + 1) || " "
-  const after = line.slice(cursorCol + 1)
+  const afterCursor = nextGraphemeBoundary(line, cursorCol)
+  const at = line.slice(cursorCol, afterCursor) || " "
+  const after = line.slice(afterCursor)
   return (
     <Text>
       {before}
@@ -139,6 +144,7 @@ function InputImpl({
   mentionProviders: mentionProvidersProp,
   width,
   popupRows,
+  composerRows,
   keybindings,
   mode,
   enabledSkillIds,
@@ -163,6 +169,8 @@ function InputImpl({
   width?: number | string
   /** Row budget for the `@`/`/` popups so they stay compact above the composer. */
   popupRows?: number
+  /** Maximum rendered text rows; the complete buffer remains editable. */
+  composerRows?: number
   /** Resolved editor key bindings (line-home/end, word-delete). Optional — the
    * defaults are used when omitted. */
   keybindings?: Record<string, string>
@@ -217,6 +225,46 @@ function InputImpl({
   // candidate it lands on (select + accept), instead of falling through to the
   // buffer cursor logic below.
   const popupBoxRef = useRef<DOMElement | null>(null)
+  const [cursorOrigin, setCursorOrigin] = useState<{ top: number; left: number } | null>(null)
+  const { setCursorPosition } = useCursor()
+  const composerWidth = typeof width === "number" ? width : 80
+  const viewport = useMemo(
+    () =>
+      composerViewport(
+        buffer,
+        Math.max(1, composerWidth - PROMPT_WIDTH - 4),
+        composerRows ?? Number.MAX_SAFE_INTEGER
+      ),
+    [buffer, composerWidth, composerRows]
+  )
+  const visibleCursorRow = viewport.rows.findIndex((row) => row.cursorCol !== null)
+
+  // Yoga positions can change after any commit (popup open/close, async rows,
+  // resize). The equality guard prevents an update loop while keeping IME exact.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const next = absoluteTopLeft(linesRef.current)
+    setCursorOrigin((current) =>
+      current?.top === next?.top && current?.left === next?.left ? current : next
+    )
+  })
+
+  setCursorPosition(
+    !disabled && cursorOrigin && visibleCursorRow >= 0
+      ? {
+          x:
+            cursorOrigin.left +
+            PROMPT_WIDTH +
+            stringWidth(
+              viewport.rows[visibleCursorRow].text.slice(
+                0,
+                viewport.rows[visibleCursorRow].cursorCol ?? 0
+              )
+            ),
+          y: cursorOrigin.top + visibleCursorRow,
+        }
+      : undefined
+  )
 
   // Derive the active popup from the buffer.
   const sQuery = slashQuery(text)
@@ -441,7 +489,7 @@ function InputImpl({
 
   // Insert a chunk, collapsing it to a `[Pasted …]` placeholder when it's large.
   // Ink ≥7 coalesces a bracketed paste (mount.tsx enables `ESC[?2004h`) into a
-  // SINGLE `useInput` callback, so a multi-line/huge paste arrives here as one
+  // SINGLE routed composer callback, so a multi-line/huge paste arrives here as one
   // `chunk` and `routePasteInsert` collapses it — no raw-stdin tee needed. (The
   // old `createPasteParser` + `stdin.on("data")` shim, required when older Ink
   // surfaced paste bodies char-by-char, attached a `data` listener that flipped
@@ -512,15 +560,12 @@ function InputImpl({
         }
         const pos = absoluteTopLeft(linesRef.current)
         if (pos) {
-          const target = clickToCursor({
-            clickRow: mouse.row - 1,
-            clickCol: mouse.col - 1,
-            boxTop: pos.top,
-            boxLeft: pos.left,
-            lines: buffer.lines,
-            promptWidth: PROMPT_WIDTH,
-          })
-          if (target) setBuffer(moveTo(buffer, target.row, target.col))
+          const visualRow = viewport.rows[mouse.row - 1 - pos.top]
+          if (visualRow) {
+            const screenCol = mouse.col - 1 - pos.left - PROMPT_WIDTH
+            const col = visualRow.start + screenColToBufferCol(visualRow.text, screenCol)
+            setBuffer(moveTo(buffer, visualRow.logicalRow, col))
+          }
         }
       }
       return
@@ -647,7 +692,7 @@ function InputImpl({
         break
     }
   }
-  // Latest-ref wrapper. Ink registers the `useInput` callback once and is meant to
+  // Latest-ref wrapper. The input router registers this callback once and is meant to
   // invoke the freshest closure each keypress, but under our tsx/CJS bundle that
   // capture doesn't refresh reliably — the handler strands on an early render and
   // every closure read goes stale: `doSubmit` saw an empty buffer (Enter never
@@ -660,7 +705,10 @@ function InputImpl({
   useEffect(() => {
     onKeyRef.current = handleKey
   })
-  useInput((inputCh, key) => onKeyRef.current(inputCh, key), { isActive: !disabled })
+  useComposerInput((inputCh, key) => onKeyRef.current(inputCh, key), {
+    isActive: !disabled,
+    popupOpen,
+  })
 
   // Command mode: the first char of the draft selects a distinct submit path —
   // `!` shells out, `/` runs a slash command. Recoloring the whole composer makes
@@ -712,6 +760,7 @@ function InputImpl({
           <SlashPalette
             matches={slashMatches}
             index={safeIndex}
+            query={sQuery ?? ""}
             maxRows={popupRows}
             width={width}
           />
@@ -735,20 +784,22 @@ function InputImpl({
         width={width}
       >
         <Box flexDirection="column" ref={linesRef}>
-          {buffer.lines.map((line, row) => (
-            <Box key={row}>
-              <Text color={promptColor}>{row === 0 ? "› " : "  "}</Text>
+          {viewport.rows.map((visualRow) => (
+            <Box key={`${visualRow.logicalRow}:${visualRow.start}`}>
+              <Text color={promptColor}>
+                {visualRow.logicalRow === 0 && !visualRow.continuation ? "› " : "  "}
+              </Text>
               <LineView
-                line={line}
-                cursorCol={row === buffer.cursorRow ? buffer.cursorCol : -1}
+                line={visualRow.text}
+                cursorCol={visualRow.cursorCol ?? -1}
                 disabled={disabled}
               />
-              {row === 0 && showPlaceholder && (
+              {visualRow.logicalRow === 0 && !visualRow.continuation && showPlaceholder && (
                 <Text color={theme.muted} dimColor>
                   {placeholder}
                 </Text>
               )}
-              {row === buffer.cursorRow && cursorAtEnd && suggestion && (
+              {visualRow.cursorCol !== null && cursorAtEnd && suggestion && (
                 <Text color={theme.muted} dimColor>
                   {suggestion}
                 </Text>

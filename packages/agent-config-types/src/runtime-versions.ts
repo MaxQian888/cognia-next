@@ -9,8 +9,12 @@
 export const PINNED_RUNTIME_VERSIONS = {
   /** Exact @anthropic-ai/claude-agent-sdk pin in sidecar/package.json. */
   agentSdkVersion: "0.3.220",
+  /** Bundled Claude Code version declared by that exact Agent SDK package. */
+  claudeCodeVersion: "2.1.220",
   /** crates/cognia-gateway Cargo.toml package version. */
   gatewayCrateVersion: "0.1.0",
+  /** tests/conformance/suite-manifest.mjs SUITE_VERSION. */
+  certificationSuiteVersion: "2",
 } as const
 
 export type PinnedRuntimeVersions = typeof PINNED_RUNTIME_VERSIONS

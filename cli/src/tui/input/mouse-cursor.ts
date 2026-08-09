@@ -4,6 +4,7 @@
  * without rendering Ink or faking a terminal.
  */
 import { stringWidth } from "../markdown/width"
+import { graphemeSegments } from "../text/graphemes"
 
 /**
  * Translate a screen column (counting display cells, where a CJK / fullwidth
@@ -14,15 +15,13 @@ import { stringWidth } from "../markdown/width"
 export function screenColToBufferCol(line: string, screenCol: number): number {
   if (screenCol <= 0) return 0
   let width = 0
-  let index = 0 // UTF-16 index into `line`
-  for (const ch of line) {
-    const w = stringWidth(ch) || 1
+  for (const grapheme of graphemeSegments(line)) {
+    const w = stringWidth(grapheme.segment) || 1
     if (width + w > screenCol) {
       // Click landed inside this cell — snap to the nearer boundary.
-      return (screenCol - width) * 2 >= w ? index + ch.length : index
+      return (screenCol - width) * 2 >= w ? grapheme.end : grapheme.index
     }
     width += w
-    index += ch.length
   }
   return line.length
 }

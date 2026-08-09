@@ -13,7 +13,7 @@ jest.mock("next-intl", () => ({
 }))
 
 const mockSwitchAccount = jest.fn<Promise<void>, [string, string?]>()
-const mockLock = jest.fn<void, []>()
+const mockLock = jest.fn<Promise<void>, []>()
 
 let mockState: Pick<
   AccountStoreState,
@@ -66,6 +66,7 @@ function renderSwitcher() {
 beforeEach(() => {
   jest.clearAllMocks()
   mockSwitchAccount.mockResolvedValue()
+  mockLock.mockResolvedValue()
   setSwitcherState()
 })
 
@@ -141,11 +142,11 @@ describe("AccountSwitcher", () => {
     expect(await screen.findByText("operationFailed")).toBeInTheDocument()
   })
 
-  it("locks the current account and opens the management dialog", () => {
+  it("locks the current account and opens the management dialog", async () => {
     renderSwitcher()
     fireEvent.click(screen.getByTestId("account-switcher"))
     fireEvent.click(screen.getByTestId("account-switcher-lock"))
-    expect(mockLock).toHaveBeenCalled()
+    await waitFor(() => expect(mockLock).toHaveBeenCalled())
 
     fireEvent.click(screen.getByTestId("account-switcher"))
     fireEvent.click(screen.getByTestId("account-switcher-manage"))

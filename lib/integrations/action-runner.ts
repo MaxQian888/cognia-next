@@ -1,5 +1,6 @@
 import type {
   ExecuteIntegrationActionInput,
+  IntegrationActionHandler,
   IntegrationActionHandlerContext,
   IntegrationActionJob,
 } from "@/types/plugin/plugin-integration"
@@ -16,6 +17,7 @@ import {
 import { getProvider } from "@/lib/plugin/auth/auth-provider-registry"
 import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-validate"
 import { getIntegrationActionHandler, getRegisteredIntegration } from "@/lib/integrations/registry"
+import { runGithubIssueLoop } from "@/lib/integrations/github-issue-loop"
 
 type AuthenticatedRequestExecutor = <T>(
   pluginId: string,
@@ -32,6 +34,7 @@ const runningControllers = new Map<string, AbortController>()
 const runningPerAccount = new Map<string, number>()
 const MAX_ACCOUNT_CONCURRENCY = 4
 let requestOverride: AuthenticatedRequestExecutor | undefined
+let githubIssueLoopExecutor: IntegrationActionHandler = runGithubIssueLoop
 
 function retryDelayMs(error: unknown, attempts: number): number {
   if (error && typeof error === "object") {
@@ -54,6 +57,18 @@ function assertActionInput(schema: Record<string, unknown>, value: unknown): voi
   const validation = validateAgainstJsonSchema(schema, value)
   if (!validation.ok) {
     throw new Error(`Integration action input is invalid: ${validation.errors.join("; ")}`)
+  }
+}
+
+function integrationErrorDetail(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== "object") return {}
+  const candidate = error as Record<string, unknown>
+  return {
+    requestId: candidate.requestId,
+    status: candidate.status,
+    statusClass: candidate.category,
+    retryAfter: candidate.retryAfter,
+    rateLimitReset: candidate.rateLimitReset,
   }
 }
 
@@ -97,10 +112,16 @@ async function defaultAuthenticatedRequest<T>(
   }
   const headers = new Headers(init.headers)
   const requestAuth = strategy.requestAuth ?? { type: "bearer" as const }
+  const credential = provider.resolveRequestCredential
+    ? await provider.resolveRequestCredential(session.id, {
+        accountId,
+        origin: url.origin,
+      })
+    : { accessToken: session.accessToken }
   if (requestAuth.type === "bearer") {
-    headers.set("authorization", `Bearer ${session.accessToken}`)
+    headers.set("authorization", `Bearer ${credential.accessToken}`)
   } else {
-    headers.set(requestAuth.name, `${requestAuth.prefix ?? ""}${session.accessToken}`)
+    headers.set(requestAuth.name, `${requestAuth.prefix ?? ""}${credential.accessToken}`)
   }
   const response = await fetch(url, {
     method: init.method,
@@ -222,7 +243,13 @@ export async function runIntegrationActionJob(jobId: string): Promise<Integratio
 
   const registered = getRegisteredIntegration(job.pluginId, job.integrationId)
   const action = registered?.definition.actions.find((candidate) => candidate.id === job.actionId)
-  const handler = getIntegrationActionHandler(job.pluginId, job.integrationId, job.actionId)
+  const isGithubIssueLoop =
+    job.pluginId === "github-delivery" &&
+    job.integrationId === "github" &&
+    job.actionId === "runIssueLoop"
+  const handler = isGithubIssueLoop
+    ? githubIssueLoopExecutor
+    : getIntegrationActionHandler(job.pluginId, job.integrationId, job.actionId)
   if (!action || !handler) {
     return updateIntegrationActionJob(jobId, {
       status: "failed",
@@ -278,12 +305,13 @@ export async function runIntegrationActionJob(jobId: string): Promise<Integratio
     }
     const message = error instanceof Error ? error.message : String(error)
     const retryable = action.idempotency !== "none" && attempts < job.maxAttempts
+    const nextAttemptAt = retryable
+      ? new Date(Date.now() + retryDelayMs(error, attempts)).toISOString()
+      : undefined
     const failed = await updateIntegrationActionJob(jobId, {
       status: retryable ? "retry_wait" : attempts >= job.maxAttempts ? "deadlettered" : "failed",
       error: message,
-      nextAttemptAt: retryable
-        ? new Date(Date.now() + retryDelayMs(error, attempts)).toISOString()
-        : undefined,
+      nextAttemptAt,
     })
     await appendIntegrationAudit({
       pluginId: job.pluginId,
@@ -291,7 +319,14 @@ export async function runIntegrationActionJob(jobId: string): Promise<Integratio
       accountId: job.accountId,
       kind: `action.${job.actionId}`,
       outcome: "failed",
-      detail: { jobId, attempts, retryable, error: message },
+      detail: {
+        jobId,
+        attempts,
+        retryable,
+        error: message,
+        nextRetryAt: nextAttemptAt,
+        ...integrationErrorDetail(error),
+      },
     })
     return failed
   } finally {
@@ -334,4 +369,10 @@ export function setIntegrationAuthenticatedRequestExecutorForTesting(
   executor?: AuthenticatedRequestExecutor
 ): void {
   requestOverride = executor
+}
+
+export function setGithubIssueLoopExecutorForTesting(
+  executor: IntegrationActionHandler = runGithubIssueLoop
+): void {
+  githubIssueLoopExecutor = executor
 }

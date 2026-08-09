@@ -31,13 +31,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use parking_lot::RwLock;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
     bridge_transport::{BridgeTransport, WebViewBridgeTransport},
     desktop_messages_bridge::DesktopMessagesBridge,
-    store::AppStore,
+    store::{AppStore, MessageRow, StoreError},
     SharedState,
 };
 
@@ -110,6 +112,15 @@ impl DataPlane {
                     .map_err(|e| e.to_string())?;
                 serde_json::to_value(page).map_err(|e| e.to_string())
             }
+        }
+    }
+
+    /// Direct-store revision accessor used by the RPC layer to publish the
+    /// same reconciliation event that the WebView-backed repository emits.
+    pub async fn direct_transcript_revision(&self, session_id: &str) -> Option<u64> {
+        match self {
+            DataPlane::Direct(store) => store.transcript_revision(session_id).await.ok(),
+            DataPlane::Bridge { .. } => None,
         }
     }
 
@@ -230,9 +241,479 @@ impl DataPlane {
             }
         }
     }
+
+    pub async fn transcript_capabilities(&self) -> Result<Value, String> {
+        match self {
+            DataPlane::Bridge { bridge, transport } => {
+                Arc::clone(bridge)
+                    .transcript_capabilities(transport.as_ref(), DEFAULT_TIMEOUT)
+                    .await
+            }
+            DataPlane::Direct(_) => Ok(json!({
+                "version": 1,
+                "maxTimelinePageSize": TRANSCRIPT_TIMELINE_PAGE_MAX,
+                "maxTurnMessagePageSize": TRANSCRIPT_DETAIL_PAGE_MAX,
+                "maxTurnMessagePageBytes": TRANSCRIPT_DETAIL_PAGE_BYTES,
+                "maxSummaryBytes": TRANSCRIPT_SUMMARY_BYTES,
+                "maxSummaryMediaRefs": 0,
+                "mediaVariants": [],
+            })),
+        }
+    }
+
+    pub async fn session_timeline(
+        &self,
+        session_id: String,
+        direction: Option<String>,
+        cursor: Option<String>,
+        limit: Option<u32>,
+    ) -> Result<Value, String> {
+        match self {
+            DataPlane::Bridge { bridge, transport } => {
+                Arc::clone(bridge)
+                    .session_timeline(
+                        transport.as_ref(),
+                        session_id,
+                        direction,
+                        cursor,
+                        limit,
+                        DEFAULT_TIMEOUT,
+                    )
+                    .await
+            }
+            DataPlane::Direct(store) => {
+                direct_session_timeline(store.as_ref(), session_id, direction, cursor, limit).await
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn session_turn_messages(
+        &self,
+        session_id: String,
+        turn_key: String,
+        revision: u64,
+        detail_revision: u64,
+        cursor: Option<String>,
+        limit: Option<u32>,
+    ) -> Result<Value, String> {
+        match self {
+            DataPlane::Bridge { bridge, transport } => {
+                Arc::clone(bridge)
+                    .session_turn_messages(
+                        transport.as_ref(),
+                        session_id,
+                        turn_key,
+                        revision,
+                        detail_revision,
+                        cursor,
+                        limit,
+                        DEFAULT_TIMEOUT,
+                    )
+                    .await
+            }
+            DataPlane::Direct(store) => {
+                direct_session_turn_messages(
+                    store.as_ref(),
+                    session_id,
+                    turn_key,
+                    revision,
+                    detail_revision,
+                    cursor,
+                    limit,
+                )
+                .await
+            }
+        }
+    }
+
+    pub async fn session_media(
+        &self,
+        session_id: String,
+        hash: String,
+        variant: String,
+    ) -> Result<super::desktop_messages_bridge::MediaBridgeResponse, String> {
+        match self {
+            DataPlane::Bridge { bridge, transport } => {
+                Arc::clone(bridge)
+                    .session_media(
+                        transport.as_ref(),
+                        session_id,
+                        hash,
+                        variant,
+                        DEFAULT_TIMEOUT,
+                    )
+                    .await
+            }
+            // The direct SQLite store has no binary media table and therefore
+            // does not advertise transcript/media V1.
+            DataPlane::Direct(_) => Err("MEDIA_NOT_FOUND".to_string()),
+        }
+    }
 }
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const TRANSCRIPT_TIMELINE_PAGE_DEFAULT: u32 = 30;
+const TRANSCRIPT_TIMELINE_PAGE_MAX: u32 = 100;
+const TRANSCRIPT_DETAIL_PAGE_DEFAULT: u32 = 100;
+const TRANSCRIPT_DETAIL_PAGE_MAX: u32 = 200;
+const TRANSCRIPT_DETAIL_PAGE_BYTES: usize = 2 * 1024 * 1024;
+const TRANSCRIPT_SUMMARY_BYTES: usize = 64 * 1024;
+const TRANSCRIPT_PREVIEW_BYTES: usize = 24 * 1024;
+const TRANSCRIPT_SCAN_CHUNK: u32 = 200;
+const TRANSCRIPT_MAX_SCANNED_MESSAGES: usize = 2_000;
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectTimelineCursor {
+    version: u8,
+    session_id: String,
+    revision: u64,
+    direction: String,
+    position: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectDetailCursor {
+    version: u8,
+    session_id: String,
+    revision: u64,
+    turn_key: String,
+    detail_revision: u64,
+    position: u32,
+}
+
+fn encode_cursor<T: Serialize>(value: &T) -> Result<String, String> {
+    serde_json::to_vec(value)
+        .map(|bytes| URL_SAFE_NO_PAD.encode(bytes))
+        .map_err(|_| "INVALID_PARAMS".to_string())
+}
+
+fn decode_cursor<T: DeserializeOwned>(value: &str) -> Result<T, String> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| "INVALID_PARAMS".to_string())?;
+    serde_json::from_slice(&bytes).map_err(|_| "INVALID_PARAMS".to_string())
+}
+
+fn store_session_revision_error(error: StoreError) -> String {
+    match error {
+        StoreError::NotFound(_) | StoreError::InvalidInput(_) => "INVALID_PARAMS".to_string(),
+        StoreError::Sqlite(_) => "TRANSCRIPT_STORE_ERROR".to_string(),
+    }
+}
+
+fn truncate_utf8(value: &str, max_bytes: usize) -> (String, bool) {
+    if value.len() <= max_bytes {
+        return (value.to_string(), false);
+    }
+    let boundary = value
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= max_bytes)
+        .last()
+        .unwrap_or(0);
+    (value[..boundary].to_string(), true)
+}
+
+fn direct_preview(message: &MessageRow) -> Value {
+    let (text, truncated) = truncate_utf8(&message.content, TRANSCRIPT_PREVIEW_BYTES);
+    json!({
+        "id": message.id,
+        "role": message.role,
+        "text": text,
+        "createdAt": message.created_at,
+        "truncated": truncated,
+    })
+}
+
+fn direct_full_message(message: &MessageRow, turn_key: &str) -> Value {
+    json!({
+        "id": message.id,
+        "sessionId": message.session_id,
+        "turnKey": turn_key,
+        "role": message.role,
+        "parts": [{ "type": "text", "text": message.content }],
+        "createdAt": message.created_at,
+    })
+}
+
+fn direct_completed_turn(turn_key: &str, messages: &[MessageRow], revision: u64) -> Value {
+    let users: Vec<Value> = messages
+        .iter()
+        .filter(|message| message.role == "user")
+        .map(direct_preview)
+        .collect();
+    let user_count = users.len();
+    let final_response = messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "assistant");
+    let final_index = final_response
+        .and_then(|target| messages.iter().position(|message| message.id == target.id));
+    let started_at = messages
+        .first()
+        .map(|message| message.created_at)
+        .unwrap_or(0);
+    let completed_at = messages
+        .last()
+        .map(|message| message.created_at)
+        .unwrap_or(0);
+    let mut item = json!({
+        "kind": "completed-turn",
+        "itemKey": turn_key,
+        "turnKey": turn_key,
+        "revision": revision,
+        "detailRevision": revision,
+        "status": "completed",
+        "userMessages": users,
+        "collapsed": {
+            "exists": messages.len() > user_count + usize::from(final_response.is_some()),
+            "messageCount": messages.len(),
+            "trailingCount": final_index
+                .map(|index| messages.len().saturating_sub(index + 1))
+                .unwrap_or(0),
+            "mediaCount": 0,
+        },
+        "startedAt": started_at,
+        "completedAt": completed_at,
+        "durationMs": completed_at.saturating_sub(started_at),
+    });
+    if let Some(response) = final_response {
+        item["finalResponse"] = direct_preview(response);
+    }
+    item
+}
+
+fn project_direct_timeline(messages: &[MessageRow], revision: u64) -> Vec<Value> {
+    let mut items = Vec::new();
+    let mut current: Vec<MessageRow> = Vec::new();
+    let mut current_key = String::new();
+
+    let flush =
+        |items: &mut Vec<Value>, current: &mut Vec<MessageRow>, current_key: &mut String| {
+            if current.is_empty() {
+                return;
+            }
+            items.push(direct_completed_turn(current_key, current, revision));
+            current.clear();
+            current_key.clear();
+        };
+
+    for message in messages {
+        if message.role == "system" && current.is_empty() {
+            items.push(json!({
+                "kind": "system",
+                "itemKey": format!("system:{}", message.id),
+                "revision": revision,
+                "status": "completed",
+                "message": direct_preview(message),
+                "startedAt": message.created_at,
+                "completedAt": message.created_at,
+                "durationMs": 0,
+            }));
+            continue;
+        }
+        if message.role == "user" && !current.is_empty() {
+            flush(&mut items, &mut current, &mut current_key);
+        }
+        if current.is_empty() {
+            current_key = format!("turn:{}", message.id);
+        }
+        current.push(message.clone());
+    }
+    flush(&mut items, &mut current, &mut current_key);
+    items
+}
+
+async fn direct_session_timeline(
+    store: &dyn AppStore,
+    session_id: String,
+    direction: Option<String>,
+    cursor: Option<String>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    let direction = direction.unwrap_or_else(|| "backward".to_string());
+    if direction != "backward" {
+        return Err("INVALID_PARAMS".to_string());
+    }
+    let revision = store
+        .transcript_revision(&session_id)
+        .await
+        .map_err(store_session_revision_error)?;
+    let mut position = 0;
+    if let Some(cursor) = cursor {
+        let decoded: DirectTimelineCursor = decode_cursor(&cursor)?;
+        if decoded.version != 1
+            || decoded.session_id != session_id
+            || decoded.direction != direction
+        {
+            return Err("INVALID_PARAMS".to_string());
+        }
+        if decoded.revision != revision {
+            return Err("TRANSCRIPT_STALE".to_string());
+        }
+        position = decoded.position;
+    }
+    let limit = limit
+        .unwrap_or(TRANSCRIPT_TIMELINE_PAGE_DEFAULT)
+        .clamp(1, TRANSCRIPT_TIMELINE_PAGE_MAX);
+    let mut descending = Vec::new();
+    let mut user_boundaries = 0_u32;
+
+    while user_boundaries < limit && descending.len() < TRANSCRIPT_MAX_SCANNED_MESSAGES {
+        let page = store
+            .get_messages_by_session_reverse(
+                &session_id,
+                TRANSCRIPT_SCAN_CHUNK,
+                position.saturating_add(descending.len() as u32),
+            )
+            .await
+            .map_err(|_| "TRANSCRIPT_STORE_ERROR".to_string())?;
+        if page.rows.is_empty() {
+            break;
+        }
+        let page_len = page.rows.len();
+        for message in page.rows {
+            if message.role == "user" {
+                user_boundaries += 1;
+            }
+            descending.push(message);
+            if user_boundaries >= limit || descending.len() >= TRANSCRIPT_MAX_SCANNED_MESSAGES {
+                break;
+            }
+        }
+        if page_len < TRANSCRIPT_SCAN_CHUNK as usize {
+            break;
+        }
+    }
+
+    let next_position = position.saturating_add(descending.len() as u32);
+    let has_more = !store
+        .get_messages_by_session_reverse(&session_id, 1, next_position)
+        .await
+        .map_err(|_| "TRANSCRIPT_STORE_ERROR".to_string())?
+        .rows
+        .is_empty();
+    descending.reverse();
+    let projected = project_direct_timeline(&descending, revision);
+    let start = projected.len().saturating_sub(limit as usize);
+    let items = projected[start..].to_vec();
+    let next_cursor = if has_more {
+        Some(encode_cursor(&DirectTimelineCursor {
+            version: 1,
+            session_id,
+            revision,
+            direction,
+            position: next_position,
+        })?)
+    } else {
+        None
+    };
+    let mut response = json!({
+        "items": items,
+        "revision": revision,
+        "hasMore": has_more,
+    });
+    if let Some(next_cursor) = next_cursor {
+        response["nextCursor"] = Value::String(next_cursor);
+    }
+    Ok(response)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn direct_session_turn_messages(
+    store: &dyn AppStore,
+    session_id: String,
+    turn_key: String,
+    revision: u64,
+    detail_revision: u64,
+    cursor: Option<String>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    let current_revision = store
+        .transcript_revision(&session_id)
+        .await
+        .map_err(store_session_revision_error)?;
+    if revision != current_revision || detail_revision != current_revision {
+        return Err("TRANSCRIPT_STALE".to_string());
+    }
+    let anchor = turn_key
+        .strip_prefix("turn:")
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "TURN_NOT_FOUND".to_string())?;
+    let mut position = 0;
+    if let Some(cursor) = cursor {
+        let decoded: DirectDetailCursor = decode_cursor(&cursor)?;
+        if decoded.version != 1 || decoded.session_id != session_id {
+            return Err("INVALID_PARAMS".to_string());
+        }
+        if decoded.turn_key != turn_key {
+            return Err("TURN_NOT_FOUND".to_string());
+        }
+        if decoded.revision != revision || decoded.detail_revision != detail_revision {
+            return Err("TRANSCRIPT_STALE".to_string());
+        }
+        position = decoded.position;
+    }
+    let limit = limit
+        .unwrap_or(TRANSCRIPT_DETAIL_PAGE_DEFAULT)
+        .clamp(1, TRANSCRIPT_DETAIL_PAGE_MAX);
+    let page = store
+        .get_implicit_turn_messages(&session_id, anchor, limit, position)
+        .await
+        .map_err(|error| match error {
+            StoreError::NotFound(_) => "TURN_NOT_FOUND".to_string(),
+            _ => "TRANSCRIPT_STORE_ERROR".to_string(),
+        })?;
+    let total = page.total;
+    let mut messages = Vec::new();
+    let mut approximate_bytes = 2_usize;
+    for row in page.rows {
+        let message = direct_full_message(&row, &turn_key);
+        let message_bytes = serde_json::to_vec(&message)
+            .map_err(|_| "TRANSCRIPT_STORE_ERROR".to_string())?
+            .len()
+            + 1;
+        if messages.is_empty() && message_bytes > TRANSCRIPT_DETAIL_PAGE_BYTES {
+            return Err("INVALID_PARAMS".to_string());
+        }
+        if !messages.is_empty()
+            && approximate_bytes.saturating_add(message_bytes) > TRANSCRIPT_DETAIL_PAGE_BYTES
+        {
+            break;
+        }
+        approximate_bytes = approximate_bytes.saturating_add(message_bytes);
+        messages.push(message);
+    }
+    let next_position = position.saturating_add(messages.len() as u32);
+    let has_more = next_position < total;
+    let next_cursor = if has_more {
+        Some(encode_cursor(&DirectDetailCursor {
+            version: 1,
+            session_id,
+            revision,
+            turn_key,
+            detail_revision,
+            position: next_position,
+        })?)
+    } else {
+        None
+    };
+    let mut response = json!({
+        "messages": messages,
+        "revision": revision,
+        "detailRevision": detail_revision,
+        "total": total,
+        "approximateBytes": approximate_bytes,
+        "hasMore": has_more,
+    });
+    if let Some(next_cursor) = next_cursor {
+        response["nextCursor"] = Value::String(next_cursor);
+    }
+    Ok(response)
+}
 
 #[cfg(test)]
 mod tests {
@@ -248,8 +729,6 @@ mod tests {
         };
         Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
-            redemption_lru: crate::companion_api::redemption_lru::RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -395,5 +874,93 @@ mod tests {
             .await
             .expect_err("should error");
         assert!(err.contains("content"));
+    }
+
+    #[tokio::test]
+    async fn direct_store_serves_bounded_transcript_v1_pages() {
+        let store = SqliteAppStore::in_memory().expect("open");
+        store
+            .upsert_session("s1", "Transcript", "direct")
+            .await
+            .unwrap();
+        store.create_message("s1", "first", "user").await.unwrap();
+        store
+            .create_message("s1", "answer", "assistant")
+            .await
+            .unwrap();
+        store.create_message("s1", "second", "user").await.unwrap();
+        store
+            .create_message("s1", "done", "assistant")
+            .await
+            .unwrap();
+        let dp = DataPlane::Direct(store as Arc<dyn AppStore>);
+
+        let capabilities = dp.transcript_capabilities().await.unwrap();
+        assert_eq!(capabilities["version"], 1);
+
+        let newest = dp
+            .session_timeline("s1".into(), None, None, Some(1))
+            .await
+            .unwrap();
+        assert_eq!(newest["items"].as_array().unwrap().len(), 1);
+        assert_eq!(newest["items"][0]["finalResponse"]["text"], "done");
+        assert_eq!(newest["hasMore"], true);
+        let cursor = newest["nextCursor"].as_str().unwrap().to_string();
+
+        let older = dp
+            .session_timeline("s1".into(), None, Some(cursor), Some(1))
+            .await
+            .unwrap();
+        assert_eq!(older["items"][0]["finalResponse"]["text"], "answer");
+        assert_eq!(older["hasMore"], false);
+    }
+
+    #[tokio::test]
+    async fn direct_store_turn_detail_is_revision_bound_and_byte_budgeted() {
+        let store = SqliteAppStore::in_memory().expect("open");
+        store
+            .upsert_session("s1", "Transcript", "direct")
+            .await
+            .unwrap();
+        let user = store
+            .create_message("s1", "question", "user")
+            .await
+            .unwrap();
+        store
+            .create_message("s1", "answer", "assistant")
+            .await
+            .unwrap();
+        let dp = DataPlane::Direct(store.clone() as Arc<dyn AppStore>);
+        let timeline = dp
+            .session_timeline("s1".into(), None, None, Some(1))
+            .await
+            .unwrap();
+        let revision = timeline["revision"].as_u64().unwrap();
+        let turn_key = format!("turn:{}", user.id);
+
+        let detail = dp
+            .session_turn_messages(
+                "s1".into(),
+                turn_key.clone(),
+                revision,
+                revision,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(detail["messages"].as_array().unwrap().len(), 2);
+        assert!(detail["approximateBytes"].as_u64().unwrap() <= 2 * 1024 * 1024);
+
+        store
+            .update_message_content(&user.id, "edited")
+            .await
+            .unwrap();
+        assert_eq!(
+            dp.session_turn_messages("s1".into(), turn_key, revision, revision, None, None,)
+                .await
+                .unwrap_err(),
+            "TRANSCRIPT_STALE"
+        );
     }
 }

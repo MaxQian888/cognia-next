@@ -3,7 +3,7 @@
 // (e.g. the future hooks settings tab) that need to read or render the hook
 // config block from settings.json.
 
-/** Hook lifecycle events. Phase 1 wires `UserPromptSubmit` and `PreToolUse`. */
+/** Hook lifecycle events exposed by the pinned Claude Agent SDK. */
 export type HookEvent =
   | "PreToolUse"
   | "PostToolUse"
@@ -32,11 +32,21 @@ export type HookEvent =
   | "StopFailure"
   | "TeammateIdle"
   | "UserPromptExpansion"
+  | "Setup"
+  | "SubagentStart"
+  | "DirectoryAdded"
+  | "MessageDisplay"
 
 export type HookHandler =
   | { type: "command"; command: string; timeout?: number }
   | {
       type: "webhook"
+      url: string
+      headers?: Record<string, string>
+      timeout?: number
+    }
+  | {
+      type: "http"
       url: string
       headers?: Record<string, string>
       timeout?: number

@@ -73,6 +73,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const client of clients) client.close()
+  jest.restoreAllMocks()
   jest.useRealTimers()
 })
 
@@ -128,13 +129,16 @@ async function waitForState(client: SignalingClient, expected: string): Promise<
   throw new Error(`timed out waiting for state ${expected}; got ${client.getState()}`)
 }
 
-async function authenticateClient(value: Fixture): Promise<{
+async function authenticateClient(
+  value: Fixture,
+  connect = true
+): Promise<{
   socket: FakeWebSocket
   mobileProof: SubscribeProofV2
   desktopProof: SubscribeProofV2
 }> {
-  value.client.connect()
-  const socket = instances[0]
+  if (connect) value.client.connect()
+  const socket = instances.at(-1)!
   socket.open()
   socket.push({
     kind: "challenge",
@@ -242,6 +246,66 @@ describe("SignalingClient v2", () => {
         encryptionKey: receiveKey,
       })
     ).resolves.toEqual({ kind: "rtc:offer", body: { sdp: "private-sdp" } })
+  })
+
+  it("bounds each signaling session to 64 active or queued sends", async () => {
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const value = await fixture({
+      buildEnvelope: async (args) => {
+        if (args.seq === 1) await firstGate
+        return buildV2Envelope(args)
+      },
+    })
+    const { socket } = await authenticateClient(value)
+    const errors: string[] = []
+    value.client.on("error", ({ code }) => errors.push(code))
+
+    const accepted = Array.from({ length: 64 }, (_, index) =>
+      value.client.send("rtc:ice", { candidate: index }).catch((error: unknown) => error)
+    )
+    await expect(value.client.send("rtc:ice", { candidate: 65 })).rejects.toThrow(
+      "outbound signaling queue is full"
+    )
+
+    expect(errors).toContain("outbound_queue_overflow")
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED)
+    expect(value.client.getState()).toBe("reconnecting")
+
+    releaseFirst()
+    await Promise.all(accepted)
+  })
+
+  it("does not let a blocked old session delay a replacement session", async () => {
+    jest.spyOn(Math, "random").mockReturnValue(0)
+    let releaseOld!: () => void
+    let blockNextEnvelope = true
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve
+    })
+    const value = await fixture({
+      buildEnvelope: async (args) => {
+        if (blockNextEnvelope) {
+          blockNextEnvelope = false
+          await oldGate
+        }
+        return buildV2Envelope(args)
+      },
+    })
+    const { socket: oldSocket } = await authenticateClient(value)
+    const oldSend = value.client.send("rtc:offer", { sdp: "old" }).catch((error: unknown) => error)
+    await flush()
+
+    oldSocket.close()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const { socket: replacementSocket } = await authenticateClient(value, false)
+    await value.client.send("rtc:offer", { sdp: "replacement" })
+
+    expect(replacementSocket.sent.some((raw) => JSON.parse(raw).kind === "relay")).toBe(true)
+    releaseOld()
+    await oldSend
   })
 
   it("authenticates inbound session metadata and suppresses replays", async () => {

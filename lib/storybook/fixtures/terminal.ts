@@ -23,6 +23,8 @@ export function makeTerminalSession(over: Partial<TerminalSessionRow> = {}): Ter
     createdAt: Date.UTC(2026, 5, 29, 8, 0),
     agentTrusted: false,
     agentSpawner: null,
+    tabColor: "none",
+    tabIcon: "none",
     promptBoundaries: [],
     lastCommands: [],
     historyOpen: false,

@@ -15,8 +15,11 @@
  * (base64) attachments a path to be referenced by.
  */
 
+// static-export-exempt: @cognia/agent is a Node-only SDK and requires Node >=26.
 import fs from "node:fs"
+// static-export-exempt: @cognia/agent is a Node-only SDK and requires Node >=26.
 import os from "node:os"
+// static-export-exempt: @cognia/agent is a Node-only SDK and requires Node >=26.
 import path from "node:path"
 
 import type { AgentStructuredError } from "@cognia/agent-config-types/agent-run-result"

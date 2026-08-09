@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 import type { RecordedFlow } from "@/lib/browser/recording/protocol"
 import {
   deleteRecording,
@@ -9,7 +6,8 @@ import {
   renameRecording,
   saveRecording,
 } from "./browser-recordings"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 const LOCAL = "http://localhost:3000"
 const OTHER = "http://localhost:4000"
@@ -26,13 +24,14 @@ function flow(id: string, over: Partial<RecordedFlow> = {}): RecordedFlow {
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().browserRecordings.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("saveRecording / getRecording", () => {
   it("round-trips a flow with its steps intact", async () => {

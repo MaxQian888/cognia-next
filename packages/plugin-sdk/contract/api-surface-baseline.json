@@ -1,0 +1,1090 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "1.0.0",
+  "namespaces": [
+    {
+      "id": "a2ui",
+      "authorPath": "ctx.a2ui",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "a2ui.createSurface",
+        "a2ui.deleteSurface",
+        "a2ui.getSurface",
+        "a2ui.registerComponent",
+        "a2ui.registerTemplate",
+        "a2ui.updateComponents",
+        "a2ui.updateDataModel"
+      ]
+    },
+    {
+      "id": "agent",
+      "authorPath": "ctx.agent",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "agent.cancelAgent",
+        "agent.context.listProviders",
+        "agent.context.queryTwinMemory",
+        "agent.context.readSharedMemory",
+        "agent.context.registerProvider",
+        "agent.context.unregisterProvider",
+        "agent.dispatchSubagent",
+        "agent.executeAgent",
+        "agent.guardrails.list",
+        "agent.guardrails.register",
+        "agent.guardrails.unregister",
+        "agent.invokeTool",
+        "agent.registerExternalAgentAdapter",
+        "agent.registerExternalAgentPreset",
+        "agent.registerMcpServerPreset",
+        "agent.registerMode",
+        "agent.registerNativeAnthropicTool",
+        "agent.registerSkill",
+        "agent.registerTool",
+        "agent.run",
+        "agent.runExternalAgent",
+        "agent.runStreamed",
+        "agent.runTeam",
+        "agent.sessions.create",
+        "agent.sessions.resume",
+        "agent.unregisterMode",
+        "agent.unregisterTool"
+      ]
+    },
+    {
+      "id": "ai",
+      "authorPath": "ctx.ai",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "ai.chat",
+        "ai.embed",
+        "ai.getAvailableModels",
+        "ai.getDefaultModel",
+        "ai.getDefaultProvider",
+        "ai.getProviderModels",
+        "ai.registerProvider"
+      ]
+    },
+    {
+      "id": "artifact",
+      "authorPath": "ctx.artifact",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "artifact.closeArtifact",
+        "artifact.createArtifact",
+        "artifact.deleteArtifact",
+        "artifact.getActiveArtifact",
+        "artifact.getArtifact",
+        "artifact.listArtifacts",
+        "artifact.onArtifactChange",
+        "artifact.openArtifact",
+        "artifact.registerRenderer",
+        "artifact.updateArtifact"
+      ]
+    },
+    {
+      "id": "auth",
+      "authorPath": "ctx.auth",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "auth.createPkceFlow",
+        "auth.getSession",
+        "auth.getSessions",
+        "auth.onDidChangeSessions",
+        "auth.registerProvider"
+      ]
+    },
+    {
+      "id": "automation",
+      "authorPath": "ctx.automation",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "automation.capabilities",
+        "automation.click",
+        "automation.cursorPosition",
+        "automation.drag",
+        "automation.find",
+        "automation.getFocus",
+        "automation.holdKey",
+        "automation.keys",
+        "automation.launchApp",
+        "automation.mouseButton",
+        "automation.mouseMove",
+        "automation.paste",
+        "automation.pickAtPoint",
+        "automation.readTree",
+        "automation.screenshot",
+        "automation.scroll",
+        "automation.type",
+        "automation.windowOp"
+      ]
+    },
+    {
+      "id": "backup",
+      "authorPath": "ctx.backup",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "backup.create",
+        "backup.getLatestSuccessful",
+        "backup.listHistory",
+        "backup.restore",
+        "backup.serialize",
+        "backup.validate"
+      ]
+    },
+    {
+      "id": "canvas",
+      "authorPath": "ctx.canvas",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "canvas.addComment",
+        "canvas.closeCanvas",
+        "canvas.closeCollaborationSession",
+        "canvas.createCollaborationSession",
+        "canvas.createDocument",
+        "canvas.deleteComment",
+        "canvas.deleteDocument",
+        "canvas.executeAction",
+        "canvas.executeActionStreaming",
+        "canvas.executePython",
+        "canvas.getActiveCollaborationSession",
+        "canvas.getCollaborationSession",
+        "canvas.getComments",
+        "canvas.getContent",
+        "canvas.getCurrentDocument",
+        "canvas.getDocument",
+        "canvas.getSelection",
+        "canvas.getVersions",
+        "canvas.insertText",
+        "canvas.listRecentCollaborationSessions",
+        "canvas.onCanvasChange",
+        "canvas.onContentChange",
+        "canvas.openDocument",
+        "canvas.replaceSelection",
+        "canvas.replyToComment",
+        "canvas.resolveComment",
+        "canvas.restoreVersion",
+        "canvas.saveVersion",
+        "canvas.setContent",
+        "canvas.setSelection",
+        "canvas.updateComment",
+        "canvas.updateDocument"
+      ]
+    },
+    {
+      "id": "capabilities",
+      "authorPath": "ctx.capabilities",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": []
+    },
+    {
+      "id": "chat",
+      "authorPath": "ctx.chat",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["chat.use"]
+    },
+    {
+      "id": "clipboard",
+      "authorPath": "ctx.clipboard",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "clipboard.clear",
+        "clipboard.hasImage",
+        "clipboard.hasText",
+        "clipboard.readImage",
+        "clipboard.readText",
+        "clipboard.writeImage",
+        "clipboard.writeText"
+      ]
+    },
+    {
+      "id": "companion",
+      "authorPath": "ctx.companion",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "companion.getDevice",
+        "companion.listDevices",
+        "companion.listOpenGoals",
+        "companion.pauseGoal",
+        "companion.resumeGoal",
+        "companion.revokeDevice",
+        "companion.serverStatus",
+        "companion.setRemoteControl",
+        "companion.stopGoal",
+        "companion.unrevokeDevice"
+      ]
+    },
+    {
+      "id": "configuration",
+      "authorPath": "ctx.configuration",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "configuration.get",
+        "configuration.getAll",
+        "configuration.getOrDefault",
+        "configuration.onChange",
+        "configuration.update"
+      ]
+    },
+    {
+      "id": "connectors",
+      "authorPath": "ctx.connectors",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "connectors.addChatMembers",
+        "connectors.addReaction",
+        "connectors.bootstrapConversation",
+        "connectors.createChat",
+        "connectors.createInstance",
+        "connectors.deleteInstance",
+        "connectors.deleteMessage",
+        "connectors.editMessage",
+        "connectors.enqueueSend",
+        "connectors.fetchHistory",
+        "connectors.findSessionByConversation",
+        "connectors.forwardMessage",
+        "connectors.getA2UICapabilityMatrix",
+        "connectors.getAdapter",
+        "connectors.getDispatchRules",
+        "connectors.getInstance",
+        "connectors.getOutboundJob",
+        "connectors.getReadReceipt",
+        "connectors.getRuntimeState",
+        "connectors.getSkillCapabilities",
+        "connectors.listAdapters",
+        "connectors.listEnabledInstances",
+        "connectors.listInstances",
+        "connectors.listInstancesByType",
+        "connectors.listRunningAdapters",
+        "connectors.listSessionsByConversation",
+        "connectors.listSiblingConversations",
+        "connectors.newIdempotencyKey",
+        "connectors.onCallback",
+        "connectors.onInbound",
+        "connectors.pinMessage",
+        "connectors.previewAtGate",
+        "connectors.previewDispatchRules",
+        "connectors.removeChatMembers",
+        "connectors.removeReaction",
+        "connectors.resolveContacts",
+        "connectors.send",
+        "connectors.sendText",
+        "connectors.sendUrgent",
+        "connectors.setDispatchRules",
+        "connectors.setInstanceEnabled",
+        "connectors.setTyping",
+        "connectors.streamReply",
+        "connectors.unpinMessage",
+        "connectors.updateChat",
+        "connectors.updateInstance",
+        "connectors.uploadFile",
+        "connectors.waitForDelivery"
+      ]
+    },
+    {
+      "id": "contextMenu",
+      "authorPath": "ctx.contextMenu",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["contextMenu.register", "contextMenu.registerMany"]
+    },
+    {
+      "id": "contextPanels",
+      "authorPath": "ctx.contextPanels",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "contextPanels.getActiveContext",
+        "contextPanels.getWorkbenchState",
+        "contextPanels.onDidChangeActiveContext",
+        "contextPanels.onDidChangeVisibility",
+        "contextPanels.onDidChangeWorkbenchState",
+        "contextPanels.register",
+        "contextPanels.reveal",
+        "contextPanels.setBadge",
+        "contextPanels.setMode",
+        "contextPanels.setPinned"
+      ]
+    },
+    {
+      "id": "db",
+      "authorPath": "ctx.db",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "db.createTable",
+        "db.dropTable",
+        "db.execute",
+        "db.query",
+        "db.tableExists",
+        "db.transaction"
+      ]
+    },
+    {
+      "id": "dexie",
+      "authorPath": "ctx.dexie",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["dexie.rawDb", "dexie.table"]
+    },
+    {
+      "id": "editor",
+      "authorPath": "ctx.editor",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "editor.notify",
+        "editor.onDidChangeActiveEditor",
+        "editor.openFile",
+        "editor.readActive",
+        "editor.reflectEdit",
+        "editor.revealInExplorer",
+        "editor.runInTerminal",
+        "editor.saveDirty",
+        "editor.showDiff"
+      ]
+    },
+    {
+      "id": "events",
+      "authorPath": "ctx.events",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "events.bus.emit",
+        "events.bus.getHistory",
+        "events.bus.off",
+        "events.bus.offAll",
+        "events.bus.on",
+        "events.bus.once",
+        "events.emit",
+        "events.ipc.broadcast",
+        "events.ipc.call",
+        "events.ipc.describeExposedMethods",
+        "events.ipc.expose",
+        "events.ipc.getExposedMethods",
+        "events.ipc.on",
+        "events.ipc.send",
+        "events.off",
+        "events.on",
+        "events.once"
+      ]
+    },
+    {
+      "id": "export",
+      "authorPath": "ctx.export",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "export.download",
+        "export.exportMessages",
+        "export.exportProject",
+        "export.exportSession",
+        "export.generateFilename",
+        "export.getAvailableFormats",
+        "export.getCustomExporters",
+        "export.registerExporter"
+      ]
+    },
+    {
+      "id": "extensions",
+      "authorPath": "ctx.extensions",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "extensions.getExtensions",
+        "extensions.hasExtensions",
+        "extensions.registerExtension"
+      ]
+    },
+    {
+      "id": "fs",
+      "authorPath": "ctx.fs",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "fs.appendText",
+        "fs.copy",
+        "fs.exists",
+        "fs.getCacheDir",
+        "fs.getDataDir",
+        "fs.getTempDir",
+        "fs.mkdir",
+        "fs.move",
+        "fs.readBinary",
+        "fs.readDir",
+        "fs.readJson",
+        "fs.readText",
+        "fs.remove",
+        "fs.stat",
+        "fs.watch",
+        "fs.writeBinary",
+        "fs.writeJson",
+        "fs.writeText"
+      ]
+    },
+    {
+      "id": "git",
+      "authorPath": "ctx.git",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "git.branches",
+        "git.checkoutBranch",
+        "git.commit",
+        "git.commitFiles",
+        "git.conflicts",
+        "git.createBranch",
+        "git.deleteBranch",
+        "git.diffCommit",
+        "git.diffFile",
+        "git.discard",
+        "git.discardAll",
+        "git.fetch",
+        "git.fileHistory",
+        "git.getRoot",
+        "git.isRepo",
+        "git.log",
+        "git.mergeAbort",
+        "git.onStatusChange",
+        "git.pull",
+        "git.push",
+        "git.remotes",
+        "git.renameBranch",
+        "git.repoState",
+        "git.resolveConflict",
+        "git.stage",
+        "git.stashApply",
+        "git.stashDrop",
+        "git.stashList",
+        "git.stashPop",
+        "git.stashPush",
+        "git.status",
+        "git.sync",
+        "git.unstage"
+      ]
+    },
+    {
+      "id": "goals",
+      "authorPath": "ctx.goals",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "goals.clearSubgoals",
+        "goals.create",
+        "goals.decomposeSubgoals",
+        "goals.delete",
+        "goals.get",
+        "goals.getActiveForSession",
+        "goals.getEvents",
+        "goals.getOpenForSession",
+        "goals.listAll",
+        "goals.listBySession",
+        "goals.pause",
+        "goals.preempt",
+        "goals.resume",
+        "goals.stop",
+        "goals.toggleSubgoal",
+        "goals.updateConfig",
+        "goals.updateObjective"
+      ]
+    },
+    {
+      "id": "i18n",
+      "authorPath": "ctx.i18n",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "i18n.formatDate",
+        "i18n.formatNumber",
+        "i18n.formatRelativeTime",
+        "i18n.getAvailableLocales",
+        "i18n.getCurrentLocale",
+        "i18n.getLocaleName",
+        "i18n.hasTranslation",
+        "i18n.onLocaleChange",
+        "i18n.registerTranslations",
+        "i18n.t"
+      ]
+    },
+    {
+      "id": "import",
+      "authorPath": "ctx.import",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "import.getCustomImporters",
+        "import.importContent",
+        "import.registerChatImporter",
+        "import.registerImporter",
+        "import.registerSessionSource"
+      ]
+    },
+    {
+      "id": "integrations",
+      "authorPath": "ctx.integrations",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "integrations.authenticatedRequest",
+        "integrations.cancelAction",
+        "integrations.createAccount",
+        "integrations.createSubscription",
+        "integrations.executeAction",
+        "integrations.getActionJob",
+        "integrations.getIngressPublicUrl",
+        "integrations.listAccounts",
+        "integrations.listDefinitions",
+        "integrations.listSubscriptions",
+        "integrations.migrateLegacy",
+        "integrations.publishEvent",
+        "integrations.removeAccount",
+        "integrations.removeSubscription",
+        "integrations.rollbackMigration",
+        "integrations.updateAccount"
+      ]
+    },
+    {
+      "id": "logger",
+      "authorPath": "ctx.logger",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "logger.child",
+        "logger.debug",
+        "logger.error",
+        "logger.fatal",
+        "logger.info",
+        "logger.trace",
+        "logger.warn",
+        "logger.withContext"
+      ]
+    },
+    {
+      "id": "media",
+      "authorPath": "ctx.media",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "media.image.load",
+        "media.image.save",
+        "media.image.toDataUrl",
+        "media.image.fromDataUrl",
+        "media.image.resize",
+        "media.image.transform",
+        "media.image.adjust",
+        "media.image.applyFilter",
+        "media.image.getHistogram",
+        "media.image.compare",
+        "media.video.loadClip",
+        "media.video.getFrame",
+        "media.video.getMetadata",
+        "media.video.analyze",
+        "media.video.cleanupAnalysis",
+        "media.video.trim",
+        "media.video.concatenate",
+        "media.video.applyEffect",
+        "media.video.addTransition",
+        "media.video.export",
+        "media.filters.register",
+        "media.filters.unregister",
+        "media.filters.getAll",
+        "media.filters.getById",
+        "media.filters.getByCategory",
+        "media.effects.register",
+        "media.effects.unregister",
+        "media.effects.getAll",
+        "media.effects.getById",
+        "media.transitions.register",
+        "media.transitions.unregister",
+        "media.transitions.getAll",
+        "media.transitions.getById",
+        "media.ai.generateImage",
+        "media.ai.generateVideo",
+        "media.ai.upscale",
+        "media.ai.removeBackground",
+        "media.ai.enhanceImage",
+        "media.ai.generateVariation",
+        "media.ai.inpaint",
+        "media.utils.createCanvas",
+        "media.utils.getImageDataFromCanvas",
+        "media.utils.putImageDataToCanvas",
+        "media.utils.blobToBase64",
+        "media.utils.base64ToBlob",
+        "media.utils.downloadFile",
+        "media.utils.registerCatalogAsset"
+      ]
+    },
+    {
+      "id": "memory",
+      "authorPath": "ctx.memory",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "memory.count",
+        "memory.forget",
+        "memory.get",
+        "memory.list",
+        "memory.search",
+        "memory.store",
+        "memory.update"
+      ]
+    },
+    {
+      "id": "messagePart",
+      "authorPath": "ctx.messagePart",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["messagePart.registerPartRenderer"]
+    },
+    {
+      "id": "modal",
+      "authorPath": "ctx.modal",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["modal.closeAll", "modal.openById", "modal.openModal"]
+    },
+    {
+      "id": "network",
+      "authorPath": "ctx.network",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "network.delete",
+        "network.download",
+        "network.fetch",
+        "network.get",
+        "network.patch",
+        "network.post",
+        "network.put",
+        "network.upload"
+      ]
+    },
+    {
+      "id": "notifications",
+      "authorPath": "ctx.notifications",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "notifications.create",
+        "notifications.createProgress",
+        "notifications.dismiss",
+        "notifications.dismissAll",
+        "notifications.getAll",
+        "notifications.onAction",
+        "notifications.update"
+      ]
+    },
+    {
+      "id": "ocr",
+      "authorPath": "ctx.ocr",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["ocr.listRegistered", "ocr.registerProvider"]
+    },
+    {
+      "id": "perf",
+      "authorPath": "ctx.perf",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "perf.hotspots",
+        "perf.listTraces",
+        "perf.snapshot",
+        "perf.subscribe",
+        "perf.systemDetails"
+      ]
+    },
+    {
+      "id": "permissions",
+      "authorPath": "ctx.permissions",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "permissions.getGrantedPermissions",
+        "permissions.hasAllPermissions",
+        "permissions.hasAnyPermission",
+        "permissions.hasPermission",
+        "permissions.requestPermission"
+      ]
+    },
+    {
+      "id": "pet",
+      "authorPath": "ctx.pet",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "pet.emitEvent",
+        "pet.getRemainingBudget",
+        "pet.getSummary",
+        "pet.getView",
+        "pet.interact",
+        "pet.onEvent"
+      ]
+    },
+    {
+      "id": "project",
+      "authorPath": "ctx.project",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "project.addKnowledgeFile",
+        "project.addTag",
+        "project.archiveProject",
+        "project.createProject",
+        "project.deleteProject",
+        "project.getCurrentProject",
+        "project.getCurrentProjectId",
+        "project.getKnowledgeFiles",
+        "project.getProject",
+        "project.getProjectSessions",
+        "project.linkSession",
+        "project.listProjects",
+        "project.onProjectChange",
+        "project.removeKnowledgeFile",
+        "project.removeTag",
+        "project.setActiveProject",
+        "project.unarchiveProject",
+        "project.unlinkSession",
+        "project.updateKnowledgeFile",
+        "project.updateProject"
+      ]
+    },
+    {
+      "id": "python",
+      "authorPath": "ctx.python",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["python.call", "python.eval", "python.import"]
+    },
+    {
+      "id": "quickActions",
+      "authorPath": "ctx.quickActions",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["quickActions.register", "quickActions.registerMany"]
+    },
+    {
+      "id": "scheduler",
+      "authorPath": "ctx.scheduler",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "scheduler.cancelExecution",
+        "scheduler.createTask",
+        "scheduler.deleteTask",
+        "scheduler.getExecution",
+        "scheduler.getExecutions",
+        "scheduler.getHandlers",
+        "scheduler.getLatestExecution",
+        "scheduler.getTask",
+        "scheduler.hasHandler",
+        "scheduler.listTasks",
+        "scheduler.pauseTask",
+        "scheduler.registerHandler",
+        "scheduler.resumeTask",
+        "scheduler.runTaskNow",
+        "scheduler.unregisterHandler",
+        "scheduler.updateTask"
+      ]
+    },
+    {
+      "id": "secrets",
+      "authorPath": "ctx.secrets",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "secrets.delete",
+        "secrets.get",
+        "secrets.has",
+        "secrets.keys",
+        "secrets.onDidChange",
+        "secrets.store"
+      ]
+    },
+    {
+      "id": "session",
+      "authorPath": "ctx.session",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "session.addMessage",
+        "session.createSession",
+        "session.deleteMessage",
+        "session.deleteSession",
+        "session.getCurrentSession",
+        "session.getCurrentSessionId",
+        "session.getMessages",
+        "session.getSession",
+        "session.getSessionStats",
+        "session.listSessions",
+        "session.onMessagesChange",
+        "session.onSessionChange",
+        "session.switchSession",
+        "session.updateMessage",
+        "session.updateSession"
+      ]
+    },
+    {
+      "id": "settings",
+      "authorPath": "ctx.settings",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["settings.get", "settings.onChange", "settings.set"]
+    },
+    {
+      "id": "share",
+      "authorPath": "ctx.share",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "share.create",
+        "share.delete",
+        "share.getByCode",
+        "share.getStats",
+        "share.list",
+        "share.revoke"
+      ]
+    },
+    {
+      "id": "shell",
+      "authorPath": "ctx.shell",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["shell.execute", "shell.open", "shell.showInFolder", "shell.spawn"]
+    },
+    {
+      "id": "shortcuts",
+      "authorPath": "ctx.shortcuts",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "shortcuts.getRegistered",
+        "shortcuts.isAvailable",
+        "shortcuts.register",
+        "shortcuts.registerMany"
+      ]
+    },
+    {
+      "id": "storage",
+      "authorPath": "ctx.storage",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "storage.clear",
+        "storage.delete",
+        "storage.get",
+        "storage.getOrDefault",
+        "storage.getSecure",
+        "storage.getUsage",
+        "storage.has",
+        "storage.isEncrypted",
+        "storage.keys",
+        "storage.remove",
+        "storage.set",
+        "storage.setSecure"
+      ]
+    },
+    {
+      "id": "subscription",
+      "authorPath": "ctx.subscription",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "subscription.getActiveAccountId",
+        "subscription.getActiveAccountSummary",
+        "subscription.getLatestUsage",
+        "subscription.getUsage",
+        "subscription.listAccounts",
+        "subscription.onUsageUpdate",
+        "subscription.providers"
+      ]
+    },
+    {
+      "id": "team",
+      "authorPath": "ctx.team",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "team.addComment",
+        "team.addTeammate",
+        "team.assignTask",
+        "team.attachTaskFile",
+        "team.createTask",
+        "team.getExecutionReport",
+        "team.getRunStatus",
+        "team.getTeam",
+        "team.getTeammate",
+        "team.listCheckpoints",
+        "team.listEvents",
+        "team.listTasks",
+        "team.listTeammates",
+        "team.listTeams",
+        "team.moveTask",
+        "team.removeTeammate",
+        "team.reorderTask",
+        "team.subscribe",
+        "team.updateTask",
+        "team.updateTeamConfig",
+        "team.updateTeammate"
+      ]
+    },
+    {
+      "id": "templates",
+      "authorPath": "ctx.templates",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "templates.register",
+        "templates.registerMany",
+        "templates.query",
+        "templates.get",
+        "templates.list",
+        "templates.getRevision",
+        "templates.subscribe",
+        "templates.validate",
+        "templates.createDraft",
+        "templates.preflight",
+        "templates.instantiate"
+      ]
+    },
+    {
+      "id": "terminal",
+      "authorPath": "ctx.terminal",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "terminal.classifyCommand",
+        "terminal.detectScriptType",
+        "terminal.kill",
+        "terminal.list",
+        "terminal.onData",
+        "terminal.readRecent",
+        "terminal.registerCommandSafetyRule",
+        "terminal.registerCompletionProvider",
+        "terminal.runScript",
+        "terminal.spawn",
+        "terminal.write"
+      ]
+    },
+    {
+      "id": "theme",
+      "authorPath": "ctx.theme",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "theme.activateCustomTheme",
+        "theme.activateRegisteredTheme",
+        "theme.applyScopedColors",
+        "theme.deleteCustomTheme",
+        "theme.getAvailablePresets",
+        "theme.getColorPreset",
+        "theme.getColors",
+        "theme.getCustomThemes",
+        "theme.getMode",
+        "theme.getResolvedMode",
+        "theme.getTheme",
+        "theme.onThemeChange",
+        "theme.registerCustomTheme",
+        "theme.setColorPreset",
+        "theme.setMode",
+        "theme.updateCustomTheme"
+      ]
+    },
+    {
+      "id": "toolResult",
+      "authorPath": "ctx.toolResult",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["toolResult.registerToolResultRenderer"]
+    },
+    {
+      "id": "tray",
+      "authorPath": "ctx.tray",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["tray.register", "tray.registerMany"]
+    },
+    {
+      "id": "ui",
+      "authorPath": "ctx.ui",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "ui.showConfirmDialog",
+        "ui.showDialog",
+        "ui.showInputDialog",
+        "ui.showNotification",
+        "ui.showToast"
+      ]
+    },
+    {
+      "id": "uri",
+      "authorPath": "ctx.uri",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["uri.registerHandler"]
+    },
+    {
+      "id": "vector",
+      "authorPath": "ctx.vector",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": [
+        "vector.addDocuments",
+        "vector.clearCollection",
+        "vector.createCollection",
+        "vector.deleteCollection",
+        "vector.deleteDocuments",
+        "vector.embed",
+        "vector.embedBatch",
+        "vector.getCollectionInfo",
+        "vector.getDocumentCount",
+        "vector.listCollections",
+        "vector.search",
+        "vector.searchByEmbedding",
+        "vector.updateDocuments"
+      ]
+    },
+    {
+      "id": "webview",
+      "authorPath": "ctx.webview",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["webview.create"]
+    },
+    {
+      "id": "window",
+      "authorPath": "ctx.window",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["window.create", "window.focus", "window.getAll", "window.getMain"]
+    },
+    {
+      "id": "workflow",
+      "authorPath": "ctx.workflow",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["workflow.emitTriggerEvent", "workflow.registerNode", "workflow.registerTrigger"]
+    },
+    {
+      "id": "workspace",
+      "authorPath": "ctx.workspace",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "methods": ["workspace.getBackend", "workspace.listRegistered", "workspace.registerBackend"]
+    }
+  ]
+}

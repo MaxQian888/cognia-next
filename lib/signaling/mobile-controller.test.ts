@@ -331,7 +331,8 @@ describe("installCompanionSignalingController", () => {
     const resolveLan = jest.fn(async () => ({ lanBaseUrl: null }))
     await saveCompanionConfig({
       baseUrl: "https://cloud.example",
-      deviceJwt: "jwt",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+      deviceKeyThumbprint: "device-thumbprint",
       deviceId: "d1",
       serverVersion: "1",
       tunnelBaseUrl: "https://tunnel.example",
@@ -424,7 +425,8 @@ describe("installCompanionSignalingController", () => {
 describe("installCompanionSignalingController — LAN re-resolution", () => {
   const LAN_CONFIG: CompanionConfig = {
     baseUrl: "https://abc-1234.trycloudflare.com",
-    deviceJwt: "jwt",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
     deviceId: "dev-1",
     serverVersion: "0.1.0",
     serverFingerprint: "AA:BB",
@@ -623,7 +625,8 @@ describe("installCompanionSignalingController — resilience", () => {
     localStorage.clear()
     await saveCompanionConfig({
       baseUrl: "https://192.168.1.5:27890",
-      deviceJwt: "jwt",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+      deviceKeyThumbprint: "device-thumbprint",
       deviceId: "dev-1",
       serverVersion: "0.2.0",
     })
@@ -817,7 +820,8 @@ describe("installCompanionSignalingController — channel failover", () => {
    */
   const OFF_LAN_CONFIG: CompanionConfig = {
     baseUrl: "https://192.168.1.5:27890",
-    deviceJwt: "jwt",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
     deviceId: "dev-1",
     serverVersion: "0.2.0",
     serverFingerprint: "abc123",
@@ -917,7 +921,8 @@ describe("installCompanionSignalingController — channel failover", () => {
     localStorage.clear()
     await saveCompanionConfig({
       baseUrl: "",
-      deviceJwt: "jwt",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+      deviceKeyThumbprint: "device-thumbprint",
       deviceId: "dev-1",
       serverVersion: "0.2.0",
     })

@@ -1,22 +1,24 @@
 //! JWT verifier middleware for the companion API.
 //!
-//! Applied to every `/api/v1/*` route **except** the pre-auth pair endpoints.
-//! Uses [`axum::middleware::from_fn_with_state`] so the handler receives the
-//! full [`SharedState`] (signing secret + deny list).
+//! [`require_service_jwt`] is applied to the loopback Headless service plane.
+//! Canonical device-key routes use the separate DPoP middleware in `api.rs`.
+//! Uses [`axum::middleware::from_fn_with_state`] so the handler
+//! receives the full [`SharedState`] (signing secret + deny list).
 //!
 //! # Token extraction order
 //!
 //! 1. `Authorization: Bearer <jwt>` header — standard REST path.
-//! 2. Legacy `?token=<jwt>` query parameters are disabled by default. They are
-//!    available only behind `COGNIA_ALLOW_LEGACY_QUERY_TOKEN=1` during the
-//!    one-release v1 migration window; v2 uses single-use socket tickets.
+//! 2. `?token=<jwt>` is accepted only on loopback Headless sockets because the
+//!    Node WebSocket client cannot attach an Authorization header. Canonical
+//!    public sockets use single-use tickets.
 //!
 //! If both are present, the header takes precedence.
 //!
 //! # Error shape
 //!
-//! All failures return JSON `{ "error": { "code": "...", "message": "..." } }`
-//! with HTTP 401, matching the error envelope in [`super::auth`].
+//! All failures return the flat JSON envelope
+//! `{ "code": "...", "message": "...", "requestId": "..." }` with HTTP
+//! 401 and the same request id in `x-request-id`.
 //!
 //! # Device attribution
 //!
@@ -43,11 +45,20 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use super::{
-    jwt::{verify, JwtError},
+    jwt::{verify, JwtError, SERVICE_DEVICE_ID},
     oidc::{self, OidcAuthenticator},
     rate_limit::RateLimitDecision,
     SharedState,
 };
+
+const LOCAL_DEBUG_TOKEN_ENV: &str = "COGNIA_LOCAL_DEBUG_TOKEN";
+const LOCAL_DEBUG_ACCOUNT_ID: &str = "local_acct_a";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PrincipalRequirement {
+    DeviceOrService,
+    Service,
+}
 
 // ---------------------------------------------------------------------------
 // Device context (injected into request extensions)
@@ -63,6 +74,15 @@ pub struct DeviceContext {
     /// handlers that may need to inspect the scope.
     #[allow(dead_code)]
     pub scope: String,
+    /// OAuth/OIDC permission scopes granted to this caller. Legacy paired
+    /// device/service tokens leave this empty and use their existing device
+    /// permission gate; OIDC routes enforce these values explicitly.
+    pub granted_scopes: Vec<String>,
+    /// Canonical remote-command capabilities loaded by the authenticating
+    /// adapter. `Some`, including `Some(Vec::new())`, is an authoritative
+    /// authorization snapshot. `None` lets adapters that have not yet loaded
+    /// a snapshot fall back to the shared security store.
+    pub authorization_capabilities: Option<Vec<String>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +128,39 @@ pub async fn require_device_jwt(
             }
         },
     };
-    authenticate_request(state, oidc, request, next).await
+    let local_debug_token = std::env::var(LOCAL_DEBUG_TOKEN_ENV)
+        .ok()
+        .filter(|token| token.len() >= 32);
+    authenticate_request(
+        state,
+        oidc,
+        local_debug_token,
+        PrincipalRequirement::DeviceOrService,
+        request,
+        next,
+    )
+    .await
+}
+
+/// Authenticate the loopback Headless plane with a service-scoped principal.
+/// Device-scoped legacy JWTs and OIDC identities are never accepted here.
+pub async fn require_service_jwt(
+    State(state): State<SharedState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let local_debug_token = std::env::var(LOCAL_DEBUG_TOKEN_ENV)
+        .ok()
+        .filter(|token| token.len() >= 32);
+    authenticate_request(
+        state,
+        None,
+        local_debug_token,
+        PrincipalRequirement::Service,
+        request,
+        next,
+    )
+    .await
 }
 
 /// Operator-only surface for metrics and local diagnostics. The real socket
@@ -192,6 +244,8 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 async fn authenticate_request(
     state: SharedState,
     oidc: Option<Arc<OidcAuthenticator>>,
+    local_debug_token: Option<String>,
+    requirement: PrincipalRequirement,
     mut request: Request,
     next: Next,
 ) -> Response {
@@ -214,10 +268,15 @@ async fn authenticate_request(
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(str::to_owned);
 
-    let legacy_query_tokens_enabled = std::env::var("COGNIA_ALLOW_LEGACY_QUERY_TOKEN")
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
-    let query_token: Option<String> = legacy_query_tokens_enabled
+    // Node's WHATWG WebSocket cannot attach an Authorization header. Admit a
+    // query token only on loopback Headless sockets. Canonical public sockets
+    // keep using short-lived, single-use tickets.
+    let internal_service_socket = peer_is_loopback
+        && matches!(
+            request.uri().path(),
+            "/internal/bridge" | "/internal/events"
+        );
+    let query_token: Option<String> = internal_service_socket
         .then(|| {
             request
                 .uri()
@@ -238,68 +297,127 @@ async fn authenticate_request(
         }
     };
 
+    // Local development may replace the persistent service JWT with one
+    // process-scoped random token. Keep the bypass narrower than the normal
+    // service principal: only verified loopback peers and service-only routes
+    // are eligible. The token never authenticates the legacy/device API.
+    let local_debug_route = request.uri().path().starts_with("/internal/")
+        || request.uri().path() == "/ide/content"
+        || request.uri().path().starts_with("/ide/content/");
+    if local_debug_route
+        && local_debug_token
+            .as_deref()
+            .is_some_and(|expected| constant_time_eq(token.as_bytes(), expected.as_bytes()))
+    {
+        if !peer_is_loopback {
+            return error_response(
+                "local_debug_token_remote",
+                "local debug tokens are only honored from loopback",
+            );
+        }
+        request.extensions_mut().insert(DeviceContext {
+            device_id: SERVICE_DEVICE_ID.to_string(),
+            account_id: LOCAL_DEBUG_ACCOUNT_ID.to_string(),
+            scope: "service".to_string(),
+            granted_scopes: Vec::new(),
+            authorization_capabilities: None,
+        });
+        return next.run(request).await;
+    }
+
     // ── 1b. OIDC mode (ADR-0059 cloud/headless) ──────────────────────────────
     // Once configured, OIDC is authoritative. Falling through to a self-issued
     // HS256 token would let a legacy paired device bypass tenant authentication
     // and would turn a JWKS outage into an authentication downgrade.
-    if let Some(authn) = oidc.as_ref() {
-        match authn.authenticate(&token).await {
-            Ok(claims) => {
-                let ctx = oidc_device_context(&claims);
-                if state.deny_list.is_revoked(&ctx.device_id) {
-                    return error_response("device_revoked", "this device has been revoked");
+    if requirement == PrincipalRequirement::DeviceOrService {
+        if let Some(authn) = oidc.as_ref() {
+            match authn.authenticate(&token).await {
+                Ok(claims) => {
+                    let ctx = oidc_device_context(&claims);
+                    if state.deny_list.is_revoked(&ctx.device_id) {
+                        return error_response("device_revoked", "this device has been revoked");
+                    }
+                    request.extensions_mut().insert(ctx);
+                    return next.run(request).await;
                 }
-                request.extensions_mut().insert(ctx);
-                return next.run(request).await;
-            }
-            Err(e) => {
-                log::warn!("companion-api oidc: token rejected: {e}");
-                return error_response(
-                    "oidc_authentication_failed",
-                    "the identity provider could not authenticate this request",
-                );
+                Err(e) => {
+                    log::warn!("companion-api oidc: token rejected: {e}");
+                    return error_response(
+                        "oidc_authentication_failed",
+                        "the identity provider could not authenticate this request",
+                    );
+                }
             }
         }
     }
 
     // ── 2. Verify JWT ───────────────────────────────────────────────────────
     let secret = state.secret.read().clone();
-    let claims = match verify(&secret, &token, "device") {
-        Ok(c) => c,
-        Err(JwtError::WrongScope { .. }) => {
-            // Not a device token — it may be the headless brain's service
-            // token, which we honor ONLY from loopback.
-            match verify(&secret, &token, "service") {
-                Ok(c) => {
-                    if !peer_is_loopback {
-                        return error_response(
-                            "service_token_remote",
-                            "service-scope tokens are only honored from loopback",
-                        );
-                    }
-                    c
-                }
-                Err(_) => {
-                    return error_response(
-                        "wrong_scope",
-                        "JWT scope must be \"device\" or \"service\"",
-                    );
-                }
+    let claims = if requirement == PrincipalRequirement::Service {
+        if !peer_is_loopback {
+            return error_response(
+                "service_token_remote",
+                "service-scope tokens are only honored from loopback",
+            );
+        }
+        match verify(&secret, &token, "service") {
+            Ok(claims) => claims,
+            Err(JwtError::WrongScope { .. }) => {
+                return error_response("wrong_scope", "JWT scope must be \"service\"");
+            }
+            Err(JwtError::WrongAccount { .. }) => {
+                return error_response("wrong_account", "JWT account claim does not match");
+            }
+            Err(JwtError::InvalidAccountId(_)) => {
+                return error_response("malformed_token", "JWT account claim is malformed");
+            }
+            Err(JwtError::Invalid(ref inner)) => {
+                use jsonwebtoken::errors::ErrorKind;
+                let code = match inner.kind() {
+                    ErrorKind::ExpiredSignature => "expired_token",
+                    _ => "invalid_signature",
+                };
+                return error_response(code, &inner.to_string());
             }
         }
-        Err(JwtError::WrongAccount { .. }) => {
-            return error_response("wrong_account", "JWT account claim does not match");
-        }
-        Err(JwtError::InvalidAccountId(_)) => {
-            return error_response("malformed_token", "JWT account claim is malformed");
-        }
-        Err(JwtError::Invalid(ref inner)) => {
-            use jsonwebtoken::errors::ErrorKind;
-            let code = match inner.kind() {
-                ErrorKind::ExpiredSignature => "expired_token",
-                _ => "invalid_signature",
-            };
-            return error_response(code, &inner.to_string());
+    } else {
+        match verify(&secret, &token, "device") {
+            Ok(c) => c,
+            Err(JwtError::WrongScope { .. }) => {
+                // Not a device token — it may be the headless brain's service
+                // token, which we honor ONLY from loopback.
+                match verify(&secret, &token, "service") {
+                    Ok(c) => {
+                        if !peer_is_loopback {
+                            return error_response(
+                                "service_token_remote",
+                                "service-scope tokens are only honored from loopback",
+                            );
+                        }
+                        c
+                    }
+                    Err(_) => {
+                        return error_response(
+                            "wrong_scope",
+                            "JWT scope must be \"device\" or \"service\"",
+                        );
+                    }
+                }
+            }
+            Err(JwtError::WrongAccount { .. }) => {
+                return error_response("wrong_account", "JWT account claim does not match");
+            }
+            Err(JwtError::InvalidAccountId(_)) => {
+                return error_response("malformed_token", "JWT account claim is malformed");
+            }
+            Err(JwtError::Invalid(ref inner)) => {
+                use jsonwebtoken::errors::ErrorKind;
+                let code = match inner.kind() {
+                    ErrorKind::ExpiredSignature => "expired_token",
+                    _ => "invalid_signature",
+                };
+                return error_response(code, &inner.to_string());
+            }
         }
     };
 
@@ -334,6 +452,8 @@ async fn authenticate_request(
         device_id: device_id.clone(),
         account_id: account_id.clone(),
         scope: claims.scope.clone(),
+        granted_scopes: Vec::new(),
+        authorization_capabilities: None,
     });
 
     // ── 6. Forward request ──────────────────────────────────────────────────
@@ -368,14 +488,20 @@ async fn authenticate_request(
 /// Wave 3.1: unified flat envelope `{ code, message, details? }`.
 fn error_response(code: &str, message: &str) -> Response {
     super::metrics::record_auth_failure();
-    (
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let mut response = (
         StatusCode::UNAUTHORIZED,
         Json(json!({
             "code": code,
             "message": message,
+            "requestId": request_id.clone(),
         })),
     )
-        .into_response()
+        .into_response();
+    if let Ok(value) = HeaderValue::from_str(&request_id) {
+        response.headers_mut().insert("x-request-id", value);
+    }
+    response
 }
 
 /// Map validated Logto claims (ADR-0059 cloud mode) onto a [`DeviceContext`].
@@ -390,6 +516,8 @@ fn oidc_device_context(claims: &oidc::OidcClaims) -> DeviceContext {
             .clone()
             .unwrap_or_else(|| claims.sub.clone()),
         scope: "oidc".to_string(),
+        granted_scopes: claims.scopes.clone(),
+        authorization_capabilities: None,
     }
 }
 
@@ -397,11 +525,9 @@ fn oidc_device_context(claims: &oidc::OidcClaims) -> DeviceContext {
 // Pre-auth rate limit (defense in depth on the public_routes surface)
 // ---------------------------------------------------------------------------
 
-/// Axum middleware that token-buckets requests on the pre-auth pair surface
-/// by source IP. Wired into `server::build_router` for the three POST pair
-/// routes (`/auth/pair/issue`, `/auth/pair`, `/auth/pair/redeem-code`) so an
-/// unauthenticated LAN peer cannot brute-force the 6-digit pair-code
-/// keyspace.
+/// Axum middleware that token-buckets canonical authentication requests by
+/// source IP so an unauthenticated LAN peer cannot exhaust challenge,
+/// registration, token, or socket-ticket resources.
 ///
 /// Uses [`super::pre_auth_rate_limiter`] — a process-global limiter with
 /// `5 burst, 20 req/min` so the many `CompanionState` test constructors
@@ -414,8 +540,8 @@ pub async fn pre_auth_rate_limit(
     request: Request,
     next: Next,
 ) -> Response {
-    // Loopback is the desktop talking to itself (e.g. the QR generator
-    // calling `/auth/pair/issue`) — no realistic brute-force surface, and
+    // Loopback is the desktop talking to itself — no realistic brute-force
+    // surface, and
     // gating it would deplete the shared bucket during integration tests
     // that issue many requests from 127.0.0.1. The threat model targets
     // *other-host* peers reachable when `bind_loopback_only=false`.
@@ -428,11 +554,17 @@ pub async fn pre_auth_rate_limit(
     match limiter.check(&key) {
         RateLimitDecision::Accept => next.run(request).await,
         RateLimitDecision::Reject { retry_after } => {
+            let request_id = uuid::Uuid::new_v4().to_string();
             let mut resp = (
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(json!({
-                    "code": "rate_limited",
-                    "message": "too many pair attempts, slow down",
+                    "error": {
+                        "code": "rate_limited",
+                        "message": "too many authentication attempts, slow down",
+                        "requestId": request_id,
+                        "retryable": true,
+                        "details": {},
+                    },
                 })),
             )
                 .into_response();
@@ -455,8 +587,7 @@ mod tests {
     use super::*;
     use crate::companion_api::{
         deny_list::DenyList,
-        jwt::{issue_device_jwt, issue_pair_jwt, issue_service_jwt},
-        redemption_lru::RedemptionLru,
+        jwt::{issue_device_jwt, issue_service_jwt},
         CompanionState, SharedState,
     };
     use axum::{
@@ -492,8 +623,6 @@ mod tests {
         use crate::companion_api::{event_bus::EventBus, idempotency::IdempotencyCache};
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -511,7 +640,11 @@ mod tests {
 
     /// Minimal handler that echoes the device_id from the extension.
     async fn echo_device(Extension(ctx): Extension<DeviceContext>) -> impl IntoResponse {
-        Json(json!({ "device_id": ctx.device_id, "account_id": ctx.account_id }))
+        Json(json!({
+            "device_id": ctx.device_id,
+            "account_id": ctx.account_id,
+            "scope": ctx.scope,
+        }))
     }
 
     fn build_router(state: SharedState) -> Router {
@@ -519,6 +652,94 @@ mod tests {
             .route("/protected", get(echo_device))
             .layer(from_fn_with_state(state.clone(), require_device_jwt))
             .with_state(state)
+    }
+
+    fn build_service_router(state: SharedState) -> Router {
+        Router::new()
+            .route("/protected", get(echo_device))
+            .layer(from_fn_with_state(state.clone(), require_service_jwt))
+            .with_state(state)
+    }
+
+    fn build_local_debug_router(state: SharedState, token: &'static str) -> Router {
+        Router::new()
+            .route("/internal/test", get(echo_device))
+            .route("/api/test", get(echo_device))
+            .layer(from_fn(move |req, next| {
+                let state = state.clone();
+                async move {
+                    authenticate_request(
+                        state,
+                        None,
+                        Some(token.to_string()),
+                        PrincipalRequirement::DeviceOrService,
+                        req,
+                        next,
+                    )
+                    .await
+                }
+            }))
+    }
+
+    fn local_debug_request(path: &str, ip: &str) -> Request<Body> {
+        let mut req = Request::builder()
+            .uri(path)
+            .header(
+                "Authorization",
+                "Bearer local-debug-token-with-at-least-32-bytes",
+            )
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(
+            format!("{ip}:54321").parse::<SocketAddr>().unwrap(),
+        ));
+        req
+    }
+
+    #[tokio::test]
+    async fn local_debug_token_authenticates_loopback_internal_requests_as_service() {
+        let router =
+            build_local_debug_router(test_state(), "local-debug-token-with-at-least-32-bytes");
+        let response = router
+            .oneshot(local_debug_request("/internal/test", "127.0.0.1"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(
+            body["device_id"],
+            crate::companion_api::jwt::SERVICE_DEVICE_ID
+        );
+        assert_eq!(body["scope"], "service");
+    }
+
+    #[tokio::test]
+    async fn local_debug_token_is_rejected_for_remote_internal_requests() {
+        let router =
+            build_local_debug_router(test_state(), "local-debug-token-with-at-least-32-bytes");
+        let response = router
+            .oneshot(local_debug_request("/internal/test", "192.0.2.50"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            body_json(response).await["code"],
+            "local_debug_token_remote"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_debug_token_does_not_authenticate_public_device_routes() {
+        let router =
+            build_local_debug_router(test_state(), "local-debug-token-with-at-least-32-bytes");
+        let response = router
+            .oneshot(local_debug_request("/api/test", "127.0.0.1"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     async fn body_json(resp: axum::response::Response) -> serde_json::Value {
@@ -530,12 +751,6 @@ mod tests {
 
     fn device_jwt(device_id: &str) -> String {
         issue_device_jwt(SECRET, device_id, ACCOUNT_ID).expect("issue device jwt")
-    }
-
-    fn pair_jwt() -> String {
-        issue_pair_jwt(SECRET, ACCOUNT_ID)
-            .expect("issue pair jwt")
-            .0
     }
 
     // ── Happy path ───────────────────────────────────────────────────────────
@@ -569,8 +784,15 @@ mod tests {
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 401);
+        let request_id = resp
+            .headers()
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok())
+            .expect("authentication errors expose a request id")
+            .to_string();
         let body = body_json(resp).await;
         assert_eq!(body["code"], "missing_authorization");
+        assert_eq!(body["requestId"], request_id);
     }
 
     // ── Malformed JWT ────────────────────────────────────────────────────────
@@ -608,7 +830,6 @@ mod tests {
             scope: "device".to_string(),
             iat: now - 400,
             exp: now - 300,
-            jti: None,
             device_id: Some("expired-device".to_string()),
             account_id: Some(ACCOUNT_ID.to_string()),
         };
@@ -635,13 +856,30 @@ mod tests {
     // ── Wrong scope ──────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn pair_scope_jwt_returns_401_wrong_scope() {
+    async fn unsupported_scope_jwt_returns_401_wrong_scope() {
+        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let claims = crate::companion_api::jwt::Claims {
+            scope: "unsupported".to_string(),
+            iat: now,
+            exp: now + 60,
+            device_id: None,
+            account_id: Some(ACCOUNT_ID.to_string()),
+        };
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(SECRET),
+        )
+        .expect("encode unsupported scope");
         let state = test_state();
         let router = build_router(state);
-        let pair = pair_jwt();
         let req = Request::builder()
             .uri("/protected")
-            .header("Authorization", format!("Bearer {pair}"))
+            .header("Authorization", format!("Bearer {token}"))
             .body(Body::empty())
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
@@ -755,7 +993,9 @@ mod tests {
                     "Retry-After should be a positive integer"
                 );
                 let body = body_json(resp).await;
-                assert_eq!(body["code"], "rate_limited");
+                assert_eq!(body["error"]["code"], "rate_limited");
+                assert_eq!(body["error"]["retryable"], true);
+                assert!(body["error"]["requestId"].is_string());
                 saw_429 = true;
                 break;
             }
@@ -794,6 +1034,36 @@ mod tests {
             body["device_id"],
             crate::companion_api::jwt::SERVICE_DEVICE_ID
         );
+    }
+
+    #[tokio::test]
+    async fn service_only_middleware_rejects_loopback_device_jwt() {
+        let jwt = device_jwt("device-on-loopback");
+        let mut request = Request::builder()
+            .uri("/protected")
+            .header("Authorization", format!("Bearer {jwt}"))
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:54321".parse::<SocketAddr>().unwrap(),
+        ));
+
+        let response = build_service_router(test_state())
+            .oneshot(request)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(body_json(response).await["code"], "wrong_scope");
+    }
+
+    #[tokio::test]
+    async fn service_only_middleware_accepts_loopback_service_jwt() {
+        let response = build_service_router(test_state())
+            .oneshot(service_request_from(Some("127.0.0.1")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_json(response).await["scope"], "service");
     }
 
     #[tokio::test]
@@ -860,7 +1130,17 @@ mod tests {
             .layer(from_fn(move |req, next| {
                 let state = state.clone();
                 let authn = authn.clone();
-                async move { authenticate_request(state, Some(authn), req, next).await }
+                async move {
+                    authenticate_request(
+                        state,
+                        Some(authn),
+                        None,
+                        PrincipalRequirement::DeviceOrService,
+                        req,
+                        next,
+                    )
+                    .await
+                }
             }))
     }
 

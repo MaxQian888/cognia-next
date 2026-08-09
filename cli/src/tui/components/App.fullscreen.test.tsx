@@ -161,6 +161,29 @@ describe("App — fullscreen layout", () => {
     await waitFor(() => expect(container.textContent).toContain("hello fullscreen"))
   })
 
+  it("lets an open overlay occupy the remaining fullscreen viewport", () => {
+    const { screen } = fakeScreen()
+    const { create } = fakeSession()
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        layoutCapability={FULLSCREEN_CAP}
+        screenOut={screen}
+      />
+    )
+
+    act(() => __fireInput("/"))
+    for (const ch of "help") act(() => __fireInput(ch))
+    act(() => __fireInput("", { return: true }))
+
+    const overlayRegion = container.querySelector('[data-testid="fullscreen-overlay-region"]')
+    expect(overlayRegion).not.toBeNull()
+    expect(overlayRegion).toHaveAttribute("data-flex-grow", "1")
+    expect(overlayRegion).toHaveTextContent("Commands")
+  })
+
   it("scroll mode captures the wheel via SGR tracking without inserting the escape", () => {
     const { screen, writes } = fakeScreen()
     const { create } = fakeSession()

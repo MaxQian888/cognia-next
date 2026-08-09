@@ -1,18 +1,19 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import { ensurePetProfile, hatchPet } from "./init-pet"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getPetProfile } from "@/lib/db/pet"
 
 // Cold fake-indexeddb open of the full schema can exceed jest's 5s default
 // under parallel suite load — same allowance as the other Dexie-cold suites.
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().petProfile.clear()
 }, 30_000)
+
+afterAll(dbFixture.dispose)
 
 describe("ensurePetProfile", () => {
   it("creates a fresh egg the first time", async () => {

@@ -1,10 +1,9 @@
-//! WebSocket event bridge — `GET /ws/v1/events`.
+//! WebSocket event bridge — `GET /ws/events`.
 //!
 //! # Connection lifecycle
 //!
-//! 1. Client opens `wss://<host>/ws/v1/events?token=<jwt>&since=<seq>`.
-//!    The `require_device_jwt` middleware verifies the JWT and injects
-//!    [`DeviceContext`] into request extensions *before* this handler runs.
+//! 1. A device redeems a one-shot ticket at `wss://<host>/ws/events`, while
+//!    the loopback headless brain uses `/internal/events?token=<service-jwt>`.
 //! 2. If `since` is too old, the server sends `{"type":"resync_required"}` and
 //!    closes the connection immediately.
 //! 3. Any buffered frames with `seq > since` are replayed in order.
@@ -26,7 +25,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::time::{interval, Duration, Instant};
 
-use super::{event_bus::SubscribeResult, middleware::DeviceContext, SharedState};
+use super::{event_bus::SubscribeResult, SharedState};
 
 // ---------------------------------------------------------------------------
 // Timing constants
@@ -45,14 +44,12 @@ const IDLE_TIMEOUT_SECS: u64 = 90;
 /// Query parameters accepted by the WS upgrade endpoint.
 #[derive(Debug, Deserialize)]
 pub struct WsParams {
-    /// Last sequence number the client received.  Omit (or pass `0`) for a
-    /// fresh subscription with no replay.
+    pub ticket: String,
     pub since: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct WsV2Params {
-    pub ticket: String,
+pub struct InternalWsParams {
     pub since: Option<u64>,
 }
 
@@ -60,73 +57,38 @@ pub struct WsV2Params {
 // Handler
 // ---------------------------------------------------------------------------
 
-/// Axum handler for `GET /ws/v1/events`.
-///
-/// The `require_device_jwt` middleware runs before this handler and injects
-/// [`DeviceContext`] into the request extensions.  We read it from the
-/// extensions *before* calling `ws.on_upgrade` because axum's
-/// `WebSocketUpgrade` extractor consumes the request parts and extensions are
-/// not forwarded into the async closure.
+/// Canonical Companion event stream. The 60-second socket ticket is path- and
+/// audience-bound, single-use, and re-checks the device's live revocation
+/// state in SQLite before the upgrade is accepted.
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<WsParams>,
     State(state): State<SharedState>,
-    request: axum::extract::Request,
-) -> Response {
-    // Read DeviceContext before the upgrade consumes the request.
-    let device_id = request
-        .extensions()
-        .get::<DeviceContext>()
-        .map(|ctx| ctx.device_id.clone())
-        .unwrap_or_default();
-
-    upgrade_events_ws(ws, params.since, None, device_id, state)
-}
-
-/// Companion API v2 event stream. The 60-second socket ticket is path- and
-/// audience-bound, single-use, and re-checks the device's live revocation
-/// state in SQLite before the upgrade is accepted.
-pub async fn ws_v2_handler(
-    ws: WebSocketUpgrade,
-    Query(params): Query<WsV2Params>,
-    State(state): State<SharedState>,
 ) -> Response {
     let Some(store) = super::security_store::security_store() else {
-        return (
+        return super::api::public_error_response(
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "error": {
-                    "code": "security_store_unavailable",
-                    "message": "the security database is unavailable",
-                    "requestId": uuid::Uuid::new_v4().to_string(),
-                    "retryable": true,
-                    "details": {}
-                }
-            })),
-        )
-            .into_response();
+            "security_store_unavailable",
+            "the security database is unavailable",
+            true,
+            json!({}),
+        );
     };
     let identity = match store.redeem_socket_ticket(
         &params.ticket,
-        "/ws/v2/events",
+        "/ws/events",
         "events",
         unix_time_secs(),
     ) {
         Ok(identity) => identity,
         Err(_) => {
-            return (
+            return super::api::public_error_response(
                 StatusCode::UNAUTHORIZED,
-                Json(json!({
-                    "error": {
-                        "code": "invalid_socket_ticket",
-                        "message": "the socket ticket is invalid or already used",
-                        "requestId": uuid::Uuid::new_v4().to_string(),
-                        "retryable": false,
-                        "details": {}
-                    }
-                })),
-            )
-                .into_response();
+                "invalid_socket_ticket",
+                "the socket ticket is invalid or already used",
+                false,
+                json!({}),
+            );
         }
     };
     upgrade_events_ws(
@@ -134,6 +96,49 @@ pub async fn ws_v2_handler(
         params.since,
         Some(identity.tenant_id),
         identity.device_id,
+        state,
+    )
+}
+
+/// Headless brain event stream. Authentication is supplied by the internal
+/// route's JWT middleware; unlike the public device stream this socket uses a
+/// loopback-only service token because the Node brain has no device key/DPoP
+/// identity and cannot attach an Authorization header to a WHATWG WebSocket.
+pub async fn internal_ws_handler(
+    ws: WebSocketUpgrade,
+    Query(params): Query<InternalWsParams>,
+    State(state): State<SharedState>,
+    request: axum::extract::Request,
+) -> Response {
+    let Some(context) = request
+        .extensions()
+        .get::<super::middleware::DeviceContext>()
+        .cloned()
+    else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "error": "missing_device_context",
+                "message": "JWT middleware did not run"
+            })),
+        )
+            .into_response();
+    };
+    if context.scope != "service" {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "service_scope_required",
+                "message": "the internal event stream requires a headless service token"
+            })),
+        )
+            .into_response();
+    }
+    upgrade_events_ws(
+        ws,
+        params.since,
+        Some(context.account_id),
+        context.device_id,
         state,
     )
 }
@@ -173,8 +178,12 @@ async fn handle_socket(
         .as_millis() as i64;
 
     // 1. Subscribe to the event bus (or bail if cursor is too old).
-    let (mut receiver, replay) = match state.event_bus.subscribe(since, now_ms) {
-        SubscribeResult::Ok { receiver, replay } => (receiver, replay),
+    let (mut receiver, replay, replay_cursor) = match state.event_bus.subscribe(since, now_ms) {
+        SubscribeResult::Ok {
+            receiver,
+            replay,
+            replay_cursor,
+        } => (receiver, replay, replay_cursor),
         SubscribeResult::ResyncRequired => {
             let msg = serde_json::to_string(&json!({
                 "type": "resync_required",
@@ -217,6 +226,17 @@ async fn handle_socket(
                 log::warn!("companion-api ws: failed to serialize replay frame: {e}");
             }
         }
+    }
+
+    // Explicit replay/live boundary. `onopen` only proves that the transport
+    // upgraded; clients become ready after this marker and an authoritative
+    // sync. Older clients safely ignore the unknown control frame.
+    if socket
+        .send(Message::Text(stream_ready_text(replay_cursor).into()))
+        .await
+        .is_err()
+    {
+        return;
     }
 
     // 3. Enter the live-streaming loop.
@@ -323,6 +343,14 @@ async fn handle_socket(
     }
 }
 
+fn stream_ready_text(cursor: u64) -> String {
+    serde_json::to_string(&json!({
+        "type": "stream_ready",
+        "cursor": cursor,
+    }))
+    .unwrap_or_else(|_| r#"{"type":"stream_ready","cursor":0}"#.to_owned())
+}
+
 fn revocation_targets(
     frame: &super::event_bus::EventFrame,
     tenant_id: Option<&str>,
@@ -349,8 +377,7 @@ fn unix_time_secs() -> i64 {
 mod tests {
     use super::*;
     use crate::companion_api::{
-        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
-        redemption_lru::RedemptionLru, CompanionState,
+        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache, CompanionState,
     };
     use parking_lot::RwLock;
     use serde_json::{json, Value};
@@ -360,8 +387,6 @@ mod tests {
         let bus = EventBus::new();
         let state = Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -397,7 +422,9 @@ mod tests {
 
         let result = state.event_bus.subscribe(None, now_ms);
         let mut receiver = match result {
-            SubscribeResult::Ok { replay, receiver } => {
+            SubscribeResult::Ok {
+                replay, receiver, ..
+            } => {
                 assert!(replay.is_empty(), "no replay expected for since=None");
                 receiver
             }
@@ -427,6 +454,12 @@ mod tests {
         assert!(!revocation_targets(&frame, Some("tenant-b"), "device-a"));
         assert!(!revocation_targets(&frame, Some("tenant-a"), "device-b"));
         assert!(!revocation_targets(&frame, None, "device-a"));
+    }
+
+    #[test]
+    fn stream_ready_frame_carries_the_replay_boundary() {
+        let frame: Value = serde_json::from_str(&stream_ready_text(42)).expect("valid JSON");
+        assert_eq!(frame, json!({ "type": "stream_ready", "cursor": 42 }));
     }
 
     // ── subscribe with valid `since` → replay frames in order ────────────────

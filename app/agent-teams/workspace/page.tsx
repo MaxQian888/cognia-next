@@ -49,6 +49,8 @@ import { AgentTeamOverview } from "@/components/agent/workspace/overview"
 import { AgentTeamTasks } from "@/components/agent/workspace/tasks"
 import { AgentTeamChat } from "@/components/agent/workspace/chat"
 import { AgentTeamActivity } from "@/components/agent/workspace/activity"
+import { DurableOperations } from "@/components/agent/workspace/durable-operations"
+import { spawnDefaultTerminal } from "@/lib/terminal/spawn-default"
 import { WorktreesPanel } from "@/components/agent/workspace/worktrees-panel"
 import { AgentTeamEditor } from "@/components/agent/workspace/editor/agent-team-editor"
 import { AgentTeamMembers } from "@/components/agent/workspace/members"
@@ -77,6 +79,8 @@ import { resolveLinkPath } from "@/lib/terminal/terminal-links"
 import { deferProjectEditorOpen, openInProjectEditor } from "@/lib/files/project-editor-bridge"
 import type { ProjectFileReference } from "@/lib/files/project-file-reference"
 import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
+import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import type {
   AgentTeamEvent,
   AgentTeamMessage,
@@ -89,6 +93,7 @@ const ALL_TABS = [
   "tasks",
   "chat",
   "activity",
+  "operations",
   "worktrees",
   "editor",
   "members",
@@ -159,6 +164,8 @@ function AgentTeamWorkspaceInner() {
   const selectedEditorRoot = useProjectEditorSessionStore((s) =>
     teamId ? s.sessions[`team:${teamId}`]?.rootKey : undefined
   )
+  const openTerminalPanel = useTerminalStore((s) => s.setPanelOpen)
+  const openBrowserPanel = useArtifactDockLayoutStore((s) => s.openBrowser)
 
   const externalAgent = useExternalAgent()
   const { setActiveAgent, executeStreaming } = externalAgent
@@ -496,6 +503,26 @@ function AgentTeamWorkspaceInner() {
                     report={team.executionReport}
                     team={team}
                     teammates={teammates}
+                  />
+                )}
+                {tab === "operations" && (
+                  <DurableOperations
+                    team={team}
+                    onOpenEditor={() => setWorkspaceTab("editor")}
+                    onOpenTerminal={(workspacePath) => {
+                      openTerminalPanel(true)
+                      void spawnDefaultTerminal({
+                        projectId: team.projectId ?? null,
+                        ...(workspacePath ? { cwdOverride: workspacePath } : {}),
+                      }).then((outcome) => {
+                        if (outcome.kind === "error") toast.error(outcome.message)
+                      })
+                    }}
+                    onOpenBrowser={openBrowserPanel}
+                    onMigrate={(config) => {
+                      updateTeam(team.id, { config })
+                      toast.success(t("operations.migration.migrated"))
+                    }}
                   />
                 )}
                 {tab === "worktrees" && <WorktreesPanel team={team} />}

@@ -24,7 +24,7 @@ import {
   runSyncDown,
   snapshotSyncStates,
 } from "./companion-sync"
-import type { SyncOutcome, SyncableTable } from "./types"
+import { SYNCABLE_TABLE_NAMES, type SyncOutcome, type SyncableTable } from "./types"
 
 function makeOkOutcome(table: SyncableTable, applied = 1, nextSince = 1): SyncOutcome {
   return { ok: true, result: { table, applied, nextSince } }
@@ -52,10 +52,9 @@ beforeEach(() => {
 })
 
 describe("SYNC_HANDLER_TABLES registry", () => {
-  it("registers the terminalHistory handler (change point c)", () => {
-    // Guards against a TS-only sync addition that never wires its handler into
-    // DEFAULT_HANDLERS — the orchestrator would then silently skip the table.
-    expect(SYNC_HANDLER_TABLES).toContain("terminalHistory")
+  it("has exactly one handler for every governed sync table", () => {
+    expect(new Set(SYNC_HANDLER_TABLES)).toEqual(new Set(SYNCABLE_TABLE_NAMES))
+    expect(SYNC_HANDLER_TABLES).toHaveLength(SYNCABLE_TABLE_NAMES.length)
   })
 })
 

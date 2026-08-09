@@ -1,58 +1,46 @@
 "use client"
 
-/**
- * External Agent Plan Component
- *
- * Displays the execution plan from ACP agents.
- * @see https://agentclientprotocol.com/protocol/agent-plan
- */
+/** Displays item-based or document-based execution plans from ACP agents. */
 
 import { CheckCircle2, Circle, Loader2, SkipForward } from "lucide-react"
 import { useTranslations } from "next-intl"
+
+import {
+  Plan,
+  PlanAction,
+  PlanContent,
+  PlanDescription,
+  PlanHeader,
+  PlanTitle,
+  PlanTrigger,
+} from "@/components/ai-elements/plan"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Progress } from "@/components/ui/progress"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import type { AcpPlanEntry, ExternalAgentPlanDocument } from "@/types/agent/external-agent"
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface ExternalAgentPlanProps {
-  /** Plan entries from the agent */
   entries: AcpPlanEntry[]
-  /** Current step index (0-based) */
   currentStep?: number
-  /** ACP identified file/Markdown plan to display when the plan is not item-based. */
   document?: ExternalAgentPlanDocument | null
-  /** Whether to show compact view */
   compact?: boolean
-  /** Custom class name */
   className?: string
 }
-
-// ============================================================================
-// Status Icon Component
-// ============================================================================
 
 function StatusIcon({ status }: { status: AcpPlanEntry["status"] }) {
   switch (status) {
     case "completed":
-      return <CheckCircle2 className="h-4 w-4 text-green-500" />
+      return <CheckCircle2 className="size-4 text-green-500" />
     case "in_progress":
-      return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+      return <Loader2 className="size-4 animate-spin text-blue-500" />
     case "skipped":
-      return <SkipForward className="h-4 w-4 text-muted-foreground" />
+      return <SkipForward className="size-4 text-muted-foreground" />
     case "pending":
     default:
-      return <Circle className="h-4 w-4 text-muted-foreground" />
+      return <Circle className="size-4 text-muted-foreground" />
   }
 }
-
-// ============================================================================
-// Priority Badge Component
-// ============================================================================
 
 function PriorityBadge({ priority }: { priority: AcpPlanEntry["priority"] }) {
   const variants: Record<AcpPlanEntry["priority"], "default" | "secondary" | "destructive"> = {
@@ -68,18 +56,17 @@ function PriorityBadge({ priority }: { priority: AcpPlanEntry["priority"] }) {
   )
 }
 
-// ============================================================================
-// Plan Entry Component
-// ============================================================================
-
-interface PlanEntryProps {
+function PlanEntry({
+  entry,
+  index,
+  isActive,
+  compact,
+}: {
   entry: AcpPlanEntry
   index: number
   isActive: boolean
   compact?: boolean
-}
-
-function PlanEntry({ entry, index, isActive, compact }: PlanEntryProps) {
+}) {
   return (
     <div
       className={cn(
@@ -90,10 +77,10 @@ function PlanEntry({ entry, index, isActive, compact }: PlanEntryProps) {
       )}
     >
       <div className="flex items-center gap-2 pt-0.5">
-        <span className="text-xs text-muted-foreground w-4">{index + 1}</span>
+        <span className="w-4 text-xs text-muted-foreground">{index + 1}</span>
         <StatusIcon status={entry.status} />
       </div>
-      <div className="flex-1 min-w-0">
+      <div className="min-w-0 flex-1">
         <p
           className={cn(
             "text-sm",
@@ -104,7 +91,7 @@ function PlanEntry({ entry, index, isActive, compact }: PlanEntryProps) {
           {entry.content}
         </p>
         {!compact && (
-          <div className="flex items-center gap-2 mt-1">
+          <div className="mt-1 flex items-center gap-2">
             <PriorityBadge priority={entry.priority} />
           </div>
         )}
@@ -112,10 +99,6 @@ function PlanEntry({ entry, index, isActive, compact }: PlanEntryProps) {
     </div>
   )
 }
-
-// ============================================================================
-// Main Component
-// ============================================================================
 
 export function ExternalAgentPlan({
   entries,
@@ -126,56 +109,68 @@ export function ExternalAgentPlan({
 }: ExternalAgentPlanProps) {
   const t = useTranslations("externalAgent")
 
-  if ((!entries || entries.length === 0) && !document) {
-    return null
-  }
+  if ((!entries || entries.length === 0) && !document) return null
 
   if (document) {
     const value = document.kind === "file" ? document.uri : document.content
     return (
-      <div className={cn("rounded-lg border bg-card", className)}>
-        <div className="border-b p-3">
-          <h4 className="text-sm font-medium">{t("executionPlan")}</h4>
-        </div>
-        <pre
-          className={cn(
-            "max-h-[300px] overflow-auto whitespace-pre-wrap break-all p-3 text-xs",
-            compact && "max-h-[160px]"
-          )}
-        >
-          {value}
-        </pre>
-      </div>
+      <Plan className={className} defaultOpen>
+        <PlanHeader className="border-b p-3">
+          <PlanTitle>{t("executionPlan")}</PlanTitle>
+          <PlanAction>
+            <PlanTrigger label={t("togglePlan")} />
+          </PlanAction>
+        </PlanHeader>
+        <PlanContent className="p-0">
+          <pre
+            className={cn(
+              "max-h-[300px] overflow-auto whitespace-pre-wrap break-all p-3 text-xs",
+              compact && "max-h-[160px]"
+            )}
+          >
+            {value}
+          </pre>
+        </PlanContent>
+      </Plan>
     )
   }
 
-  const completedCount = entries.filter((e) => e.status === "completed").length
+  const completedCount = entries.filter((entry) => entry.status === "completed").length
   const progress = (completedCount / entries.length) * 100
 
   return (
-    <div className={cn("rounded-lg border bg-card", className)}>
-      <div className="p-3 border-b">
-        <div className="flex items-center justify-between">
-          <h4 className="font-medium text-sm">{t("executionPlan")}</h4>
-          <span className="text-xs text-muted-foreground">
+    <Plan
+      className={className}
+      defaultOpen
+      isStreaming={entries.some((entry) => entry.status === "in_progress")}
+    >
+      <PlanHeader className="border-b p-3">
+        <div className="min-w-0 flex-1">
+          <PlanTitle>{t("executionPlan")}</PlanTitle>
+          <PlanDescription className="mt-1">
             {completedCount}/{entries.length} {t("stepsCompleted")}
-          </span>
+          </PlanDescription>
+          <Progress value={progress} className="mt-2 h-1" />
         </div>
-        <Progress value={progress} className="mt-2 h-1" />
-      </div>
-      <ScrollArea className={cn(compact ? "h-[160px] md:h-[200px]" : "h-[220px] md:h-[300px]")}>
-        <div className="p-2 space-y-1">
-          {entries.map((entry, index) => (
-            <PlanEntry
-              key={`${index}-${entry.content.slice(0, 20)}`}
-              entry={entry}
-              index={index}
-              isActive={currentStep === index}
-              compact={compact}
-            />
-          ))}
-        </div>
-      </ScrollArea>
-    </div>
+        <PlanAction>
+          <PlanTrigger label={t("togglePlan")} />
+        </PlanAction>
+      </PlanHeader>
+      <PlanContent className="p-0">
+        <ScrollArea className={cn(compact ? "h-[160px] md:h-[200px]" : "h-[220px] md:h-[300px]")}>
+          <div className="space-y-1 p-2">
+            {entries.map((entry, index) => (
+              <PlanEntry
+                key={`${index}-${entry.content.slice(0, 20)}`}
+                compact={compact}
+                entry={entry}
+                index={index}
+                isActive={currentStep === index}
+              />
+            ))}
+          </div>
+        </ScrollArea>
+      </PlanContent>
+    </Plan>
   )
 }

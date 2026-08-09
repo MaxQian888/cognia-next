@@ -20,7 +20,14 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { CameraIcon, FilePlusIcon, FolderPlusIcon, PlusIcon } from "lucide-react"
+import {
+  CameraIcon,
+  FilePlusIcon,
+  FolderPlusIcon,
+  Loader2Icon,
+  PlusIcon,
+  ScanTextIcon,
+} from "lucide-react"
 import { useChatStore } from "@/stores/chat"
 import { usePlatform } from "@/hooks/use-platform"
 import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input"
@@ -53,6 +60,9 @@ export interface ComposerAttachMenuProps {
   onPickFiles: () => void
   /** Turn capabilities colocated under the same `+` trigger. */
   capabilities?: React.ReactNode
+  /** Capture the currently focused desktop app as image + accessibility context. */
+  onSmartSnapshot?: () => void
+  smartSnapshotPending?: boolean
   className?: string
 }
 
@@ -60,6 +70,8 @@ export function ComposerAttachMenu({
   disabled,
   onPickFiles,
   capabilities,
+  onSmartSnapshot,
+  smartSnapshotPending = false,
   className,
 }: ComposerAttachMenuProps) {
   const t = useTranslations("chat.composer")
@@ -152,6 +164,23 @@ export function ComposerAttachMenu({
                   void onScreenshot()
                 }}
               />
+              {onSmartSnapshot ? (
+                <PanelItem
+                  icon={
+                    smartSnapshotPending ? (
+                      <Loader2Icon className="size-4 animate-spin" />
+                    ) : (
+                      <ScanTextIcon className="size-4" />
+                    )
+                  }
+                  label={t("smartSnapshot.captureTooltip")}
+                  onSelect={() => {
+                    setOpen(false)
+                    onSmartSnapshot()
+                  }}
+                  disabled={smartSnapshotPending}
+                />
+              ) : null}
             </>
           )}
 
@@ -219,18 +248,21 @@ function PanelItem({
   label,
   onSelect,
   active,
+  disabled,
 }: {
   icon: React.ReactNode
   label: string
   onSelect: () => void
   active?: boolean
+  disabled?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
+      disabled={disabled}
       className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent",
+        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50",
         active && "text-foreground"
       )}
     >

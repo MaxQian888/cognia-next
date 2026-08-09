@@ -12,6 +12,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { Loader2Icon } from "lucide-react"
 
 import {
@@ -28,20 +29,24 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 
 import { saveOpencodeZenKey } from "@/lib/subscription/opencode/discovery"
+import { persistProviderAccount } from "@/lib/subscription/core/account-lifecycle"
 import type { Account, OpencodePlan } from "@/types/subscription"
 
 export interface OpencodeAddAccountDialogProps {
   open: boolean
   onOpenChange: (next: boolean) => void
   onAdded?: (account: Account) => void
+  existingAccount?: Account
 }
 
 export function OpencodeAddAccountDialog({
   open,
   onOpenChange,
   onAdded,
+  existingAccount,
 }: OpencodeAddAccountDialogProps) {
   const t = useTranslations("subscription.opencode.zen")
+  const tAccountList = useTranslations("subscription.common.accountList")
 
   const [accessToken, setAccessToken] = useState("")
   const [baseUrl, setBaseUrl] = useState("")
@@ -55,9 +60,13 @@ export function OpencodeAddAccountDialog({
     setPrevOpen(open)
     if (open) {
       setAccessToken("")
-      setBaseUrl("")
-      setLabel("")
-      setPlan("zen")
+      const existingCredential =
+        existingAccount?.credential.provider === "opencode-zen"
+          ? existingAccount.credential
+          : undefined
+      setBaseUrl(existingCredential?.baseUrl ?? "")
+      setLabel(existingAccount?.label ?? "")
+      setPlan(existingCredential?.plan ?? "zen")
       setError(null)
       setBusy(false)
     }
@@ -68,13 +77,30 @@ export function OpencodeAddAccountDialog({
     setBusy(true)
     setError(null)
     try {
-      const account = await saveOpencodeZenKey({
-        accessToken: accessToken.trim(),
-        baseUrl: baseUrl.trim() || undefined,
-        label: label.trim() || undefined,
-        plan,
-      })
+      const account = existingAccount
+        ? await persistProviderAccount("opencode", {
+            ...existingAccount,
+            label: label.trim() || existingAccount.label,
+            credential: {
+              provider: "opencode-zen",
+              accessToken: accessToken.trim(),
+              baseUrl: baseUrl.trim() || undefined,
+              plan,
+              storedAtMs: Date.now(),
+            },
+            lastUsedAtMs: Date.now(),
+          })
+        : await persistProviderAccount(
+            "opencode",
+            await saveOpencodeZenKey({
+              accessToken: accessToken.trim(),
+              baseUrl: baseUrl.trim() || undefined,
+              label: label.trim() || undefined,
+              plan,
+            })
+          )
       onAdded?.(account)
+      toast.success(tAccountList(existingAccount ? "credentialsUpdated" : "accountAdded"))
       onOpenChange(false)
     } catch (e) {
       setError(t("saveFailed", { error: e instanceof Error ? e.message : String(e) }))

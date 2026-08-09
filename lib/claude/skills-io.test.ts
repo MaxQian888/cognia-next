@@ -20,23 +20,20 @@ describe("serializeSkill", () => {
       content: "When stating a fact, name the source.",
     })
     expect(md).toMatch(/^---\n/)
-    expect(md).toContain("name: Cite sources")
+    expect(md).toContain("name: cite-sources")
     expect(md).toContain("description: Every claim cites a source.")
     expect(md).toContain("When stating a fact, name the source.")
   })
 
-  it("emits allowed-tools and tags as YAML arrays", () => {
+  it("emits standard space-delimited allowed-tools and Cognia metadata", () => {
     const md = serializeSkill({
       name: "Researcher",
       content: "...",
       allowedTools: ["WebSearch", "Read"],
       tags: ["accuracy", "style"],
     })
-    expect(md).toContain("allowed-tools:")
-    expect(md).toContain("- WebSearch")
-    expect(md).toContain("- Read")
-    expect(md).toContain("tags:")
-    expect(md).toContain("- accuracy")
+    expect(md).toContain("allowed-tools: WebSearch Read")
+    expect(md).toContain('cognia.tags: \'["accuracy","style"]\'')
   })
 
   it("skips empty arrays", () => {
@@ -82,6 +79,35 @@ body content
     const { draft } = parseSkillMarkdown(md)
     expect(draft.allowedTools).toEqual(["WebSearch", "Read"])
     expect(draft.tags).toEqual(["a", "b", "c"])
+  })
+
+  it("preserves unknown extensions and standard metadata across a roundtrip", () => {
+    const md = `---
+name: portable-skill
+description: Portable.
+compatibility: Requires git.
+allowed-tools: Read Write
+metadata:
+  cognia.display-name: 可移植技能
+  custom: value
+disable-model-invocation: true
+future-field:
+  nested: true
+---
+
+body
+`
+    const first = parseSkillMarkdown(md).draft
+    expect(first).toMatchObject({
+      name: "可移植技能",
+      slug: "portable-skill",
+      compatibility: "Requires git.",
+      allowedTools: ["Read", "Write"],
+      invocationPolicy: "explicit",
+      metadata: { "cognia.display-name": "可移植技能", custom: "value" },
+      frontmatterExtensions: { "future-field": { nested: true } },
+    })
+    expect(parseSkillMarkdown(serializeSkill(first)).draft).toMatchObject(first)
   })
 
   it("falls back to fallbackName when frontmatter has no name", () => {

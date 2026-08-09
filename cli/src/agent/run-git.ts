@@ -8,7 +8,7 @@
  * `--no-optional-locks` (don't contend with a concurrent git process). The
  * spawner is injectable so the controllers unit-test without a real process.
  */
-import { execFile } from "node:child_process"
+import { execFile, type ExecFileOptionsWithStringEncoding } from "node:child_process"
 
 /** 16 MB capture ceiling — a big diff/log truncates rather than hard-erroring. */
 const MAX_BUFFER = 16 * 1024 * 1024
@@ -32,27 +32,29 @@ export type ExecFn = (file: string, args: string[], opts?: ExecOpts) => Promise<
  * non-zero {@link ExecResult.code} so callers branch on exit status, not throw. */
 export const runExec: ExecFn = (file, args, opts = {}) =>
   new Promise<ExecResult>((resolve) => {
-    execFile(
-      file,
-      args,
-      {
-        cwd: opts.cwd,
-        timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        maxBuffer: MAX_BUFFER,
-        windowsHide: true,
-        encoding: "utf8",
-      },
-      (err, stdout, stderr) => {
-        const e = err as (NodeJS.ErrnoException & { code?: number | string }) | null
-        let code = 0
-        if (e) {
-          if (typeof e.code === "number") code = e.code
-          else if (e.code === "ENOENT") code = 127
-          else code = 1
-        }
-        resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), code })
+    const execOptions: ExecFileOptionsWithStringEncoding & {
+      stdio: ["pipe", "pipe", "pipe"]
+    } = {
+      cwd: opts.cwd,
+      timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+      windowsHide: true,
+      encoding: "utf8",
+      // Git opens /dev/null when any standard fd is missing. External
+      // ACP/MCP hosts can close inherited descriptors, so keep all three
+      // streams connected explicitly instead of relying on runtime defaults.
+      stdio: ["pipe", "pipe", "pipe"],
+    }
+    execFile(file, args, execOptions, (err, stdout, stderr) => {
+      const e = err as (NodeJS.ErrnoException & { code?: number | string }) | null
+      let code = 0
+      if (e) {
+        if (typeof e.code === "number") code = e.code
+        else if (e.code === "ENOENT") code = 127
+        else code = 1
       }
-    )
+      resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), code })
+    })
   })
 
 /** Run `git` with an argv list against `cwd`. Injectable exec seam for tests. */

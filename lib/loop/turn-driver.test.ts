@@ -1,8 +1,6 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { LoopCreateInput } from "@/lib/db/loops"
 import { createLoop, getLoop, listLoopEvents, updateLoop } from "@/lib/db/loops"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { handleLoopTurnComplete } from "./turn-driver"
 
 const NOW = 1_700_000_000_000
@@ -34,12 +32,14 @@ function buildLoop(overrides: Partial<LoopCreateInput> = {}): LoopCreateInput {
 
 const CONTINUE_TRAILER = '{"continue": true, "delaySeconds": 300, "reason": "build running"}'
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+
+afterAll(dbFixture.dispose)
 
 describe("handleLoopTurnComplete — basic outcomes", () => {
   it("returns no_loop for an unknown id", async () => {

@@ -73,8 +73,21 @@
     "description": "Show the floating pet widget.",
     "label": "Enable pet"
   },
+  "gaze": {
+    "description": "Use only the local pointer position; it is never saved or sent anywhere.",
+    "label": "Follow pointer"
+  },
   "live2d": {
     "active": "Active",
+    "compatibility": {
+      "diagnosticWithPath": "{message} — {path}",
+      "status": {
+        "degraded": "Degraded",
+        "invalid": "Invalid",
+        "legacy": "Needs validation",
+        "ready": "Ready"
+      }
+    },
     "config": {
       "cancel": "Cancel",
       "columnKey": "State",
@@ -89,6 +102,24 @@
       "optionDefault": "Default",
       "optionEngine": "Engine default",
       "optionNoExpression": "No expression",
+      "parameters": {
+        "auto": "Auto-detect",
+        "custom": "Custom",
+        "description": "Map standard pet behavior to this model's parameter IDs, or disable unsupported roles.",
+        "disabled": "Disabled",
+        "parameterIdFor": "Parameter ID for {role}",
+        "parameterIdPlaceholder": "ParamAngleX",
+        "roles": {
+          "bodyX": "Body horizontal",
+          "bodyY": "Body vertical",
+          "eyeX": "Eyes horizontal",
+          "eyeY": "Eyes vertical",
+          "headX": "Head horizontal",
+          "headY": "Head vertical",
+          "headZ": "Head tilt",
+          "mouthOpen": "Mouth open"
+        }
+      },
       "previewState": "Preview state",
       "previewUnavailable": "Live preview needs the Live2D runtime — settings still save.",
       "resetAll": "Reset all",
@@ -97,6 +128,7 @@
       "save": "Save",
       "scale": "Scale",
       "tabMotion": "Motion mapping",
+      "tabParameters": "Parameters",
       "tabTransform": "Transform",
       "test": "Test",
       "title": "Customize {name}"
@@ -107,12 +139,22 @@
     "download": "Download sample",
     "downloading": "Downloading…",
     "errors": {
+      "ambiguousPath": "The package contains paths that differ only by letter case.",
+      "corruptTexture": "A required texture is corrupt or cannot be decoded.",
       "cubism2Unsupported": "Cubism 2 models aren't supported.",
       "downloadFailed": "The sample model couldn't be downloaded.",
+      "duplicatePath": "The package contains a duplicate normalized path.",
       "invalidJson": "The settings file isn't valid JSON.",
+      "missingExpression": "A missing expression was disabled.",
+      "missingMetadata": "Missing optional model metadata was disabled.",
+      "missingMotion": "A missing motion was disabled.",
+      "missingPhysics": "Missing physics was disabled.",
+      "missingPose": "Missing pose data was disabled.",
       "missingReferenced": "The model is missing files it references.",
+      "missingSound": "A missing motion sound was disabled.",
       "multipleSettings": "More than one .model3.json was found — keep just one.",
       "noSettings": "No .model3.json settings file was found.",
+      "pathTraversal": "The package contains an unsafe traversal path.",
       "tooLarge": "The model is larger than the 50 MB limit.",
       "zipFailed": "The .zip couldn't be read."
     },
@@ -226,9 +268,51 @@
       "svg": "Vector mascot"
     }
   },
+  "skinStatus": {
+    "configure": "Configure",
+    "diagnostics": {
+      "ambiguousPath": "Two resources differ only by letter case: {path}.",
+      "assetMissing": "The selected asset is missing: {path}.",
+      "assetTooLarge": "The asset exceeds the configured size limit: {path}.",
+      "contextLost": "The WebGL context was lost twice. Rendering is paused until you retry.",
+      "corruptTexture": "A referenced texture cannot be decoded: {path}.",
+      "cubism2Unsupported": "Cubism 2 models are not supported: {path}.",
+      "duplicatePath": "The package contains a duplicate normalized path: {path}.",
+      "invalidSettings": "The model settings are invalid: {path}.",
+      "missingOptionalResource": "An optional resource is missing and was disabled: {path}.",
+      "missingRequiredResource": "A required resource is missing: {path}.",
+      "pathTraversal": "The package contains an unsafe traversal path: {path}.",
+      "renderFailed": "The selected skin failed while rendering. Retry or configure another asset.",
+      "runtimeUnavailable": "The required rendering runtime is unavailable.",
+      "unknownSkin": "This saved skin is no longer supported: {path}."
+    },
+    "effective": "Effective skin: {skin}",
+    "fallback": "Fallback is active; the requested skin is not being rendered.",
+    "requested": "Requested skin: {skin}",
+    "retry": "Retry",
+    "skins": {
+      "live2d": "Live2D model",
+      "sprite-v2": "AI sprite (v2)",
+      "svg": "Vector mascot"
+    },
+    "unknownResource": "unknown resource"
+  },
+  "sound": {
+    "description": "Play short sounds when you touch the pet or it reacts. Off by default.",
+    "label": "Sound effects",
+    "quietHours": {
+      "description": "Silence pet sounds during this window.",
+      "end": "To",
+      "label": "Quiet hours",
+      "start": "From"
+    },
+    "volume": {
+      "label": "Volume ({value}%)"
+    }
+  },
   "spriteV2": {
-    "active": "Active",
     "activate": "Use",
+    "active": "Active",
     "agentPrompt": {
       "concept": "Pet concept: {concept}",
       "defaultConcept": "a friendly custom pet that fits Cognia",
@@ -256,19 +340,6 @@
     "import": "Import v2 sprite pet",
     "importHint": "Select pet.json and its spritesheet.webp or spritesheet.png together. Cognia validates the v2 manifest and 1536×2288 atlas before installing.",
     "installed": "Sprite pet installed and activated."
-  },
-  "sound": {
-    "description": "Play short sounds when you touch the pet or it reacts. Off by default.",
-    "label": "Sound effects",
-    "quietHours": {
-      "description": "Silence pet sounds during this window.",
-      "end": "To",
-      "label": "Quiet hours",
-      "start": "From"
-    },
-    "volume": {
-      "label": "Volume ({value}%)"
-    }
   },
   "title": "Pet",
   "twinAwareness": {

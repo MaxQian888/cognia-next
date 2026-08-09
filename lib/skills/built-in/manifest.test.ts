@@ -11,6 +11,7 @@ import {
 import { registerBuiltInSkill, __resetSharedBuiltInSkillRegistry } from "./registry"
 import type { BuiltInSkill } from "./types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
+import { __setLarkCliCapabilityDiagnosticsForTests } from "./lark/capabilities"
 
 const hitlSurface = () => ({
   components: { btn: { component: "Button" } },
@@ -47,9 +48,32 @@ function mkOverride(fields: Partial<ConversationOverrideRow> = {}): Conversation
 
 beforeEach(() => {
   __resetSharedBuiltInSkillRegistry()
+  __setLarkCliCapabilityDiagnosticsForTests({
+    certifiedVersion: "1.0.83",
+    detectedVersion: "1.0.83",
+    ready: true,
+    missingCommands: [],
+    missingFlags: {},
+    affectedSkillIds: [],
+  })
 })
 
 describe("buildBuiltInSkillManifest — platform filter", () => {
+  it("fails closed for certified Lark skills when the CLI capability probe is blocked", () => {
+    __setLarkCliCapabilityDiagnosticsForTests({
+      certifiedVersion: "1.0.83",
+      detectedVersion: "1.0.84",
+      ready: false,
+      missingCommands: [],
+      missingFlags: {},
+      affectedSkillIds: ["lark.calendar.list_events"],
+      message: "version mismatch",
+    })
+    registerBuiltInSkill(mkSkill())
+
+    expect(buildBuiltInSkillManifest({})).toEqual([])
+  })
+
   it("includes 'any' skills on every platform", () => {
     registerBuiltInSkill(
       mkSkill({ id: "x.any", family: "x", platforms: "any", mcpToolName: "x_any" })

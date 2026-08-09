@@ -80,6 +80,25 @@ DomainExportFile                       # single-table slice
 
 导入器会检测加密形态，先静默尝试自动密钥，只有在失败时才回退到口令提示。
 
+### 增量式流式 v4 codec（2026-08-06）
+
+大型数据库不能先聚合成单个 `BackupPayloadV3` 对象再写出。因此，新增的
+v4 codec 使用逐行的 `header → chunk* → footer` 记录：
+
+- `buildBackupStream` 通过主键游标读取 catalog 绑定的 portable 数据；
+  消费者读取完一条记录后，对应的 IndexedDB page 即可释放。
+- 每个 chunk 独立计算 SHA-256；固定大小的 SHA-256 hash chain 绑定
+  header、chunk 顺序和必需的 footer，无需在内存中保存所有 chunk hash。
+- 加密流使用 PBKDF2-SHA256 和逐记录 AES-GCM。8 字节随机 nonce 前缀与
+  32 位记录序号组成唯一的 12 字节 IV；format、trace id 和 sequence
+  作为 AAD 一并认证。
+- decoder 在暴露已验证 chunk 前会检查记录大小、顺序、checksum、footer、
+  KDF 参数和 nonce 边界。
+
+这是新增格式 seam，不会替换旧格式。v1/v3 导入继续保持可读；现有 UI、
+scheduler 和 WebDAV 在流式 sink 与可恢复 restore adapter 完成前仍写出
+v3。没有配套恢复链路时，不得把 v4 codec 接入这些生产 writer。
+
 ### 备份历史 + 提醒 + 自动定时
 
 新增的 Dexie 表 `backupHistory`（v10）记录每一次成功或失败的导出。历史
@@ -125,6 +144,8 @@ DomainExportFile                       # single-table slice
 | `lib/data/backup-key.ts`                                | 设备存储的自动密钥 + 轮换                                                                |
 | `lib/data/migrate.ts`                                   | v1 → v3 边界；完整性校验                                                                 |
 | `lib/data/build-package.ts`                             | 读取 Dexie 表 → `BackupPackageV3`                                                        |
+| `lib/data/build-stream.ts`                              | 以有界 v4 page 读取 portable Dexie 数据                                                  |
+| `lib/data/stream-format.ts`                             | 编解码带认证的 v4 NDJSON 记录                                                            |
 | `lib/data/apply-package.ts`                             | 写回 `BackupPackageV3`，尊重内置项                                                       |
 | `lib/data/scheduler.ts`                                 | 纯辅助函数：`shouldRunScheduledBackup`、`shouldShowReminder`、`pruneScheduledBackups`    |
 | `lib/data/import-registry.ts`                           | 外部格式分派器                                                                           |

@@ -4,9 +4,9 @@ name: Compose E2E
 # Brings up the self-host compose suite and runs the tiered smoke (ADR-0059
 # P0.4 / W6). Tier 1 (signaling + share) runs on every relevant PR and
 # nightly; it needs no secrets. Tier 2 (cognia-server) builds the full image
-# (heavy — cargo cook) so it runs nightly + on dispatch only; the stub ACP
-# agent keeps it vendor-secret-free (the sidecar chat leg SKIPs without
-# ANTHROPIC_API_KEY).
+# (heavy — cargo cook) so it runs nightly + on dispatch only; a Compose-local
+# Anthropic fixture keeps the real sidecar chat leg deterministic and
+# vendor-secret-free.
 # ============================================================================
 
 on:
@@ -14,6 +14,8 @@ on:
     paths:
       - "deploy/compose/**"
       - "scripts/smoke/compose-smoke.mjs"
+      - "tests/real-e2e/**"
+      - "playwright.web-headless.config.ts"
       - "services/signaling-server/**"
       - "services/share-server/**"
       - "services/diagnostic-server/**"
@@ -166,7 +168,20 @@ jobs:
     env:
       SHARE_UPLOAD_SECRET: ci-smoke-secret
       COGNIA_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000001"
+      COGNIA_SECONDARY_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000002"
+      COGNIA_OIDC_MEMBER_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000003"
+      COGNIA_OIDC_OWNER_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000004"
       COGNIA_SMOKE_AGENT: "1"
+      COGNIA_PUBLIC_URL: "https://cognia.localhost"
+      COGNIA_PUBLIC_SIGNALING_URL: "wss://cognia.localhost/v2/signaling"
+      COGNIA_ALLOWED_WEB_ORIGINS: "https://cognia.localhost"
+      COGNIA_ALLOW_PRIVATE_NETWORK: "true"
+      SIGNALING_ALLOWED_ORIGINS: "https://cognia.localhost"
+      COGNIA_DOMAIN: "cognia.localhost"
+      COGNIA_WEB_IMAGE: "cognia-web:ci"
+      NEXT_PUBLIC_E2E: "1"
+      NEXT_PUBLIC_ACCOUNT_GATE: "1"
+      COMPOSE_FILE: "docker-compose.yml:docker-compose.web-headless-e2e.yml"
     steps:
       - uses: actions/checkout@v6
 
@@ -185,6 +200,14 @@ jobs:
           COGNIA_SERVER_IMAGE: cognia-server:ci-full
         run: docker compose --profile server build cognia-server
 
+      - name: Build same-origin Web/Caddy image
+        working-directory: deploy/compose
+        env:
+          SIGNALING_IMAGE: cognia-signaling:ci
+          SHARE_IMAGE: cognia-share:ci
+          COGNIA_SERVER_IMAGE: cognia-server:ci-full
+        run: docker compose --profile tls build caddy
+
       - name: Up + wait (server profile)
         working-directory: deploy/compose
         env:
@@ -198,16 +221,94 @@ jobs:
           COGNIA_SERVER_IMAGE: cognia-server:ci-full
         run: node scripts/smoke/compose-smoke.mjs --tier server
 
+      - name: Start same-origin Caddy front door
+        working-directory: deploy/compose
+        env:
+          SIGNALING_IMAGE: cognia-signaling:ci
+          SHARE_IMAGE: cognia-share:ci
+          COGNIA_SERVER_IMAGE: cognia-server:ci-full
+        run: docker compose --profile server --profile tls --profile web-headless-e2e up -d --wait
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10.28.2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.x
+          cache: pnpm
+
+      - name: Install Web Headless E2E dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Real Web to Headless Playwright lane
+        working-directory: deploy/compose
+        env:
+          SIGNALING_IMAGE: cognia-signaling:ci
+          SHARE_IMAGE: cognia-share:ci
+          COGNIA_SERVER_IMAGE: cognia-server:ci-full
+        run: |
+          set -euo pipefail
+          pair_payload="$(docker compose exec -T cognia-server \
+            cognia-server pair --device-name web-e2e --advertise-url https://cognia.localhost \
+            | grep -Eo 'cgnp3\|[A-Za-z0-9_-]+' | head -n 1)"
+          test -n "$pair_payload"
+          lifecycle_pair_payload="$(docker compose exec -T cognia-server \
+            cognia-server pair --device-name web-e2e-lifecycle \
+              --advertise-url https://cognia.localhost \
+            | grep -Eo 'cgnp3\|[A-Za-z0-9_-]+' | head -n 1)"
+          test -n "$lifecycle_pair_payload"
+          admin_pair_payload="$(docker compose exec -T cognia-server \
+            cognia-server pair --device-name web-e2e-admin \
+              --advertise-url https://cognia.localhost \
+            | grep -Eo 'cgnp3\|[A-Za-z0-9_-]+' | head -n 1)"
+          test -n "$admin_pair_payload"
+          revokee_pair_payload="$(docker compose exec -T cognia-server \
+            cognia-server pair --device-name web-e2e-revokee \
+              --advertise-url https://cognia.localhost \
+            | grep -Eo 'cgnp3\|[A-Za-z0-9_-]+' | head -n 1)"
+          test -n "$revokee_pair_payload"
+          second_pair_payload="$(docker compose exec -T cognia-server-secondary \
+            cognia-server pair --device-name web-e2e-secondary \
+              --advertise-url https://127.0.0.1:27891 \
+            | grep -Eo 'cgnp3\|[A-Za-z0-9_-]+' | head -n 1)"
+          test -n "$second_pair_payload"
+          oidc_member_pair_payload="$(docker compose exec -T cognia-server-oidc-member \
+            cognia-server pair --device-name web-e2e-oidc-member \
+              --tenant-id tenant-e2e-member \
+              --advertise-url https://127.0.0.1:27892 \
+            | grep -Eo 'cgnp3\|[A-Za-z0-9_-]+' | head -n 1)"
+          test -n "$oidc_member_pair_payload"
+          oidc_owner_pair_payload="$(docker compose exec -T cognia-server-oidc-owner \
+            cognia-server pair --device-name web-e2e-oidc-owner \
+              --tenant-id tenant-e2e-owner \
+              --advertise-url https://127.0.0.1:27893 \
+            | grep -Eo 'cgnp3\|[A-Za-z0-9_-]+' | head -n 1)"
+          test -n "$oidc_owner_pair_payload"
+          cd ../..
+          COGNIA_REAL_PAIR_PAYLOAD="$pair_payload" \
+            COGNIA_REAL_LIFECYCLE_PAIR_PAYLOAD="$lifecycle_pair_payload" \
+            COGNIA_REAL_ADMIN_PAIR_PAYLOAD="$admin_pair_payload" \
+            COGNIA_REAL_REVOKEE_PAIR_PAYLOAD="$revokee_pair_payload" \
+            COGNIA_REAL_SECOND_PAIR_PAYLOAD="$second_pair_payload" \
+            COGNIA_REAL_OIDC_MEMBER_PAIR_PAYLOAD="$oidc_member_pair_payload" \
+            COGNIA_REAL_OIDC_OWNER_PAIR_PAYLOAD="$oidc_owner_pair_payload" \
+            COGNIA_REAL_COMPOSE_DIR="deploy/compose" \
+            pnpm test:e2e:web-headless
+
       - name: Logs on failure
         if: failure()
         working-directory: deploy/compose
         env:
           COGNIA_SERVER_IMAGE: cognia-server:ci-full
-        run: docker compose --profile server logs --no-color
+        run: docker compose --profile server --profile tls --profile web-headless-e2e logs --no-color
 
       - name: Down
         if: always()
         working-directory: deploy/compose
         env:
           COGNIA_SERVER_IMAGE: cognia-server:ci-full
-        run: docker compose --profile server down -v
+        run: docker compose --profile server --profile tls --profile web-headless-e2e down -v

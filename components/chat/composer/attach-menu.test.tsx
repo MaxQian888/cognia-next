@@ -48,11 +48,18 @@ const summary = (over: Partial<FolderSummary> = {}): FolderSummary => ({
 
 function renderMenu(
   onPickFiles = jest.fn(),
-  capabilities: React.ReactNode = <div data-testid="composer-capabilities">Capabilities</div>
+  capabilities: React.ReactNode = <div data-testid="composer-capabilities">Capabilities</div>,
+  onSmartSnapshot?: () => void,
+  smartSnapshotPending = false
 ) {
   render(
     <TooltipProvider>
-      <ComposerAttachMenu onPickFiles={onPickFiles} capabilities={capabilities} />
+      <ComposerAttachMenu
+        onPickFiles={onPickFiles}
+        capabilities={capabilities}
+        onSmartSnapshot={onSmartSnapshot}
+        smartSnapshotPending={smartSnapshotPending}
+      />
     </TooltipProvider>
   )
   return onPickFiles
@@ -88,6 +95,15 @@ describe("ComposerAttachMenu", () => {
 
     await clickLabel("Upload files")
     expect(onPickFiles).toHaveBeenCalledTimes(1)
+  })
+
+  it("runs the smart snapshot action when provided", async () => {
+    const onSmartSnapshot = jest.fn()
+    renderMenu(jest.fn(), undefined, onSmartSnapshot)
+
+    await clickLabel("Smart snapshot")
+
+    expect(onSmartSnapshot).toHaveBeenCalledTimes(1)
   })
 
   it("stages a screenshot as an attachment", async () => {
@@ -137,6 +153,7 @@ describe("ComposerAttachMenu", () => {
     // No filesystem path to reference and no screen to capture in a browser tab.
     expect(screen.queryByText("Add folder")).toBeNull()
     expect(screen.queryByText("Capture screenshot")).toBeNull()
+    expect(screen.queryByText("Smart snapshot")).toBeNull()
 
     await clickLabel("Upload files")
     expect(onPickFiles).toHaveBeenCalledTimes(1)

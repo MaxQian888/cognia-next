@@ -64,6 +64,7 @@ export const TEAM_TOOL_NAMES = {
   getTask: "task_get",
   twinKnowledgeSearch: "twin_knowledge_search",
   postToChat: "team_post_to_chat",
+  proposeDecision: "team_propose_decision",
 } as const
 
 /** Synthetic plugin id tagging the promoted team-collaboration manifest entries. */
@@ -194,6 +195,16 @@ export interface TeamToolDeps {
     reason?: string
     fields?: Record<string, unknown>
   }) => Promise<void>
+  proposeDecision?: (input: {
+    runId: string
+    teamId: string
+    authorId: string
+    title: string
+    detail: string
+    evidenceIds: string[]
+    impacts?: Array<"mechanical" | "public_api" | "migration" | "security" | "user_constraint">
+    compatibilityScopes?: string[]
+  }) => Promise<{ id: string; version: number; conflict?: unknown }>
 }
 
 const SEND_MESSAGE_SCHEMA = {
@@ -347,6 +358,28 @@ const TWIN_KNOWLEDGE_SEARCH_SCHEMA = {
   required: ["query"],
 } as const
 
+const PROPOSE_DECISION_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string", description: "Short decision title." },
+    detail: { type: "string", description: "Concrete proposed decision and rationale." },
+    evidenceIds: {
+      type: "array",
+      items: { type: "string" },
+      description: "One or more durable evidence ids from this run.",
+    },
+    impacts: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["mechanical", "public_api", "migration", "security", "user_constraint"],
+      },
+    },
+    compatibilityScopes: { type: "array", items: { type: "string" } },
+  },
+  required: ["title", "detail", "evidenceIds"],
+} as const
+
 export interface BuildTeamCollabManifestOptions {
   /**
    * Append the `twin_knowledge_search` tool. Only true when the team exposes at
@@ -423,6 +456,11 @@ export function buildTeamCollabManifestEntries(
       TEAM_TOOL_NAMES.postToChat,
       "Post a message into this run's IM conversation, or into a SIBLING conversation (another of our bot instances in the same group chat) so it is delivered under that bot's identity. Only available for IM-triggered runs; use im_broadcast for arbitrary fan-out.",
       POST_TO_CHAT_SCHEMA as unknown as Record<string, unknown>
+    ),
+    entry(
+      TEAM_TOOL_NAMES.proposeDecision,
+      "Submit an evidence-backed durable decision proposal for Lead review.",
+      PROPOSE_DECISION_SCHEMA as unknown as Record<string, unknown>
     ),
     ...(opts.includeTwinKnowledgeSearch
       ? [
@@ -546,6 +584,14 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
           createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
         })),
       }
+    },
+    proposeDecision: async (input) => {
+      const team = useAgentTeamStore.getState().teams[input.teamId]
+      if (!team || team.config.runtimeVersion !== "durable-v2") {
+        throw new Error("Decision proposals require a durable-v2 AgentTeam run")
+      }
+      const { createDecisionLedger } = await import("@/lib/ai/agent/team/decision-ledger")
+      return createDecisionLedger({ runId: input.runId, leadId: team.leadId }).propose(input)
     },
     searchTwinKnowledge: async (input) => {
       const state = useAgentTeamStore.getState()
@@ -772,6 +818,42 @@ export async function runTeamBuiltinTool(
           ...(typeof args.ultracode === "boolean" ? { ultracode: args.ultracode } : {}),
         })
         return `Delegated to ${target} (id=${rec.id}, status=${rec.status}).`
+      }
+      case TEAM_TOOL_NAMES.proposeDecision: {
+        if (!caller.runId) return "Error: team_propose_decision requires a durable run context."
+        if (!d.proposeDecision) return "Error: durable decision proposals are unavailable."
+        const title = asString(args.title).trim()
+        const detail = asString(args.detail).trim()
+        const evidenceIds = Array.isArray(args.evidenceIds)
+          ? args.evidenceIds.map(String).filter(Boolean)
+          : []
+        if (!title || !detail || evidenceIds.length === 0) {
+          return "Error: team_propose_decision requires title, detail, and evidenceIds."
+        }
+        const impacts = Array.isArray(args.impacts)
+          ? (args.impacts.map(String) as Array<
+              "mechanical" | "public_api" | "migration" | "security" | "user_constraint"
+            >)
+          : undefined
+        const compatibilityScopes = Array.isArray(args.compatibilityScopes)
+          ? args.compatibilityScopes.map(String)
+          : undefined
+        const proposal = await d.proposeDecision({
+          runId: caller.runId,
+          teamId: caller.teamId,
+          authorId: caller.teammateId,
+          title,
+          detail,
+          evidenceIds,
+          ...(impacts ? { impacts } : {}),
+          ...(compatibilityScopes ? { compatibilityScopes } : {}),
+        })
+        return {
+          id: proposal.id,
+          version: proposal.version,
+          status: "proposed",
+          ...(proposal.conflict ? { conflict: proposal.conflict } : {}),
+        }
       }
       case TEAM_TOOL_NAMES.listMembers: {
         return d.listMembers(caller.teamId)

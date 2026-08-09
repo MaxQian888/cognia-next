@@ -8,12 +8,15 @@ import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import type { McpServer } from "@cognia/agent-config-types"
 import { McpServerCard } from "./mcp-server-card"
 import { groupServers, type McpGroupBy } from "./mcp-server-utils"
+import type { AgentStatus } from "@/hooks/agent/use-agent-status"
 
 interface Props {
   servers: McpServer[]
   view: "grid" | "list"
   groupBy: McpGroupBy
   selection: Set<string>
+  agentStatuses: AgentStatus[]
+  agentStatusesLoading: boolean
   isFavorite: (id: string) => boolean
   onToggleSelect: (id: string) => void
   onToggleFavorite: (id: string) => void
@@ -33,6 +36,8 @@ export function McpServerList({
   view,
   groupBy,
   selection,
+  agentStatuses,
+  agentStatusesLoading,
   isFavorite,
   onToggleSelect,
   onToggleFavorite,
@@ -77,6 +82,8 @@ export function McpServerList({
                   variant={view === "list" ? "row" : "card"}
                   selected={selection.has(server.id)}
                   favorite={isFavorite(server.id)}
+                  agentStatuses={agentStatuses}
+                  agentStatusesLoading={agentStatusesLoading}
                   onToggleSelect={onToggleSelect}
                   onToggleFavorite={onToggleFavorite}
                   onToggle={(enabled) => onToggle(server, enabled)}

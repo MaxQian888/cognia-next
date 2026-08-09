@@ -35,7 +35,10 @@
     "proxyWebsocketsHint": "通过 HTTP CONNECT 隧道或 SOCKS5 转发 Discord Gateway、Slack Socket Mode 等 WSS 长连接。",
     "proxyWebsocketsLabel": "WebSocket 走代理",
     "removeBypass": "从绕过列表中移除 {entry}",
-    "username": "用户名"
+    "username": "用户名",
+    "clearPassword": "清除已保存密码",
+    "passwordConfiguredPlaceholder": "密码已配置",
+    "passwordKeyringError": "无法在安全存储中更新代理密码。"
   },
   "ipInfo": {
     "disabled": "IP 查询已关闭。开启后将从 ipinfo.io 获取当前公网 IP 及归属地。",

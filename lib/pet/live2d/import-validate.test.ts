@@ -1,6 +1,7 @@
 import { MAX_MODEL_BYTES } from "./constants"
 import { validateLive2dImport } from "./import-validate"
 import type { ModelFileEntry } from "./types"
+import { readBlobText } from "./read-blob-text"
 
 function entry(path: string, content: BlobPart = path): ModelFileEntry {
   return { path, blob: new Blob([content]) }
@@ -112,6 +113,36 @@ describe("validateLive2dImport", () => {
     expect(result.ok).toBe(true)
   })
 
+  it("rejects ambiguous case-insensitive and duplicate normalized paths", async () => {
+    const ambiguous = await validateLive2dImport([
+      { path: "a.model3.json", blob: settingsBlob(MODERN) },
+      entry("model.moc3"),
+      entry("tex/t0.png"),
+      entry("TEX/T0.PNG"),
+      entry("tex/t1.png"),
+    ])
+    expect(ambiguous).toEqual(expect.objectContaining({ ok: false, code: "ambiguousPath" }))
+
+    const duplicate = await validateLive2dImport([
+      { path: "a.model3.json", blob: settingsBlob(MODERN) },
+      entry("model.moc3"),
+      entry("tex/./t0.png"),
+      entry("tex/t0.png"),
+      entry("tex/t1.png"),
+    ])
+    expect(duplicate).toEqual(expect.objectContaining({ ok: false, code: "duplicatePath" }))
+  })
+
+  it("rejects path traversal before persistence", async () => {
+    const result = await validateLive2dImport([
+      { path: "a.model3.json", blob: settingsBlob(MODERN) },
+      entry("../model.moc3"),
+      entry("tex/t0.png"),
+      entry("tex/t1.png"),
+    ])
+    expect(result).toEqual(expect.objectContaining({ ok: false, code: "pathTraversal" }))
+  })
+
   it("drops optional physics/pose from the manifest when their files are absent", async () => {
     const result = await validateLive2dImport([
       { path: "a.model3.json", blob: settingsBlob(MODERN) },
@@ -123,6 +154,61 @@ describe("validateLive2dImport", () => {
     if (!result.ok) return
     expect(result.model.manifest.physicsPath).toBeUndefined()
     expect(result.model.manifest.posePath).toBeUndefined()
+  })
+
+  it("sanitizes missing motions, expressions, sounds and metadata as a degraded model", async () => {
+    const settings = {
+      FileReferences: {
+        Moc: "model.moc3",
+        Textures: ["tex/t0.png"],
+        Motions: {
+          Idle: [{ File: "motions/idle.motion3.json", Sound: "sounds/idle.wav" }],
+          Missing: [{ File: "motions/missing.motion3.json" }],
+        },
+        Expressions: [
+          { Name: "happy", File: "expressions/happy.exp3.json" },
+          { Name: "missing", File: "expressions/missing.exp3.json" },
+        ],
+        UserData: "userdata.json",
+      },
+    }
+    const result = await validateLive2dImport([
+      { path: "a.model3.json", blob: settingsBlob(settings) },
+      entry("model.moc3"),
+      entry("tex/t0.png"),
+      entry("motions/idle.motion3.json"),
+      entry("expressions/happy.exp3.json"),
+    ])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.model.compatibility.status).toBe("degraded")
+    expect(result.model.compatibility.diagnostics.map((item) => item.code)).toEqual(
+      expect.arrayContaining([
+        "missingMotion",
+        "missingExpression",
+        "missingSound",
+        "missingMetadata",
+      ])
+    )
+    expect(result.model.manifest.motionGroups).toEqual(["Idle"])
+    expect(result.model.manifest.expressionIds).toEqual(["happy"])
+    const storedSettings = result.model.entries.find((item) => item.path === "a.model3.json")!
+    const sanitized = JSON.parse(await readBlobText(storedSettings.blob))
+    expect(sanitized.FileReferences.Motions.Idle[0].Sound).toBeUndefined()
+    expect(sanitized.FileReferences.Motions.Missing).toBeUndefined()
+    expect(sanitized.FileReferences.UserData).toBeUndefined()
+  })
+
+  it("rejects a typed texture with a corrupt image signature", async () => {
+    const result = await validateLive2dImport([
+      {
+        path: "a.model3.json",
+        blob: settingsBlob({ FileReferences: { Moc: "model.moc3", Textures: ["bad.png"] } }),
+      },
+      entry("model.moc3"),
+      { path: "bad.png", blob: new Blob(["not-png"], { type: "image/png" }) },
+    ])
+    expect(result).toEqual({ ok: false, code: "corruptTexture", detail: "bad.png" })
   })
 
   it("flags tooLarge when the bundle exceeds the cap", async () => {

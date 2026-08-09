@@ -61,6 +61,8 @@ const trigger: TriggerEvent = { workflowId: "wf", kind: "trigger.manual", payloa
 async function buildInput(opts: {
   honorPinData?: boolean
   pinData?: Record<string, unknown>
+  iterationMeta?: { loopId: string; iterationIndex: number }
+  executionBinding?: RunStepInput["executionBinding"]
 }): Promise<RunStepInput> {
   const runId = "run_1"
   return {
@@ -75,6 +77,8 @@ async function buildInput(opts: {
     secretResolver: NoopSecretResolver,
     logger: createRunLogger(runId),
     honorPinData: opts.honorPinData,
+    iterationMeta: opts.iterationMeta,
+    executionBinding: opts.executionBinding,
   }
 }
 
@@ -108,6 +112,30 @@ describe("runStep pin short-circuit", () => {
 
     expect(execSpy).toHaveBeenCalledTimes(1)
     expect(result.output).toEqual({ real: true })
+  })
+
+  it("threads loop and formal-run provenance into the executor context", async () => {
+    const executionBinding: NonNullable<RunStepInput["executionBinding"]> = {
+      versionId: "wfv_parent_1",
+      deploymentId: "wfd_parent",
+      deploymentRevision: 3,
+      entrypoint: "http",
+      caller: "test",
+      dependencyLock: { workflows: {}, indexes: {} },
+    }
+    const input = await buildInput({
+      iterationMeta: { loopId: "loop1", iterationIndex: 2 },
+      executionBinding,
+    })
+
+    await runStep(input)
+
+    expect(execSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        iteration: { loopId: "loop1", iterationIndex: 2 },
+        executionBinding,
+      })
+    )
   })
 
   it("coalesces commentary through a dedicated runtime event sink", async () => {

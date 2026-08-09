@@ -1,0 +1,14 @@
+FROM node:22-alpine AS web-build
+WORKDIR /app
+RUN corepack enable
+COPY . .
+RUN pnpm install --frozen-lockfile
+ARG NEXT_PUBLIC_E2E
+ARG NEXT_PUBLIC_ACCOUNT_GATE
+ENV NEXT_PUBLIC_E2E=${NEXT_PUBLIC_E2E}
+ENV NEXT_PUBLIC_ACCOUNT_GATE=${NEXT_PUBLIC_ACCOUNT_GATE}
+RUN pnpm build
+
+FROM caddy:2.10
+COPY deploy/compose/Caddyfile /etc/caddy/Caddyfile
+COPY --from=web-build /app/out /srv

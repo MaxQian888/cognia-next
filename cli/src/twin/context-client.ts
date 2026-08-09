@@ -1,6 +1,6 @@
 /**
  * CLI-side client for the desktop twin-context bridge route
- * (`POST /api/v1/dev/twin/context`).
+ * (`POST /api/dev/twin/context`).
  *
  * The CLI process has no access to the GUI's Dexie tables or the vector
  * store, so twin retrieval runs on the desktop (renderer) and only the
@@ -15,7 +15,7 @@
 import { detectDesktop, DEV_TOKEN_HEADER, type HandoffClientDeps } from "../handoff/client"
 import type { BridgeEndpoint } from "../handoff/endpoint"
 
-export const TWIN_CONTEXT_PATH = "/api/v1/dev/twin/context"
+export const TWIN_CONTEXT_PATH = "/api/dev/twin/context"
 const REQUEST_TIMEOUT_MS = 10_000
 
 export interface TwinContextRequest {

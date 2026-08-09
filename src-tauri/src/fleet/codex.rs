@@ -72,7 +72,7 @@ curl -sk --max-time 0.6 \
   -H "X-Cognia-Fleet-Token: $TOKEN" \
   -H "Content-Type: application/json" \
   --data-binary "$BODY" \
-  "https://127.0.0.1:$PORT/api/v1/fleet/hook" >/dev/null 2>&1 || exit 0
+  "https://127.0.0.1:$PORT/api/fleet/hook" >/dev/null 2>&1 || exit 0
 exit 0
 "#,
         marker = MANAGED_MARKER,
@@ -304,7 +304,7 @@ mod tests {
         assert!(s.contains(r#"\"agent\":\"codex\""#));
         assert!(s.contains(r#"\"event\":\"agent-turn-complete\""#));
         assert!(s.contains(r#"PAYLOAD="${1:-}""#));
-        assert!(s.contains("/api/v1/fleet/hook"));
+        assert!(s.contains("/api/fleet/hook"));
         assert!(s.trim_end().ends_with("exit 0"));
     }
 

@@ -1,6 +1,8 @@
 import {
   PROVIDERS,
+  isLocalProviderName,
   type CustomProviderSettings,
+  type ProviderName,
   type ProviderVerificationStatus,
   type UserProviderSettings,
 } from "@cognia/provider-types"
@@ -90,19 +92,6 @@ export interface CustomProviderCompleteness {
     runtime: ProviderGuardResult
   }
 }
-
-const LOCAL_PROVIDER_IDS = new Set([
-  "ollama",
-  "lmstudio",
-  "llamacpp",
-  "llamafile",
-  "vllm",
-  "localai",
-  "jan",
-  "textgenwebui",
-  "koboldcpp",
-  "tabbyapi",
-])
 
 interface SettingsLike {
   apiKey?: string
@@ -296,7 +285,7 @@ export function getProviderRequirements(providerId: string): ProviderRequirement
   }
 
   const provider = PROVIDERS[providerId]
-  const inferredLocal = LOCAL_PROVIDER_IDS.has(providerId)
+  const inferredLocal = isLocalProviderName(providerId as ProviderName)
   if (!provider) {
     return {
       providerId,

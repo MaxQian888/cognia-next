@@ -16,9 +16,9 @@
  *    streams its output, with the same enriched PATH the resolver uses so
  *    `npm` / `brew` / `curl` are found even from a minimal environment.
  *
- * Agents run through `npx` (Claude Code, Gemini, Qwen, the Codex ACP shim, Pi)
- * need no install — `npx` fetches on demand — so they have no plan; a missing
- * `npx` means Node itself is absent, which we can only point at docs for.
+ * Agents still run through `npx` (Gemini, Qwen, the Codex ACP shim, Pi) fetch
+ * on demand. Claude's adapter is intentionally installed once: making every
+ * chat startup depend on npm/DNS left the UI stuck at "Starting agent".
  */
 import { spawn as nodeSpawn } from "node:child_process"
 import readline from "node:readline"
@@ -90,6 +90,12 @@ const curl = (url: string, shell: "sh" | "bash", curlFlags = "-fsSL"): InstallMe
  * directly from `failure.command`.
  */
 export const INSTALL_PLANS: Record<string, InstallPlan> = {
+  "claude-agent-acp": {
+    command: "claude-agent-acp",
+    name: "Claude Agent ACP adapter",
+    methods: [npm("npm", "@agentclientprotocol/claude-agent-acp")],
+    docsUrl: "https://github.com/agentclientprotocol/claude-agent-acp",
+  },
   codex: {
     command: "codex",
     name: "OpenAI Codex CLI",
@@ -174,6 +180,10 @@ export interface RunInstallDeps {
    * `npm` / `brew` / `curl` resolve from a minimal launching environment. */
   env?: NodeJS.ProcessEnv
   cwd?: string
+  /** Cancels the installer and its subprocess tree. */
+  signal?: AbortSignal
+  /** Process-tree termination seam for tests. */
+  killProcessTree?: (child: ReturnType<typeof nodeSpawn>) => void
 }
 
 export interface RunInstallResult {
@@ -203,12 +213,26 @@ export async function runInstall(deps: RunInstallDeps): Promise<RunInstallResult
         env,
         ...(deps.cwd ? { cwd: deps.cwd } : {}),
         stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
       })
     } catch (error) {
       deps.onLine?.(error instanceof Error ? error.message : String(error))
       done({ ok: false, exitCode: null, signal: null })
       return
     }
+    const terminate = (): void => {
+      try {
+        if (deps.killProcessTree) deps.killProcessTree(child)
+        else if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM")
+        else child.kill?.("SIGTERM")
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+          deps.onLine?.(error instanceof Error ? error.message : String(error))
+        }
+      }
+    }
+    if (deps.signal?.aborted) terminate()
+    else deps.signal?.addEventListener("abort", terminate, { once: true })
     for (const stream of [child.stdout, child.stderr]) {
       if (!stream) continue
       readline.createInterface({ input: stream }).on("line", (line) => deps.onLine?.(line))
@@ -218,6 +242,7 @@ export async function runInstall(deps: RunInstallDeps): Promise<RunInstallResult
       done({ ok: false, exitCode: null, signal: null })
     })
     child.once("exit", (code, signal) => {
+      deps.signal?.removeEventListener("abort", terminate)
       done({ ok: code === 0, exitCode: code, signal })
     })
   })

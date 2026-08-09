@@ -9,5 +9,5 @@
 # Cargo.lock for the demanding crate and either downgrade it
 # (`cargo update -p <crate>@<ver> --precise <older>`) or bump this pin.
 [toolchain]
-channel = "1.93.0"
-components = ["rustfmt", "clippy"]
+channel = "1.95"
+components = ["rustfmt", "clippy", "rust-analyzer"]

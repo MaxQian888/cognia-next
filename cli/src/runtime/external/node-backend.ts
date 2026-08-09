@@ -44,6 +44,7 @@ const CHANNEL = {
 
 const BINARY_ALLOWLIST = new Set([
   "claude",
+  "claude-agent-acp",
   "claude-code-acp",
   "codex",
   "codex-acp",

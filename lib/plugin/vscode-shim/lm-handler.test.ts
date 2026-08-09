@@ -163,7 +163,7 @@ describe("lm-handler — sendChatRequest", () => {
 
     expect(generateTextMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        system: [{ role: "system", content: "You are a code reviewer." }],
+        instructions: [{ role: "system", content: "You are a code reviewer." }],
         messages: [{ role: "user", content: "review this" }],
       })
     )
@@ -181,7 +181,7 @@ describe("lm-handler — sendChatRequest", () => {
     })
 
     const call = generateTextMock.mock.calls[0][0]
-    expect(call).not.toHaveProperty("system")
+    expect(call).not.toHaveProperty("instructions")
     expect(call.allowSystemInMessages).toBe(true)
     expect(call.messages).toEqual([
       { role: "user", content: "review this" },

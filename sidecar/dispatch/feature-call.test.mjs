@@ -387,6 +387,55 @@ test("discovers OpenCode V2 without persisting or logging authentication headers
   ])
 })
 
+test("discovers MCP capabilities through the client-managed runtime gateway", async () => {
+  const events = []
+  let received
+  const handler = createFeatureCallHandler({
+    emit: (event) => events.push(event),
+    discoverMcpServer: async (server, options) => {
+      received = { server, signal: options.signal }
+      return {
+        ok: true,
+        toolCount: 1,
+        tools: [{ name: "search" }],
+        resources: [],
+        prompts: [],
+        durationMs: 4,
+      }
+    },
+  })
+
+  await handler.call({
+    type: "feature_call",
+    requestId: "mcp-1",
+    operation: "mcp-discover",
+    credentials: {},
+    mcpServer: {
+      id: "srv-1",
+      name: "docs",
+      transport: "http",
+      config: { url: "https://mcp.example/rpc", headers: { authorization: "ephemeral" } },
+    },
+  })
+
+  assert.equal(received.server.id, "srv-1")
+  assert.equal(received.signal instanceof AbortSignal, true)
+  assert.deepEqual(events, [
+    {
+      type: "feature_call_result",
+      requestId: "mcp-1",
+      result: {
+        ok: true,
+        toolCount: 1,
+        tools: [{ name: "search" }],
+        resources: [],
+        prompts: [],
+        durationMs: 4,
+      },
+    },
+  ])
+})
+
 test("validates the discovered OpenCode V2 endpoint and derives its version from health", async () => {
   const endpoint = {
     url: "http://127.0.0.1:4096",

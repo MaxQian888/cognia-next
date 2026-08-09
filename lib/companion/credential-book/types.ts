@@ -2,7 +2,7 @@
  * Multi-host companion credential book (ADR-0097).
  *
  * The single-`CompanionConfig` abstraction assumed exactly one desktop per
- * client: one `baseUrl`, one device JWT, one TLS pin, one cursor namespace.
+ * client: one `baseUrl`, one device identity, one TLS pin, one cursor namespace.
  * Everything that needed per-host separation — sync cursors, outbound queues,
  * the mirrored Dexie tables — had to reconstruct it from whatever field
  * happened to be unique, and "switching hosts" degenerated into wiping the
@@ -20,7 +20,7 @@
  * Records are addressed by {@link CompanionHostKey} — `{hostId,
  * accountNamespace}`. Both halves are required: the same physical desktop can
  * be paired from two local accounts, and those pairings must never share a
- * device JWT, a cursor watermark, or a mirrored row.
+ * device identity, a cursor watermark, or a mirrored row.
  */
 import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
 
@@ -88,6 +88,8 @@ export function initialConnectionState(): CompanionConnectionState {
 export interface CompanionHostRecord {
   hostId: string
   accountNamespace: string
+  /** Remote SecurityStore/OIDC tenant; distinct from the local account namespace. */
+  tenantId?: string
   /** User-facing name. Defaults to the host name reported at pair time. */
   label: string
   endpoints: CompanionHostEndpoints
@@ -106,12 +108,18 @@ export interface CompanionHostRecord {
   cursorNamespace: string
   /** Device identity this host issued us at pair time. */
   deviceId: string
+  /** Thumbprint of the registered ES256 device public key. */
+  deviceKeyThumbprint: string
   /** Host semver captured at pair time. Diagnostics only. */
   serverVersion: string
   /** ADR-0021 signaling room id. Absent disables the WebRTC tier. */
   rendezvousId?: string
   /** Public, self-certifying signaling v2 room descriptor. */
   signalingRoomDescriptor?: RoomDescriptorV2
+  /** Browser-reachable signaling endpoint for this target. */
+  signalingUrl?: string
+  /** Target-specific ICE configuration; contains no private credentials. */
+  iceServers?: RTCIceServer[]
   connection: CompanionConnectionState
   createdAt: number
   updatedAt: number
@@ -119,8 +127,8 @@ export interface CompanionHostRecord {
 
 /** The secret half. Secure storage only; never enumerated. */
 export interface CompanionHostCredential {
-  /** Long-lived JWT returned by `POST /api/v1/auth/pair`. */
-  deviceJwt: string
+  /** ES256 device identity. Access tokens are refreshed into memory only. */
+  devicePrivateKeyJwk: JsonWebKey
   /** Mobile-role ECDSA private key for signaling v2. */
   signalingPrivateKeyJwk?: JsonWebKey
 }

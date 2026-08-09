@@ -17,6 +17,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import writeFileAtomic from "write-file-atomic"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, "../..")
@@ -78,11 +79,7 @@ export async function downloadCubismCore(opts = {}) {
     }
     const buf = Buffer.from(await res.arrayBuffer())
     fs.mkdirSync(path.dirname(dest), { recursive: true })
-    // Atomic write: temp file then rename so a killed process never leaves a
-    // half-written core file that the size check would accept.
-    const tmp = `${dest}.tmp-${process.pid}`
-    fs.writeFileSync(tmp, buf)
-    fs.renameSync(tmp, dest)
+    writeFileAtomic.sync(dest, buf)
     log(`[live2d] done: ${dest} (${buf.length} bytes)`)
     return { status: "downloaded" }
   } catch (err) {

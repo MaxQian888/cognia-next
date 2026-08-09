@@ -47,7 +47,7 @@ export interface ModelMappingParameterDefaults {
 }
 
 /** Distribution strategy for entries in a mapping */
-export type MappingDistributionStrategy = "priority" | "weighted"
+export type MappingDistributionStrategy = "priority" | "weighted" | "round-robin"
 
 /**
  * Error-class-specific fallback chains (LiteLLM `context_window_fallbacks` /

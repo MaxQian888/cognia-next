@@ -10,12 +10,8 @@ jest.mock(
   }
 )
 
-const getActiveProxyUrlMock = jest.fn<string | null, []>(() => null)
-jest.mock("@/stores/network-proxy", () => ({
-  getActiveProxyUrl: () => getActiveProxyUrlMock(),
-}))
-
 const settingsState = {
+  loaded: true,
   settings: {
     updates: {
       autoCheck: true,
@@ -24,6 +20,15 @@ const settingsState = {
       relaunchAfterInstall: true,
       requestTimeoutSeconds: 30,
       useProxy: true,
+    },
+    networkProxy: {
+      mode: "off",
+      protocol: "http",
+      host: "",
+      port: 0,
+      bypass: ["localhost", "127.0.0.1", "::1"],
+      proxyWebsockets: true,
+      ipLookupEnabled: true,
     },
   },
 }
@@ -76,7 +81,6 @@ import {
 beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
-  getActiveProxyUrlMock.mockReturnValue(null)
   settingsState.settings.updates = {
     autoCheck: true,
     checkIntervalMinutes: 360,
@@ -84,6 +88,16 @@ beforeEach(() => {
     relaunchAfterInstall: true,
     requestTimeoutSeconds: 30,
     useProxy: true,
+  }
+  settingsState.loaded = true
+  settingsState.settings.networkProxy = {
+    mode: "off",
+    protocol: "http",
+    host: "",
+    port: 0,
+    bypass: ["localhost", "127.0.0.1", "::1"],
+    proxyWebsockets: true,
+    ipLookupEnabled: true,
   }
   __resetPendingUpdate()
 })
@@ -149,22 +163,41 @@ describe("checkForUpdate", () => {
     })
   })
 
-  it("passes the configured timeout and active proxy to the updater fetch", async () => {
+  it("passes the timeout while the native host owns active proxy routing", async () => {
     settingsState.settings.updates.requestTimeoutSeconds = 45
-    getActiveProxyUrlMock.mockReturnValue("http://127.0.0.1:7890")
+    settingsState.settings.networkProxy = {
+      ...settingsState.settings.networkProxy,
+      mode: "manual",
+      host: "127.0.0.1",
+      port: 7890,
+    }
     checkMock.mockResolvedValueOnce(null)
 
     await checkForUpdate()
 
-    expect(checkMock).toHaveBeenCalledWith({
-      timeout: 45_000,
-      proxy: "http://127.0.0.1:7890",
-    })
+    expect(checkMock).toHaveBeenCalledWith({ timeout: 45_000 })
   })
 
-  it("omits the proxy when updater proxy use is disabled", async () => {
+  it("blocks instead of bypassing an active global proxy when updater proxy use is disabled", async () => {
     settingsState.settings.updates.useProxy = false
-    getActiveProxyUrlMock.mockReturnValue("http://127.0.0.1:7890")
+    settingsState.settings.networkProxy = {
+      ...settingsState.settings.networkProxy,
+      mode: "manual",
+      host: "127.0.0.1",
+      port: 7890,
+    }
+    await expect(checkForUpdate()).rejects.toEqual(
+      expect.objectContaining({
+        code: "network",
+        phase: "check",
+        message: expect.stringContaining("PROXY_TRANSPORT_UNSUPPORTED"),
+      })
+    )
+    expect(checkMock).not.toHaveBeenCalled()
+  })
+
+  it("permits an explicit direct updater request when the global proxy is off", async () => {
+    settingsState.settings.updates.useProxy = false
     checkMock.mockResolvedValueOnce(null)
 
     await checkForUpdate()
@@ -172,15 +205,17 @@ describe("checkForUpdate", () => {
     expect(checkMock).toHaveBeenCalledWith({ timeout: 30_000 })
   })
 
-  it("falls back to a direct request when the proxy snapshot is unavailable", async () => {
-    getActiveProxyUrlMock.mockImplementationOnce(() => {
-      throw new Error("settings hydrating")
-    })
-    checkMock.mockResolvedValueOnce(null)
+  it("fails closed before settings hydration completes", async () => {
+    settingsState.loaded = false
 
-    await checkForUpdate()
-
-    expect(checkMock).toHaveBeenCalledWith({ timeout: 30_000 })
+    await expect(checkForUpdate()).rejects.toEqual(
+      expect.objectContaining({
+        code: "network",
+        phase: "check",
+        message: expect.stringContaining("PROXY_NOT_INITIALIZED"),
+      })
+    )
+    expect(checkMock).not.toHaveBeenCalled()
   })
 
   it("deduplicates concurrent checks", async () => {

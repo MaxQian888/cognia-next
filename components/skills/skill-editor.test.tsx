@@ -31,10 +31,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SkillEditor } from "./skill-editor"
 
 describe("SkillEditor", () => {
-  it("renders the name + category + content fields with localized labels", () => {
+  it("renders portable metadata and content fields with localized labels", () => {
     render(<SkillEditor mode="create" onCancel={jest.fn()} onSave={jest.fn(async () => {})} />)
     expect(screen.getByText("name")).toBeInTheDocument()
+    expect(screen.getByText("slug")).toBeInTheDocument()
     expect(screen.getByText("category")).toBeInTheDocument()
+    expect(screen.getByText("invocationPolicy")).toBeInTheDocument()
+    expect(screen.getByText("compatibility")).toBeInTheDocument()
+    expect(screen.getByText("metadata")).toBeInTheDocument()
     expect(screen.getByText("content")).toBeInTheDocument()
   })
 
@@ -56,7 +60,15 @@ describe("SkillEditor", () => {
       <SkillEditor
         mode="edit"
         hideContent
-        initial={{ name: "Existing", content: "# body", source: "custom" } as never}
+        initial={
+          {
+            slug: "existing",
+            name: "Existing",
+            description: "Existing skill",
+            content: "# body",
+            source: "custom",
+          } as never
+        }
         onCancel={jest.fn()}
         onSave={jest.fn(async () => {})}
       />
@@ -76,7 +88,13 @@ describe("SkillEditor", () => {
       <SkillEditor
         mode="edit"
         initial={
-          { name: "Example", content: "```mermaid\ngraph TD\n```", source: "custom" } as never
+          {
+            slug: "example",
+            name: "Example",
+            description: "Example skill",
+            content: "```mermaid\ngraph TD\n```",
+            source: "custom",
+          } as never
         }
         onCancel={jest.fn()}
         onSave={jest.fn(async () => {})}
@@ -105,7 +123,7 @@ describe("SkillEditor", () => {
       button: 0,
       ctrlKey: false,
     })
-    fireEvent.change(container.querySelector("textarea")!, { target: { value: "Body" } })
+    fireEvent.change(container.querySelectorAll("textarea")[1]!, { target: { value: "Body" } })
     fireEvent.mouseDown(screen.getByRole("tab", { name: "tabPreview" }), {
       button: 0,
       ctrlKey: false,
@@ -113,18 +131,24 @@ describe("SkillEditor", () => {
     expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("## unnamedPreview")
   })
 
-  it("saves a valid minimal draft with optional metadata omitted", async () => {
+  it("saves a valid portable draft with optional metadata omitted", async () => {
     const onSave = jest.fn(async () => {})
     const { container } = render(<SkillEditor mode="create" onCancel={jest.fn()} onSave={onSave} />)
     const inputs = container.querySelectorAll("input")
     fireEvent.change(inputs[0], { target: { value: "Minimal" } })
-    fireEvent.change(container.querySelector("textarea")!, { target: { value: "Body" } })
+    fireEvent.change(inputs[1], { target: { value: "minimal" } })
+    fireEvent.change(inputs[2], { target: { value: "Use for minimal examples." } })
+    fireEvent.change(container.querySelectorAll("textarea")[1]!, { target: { value: "Body" } })
     fireEvent.click(screen.getByText("create"))
 
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith({
+        slug: "minimal",
         name: "Minimal",
-        description: undefined,
+        description: "Use for minimal examples.",
+        compatibility: undefined,
+        metadata: undefined,
+        invocationPolicy: "implicit",
         content: "Body",
         allowedTools: undefined,
         tags: undefined,
@@ -148,13 +172,17 @@ describe("SkillEditor", () => {
     )
     const inputs = container.querySelectorAll("input")
     fireEvent.change(inputs[0], { target: { value: "  Example  " } })
-    fireEvent.change(inputs[1], { target: { value: "  Description  " } })
-    fireEvent.change(inputs[2], { target: { value: "1.2.3" } })
-    fireEvent.change(inputs[3], { target: { value: "  Author  " } })
-    fireEvent.change(inputs[4], { target: { value: "  MIT  " } })
-    fireEvent.change(inputs[5], { target: { value: "alpha, beta, gamma" } })
-    fireEvent.change(container.querySelector("textarea")!, { target: { value: "Initial body" } })
-    fireEvent.change(inputs[6], { target: { value: "Read, Write, Execute" } })
+    fireEvent.change(inputs[1], { target: { value: "example" } })
+    fireEvent.change(inputs[2], { target: { value: "  Description  " } })
+    fireEvent.change(inputs[3], { target: { value: "Requires git" } })
+    const textareas = container.querySelectorAll("textarea")
+    fireEvent.change(textareas[0], { target: { value: "owner=acme\ntier=stable" } })
+    fireEvent.change(inputs[4], { target: { value: "1.2.3" } })
+    fireEvent.change(inputs[5], { target: { value: "  Author  " } })
+    fireEvent.change(inputs[6], { target: { value: "  MIT  " } })
+    fireEvent.change(inputs[7], { target: { value: "alpha, beta, gamma" } })
+    fireEvent.change(textareas[1]!, { target: { value: "Initial body" } })
+    fireEvent.change(inputs[8], { target: { value: "Read, Write, Execute" } })
 
     fireEvent.click(screen.getByText("ai.buttonLabel"))
     fireEvent.click(screen.getByText("mock-close-ai"))
@@ -164,8 +192,12 @@ describe("SkillEditor", () => {
 
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith({
+        slug: "example",
         name: "Example",
         description: "Description",
+        compatibility: "Requires git",
+        metadata: { owner: "acme", tier: "stable" },
+        invocationPolicy: "implicit",
         content: "AI body",
         allowedTools: ["Read", "Write", "Execute"],
         tags: ["alpha", "beta", "gamma"],

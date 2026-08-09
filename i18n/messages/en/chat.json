@@ -26,6 +26,10 @@
       "matches": "{count, plural, =1 {1 match} other {# matches}}"
     },
     "rowAria": "{name} tool call — {status}",
+    "semantic": {
+      "readOnly": "Read only",
+      "writeCapable": "Can modify"
+    },
     "status": {
       "awaitingApproval": "Awaiting approval",
       "completed": "Completed",
@@ -37,6 +41,10 @@
     },
     "subagents": {
       "summary": "{count, plural, =1 {1 agent} other {# agents}}"
+    },
+    "toolSummary": {
+      "ariaLabel": "Summary of preceding tool calls",
+      "label": "Tool summary"
     }
   },
   "agentTeamDispatch": {
@@ -157,6 +165,15 @@
     "undoFailed": "Couldn't restore the conversation",
     "undoSuccess": "Conversation restored"
   },
+  "checkpoint": {
+    "action": "Restore files to this checkpoint",
+    "cancel": "Cancel",
+    "confirm": "Restore files",
+    "description": "Review the dry-run result before restoring tracked files. Conversation history is not changed.",
+    "previewFailed": "Could not preview this checkpoint.",
+    "restoreFailed": "Could not restore this checkpoint.",
+    "title": "Restore file checkpoint"
+  },
   "composer": {
     "ariaAttachImage": "Attach files",
     "ariaMessage": "Message",
@@ -174,6 +191,7 @@
       "trigger": "Attach"
     },
     "attachments": {
+      "analyzing": "Analyzing image…",
       "countLimit": "Only {max} attachments allowed.",
       "extracting": "Reading…",
       "fallbackFile": "file",
@@ -189,6 +207,7 @@
       "oversizeConfirm": "Send anyway",
       "oversizeTitle": "Large attachment",
       "preparing": "Preparing attachments…",
+      "preparingImages": "{count, plural, =1 {Preparing 1 image…} other {Preparing # images…}}",
       "preview": {
         "empty": "Nothing was extracted from this file.",
         "fileTab": "File",
@@ -199,8 +218,8 @@
         "ocrDetail": "View per-page result",
         "ocrRun": "Run OCR",
         "ocrRunning": "Running OCR…",
-        "ocrToggle": "Also send OCR text",
         "ocrToInput": "Add text to message",
+        "ocrToggle": "Also send OCR text",
         "redactedNote": "Highlighted spans were redacted before sending.",
         "tokens": "{tokens} tokens"
       },
@@ -223,7 +242,17 @@
       "permissionDenied": "Camera or photo access is required to attach a photo.",
       "unsupported": "Photo capture isn't available on this device."
     },
+    "commandHint": {
+      "needsArgs": "Add the required arguments"
+    },
+    "commandQueue": {
+      "ariaLabel": "Queued commands",
+      "failedTooltip": "/{name} failed",
+      "label": "{count, plural, one {# command} other {# commands}}",
+      "removeAria": "Remove /{name}"
+    },
     "commands": {
+      "batchFailed": "{count, plural, one {Command {names} failed} other {Commands {names} failed}}",
       "failed": "Command failed",
       "unavailable": "/{name} is not available yet."
     },
@@ -246,7 +275,20 @@
     },
     "effort": {
       "aria": "Thinking level",
-      "auto": "Auto"
+      "auto": "Auto",
+      "desc": {
+        "high": "Deep reasoning for complex tasks.",
+        "low": "Light reasoning for straightforward tasks.",
+        "max": "Maximum reasoning for the hardest tasks.",
+        "medium": "Balanced reasoning for everyday tasks.",
+        "off": "Use the model's default reasoning behavior.",
+        "ultracode": "Maximum-but-one reasoning plus the dynamic workflow tools.",
+        "xhigh": "Extra-deep reasoning for demanding tasks."
+      },
+      "faster": "Faster",
+      "hint": "Choose how much reasoning the model should use for this conversation.",
+      "hintAria": "About thinking levels",
+      "smarter": "Smarter"
     },
     "enhance": {
       "modes": {
@@ -289,7 +331,27 @@
     "ghostAcceptHint": "Tab",
     "ghostDismiss": "Dismiss suggestion",
     "helperHints": {
+      "chainingNote": "Put commands on separate lines to run them in order.",
+      "cheatsheetDescription": "Keyboard shortcuts and prefixes available in the message composer.",
+      "cheatsheetLabel": "Keyboard help",
+      "cheatsheetTitle": "Composer shortcuts",
       "dropImages": "Drop / paste files, folders or links",
+      "keys": {
+        "complete": "Complete the current command or mention",
+        "dismiss": "Dismiss suggestions",
+        "history": "Recall input history",
+        "newline": "Insert a new line",
+        "permissionMode": "Change permission mode",
+        "send": "Send the message"
+      },
+      "keysTitle": "Keyboard",
+      "prefixes": {
+        "memory": "Write to memory",
+        "mention": "Mention a file, agent, skill, or workflow",
+        "shell": "Run a shell command",
+        "slash": "Run a slash command"
+      },
+      "prefixesTitle": "Prefixes",
       "send": "⏎ Send · ⇧⏎ New line",
       "tryPrefix": "Try"
     },
@@ -300,12 +362,32 @@
     },
     "memory": {
       "appended": "Appended to {path}",
+      "desktopOnly": "File-backed memory is available in the desktop app.",
       "emptyPreview": "(start typing the memory line)",
       "failed": "Memory write failed",
       "needsLine": "Type the memory line after #.",
       "panelTitle": "Append to memory",
       "pickScope": "Pick Project or User memory in the popover to save.",
       "projectLabel": "Project memory",
+      "scope": {
+        "global": "global memory",
+        "workspace": "workspace memory"
+      },
+      "storedInMemory": "Stored in {scope}",
+      "storeError": {
+        "disabled": "Long-term memory is disabled.",
+        "empty": "Type a fact to remember.",
+        "failed": "The memory could not be stored.",
+        "pii": "Sensitive information cannot be stored in memory.",
+        "temporary": "Memory is unavailable in temporary mode.",
+        "unavailable": "The memory store is unavailable."
+      },
+      "targetLabel": {
+        "file:project": "Project memory file",
+        "file:user": "User memory file",
+        "store:global": "Global memory",
+        "store:workspace": "Workspace memory"
+      },
       "userLabel": "User memory"
     },
     "modelPicker": {
@@ -325,7 +407,8 @@
       "noProviders": "No providers configured",
       "routingGroup": "Routing",
       "searchPlaceholder": "Search models…",
-      "switchModelAria": "Switch model"
+      "switchModelAria": "Switch model",
+      "title": "Select a model"
     },
     "paramForm": {
       "cancel": "Cancel",
@@ -484,12 +567,17 @@
       },
       "grantMicAccess": "Allow microphone access",
       "languageLabel": "Language",
+      "listening": "Listening…",
       "live": {
         "description": "Talk naturally, interrupt at any time, and keep the conversation moving hands-free.",
         "end": "End live voice",
         "errors": {
+          "disabled": "Live voice is turned off. Enable it in Settings → Speech.",
+          "mintFailed": "Could not start a session with any live voice provider. Check your API key and network, then try again.",
+          "noDeployments": "No live voice provider is set up yet. Add one in Settings → Speech.",
+          "noneEligible": "None of your live voice providers is available in this region on this device.",
           "sessionFailed": "The live voice connection was interrupted. End the session and try again.",
-          "startFailed": "Could not start live voice. Check your OpenAI key and microphone access."
+          "startFailed": "Could not start live voice. Check your provider key and microphone access."
         },
         "mute": "Mute microphone",
         "phases": {
@@ -505,7 +593,6 @@
         "title": "Live voice",
         "unmute": "Unmute microphone"
       },
-      "listening": "Listening…",
       "micPermissionDenied": "Microphone access is blocked — enable it in your system or browser settings.",
       "microphoneLabel": "Microphone",
       "noMicFound": "No microphone found.",
@@ -517,6 +604,12 @@
     "webLabel": "Web",
     "workflowRefs": {
       "removeAria": "Remove reference to {label}"
+    },
+    "smartSnapshot": {
+      "captureFailed": "Smart snapshot failed",
+      "captureTooltip": "Smart snapshot",
+      "captured": "Smart snapshot attached: {appName}",
+      "switchPrompt": "Switch to the target app now; Cognia will capture it in a moment."
     }
   },
   "concurrent": {
@@ -583,6 +676,39 @@
       "continue": "Continue",
       "tryPrompt": "Try a prompt"
     },
+    "stats": {
+      "customize": "Customize stats",
+      "customizeTitle": "Show on the welcome page",
+      "dayCount": "{count}d",
+      "empty": "No usage recorded in this window yet.",
+      "heatmap": "Calendar heatmap",
+      "models": {
+        "empty": "No model usage in this window.",
+        "turns": "{count} turns"
+      },
+      "none": "—",
+      "range": {
+        "days": "{days}d",
+        "label": "Time range"
+      },
+      "tiles": {
+        "activeDays": "Active days",
+        "cost": "Total cost",
+        "currentStreak": "Current streak",
+        "longestStreak": "Longest streak",
+        "peakHour": "Peak hour",
+        "sessions": "Sessions",
+        "tokens": "Total tokens",
+        "topModel": "Top model",
+        "turns": "Turns"
+      },
+      "title": "Your activity",
+      "view": {
+        "label": "Dashboard view",
+        "models": "Models",
+        "overview": "Overview"
+      }
+    },
     "style": {
       "minimal": "Minimal",
       "rich": "Rich",
@@ -601,10 +727,23 @@
       "active": "active",
       "aria": "Switch account for this session",
       "noOverride": "Inherit",
-      "toast": "Next message will use account {label}"
+      "toast": "Next message will use account {label}",
+      "effective": "Effective account",
+      "error": "Couldn't switch accounts.",
+      "inheritedToast": "Using inherited account {label}",
+      "toastInherited": "Using the inherited account.",
+      "switchFailed": "Couldn't switch accounts: {error}",
+      "unavailable": "Account switching is unavailable.",
+      "unavailableWithId": "Account {id} is unavailable.",
+      "useInherited": "Use inherited account"
     },
     "ariaSettings": "Session settings",
     "bareMode": "Bare mode",
+    "branchAria": "Branch conversation",
+    "branchEmpty": "Nothing to branch yet — this conversation has no messages.",
+    "branchError": "Couldn't branch this conversation.",
+    "branchSuccess": "Branched. The new conversation is now active.",
+    "branchTooltip": "Branch conversation — copies this thread into a new one you can take elsewhere",
     "briefMode": "Brief output",
     "cancel": "Cancel",
     "compactAria": "Compact",
@@ -629,30 +768,16 @@
       "simplified": "Simplified",
       "standard": "Standard"
     },
-    "branchAria": "Branch conversation",
-    "branchEmpty": "Nothing to branch yet — this conversation has no messages.",
-    "branchError": "Couldn't branch this conversation.",
-    "branchSuccess": "Branched. The new conversation is now active.",
-    "branchTooltip": "Branch conversation — copies this thread into a new one you can take elsewhere",
     "forkAria": "Fork session",
     "forkSuccess": "Session forked. The new branch is now active.",
     "forkTooltip": "Fork conversation — branches a new session from this one's history",
     "forkUnsupported": "This agent doesn't support session forking.",
-    "providerUndoAria": "Provider Undo",
-    "providerUndoConfirm": "Continue with Provider Undo",
-    "providerUndoFailure": "Provider undo failed: {error}",
-    "providerUndoProgress": "Undoing…",
-    "providerUndoSuccess": "Provider undo completed",
-    "providerUndoTooltip": "Run the provider's advertised /undo command",
-    "providerUndoWarningDescription": "The provider may revert conversation state and file changes. This is provider-native undo, not a compaction restore. This warning is remembered for this external-agent configuration.",
-    "providerUndoWarningTitle": "Provider Undo may change files",
     "groups": {
       "default": "Default",
       "favorites": "Favorites",
       "other": "Other"
     },
     "hideArtifacts": "Hide artifacts panel",
-    "openBrowser": "Open browser panel",
     "hideConversations": "Hide conversation list",
     "insights": "Session insights",
     "memoryInherit": "Inherit app setting",
@@ -661,6 +786,7 @@
     "memoryOn": "On",
     "memoryUse": "Use memories in this chat",
     "noApiKey": "No API key",
+    "openBrowser": "Open browser panel",
     "permissionModeAppDefault": "Use app default",
     "permissionModeLabel": "Permission mode",
     "pickDirAria": "Pick directory",
@@ -690,13 +816,60 @@
       "searchAriaLabel": "Search presets",
       "searchPlaceholder": "Search presets…"
     },
+    "providerUndoAria": "Provider Undo",
+    "providerUndoConfirm": "Continue with Provider Undo",
+    "providerUndoFailure": "Provider undo failed: {error}",
+    "providerUndoProgress": "Undoing…",
+    "providerUndoSuccess": "Provider undo completed",
+    "providerUndoTooltip": "Run the provider's advertised /undo command",
+    "providerUndoWarningDescription": "The provider may revert conversation state and file changes. This is provider-native undo, not a compaction restore. This warning is remembered for this external-agent configuration.",
+    "providerUndoWarningTitle": "Provider Undo may change files",
+    "execution": {
+      "addEnv": "Add variable",
+      "effort": "Execution effort",
+      "effortValues": {
+        "high": "High",
+        "low": "Low",
+        "max": "Maximum",
+        "medium": "Medium",
+        "xhigh": "Extra high"
+      },
+      "envDescription": "Session values override variables with the same name on the Agent. Secret values stay in the secure keyring.",
+      "envKind": "Type",
+      "envName": "Environment variable name",
+      "envNameDuplicate": "Environment variable {name} is duplicated.",
+      "envNameInvalid": "Environment variable {name} has an invalid name.",
+      "envNamePlaceholder": "API_BASE_URL",
+      "envPlain": "Plain",
+      "envPlainPlaceholder": "Value",
+      "envSecret": "Secret",
+      "envSecretPlaceholder": "Stored securely; leave blank to keep the current value",
+      "envSecretRequired": "Enter a secret value for {name}.",
+      "envSecretSaveFailed": "Could not securely save {name}.",
+      "envTitle": "Environment variables",
+      "envValue": "Environment variable value",
+      "inherit": "Inherit Agent or app default",
+      "maxTurns": "Maximum turns",
+      "maxTurnsHint": "Leave empty to inherit the Agent limit. Allowed range: 1–100.",
+      "maxTurnsInvalid": "Maximum turns must be an integer from 1 to 100.",
+      "maxTurnsPlaceholder": "Inherit",
+      "removeEnv": "Remove environment variable {name}",
+      "summaryDefault": "Default",
+      "summaryEffort": "Effort",
+      "summaryExecute": "Execute",
+      "summaryMaxTurns": "Turns",
+      "summaryPlan": "Plan",
+      "summaryUtility": "Utility"
+    },
     "save": "Save",
+    "sessionCommunication": "Session communication",
     "sheet": {
       "sections": {
         "account": "Model & account",
         "actions": "Session actions",
         "behavior": "Behavior",
         "display": "Display",
+        "execution": "Execution overrides",
         "memory": "Memory",
         "role": "Role & abilities",
         "status": "Status"
@@ -722,7 +895,10 @@
     "unreadArtifacts": "New artifacts — open panel",
     "untitledSession": "(untitled)",
     "workingDirLabel": "Working directory",
-    "workingDirPlaceholder": "/path/to/project"
+    "workingDirPlaceholder": "/path/to/project",
+    "openInCodexApp": "Open in Codex app",
+    "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
+    "openedInCodexApp": "Opened in the Codex app."
   },
   "history": {
     "loadError": "Couldn't load this conversation.",
@@ -743,12 +919,15 @@
   },
   "inlineError": {
     "dismiss": "Dismiss",
+    "environmentSetupFailed": "Project environment setup failed. Retry, or explicitly bypass setup for this interactive turn.",
+    "environmentUnavailable": "The selected project environment is unavailable.",
     "noSession": "No conversation is open. Start a new one to send this.",
     "openSettings": "Open settings",
     "pendingPromptPiiBlocked": "The automated prompt was blocked because it may contain private or credential-like data. Start a normal chat and share only the details you intend to send.",
     "retry": "Retry",
     "sidecarExited": "The assistant stopped unexpectedly and the turn was interrupted. Retry to continue.",
     "title": "Failed to send",
+    "managedWorktreeUnavailable": "The managed worktree is unavailable. This task was not run locally.",
     "unflushedEditorBuffers": "{count, plural, one {# open file could not be saved} other {# open files could not be saved}} before this turn, so the agent may read an out-of-date copy: {files}"
   },
   "jump": {
@@ -832,6 +1011,16 @@
     },
     "read": {
       "title": "Read"
+    },
+    "spawnTask": {
+      "aside": "aside",
+      "caveats": "Caveats",
+      "codeLocations": "Code locations",
+      "inherit": "inherits context",
+      "open": "Open task",
+      "situation": "Situation",
+      "solution": "Proposed solution",
+      "start": "Start task"
     },
     "webFetch": {
       "empty": "No content returned"
@@ -1046,6 +1235,7 @@
       "failedToLoad": "Failed to load audio",
       "loop": "Loop",
       "mute": "Mute",
+      "playPause": "Play or pause audio",
       "skipBack": "-10s",
       "skipForward": "+10s",
       "unmute": "Unmute"
@@ -1089,6 +1279,7 @@
       "titleNamed": "{name} Render Error"
     },
     "image": {
+      "allImagesTitle": "All images",
       "close": "Close",
       "copyUrl": "Copy URL",
       "counter": "{current} of {total}",
@@ -1103,8 +1294,10 @@
       "previewAria": "Preview {name}",
       "previewDescription": "Preview the selected image, zoom or rotate it.",
       "previous": "Previous image",
+      "retry": "Retry",
       "rotate": "Rotate",
       "selectImage": "View {name}",
+      "showAllImages": "Show all {count} images",
       "viewFullscreen": "View fullscreen",
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out"
@@ -1212,6 +1405,69 @@
     "askError": "Couldn't open an aside for that.",
     "askInAside": "Ask in an aside"
   },
+  "sessionCommunication": {
+    "acceptHeld": "Accept",
+    "agentOrigin": "Agent message from {name} · untrusted",
+    "attachedCreateError": "Couldn't create the attached session.",
+    "attachedCreated": "Attached session created.",
+    "attachedPromptLabel": "Initial prompt",
+    "attachedTab": "Attached sessions",
+    "attachedTitleLabel": "Task title",
+    "attachedStatus": {
+      "closed": "Closed",
+      "completed": "Completed",
+      "interrupted": "Interrupted",
+      "running": "Running",
+      "staged": "Ready"
+    },
+    "closeAttached": "Close",
+    "contextFull": "Full parent context",
+    "contextLabel": "Context fork",
+    "contextLastN": "Last messages",
+    "contextNone": "No parent context",
+    "createAttached": "Create attached session",
+    "description": "Manage parent-owned child chats and live plain-text handoffs between independent sessions.",
+    "from": "From {name}",
+    "inboxTitle": "Inbox",
+    "intentLabel": "Delivery intent",
+    "intentNote": "Note only",
+    "intentTrigger": "Start a turn",
+    "interruptAttached": "Interrupt",
+    "messageLabel": "Message",
+    "messageStatus": {
+      "delivered": "Delivered",
+      "expired": "Expired",
+      "held": "Awaiting approval",
+      "queued": "Queued",
+      "refused": "Refused",
+      "targetUnavailable": "Target unavailable"
+    },
+    "noAttached": "No attached sessions yet.",
+    "noInbox": "No incoming messages.",
+    "noOutbox": "No sent messages.",
+    "noReachable": "No other live sessions in this workspace.",
+    "openAttached": "Open",
+    "outboxTitle": "Receipts",
+    "peerTab": "Message session",
+    "policyAccept": "Accept",
+    "policyHold": "Hold for approval",
+    "policyLabel": "Incoming policy",
+    "policyRefuse": "Refuse",
+    "policyUpdateError": "Couldn't update the incoming-message policy.",
+    "refuseHeld": "Refuse",
+    "resultLabel": "Result",
+    "send": "Send message",
+    "sendError": "Couldn't send the message.",
+    "sent": "Message status: {status}",
+    "targetLabel": "Target session",
+    "targetPlaceholder": "Choose a live session",
+    "title": "Session communication",
+    "turnsLabel": "Messages to carry",
+    "userOrigin": "Message from {name} · untrusted",
+    "workspaceIndependent": "Independent workspace",
+    "workspaceLabel": "Workspace",
+    "workspaceShared": "Share parent workspace"
+  },
   "sessionCost": {
     "byModelTitle": "By model",
     "cache": "Cache",
@@ -1250,10 +1506,12 @@
     "ranSlashCommand": "ran slash command"
   },
   "sourcesPart": {
+    "agentKnowledgeHeader": "Agent Knowledge Base excerpts ({count})",
     "citationsLabel": "{count, plural, =1 {1 web source} other {# web sources}}",
     "degradedNotice": "Twin retrieval unavailable — this reply skipped the twin's documents.",
     "originLabel": {
       "anthropic": "Web",
+      "agentKnowledgeBase": "Agent KB",
       "footnote": "Note",
       "memory": "Memory",
       "twinRag": "Twin",
@@ -1326,7 +1584,15 @@
     "today": "Today",
     "yesterday": "Yesterday"
   },
+  "transcript": {
+    "collapseTurn": "Collapse turn",
+    "expandTurn": "Expand full turn",
+    "loadOlder": "Load older turns",
+    "loading": "Loading transcript…",
+    "retry": "Retry transcript"
+  },
   "toolApproval": {
+    "actionsTitle": "Approval actions",
     "allowAlways": "Allow always",
     "allowOnce": "Allow once",
     "askedBySubagent": "Asked by {subagent} (run {runId})",

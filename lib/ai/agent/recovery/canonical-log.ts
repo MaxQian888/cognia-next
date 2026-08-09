@@ -8,11 +8,20 @@
 // Appends are idempotent on `envelope.eventId` (crash/replay safe), and the
 // header projection derives the session-level view without a second store.
 
-import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
-
+import {
+  isAgentEventEnvelope,
+  type AgentEventEnvelope,
+} from "@cognia/agent-config-types/agent-execution"
 import { appendEvents, listRunEvents } from "@/lib/workflow/runtime/event-log"
 
 const ENVELOPE_KIND = "agent_envelope"
+
+export class CanonicalLogCorruptionError extends Error {
+  constructor(runId: string) {
+    super(`canonical agent envelope log is corrupt for run ${runId}`)
+    this.name = "CanonicalLogCorruptionError"
+  }
+}
 
 interface EnvelopePayload {
   kind: typeof ENVELOPE_KIND
@@ -24,16 +33,27 @@ function isEnvelopePayload(payload: unknown): payload is EnvelopePayload {
     !!payload &&
     typeof payload === "object" &&
     (payload as { kind?: string }).kind === ENVELOPE_KIND &&
-    typeof (payload as { envelope?: { eventId?: unknown } }).envelope?.eventId === "string"
+    isAgentEventEnvelope((payload as { envelope?: unknown }).envelope)
   )
 }
 
 /** Per-run cache of already-persisted eventIds (idempotency without rescans). */
 const seenByRun = new Map<string, Set<string>>()
+/** Serialize appends per run so concurrent snapshot effects cannot race dedupe. */
+const appendTailByRun = new Map<string, Promise<unknown>>()
+
+function outsideCurrentDexieTransaction<T>(operation: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    setTimeout(() => {
+      void operation().then(resolve, reject)
+    }, 0)
+  })
+}
 
 /** Test-only: drop the idempotency cache so suites start cold. */
 export function __resetCanonicalLogForTesting(): void {
   seenByRun.clear()
+  appendTailByRun.clear()
 }
 
 async function seenEventIds(runId: string): Promise<Set<string>> {
@@ -59,23 +79,45 @@ export async function appendCanonicalEnvelopes(
   runId: string,
   envelopes: readonly AgentEventEnvelope[]
 ): Promise<number> {
-  const seen = await seenEventIds(runId)
-  const fresh = envelopes.filter((envelope) => !seen.has(envelope.eventId))
-  if (fresh.length === 0) return 0
-  await appendEvents(
-    fresh.map((envelope) => ({
-      runId,
-      type: "run_log" as const,
-      payload: { kind: ENVELOPE_KIND, envelope } satisfies EnvelopePayload,
-    }))
-  )
-  for (const envelope of fresh) seen.add(envelope.eventId)
-  return fresh.length
+  const previous = appendTailByRun.get(runId) ?? Promise.resolve()
+  const pending = previous
+    .catch(() => undefined)
+    .then(() =>
+      outsideCurrentDexieTransaction(async () => {
+        const seen = await seenEventIds(runId)
+        const fresh = envelopes.filter((envelope) => !seen.has(envelope.eventId))
+        if (fresh.length === 0) return 0
+        await appendEvents(
+          fresh.map((envelope) => ({
+            runId,
+            type: "run_log" as const,
+            payload: { kind: ENVELOPE_KIND, envelope } satisfies EnvelopePayload,
+          }))
+        )
+        for (const envelope of fresh) seen.add(envelope.eventId)
+        return fresh.length
+      })
+    )
+  appendTailByRun.set(runId, pending)
+  try {
+    return await pending
+  } finally {
+    if (appendTailByRun.get(runId) === pending) appendTailByRun.delete(runId)
+  }
 }
 
 /** Read the run's canonical envelope stream in persisted (ts) order. */
 export async function readCanonicalEnvelopes(runId: string): Promise<AgentEventEnvelope[]> {
-  return (await listRunEvents(runId))
+  const rows = await listRunEvents(runId)
+  const corrupt = rows.some(
+    (row) =>
+      !!row.payload &&
+      typeof row.payload === "object" &&
+      (row.payload as { kind?: unknown }).kind === ENVELOPE_KIND &&
+      !isEnvelopePayload(row.payload)
+  )
+  if (corrupt) throw new CanonicalLogCorruptionError(runId)
+  return rows
     .map((row) => row.payload)
     .filter(isEnvelopePayload)
     .map((payload) => payload.envelope)

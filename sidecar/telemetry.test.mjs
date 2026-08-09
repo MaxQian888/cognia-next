@@ -41,6 +41,10 @@ test("extracts a valid W3C traceparent and makes it current", () => {
 })
 
 test("AI SDK telemetry is enabled only after configuration and never records content", async () => {
+  // No OTLP endpoint configured → no telemetry options are ever attached to a
+  // call. This is what keeps an unconfigured sidecar completely silent: AI SDK 7
+  // telemetry is opt-OUT once an integration is registered, so registration is
+  // deliberately tied to `initializeTelemetry` succeeding.
   assert.equal(aiSdkTelemetry({ provider: "openai" }), undefined)
   assert.equal(
     initializeTelemetry({
@@ -54,9 +58,23 @@ test("AI SDK telemetry is enabled only after configuration and never records con
     traceId: "a".repeat(32),
     provider: "openai",
   })
-  assert.equal(options.isEnabled, true)
+  // v7 removed both of these from the per-call options: telemetry is on by
+  // default once registered, and a custom tracer now belongs to the
+  // `OpenTelemetry` instance passed to `registerTelemetry`.
+  assert.equal(options.isEnabled, undefined)
+  assert.equal(options.tracer, undefined)
+  // Privacy contract, unchanged across the upgrade: no prompt or completion
+  // content may enter a span.
   assert.equal(options.recordInputs, false)
   assert.equal(options.recordOutputs, false)
   assert.equal(options.functionId, "cognia.sidecar.openai")
+  assert.deepEqual(options.metadata, { sessionId: "session-1", traceId: "a".repeat(32) })
+
+  // A second init must not register the integration again — `registerTelemetry`
+  // appends to a process-global list, so a duplicate would double every span.
+  assert.equal(
+    initializeTelemetry({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://127.0.0.1:4318/v1/traces" }),
+    false
+  )
   await shutdownTelemetry()
 })

@@ -8,7 +8,7 @@
  */
 
 import { getAdapter } from "./providers/registry"
-import type { TTSProvider, TTSSettings } from "./types"
+import { getTTSError, type TTSProvider, type TTSResponse, type TTSSettings } from "./types"
 
 const DB_NAME = "cognia-next-tts-cache"
 const DB_VERSION = 1
@@ -282,4 +282,52 @@ export async function getCachedOrGenerate(
     }
   }
   return result
+}
+
+/** Cache seam that preserves a provider's structured failure response. */
+export async function getCachedTtsResponseOrGenerate(
+  key: string,
+  generateFn: () => Promise<TTSResponse>,
+  provider: TTSProvider,
+  text: string,
+  cacheEnabled = true,
+  signal?: AbortSignal
+): Promise<TTSResponse> {
+  if (signal?.aborted) return cancelledResponse()
+  if (cacheEnabled) {
+    try {
+      const cached = await ttsCache.get(key)
+      if (signal?.aborted) return cancelledResponse()
+      if (cached) {
+        return { success: true, audioData: cached.audioBlob, mimeType: cached.mimeType }
+      }
+    } catch {
+      // Cache failures must never prevent synthesis.
+    }
+  }
+
+  const response = await generateFn()
+  if (signal?.aborted) return cancelledResponse()
+  if (!response.success || !response.audioData) return response
+  if (cacheEnabled) {
+    try {
+      const mimeType = response.mimeType ?? "audio/mpeg"
+      const blob =
+        response.audioData instanceof Blob
+          ? response.audioData
+          : new Blob([response.audioData], { type: mimeType })
+      await ttsCache.set(key, blob, mimeType, provider, text)
+    } catch {
+      // Best-effort cache; preserve the successful provider response.
+    }
+  }
+  return response
+}
+
+function cancelledResponse(): TTSResponse {
+  return {
+    success: false,
+    error: getTTSError("cancelled").message,
+    errorType: "cancelled",
+  }
 }

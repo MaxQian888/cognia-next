@@ -178,6 +178,49 @@ describe("runTeamBuiltinTool", () => {
     expect(await runTeamBuiltinTool("nope", {}, caller, deps)).toMatch(/unknown team tool/)
   })
 
+  it("routes evidence-backed durable decision proposals with caller identity", async () => {
+    const proposeDecision = jest.fn(async () => ({
+      id: "decision-1",
+      version: 2,
+      conflict: { resolution: "escalate" },
+    }))
+    const { deps } = makeDeps({ proposeDecision })
+
+    await expect(
+      runTeamBuiltinTool(
+        TEAM_TOOL_NAMES.proposeDecision,
+        {
+          title: "Migration shape",
+          detail: "Use an additive migration",
+          evidenceIds: ["evidence-1"],
+          impacts: ["migration"],
+          compatibilityScopes: ["lib/db"],
+        },
+        caller,
+        deps
+      )
+    ).resolves.toMatchObject({ id: "decision-1", version: 2, status: "proposed" })
+    expect(proposeDecision).toHaveBeenCalledWith({
+      runId: "run-1",
+      teamId: "team-1",
+      authorId: "tm-a",
+      title: "Migration shape",
+      detail: "Use an additive migration",
+      evidenceIds: ["evidence-1"],
+      impacts: ["migration"],
+      compatibilityScopes: ["lib/db"],
+    })
+
+    await expect(
+      runTeamBuiltinTool(
+        TEAM_TOOL_NAMES.proposeDecision,
+        { title: "No evidence", detail: "Unsupported", evidenceIds: [] },
+        caller,
+        deps
+      )
+    ).resolves.toMatch(/requires title, detail, and evidenceIds/)
+  })
+
   it("team_send_message broadcasts when no recipient, direct otherwise", async () => {
     const { deps, calls } = makeDeps()
     expect(

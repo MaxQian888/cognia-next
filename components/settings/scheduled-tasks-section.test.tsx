@@ -520,12 +520,12 @@ describe("ScheduledTasksSection — webhook signing card", () => {
     expect(screen.getByTestId("signing-state-disabled")).toBeInTheDocument()
   })
 
-  it("renders a manage-secret link to the remote-control outbound tab", () => {
+  it("renders a manage-secret link to the canonical webhooks section", () => {
     mockedIsTauri.mockReturnValue(true)
     mockedSigningHook.mockReturnValue({ enabled: true, loading: false })
     render(<ScheduledTasksSection />)
     const link = screen.getByRole("link", { name: /manage signing secret/i })
-    expect(link).toHaveAttribute("href", "/settings?section=remote-control&remoteTab=outbound")
+    expect(link).toHaveAttribute("href", "/settings?section=webhooks")
   })
 })
 

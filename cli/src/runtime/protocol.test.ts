@@ -100,6 +100,23 @@ describe("commandToInbound", () => {
     })
   })
 
+  it("maps agent_session_api to a session-level SDK request", () => {
+    expect(
+      commandToInbound(COMMAND.SESSION_API, {
+        requestId: "r2",
+        method: "listSessions",
+        params: { dir: "/workspace" },
+        sendOptions: { cwd: "/workspace" },
+      })
+    ).toEqual({
+      type: "session_api",
+      requestId: "r2",
+      method: "listSessions",
+      params: { dir: "/workspace" },
+      sendOptions: { cwd: "/workspace" },
+    })
+  })
+
   it("maps claude_close_session", () => {
     expect(commandToInbound(COMMAND.CLOSE, { sessionId: "s1" })).toEqual({
       type: "close",

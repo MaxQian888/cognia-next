@@ -32,9 +32,9 @@
 //!     rejected (mirrors the `files.rs` workspace sandbox).
 //!   * **secret namespacing** — `secrets:*` keys live under the keyring
 //!     namespace `plugin:<plugin_id>`, so one plugin can't read another's.
-//!   * **network domain allowlist** — `network:fetch` URLs are checked against
-//!     `state.network_allowlist` (empty = unrestricted), fail-closed on an
-//!     unparseable URL.
+//!   * **network egress policy** — `network:fetch` URLs are checked against
+//!     `state.network_allowlist` plus optional method/path rules, fail-closed
+//!     on a missing declaration or unparseable URL.
 //!
 //! UI-only operations (`clipboard:*`, `window:*`, `shell:open`, and
 //! `shell:showInFolder`) require a desktop `AppHandle`. The headless gateway
@@ -57,10 +57,9 @@ use tauri::AppHandle;
 use tauri::State;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
-use super::{PluginError, PluginRuntimeState, Result};
+use super::{NetworkAccessRule, PluginError, PluginRuntimeState, Result};
 
 const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
-const MIN_SUPPORTED_SDK: &str = "1.0.0";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire types — mirror lib/plugin/core/transport.ts:25-42
@@ -80,7 +79,7 @@ pub struct PluginApiInvokeRequest {
 }
 
 fn default_sdk_version() -> String {
-    "2.0.0".to_string()
+    crate::contract::gateway_client_version().to_string()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,7 +139,8 @@ impl PluginApiError {
         Self::new(
             "INCOMPATIBLE_SDK",
             format!(
-                "plugin SDK version {sdk_version} is below the minimum supported {MIN_SUPPORTED_SDK}"
+                "plugin SDK version {sdk_version} is below the minimum supported {}",
+                crate::contract::minimum_gateway_client_version()
             ),
         )
     }
@@ -168,7 +168,7 @@ fn parse_sdk_semver(s: &str) -> Option<(u32, u32, u32)> {
 fn sdk_is_compatible(sdk_version: &str) -> bool {
     match (
         parse_sdk_semver(sdk_version),
-        parse_sdk_semver(MIN_SUPPORTED_SDK),
+        parse_sdk_semver(crate::contract::minimum_gateway_client_version()),
     ) {
         (Some(sdk), Some(min)) => sdk >= min,
         _ => false,
@@ -178,7 +178,7 @@ fn sdk_is_compatible(sdk_version: &str) -> bool {
 fn compat_for(sdk_version: &str) -> PluginApiCompat {
     PluginApiCompat {
         sdk_version: sdk_version.to_string(),
-        min_supported_sdk: MIN_SUPPORTED_SDK.to_string(),
+        min_supported_sdk: crate::contract::minimum_gateway_client_version().to_string(),
         compatible: sdk_is_compatible(sdk_version),
     }
 }
@@ -1075,22 +1075,24 @@ async fn handle_window(
     }
 }
 
-/// Per-plugin egress allowlist gate for the network domain. A plugin that
-/// declared no allowlist is denied by default; a declared allowlist is
-/// enforced (see `state.network_host_allowed`). Fail-closed on an
-/// unparseable URL / host.
-fn guard_network_host(
+/// Per-plugin egress gate for domain, HTTP method, and pathname. A plugin that
+/// declared no allowlist is denied by default. Fail-closed on an unparseable
+/// URL / host.
+fn guard_network_request(
     state: &PluginRuntimeState,
     plugin_id: &str,
     url: &str,
+    method: &str,
 ) -> std::result::Result<(), PluginApiError> {
-    match url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(str::to_string))
-    {
-        Some(h) if state.network_host_allowed(plugin_id, &h) => Ok(()),
-        Some(h) => Err(PluginApiError::permission_denied(format!(
-            "network egress to {h} is not in plugin {plugin_id}'s allowedDomains"
+    match url::Url::parse(url).ok().and_then(|u| {
+        u.host_str()
+            .map(|host| (host.to_string(), u.path().to_string()))
+    }) {
+        Some((host, path)) if state.network_request_allowed(plugin_id, &host, method, &path) => {
+            Ok(())
+        }
+        Some((host, _)) => Err(PluginApiError::permission_denied(format!(
+            "network policy denied {method} egress to {host} for plugin {plugin_id}"
         ))),
         None => Err(PluginApiError::invalid(format!(
             "network: cannot extract host from URL: {url}"
@@ -1098,9 +1100,11 @@ fn guard_network_host(
     }
 }
 
-fn network_http_client() -> std::result::Result<reqwest::Client, PluginApiError> {
-    reqwest::Client::builder()
-        .user_agent("cognia-plugin-network/0.1")
+fn network_http_client(url: &str) -> std::result::Result<reqwest::Client, PluginApiError> {
+    let builder = reqwest::Client::builder().user_agent("cognia-plugin-network/0.1");
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, url)
+        .map_err(|error| PluginApiError::internal(error.to_string()))?;
+    builder
         .build()
         .map_err(|e| PluginApiError::internal(format!("network: http client init: {e}")))
 }
@@ -1123,13 +1127,13 @@ async fn handle_network(
     match op {
         "fetch" => {
             let url = payload_str(payload, "url")?;
-            guard_network_host(state, plugin_id, &url)?;
             let options = payload.get("options").cloned().unwrap_or(Value::Null);
             let method = options
                 .get("method")
                 .and_then(Value::as_str)
                 .unwrap_or("GET")
                 .to_string();
+            guard_network_request(state, plugin_id, &url, &method)?;
             let headers: Option<HashMap<String, String>> = options
                 .get("headers")
                 .and_then(|h| serde_json::from_value(h.clone()).ok());
@@ -1164,10 +1168,10 @@ async fn handle_network(
         "download" => {
             let url = payload_str(payload, "url")?;
             let dest_rel = payload_str(payload, "destPath")?;
-            guard_network_host(state, plugin_id, &url)?;
+            guard_network_request(state, plugin_id, &url, "GET")?;
             resolve_scoped(state, plugin_id, &dest_rel)?;
 
-            let client = network_http_client()?;
+            let client = network_http_client(&url)?;
             let mut req = client.get(&url);
             for (k, v) in payload_headers(payload) {
                 req = req.header(k, v);
@@ -1209,7 +1213,25 @@ async fn handle_network(
         "upload" => {
             let url = payload_str(payload, "url")?;
             let file_rel = payload_str(payload, "filePath")?;
-            guard_network_host(state, plugin_id, &url)?;
+            guard_network_request(state, plugin_id, &url, "POST")?;
+            let file_content_policy = payload
+                .get("fileContentPolicy")
+                .and_then(Value::as_str)
+                .unwrap_or("block");
+            if file_content_policy != "allow" {
+                return Err(PluginApiError::permission_denied(
+                    "network:upload file content is blocked; set fileContentPolicy=allow and declare dataClassification",
+                ));
+            }
+            if payload
+                .get("dataClassification")
+                .and_then(Value::as_str)
+                .is_none_or(str::is_empty)
+            {
+                return Err(PluginApiError::permission_denied(
+                    "network:upload requires dataClassification when fileContentPolicy=allow",
+                ));
+            }
             let src = resolve_scoped(state, plugin_id, &file_rel)?;
             let bytes = crate::contained_path::read_existing_plugin_file(
                 &state.plugin_dir(plugin_id),
@@ -1227,7 +1249,7 @@ async fn handle_network(
             let method = reqwest::Method::from_bytes(method_str.as_bytes()).map_err(|_| {
                 PluginApiError::invalid(format!("network:upload: bad method {method_str}"))
             })?;
-            let client = network_http_client()?;
+            let client = network_http_client(&url)?;
             let mut req = client.request(method, &url);
             for (k, v) in payload_headers(payload) {
                 req = req.header(k, v);
@@ -1427,7 +1449,8 @@ fn required_permission(domain: &str, op: &str) -> Option<&'static str> {
         ("managedIdeSecrets", "set" | "delete") => Some("secrets:write"),
         ("clipboard", "readText" | "hasText") => Some("clipboard:read"),
         ("clipboard", "writeText" | "clear") => Some("clipboard:write"),
-        ("network", "fetch" | "download" | "upload") => Some("network:fetch"),
+        ("network", "fetch" | "download") => Some("network:fetch"),
+        ("network", "upload") => Some("network:upload"),
         ("db", "query" | "tableExists" | "txQuery") => Some("database:read"),
         (
             "db",
@@ -1708,7 +1731,7 @@ fn capability_table() -> Vec<PluginApiCapability> {
         cap("window:setAlwaysOnTop", true, false, &[]),
         cap("network:fetch", true, false, &["network:fetch"]),
         cap("network:download", true, false, &["network:fetch"]),
-        cap("network:upload", true, true, &["network:fetch"]),
+        cap("network:upload", true, true, &["network:upload"]),
         cap("db:query", true, false, &["database:read"]),
         cap("db:tableExists", true, false, &["database:read"]),
         cap("db:execute", true, true, &["database:write"]),
@@ -1764,8 +1787,12 @@ pub async fn plugin_set_network_allowlist(
     state: State<'_, PluginRuntimeState>,
     plugin_id: String,
     domains: Vec<String>,
+    rules: Option<Vec<NetworkAccessRule>>,
 ) -> Result<()> {
     state.set_network_allowlist(&plugin_id, domains);
+    if let Some(rules) = rules {
+        state.set_network_rules(&plugin_id, rules);
+    }
     Ok(())
 }
 
@@ -2085,6 +2112,9 @@ mod tests {
             .contains(&"network:fetch".to_string()));
         let up = caps.iter().find(|c| c.api == "network:upload").unwrap();
         assert!(up.supported && up.high_risk);
+        assert!(up
+            .required_permissions
+            .contains(&"network:upload".to_string()));
     }
 
     #[test]
@@ -2095,7 +2125,52 @@ mod tests {
         );
         assert_eq!(
             required_permission("network", "upload"),
-            Some("network:fetch")
+            Some("network:upload")
+        );
+    }
+
+    #[test]
+    fn network_guard_enforces_method_and_path_rules() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        state.set_network_allowlist("demo", vec!["observability.test".into()]);
+        state.set_network_rules(
+            "demo",
+            vec![NetworkAccessRule {
+                domain: "observability.test".into(),
+                methods: vec!["GET".into()],
+                paths: vec!["/api/logs/*".into()],
+            }],
+        );
+
+        assert!(guard_network_request(
+            &state,
+            "demo",
+            "https://observability.test/api/logs/recent?limit=10",
+            "GET"
+        )
+        .is_ok());
+        assert_eq!(
+            guard_network_request(
+                &state,
+                "demo",
+                "https://observability.test/api/logs/recent",
+                "DELETE"
+            )
+            .unwrap_err()
+            .code,
+            "PERMISSION_DENIED"
+        );
+        assert_eq!(
+            guard_network_request(
+                &state,
+                "demo",
+                "https://observability.test/api/admin",
+                "GET"
+            )
+            .unwrap_err()
+            .code,
+            "PERMISSION_DENIED"
         );
     }
 
@@ -2144,11 +2219,54 @@ mod tests {
             &state,
             "demo",
             "upload",
-            &json!({ "url": "https://files.test/u", "filePath": "nope.bin" }),
+            &json!({
+                "url": "https://files.test/u",
+                "filePath": "nope.bin",
+                "fileContentPolicy": "allow",
+                "dataClassification": "internal"
+            }),
         )
         .await
         .unwrap_err();
         assert_eq!(err.code, "INTERNAL");
+    }
+
+    #[tokio::test]
+    async fn upload_blocks_file_content_by_default() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        state.set_network_allowlist("demo", vec!["files.test".into()]);
+        let err = handle_network(
+            &state,
+            "demo",
+            "upload",
+            &json!({ "url": "https://files.test/u", "filePath": "payload.bin" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "PERMISSION_DENIED");
+        assert!(err.message.contains("file content is blocked"));
+    }
+
+    #[tokio::test]
+    async fn upload_allow_requires_data_classification() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        state.set_network_allowlist("demo", vec!["files.test".into()]);
+        let err = handle_network(
+            &state,
+            "demo",
+            "upload",
+            &json!({
+                "url": "https://files.test/u",
+                "filePath": "payload.bin",
+                "fileContentPolicy": "allow"
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "PERMISSION_DENIED");
+        assert!(err.message.contains("requires dataClassification"));
     }
 
     #[tokio::test]
@@ -2423,12 +2541,11 @@ mod tests {
 
     #[test]
     fn capability_table_uses_only_canonical_permissions() {
-        // No phantom permission strings (filesystem:delete, network:download/
-        // upload, database:query/execute) outside the PluginPermission union.
+        // No phantom permission strings (filesystem:delete, network:download,
+        // database:query/execute) outside the PluginPermission union.
         let phantom = [
             "filesystem:delete",
             "network:download",
-            "network:upload",
             "database:query",
             "database:execute",
         ];

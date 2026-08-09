@@ -65,6 +65,7 @@ import { PetConsole } from "./pet-console"
 import { createDefaultProfile } from "@/lib/pet/defaults"
 import { computePetView } from "@/lib/pet/runtime/pet-view"
 import type { PetProfile } from "@/types/pet"
+import { getPetSkinRuntime, resetPetSkinRuntimeForTests } from "@/lib/pet/skin-runtime"
 
 const mockUsePet = usePet as jest.Mock
 
@@ -86,6 +87,7 @@ function petResult(soul: PetProfile["soul"]) {
 }
 
 beforeEach(() => {
+  resetPetSkinRuntimeForTests()
   mockUsePet.mockReset()
   hatchPet.mockClear()
   emitPetEvent.mockClear()
@@ -163,7 +165,8 @@ describe("PetConsole", () => {
     render(<PetConsole />)
     expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ skinId: "svg" }))
     // The header explains why the built-in mascot is showing.
-    expect(screen.getByText(/showing the built-in mascot/i)).toBeInTheDocument()
+    expect(screen.getByText(/requested skin.*live2d/i)).toBeInTheDocument()
+    expect(screen.getByText(/effective skin.*vector mascot/i)).toBeInTheDocument()
   })
 
   it("omits the fallback note once Live2D renders", () => {
@@ -171,7 +174,20 @@ describe("PetConsole", () => {
     useActiveLive2dModel.mockReturnValue({ modelId: "m1", row: undefined, coreReady: true })
     settingsValue = { petSettings: { skinId: "live2d" } }
     render(<PetConsole />)
-    expect(screen.queryByText(/showing the built-in mascot/i)).toBeNull()
+    expect(screen.queryByText(/fallback is active/i)).toBeNull()
+  })
+
+  it("offers a functional retry after repeated WebGL context loss", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    useActiveLive2dModel.mockReturnValue({ modelId: "m1", row: undefined, coreReady: true })
+    settingsValue = { petSettings: { skinId: "live2d" } }
+    const runtime = getPetSkinRuntime()
+    runtime.recordContextLoss("live2d:m1")
+    runtime.recordContextLoss("live2d:m1")
+
+    render(<PetConsole />)
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+    expect(runtime.assetDiagnostic("live2d:m1")).toBeUndefined()
   })
 
   it("hides the plugins tab until a pet.console.tab extension registers", () => {

@@ -5,27 +5,21 @@ describe("companion command descriptors", () => {
     const manifest = getCommandManifest()
     const names = manifest.commands.map((command) => command.name)
 
-    expect(manifest.schemaVersion).toBe(1)
+    expect(manifest.schemaVersion).toBe(2)
     expect(names.length).toBeGreaterThanOrEqual(900)
     expect(new Set(names).size).toBe(names.length)
     expect(manifest.commands.every((command) => command.capability.length > 0)).toBe(true)
   })
 
-  it("classifies arbitrary MCP process probing as critical signed policy", () => {
-    expect(getCommandDescriptor("test_mcp_server")).toEqual(
-      expect.objectContaining({
-        target: "service",
-        capability: "process.spawn",
-        risk: "critical",
-        approval: "signed-policy",
-        idempotency: "required",
-      })
-    )
+  it("does not expose the retired renderer-owned MCP process probe", () => {
+    expect(getCommandDescriptor("test_mcp_server")).toBeUndefined()
   })
 
   it("keeps client-owned definitions local and service commands internal", () => {
     expect(getCommandDescriptor("app_settings_update")?.target).toBe("client")
     expect(getCommandDescriptor("keyring_secret_get")?.target).toBe("service")
+    expect(getCommandDescriptor("secret_store_get")?.target).toBe("service")
+    expect(getCommandDescriptor("plugin_set_status")?.target).toBe("service")
     expect(getCommandDescriptor("git_status")?.target).toBe("execution")
   })
 })

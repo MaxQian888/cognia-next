@@ -80,7 +80,9 @@ const template = (overrides: Partial<AgentTeamTemplate>): AgentTeamTemplate =>
 let storeState: Record<string, unknown>
 
 jest.mock("@/stores/agent/agent-team-store", () => ({
-  useAgentTeamStore: (selector: (s: unknown) => unknown) => selector(storeState),
+  useAgentTeamStore: Object.assign((selector: (s: unknown) => unknown) => selector(storeState), {
+    getState: () => storeState,
+  }),
 }))
 
 jest.mock("@/stores/ui/ui-store", () => ({

@@ -36,6 +36,13 @@ import {
   __resetPluginWallpapersForTesting,
 } from "@/lib/plugin/bridge/wallpaper-bridge"
 import { listThemePacks, __resetThemePackRegistryForTesting } from "@/lib/theme/theme-pack-registry"
+import {
+  __resetCharacterPacksForTesting,
+  getPackWarnings,
+  registerCharacterPack,
+} from "@/lib/plugin/registries/character-pack-registry"
+import { __resetSkillsForTesting, registerSkill } from "@/lib/plugin/registries/skill-registry"
+import { __resetPluginActivationProgressStoreForTesting } from "@/stores/plugin-runtime/plugin-activation-progress-store"
 
 const mockTransportCall = jest.fn()
 const mockTransportSubscribe = jest.fn()
@@ -239,6 +246,12 @@ describe("PluginManager", () => {
     ;(getPluginSignatureVerifier as jest.Mock).mockReturnValue(mockVerifier)
     ;(getPermissionGuard as jest.Mock).mockReturnValue(mockGuard)
     clearPluginExtensions("rollback-plugin")
+    __resetCharacterPacksForTesting()
+    __resetSkillsForTesting()
+  })
+
+  afterEach(() => {
+    __resetPluginActivationProgressStoreForTesting()
   })
 
   describe("syncBackendStatus", () => {
@@ -261,6 +274,66 @@ describe("PluginManager", () => {
       await expect(
         (manager as unknown as WithSync).syncBackendStatus("p1", "disabled")
       ).resolves.toBeUndefined()
+    })
+
+    it("routes every headless lifecycle call through the injected host invoker", async () => {
+      ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+      mockCanUseTauriInvoke.mockReturnValue(false)
+      const hostInvoker = jest.fn(async (command: string) => {
+        if (command === "plugin_python_runtime_info") {
+          return {
+            available: true,
+            version: "3.12.4",
+            plugin_count: 0,
+            lazy_hosts: 0,
+            total_calls: 0,
+            total_execution_time_ms: 0,
+            failed_calls: 0,
+          }
+        }
+        return undefined
+      })
+      const unsubscribe = jest.fn()
+      const hostSubscriber = jest.fn(() => unsubscribe)
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        enablePython: true,
+        runtimeProfile: "headless",
+        nodeHostInvoker: hostInvoker as never,
+        nodeHostSubscriber: hostSubscriber,
+      })
+      const internals = manager as unknown as {
+        initializePythonRuntime: () => Promise<void>
+        syncBackendStatus: (id: string, status: string) => Promise<void>
+        syncShellAllowlistToHost: (id: string, commands: string[]) => Promise<void>
+        syncNetworkAllowlistToHost: (id: string, domains: string[]) => Promise<void>
+      }
+
+      await internals.initializePythonRuntime()
+      await internals.syncBackendStatus("p1", "enabled")
+      await internals.syncShellAllowlistToHost("p1", ["git"])
+      await internals.syncNetworkAllowlistToHost("p1", ["api.example.com"])
+
+      expect(hostInvoker).toHaveBeenCalledWith("plugin_python_initialize", {
+        pythonPath: undefined,
+      })
+      expect(hostInvoker).toHaveBeenCalledWith("plugin_python_runtime_info", {})
+      expect(hostInvoker).toHaveBeenCalledWith("plugin_set_status", {
+        pluginId: "p1",
+        status: "enabled",
+      })
+      expect(hostInvoker).toHaveBeenCalledWith("plugin_set_shell_allowlist", {
+        pluginId: "p1",
+        commands: ["git"],
+      })
+      expect(hostInvoker).toHaveBeenCalledWith("plugin_set_network_allowlist", {
+        pluginId: "p1",
+        domains: ["api.example.com"],
+        rules: [],
+      })
+      expect(hostSubscriber).toHaveBeenCalledWith("plugin:python", expect.any(Function))
+      expect(mockInvoke).not.toHaveBeenCalled()
+      expect(mockTransportCall).not.toHaveBeenCalled()
     })
   })
 
@@ -427,6 +500,28 @@ describe("PluginManager", () => {
       expect(mockInvoke).toHaveBeenCalledWith("plugin_set_network_allowlist", {
         pluginId: "net-plugin",
         domains: ["api.example.com", "*.cdn.test"],
+        rules: [],
+      })
+    })
+
+    it("pushes method/path rules to the host with the domain allowlist", async () => {
+      mockInvoke.mockResolvedValue(undefined)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const rules = [{ domain: "api.example.com", methods: ["GET" as const], paths: ["/logs/*"] }]
+      await (
+        manager as unknown as {
+          syncNetworkAllowlistToHost: (
+            id: string,
+            domains: string[],
+            networkRules: typeof rules
+          ) => Promise<void>
+        }
+      ).syncNetworkAllowlistToHost("net-plugin", ["api.example.com"], rules)
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_set_network_allowlist", {
+        pluginId: "net-plugin",
+        domains: ["api.example.com"],
+        rules,
       })
     })
   })
@@ -1857,6 +1952,9 @@ describe("PluginManager", () => {
             manifest: {
               ...createManifest(pluginId),
               dexie: { tables: [{ name: "items", schema: "++id" }] },
+              runtimeCompatibility: {
+                browser: { availability: "supported" },
+              },
             },
             status: "installed",
             source: "builtin",
@@ -2118,6 +2216,58 @@ describe("PluginManager", () => {
   })
 
   describe("disablePlugin", () => {
+    it("refreshes character-pack warnings after dropping plugin skills", async () => {
+      registerSkill(
+        "owned-skill",
+        {
+          id: "owned-skill",
+          name: "Owned skill",
+          description: "Removed when its plugin is disabled.",
+          source: { kind: "inline", markdown: "# Owned skill" },
+        },
+        { pluginId: "skill-owner" }
+      )
+      registerCharacterPack("dependent-pack", {
+        id: "dependent-pack",
+        name: "Dependent pack",
+        version: "1.0.0",
+        characters: [],
+        requires: { skills: ["owned-skill"] },
+      })
+      expect(getPackWarnings("dependent-pack")).toEqual([])
+
+      const store = {
+        plugins: {
+          "skill-owner": {
+            manifest: createManifest("skill-owner"),
+            status: "enabled",
+            source: "local",
+            path: "/plugins/skill-owner",
+            config: {},
+          },
+        } as Record<string, Plugin>,
+        disablePlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "disabled" } as Plugin
+        }),
+        unregisterPluginTool: jest.fn(),
+        unregisterPluginComponent: jest.fn(),
+        unregisterPluginMode: jest.fn(),
+        unregisterPluginCommand: jest.fn(),
+        setPluginError: jest.fn(),
+        setPluginStatus: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.disablePlugin("skill-owner")
+
+      expect(getPackWarnings("dependent-pack")).toEqual([
+        { code: "missing-skill", missingId: "owned-skill" },
+      ])
+    })
+
     it("should call plugin deactivate and unregister contributions", async () => {
       const manifest = {
         ...createManifest("to-disable"),
@@ -2872,6 +3022,50 @@ describe("PluginManager", () => {
 
       expect(enableSpy).toHaveBeenCalledWith("cognia-web-tools")
       expect(enableSpy).not.toHaveBeenCalledWith("cognia-computer-use")
+    })
+
+    it("skips a headless-compatible plugin when a required dependency is headless-blocked", async () => {
+      const office: Plugin = {
+        manifest: {
+          ...createManifest("cognia-office"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            headless: {
+              availability: "blocked",
+              reason: "Office file ports require an interactive host",
+            },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-office",
+        config: {},
+      }
+      const workMode: Plugin = {
+        manifest: {
+          ...createManifest("cognia-work-mode"),
+          activationEvents: ["startup"],
+          dependencies: { "cognia-office": "*" },
+          runtimeCompatibility: {
+            browser: { availability: "supported" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-work-mode",
+        config: {},
+      }
+      mockGetState.mockReturnValue({
+        plugins: { "cognia-office": office, "cognia-work-mode": workMode },
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "headless" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).not.toHaveBeenCalled()
     })
 
     it("skips a retired builtin left in persisted state", async () => {
@@ -3679,6 +3873,24 @@ describe("PluginManager", () => {
   })
 
   describe("plugin point governance", () => {
+    it("reuses precompiled activation specs and wildcard matchers", () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const manifest: PluginManifest = {
+        ...createManifest("indexed-activation"),
+        activationEvents: ["onCommand:plugin.*"],
+      }
+      const internals = manager as unknown as {
+        parseActivationSpec: (value: PluginManifest) => unknown
+        matchesActivation: (pattern: string, value: string) => boolean
+        activationPatternCache: Map<string, RegExp>
+      }
+
+      expect(internals.parseActivationSpec(manifest)).toBe(internals.parseActivationSpec(manifest))
+      expect(internals.matchesActivation("plugin.*", "plugin.open")).toBe(true)
+      expect(internals.matchesActivation("plugin.*", "plugin.close")).toBe(true)
+      expect(internals.activationPatternCache.size).toBe(1)
+    })
+
     it("blocks retired activation events in block mode", async () => {
       const manager = new PluginManager({
         pluginDirectory: "/plugins",
@@ -3739,6 +3951,21 @@ describe("PluginManager", () => {
 
       manager.setPluginPointGovernanceMode("warn")
       expect(manager.getPluginPointGovernanceMode()).toBe("warn")
+    })
+  })
+
+  describe("disposable lifecycle ledger", () => {
+    it("disposes a partial activation even when the store row is already gone", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const dispose = jest.fn()
+      manager.getPluginDisposableScope("partial").track(dispose, "partial.registration")
+      mockGetState.mockReturnValue({ plugins: {} })
+
+      await (
+        manager as unknown as { unregisterPluginContributions: (pluginId: string) => Promise<void> }
+      ).unregisterPluginContributions("partial")
+
+      expect(dispose).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -4106,8 +4333,8 @@ describe("PluginManager", () => {
     it("initializes and subscribes through the service transport in the headless brain", async () => {
       ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
       const unsubscribe = jest.fn()
-      mockTransportSubscribe.mockReturnValue(unsubscribe)
-      mockTransportCall.mockImplementation(async (cmd: string) => {
+      const hostSubscriber = jest.fn(() => unsubscribe)
+      const hostInvoker = jest.fn(async (cmd: string) => {
         if (cmd === "plugin_python_runtime_info") {
           return {
             available: true,
@@ -4121,16 +4348,21 @@ describe("PluginManager", () => {
         return undefined
       })
 
-      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        enablePython: true,
+        nodeHostInvoker: hostInvoker as never,
+        nodeHostSubscriber: hostSubscriber,
+      })
       await (
         manager as unknown as { initializePythonRuntime: () => Promise<void> }
       ).initializePythonRuntime()
 
-      expect(mockTransportCall).toHaveBeenCalledWith("plugin_python_initialize", {
+      expect(hostInvoker).toHaveBeenCalledWith("plugin_python_initialize", {
         pythonPath: undefined,
       })
-      expect(mockTransportCall).toHaveBeenCalledWith("plugin_python_runtime_info", undefined)
-      expect(mockTransportSubscribe).toHaveBeenCalledWith("plugin:python", expect.any(Function))
+      expect(hostInvoker).toHaveBeenCalledWith("plugin_python_runtime_info", {})
+      expect(hostSubscriber).toHaveBeenCalledWith("plugin:python", expect.any(Function))
       expect(mockInvoke).not.toHaveBeenCalled()
       await (
         manager as unknown as { pythonEventsUnlisten: (() => void) | null }

@@ -2,16 +2,18 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
-const mockContinue = jest.fn(async (_id: string) => true)
+const mockContinue = jest.fn(async (_id: string) => ({ resumed: true as const }))
 const mockRetry = jest.fn(async (_id: string, _options: { confirmed: boolean }) => true)
 const mockDismiss = jest.fn(async (_id: string) => true)
 const mockResume = jest.fn(async () => ({ resumed: 1, recoveryRequired: 0 }))
 
 jest.mock("@/lib/db/connector-inbound-jobs", () => ({
-  continueConnectorInboundJobSafely: (id: string) => mockContinue(id),
   retryConnectorInboundJobFromStart: (id: string, options: { confirmed: boolean }) =>
     mockRetry(id, options),
   dismissConnectorInboundJobRecovery: (id: string) => mockDismiss(id),
+}))
+jest.mock("@/lib/ai/agent/recovery/reconcile-crashed-runs", () => ({
+  resumeCrashedAgentRun: (id: string) => mockContinue(id),
 }))
 jest.mock("@/lib/connectors/bus", () => ({
   getBus: () => ({ resumeDurableInboundJobs: mockResume }),
@@ -26,6 +28,7 @@ function job(overrides: Partial<Job> = {}): Job {
     id: "job-1",
     sourceMessageId: "om-1",
     recoveryReason: "lease_expired",
+    executionRunId: "run-1",
     ...overrides,
   } as Job
 }
@@ -45,7 +48,7 @@ describe("InboundRecoveryNotice", () => {
   it("offers safe continuation and resumes durable work", async () => {
     render(<InboundRecoveryNotice jobs={[job()]} />)
     fireEvent.click(screen.getByRole("button", { name: "Continue safely" }))
-    await waitFor(() => expect(mockContinue).toHaveBeenCalledWith("job-1"))
+    await waitFor(() => expect(mockContinue).toHaveBeenCalledWith("run-1"))
     expect(mockResume).toHaveBeenCalledWith()
   })
 
@@ -76,7 +79,7 @@ describe("InboundRecoveryNotice", () => {
   })
 
   it("skips the durable resume when the job did not actually change", async () => {
-    mockContinue.mockResolvedValueOnce(false)
+    mockContinue.mockResolvedValueOnce({ resumed: false, reason: "missing-anchor" } as never)
     render(<InboundRecoveryNotice jobs={[job()]} />)
     fireEvent.click(screen.getByRole("button", { name: "Continue safely" }))
     await waitFor(() => expect(mockContinue).toHaveBeenCalled())

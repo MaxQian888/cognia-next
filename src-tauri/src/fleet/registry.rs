@@ -197,6 +197,9 @@ pub struct FleetSession {
     /// Live subagents (Task tool), foreground and background.
     pub subagents: Vec<FleetSubagent>,
     pub capabilities: FleetCapabilities,
+    /// Manifest version/source that produced `capabilities`.
+    pub capability_descriptor_version: u32,
+    pub capability_descriptor_source: String,
     /// Epoch ms of the first event seen for this session.
     pub started_at: u64,
     /// Epoch ms of the most recent event.
@@ -244,7 +247,10 @@ impl FleetSession {
     /// its evidence: no transcript file means nothing to open, and a terminal
     /// this OS cannot raise means no focus button.
     fn refresh_capabilities(&mut self) {
-        let declared = super::integrations::manifest_for(self.agent).capabilities;
+        let manifest = super::integrations::manifest_for(self.agent);
+        let declared = manifest.capabilities;
+        self.capability_descriptor_version = manifest.descriptor_version;
+        self.capability_descriptor_source = manifest.descriptor_source.to_string();
         self.capabilities = FleetCapabilities {
             // No runtime probe: whether the agent's ingress can carry an
             // approval back is a property of its hook contract, not of any
@@ -361,6 +367,13 @@ pub struct AgentLivenessRow {
 }
 
 impl FleetRegistry {
+    /// Drop the volatile observation projection without claiming the external
+    /// processes ended. The durable history sink interprets their absence as
+    /// `detached` and can reconcile them when monitoring resumes.
+    pub fn clear_observed_sessions(&mut self) {
+        self.sessions.clear();
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -677,6 +690,9 @@ impl FleetRegistry {
                     at: now_ms,
                 });
             }
+            NormalizedEvent::SubagentStart => {
+                push_native_subagent(entry, &ev.payload, now_ms);
+            }
             // A subagent finished. The payload carries no correlation id, so
             // retire the oldest foreground entry (its PostToolUse follows and
             // no-ops); a background-only list retires FIFO.
@@ -773,6 +789,18 @@ impl FleetRegistry {
                 if let Some(prompt) = payload_str(&ev.payload, "prompt") {
                     entry.last_prompt = Some(prompt);
                 }
+            }
+            NormalizedEvent::QuestionAsked => {
+                let request_id = payload_str(&ev.payload, "request_id")
+                    .or_else(|| payload_str(&ev.payload, "requestID"))
+                    .unwrap_or_else(|| format!("question-{now_ms}"));
+                entry.status = FleetStatus::WaitingInput;
+                entry.activity = None;
+                entry.pending_questions = extract_questions(&ev.payload);
+                entry.pending_question_request = Some(PendingQuestionRequest {
+                    request_id,
+                    requested_at: now_ms,
+                });
             }
             NormalizedEvent::SessionIdle => {
                 entry.status = FleetStatus::Idle;
@@ -906,6 +934,27 @@ impl FleetRegistry {
         false
     }
 
+    pub fn question_target(
+        &self,
+        request_id: &str,
+    ) -> Option<(FleetAgent, String, Vec<PendingQuestion>)> {
+        self.sessions
+            .iter()
+            .find_map(|((agent, session_id), session)| {
+                session
+                    .pending_question_request
+                    .as_ref()
+                    .filter(|request| request.request_id == request_id)
+                    .map(|_| {
+                        (
+                            *agent,
+                            session_id.clone(),
+                            session.pending_questions.clone(),
+                        )
+                    })
+            })
+    }
+
     /// Drop ended rows past their linger window and stale rows whose agent
     /// process is gone. `pid_alive` is injected so tests don't need real pids.
     pub fn reap(&mut self, now_ms: u64, pid_alive: impl Fn(u32) -> bool) -> bool {
@@ -951,6 +1000,7 @@ fn new_session(
     ev: &FleetEvent,
     now_ms: u64,
 ) -> FleetSession {
+    let manifest = super::integrations::manifest_for(agent);
     FleetSession {
         agent,
         session_id,
@@ -971,7 +1021,9 @@ fn new_session(
         subagents: Vec::new(),
         // The manifest's declared ceiling. `FleetRegistry::apply` narrows it
         // against this row's runtime facts immediately after inserting.
-        capabilities: super::integrations::manifest_for(agent).capabilities,
+        capabilities: manifest.capabilities,
+        capability_descriptor_version: manifest.descriptor_version,
+        capability_descriptor_source: manifest.descriptor_source.to_string(),
         started_at: now_ms,
         last_event_at: now_ms,
         ended_at: None,
@@ -1199,6 +1251,27 @@ fn push_subagent(entry: &mut FleetSession, payload: &serde_json::Value, now_ms: 
             .filter(|t| !t.trim().is_empty())
             .map(|t| truncate_chars(t.trim(), 40)),
         background: subagent_is_background(payload),
+        started_at: now_ms,
+    });
+}
+
+fn push_native_subagent(entry: &mut FleetSession, payload: &serde_json::Value, now_ms: u64) {
+    let description = payload_str(payload, "description")
+        .or_else(|| payload_str(payload, "agent_type"))
+        .or_else(|| payload_str(payload, "subagent_type"))
+        .unwrap_or_else(|| "Subagent".to_string());
+    if entry.subagents.len() >= MAX_SUBAGENTS {
+        entry.subagents.remove(0);
+    }
+    entry.subagents.push(FleetSubagent {
+        description: truncate_chars(description.trim(), MAX_SUBAGENT_DESC_CHARS),
+        agent_type: payload_str(payload, "agent_type")
+            .or_else(|| payload_str(payload, "subagent_type"))
+            .map(|value| truncate_chars(value.trim(), 40)),
+        background: payload
+            .get("background")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
         started_at: now_ms,
     });
 }
@@ -2523,6 +2596,8 @@ mod tests {
         assert!(s.get("lastEventAt").is_some());
         assert!(s.get("projectName").is_some());
         assert!(s["capabilities"].get("openTranscript").is_some());
+        assert_eq!(s["capabilityDescriptorVersion"], 1);
+        assert_eq!(s["capabilityDescriptorSource"], "builtin:claude-code");
     }
 
     /// The manifest is a ceiling, and a payload cannot raise it. OpenCode

@@ -1,8 +1,3 @@
-/**
- * @jest-environment jsdom
- */
-import "fake-indexeddb/auto"
-
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/telemetry/events/track-event", () => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
@@ -16,17 +11,19 @@ import {
   listRunEvents,
 } from "./event-log"
 import { listUsageForSession } from "@/lib/db/session-usage"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().workflowRunEvents.clear()
   mockTrackEvent.mockClear()
 })
+afterAll(dbFixture.dispose)
 
 describe("event-log ts monotonicity", () => {
   // `listRunEvents` orders by the [runId+ts] compound index; for equal ts
@@ -44,6 +41,7 @@ describe("event-log ts monotonicity", () => {
 
       const events = await listRunEvents("run_1")
       expect(events.map((e) => e.stepId)).toEqual(["n_a", "n_b", "n_c"])
+      expect(events.map((event) => event.sequence)).toEqual([1, 2, 3])
     } finally {
       nowSpy.mockRestore()
     }
@@ -61,11 +59,26 @@ describe("event-log ts monotonicity", () => {
       ])
       const events = await listRunEvents("run_2")
       expect(events.map((e) => e.stepId)).toEqual(["s0", "s1", "s2", "s3"])
+      expect(events.map((event) => event.sequence)).toEqual([1, 2, 3, 4])
       // The batch continued the watermark past the earlier single append.
       expect(events[1].ts).toBeGreaterThan(single.ts)
     } finally {
       nowSpy.mockRestore()
     }
+  })
+
+  it("serializes concurrent appends into one gap-free per-run sequence", async () => {
+    await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        appendEvent({ runId: "run_parallel", type: "run_log", payload: { index } })
+      )
+    )
+
+    const events = await getDb()
+      .workflowRunEvents.where("[runId+sequence]")
+      .between(["run_parallel", 0], ["run_parallel", Number.MAX_SAFE_INTEGER])
+      .toArray()
+    expect(events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
   })
 
   it("coalesces a synchronous burst of events into a single bulkPut", async () => {

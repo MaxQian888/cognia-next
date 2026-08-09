@@ -1,6 +1,6 @@
 //! Tauri commands exposing proxy configuration to the frontend.
 //!
-//! - `proxy_set` — push a fresh `ProxyConfig` into the in-process state so
+//! - `proxy_apply` — resolve keyring credentials and atomically publish policy.
 //!   subsequent reqwest builders pick it up. Idempotent.
 //! - `proxy_detect` — port-probe + Clash API; returns the candidate list
 //!   the Detection tab renders.
@@ -16,7 +16,13 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::detect::{identify_clash, probe_all, ProxyCandidate};
-use super::{set_current, ProxyConfig};
+use super::{
+    apply_current, block_current, runtime_status, ProxyConfig, ProxyError, ProxyErrorCode,
+    ProxyMode, ProxyProtocol, ProxyRouteSummary, ProxyRuntimeStatus,
+};
+
+const PROXY_CREDENTIAL_NAMESPACE: &str = "cognia-network-proxy";
+const PROXY_CREDENTIAL_KEY: &str = "manual-password";
 
 #[derive(Debug, Serialize)]
 pub struct ProxyTestResult {
@@ -26,23 +32,90 @@ pub struct ProxyTestResult {
     pub latency_ms: u128,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(rename = "proxyUrl", skip_serializing_if = "Option::is_none")]
-    pub proxy_url: Option<String>,
+    #[serde(rename = "errorCode", skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<ProxyErrorCode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<ProxyRouteSummary>,
 }
 
-/// Replace the in-process proxy config. The renderer is the sole writer: it
-/// calls this after every settings save and once on startup (after loading the
-/// persisted config). The process default stays `Off` until that first push.
-#[tauri::command]
-pub async fn proxy_set(cfg: ProxyConfig) -> Result<(), String> {
-    set_current(cfg);
-    Ok(())
+#[derive(Debug, Deserialize)]
+pub struct ProxyApplyInput {
+    pub mode: ProxyMode,
+    pub protocol: ProxyProtocol,
+    pub host: String,
+    pub port: u16,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub bypass: Vec<String>,
+    #[serde(default = "default_proxy_websockets")]
+    pub proxy_websockets: bool,
 }
 
-/// Debug aid — return the live `ProxyConfig` snapshot.
+fn default_proxy_websockets() -> bool {
+    true
+}
+
+/// Atomically resolve the keyring credential, validate, and publish runtime
+/// policy. Any failure places the process in Blocked rather than retaining a
+/// stale or direct configuration.
 #[tauri::command]
-pub async fn proxy_get_active() -> Result<ProxyConfig, String> {
-    Ok(super::current())
+pub async fn proxy_apply(input: ProxyApplyInput) -> Result<(), ProxyError> {
+    let password = if !matches!(input.mode, ProxyMode::Off)
+        && input
+            .username
+            .as_deref()
+            .is_some_and(|username| !username.is_empty())
+    {
+        match cognia_secrets::keyring_secrets::get(PROXY_CREDENTIAL_NAMESPACE, PROXY_CREDENTIAL_KEY)
+        {
+            Ok(Some(password)) if !password.is_empty() => Some(password),
+            Ok(_) => {
+                let error = ProxyError::new(
+                    ProxyErrorCode::ProxyCredentialUnavailable,
+                    "proxy password is unavailable in the system keyring",
+                );
+                block_current(error.clone());
+                super::install_uninitialized_proxy_environment();
+                return Err(error);
+            }
+            Err(_) => {
+                let error = ProxyError::new(
+                    ProxyErrorCode::ProxyCredentialUnavailable,
+                    "system keyring could not be accessed",
+                );
+                block_current(error.clone());
+                super::install_uninitialized_proxy_environment();
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
+
+    let config = ProxyConfig {
+        mode: input.mode,
+        protocol: input.protocol,
+        host: input.host,
+        port: input.port,
+        username: input.username,
+        password,
+        bypass: input.bypass,
+        proxy_websockets: input.proxy_websockets,
+    };
+    if let Err(error) = config.validate() {
+        block_current(error.clone());
+        super::install_uninitialized_proxy_environment();
+        return Err(error);
+    }
+    super::install_process_proxy_environment(&config);
+    apply_current(config)
+}
+
+/// Sanitized runtime diagnostics. Credentials are represented by presence only.
+#[tauri::command]
+pub async fn proxy_get_active() -> Result<ProxyRuntimeStatus, String> {
+    Ok(runtime_status())
 }
 
 /// Probe local ports + Clash controller; return the candidate list.
@@ -73,12 +146,10 @@ pub struct ProxyTestInput {
 
 #[tauri::command]
 pub async fn proxy_test(input: ProxyTestInput) -> Result<ProxyTestResult, String> {
-    let cfg = super::current();
     let timeout = Duration::from_millis(input.timeout_ms.unwrap_or(10_000));
-    let mut builder = reqwest::Client::builder().timeout(timeout);
-    if let Some(proxy) = cfg.build_reqwest_proxy() {
-        builder = builder.proxy(proxy);
-    }
+    let (builder, route) =
+        super::apply_reqwest_policy(reqwest::Client::builder().timeout(timeout), &input.url)
+            .map_err(|error| serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))?;
     let client = builder
         .build()
         .map_err(|e| format!("client build failed: {e}"))?;
@@ -93,14 +164,16 @@ pub async fn proxy_test(input: ProxyTestInput) -> Result<ProxyTestResult, String
             status: Some(resp.status().as_u16()),
             latency_ms,
             error: None,
-            proxy_url: cfg.proxy_url(),
+            error_code: None,
+            route: Some(route.clone()),
         },
         Err(e) => ProxyTestResult {
             ok: false,
             status: None,
             latency_ms,
-            error: Some(e.to_string()),
-            proxy_url: cfg.proxy_url(),
+            error: Some(e.without_url().to_string()),
+            error_code: Some(ProxyErrorCode::ProxyConnectFailed),
+            route: Some(route),
         },
     })
 }
@@ -113,20 +186,20 @@ pub async fn proxy_test(input: ProxyTestInput) -> Result<ProxyTestResult, String
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProxyHttpRequestInput {
+    pub request_id: String,
     pub url: String,
     #[serde(default)]
     pub method: Option<String>,
     #[serde(default)]
-    pub body: Option<String>,
+    pub body_base64: Option<String>,
     #[serde(default)]
     pub headers: Option<HashMap<String, String>>,
-    /// Overrides the active proxy URL for this single request. When `None`,
-    /// falls back to `proxy_config::current()`.
     #[serde(default)]
-    pub proxy_url: Option<String>,
+    pub timeout_ms: Option<u64>,
     #[serde(default)]
-    pub timeout_secs: Option<u64>,
+    pub redirect: Option<String>,
     /// Defense-in-depth SSRF guard. When `Some(true)`, reject private /
     /// loopback / link-local targets (localhost, 10./192.168., 169.254.x cloud
     /// metadata, …). Off by default so existing callers (Anthropic OAuth,
@@ -189,10 +262,26 @@ fn ipv6_is_private(v6: std::net::Ipv6Addr) -> bool {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProxyHttpRequestOutput {
     pub status: u16,
     pub headers: HashMap<String, String>,
-    pub body: String,
+    pub body_base64: String,
+}
+
+const MAX_PROXY_HTTP_BODY_BYTES: usize = 64 * 1024 * 1024;
+
+fn proxy_http_cancellations(
+) -> &'static cognia_net::request_cancellation::RequestCancellationRegistry {
+    static CANCELLATIONS: std::sync::OnceLock<
+        cognia_net::request_cancellation::RequestCancellationRegistry,
+    > = std::sync::OnceLock::new();
+    CANCELLATIONS.get_or_init(Default::default)
+}
+
+#[tauri::command]
+pub fn proxy_http_cancel(request_id: String) -> bool {
+    proxy_http_cancellations().cancel(&request_id)
 }
 
 #[tauri::command]
@@ -206,21 +295,23 @@ pub async fn proxy_http_request(
         ));
     }
 
-    let timeout = Duration::from_secs(input.timeout_secs.unwrap_or(30));
-    let mut builder = reqwest::Client::builder().timeout(timeout);
+    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+    use futures_util::StreamExt as _;
 
-    let cfg = super::current();
-    let bypass = cfg.should_bypass(&input.url);
-    if !bypass {
-        if let Some(override_url) = input.proxy_url.as_deref() {
-            // Caller supplied a one-off proxy override.
-            let proxy = reqwest::Proxy::all(override_url)
-                .map_err(|e| format!("invalid proxy override URL: {e}"))?;
-            builder = builder.proxy(proxy);
-        } else if let Some(proxy) = cfg.build_reqwest_proxy() {
-            builder = builder.proxy(proxy);
-        }
-    }
+    let timeout = Duration::from_millis(input.timeout_ms.unwrap_or(30_000));
+    let redirect = match input.redirect.as_deref().unwrap_or("follow") {
+        "follow" => reqwest::redirect::Policy::limited(10),
+        "manual" => reqwest::redirect::Policy::none(),
+        "error" => reqwest::redirect::Policy::custom(|attempt| attempt.error("redirect blocked")),
+        value => return Err(format!("invalid redirect mode: {value}")),
+    };
+    let (builder, _route) = super::apply_reqwest_policy(
+        reqwest::Client::builder()
+            .timeout(timeout)
+            .redirect(redirect),
+        &input.url,
+    )
+    .map_err(|error| serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))?;
     let client = builder
         .build()
         .map_err(|e| format!("client build failed: {e}"))?;
@@ -235,34 +326,66 @@ pub async fn proxy_http_request(
     let mut req = client.request(method, &input.url);
     if let Some(headers) = &input.headers {
         for (k, v) in headers {
+            if k.eq_ignore_ascii_case("proxy-authorization") {
+                return Err(
+                    "Proxy-Authorization is reserved for the native proxy connector".into(),
+                );
+            }
             req = req.header(k.as_str(), v.as_str());
         }
     }
-    if let Some(body) = input.body {
-        req = req.body(body);
+    if let Some(body) = input.body_base64 {
+        let bytes = B64
+            .decode(body)
+            .map_err(|_| "request body is not valid base64".to_string())?;
+        if bytes.len() > MAX_PROXY_HTTP_BODY_BYTES {
+            return Err("request body exceeds proxy bridge byte limit".to_string());
+        }
+        req = req.body(bytes);
     }
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("request failed: {e}"))?;
+    let (generation, cancelled) = proxy_http_cancellations().register(&input.request_id);
+    let request_id = input.request_id.clone();
+    let operation = async move {
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("request failed: {}", e.without_url()))?;
+        if resp
+            .content_length()
+            .is_some_and(|length| length > MAX_PROXY_HTTP_BODY_BYTES as u64)
+        {
+            return Err("response body exceeds proxy bridge byte limit".to_string());
+        }
+        let status = resp.status().as_u16();
+        let headers: HashMap<String, String> = resp
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
+            .collect();
+        let mut stream = resp.bytes_stream();
+        let mut body = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| format!("read body failed: {error}"))?;
+            if body.len().saturating_add(chunk.len()) > MAX_PROXY_HTTP_BODY_BYTES {
+                return Err("response body exceeds proxy bridge byte limit".to_string());
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(ProxyHttpRequestOutput {
+            status,
+            headers,
+            body_base64: B64.encode(body),
+        })
+    };
 
-    let status = resp.status().as_u16();
-    let headers: HashMap<String, String> = resp
-        .headers()
-        .iter()
-        .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
-        .collect();
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("read body failed: {e}"))?;
+    let result = tokio::select! {
+        result = operation => result,
+        _ = cancelled => Err("request cancelled".to_string()),
+    };
+    proxy_http_cancellations().finish(&request_id, generation);
 
-    Ok(ProxyHttpRequestOutput {
-        status,
-        headers,
-        body,
-    })
+    result
 }
 
 #[cfg(test)]
@@ -271,28 +394,47 @@ mod tests {
     use crate::proxy_config::{ProxyMode, ProxyProtocol};
 
     #[tokio::test]
-    async fn proxy_set_and_get_roundtrip() {
-        let prev = super::super::current();
-        let cfg = ProxyConfig {
+    async fn proxy_apply_and_get_roundtrip_is_sanitized() {
+        proxy_apply(ProxyApplyInput {
             mode: ProxyMode::Manual,
             protocol: ProxyProtocol::Http,
             host: "10.0.0.1".to_string(),
             port: 1080,
-            ..ProxyConfig::default()
-        };
-        proxy_set(cfg.clone()).await.unwrap();
+            username: None,
+            bypass: vec!["localhost".into()],
+            proxy_websockets: true,
+        })
+        .await
+        .unwrap();
         let got = proxy_get_active().await.unwrap();
-        assert_eq!(got.host, "10.0.0.1");
-        assert_eq!(got.port, 1080);
-        // Restore for other tests in the file.
-        super::super::set_current(prev);
+        assert_eq!(got.state, "ready");
+        assert!(matches!(
+            got.route,
+            Some(ProxyRouteSummary::Proxy { ref host, port: 1080, .. }) if host == "10.0.0.1"
+        ));
+        assert!(!got.credential_configured);
+    }
+
+    #[tokio::test]
+    async fn proxy_apply_off_does_not_require_a_stale_username_password() {
+        proxy_apply(ProxyApplyInput {
+            mode: ProxyMode::Off,
+            protocol: ProxyProtocol::Http,
+            host: "proxy.example".into(),
+            port: 8080,
+            username: Some("stale-user".into()),
+            bypass: vec!["localhost".into()],
+            proxy_websockets: true,
+        })
+        .await
+        .unwrap();
+        assert_eq!(proxy_get_active().await.unwrap().state, "ready");
     }
 
     #[tokio::test]
     async fn proxy_test_reports_error_for_unreachable_host() {
         // Reset to off so the test bypasses any leftover state.
-        let prev = super::super::current();
-        super::super::set_current(ProxyConfig::default());
+        apply_current(ProxyConfig::default()).unwrap();
 
         let result = proxy_test(ProxyTestInput {
             url: "http://127.0.0.1:1/should-fail".to_string(),
@@ -302,7 +444,6 @@ mod tests {
         .unwrap();
         assert!(!result.ok);
         assert!(result.error.is_some());
-        super::super::set_current(prev);
     }
 
     #[tokio::test]
@@ -327,31 +468,31 @@ mod tests {
 
     #[tokio::test]
     async fn proxy_http_request_rejects_invalid_url() {
-        let prev = super::super::current();
-        super::super::set_current(ProxyConfig::default());
+        apply_current(ProxyConfig::default()).unwrap();
         let res = proxy_http_request(ProxyHttpRequestInput {
+            request_id: "invalid-url".into(),
             url: "not a url".to_string(),
             method: None,
-            body: None,
+            body_base64: None,
             headers: None,
-            proxy_url: None,
-            timeout_secs: Some(1),
+            timeout_ms: Some(1_000),
+            redirect: None,
             block_private: None,
         })
         .await;
         assert!(res.is_err());
-        super::super::set_current(prev);
     }
 
     #[tokio::test]
     async fn proxy_http_request_rejects_invalid_method() {
         let res = proxy_http_request(ProxyHttpRequestInput {
+            request_id: "invalid-method".into(),
             url: "http://127.0.0.1:1/".to_string(),
             method: Some("@@@bad".to_string()),
-            body: None,
+            body_base64: None,
             headers: None,
-            proxy_url: None,
-            timeout_secs: Some(1),
+            timeout_ms: Some(1_000),
+            redirect: None,
             block_private: None,
         })
         .await;
@@ -361,12 +502,13 @@ mod tests {
     #[tokio::test]
     async fn proxy_http_request_blocks_private_host_when_guarded() {
         let res = proxy_http_request(ProxyHttpRequestInput {
+            request_id: "blocked-private".into(),
             url: "http://169.254.169.254/latest/meta-data/".to_string(),
             method: None,
-            body: None,
+            body_base64: None,
             headers: None,
-            proxy_url: None,
-            timeout_secs: Some(1),
+            timeout_ms: Some(1_000),
+            redirect: None,
             block_private: Some(true),
         })
         .await;

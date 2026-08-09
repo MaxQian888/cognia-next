@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 // The cascade dynamically imports the project-knowledge deps resolver for its
 // best-effort remote vector-collection drop. Mock it so tests control whether a
 // (fake) vector store is present.
@@ -8,7 +5,8 @@ jest.mock("@/lib/project-knowledge/runtime/build-deps", () => ({
   tryBuildProjectKnowledgeDeps: jest.fn(async () => undefined),
 }))
 
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import { getSettings, saveSettings } from "./settings"
 import { tryBuildProjectKnowledgeDeps } from "@/lib/project-knowledge/runtime/build-deps"
 
@@ -23,14 +21,15 @@ import {
 } from "./project-scope"
 
 describe("project-scope helper", () => {
+  const dbFixture = createDbTestFixture()
+
+  beforeAll(dbFixture.initialize)
   beforeEach(async () => {
-    await getDb().delete()
-    __resetDbForTesting()
+    await dbFixture.restore()
     // Let the background built-in seed settle before exercising heavy
     // multi-table cascades, so seeding transactions don't race the test.
-    getDb()
-    await whenSeeded()
-  }, 30000)
+  })
+  afterAll(dbFixture.dispose)
 
   describe("resolveScopeProjectId", () => {
     it("returns an explicit id verbatim without touching settings", async () => {
@@ -217,6 +216,106 @@ describe("project-scope helper", () => {
 
     it("is a no-op for a project with no data", async () => {
       await expect(deleteProjectCascade("empty")).resolves.toBeUndefined()
+    }, 30000)
+
+    it("purges durable AgentTeam runs, environments, children, and orphaned content", async () => {
+      const db = getDb()
+      await db.agentTeamRuns.bulkPut([
+        {
+          id: "runA",
+          teamId: "teamA",
+          projectId: "A",
+          objective: "a",
+          status: "completed",
+          priority: 1,
+          decisionVersion: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "runB",
+          teamId: "teamB",
+          projectId: "B",
+          objective: "b",
+          status: "completed",
+          priority: 1,
+          decisionVersion: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ] as never)
+      await db.agentTeamTrajectory.bulkPut([
+        {
+          id: "runA:1",
+          runId: "runA",
+          sequence: 1,
+          kind: "model_turn_completed",
+          correlationId: "a",
+          contentHash: "hashA",
+          createdAt: 1,
+        },
+        {
+          id: "runB:1",
+          runId: "runB",
+          sequence: 1,
+          kind: "model_turn_completed",
+          correlationId: "b",
+          contentHash: "hashB",
+          createdAt: 1,
+        },
+      ] as never)
+      await db.agentTeamContentObjects.bulkPut([
+        {
+          hash: "hashA",
+          mimeType: "text/plain",
+          byteLength: 1,
+          data: new Uint8Array([1]),
+          createdAt: 1,
+        },
+        {
+          hash: "hashB",
+          mimeType: "text/plain",
+          byteLength: 1,
+          data: new Uint8Array([2]),
+          createdAt: 1,
+        },
+      ])
+      await db.projectEnvironments.bulkPut([
+        {
+          id: "envA",
+          projectId: "A",
+          name: "A",
+          isEnabled: true,
+          setupScript: { default: "" },
+          actions: [],
+          variables: {},
+          keyringReferences: [],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "envB",
+          projectId: "B",
+          name: "B",
+          isEnabled: true,
+          setupScript: { default: "" },
+          actions: [],
+          variables: {},
+          keyringReferences: [],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ])
+
+      await deleteProjectCascade("A")
+
+      expect(await db.agentTeamRuns.get("runA")).toBeUndefined()
+      expect(await db.agentTeamTrajectory.get("runA:1")).toBeUndefined()
+      expect(await db.agentTeamContentObjects.get("hashA")).toBeUndefined()
+      expect(await db.projectEnvironments.get("envA")).toBeUndefined()
+      expect(await db.agentTeamRuns.get("runB")).toBeDefined()
+      expect(await db.agentTeamContentObjects.get("hashB")).toBeDefined()
+      expect(await db.projectEnvironments.get("envB")).toBeDefined()
     }, 30000)
 
     it("drops the remote vector collection best-effort when a backend exists", async () => {

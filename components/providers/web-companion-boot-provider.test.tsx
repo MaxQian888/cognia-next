@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react"
+import { act, render, waitFor } from "@testing-library/react"
 
 const replaceMock = jest.fn()
 let pathnameValue = "/"
@@ -20,7 +20,10 @@ jest.mock("@/lib/tauri/transport-companion", () => ({
 const transportCallMock = jest.fn()
 const connectionStateListeners = new Set<(state: string) => void>()
 let connectionStateValue = "connected"
+const planeHealthListeners = new Set<(health: { rpc: string; events: string }) => void>()
+let planeHealthValue = { rpc: "ready", events: "ready" }
 const connectionUnsubscribeMock = jest.fn()
+const planeUnsubscribeMock = jest.fn()
 jest.mock("@/lib/tauri", () => ({
   transport: {
     call: (...args: unknown[]) => transportCallMock(...args),
@@ -30,6 +33,15 @@ jest.mock("@/lib/tauri", () => ({
       return () => {
         connectionUnsubscribeMock()
         connectionStateListeners.delete(listener)
+      }
+    },
+    getPlaneHealth: () => planeHealthValue,
+    onPlaneHealthChange: (listener: (health: { rpc: string; events: string }) => void) => {
+      planeHealthListeners.add(listener)
+      listener(planeHealthValue)
+      return () => {
+        planeUnsubscribeMock()
+        planeHealthListeners.delete(listener)
       }
     },
   },
@@ -42,12 +54,13 @@ jest.mock("@/lib/runtime/browser-vault", () => ({
 const runSyncDownMock = jest.fn()
 const foregroundTeardown = jest.fn()
 const eventTeardown = jest.fn()
+const installEventDrivenSyncMock = jest.fn(() => eventTeardown)
 const networkTeardown = jest.fn()
 const installNetworkSyncMock = jest.fn(async () => networkTeardown)
 jest.mock("@/lib/sync/companion-sync", () => ({
   runSyncDown: (...args: unknown[]) => runSyncDownMock(...args),
   installForegroundSync: () => foregroundTeardown,
-  installEventDrivenSync: () => eventTeardown,
+  installEventDrivenSync: () => installEventDrivenSyncMock(),
   installNetworkSync: () => installNetworkSyncMock(),
 }))
 
@@ -57,6 +70,7 @@ import {
   getRuntimeSnapshot,
 } from "@/lib/runtime/runtime-snapshot-store"
 import { stopRuntimeTargetSubscriptions } from "@/lib/runtime/runtime-target-lifecycle"
+import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 
 const ENV_KEY = "NEXT_PUBLIC_COGNIA_SERVER_URL"
 
@@ -68,6 +82,8 @@ beforeEach(() => {
   runSyncDownMock.mockResolvedValue(undefined)
   connectionStateValue = "connected"
   connectionStateListeners.clear()
+  planeHealthValue = { rpc: "ready", events: "ready" }
+  planeHealthListeners.clear()
   transportCallMock.mockResolvedValue({
     schemaVersion: 2,
     hostBuildId: "host-build",
@@ -75,6 +91,7 @@ beforeEach(() => {
     generatedAt: 1,
     hostIdentity: { id: "host-1", kind: "cloud" },
     protocol: { min: 1, max: 2 },
+    transportCapabilities: { eventStreamReady: 1 },
     features: {
       "claude.host-tools": {
         version: 1,
@@ -133,7 +150,8 @@ describe("WebCompanionBootProvider", () => {
   it("paired: runs sync-down and installs the sync listeners", async () => {
     hydrateMock.mockResolvedValue({
       baseUrl: "https://cloud.example.com:7890",
-      deviceJwt: "jwt",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
       deviceId: "dev-1",
       serverVersion: "1.0.0",
       targetId: "companion-cloud",
@@ -163,10 +181,128 @@ describe("WebCompanionBootProvider", () => {
     expect(replaceMock).not.toHaveBeenCalled()
   })
 
+  it("keeps Web connecting until the event replay boundary is ready", async () => {
+    planeHealthValue = { rpc: "ready", events: "replaying" }
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+    })
+
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+    await waitFor(() => expect(installEventDrivenSyncMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("connecting"))
+    expect(runSyncDownMock).not.toHaveBeenCalled()
+
+    planeHealthValue = { rpc: "ready", events: "ready" }
+    for (const listener of planeHealthListeners) listener(planeHealthValue)
+
+    await waitFor(() => expect(runSyncDownMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("online"))
+  })
+
+  it("fails incompatible when the host cannot prove replay completion", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+    })
+    transportCallMock.mockResolvedValueOnce({
+      schemaVersion: 2,
+      hostBuildId: "legacy",
+      platform: "headless",
+      generatedAt: 1,
+      hostIdentity: { id: "host-legacy", kind: "cloud" },
+      protocol: { min: 1, max: 2 },
+      features: {},
+      operations: [],
+      deviceGrants: [],
+      limits: {
+        rpcJsonBodyBytes: 1,
+        skillMaxResources: 1,
+        skillMaxResourceBytes: 1,
+        skillUploadChunkBytes: 1,
+        mcpRequestBodyBytes: 1,
+        maxConcurrentProxyCalls: 1,
+      },
+    })
+
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    await waitFor(() =>
+      expect(getRuntimeSnapshot()).toMatchObject({
+        connectionState: "offline",
+        host: { compatible: false },
+      })
+    )
+    expect(runSyncDownMock).not.toHaveBeenCalled()
+  })
+
+  it("retries a temporarily unavailable manifest before installing subscriptions", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+    })
+    const manifest = transportCallMock.getMockImplementation()!
+    transportCallMock
+      .mockRejectedValueOnce(new Error("temporarily unavailable"))
+      .mockImplementation(manifest)
+
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    await waitFor(() => expect(transportCallMock).toHaveBeenCalledTimes(2), { timeout: 1_000 })
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("online"))
+    expect(installEventDrivenSyncMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("coalesces a failed authoritative sync into one delayed recovery", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+    })
+    runSyncDownMock
+      .mockRejectedValueOnce(new Error("sync unavailable"))
+      .mockResolvedValue(undefined)
+
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    await waitFor(() => expect(runSyncDownMock).toHaveBeenCalledTimes(2), { timeout: 1_000 })
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("online"))
+    expect(transportCallMock).toHaveBeenCalledTimes(2)
+    expect(installNetworkSyncMock).toHaveBeenCalledTimes(1)
+  })
+
   it("paired: tears down browser network sync on unmount", async () => {
     hydrateMock.mockResolvedValue({
       baseUrl: "https://cloud.example.com:7890",
-      deviceJwt: "jwt",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
       deviceId: "dev-1",
       serverVersion: "1.0.0",
     })
@@ -181,12 +317,14 @@ describe("WebCompanionBootProvider", () => {
 
     expect(networkTeardown).toHaveBeenCalledTimes(1)
     expect(connectionUnsubscribeMock).toHaveBeenCalledTimes(1)
+    expect(planeUnsubscribeMock).toHaveBeenCalledTimes(1)
   })
 
   it("stops old sync subscriptions before an external runtime-target switch", async () => {
     hydrateMock.mockResolvedValue({
       baseUrl: "https://cloud.example.com:7890",
-      deviceJwt: "jwt",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
       deviceId: "dev-1",
       serverVersion: "1.0.0",
     })
@@ -221,6 +359,9 @@ describe("WebCompanionBootProvider", () => {
         <div />
       </WebCompanionBootProvider>
     )
+    await act(async () => {
+      window.dispatchEvent(new Event("cognia:companion-config-changed"))
+    })
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(hydrateMock).not.toHaveBeenCalled()
     expect(getRuntimeSnapshot()).toMatchObject({
@@ -231,9 +372,11 @@ describe("WebCompanionBootProvider", () => {
 
   it("updates availability when the Companion transport reconnects", async () => {
     connectionStateValue = "reconnecting"
+    planeHealthValue = { rpc: "ready", events: "connecting" }
     hydrateMock.mockResolvedValue({
       baseUrl: "https://cloud.example.com:7890",
-      deviceJwt: "jwt",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
       deviceId: "dev-1",
       serverVersion: "1.0.0",
     })
@@ -244,9 +387,50 @@ describe("WebCompanionBootProvider", () => {
     )
     await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("connecting"))
 
+    connectionStateValue = "connected"
     for (const listener of connectionStateListeners) listener("connected")
+    planeHealthValue = { rpc: "ready", events: "ready" }
+    for (const listener of planeHealthListeners) listener(planeHealthValue)
 
     await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("online"))
     expect(transportCallMock).toHaveBeenCalledWith("host_feature_manifest", {})
+  })
+
+  it("returns to connecting for either plane and resyncs before becoming online again", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+    })
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("online"))
+    expect(runSyncDownMock).toHaveBeenCalledTimes(1)
+
+    planeHealthValue = { rpc: "ready", events: "replaying" }
+    for (const listener of planeHealthListeners) listener(planeHealthValue)
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("connecting"))
+    await remoteEventResyncCoordinator.resolve(["claude"])
+    expect(runSyncDownMock).toHaveBeenCalledTimes(2)
+
+    planeHealthValue = { rpc: "ready", events: "ready" }
+    for (const listener of planeHealthListeners) listener(planeHealthValue)
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("online"))
+    expect(runSyncDownMock).toHaveBeenCalledTimes(3)
+
+    planeHealthValue = { rpc: "unavailable", events: "ready" }
+    for (const listener of planeHealthListeners) listener(planeHealthValue)
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("connecting"))
+    planeHealthValue = { rpc: "ready", events: "ready" }
+    for (const listener of planeHealthListeners) listener(planeHealthValue)
+
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("online"))
+    expect(transportCallMock).toHaveBeenCalledTimes(3)
+    expect(runSyncDownMock).toHaveBeenCalledTimes(4)
   })
 })

@@ -63,6 +63,10 @@ jest.mock("sonner", () => ({
   },
 }))
 
+jest.mock("@/components/settings/agent-runtime/sdk-session-manager", () => ({
+  SdkSessionManager: () => <div data-testid="sdk-session-manager" />,
+}))
+
 const warnMock = jest.fn()
 jest.mock("@cognia/logging", () => ({
   loggers: { chat: { warn: (...args: unknown[]) => warnMock(...args) } },

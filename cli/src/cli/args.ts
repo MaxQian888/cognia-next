@@ -16,6 +16,8 @@ export interface ParsedArgs {
   positionals: string[]
   /** Parsed flags; boolean flags are `true`, value flags carry their string. */
   flags: Record<string, string | boolean>
+  /** Tokens after an explicit `--` separator — passed through verbatim. */
+  rest: string[]
   help: boolean
   version: boolean
 }
@@ -44,10 +46,20 @@ export const BOOLEAN_FLAGS = new Set([
   // gate an irreversible step and must never swallow the next token.
   "activate",
   "confirm",
+  // `x --verbose` — log proxy requests for debugging.
+  "verbose",
 ])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
-export const GROUPED_COMMANDS = new Set(["auth", "config", "logto", "lark", "eval", "durability"])
+export const GROUPED_COMMANDS = new Set([
+  "auth",
+  "config",
+  "logto",
+  "lark",
+  "eval",
+  "durability",
+  "sdk",
+])
 
 const SHORT_ALIAS: Record<string, string> = {
   h: "help",
@@ -67,9 +79,15 @@ function normalizeFlagName(token: string): { name: string; inlineValue?: string 
 export function parseArgv(argv: string[]): ParsedArgs {
   const flags: Record<string, string | boolean> = {}
   const positionals: string[] = []
+  const rest: string[] = []
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i]
+    // `--` stops flag parsing; everything after goes to `rest` verbatim.
+    if (token === "--") {
+      rest.push(...argv.slice(i + 1))
+      break
+    }
     if (token.startsWith("-") && token !== "-") {
       const isShort = !token.startsWith("--")
       const { name: rawName, inlineValue } = normalizeFlagName(token)
@@ -106,6 +124,7 @@ export function parseArgv(argv: string[]): ParsedArgs {
     subcommand,
     positionals,
     flags,
+    rest,
     help: flags.help === true,
     version: flags.version === true,
   }

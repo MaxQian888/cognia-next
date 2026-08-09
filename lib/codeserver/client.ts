@@ -26,11 +26,6 @@ export interface CodeServerStatus {
   relayPath?: string | null
 }
 
-interface DesktopRelayStatus {
-  port: number
-  url: string
-}
-
 /** Mirror of `codeserver::download::CodeServerDiskUsage`. */
 export interface CodeServerDiskUsage {
   version: string
@@ -147,7 +142,12 @@ export interface CodeServerExited {
 export interface CodeServerEditorEvent {
   /** Canonical project root of the reporting instance. */
   root: string
-  name: "activeEditorChanged" | "selectionChanged" | "documentSaved" | "diagnosticsChanged"
+  name:
+    | "activeEditorChanged"
+    | "selectionChanged"
+    | "documentSaved"
+    | "diagnosticsChanged"
+    | "chatContextRequested"
   payload: { path?: string | null; empty?: boolean; count?: number } | null
 }
 
@@ -188,13 +188,7 @@ export const codeServerClient = {
     if (!endpoint.serverFingerprint) {
       throw new Error("remote host is missing its paired certificate fingerprint")
     }
-    const relay = await transport.call<DesktopRelayStatus>("codeserver_remote_relay_ensure", {
-      baseUrl: endpoint.baseUrl,
-      deviceJwt: endpoint.deviceJwt,
-      serverFingerprint: endpoint.serverFingerprint,
-      relayPath: status.relayPath,
-    })
-    return { ...status, port: relay.port }
+    throw new Error("remote managed IDE relay requires the canonical browser socket-ticket adapter")
   },
   /** Current status for `root` without spawning. */
   status: (root: string) => transport.call<CodeServerStatus>("codeserver_status", { root }),

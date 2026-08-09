@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import {
   branchSessionAtMessage,
   branchTitle,
@@ -7,17 +5,18 @@ import {
   renderTranscript,
   BRANCH_SEED_MAX_CHARS,
 } from "./branch-session"
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listMessages } from "@/lib/db/messages"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
 
 function uiMsg(
@@ -56,6 +55,8 @@ const visible = (): UIMessage[] => [
   uiMsg("u2", "user", "second question"),
   uiMsg("a2", "assistant", "second answer"),
 ]
+
+afterAll(dbFixture.dispose)
 
 describe("renderTranscript", () => {
   it("labels roles and skips empty turns", () => {

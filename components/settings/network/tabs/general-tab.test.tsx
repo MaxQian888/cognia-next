@@ -24,13 +24,21 @@ jest.mock("@/stores/settings", () => ({
 
 jest.mock("@/stores/network-proxy", () => ({
   applyProxyToRust: jest.fn().mockResolvedValue(undefined),
+  getProxyRuntimeStatus: jest
+    .fn()
+    .mockResolvedValue({ state: "ready", credentialConfigured: false }),
+  updateProxyPassword: jest.fn().mockResolvedValue(true),
 }))
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const networkProxyModule = require("@/stores/network-proxy") as {
   applyProxyToRust: jest.Mock
+  getProxyRuntimeStatus: jest.Mock
+  updateProxyPassword: jest.Mock
 }
 const applyProxyToRustMock = networkProxyModule.applyProxyToRust
+const getProxyRuntimeStatusMock = networkProxyModule.getProxyRuntimeStatus
+const updateProxyPasswordMock = networkProxyModule.updateProxyPassword
 
 import { NetworkGeneralTab } from "./general-tab"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
@@ -38,6 +46,10 @@ import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 beforeEach(() => {
   saveMock.mockClear()
   applyProxyToRustMock.mockClear()
+  getProxyRuntimeStatusMock
+    .mockReset()
+    .mockResolvedValue({ state: "ready", credentialConfigured: false })
+  updateProxyPasswordMock.mockReset().mockResolvedValue(true)
   mockedSettings = {}
 })
 
@@ -203,7 +215,7 @@ describe("NetworkGeneralTab", () => {
     expect(saveMock.mock.calls[0][0].networkProxy.port).toBe(7890)
   })
 
-  it("commits password on blur", async () => {
+  it("replaces a password in keyring without persisting it in Dexie", async () => {
     mockedSettings = {
       networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, mode: "manual" },
     }
@@ -214,7 +226,32 @@ describe("NetworkGeneralTab", () => {
       fireEvent.keyDown(passwordInput, { key: "Enter" })
       fireEvent.blur(passwordInput)
     })
-    expect(saveMock.mock.calls[0][0].networkProxy.password).toBe("s3cret")
+    expect(updateProxyPasswordMock).toHaveBeenCalledWith({
+      kind: "replace",
+      value: "s3cret",
+    })
+    expect(JSON.stringify(saveMock.mock.calls)).not.toContain("s3cret")
+  })
+
+  it("keeps an existing credential until the explicit clear action is used", async () => {
+    getProxyRuntimeStatusMock.mockResolvedValue({ state: "ready", credentialConfigured: true })
+    mockedSettings = {
+      networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, mode: "manual" },
+    }
+    render(<NetworkGeneralTab />)
+
+    await act(async () => undefined)
+    const passwordInput = screen.getByLabelText("form.password") as HTMLInputElement
+    await act(async () => {
+      fireEvent.focus(passwordInput)
+      fireEvent.blur(passwordInput)
+    })
+    expect(updateProxyPasswordMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "form.clearPassword" }))
+    })
+    expect(updateProxyPasswordMock).toHaveBeenCalledWith({ kind: "clear" })
   })
 
   it("a non-Enter keydown does not commit", async () => {

@@ -37,7 +37,7 @@ function allowedActions(
   if (TERMINAL.has(status)) return ["open_details"]
   switch (status) {
     case "paused":
-      return kind === "plan" || kind === "goal"
+      return kind === "plan" || kind === "goal" || kind === "agent-turn"
         ? ["resume", "stop", "open_details"]
         : ["stop", "open_details"]
     case "recovery_required":

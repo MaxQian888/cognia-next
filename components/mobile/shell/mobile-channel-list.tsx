@@ -27,7 +27,7 @@ import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
-import { updateSession } from "@/lib/db/sessions"
+import { bulkSetSessionsPinned } from "@/lib/db/sessions"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
@@ -240,7 +240,7 @@ export function MobileChannelList({
   )
 
   const togglePin = async (session: ChatSession) => {
-    await updateSession(session.id, { pinned: !session.pinned }).catch(() => undefined)
+    await bulkSetSessionsPinned([session.id], !session.pinned).catch(() => undefined)
   }
 
   const renderRows = (list: ChatSession[]) =>
@@ -640,7 +640,8 @@ function ChannelRow({
                 className="truncate text-[11px] text-muted-foreground"
                 data-testid={`mobile-channel-subtitle-${session.id}`}
               >
-                {preview ?? format.relativeTime(new Date(session.updatedAt), now)}
+                {preview ??
+                  format.relativeTime(new Date(session.lastMessageAt ?? session.updatedAt), now)}
               </span>
             </span>
           </Button>

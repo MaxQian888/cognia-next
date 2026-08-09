@@ -9,6 +9,9 @@ export type PetAnchor = "bottom-right" | "bottom-left" | "top-right" | "top-left
 /** Motion preference: follow the OS, or force on/off regardless. */
 export type PetMotionPreference = "auto" | "full" | "reduced"
 
+/** Kept structural so this leaf package has no dependency on app-local types. */
+export type PetSkinId = "svg" | "live2d" | "sprite-v2"
+
 /** How often the overlay pet starts a wander walk on its own. */
 export type PetWanderFrequency = "calm" | "normal" | "lively"
 
@@ -119,7 +122,7 @@ export interface PetSettings {
    * `"live2d"` renders an imported Live2D model, and `"sprite-v2"` renders
    * a validated Codex-compatible v2 atlas. Defaults to `"svg"`.
    */
-  skinId?: string
+  skinId?: PetSkinId
   /**
    * Id of the globally-active Live2D model (a `petModels` row). The skin
    * resolver prefers a per-character binding override when present.
@@ -134,6 +137,8 @@ export interface PetSettings {
    * antialiasing at init, and lengthens wander rest intervals.
    */
   lowPower?: boolean
+  /** Follow the local pointer/cursor with the pet's gaze. Defaults to true. */
+  gazeFollowing?: boolean
   /**
    * Opt-in LLM speak for the talk interaction (`speakAsPet` side channel).
    * Absent or `enabled: false` → talk shows a template bubble only; the pet
@@ -209,4 +214,5 @@ export const DEFAULT_PET_SETTINGS: PetSettings = {
   size: 96,
   skinId: "svg",
   lowPower: false,
+  gazeFollowing: true,
 }

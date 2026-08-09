@@ -6,7 +6,7 @@
  * When a host session that a remote device is watching hits a tool-use
  * approval (and the desktop routed it to that device instead of auto-denying —
  * see `hooks/chat/use-claude-chat.ts`), the remote may have backgrounded the
- * app, dropping its `/ws/v1/events` subscription. This emits a dedicated
+ * app, dropping its `/ws/events` subscription. This emits a dedicated
  * `companion://needs-input` Tauri event that the Rust `register_push_trigger`
  * (in `companion_api/commands.rs`) fans out as an APNs/FCM push to every
  * offline paired device — so the approval doesn't silently wait out its
@@ -14,7 +14,7 @@
  *
  * Lazy Tauri import so the web/mobile bundle stays decoupled; failures are
  * swallowed (the approval is still pending and recoverable when the device
- * reopens its `/ws/v1/events` stream).
+ * reopens its `/ws/events` stream).
  */
 
 import { isTauri } from "@/lib/platform/detect"

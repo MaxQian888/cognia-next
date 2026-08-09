@@ -27,14 +27,22 @@ jest.mock("@/lib/cli-bridge/renderer-request-source", () => ({
   installCliRendererRequestSource: () => installCliRendererMock(),
 }))
 
+// So does the WASM plugin capability bridge (ADR-0013 api-version 0.2).
+const installWasmRendererMock = jest.fn()
+jest.mock("@/lib/plugin/wasm-bridge/renderer-request-source", () => ({
+  installWasmRendererRequestSource: () => installWasmRendererMock(),
+}))
+
 beforeEach(() => {
   installMock.mockReset()
   installWriteMock.mockReset()
   installCliRendererMock.mockReset()
+  installWasmRendererMock.mockReset()
   // The write-source mock returns a no-op teardown by default — tests
   // that care about its teardown override this explicitly.
   installWriteMock.mockResolvedValue(() => {})
   installCliRendererMock.mockResolvedValue(() => {})
+  installWasmRendererMock.mockResolvedValue(() => {})
   delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
   delete (window as { Capacitor?: unknown }).Capacitor
 })
@@ -54,6 +62,7 @@ describe("<DesktopMessageSourceProvider />", () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(installMock).toHaveBeenCalled()
     expect(installCliRendererMock).toHaveBeenCalled()
+    expect(installWasmRendererMock).toHaveBeenCalled()
 
     unmount()
     expect(teardown).toHaveBeenCalled()

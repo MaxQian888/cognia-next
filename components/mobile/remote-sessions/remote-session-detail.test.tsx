@@ -6,6 +6,25 @@ import { useConnectionState } from "@/hooks/companion/use-connection-state"
 import type { RemoteSessionStream } from "@/hooks/data/use-remote-session-stream"
 import type { ConnectionState } from "@/lib/tauri/transport-companion"
 
+const transcriptListMock = jest.fn(() => <div data-testid="remote-transcript-list" />)
+jest.mock("@/components/chat/transcript-message-list", () => ({
+  TranscriptMessageList: (props: unknown) => transcriptListMock(props),
+}))
+
+const timelineSurfaceMock = jest.fn(() => <div data-testid="remote-timeline-surface" />)
+jest.mock("@/components/chat/transcript-timeline-surface", () => ({
+  TranscriptTimelineSurface: (props: unknown) => timelineSurfaceMock(props),
+}))
+
+const transcriptControllerMock = jest.fn()
+jest.mock("@/hooks/chat/use-transcript-controller", () => ({
+  useTranscriptController: () => transcriptControllerMock(),
+}))
+
+jest.mock("@/lib/chat/transcript/source", () => ({
+  createRemoteTranscriptSource: () => ({}),
+}))
+
 const streamMock = jest.fn()
 jest.mock("@/hooks/data/use-remote-session-stream", () => ({
   useRemoteSessionStream: () => streamMock(),
@@ -37,6 +56,7 @@ function baseStream(overrides: Partial<RemoteSessionStream> = {}): RemoteSession
     send: jest.fn().mockResolvedValue(undefined),
     interrupt: jest.fn().mockResolvedValue(undefined),
     respond: jest.fn().mockResolvedValue(undefined),
+    reconcileTranscript: jest.fn(),
     ...overrides,
   }
 }
@@ -45,16 +65,100 @@ describe("<RemoteSessionDetail />", () => {
   beforeEach(() => {
     window.localStorage.clear()
     connectionMock.mockReturnValue(null)
+    transcriptControllerMock.mockReturnValue({
+      snapshot: {
+        mode: "legacy",
+        items: [],
+        revision: 0,
+        loading: false,
+        loadingOlder: false,
+        hasMore: false,
+        expandedTurnKeys: new Set(),
+        error: null,
+      },
+      getDetail: jest.fn(),
+      loadOlder: jest.fn(),
+      expandTurn: jest.fn(),
+      collapseTurn: jest.fn(),
+      retry: jest.fn(),
+    })
   })
 
-  it("renders streamed messages", () => {
+  it("uses the folded timeline and skips legacy history seeding on a capable host", () => {
+    transcriptControllerMock.mockReturnValue({
+      snapshot: {
+        mode: "timeline",
+        items: [{ kind: "system", itemKey: "s" }],
+        revision: 1,
+        loading: false,
+        loadingOlder: false,
+        hasMore: false,
+        expandedTurnKeys: new Set(),
+        error: null,
+      },
+      getDetail: jest.fn(),
+      loadOlder: jest.fn(),
+      expandTurn: jest.fn(),
+      collapseTurn: jest.fn(),
+      retry: jest.fn(),
+    })
+    streamMock.mockReturnValue(baseStream())
+
+    render(<RemoteSessionDetail sessionId="s1" />)
+
+    expect(screen.getByTestId("remote-timeline-surface")).toBeInTheDocument()
+  })
+
+  it("releases completed live messages after a timeline revision is rendered", () => {
+    const reconcileTranscript = jest.fn()
+    transcriptControllerMock.mockReturnValue({
+      snapshot: {
+        mode: "timeline",
+        items: [],
+        revision: 7,
+        loading: false,
+        loadingOlder: false,
+        hasMore: false,
+        expandedTurnKeys: new Set(),
+        error: null,
+      },
+      getDetail: jest.fn(),
+      loadOlder: jest.fn(),
+      expandTurn: jest.fn(),
+      collapseTurn: jest.fn(),
+      retry: jest.fn(),
+    })
+    streamMock.mockReturnValue(baseStream({ reconcileTranscript }))
+
+    render(<RemoteSessionDetail sessionId="s1" />)
+
+    expect(reconcileTranscript).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders streamed messages through the shared read-only transcript surface", () => {
+    const messages = [
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "hi there" },
+          { type: "reasoning", text: "checking" },
+        ],
+      },
+    ] as never
     streamMock.mockReturnValue(
       baseStream({
-        messages: [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "hi there" }] }] as never,
+        messages,
+        status: "streaming",
       })
     )
     render(<RemoteSessionDetail sessionId="s1" />)
-    expect(screen.getByText("hi there")).toBeInTheDocument()
+    expect(screen.getByTestId("remote-transcript-list")).toBeInTheDocument()
+    expect(transcriptListMock).toHaveBeenCalledWith({
+      messages,
+      sessionId: "s1",
+      status: "streaming",
+    })
   })
 
   it("sends a follow-up via the composer", async () => {

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 
 const mockStreamdownParser = jest.fn((markdown: string) =>
@@ -30,7 +30,13 @@ jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => flowMotion,
 }))
 
-import { StreamingTextPart, blockRendersCode } from "./streaming-text-part"
+jest.mock("./markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => (
+    <div data-testid="finalized-markdown-content">{content}</div>
+  ),
+}))
+
+import { FinalizedLongTextPart, StreamingTextPart, blockRendersCode } from "./streaming-text-part"
 
 describe("StreamingTextPart", () => {
   beforeEach(() => {
@@ -191,6 +197,45 @@ describe("StreamingTextPart", () => {
 
     const prose = render(createElement(Block, { content: "just a paragraph" }))
     expect(prose.container.querySelector(".not-typeset")).toBeNull()
+  })
+})
+
+describe("FinalizedLongTextPart", () => {
+  it("mounts initial sections and defers distant Markdown until it approaches the viewport", () => {
+    const callbacks: IntersectionObserverCallback[] = []
+    const OriginalObserver = global.IntersectionObserver
+    class FakeIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback) {
+        callbacks.push(callback)
+      }
+      observe = jest.fn()
+      disconnect = jest.fn()
+      unobserve = jest.fn()
+      takeRecords = jest.fn(() => [])
+      root = null
+      rootMargin = "1200px 0px"
+      thresholds = [0]
+    }
+    global.IntersectionObserver = FakeIntersectionObserver as unknown as typeof IntersectionObserver
+    const text = Array.from({ length: 80 }, (_, index) => `paragraph ${index}`).join("\n\n")
+
+    try {
+      render(<FinalizedLongTextPart text={text} messageId="m1" />)
+
+      expect(screen.getAllByTestId("finalized-markdown-section")).toHaveLength(3)
+      expect(screen.getAllByTestId("finalized-markdown-placeholder").length).toBeGreaterThan(0)
+
+      act(() => {
+        callbacks[0]?.(
+          [{ isIntersecting: true } as IntersectionObserverEntry],
+          {} as IntersectionObserver
+        )
+      })
+
+      expect(screen.getAllByTestId("finalized-markdown-section")).toHaveLength(4)
+    } finally {
+      global.IntersectionObserver = OriginalObserver
+    }
   })
 })
 

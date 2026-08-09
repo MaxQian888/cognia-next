@@ -43,9 +43,10 @@ jest.mock("@cognia/logging", () => ({
 
 // Stub the plugin event surface so the new dispatchShortcut wiring doesn't
 // drag the real plugin store (and its Tauri bindings) into this test.
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({
     dispatchShortcut: jest.fn().mockResolvedValue(false),
+    dispatchProjectSwitch: jest.fn().mockResolvedValue(false),
   }),
 }))
 

@@ -27,12 +27,14 @@ use notify::{EventKind, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use crate::engine::bridge_client::{load_endpoint, post_json, EndpointFile};
-use crate::shared::read_plugin_manifest;
+use crate::shared::{
+    clear_process_interrupt, read_plugin_manifest, request_process_interrupt, ProcessInterrupted,
+};
 use crate::ui::{style, RuntimeUi};
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
@@ -98,7 +100,9 @@ pub fn run(
     // this entirely; production runs install before the watcher to make
     // sure the handler is wired before any fs noise can fire.
     let quit_state = Arc::new(AtomicU8::new(QUIT_RUNNING));
-    install_quit_handler(quit_state.clone())?;
+    let build_active = Arc::new(AtomicBool::new(false));
+    clear_process_interrupt();
+    install_quit_handler(quit_state.clone(), build_active.clone())?;
 
     let panel = StatusPanel::new(ui, &crate_root, reload_endpoint.as_ref());
     panel.set_status("Watching");
@@ -167,11 +171,18 @@ pub fn run(
                     // output still streams.
                     let prior_quiet = ui.flags.quiet;
                     ui.flags.quiet = true;
+                    build_active.store(true, Ordering::SeqCst);
                     let outcome = rebuild_and_reload(&crate_root, reload_endpoint.as_ref(), ui);
+                    build_active.store(false, Ordering::SeqCst);
                     ui.flags.quiet = prior_quiet;
                     let elapsed = started.elapsed();
                     panel.record_build(&outcome, elapsed);
-                    if let Err(e) = outcome {
+                    if outcome
+                        .as_ref()
+                        .is_err_and(|error| error.downcast_ref::<ProcessInterrupted>().is_some())
+                    {
+                        panel.println_above(format!("{}build interrupted", style::warn_prefix()));
+                    } else if let Err(e) = outcome {
                         panel.println_above(format!(
                             "{}rebuild failed: {e:#}",
                             style::error_prefix()
@@ -384,7 +395,7 @@ fn reload_bundle(
     }
     let response: DevReloadResponse = post_json(
         endpoint,
-        "/api/v1/dev/plugins/reload",
+        "/api/dev/plugins/reload",
         &json!({ "bundle_path": bundle.to_string_lossy(), "plugin_id": id }),
     )
     .context("reload endpoint POST failed")?;
@@ -526,7 +537,7 @@ fn resolve_reload_endpoint(override_url: Option<&str>) -> Option<EndpointFile> {
 /// `set_handler` errors only when called twice in the same process —
 /// production runs are once per `dev`, so that's a programmer bug;
 /// surface it loudly. Tests skip this entirely.
-fn install_quit_handler(state: Arc<AtomicU8>) -> Result<()> {
+fn install_quit_handler(state: Arc<AtomicU8>, build_active: Arc<AtomicBool>) -> Result<()> {
     let result = ctrlc::set_handler(move || {
         // Exactly ONE transition per press:
         //   RUNNING       → FIRST_PRESS
@@ -540,6 +551,9 @@ fn install_quit_handler(state: Arc<AtomicU8>) -> Result<()> {
             QUIT_FIRST_PRESS => Some(QUIT_SECOND_PRESS),
             _ => None,
         });
+        if build_active.load(Ordering::SeqCst) {
+            request_process_interrupt();
+        }
     });
     // Re-installing in the same process is fine — we treat it as idempotent.
     match result {

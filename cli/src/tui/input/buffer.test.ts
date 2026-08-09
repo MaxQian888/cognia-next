@@ -41,6 +41,13 @@ describe("buffer basics", () => {
     expect(isEmpty(b)).toBe(false)
     expect(bufferText(b)).toBe("a\nbc")
   })
+
+  it("restores Unicode history text with the cursor on a grapheme boundary", () => {
+    const restored = bufferFromText("中 ☝️ 1️⃣")
+    expect(restored.cursorCol).toBe(restored.lines[0].length)
+    expect(moveLeft(restored).cursorCol).toBe(restored.lines[0].length - 3)
+    expect(moveRight(moveLeft(restored))).toEqual(restored)
+  })
 })
 
 describe("insertText", () => {
@@ -48,6 +55,18 @@ describe("insertText", () => {
     expect(insertText(buf(["ac"], 0, 1), "b")).toEqual({
       lines: ["abc"],
       cursorRow: 0,
+      cursorCol: 2,
+    })
+  })
+  it("keeps insertion and paste cursors on a forward grapheme boundary", () => {
+    expect(insertText(buf(["\u0301x"], 0, 0), "e")).toEqual({
+      lines: ["e\u0301x"],
+      cursorRow: 0,
+      cursorCol: 2,
+    })
+    expect(insertText(buf(["x"], 0, 0), "a\ne\u0301")).toEqual({
+      lines: ["a", "e\u0301x"],
+      cursorRow: 1,
       cursorCol: 2,
     })
   })
@@ -92,6 +111,18 @@ describe("backspace", () => {
   it("no-ops at the very start", () => {
     const b = buf([""], 0, 0)
     expect(backspace(b)).toBe(b)
+  })
+  it("deletes one complete grapheme cluster", () => {
+    expect(backspace(buf(["A👩‍💻b"], 0, 6))).toEqual({
+      lines: ["Ab"],
+      cursorRow: 0,
+      cursorCol: 1,
+    })
+    expect(backspace(bufferFromText("e\u0301"))).toEqual({
+      lines: [""],
+      cursorRow: 0,
+      cursorCol: 0,
+    })
   })
 })
 
@@ -140,6 +171,17 @@ describe("cursor movement", () => {
     const end = buf(["ab"], 0, 2)
     expect(moveRight(end)).toBe(end)
   })
+  it("moves only across grapheme-cluster boundaries", () => {
+    const emoji = bufferFromText("A😀中e\u0301")
+    expect(moveLeft(emoji).cursorCol).toBe(4)
+    expect(moveLeft(moveLeft(emoji)).cursorCol).toBe(3)
+    expect(moveLeft(moveLeft(moveLeft(emoji))).cursorCol).toBe(1)
+    expect(moveRight(buf(["👩‍💻x"], 0, 0)).cursorCol).toBe(5)
+  })
+  it("maps vertical movement by terminal display column", () => {
+    expect(moveDown(buf(["a中b", "abcdef"], 0, 2))).toMatchObject({ cursorRow: 1, cursorCol: 3 })
+    expect(moveUp(buf(["a中b", "abcdef"], 1, 3))).toMatchObject({ cursorRow: 0, cursorCol: 2 })
+  })
   it("moveUp / moveDown clamp the column", () => {
     expect(moveUp(buf(["ab", "cdef"], 1, 4))).toEqual({
       lines: ["ab", "cdef"],
@@ -169,6 +211,10 @@ describe("cursor movement", () => {
     // Negatives clamp to the origin.
     expect(moveTo(buf(["abc"], 0, 2), -1, -1)).toMatchObject({ cursorRow: 0, cursorCol: 0 })
   })
+  it("moveTo snaps an invalid UTF-16 column to a grapheme boundary", () => {
+    expect(moveTo(buf(["😀x"], 0, 0), 0, 1).cursorCol).toBe(0)
+    expect(moveTo(buf(["e\u0301x"], 0, 0), 0, 1).cursorCol).toBe(0)
+  })
   it("onFirstLine / onLastLine", () => {
     expect(onFirstLine(buf(["a", "b"], 0, 0))).toBe(true)
     expect(onFirstLine(buf(["a", "b"], 1, 0))).toBe(false)
@@ -184,6 +230,12 @@ describe("word movement", () => {
   })
   it("moveWordLeft skips trailing spaces", () => {
     expect(moveWordLeft(buf(["foo   "], 0, 6)).cursorCol).toBe(0)
+  })
+  it("keeps word movement and deletion on grapheme boundaries", () => {
+    const value = bufferFromText("a \u0301b")
+    expect(moveWordLeft(value).cursorCol).toBe(1)
+    expect(deleteWordLeft(value).cursorCol).toBe(1)
+    expect(moveWordRight(buf(["a \u0301b"], 0, 1)).cursorCol).toBe(4)
   })
   it("moveWordLeft steps to the end of the previous line at column 0", () => {
     expect(moveWordLeft(buf(["ab", "cd"], 1, 0))).toEqual({

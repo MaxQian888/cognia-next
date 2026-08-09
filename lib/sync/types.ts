@@ -6,67 +6,14 @@
  * queries fall through to the warmed cache when the network is offline.
  */
 
-/**
- * Tables the phone is allowed to mirror. Each value matches the production
- * Dexie table name in `lib/db/schema.ts` so the handler implementations
- * can do `db[name]` without an extra adapter layer.
- *
- * Wave 2 additions: workflows / twinProfile / plugins / adapterInstances
- * / settings (the singleton AppSettings row). These power the mobile
- * read paths for workflow viewer, twin switcher, plugin toggles,
- * connector policy, and per-device preferences.
- */
-export type SyncableTable =
-  | "characters"
-  | "skills"
-  | "sessions"
-  | "messages"
-  | "workflows"
-  | "twinProfile"
-  | "plugins"
-  | "adapterInstances"
-  | "settings"
-  // v49 — per-conversation overrides (pinned / archived / lastReadAt /
-  // allowComputerUse / allowGoalDriving / mode / character / quietHours).
-  // Mobile mirrors these so the Inbox can render pinned/unread state when
-  // the companion server is unreachable.
-  | "conversationOverrides"
-  // Companion read-mostly views: mirror /goal console + long-term memory so
-  // the phone can show goal progress and recalled memories from Dexie while
-  // the desktop is unreachable. Both are authored on the desktop; mobile is
-  // a viewer.
-  | "goals"
-  | "memories"
-  // Workflow RUN history. Workflow *definitions* (`workflows`) already sync,
-  // but their runs never did — so every mobile run surface (the library's
-  // "active"/"sending" badges, RecentRunsFeed, MobileRunsList, the home
-  // active-runs card) sat permanently empty, and a workflow triggered from
-  // the phone vanished the moment its outbound job was sent. The phone is a
-  // read-only viewer; runs are authored on the desktop that executes them.
-  | "workflowRuns"
-  // ADR-0056 (Wave 4) — configured MCP servers. The standalone webview engine
-  // runs no MCP, and the phone has no `mcp_set_enabled` push RPC, so the mobile
-  // `/me/mcp` page is a paired-only read-only viewer of the desktop's servers.
-  // Mirroring this table is what lets it list the desktop's MCP config offline.
-  | "mcpServers"
-  // ADR-0039 (phase 2) — durable terminal command history. Authored on the
-  // desktop by the terminal spawn-orchestrator; the phone has no shell and
-  // never writes back, so this is a one-way read-only mirror powering the
-  // mobile `/me/command-history` browse/search viewer. Rows carry no
-  // `updatedAt`/`createdAt` — recency lives on the indexed `ts`, which the
-  // desktop projector cursors on (see readTerminalHistoryDelta).
-  | "terminalHistory"
-  // v104 — Agent-Team board projection (team-board CQRS). One-way mirror of
-  // the desktop agent-team-store (tasks + team-meta rows) so the phone can
-  // render the kanban offline. Mobile is a viewer; edits travel back as
-  // Companion RPC commands (`team_task_*`), never as data-level writes.
-  | "agentTeamBoard"
-  // Unified template platform portable projections. Device bindings,
-  // credentials, local Twin preferences, and migration rollback snapshots
-  // deliberately have no sync table.
-  | "templateDefinitions"
-  | "templatePackages"
-  | "templateInstances"
+import {
+  COMPANION_SYNC_PROTOCOL_TABLE_NAMES,
+  type CompanionSyncProtocolTableName,
+} from "@/lib/data-governance/table-catalog"
+
+/** The catalog is the single TypeScript authority for companion sync tables. */
+export const SYNCABLE_TABLE_NAMES = COMPANION_SYNC_PROTOCOL_TABLE_NAMES
+export type SyncableTable = CompanionSyncProtocolTableName
 
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */

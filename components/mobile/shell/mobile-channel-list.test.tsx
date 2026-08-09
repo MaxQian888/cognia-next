@@ -10,9 +10,10 @@ import { MobileChannelList } from "./mobile-channel-list"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { Project } from "@/types"
 
-const updateSessionMock: jest.Mock<Promise<void>, [string, Record<string, unknown>]> = jest.fn()
+const bulkSetSessionsPinnedMock: jest.Mock<Promise<void>, [readonly string[], boolean]> = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
-  updateSession: (id: string, patch: Record<string, unknown>) => updateSessionMock(id, patch),
+  bulkSetSessionsPinned: (ids: readonly string[], pinned: boolean) =>
+    bulkSetSessionsPinnedMock(ids, pinned),
 }))
 
 const charactersRef: {
@@ -43,8 +44,9 @@ jest.mock("@/hooks/data", () => ({
   }),
 }))
 
+const relativeTimeMock = jest.fn(() => "now")
 jest.mock("next-intl", () => ({
-  useFormatter: () => ({ relativeTime: () => "now" }),
+  useFormatter: () => ({ relativeTime: relativeTimeMock }),
   useNow: () => new Date(),
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     const map: Record<string, string> = {
@@ -133,8 +135,9 @@ const sessions: ChatSession[] = [
 
 describe("<MobileChannelList />", () => {
   beforeEach(() => {
-    updateSessionMock.mockReset()
-    updateSessionMock.mockResolvedValue(undefined)
+    bulkSetSessionsPinnedMock.mockReset()
+    bulkSetSessionsPinnedMock.mockResolvedValue(undefined)
+    relativeTimeMock.mockClear()
     charactersRef.value = []
     sessionStatesRef.value = []
     setChannelListView.mockReset()
@@ -377,10 +380,24 @@ describe("<MobileChannelList />", () => {
       />
     )
     await user.click(screen.getAllByTestId("swipe-action-pin")[0])
-    expect(updateSessionMock).toHaveBeenCalled()
-    const [id, patch] = updateSessionMock.mock.calls[0]
-    expect(id).toBe("s1")
-    expect(patch).toMatchObject({ pinned: false })
+    expect(bulkSetSessionsPinnedMock).toHaveBeenCalledWith(["s1"], false)
+  })
+
+  it("shows message activity time instead of a newer metadata-write time", () => {
+    render(
+      <MobileChannelList
+        sessions={[baseSession("s1", { lastMessageAt: 100, updatedAt: 200 })]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+
+    expect(relativeTimeMock).toHaveBeenCalledWith(new Date(100), expect.any(Date))
   })
 
   it("calls onNewDirect from the + button", async () => {

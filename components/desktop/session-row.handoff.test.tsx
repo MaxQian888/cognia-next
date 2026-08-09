@@ -41,6 +41,11 @@ jest.mock("@/lib/chat/export-handoff-to-cli", () => ({
   exportHandoffToCli: (params: unknown) => mockExport(params),
 }))
 
+const mockDispatchSessionToCodexApp = jest.fn()
+jest.mock("@/lib/chat/dispatch-to-codex-app", () => ({
+  dispatchSessionToCodexApp: (session: unknown) => mockDispatchSessionToCodexApp(session),
+}))
+
 import { SessionRow } from "./session-row"
 import { detectCli } from "@/lib/cli-bridge/detect-cli"
 import { launchCogniaAgent } from "@/lib/terminal/run-cognia"
@@ -79,6 +84,7 @@ beforeEach(() => {
     error: null,
   })
   mockLaunchCogniaAgent.mockResolvedValue({ kind: "launched", sessionId: "terminal-1" })
+  mockDispatchSessionToCodexApp.mockResolvedValue({ threadId: "thread-1" })
 })
 
 test("Open in terminal presence-checks, exports, and launches the resume command", async () => {
@@ -127,4 +133,32 @@ test("a failed export surfaces an error toast", async () => {
   )
   await user.click(item)
   expect(mockToastError).toHaveBeenCalledWith("openInTerminalFailed")
+})
+
+test("Open in Codex App dispatches independently of cognia-agent availability", async () => {
+  mockDetectCli.mockResolvedValueOnce({
+    available: false,
+    version: null,
+    path: null,
+    error: "not found",
+  })
+  const user = userEvent.setup()
+  setup()
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  const item = await screen.findByText("openInCodexApp")
+  expect(item.closest('[role="menuitem"]')).not.toHaveAttribute("data-disabled")
+
+  await user.click(item)
+
+  expect(mockDispatchSessionToCodexApp).toHaveBeenCalledWith(baseSession)
+  expect(mockToastSuccess).toHaveBeenCalledWith("openedInCodexApp")
+})
+
+test("a failed Codex App dispatch surfaces an error toast", async () => {
+  mockDispatchSessionToCodexApp.mockRejectedValueOnce(new Error("app too old"))
+  const user = userEvent.setup()
+  setup()
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("openInCodexApp"))
+  await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("openInCodexAppFailed"))
 })

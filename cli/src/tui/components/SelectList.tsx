@@ -5,13 +5,15 @@
  * reducer-driven overlays and input-local popups.
  */
 import React, { useRef } from "react"
-import { Box, Text, useInput, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
+import { useModalInput } from "../input/input-router"
 
 import { useTheme } from "../theme/context"
 import { windowList } from "./list-window"
 import { windowByWrappedRows } from "./overlay-layout"
 import { OverlayFooter } from "./OverlayFooter"
 import { usePanelClick } from "../input/use-panel-click"
+import { isMouseSequence } from "../input/mouse"
 
 /** Row prefix drawn before every label ("❯ " / "  "), stolen from the wrap width. */
 const LIST_ROW_CHROME = 2
@@ -124,7 +126,7 @@ export function SelectList({
     onWheel: disableWheel ? undefined : (dir) => onMove(dir === "up" ? -1 : 1),
   })
 
-  useInput(
+  useModalInput(
     (input, key) => {
       if (handleMouse(input)) return
       if (key.upArrow) onMove(-1)
@@ -139,7 +141,17 @@ export function SelectList({
         else if (input && !key.ctrl && !key.meta && !key.tab) onQueryChange((query ?? "") + input)
       }
     },
-    { isActive }
+    {
+      isActive,
+      shouldHandle: (input, key) =>
+        isMouseSequence(input) ||
+        key.upArrow ||
+        key.downArrow ||
+        key.return ||
+        (key.escape && onCancel !== undefined) ||
+        (onQueryChange !== undefined &&
+          (key.backspace || key.delete || Boolean(input && !key.ctrl && !key.meta && !key.tab))),
+    }
   )
 
   return (

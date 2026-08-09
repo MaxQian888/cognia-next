@@ -1,23 +1,22 @@
-/** @jest-environment jsdom */
 /**
  * Coverage for the shared twin-injection helper (M6). The downstream
  * `applyTwinContext` is exercised by its own tests — here we focus on
  * the helper's contract: lookup → guard → injection → inject-log entry.
  */
 
-import "fake-indexeddb/auto"
 import { injectTwinContext } from "./twin-injector"
 import { __resetTwinInjectLog, readTwinInjectLog } from "@/lib/twin/runtime/inject-log"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createCharacter } from "@/lib/db/characters"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   __resetTwinInjectLog()
 })
+afterAll(dbFixture.dispose)
 
 describe("injectTwinContext", () => {
   it("returns the base prompt unchanged when characterId is missing", async () => {

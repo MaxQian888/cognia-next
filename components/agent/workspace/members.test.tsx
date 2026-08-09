@@ -128,6 +128,14 @@ describe("AgentTeamMembers", () => {
     expect(screen.getByTestId("member-tm_1")).toBeInTheDocument()
     expect(screen.getByText("Lead Bot")).toBeInTheDocument()
     expect(screen.getByText("Worker One")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-team-avatar-lead_1")).toHaveAttribute(
+      "data-avatar-id",
+      "coordinator"
+    )
+    expect(screen.getByTestId("agent-team-avatar-tm_1")).toHaveAttribute(
+      "src",
+      expect.stringMatching(/^\/icons\/cognia-agent-team\/webp\/.+\.webp$/)
+    )
     const status = screen.getByTestId("member-tm_1-status")
     expect(status.textContent ?? "").toMatch(/Executing/i)
   })

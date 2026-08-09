@@ -16,6 +16,9 @@ import { registerPluginI18n, __resetPluginI18nForTesting } from "@/lib/i18n/plug
 // as a span so the test can read its className + data-* attributes.
 jest.mock("@xyflow/react", () => ({
   __esModule: true,
+  NodeToolbar: ({ children, ...props }: React.ComponentProps<"div">) => (
+    <div {...props}>{children}</div>
+  ),
   Handle: ({
     className,
     ...rest

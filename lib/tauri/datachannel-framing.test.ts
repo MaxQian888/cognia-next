@@ -1,5 +1,7 @@
 import {
+  decodeRtcBinaryResourceChunk,
   encodeRtcLogicalMessage,
+  RTC_BINARY_RESOURCE_HEADER_BYTES,
   RTC_MAX_FRAME_BYTES,
   RTC_MAX_MESSAGE_BYTES,
   RtcChunkReassembler,
@@ -75,5 +77,25 @@ describe("RTC DataChannel framing", () => {
         20_000
       )
     ).toEqual({ kind: "cancel", messageId: "m1", reason: "invalid_chunk" })
+  })
+
+  it("decodes raw binary resource frames without base64 expansion", () => {
+    const requestId = "550e8400-e29b-41d4-a716-446655440000"
+    const payload = Uint8Array.from([0, 255, 17, 99])
+    const frame = new ArrayBuffer(RTC_BINARY_RESOURCE_HEADER_BYTES + payload.byteLength)
+    const bytes = new Uint8Array(frame)
+    bytes.set([0x43, 0x47, 0x4d, 0x31], 0)
+    bytes.set(new TextEncoder().encode(requestId), 4)
+    const view = new DataView(frame)
+    view.setUint32(40, 1)
+    view.setUint32(44, 3)
+    bytes.set(payload, RTC_BINARY_RESOURCE_HEADER_BYTES)
+
+    expect(decodeRtcBinaryResourceChunk(frame)).toEqual({
+      requestId,
+      index: 1,
+      totalChunks: 3,
+      bytes: payload,
+    })
   })
 })

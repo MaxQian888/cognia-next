@@ -9,7 +9,7 @@
  * (renderer) registry. `hooks/chat/use-claude-chat.ts` consults
  * `isSessionAttached` so a `permission_request` for a session that is NOT the
  * desktop's foreground session is **routed to the attached remote device**
- * (which already received the frame over `/ws/v1/events` and will call
+ * (which already received the frame over `/ws/events` and will call
  * `claude_approve`) instead of being auto-denied with "session not active".
  *
  * Because the sidecar's `canUseTool` has no timeout of its own (see

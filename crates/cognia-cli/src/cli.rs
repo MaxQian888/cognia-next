@@ -28,8 +28,8 @@ pub(crate) struct Cli {
     /// Increase log verbosity (repeatable, e.g. `-vv` for debug-level).
     #[arg(long, short = 'v', global = true, action = clap::ArgAction::Count)]
     pub(crate) verbose: u8,
-    /// Pre-confirm every interactive prompt (`uninstall --purge-data`,
-    /// overwrite prompts, etc.). Required for CI usage.
+    /// Pre-confirm every interactive prompt only after the user has approved
+    /// every operation and argument in this exact invocation.
     #[arg(long, short = 'y', global = true)]
     pub(crate) yes: bool,
 
@@ -43,6 +43,36 @@ pub(crate) enum TopCommand {
     Plugin {
         #[command(subcommand)]
         command: PluginCommand,
+    },
+    /// Character Pack authoring subcommands (`.cognia-pack.json`).
+    ///
+    /// Packs are not plugins: they carry no code, and their signature lives
+    /// in-band in the file rather than in a detached `.sig`. Hence a separate
+    /// command group from `cognia plugin sign` / `verify`.
+    Pack {
+        #[command(subcommand)]
+        command: PackCommand,
+    },
+    /// Inspect and invoke the loopback-only Headless service API.
+    Host {
+        /// Headless server base URL. Must be HTTPS on a loopback host.
+        #[arg(
+            long,
+            env = "COGNIA_SERVER_URL",
+            default_value = "https://127.0.0.1:27890"
+        )]
+        server_url: String,
+        /// Cognia server data directory (TLS material and signing state).
+        #[arg(long, env = "COGNIA_DATA_DIR")]
+        data_dir: Option<PathBuf>,
+        /// Explicit PEM certificate trusted for the self-signed Headless listener.
+        #[arg(long, env = "COGNIA_CA_CERT")]
+        ca_cert: Option<PathBuf>,
+        /// `cognia-server` binary used to issue an in-memory service token.
+        #[arg(long, env = "COGNIA_SERVER_BIN")]
+        server_bin: Option<PathBuf>,
+        #[command(subcommand)]
+        command: HostCommand,
     },
     /// Bridge stdio to the cognia ACP server so ACP clients (Zed, Neovim,
     /// JetBrains) can drive cognia. Configure your editor with
@@ -78,6 +108,190 @@ pub(crate) enum TopCommand {
         /// the release key is provisioned.
         #[arg(long)]
         signature: Option<PathBuf>,
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum HostListFormat {
+    Json,
+    Table,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum HostSchemaFormat {
+    Json,
+    Human,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum HostCallFormat {
+    Json,
+    Raw,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum HostSkillKind {
+    Core,
+    Domain,
+    Workflow,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum HostSkillScope {
+    User,
+    Project,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum HostSkillsCommand {
+    /// Install the embedded skills into a standard Agent Skills directory.
+    Install {
+        /// Required destination scope; no implicit scope is selected.
+        #[arg(long, value_enum)]
+        scope: HostSkillScope,
+    },
+    /// List the agent-readable skills embedded in this binary.
+    List {
+        /// Restrict results to one host command category.
+        #[arg(long)]
+        category: Option<String>,
+        /// Restrict results to core, domain, or workflow skills.
+        #[arg(long, value_enum)]
+        kind: Option<HostSkillKind>,
+    },
+    /// Read an embedded skill file from the allowlisted skill bundle.
+    Read {
+        /// Embedded skill name. Run `skills list` to discover the allowlist.
+        skill: String,
+        /// Optional allowlisted relative file path; defaults to `SKILL.md`.
+        path: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum HostCommand {
+    /// Summarize the stable command categories and their embedded skills.
+    Categories {
+        #[arg(long, value_enum, default_value_t = HostListFormat::Json)]
+        format: HostListFormat,
+    },
+    /// Summarize resource groups within the generated command catalog.
+    Resources {
+        /// Restrict resources to one host command category.
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long, value_enum, default_value_t = HostListFormat::Json)]
+        format: HostListFormat,
+    },
+    /// Browse the embedded Headless RPC command catalog without connecting.
+    Commands {
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        operation: Option<String>,
+        #[arg(long)]
+        risk: Option<String>,
+        #[arg(long)]
+        approval: Option<String>,
+        #[arg(long)]
+        capability: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        resource: Option<String>,
+        #[arg(long, value_enum, default_value_t = HostListFormat::Json)]
+        format: HostListFormat,
+    },
+    /// Print the concrete input schema for one Headless RPC command.
+    Schema {
+        rpc_command: String,
+        #[arg(long, value_enum, default_value_t = HostSchemaFormat::Json)]
+        format: HostSchemaFormat,
+    },
+    /// Validate and invoke one named Headless RPC command.
+    Call {
+        rpc_command: String,
+        /// JSON body, `-` for stdin, or `@file`.
+        #[arg(long)]
+        data: Option<String>,
+        #[arg(long)]
+        idempotency_key: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        no_wait: bool,
+        #[arg(long, default_value_t = 30)]
+        timeout_seconds: u64,
+        #[arg(long, value_enum, default_value_t = HostCallFormat::Json)]
+        format: HostCallFormat,
+    },
+    /// Check local configuration, TLS, readiness, credentials, and one safe RPC.
+    Doctor {
+        #[arg(long)]
+        offline: bool,
+        #[arg(long, value_enum, default_value_t = HostSchemaFormat::Json)]
+        format: HostSchemaFormat,
+    },
+    /// Stream Headless events as NDJSON with replay-cursor reconnects.
+    Events {
+        #[arg(long)]
+        since: Option<u64>,
+        #[arg(long = "event")]
+        events: Vec<String>,
+        #[arg(long)]
+        max_events: Option<u64>,
+    },
+    /// Read agent instructions embedded alongside the command catalog.
+    Skills {
+        #[command(subcommand)]
+        command: HostSkillsCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum PackCommand {
+    /// Ed25519-sign a `.cognia-pack.json`, writing the signature in-band.
+    ///
+    /// The signed bytes are the RFC 8785 canonical JSON of the `pack` object
+    /// alone — `schemaVersion` and `signature` are deliberately outside them,
+    /// so a host that rewrites the file to a newer schema keeps the signature
+    /// valid. The signature is self-verified before anything is written.
+    ///
+    /// The output is re-serialized with keys in canonical (sorted) order.
+    Sign {
+        /// The `.cognia-pack.json` to sign.
+        file: PathBuf,
+        /// Path to the private key file (32 raw bytes, base64-encoded one
+        /// line). `cognia plugin keygen` generates one.
+        #[arg(long)]
+        key: PathBuf,
+        /// Write the signed pack here instead of updating `file` in place.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check a `.cognia-pack.json`'s in-band signature the way the host will.
+    ///
+    /// Reports `verified`, `unsigned`, or `invalid`. Unsigned exits 0 — Cognia
+    /// accepts unsigned packs and labels them — while an invalid signature
+    /// always exits non-zero.
+    Verify {
+        /// The `.cognia-pack.json` to check.
+        file: PathBuf,
+        /// Require this exact base64 public key instead of trusting the one
+        /// embedded in the file. The only check that detects a re-signed pack.
+        #[arg(long)]
+        public_key: Option<String>,
+        /// Treat an unsigned pack as a failure. For CI.
+        #[arg(long)]
+        require_signature: bool,
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
@@ -529,6 +743,42 @@ pub(crate) enum PluginCommand {
     },
 }
 
+pub(crate) fn dispatch_pack(command: PackCommand, ui: &mut RuntimeUi) -> Result<()> {
+    match command {
+        PackCommand::Sign {
+            file,
+            key,
+            out,
+            json,
+        } => {
+            ui.flags.json = json;
+            ui.verbose(format!(
+                "running pack sign file={} key={} out={} json={json}",
+                file.display(),
+                key.display(),
+                out.as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<in-place>".to_string()),
+            ));
+            commands::pack_sign::run(file, key, out, ui)
+        }
+        PackCommand::Verify {
+            file,
+            public_key,
+            require_signature,
+            json,
+        } => {
+            ui.flags.json = json;
+            ui.verbose(format!(
+                "running pack verify file={} public_key={} require_signature={require_signature} json={json}",
+                file.display(),
+                public_key.as_deref().unwrap_or("<embedded>"),
+            ));
+            commands::pack_verify::run(file, public_key, require_signature, ui)
+        }
+    }
+}
+
 pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Result<()> {
     match command {
         PluginCommand::New {
@@ -882,5 +1132,70 @@ mod tests {
         assert_eq!(bundle, Some(PathBuf::from("plugin-dir")));
         assert_eq!(plugin_id, None);
         assert!(!json);
+    }
+
+    #[test]
+    fn pack_sign_parses_file_key_output_and_json() {
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "pack",
+            "sign",
+            "example.cognia-pack.json",
+            "--key",
+            "private-key.txt",
+            "--out",
+            "signed.cognia-pack.json",
+            "--json",
+        ])
+        .expect("pack sign arguments should parse");
+        let TopCommand::Pack {
+            command:
+                PackCommand::Sign {
+                    file,
+                    key,
+                    out,
+                    json,
+                },
+        } = cli.command
+        else {
+            panic!("expected pack sign command");
+        };
+
+        assert_eq!(file, PathBuf::from("example.cognia-pack.json"));
+        assert_eq!(key, PathBuf::from("private-key.txt"));
+        assert_eq!(out, Some(PathBuf::from("signed.cognia-pack.json")));
+        assert!(json);
+    }
+
+    #[test]
+    fn pack_verify_parses_public_key_signature_requirement_and_json() {
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "pack",
+            "verify",
+            "example.cognia-pack.json",
+            "--public-key",
+            "base64-public-key",
+            "--require-signature",
+            "--json",
+        ])
+        .expect("pack verify arguments should parse");
+        let TopCommand::Pack {
+            command:
+                PackCommand::Verify {
+                    file,
+                    public_key,
+                    require_signature,
+                    json,
+                },
+        } = cli.command
+        else {
+            panic!("expected pack verify command");
+        };
+
+        assert_eq!(file, PathBuf::from("example.cognia-pack.json"));
+        assert_eq!(public_key.as_deref(), Some("base64-public-key"));
+        assert!(require_signature);
+        assert!(json);
     }
 }

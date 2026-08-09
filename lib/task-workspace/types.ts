@@ -194,8 +194,19 @@ export interface PatchSet {
     beforeMode: number | null
     afterMode: number | null
     binary: boolean
-    hunks: Array<{ id: string; header: string }>
+    hunks: Array<{
+      id: string
+      header: string
+      forwardPatchHash: string
+      inversePatchHash: string
+      additions?: number
+      deletions?: number
+    }>
   }>
+  /** Missing/false on patch rows written before durable selection tracking. */
+  appliedSelectionKnown?: boolean
+  /** Empty means the successful apply selected every file. */
+  appliedSelection?: PatchSelection[]
   createdAt: number
 }
 

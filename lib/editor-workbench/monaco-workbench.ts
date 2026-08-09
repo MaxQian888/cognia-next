@@ -44,6 +44,12 @@ import {
 import { getFileExtension } from "@/lib/canvas/utils"
 import { pathToFileUri } from "@/lib/files/path-uri"
 import { registerAllSnippets, registerEmmetSupport } from "@/lib/monaco/snippets"
+import {
+  disposeWorkspace,
+  ensureWorkspace,
+  isLspWorkspaceManagerConfigured,
+  registerProjectWorkspace,
+} from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 
 // ────────────────────────────────────────────────────────────────────────
 // Minimal real-monaco interface shapes (decoupled from monaco-editor pkg).
@@ -295,9 +301,37 @@ export function mountMonacoWorkbench(
     cursor: readCursor(),
   })
 
-  // Step 3 — vscode-shim bridge notification.
+  // Step 3 — materialise synthetic documents before exposing them to the
+  // standalone LSP bridge. VS Code-extension providers remain on the same
+  // Monaco model and therefore share the stable URI.
   const bridgeEditor = adaptEditorForBridge(editor)
-  notifyEditorMounted(bridgeEditor)
+  let bridgeMounted = false
+  let disposed = false
+  const notifyMounted = () => {
+    if (disposed || bridgeMounted) return
+    bridgeMounted = true
+    notifyEditorMounted(bridgeEditor)
+  }
+  if (spec.surface === "file") {
+    if (spec.projectRoot) registerProjectWorkspace(spec.projectRoot)
+    notifyMounted()
+  } else if (isLspWorkspaceManagerConfigured()) {
+    const fileName =
+      spec.pathSegments && spec.pathSegments.length > 0
+        ? spec.pathSegments.join("/")
+        : (uriString.split("/").pop() ?? `${spec.documentId}.${getFileExtension(spec.language)}`)
+    const workspaceId =
+      spec.surface === "skill" ? (spec.skillId ?? spec.documentId) : spec.documentId
+    void ensureWorkspace({
+      surface: spec.surface,
+      documentId: workspaceId,
+      fileName,
+      initialContent: model.getValue(),
+      monacoUri: uriString,
+    }).then(notifyMounted, notifyMounted)
+  } else {
+    notifyMounted()
+  }
 
   // Step 4 — focus / content / selection listener wiring.
   const focusDisposable = editor.onDidFocusEditorWidget(() => {
@@ -314,7 +348,6 @@ export function mountMonacoWorkbench(
     lightBinding.update({ selection: editor.getSelection(), cursor: readCursor() })
   })
 
-  let disposed = false
   return {
     uri: uriString,
     dispose: () => {
@@ -324,7 +357,14 @@ export function mountMonacoWorkbench(
       blurDisposable.dispose()
       contentDisposable.dispose()
       selectionDisposable.dispose()
-      notifyEditorUnmounted(editor.getId())
+      if (bridgeMounted) notifyEditorUnmounted(editor.getId())
+      if (
+        spec.surface !== "file" &&
+        spec.surface !== "skill" &&
+        isLspWorkspaceManagerConfigured()
+      ) {
+        void disposeWorkspace({ surface: spec.surface, documentId: spec.documentId })
+      }
       lightBinding.dispose()
     },
   }

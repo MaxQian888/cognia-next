@@ -9,7 +9,7 @@ description: "定义云部署策略：保持桌面经过验证的双平面分割
 
 > **2026-07-18 附录**：ADR-0085增加了第二个选择加入的 T2 执行形态：每个迁移工作空间一个持久WorkspaceRuntime，托管重复的 external-Agent 子节点、其开发服务器和一个私有Playwright服务。一次性per-Agent `ContainerBackend`保持默认状态，不会被移除。客户端只能通过`cognia-server`访问浏览器;运行时和CDP端点保持私密。
 
-> **实现状态（2026-07-13，`dev`）**：阶段0已完全落地——`deploy.yml`是真正的门禁部署工作流（P0.1），`images.yml` publishes/compile-checks所有四个GHCR镜像（P0.2），服务工作流也推送`dev`（P0.3），且组合套件存在调优后的seccomp配置文件（P0.4）。第一阶段（W1–W6）已落地：无头二进制监控Brain + sidecar，服务器秘密存储被env密钥化，`compose-e2e.yml`在CI中运行二级烟雾。从第二阶段开始，F2（Caddy ACME 前门）和 F4（公共连接器 webhooks）被发布，此外 Logto OIDC网关上的多用户认证。从第三阶段开始，`ExecBackend::Container`（R13，路桩+`docker-compose.t2.yml`）、其Kubernetes特色（`k8s-exec`功能——带有固定站点和PVC-subPath工作区的跑者舱，通过`tenant-template/runners/`选择加入），以及`deploy/k8s`的kustomize树（D9/T3）都存在。伴随的默认端口迁移到了**27890**（冲突碰撞），整个部署套件都在跟踪它。下面的“背景”部分描述了截至2026年7月2日的世界，保持原样。
+> **实现状态（2026-07-13，`dev`）**：阶段0已完全落地——`deploy.yml`是真正的门禁部署工作流（P0.1），`images.yml` publishes/compile-checks所有四个GHCR镜像（P0.2），服务工作流也推送`dev`（P0.3），且组合套件存在调优后的seccomp配置文件（P0.4）。第一阶段（W1–W6）已落地：无头二进制监控Brain + sidecar，服务器秘密存储被env密钥化，`compose-e2e.yml`在CI中运行二级烟雾。从第二阶段开始，F2（Caddy ACME 前门）、F4（公共连接器 webhooks）和 F6（服务器持有的连接器运行时租约）已发布，此外还有 Logto OIDC 网关上的多用户认证。从第三阶段开始，`ExecBackend::Container`（R13，路桩+`docker-compose.t2.yml`）、其Kubernetes特色（`k8s-exec`功能——带有固定站点和PVC-subPath工作区的跑者舱，通过`tenant-template/runners/`选择加入），以及`deploy/k8s`的kustomize树（D9/T3）都存在。伴随的默认端口迁移到了**27890**（冲突碰撞），整个部署套件都在跟踪它。下面的“背景”部分描述了截至2026年7月2日的世界，保持原样。
 **基于以下内容：ADR-0012（传输抽象）、ADR-0014/0015（伴随API代理、D阶段骨架）、ADR-0021（信令）、ADR-0025（统一订阅）、ADR-0028（沙盒）、ADR-0037（共享服务器）、ADR-0043（提供商执行）、ADR-0048/0049/0051（外部代理）、ADR-0054（本地多账户）
 
 ## 背景
@@ -17,7 +17,7 @@ description: "定义云部署策略：保持桌面经过验证的双平面分割
 Cognia本地优先：Next.js静态导出被三个壳消耗，**桌面是服务器**——移动端通过云火廊隧道（`lib/connectivity/connection-strategy.ts`）访问mDNS → WebRTC →。当前云计算情况：
 
 - **两个独立服务**（`services/signaling-server`、`services/share-server`），各自发布一个axum二进制文件+一个Cloudflare Worker变体Dockerfile和一个示例fly.toml。CI测试了它们（clippy + ≥90% llvm-cov），但**没有部署任何东西**——`deploy.yml` Vercel支架已死（`DEPLOY_ENABLED: false`），服务工作流的推送只在`master`触发触发。
-- **已有无头 companion-API骨架**：`src-tauri/src/bin/cognia-server.rs`（“D阶段”）开启SQLite `AppStore`自签名TLS+指纹，配对 JWT（`cgnp2|` 载荷）、`FilePushCredStore`，并与伴随轴心路由器`app_handle: None`服务。`Dockerfile.cognia-server`存在，但从未CI建成。
+- **无头 companion 前门现已统一到 canonical 协议**：`src-tauri/src/bin/cognia-server.rs` 打开 SQLite app/SecurityStore 状态、自签名 TLS 与指纹，签发 `cgnp3` Owner/OIDC 载荷，把秘密写入加密 backend，并以 `app_handle: None` 提供 companion axum router。设备流量使用 P-256 DPoP 绑定 access token 与单次 socket ticket。
 - **CLI（`cli/`）证明Brain运行无头**：`fake-indexeddb`序言（`cli/src/db/install-indexeddb.ts`）允许桌面Dexie代码在Node中运行;`setTransport(StdioTransport)`开的是同款sidecar;去跳出的 JSON 快照（`cli/src/db/{bootstrap,snapshot}.ts`）会在存储中持久存在。
 - **frontend/backend接缝已经存在**：所有内容都流经`Transport { call, subscribe }`（`lib/tauri/transport-types.ts`），有五种实现方式（Tauri IPC / 伴随 HTTP+WS / WebRTC / 网页存根 / CLI stdio）。纯网构建会获得存根，但存根会拒绝所有调用。
 
@@ -132,11 +132,12 @@ Cognia本地优先：Next.js静态导出被三个壳消耗，**桌面是服务�
 
 | # | 任务 | 注释 |
 | --- | --- | --- |
-| F1 | 网页传输选择：浏览器构建在云基基 URL配置时使用 `CompanionTransport`（替换 `WebStubTransport`）;login/pair页面（paste/scan `cgnp2\|`，交换设备JWT，浏览器安全存储） | i18N两个地点;`static-export-auditor`必须保持绿色 |
+| F1 | Web 传输选择：浏览器构建使用当前 Headless 目标的 `CompanionTransport`；`/pair` 消费 canonical Owner/OIDC 载荷，生成独立设备与 signaling 密钥，并只在注册成功后提交加密 Browser Vault 状态 | 两种语言均完成 i18n；`static-export-auditor` 必须保持绿色 |
 | F2 | 真实TLS故事：Caddy（ACME）在 compose 套件前端，连接 cognia-server;指纹固定只放在Capacitor路径上 | 文档 + 作曲 |
 | F3 | 账户模型：将`HEADLESS_LOCAL_ACCOUNT_ID`与ADR-0054多账户隔离对齐;Brain + 前门 的每个账户范围范围 | T3的前提条件 |
 | F4 | 连接器公开：通过前门的公开URL暴露的网络钩路由;取消云安装的隧道要求docs/UI | 最大的结构性胜利 |
 | F5 | UI中的能力降级矩阵：传输为云伴侣时hide/disable桌面专用功能 | i18n;移动端已有按功能划分的能力标志——扩展，不分叉 |
+| F6 | 连接器运行时所有权：激活远程目标时，桌面守卫会先停止本地运行时；桌面内多个 WebView 仍由 Web Locks 串行化；多个无头 Brain 进程则通过仅限 service token 的 `connectors_runtime_lease_{acquire,renew,release}` RPC 竞争同一个 Rust 宿主租约 | 使用单调时钟计算 15 秒 TTL、每 5 秒续租；竞争失败不启动，续租失败则立即停止所有连接器传输。OneBot 反向 WebSocket 的入站事件和出站 action 继续走统一的连接器事件/命令平面；Lark OAuth 回调使用不进入 replay、仅投递给持有租约的 `brain-local` service principal 的事件，同时保留桌面 custom-scheme 跳转 |
 
 ### 2026-07-31 网页双重 运行时 完成
 
@@ -146,7 +147,7 @@ Cognia本地优先：Next.js静态导出被三个壳消耗，**桌面是服务�
 - `companion`解析已解锁浏览器Vault的加密凭证引用，将传输和同步绑定到该目标，只使用`HostRuntimeManifestV2`宣传的健康且已授权的操作。
 - `legacy-readonly`保存了迁移前的未机密数据，而不允许将其写回任意主机。
 
-目标元数据是基于账户范围的，而每个目标都有物理独立的 Dexie 数据库。切换后，停止订阅→激活数据库→重新绑定传输 →刷新manifest/sync;传输重新绑定失败会回滚激活指针。出站队列行同时携带`accountId`和`targetId`，且不会对其他目标重玩。浏览器机密（提供商密钥、设备JWTs、信令JWKs）由PBKDF2/AES-GCM Vault加密，且永远不会存储在公共目标簿中。
+目标元数据是基于账户范围的，而每个目标都有物理独立的 Dexie 数据库。切换后，停止订阅→激活数据库→重新绑定传输 →刷新manifest/sync;传输重新绑定失败会回滚激活指针。出站队列行同时携带`accountId`和`targetId`，且不会对其他目标重玩。浏览器机密（provider 密钥、设备私钥与 signaling 私钥）由 PBKDF2/AES-GCM Vault 加密，且永远不会存储在公共目标簿中。
 
 公共导航和深度链接消耗了共享`SurfaceContract`注册表。因此，每条路由解析为可执行、远程、缓存只读、队列或显式局部恢复状态。主机构建ID仅用于诊断：兼容性通过协议范围和每个功能版本协商，未声明、不健康或未授权操作默认拒绝。
 
@@ -185,7 +186,7 @@ Cognia本地优先：Next.js静态导出被三个壳消耗，**桌面是服务�
 | Node 中的耐久性 Dexie（fake-indexeddb 在内存中；快照在崩溃时丢失最后几秒；全库序列化为 O(n)） | **2026-08-02 已解决** —— 阶梯已建成：`snapshot-v3` 去抖快照 → `journal-v4` 带校验和的事务日志（事务对调用方 resolve 之前先 `fsync`）→ `sqlite-v5` WAL 行存储，三者都位于 `HeadlessDurabilityBackend` 之后，并有一条经过一致性校验的迁移路径。仍需监控 Brain RSS：内存中的数据集依然是该路径的上限。 |
 | `lib/` 运行时 CLI未被执行的残余`window`/DOM假设（连接器、调度器） | W2每抽出运行时能落下无头烟雾;故障接口在提取时，而非生产阶段 |
 | BWRAP 内部库存Docker不可用（`CLONE_NEWUSER`被封锁） | 在Compose中交付调谐的Seccomp配置文件;通过`UninstalledSandboxBackend`的诚实贬低 |
-| 出生阶级RCE 接口 RPC | 预设允许列表 + 专用范围 + 审计;仅为remote-control/gateway提供环回 |
+| 出生阶级RCE 接口 RPC | 预设允许列表 + 专用范围 + 审计；通过带鉴权的 Companion/gateway 前门暴露 |
 | Brain⇄前门版本偏斜（滚动容器更新） | 他们用一张图片发货;`/healthz`报道了两种版本;桥接协议携带一个版本字段 |
 
 ## 考虑的替代方案

@@ -6,10 +6,9 @@ import { getDefaultPreset, recordPresetUsage } from "./prompt-presets"
 import { buildAutoApplySessionPatch } from "@/lib/presets/apply-to-session"
 import { invalidatePersistSnapshot } from "./messages"
 import { recordTombstones } from "@/lib/sync/tombstones"
-import { deleteLoopsForSession } from "./loops"
-import { deleteGoalsForSession } from "./goals"
 import { resolveScopeProjectId } from "./project-scope"
 import { markSessionRemoved } from "@/lib/chat/search/indexer"
+import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -112,6 +111,7 @@ export async function createSession(
   const session: ChatSession = {
     id: newId(),
     projectId,
+    executionContext: partial?.executionContext,
     title: partial?.title ?? "New chat",
     kind: partial?.kind ?? "direct",
     characterId: partial?.characterId,
@@ -152,6 +152,67 @@ export async function updateSession(
       .sessions.update(id, { ...patch, updatedAt: Date.now() })
       .then(() => undefined)
   )
+}
+
+/**
+ * Set the pinned state for a session batch in one transaction.
+ *
+ * `updatedAt` remains the sync cursor, so the metadata change must advance it.
+ * Before doing that, preserve the row's current display-recency timestamp in
+ * `lastMessageAt` when no message boundary has populated it yet. Conversation
+ * lists use that activity timestamp, preventing pin/unpin from making an old
+ * conversation look newly active while still allowing companion sync to see
+ * the write. A single collection `modify` makes the batch all-or-nothing.
+ */
+export async function bulkSetSessionsPinned(
+  ids: readonly string[],
+  pinned: boolean
+): Promise<void> {
+  if (ids.length === 0) return
+  const uniqueIds = [...new Set(ids)]
+  const now = Date.now()
+  await withDbReopenRetry(async () => {
+    const db = getDb()
+    await db.transaction("rw", db.sessions, async () => {
+      await db.sessions
+        .where("id")
+        .anyOf(uniqueIds)
+        .modify((session) => {
+          session.lastMessageAt ??= session.updatedAt
+          session.pinned = pinned
+          session.updatedAt = now
+        })
+    })
+  })
+}
+
+/** Persist the selected sibling for one branch group and invalidate summaries. */
+export async function setSessionActiveBranchSelection(
+  sessionId: string,
+  branchGroupId: string,
+  messageId: string
+): Promise<void> {
+  if (!sessionId || !branchGroupId || !messageId) return
+  const db = getDb()
+  let revision: number | null = null
+  await withDbReopenRetry(() =>
+    db.transaction("rw", db.sessions, async () => {
+      const session = await db.sessions.get(sessionId)
+      if (!session) return
+      if (session.activeBranchByGroup?.[branchGroupId] === messageId) return
+      const nextRevision = (session.transcriptRevision ?? 0) + 1
+      await db.sessions.update(sessionId, {
+        activeBranchByGroup: {
+          ...(session.activeBranchByGroup ?? {}),
+          [branchGroupId]: messageId,
+        },
+        transcriptRevision: nextRevision,
+        updatedAt: Date.now(),
+      })
+      revision = nextRevision
+    })
+  )
+  if (revision !== null) await publishTranscriptRevision(sessionId, revision)
 }
 
 /**
@@ -205,6 +266,61 @@ export async function freezeImportedSession(id: string): Promise<void> {
     })
 }
 
+async function listOwnedAttachedDescendantIds(
+  db: ReturnType<typeof getDb>,
+  rootIds: readonly string[]
+): Promise<string[]> {
+  const uniqueRootIds = [...new Set(rootIds)]
+  const existingRoots = (await db.sessions.bulkGet(uniqueRootIds)).flatMap((row) =>
+    row ? [row.id] : []
+  )
+  const seen = new Set(existingRoots)
+  const descendants: string[] = []
+  let frontier = existingRoots
+
+  while (frontier.length > 0) {
+    const children = await db.sessions.where("parentSessionId").anyOf(frontier).toArray()
+    const next: string[] = []
+    for (const child of children) {
+      if (
+        seen.has(child.id) ||
+        !child.parentSessionId ||
+        child.attachedChild?.parentSessionId !== child.parentSessionId ||
+        child.attachedChild?.lifecycleOwnerSessionId !== child.parentSessionId
+      ) {
+        continue
+      }
+      seen.add(child.id)
+      descendants.push(child.id)
+      next.push(child.id)
+    }
+    frontier = next
+  }
+
+  return descendants
+}
+
+async function closeOwnedAttachedDescendants(
+  db: ReturnType<typeof getDb>,
+  rootIds: readonly string[],
+  now: number
+): Promise<void> {
+  const descendantIds = await listOwnedAttachedDescendantIds(db, rootIds)
+  if (descendantIds.length === 0) return
+  await db.sessions
+    .where("id")
+    .anyOf(descendantIds)
+    .modify((child) => {
+      if (!child.attachedChild) return
+      child.attachedChild = {
+        ...child.attachedChild,
+        status: "closed",
+        updatedAt: now,
+      }
+      child.updatedAt = now
+    })
+}
+
 /**
  * Archive a session (conversation-list overhaul). Sets `archivedAt` so the
  * conversation-list model drops it from the active list; it remains visible in
@@ -212,7 +328,12 @@ export async function freezeImportedSession(id: string): Promise<void> {
  * keeps its real recency for the archived-view sort and on restore.
  */
 export async function archiveSession(id: string): Promise<void> {
-  await getDb().sessions.update(id, { archivedAt: Date.now() })
+  const db = getDb()
+  const now = Date.now()
+  await db.transaction("rw", db.sessions, async () => {
+    await db.sessions.update(id, { archivedAt: now })
+    await closeOwnedAttachedDescendants(db, [id], now)
+  })
 }
 
 /**
@@ -237,6 +358,7 @@ export async function bulkArchiveSessions(ids: readonly string[]): Promise<void>
   const db = getDb()
   await db.transaction("rw", db.sessions, async () => {
     for (const id of ids) await db.sessions.update(id, { archivedAt: now })
+    await closeOwnedAttachedDescendants(db, ids, now)
   })
 }
 
@@ -359,49 +481,7 @@ export async function countBranchesAtMessage(parentId: string, messageId: string
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  const db = getDb()
-  await db.transaction(
-    "rw",
-    db.sessions,
-    db.messages,
-    db.sessionUsage,
-    db.syncTombstones,
-    async () => {
-      // Capture message ids before the cascade so we can tombstone each one —
-      // the companion sync mirrors these deletions to paired phones (v61).
-      const msgIds = (await db.messages.where("sessionId").equals(id).primaryKeys()) as string[]
-
-      // Re-point this session's branches at their grandparent before the row
-      // goes. A branch is a standalone conversation — `direct` mode copies the
-      // messages outright, so it does not depend on its parent for anything —
-      // and deleting the parent must not take it down or strand it. Left alone,
-      // each child kept a `parentSessionId` pointing at a row that no longer
-      // exists, so its lineage chip degraded to "a deleted conversation" and
-      // the trail up the chain was cut. Uses the v81 `parentSessionId` index.
-      const doomed = await db.sessions.get(id)
-      const children = (await db.sessions
-        .where("parentSessionId")
-        .equals(id)
-        .primaryKeys()) as string[]
-      for (const childId of children) {
-        // `undefined` deletes the field, which is what a branch of a top-level
-        // conversation should end up with — not a pointer to nothing.
-        await db.sessions.update(childId, { parentSessionId: doomed?.parentSessionId })
-      }
-
-      await db.messages.where("sessionId").equals(id).delete()
-      await db.sessionUsage.where("sessionId").equals(id).delete()
-      await db.sessions.delete(id)
-      const at = Date.now()
-      await recordTombstones("sessions", [id], at)
-      await recordTombstones("messages", msgIds, at)
-    }
-  )
-  invalidatePersistSnapshot(id)
-  markSessionRemoved(id)
-  await cleanupSessionScopedLoops(id)
-  await deleteGoalsForSession(id).catch(() => {})
-  await purgeSessionStoreBuckets(id)
+  await bulkDeleteSessions([id])
 }
 
 /**
@@ -444,18 +524,14 @@ async function purgeSessionStoreBuckets(sessionId: string): Promise<void> {
 }
 
 /**
- * /loop cascade (v79): drop the session's loop rows and tear down the
- * scheduler tasks behind any interval loops. Runs OUTSIDE the Dexie
- * transaction (the scheduler call is async IPC) and best-effort — a
- * scheduler hiccup must not block the session delete. The scheduler import
- * is dynamic to dodge a module cycle (scheduler executors import this
- * module).
+ * Tear down scheduler tasks after their loop rows were removed atomically
+ * with the session subtree. Scheduler IPC cannot participate in the Dexie
+ * transaction, so this final external cleanup is best-effort. The dynamic
+ * import avoids a module cycle (scheduler executors import this module).
  */
-async function cleanupSessionScopedLoops(sessionId: string): Promise<void> {
+async function cleanupScheduledLoopTasks(taskIds: readonly string[]): Promise<void> {
+  if (taskIds.length === 0) return
   try {
-    const loops = await deleteLoopsForSession(sessionId)
-    const taskIds = loops.flatMap((l) => (l.scheduledTaskId ? [l.scheduledTaskId] : []))
-    if (taskIds.length === 0) return
     const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
     for (const taskId of taskIds) {
       await getTaskScheduler()
@@ -469,36 +545,105 @@ async function cleanupSessionScopedLoops(sessionId: string): Promise<void> {
 
 /**
  * Bulk variant of `deleteSession` for the channel-list batch toolbar.
- * Runs every per-id removal inside a single Dexie `rw` transaction so a
- * mid-loop failure rolls back atomically. Missing ids are silently skipped
- * (matches the per-id contract — `dexie.delete()` is a no-op on a stale id).
+ * Expands parent-owned attached descendants, then removes their session,
+ * message, peer-message, goal and loop rows in one Dexie `rw` transaction so
+ * a mid-cascade failure rolls back atomically. Missing ids are silently
+ * skipped. Scheduler tasks and persisted UI stores are external systems and
+ * are cleaned up best-effort after the database commit.
  */
 export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> {
   if (ids.length === 0) return
   const db = getDb()
+  const requestedIds = [...new Set(ids)]
+  let deletedIds: string[] = []
+  let scheduledTaskIds: string[] = []
   await db.transaction(
     "rw",
-    db.sessions,
-    db.messages,
-    db.sessionUsage,
-    db.syncTombstones,
+    [
+      db.sessions,
+      db.messages,
+      db.sessionUsage,
+      db.sessionPeerMessages,
+      db.chatGoals,
+      db.chatGoalEvents,
+      db.loops,
+      db.loopEvents,
+      db.syncTombstones,
+    ],
     async () => {
       const at = Date.now()
-      for (const id of ids) {
+      deletedIds = (await db.sessions.bulkGet(requestedIds)).flatMap((row) => (row ? [row.id] : []))
+      if (deletedIds.length === 0) return
+      const attachedDescendants = await listOwnedAttachedDescendantIds(db, deletedIds)
+      deletedIds = [...new Set([...deletedIds, ...attachedDescendants])]
+      const doomedIds = new Set(deletedIds)
+      const doomedRows = await db.sessions.where("id").anyOf(deletedIds).toArray()
+      const doomedById = new Map(doomedRows.map((row) => [row.id, row]))
+
+      const goalIds = (await db.chatGoals
+        .where("sessionId")
+        .anyOf(deletedIds)
+        .primaryKeys()) as string[]
+      if (goalIds.length > 0) {
+        await db.chatGoalEvents.where("goalId").anyOf(goalIds).delete()
+        await db.chatGoals.bulkDelete(goalIds)
+      }
+
+      const loopRows = await db.loops.where("sessionId").anyOf(deletedIds).toArray()
+      const loopIds = loopRows.map((row) => row.id)
+      scheduledTaskIds = loopRows.flatMap((row) =>
+        row.scheduledTaskId ? [row.scheduledTaskId] : []
+      )
+      if (loopIds.length > 0) {
+        await db.loopEvents.where("loopId").anyOf(loopIds).delete()
+        await db.loops.bulkDelete(loopIds)
+      }
+
+      const survivingParentOf = (sessionId: string): string | undefined => {
+        let parentId = doomedById.get(sessionId)?.parentSessionId
+        const visited = new Set<string>()
+        while (parentId && doomedIds.has(parentId) && !visited.has(parentId)) {
+          visited.add(parentId)
+          parentId = doomedById.get(parentId)?.parentSessionId
+        }
+        return parentId
+      }
+
+      // Preserve ordinary branches while attached children remain owned by
+      // the deletion set. A surviving branch is connected to the nearest
+      // surviving ancestor, matching the single-delete contract.
+      for (const id of deletedIds) {
+        const childIds = (await db.sessions
+          .where("parentSessionId")
+          .equals(id)
+          .primaryKeys()) as string[]
+        const fallbackParentId = survivingParentOf(id)
+        for (const childId of childIds) {
+          if (!doomedIds.has(childId)) {
+            await db.sessions.update(childId, { parentSessionId: fallbackParentId })
+          }
+        }
+      }
+
+      const allMessageIds: string[] = []
+      for (const id of deletedIds) {
         const msgIds = (await db.messages.where("sessionId").equals(id).primaryKeys()) as string[]
+        allMessageIds.push(...msgIds)
         await db.messages.where("sessionId").equals(id).delete()
         await db.sessionUsage.where("sessionId").equals(id).delete()
         await db.sessions.delete(id)
-        await recordTombstones("sessions", [id], at)
-        await recordTombstones("messages", msgIds, at)
       }
+      await db.sessionPeerMessages
+        .filter((row) => doomedIds.has(row.senderSessionId) || doomedIds.has(row.receiverSessionId))
+        .delete()
+      await recordTombstones("sessions", deletedIds, at)
+      await recordTombstones("messages", allMessageIds, at)
     }
   )
-  for (const id of ids) {
+  await cleanupScheduledLoopTasks(scheduledTaskIds)
+  for (const id of deletedIds) {
     invalidatePersistSnapshot(id)
     markSessionRemoved(id)
-    await cleanupSessionScopedLoops(id)
-    await deleteGoalsForSession(id).catch(() => {})
     await purgeSessionStoreBuckets(id)
   }
 }

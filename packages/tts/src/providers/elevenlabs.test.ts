@@ -1,7 +1,7 @@
 jest.mock("../proxy-fetch", () => ({ proxyFetch: jest.fn() }))
 
 import { proxyFetch } from "../proxy-fetch"
-import { generateElevenLabsTTS } from "./elevenlabs"
+import { generateElevenLabsTTS, listElevenLabsVoices } from "./elevenlabs"
 
 const mockProxy = proxyFetch as jest.Mock
 
@@ -92,5 +92,26 @@ describe("generateElevenLabsTTS", () => {
     mockProxy.mockRejectedValueOnce(null)
     const r = await generateElevenLabsTTS("hi", { apiKey: "k" })
     expect(r.error).toMatch(/TTS API returned an error/)
+  })
+})
+
+describe("listElevenLabsVoices", () => {
+  it("returns real account voice ids and drops malformed rows", async () => {
+    mockProxy.mockResolvedValueOnce({
+      ...ok(),
+      json: async () => ({
+        voices: [
+          { voice_id: "voice-123", name: "Rachel", description: "Calm" },
+          { voice_id: "", name: "Broken" },
+        ],
+      }),
+    })
+    await expect(listElevenLabsVoices("key")).resolves.toEqual([
+      { id: "voice-123", name: "Rachel", description: "Calm" },
+    ])
+    expect(mockProxy.mock.calls[0][1]).toMatchObject({
+      method: "GET",
+      provider: "elevenlabs",
+    })
   })
 })

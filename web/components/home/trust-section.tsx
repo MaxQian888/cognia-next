@@ -1,7 +1,7 @@
-import { CountUp } from "@web/components/count-up"
 import { Reveal } from "@web/components/reveal"
 import { Section, SectionHeading } from "@web/components/section"
 import { SiteLink } from "@web/components/site-link"
+import { NumberTicker } from "@web/components/ui/number-ticker"
 import { format } from "@web/content"
 import type { CommonCopy, TrustCopy } from "@web/content/types"
 import { type Evidence, formatDate, freshness, latestRelease } from "@web/lib/evidence"
@@ -32,7 +32,7 @@ export function TrustSection({ copy, common, evidence, locale, docsOrigin }: Tru
   const state = freshness(evidence)
   const release = latestRelease(evidence)
 
-  // `string | number` on purpose: `CountUp` counts a number and renders a
+  // `string | number` on purpose: `NumberTicker` counts a number and renders a
   // string verbatim, so "52" ticks while "AGPL-3.0-or-later" and "—" do not.
   const stats: Array<{ label: string; value: string | number }> = [
     {
@@ -48,16 +48,19 @@ export function TrustSection({ copy, common, evidence, locale, docsOrigin }: Tru
   ]
 
   return (
-    <Section id="trust" tone="paper">
+    <Section id="trust" tone="paper" density="tight">
       <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
 
       <Reveal className="mt-14">
         <div className="grid gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,14rem)] lg:gap-16">
-          <div className="overflow-hidden rounded-stage border border-hairline">
+          <div>
             {/* A list, not four divs: "Source" also names a step on the
              * provenance rail beside it, and the two need to be distinguishable
              * to a screen reader as well as to an eye. */}
-            <ul aria-label={copy.title} className="grid gap-px bg-hairline sm:grid-cols-2">
+            <ul
+              aria-label={copy.title}
+              className="grid gap-px border-y border-hairline bg-hairline sm:grid-cols-2"
+            >
               {copy.cards.map((card) => (
                 <li key={card.key} className="flex flex-col bg-surface p-6 md:p-8">
                   <p className="font-mono text-xs uppercase tracking-widest text-muted">
@@ -112,7 +115,11 @@ export function TrustSection({ copy, common, evidence, locale, docsOrigin }: Tru
                 {stat.label}
               </dt>
               <dd className="mt-2 text-2xl font-medium tracking-tight text-ink">
-                <CountUp value={stat.value} />
+                {typeof stat.value === "number" ? (
+                  <NumberTicker value={stat.value} locale={locale === "zh" ? "zh-CN" : "en-US"} />
+                ) : (
+                  stat.value
+                )}
               </dd>
             </div>
           ))}

@@ -21,7 +21,12 @@ describe("runProviderTextBenchmark", () => {
         now: () => times.shift() ?? 1_250,
         streamTextImpl: () => ({
           textStream: chunks(["", "PONG", "!"]),
-          usage: Promise.resolve({ inputTokens: 10, outputTokens: 5, reasoningTokens: 2 }),
+          usage: Promise.resolve({
+            inputTokens: 10,
+            outputTokens: 5,
+            // v7: the top-level `reasoningTokens` mirror is gone.
+            outputTokenDetails: { reasoningTokens: 2 },
+          }),
         }),
       }
     )

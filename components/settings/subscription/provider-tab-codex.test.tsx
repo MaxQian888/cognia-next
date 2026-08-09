@@ -9,8 +9,24 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("./account-list", () => ({
-  AccountList: ({ provider }: { provider: string }) => (
-    <div data-testid={`account-list-${provider}`} />
+  AccountList: ({
+    provider,
+    onUpdate,
+  }: {
+    provider: string
+    onUpdate?: (account: unknown) => void
+  }) => (
+    <div data-testid={`account-list-${provider}`}>
+      <button
+        data-testid="codex-update-account"
+        onClick={() =>
+          onUpdate?.({
+            id: "existing-codex",
+            credential: { provider: "codex", accessToken: "old", storedAtMs: 0 },
+          })
+        }
+      />
+    </div>
   ),
 }))
 
@@ -21,8 +37,13 @@ jest.mock("./preset-picker", () => ({
 }))
 
 jest.mock("./add-account-dialog/codex", () => ({
-  CodexAddAccountDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="codex-add-dialog" /> : null,
+  CodexAddAccountDialog: ({
+    open,
+    existingAccount,
+  }: {
+    open: boolean
+    existingAccount?: { id: string }
+  }) => (open ? <div data-testid="codex-add-dialog">{existingAccount?.id}</div> : null),
 }))
 
 jest.mock("./provider-quota-panel", () => ({
@@ -102,6 +123,13 @@ describe("ProviderTabCodex", () => {
     expect(screen.getByTestId("account-list-codex")).toBeInTheDocument()
     expect(screen.getByTestId("preset-picker-codex")).toBeInTheDocument()
     expect(screen.getByText("cardTitle")).toBeInTheDocument()
+  })
+
+  it("opens the same-ID credential update flow", () => {
+    render(<ProviderTabCodex />)
+    fireEvent.click(screen.getByTestId("codex-update-account"))
+
+    expect(screen.getByTestId("codex-add-dialog")).toHaveTextContent("existing-codex")
   })
 
   it("shows the connection-settings toggle when the card is expanded", () => {

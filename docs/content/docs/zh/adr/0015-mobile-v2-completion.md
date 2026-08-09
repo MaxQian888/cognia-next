@@ -10,7 +10,7 @@ description: 收尾 ADR-0014 推迟的移动端事项（QR / TLS / mDNS / OAuth�
 ## 背景
 
 ADR-0014（「Capacitor 移动端外壳」，2026-04-XX）交付了 V1 移动端基础：
-Capacitor 7 工作区、JWT 配对、`/api/v1/*` axum companion 服务器、推送
+Capacitor 7 工作区、最初的 companion 配对与数据面、推送
 通知、增量同步、安全存储，以及一个 M3.4 手动文本框配对引导流程。
 ADR-0014 显式推迟了：
 
@@ -50,12 +50,13 @@ barcode-scanning`）。
    以便移动端客户端在后续调用中固定它。用同一密钥重新签发可使固定值
    保持有效。
 
-3. **Pair 载荷 v2（`lib/qr/pair-payload.ts`）**
+3. **Canonical Pair 载荷（`lib/qr/pair-payload.ts`）**
 
-   带头部前缀（`cgnp2|...`）的 base64url JSON，携带 `baseUrl`、
-   `pairJwt`、`version` 与 `fingerprint`。与 M3.4 裸 JSON 载荷向后兼容
-   （自动检测）。新的 `lib/capacitor/barcode.ts` 封装把原始 QR 字符串
-   喂给解码器。
+   当前协议是破坏性升级后的 `cgnp3` envelope，携带 `base`、`host`、
+   `tenant`、`exp`、`ver`、`fp` 与 `mode`；仅 `owner-invitation` 模式携带
+   单次 `invitation`。客户端拒绝所有旧版与裸 JSON 载荷。设备认证使用
+   P-256 密钥、5 分钟 DPoP 绑定 access token 与单次 socket ticket。
+   `lib/capacitor/barcode.ts` 封装把原始 QR 字符串交给解码器。
 
 4. **mDNS 广播 + 扫描**
 

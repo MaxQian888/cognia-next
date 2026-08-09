@@ -1,7 +1,10 @@
 // OpenAI Codex CLI session-history source.
 //
-// On disk: `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl` (honors
-// $CODEX_HOME). Each line is a `RolloutLine` = `{ timestamp, type, payload }`,
+// On disk: `<codexHome>/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`, where
+// `codexHome` is `$CODEX_HOME` or `~/.codex` — resolved in Rust and delivered
+// through `SessionScanInput.roots` (`lib/agent-roots/`), because the renderer
+// cannot read environment variables.
+// Each line is a `RolloutLine` = `{ timestamp, type, payload }`,
 // with `type` ∈ session_meta | response_item | event_msg | turn_context |
 // compacted. We reconstruct the conversation from `response_item` payloads:
 //
@@ -481,8 +484,11 @@ export const codexSessionSource: AgentSessionSourceAdapter = {
   labelKey: "codex",
   acceptedExtensions: ACCEPTED,
 
-  scanRoots(home) {
-    return home ? [joinPath(joinPath(home, ".codex"), "sessions")] : []
+  // `$CODEX_HOME` relocates the whole tree; `roots` carries it (the renderer
+  // can't read env vars — see `lib/agent-roots/`).
+  scanRoots(home, roots) {
+    const base = roots?.codexHome || (home ? joinPath(home, ".codex") : "")
+    return base ? [joinPath(base, "sessions")] : []
   },
 
   detect(files: PickedSessionFile[]) {
@@ -510,7 +516,7 @@ export const codexSessionSource: AgentSessionSourceAdapter = {
   async listSessions(input: SessionScanInput) {
     return scanFileSummaries(
       input,
-      this.scanRoots(input.home),
+      this.scanRoots(input.home, input.roots),
       (n) => n.toLowerCase().endsWith(".jsonl"),
       summarizeCodexFile
     )

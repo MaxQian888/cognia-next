@@ -29,11 +29,13 @@ import {
   __resetCharacterPacksForTesting,
   getCharacterPack,
   getCharacterPackEntry,
-  registerCharacterPack,
+  registerCharacterPackWithTrust,
+  getPackTrust,
   unregisterCharacterPackById,
 } from "@/lib/plugin/registries/character-pack-registry"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
+import { resolvePackTrust } from "./pack-trust"
 import {
   CHARACTER_PACK_FILE_SCHEMA_VERSION,
   parseLocalPackFile,
@@ -175,21 +177,24 @@ export function __resetLocalPackStoreForTesting(): void {
 export async function scanAndRegisterLocalPacks(): Promise<{
   registered: string[]
   skipped: Array<{ filename: string; reason: string }>
+  /** Subset of `skipped` that failed signature verification specifically. */
+  signatureSkipped: number
 }> {
   const fs = getFs()
   const dir = await fs.resolveDir()
-  if (!dir) return { registered: [], skipped: [] }
+  if (!dir) return { registered: [], skipped: [], signatureSkipped: 0 }
 
   let filenames: string[] = []
   try {
     filenames = await fs.listFiles(dir)
   } catch (err) {
     log.warn("local-pack-store: listFiles failed", { err })
-    return { registered: [], skipped: [] }
+    return { registered: [], skipped: [], signatureSkipped: 0 }
   }
 
   const registered: string[] = []
   const skipped: Array<{ filename: string; reason: string }> = []
+  let signatureSkipped = 0
   for (const filename of filenames) {
     const absPath = await fs.pathFor(dir, filename.replace(/\.cognia-pack\.json$/, ""))
     const body = await fs.readFile(absPath)
@@ -209,16 +214,29 @@ export async function scanAndRegisterLocalPacks(): Promise<{
       skipped.push({ filename, reason: result.error })
       continue
     }
-    registerCharacterPack(result.file.pack.id, result.file.pack, {
+    // Trust is recomputed from the file on every scan — a verdict is never
+    // persisted, so a pack cannot keep a badge after its bytes change.
+    const trust = await resolvePackTrust(result.file)
+    if (!trust.ok) {
+      // A pack that CARRIES a signature which does not verify is refused, never
+      // downgraded to unsigned. Counted separately so the boot initializer can
+      // raise a sterner toast than the generic malformed-file one.
+      signatureSkipped += 1
+      skipped.push({ filename, reason: `Signature verification failed: ${trust.reason}` })
+      continue
+    }
+    registerCharacterPackWithTrust(result.file.pack.id, result.file.pack, {
       pluginId: LOCAL_PACK_PLUGIN_ID,
+      trust: trust.trust,
     })
     registered.push(result.file.pack.id)
   }
   log.info("local-pack-store: scan complete", {
     registeredCount: registered.length,
     skippedCount: skipped.length,
+    signatureSkipped,
   })
-  return { registered, skipped }
+  return { registered, skipped, signatureSkipped }
 }
 
 export type LocalPackImportConflict = "rejected-existing-plugin-pack"
@@ -262,6 +280,17 @@ export async function importLocalPack(
   }
   const pack = result.file.pack
 
+  // Verify BEFORE anything else touches disk or the registry. A signed pack
+  // that does not verify is refused outright — importing it as "unsigned"
+  // would launder a tampered file into a usable one.
+  const trust = await resolvePackTrust(result.file)
+  if (!trust.ok) {
+    return {
+      ok: false,
+      error: `Signature verification failed for "${pack.id}": ${trust.reason}`,
+    }
+  }
+
   // Conflict check: another plugin already contributed this id.
   const existingEntry = getCharacterPackEntry(pack.id)
   if (existingEntry && existingEntry.pluginId && existingEntry.pluginId !== LOCAL_PACK_PLUGIN_ID) {
@@ -282,7 +311,10 @@ export async function importLocalPack(
   } catch (err) {
     return { ok: false, error: `Write failed: ${(err as Error).message}` }
   }
-  registerCharacterPack(pack.id, pack, { pluginId: LOCAL_PACK_PLUGIN_ID })
+  registerCharacterPackWithTrust(pack.id, pack, {
+    pluginId: LOCAL_PACK_PLUGIN_ID,
+    trust: trust.trust,
+  })
   return { ok: true, value: { packId: pack.id } }
 }
 
@@ -323,6 +355,12 @@ export async function deleteLocalPack(
  * file-save dialog. Plugin-contributed packs are exported verbatim — the
  * exported file carries no plugin identity, so re-importing it produces
  * a `local:imported` pack with the same content.
+ *
+ * A verified pack's ORIGINAL signature block is written back out unchanged, so
+ * the exported file still verifies on re-import. (Until the trust chain landed
+ * this silently dropped it, which turned every export of a signed pack into an
+ * unsigned one.) The signature stays valid across a v1→v2 schema rewrite
+ * because the signed bytes cover the `pack` object only.
  */
 export function exportPack(packId: string): LocalPackOperationResult<{
   filename: string
@@ -333,7 +371,9 @@ export function exportPack(packId: string): LocalPackOperationResult<{
   if (!pack) {
     return { ok: false, error: `Pack "${packId}" is not registered` }
   }
-  const body = serializeLocalPackFile(pack as PluginCharacterPackDef)
+  const trust = getPackTrust(packId)
+  const signature = trust.state === "verified" ? trust.signature : undefined
+  const body = serializeLocalPackFile(pack as PluginCharacterPackDef, signature)
   return {
     ok: true,
     value: {
@@ -342,6 +382,7 @@ export function exportPack(packId: string): LocalPackOperationResult<{
       file: {
         schemaVersion: CHARACTER_PACK_FILE_SCHEMA_VERSION,
         pack: pack as PluginCharacterPackDef,
+        ...(signature ? { signature } : {}),
       },
     },
   }

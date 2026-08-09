@@ -188,6 +188,8 @@ export async function dispatchSlashCommand(
     // Dynamic import avoids a static cycle (manager → this registry); the
     // try/catch tolerates an uninitialized manager (SSR / tests / web profile).
     try {
+      const { ensureBootCapability, getBootProfile } = await import("@/lib/boot/capabilities")
+      if (getBootProfile() === "main") await ensureBootCapability("plugin-runtime")
       const { getPluginManager } = await import("@/lib/plugin/core/manager")
       await getPluginManager().handleActivationEvent(`onCommand:${id}`)
       def = registry.get(id)

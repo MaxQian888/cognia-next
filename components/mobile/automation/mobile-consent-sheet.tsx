@@ -6,7 +6,7 @@
  * The host renders a desktop `<ConsentOverlay>` for local Per-Call consent;
  * this is the phone-side equivalent for a paired device with the remote-control
  * capability. When the desktop's automation gate needs HITL consent, the
- * `automation:consent-request` frame streams over `/ws/v1/events`; this sheet
+ * `automation:consent-request` frame streams over `/ws/events`; this sheet
  * surfaces it and resolves it via `automation_consent_respond` (first-responder
  * wins — the desktop overlay and any attached phone race harmlessly).
  *

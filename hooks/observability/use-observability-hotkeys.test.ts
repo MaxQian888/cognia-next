@@ -10,7 +10,7 @@ import { __resetContextKeysForTesting } from "@/lib/plugin/context-keys/context-
 
 // The editable-target guard now lives in `lib/shortcuts/dom.ts` (tested there);
 // this suite covers the observability hook's dispatch contract end-to-end.
-jest.mock("@/lib/plugin", () => ({
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({ dispatchShortcut: jest.fn() }),
 }))
 

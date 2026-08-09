@@ -10,6 +10,7 @@ const task = {
   title: "Add validation",
   description: "Validate the input",
   expectedOutput: "A patch",
+  evidenceIds: ["evidence-diff", "evidence-test"],
 }
 
 const commitEvidence: ReviewEvidence = {
@@ -63,6 +64,7 @@ describe("buildLeadReviewPrompt", () => {
     expect(prompt).toContain("I added validation")
     expect(prompt).toContain("+b")
     expect(prompt).toContain("```diff")
+    expect(prompt).toContain("evidence-diff, evidence-test")
   })
 
   it("tells the lead when a claim has no diff behind it", () => {

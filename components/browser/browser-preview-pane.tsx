@@ -2,6 +2,7 @@
 
 import {
   CameraIcon,
+  BracesIcon,
   CheckIcon,
   ExternalLinkIcon,
   GlobeIcon,
@@ -24,6 +25,8 @@ import {
   useBrowserAgentActivity,
 } from "@/components/browser/browser-agent-indicator"
 import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
+import { BrowserAdjustControls } from "@/components/browser/browser-adjust-controls"
+import { BrowserCdpControls } from "@/components/browser/browser-cdp-controls"
 import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
@@ -63,6 +66,8 @@ import {
 import { isTauri } from "@/lib/tauri"
 import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
+import { serializeBrowserAdjustmentFeedback } from "@/lib/browser/adjust"
+import type { BrowserAdjustmentFeedback } from "@/types/browser-developer"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
@@ -148,6 +153,7 @@ export function BrowserPreviewPane({
   ownerId?: string
 }) {
   const t = useTranslations("browser")
+  const tCdp = useTranslations("browserCdp")
   const normalizedInitialUrl = initialUrl ? normalizePreviewUrl(initialUrl) : null
   const reservedRef = useRef<HTMLDivElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
@@ -156,6 +162,10 @@ export function BrowserPreviewPane({
   const [editingUrl, setEditingUrl] = useState(false)
   const [committedUrl, setCommittedUrl] = useState<string | null>(normalizedInitialUrl)
   const [comment, setComment] = useState("")
+  const [acceptedAdjustment, setAcceptedAdjustment] = useState<{
+    pageUrl: string
+    feedback: BrowserAdjustmentFeedback
+  } | null>(null)
   const [sending, setSending] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [annotationIntent, setAnnotationIntent] = useState<BrowserAnnotationIntent>("change")
@@ -175,6 +185,7 @@ export function BrowserPreviewPane({
   })
   const [webviewReady, setWebviewReady] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
+  const [developerOpen, setDeveloperOpen] = useState(false)
   const { recent: recentHistory, push: pushHistory, clear: clearHistory } = useBrowserHistory()
   const annotationQueue =
     useLiveQuery(
@@ -206,10 +217,21 @@ export function BrowserPreviewPane({
   const shouldShowLivePage = !!committedUrl && hasPainted && regionVisible
 
   const handleWebviewReady = useCallback(() => setWebviewReady(true), [])
+  const handleWebviewError = useCallback(
+    (error: unknown) => {
+      if (String(error).includes("PROXY_TRANSPORT_UNSUPPORTED")) {
+        toast.error(t("errors.httpsProxyUnsupported"))
+        return
+      }
+      toast.error(t("errors.navigate"))
+    },
+    [t]
+  )
   const { getRect, refreshBounds } = useBrowserPaneWebview(reservedRef, {
     url: committedUrl,
     ownerId,
     onReady: handleWebviewReady,
+    onError: handleWebviewError,
     onRectChange: handleRectChange,
     visible: shouldShowLivePage,
   })
@@ -258,6 +280,15 @@ export function BrowserPreviewPane({
 
   // The preview's real location (follows in-page navigations and redirects).
   const currentUrl = navigated?.url ?? committedUrl
+  const adjustmentFeedback =
+    acceptedAdjustment?.pageUrl === currentUrl ? acceptedAdjustment.feedback : null
+  const acceptAdjustment = useCallback(
+    (feedback: BrowserAdjustmentFeedback) => {
+      if (!currentUrl) return
+      setAcceptedAdjustment({ pageUrl: currentUrl, feedback })
+    },
+    [currentUrl]
+  )
 
   // How the toolbar packs itself. Width 0 means "not measured yet" (SSR, first
   // paint, jsdom) — take the widest branch, matching the `/browser` page. Each
@@ -288,7 +319,7 @@ export function BrowserPreviewPane({
   // reserved region. Keep it mounted through its slide-out so the exit
   // animation can play, then unmount on animationEnd. Set-state-during-render
   // (not an effect) — same "adjust state on prop change" pattern as syncedNavUrl.
-  const railWanted = !!selection || annotationQueue.length > 0
+  const railWanted = developerOpen || !!selection || annotationQueue.length > 0
   const [railRendered, setRailRendered] = useState(railWanted)
   if (railWanted && !railRendered) setRailRendered(true)
 
@@ -327,18 +358,23 @@ export function BrowserPreviewPane({
   const cancelComment = useCallback(() => {
     clearSelection()
     setComment("")
+    setAcceptedAdjustment(null)
     void browserClient.embedClearSelection().catch(() => {})
   }, [clearSelection])
 
   const onQueue = useCallback(async () => {
-    if (!selection || !comment.trim()) return
+    if (!selection || (!comment.trim() && !adjustmentFeedback)) return
     setSending(true)
     try {
       const baseUrl = new URL(currentUrl ?? selection.pageUrl).origin
+      const feedbackPayload = adjustmentFeedback
+        ? serializeBrowserAdjustmentFeedback(adjustmentFeedback)
+        : ""
+      const outgoingComment = [comment.trim(), feedbackPayload].filter(Boolean).join("\n\n")
       const targets = selections.length > 0 ? selections : [selection]
       const annotations = await Promise.all(
         targets.map((target) =>
-          queueAnnotation(target, comment, {
+          queueAnnotation(target, outgoingComment, {
             sessionId,
             baseUrl,
             intent: annotationIntent,
@@ -349,6 +385,7 @@ export function BrowserPreviewPane({
       const saved = annotations.filter((item) => item != null)
       if (saved.length > 0) {
         setComment("")
+        setAcceptedAdjustment(null)
         clearSelection()
         void browserClient.embedClearSelection().catch(() => {})
       } else {
@@ -370,20 +407,30 @@ export function BrowserPreviewPane({
     t,
     annotationIntent,
     annotationSeverity,
+    adjustmentFeedback,
   ])
 
   const onSend = useCallback(async () => {
-    if (!selection || !comment.trim()) return
+    if (!selection || (!comment.trim() && !adjustmentFeedback)) return
     setSending(true)
     try {
-      const ok = await sendComment(selections.length > 0 ? selections : selection, comment, {
-        sessionId,
-        captureRect: getRect() ?? undefined,
-        detailLevel,
-      })
+      const feedbackPayload = adjustmentFeedback
+        ? serializeBrowserAdjustmentFeedback(adjustmentFeedback)
+        : ""
+      const outgoingComment = [comment.trim(), feedbackPayload].filter(Boolean).join("\n\n")
+      const ok = await sendComment(
+        selections.length > 0 ? selections : selection,
+        outgoingComment,
+        {
+          sessionId,
+          captureRect: getRect() ?? undefined,
+          detailLevel,
+        }
+      )
       if (ok) {
         toast.success(t("comment.sent"))
         setComment("")
+        setAcceptedAdjustment(null)
         clearSelection()
         void browserClient.embedClearSelection().catch(() => {})
       } else {
@@ -404,6 +451,7 @@ export function BrowserPreviewPane({
     clearSelection,
     t,
     detailLevel,
+    adjustmentFeedback,
   ])
 
   const onSendQueue = useCallback(async () => {
@@ -553,6 +601,15 @@ export function BrowserPreviewPane({
         onClick={() => (findOpen ? closeFind() : setFindOpen(true))}
       >
         <SearchIcon />
+      </TooltipIconButton>
+      <TooltipIconButton
+        tooltip={tCdp("title")}
+        aria-label={tCdp("title")}
+        disabled={!committedUrl || !sessionId}
+        className={cn(developerOpen && "bg-primary/15 text-primary")}
+        onClick={() => setDeveloperOpen((current) => !current)}
+      >
+        <BracesIcon />
       </TooltipIconButton>
     </>
   )
@@ -816,6 +873,13 @@ export function BrowserPreviewPane({
             )}
           >
             <ScrollArea className="min-h-0 flex-1">
+              {developerOpen && currentUrl && sessionId && (
+                <BrowserCdpControls
+                  sessionId={sessionId}
+                  browserSessionId={ownerId ?? `browser:${sessionId}`}
+                  pageUrl={currentUrl}
+                />
+              )}
               {selection && (
                 <div className="bg-background p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -848,6 +912,18 @@ export function BrowserPreviewPane({
                     rows={2}
                     className="resize-none text-sm"
                   />
+                  {currentUrl && sessionId && (
+                    <BrowserAdjustControls
+                      sessionId={sessionId}
+                      browserSessionId={ownerId ?? `browser:${sessionId}`}
+                      pageUrl={currentUrl}
+                      selector={selection.selector}
+                      onAccept={acceptAdjustment}
+                    />
+                  )}
+                  {adjustmentFeedback && (
+                    <p className="mt-1 text-xs text-muted-foreground">{t("adjust.accepted")}</p>
+                  )}
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1">
                       <select
@@ -883,14 +959,14 @@ export function BrowserPreviewPane({
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={sending || !comment.trim()}
+                        disabled={sending || (!comment.trim() && !adjustmentFeedback)}
                         onClick={() => void onQueue()}
                       >
                         {t("annotation.add")}
                       </Button>
                       <Button
                         size="sm"
-                        disabled={sending || !comment.trim()}
+                        disabled={sending || (!comment.trim() && !adjustmentFeedback)}
                         onClick={() => void onSend()}
                       >
                         <SendIcon className="size-3.5" />

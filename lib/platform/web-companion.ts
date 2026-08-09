@@ -7,12 +7,13 @@
  * 1. **Build-time**: `NEXT_PUBLIC_COGNIA_SERVER_URL` — the self-host operator
  *    bakes their server URL into the web bundle (compose/k8s deployments
  *    serve the static export next to the server).
- * 2. **Runtime**: the user already paired in this browser — a
- *    `CompanionConfig` sits in localStorage (written by the /pair page).
+ * 2. **Runtime**: the user already paired in this browser — a public target
+ *    record sits in localStorage while its P-256 private key stays encrypted
+ *    in the Browser Vault.
  *
  * Pure leaf, synchronous on purpose: `pickTransport()` runs at module load,
  * so this must not await the async storage facade. It reads the same
- * localStorage key `LocalStorageCompanionStorage` owns.
+ * public target-book key `LocalStorageCompanionStorage` owns.
  */
 
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
@@ -28,7 +29,7 @@ export function buildTimeServerUrl(): string | null {
   return url.trim().replace(/\/+$/, "")
 }
 
-/** Whether a paired CompanionConfig exists in this browser. */
+/** Whether a canonical cgnp3 target exists in this browser. */
 export function hasStoredWebPairing(): boolean {
   if (typeof window === "undefined") return false
   try {
@@ -47,18 +48,10 @@ export function hasStoredWebPairing(): boolean {
       }
     }
 
-    const raw = window.localStorage.getItem(WEB_COMPANION_CONFIG_KEY)
-    if (!raw) return false
-    const parsed = JSON.parse(raw) as {
-      baseUrl?: unknown
-      deviceJwt?: unknown
-      deviceJwtEncrypted?: unknown
-    }
-    return (
-      typeof parsed.baseUrl === "string" &&
-      (typeof parsed.deviceJwt === "string" ||
-        (typeof parsed.deviceJwtEncrypted === "object" && parsed.deviceJwtEncrypted !== null))
-    )
+    // The former single-record bearer credential is intentionally ignored;
+    // this breaking upgrade requires a fresh device-key pairing.
+    window.localStorage.removeItem(WEB_COMPANION_CONFIG_KEY)
+    return false
   } catch {
     return false
   }

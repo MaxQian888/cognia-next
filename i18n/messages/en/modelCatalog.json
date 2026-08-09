@@ -30,8 +30,8 @@
     "speech": "Speech"
   },
   "modalityLabel": "Modality",
-  "offline": "Offline: showing the cached last-known-good revision.",
   "offerings": "Provider offerings",
+  "offline": "Offline: showing the cached last-known-good revision.",
   "recoveryDescription": "The bundled catalog will be restored automatically. Existing provider settings remain unchanged.",
   "recoveryTitle": "Model catalog is recovering",
   "replacement": "Suggested replacement",

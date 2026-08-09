@@ -106,6 +106,7 @@ const REGISTRY = [
   // were hand-maintained and had drifted (dead keys, fields writable up but
   // never mirrored down, transport config classified backwards).
   { script: "settings-sync:check", group: "artifacts" },
+  { script: "companion-api:check", group: "artifacts" },
   { script: "plugin-convert:check", group: "artifacts" },
   { script: "plugin:contract:check", group: "artifacts" },
   { script: "ide:check", group: "artifacts" },
@@ -117,11 +118,18 @@ const REGISTRY = [
   // Repo-specific structural audits (see the ADRs each one cites).
   { script: "audit:slots", group: "audit" },
   { script: "audit:plugin-surfaces", group: "audit" },
+  { script: "audit:ai-elements", group: "audit" },
+  // Local persistence governance rejects schema/catalog, TypeScript/Rust sync,
+  // version-order, and generated-documentation drift.
+  { script: "audit:data-governance", group: "audit" },
   // ADR-0090: unified execution paths must stay vendor-neutral (no
   // GLM/Kimi/provider-name branches in dispatch logic).
   { script: "check:provider-name-branches", group: "audit" },
   // ADR-0090 Phase 5: certification staleness inputs must match real pins.
   { script: "check:runtime-versions", group: "audit" },
+  // Stable ACP v1 methods, updates, versions, and SDK pins must stay aligned
+  // with the checked-in schema contract.
+  { script: "check:acp-v1-contract", group: "audit" },
   // The Agent SDK's public surface must stay fully triaged. `anthropic.mjs`
   // builds `query()` options from an explicit allowlist, so a new SDK option
   // is otherwise invisible — no break, no warning, the capability just does
@@ -130,6 +138,7 @@ const REGISTRY = [
   // The live session-control surface is hand-declared in four files across
   // three languages. This binds all four to protocol/agent-control-methods.json
   // and refuses to let a still-`planned` control reach a live Query object.
+  { script: "audit:adapter-capabilities", group: "audit" },
   { script: "audit:agent-control-methods", group: "audit" },
   { script: "audit:trusted-publishers", group: "audit" },
   { script: "audit:silent-flags", group: "audit" },
@@ -141,8 +150,10 @@ const REGISTRY = [
   { script: "audit:colocated-tests", group: "audit" },
   { script: "audit:loading-states", group: "audit" },
   { script: "audit:unreachable-components", group: "audit" },
+  { script: "audit:root-loading", group: "audit" },
   { script: "lint:static-export", group: "audit" },
   { script: "lint:plugin-sdk-wit", group: "audit" },
+  { script: "lint:frozen-wasm-api", group: "audit" },
   { script: "lint:claude-md", group: "audit" },
   { script: "plugin:author-imports", group: "audit" },
 

@@ -8,7 +8,7 @@
  * scheme rejects SW registration); enabled on web + Tauri.
  *
  * Runtime caching strategy:
- *   - **NetworkFirst** for `/api/v1/_rpc/sync_pull` — the sync orchestrator
+ *   - **NetworkFirst** for `/api/_rpc/sync_pull` — the sync orchestrator
  *     is the canonical source; the SW only serves cached responses if the
  *     network times out (4s) so users see SOMETHING instead of a blank
  *     screen when the desktop server is unreachable.
@@ -45,7 +45,7 @@ const serwist = new Serwist({
   navigationPreload: true,
   runtimeCaching: [
     {
-      matcher: ({ url }) => url.pathname.startsWith("/api/v1/_rpc/sync_pull"),
+      matcher: ({ url }) => url.pathname.startsWith("/api/_rpc/sync_pull"),
       handler: new NetworkFirst({
         cacheName: "sync-pull",
         networkTimeoutSeconds: 4,

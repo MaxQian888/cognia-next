@@ -265,6 +265,86 @@ describe("extract — caching", () => {
 })
 
 describe("extract — error wrapping", () => {
+  it("continues the automatic candidate chain after a retryable failure", async () => {
+    const calls: string[] = []
+    const reg = createOcrRegistry()
+    reg.register({
+      ...makeProvider({ id: "paddle-ocr", category: "local" }),
+      async extract() {
+        calls.push("paddle-ocr")
+        throw new OcrError("provider_failed", "paddle-ocr", "runtime unavailable")
+      },
+    })
+    reg.register({
+      ...makeProvider({ id: "mistral-ocr", category: "document-cloud" }),
+      async extract(input) {
+        calls.push("mistral-ocr")
+        return makeProvider({ id: "mistral-ocr" }).extract(input, {
+          credentials: { secrets: {} },
+          config: {},
+          platform: "tauri",
+        })
+      },
+    })
+    const result = await extract(
+      sampleInput,
+      makeDeps({
+        registry: reg,
+        platform: "tauri",
+        osTag: "linux",
+        settings: { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "auto" },
+        localReadiness: () => true,
+        hasCredentials: () => true,
+      })
+    )
+    expect(calls).toEqual(["paddle-ocr", "mistral-ocr"])
+    expect(result.providerId).toBe("mistral-ocr")
+  })
+
+  it("never falls back when the request names an explicit provider", async () => {
+    let fallbackCalls = 0
+    const reg = createOcrRegistry()
+    reg.register({
+      ...makeProvider({ id: "paddle-ocr", category: "local" }),
+      async extract() {
+        throw new OcrError("provider_failed", "paddle-ocr", "runtime unavailable")
+      },
+    })
+    reg.register(makeProvider({ id: "mistral-ocr", onCall: () => fallbackCalls++ }))
+    await expect(
+      extract({ ...sampleInput, providerId: "paddle-ocr" }, makeDeps({ registry: reg }))
+    ).rejects.toMatchObject({ providerId: "paddle-ocr" })
+    expect(fallbackCalls).toBe(0)
+  })
+
+  it("does not fall back after unsupported-language errors", async () => {
+    let fallbackCalls = 0
+    const reg = createOcrRegistry()
+    reg.register({
+      ...makeProvider({ id: "paddle-ocr", category: "local" }),
+      async extract() {
+        throw new OcrError("unsupported_language", "paddle-ocr", "unsupported")
+      },
+    })
+    reg.register(
+      makeProvider({ id: "mistral-ocr", category: "document-cloud", onCall: () => fallbackCalls++ })
+    )
+    await expect(
+      extract(
+        sampleInput,
+        makeDeps({
+          registry: reg,
+          platform: "tauri",
+          osTag: "linux",
+          settings: { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "auto" },
+          localReadiness: () => true,
+          hasCredentials: () => true,
+        })
+      )
+    ).rejects.toMatchObject({ code: "unsupported_language" })
+    expect(fallbackCalls).toBe(0)
+  })
+
   it("wraps a plain provider exception into provider_failed", async () => {
     const reg = createOcrRegistry()
     reg.register({

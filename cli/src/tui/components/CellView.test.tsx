@@ -476,6 +476,47 @@ describe("CellView", () => {
     })
   })
 
+  it("renders source metadata and emits only safe OSC-8 links", () => {
+    const previous = process.env.FORCE_HYPERLINK
+    process.env.FORCE_HYPERLINK = "1"
+    try {
+      const safe = renderCell({
+        id: "sources",
+        kind: "content-part",
+        partId: "sources",
+        part: {
+          type: "sources",
+          sources: [
+            {
+              id: "ink",
+              title: "Ink docs",
+              url: "https://example.test/ink",
+              score: 0.91,
+              snippet: "Terminal renderer",
+            },
+          ],
+        },
+      })
+      expect(safe).toContain("Ink docs")
+      expect(safe).toContain("91%")
+      expect(safe).toContain("\u001b]8;;https://example.test/ink")
+
+      const unsafe = renderCell({
+        id: "unsafe",
+        kind: "content-part",
+        partId: "unsafe",
+        part: {
+          type: "sources",
+          sources: [{ id: "bad", title: "Unsafe", url: "javascript:alert(1)" }],
+        },
+      })
+      expect(unsafe).not.toContain("\u001b]8;;javascript:")
+    } finally {
+      if (previous === undefined) delete process.env.FORCE_HYPERLINK
+      else process.env.FORCE_HYPERLINK = previous
+    }
+  })
+
   it("renders a plan cell as a compact reference card (full body lives in the approval overlay / /plan)", () => {
     const text = renderCell({ id: "1", kind: "plan", raw: "# Approach\n- step one\n- step two" })
     expect(text).toContain("Plan ready for review")

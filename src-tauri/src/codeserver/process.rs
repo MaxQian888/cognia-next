@@ -1237,6 +1237,7 @@ fn spawn_watchdog(
         use tauri::Emitter as _;
         let Ok(client) = reqwest::Client::builder()
             .timeout(Duration::from_secs(2))
+            .no_proxy()
             .build()
         else {
             return;
@@ -1276,6 +1277,7 @@ async fn wait_healthy(port: u16, budget: Duration) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{port}/healthz");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
+        .no_proxy()
         .build()
         .map_err(|e| format!("build health client: {e}"))?;
     let deadline = Instant::now() + budget;

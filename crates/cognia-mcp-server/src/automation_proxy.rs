@@ -516,6 +516,7 @@ mod tests {
             audit: AuditRing::new(),
             consent: ConsentBroker::default(),
             policy: PolicyState::default(),
+            consent_event_sink: None,
         }
     }
 
@@ -645,6 +646,7 @@ mod tests {
             audit: audit.clone(),
             consent: ConsentBroker::default(),
             policy: PolicyState::default(),
+            consent_event_sink: None,
         };
         let proxy = AutomationProxy::spawn(stub_handle(), enf).await.unwrap();
         let mut stream = TcpStream::connect(proxy.addr).await.unwrap();

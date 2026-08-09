@@ -18,6 +18,8 @@ static STARTED_AT: Lazy<Instant> = Lazy::new(Instant::now);
 static RPC_CALLS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static RPC_ERRORS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static AUTH_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static DPOP_REJECTIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static DPOP_REPLAYS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static WS_CLIENTS_ACTIVE: AtomicI64 = AtomicI64::new(0);
 
 // ── Lark dual-entry counters (plan 2026-07-24 P6.2) ─────────────────────────
@@ -81,6 +83,14 @@ pub fn record_auth_failure() {
     AUTH_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
 }
 
+pub fn record_dpop_replay() {
+    DPOP_REPLAYS_TOTAL.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_dpop_rejection() {
+    DPOP_REJECTIONS_TOTAL.fetch_add(1, Ordering::Relaxed);
+}
+
 pub fn ws_client_connected() {
     WS_CLIENTS_ACTIVE.fetch_add(1, Ordering::Relaxed);
 }
@@ -135,9 +145,23 @@ pub fn render_prometheus() -> String {
     );
     push_metric(
         &mut out,
+        "cognia_dpop_rejections_total",
+        "counter",
+        "Rejected DPoP proofs with invalid signatures, expiry, or request bindings.",
+        DPOP_REJECTIONS_TOTAL.load(Ordering::Relaxed),
+    );
+    push_metric(
+        &mut out,
+        "cognia_dpop_replays_total",
+        "counter",
+        "Rejected DPoP proofs whose jti was already consumed.",
+        DPOP_REPLAYS_TOTAL.load(Ordering::Relaxed),
+    );
+    push_metric(
+        &mut out,
         "cognia_ws_clients_active",
         "gauge",
-        "Open /ws/v1/events client connections.",
+        "Open /ws/events client connections.",
         WS_CLIENTS_ACTIVE.load(Ordering::Relaxed).max(0),
     );
 
@@ -288,11 +312,15 @@ mod tests {
         assert!(before.contains("cognia_uptime_seconds"));
         assert!(before.contains("# TYPE cognia_rpc_calls_total counter"));
         assert!(before.contains("cognia_auth_failures_total"));
+        assert!(before.contains("cognia_dpop_replays_total"));
+        assert!(before.contains("cognia_dpop_rejections_total"));
         assert!(before.contains("cognia_ws_clients_active"));
 
         record_rpc_call(true);
         record_rpc_call(false);
         record_auth_failure();
+        record_dpop_replay();
+        record_dpop_rejection();
         ws_client_connected();
         let after = render_prometheus();
 
@@ -308,6 +336,8 @@ mod tests {
         );
         assert!(value(&after, "cognia_rpc_errors_total") >= 1);
         assert!(value(&after, "cognia_auth_failures_total") >= 1);
+        assert!(value(&after, "cognia_dpop_replays_total") >= 1);
+        assert!(value(&after, "cognia_dpop_rejections_total") >= 1);
         ws_client_disconnected();
     }
 

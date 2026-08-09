@@ -186,6 +186,16 @@ export interface Artifact {
 }
 
 export interface ArtifactMetadata {
+  /**
+   * Namespaced descriptor for plugin-owned artifact payloads. The host treats
+   * `kind` and `schemaVersion` as opaque routing/versioning data and enforces
+   * `ownerPluginId` at the Plugin Artifact API boundary.
+   */
+  plugin?: {
+    kind: string
+    schemaVersion: number
+    ownerPluginId: string
+  }
   // For code artifacts
   runnable?: boolean
   dependencies?: string[]
@@ -235,7 +245,10 @@ export interface ArtifactMetadata {
 export interface ArtifactVersion {
   id: string
   artifactId: string
+  /** Optional for compatibility with history rows persisted before title snapshots shipped. */
+  title?: string
   content: string
+  metadata?: ArtifactMetadata
   version: number
   createdAt: Date
   changeDescription?: string

@@ -2,6 +2,7 @@
 
 import { claudeCodeAdapter } from "./claude-code"
 import { codexCliAdapter } from "./codex-cli"
+import { opencodeAdapter } from "./opencode"
 import { cursorAdapter } from "./cursor"
 import { clineAdapter } from "./cline"
 import { genericMdAdapter } from "./generic-md"
@@ -11,6 +12,7 @@ import type { ImportInput, SubagentSourceAdapter, SubagentSourceId } from "./typ
 export const SUBAGENT_SOURCE_ADAPTERS: SubagentSourceAdapter[] = [
   claudeCodeAdapter,
   codexCliAdapter,
+  opencodeAdapter,
   cursorAdapter,
   clineAdapter,
   genericMdAdapter,

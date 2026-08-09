@@ -1,7 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
 import type { SlashContext } from "../builtin"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { __resetGoalRuntimeForTesting, getGoalRuntime } from "@/lib/goal/runtime"
 import { dispatchGoalSubcommand } from "./goal"
@@ -14,11 +12,11 @@ jest.mock("@/stores/settings", () => ({
   },
 }))
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await __resetRedactionKey()
   __resetGoalRuntimeForTesting()
 })
@@ -36,6 +34,8 @@ function ctx(overrides: Partial<SlashContext> = {}): SlashContext {
     ...overrides,
   } as unknown as SlashContext
 }
+
+afterAll(dbFixture.dispose)
 
 describe("dispatchGoalSubcommand — guards", () => {
   it("requires an active session", async () => {

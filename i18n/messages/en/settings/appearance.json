@@ -42,10 +42,10 @@
     }
   },
   "accent": {
-    "label": "Accent color",
     "description": "Retint buttons and highlights without editing the full theme.",
-    "usingTheme": "Using theme accent",
-    "reset": "Reset"
+    "label": "Accent color",
+    "reset": "Reset",
+    "usingTheme": "Using theme accent"
   },
   "advanced": {
     "description": "Inject your own CSS into the app. Remote @import / url(http) statements are stripped on save. Use carefully — bad CSS can hide UI elements.",
@@ -186,6 +186,74 @@
       "translucent": "Translucent"
     },
     "tonalityHint": "Tonality only takes effect while a wallpaper is enabled."
+  },
+  "cursor": {
+    "colorHint": "Accent follows the active theme; custom pins one color across every pack.",
+    "colorLabel": "Color",
+    "colorModes": {
+      "accent": "Theme accent",
+      "custom": "Custom color",
+      "pack": "Pack colors"
+    },
+    "customColorLabel": "Custom color",
+    "description": "Replace the pointer with a designed cursor pack, and add an optional particle effect.",
+    "effect": {
+      "clickBurstHint": "Emit an extra burst of particles wherever you click.",
+      "clickBurstLabel": "Burst on click",
+      "colorLabel": "Color",
+      "colorModes": {
+        "accent": "Theme accent",
+        "custom": "Custom color",
+        "pack": "Pack colors",
+        "rainbow": "Rainbow"
+      },
+      "customColorLabel": "Custom color",
+      "description": "Particles drawn behind the pointer as it moves.",
+      "intensityLabel": "Intensity",
+      "kindLabel": "Effect",
+      "kinds": {
+        "bubbles": "Bubbles",
+        "flame": "Flame",
+        "glow": "Glow",
+        "none": "None",
+        "petals": "Petals",
+        "ribbon": "Ribbon",
+        "ripple": "Ripple",
+        "snow": "Snow",
+        "sparkle": "Sparkle",
+        "stardust": "Stardust",
+        "trail": "Trail"
+      },
+      "reducedMotionNotice": "Reduced motion is on, so the effect is not drawn.",
+      "scaleLabel": "Particle size",
+      "title": "Cursor effect",
+      "touchNotice": "Pointer effects are not drawn for touch input."
+    },
+    "enabledHint": "Off keeps your operating system's own pointer.",
+    "enabledLabel": "Custom cursor",
+    "families": {
+      "anime": "Anime",
+      "classic": "Classic",
+      "playful": "Playful",
+      "system": "System"
+    },
+    "nativeRoles": "These roles keep the system pointer: {roles}",
+    "roles": {
+      "crosshair": "Crosshair",
+      "default": "Default",
+      "grab": "Grab",
+      "grabbing": "Grabbing",
+      "notAllowed": "Not allowed",
+      "pointer": "Link",
+      "progress": "Busy",
+      "text": "Text"
+    },
+    "rolesLabel": "Roles",
+    "sizeLabel": "Size",
+    "systemPack": "System",
+    "systemPackHint": "Your OS pointer",
+    "systemSelectedHint": "The system pointer is in use, so there is nothing to preview.",
+    "title": "Cursor"
   },
   "customTheme": {
     "actions": {
@@ -563,14 +631,6 @@
     "enabledLabel": "Enable background",
     "formats": "PNG, JPEG, WebP, GIF, AVIF · up to 32 MB",
     "galleryTitle": "Gallery",
-    "gradient": {
-      "angle": "Angle",
-      "end": "End",
-      "namePlaceholder": "Gradient name",
-      "save": "Add to gallery",
-      "start": "Start",
-      "title": "Build a gradient"
-    },
     "generator": {
       "accent": "Generated accent color",
       "action": "Generate matching theme",
@@ -583,6 +643,14 @@
         "dark": "Dark base",
         "light": "Light base"
       }
+    },
+    "gradient": {
+      "angle": "Angle",
+      "end": "End",
+      "namePlaceholder": "Gradient name",
+      "save": "Add to gallery",
+      "start": "Start",
+      "title": "Build a gradient"
     },
     "invalidType": "Unsupported file type. Use PNG, JPEG, WebP, GIF or AVIF.",
     "noActive": "No wallpaper selected.",
@@ -639,73 +707,5 @@
     "tooLarge": "File is too large (max 32 MB).",
     "uploadHint": "Drop an image here or browse",
     "uploading": "Uploading…"
-  },
-  "cursor": {
-    "title": "Cursor",
-    "description": "Replace the pointer with a designed cursor pack, and add an optional particle effect.",
-    "enabledLabel": "Custom cursor",
-    "enabledHint": "Off keeps your operating system's own pointer.",
-    "sizeLabel": "Size",
-    "colorLabel": "Color",
-    "colorHint": "Accent follows the active theme; custom pins one color across every pack.",
-    "customColorLabel": "Custom color",
-    "rolesLabel": "Roles",
-    "systemSelectedHint": "The system pointer is in use, so there is nothing to preview.",
-    "systemPack": "System",
-    "systemPackHint": "Your OS pointer",
-    "nativeRoles": "These roles keep the system pointer: {roles}",
-    "families": {
-      "system": "System",
-      "classic": "Classic",
-      "playful": "Playful",
-      "anime": "Anime"
-    },
-    "colorModes": {
-      "pack": "Pack colors",
-      "accent": "Theme accent",
-      "custom": "Custom color"
-    },
-    "roles": {
-      "default": "Default",
-      "pointer": "Link",
-      "text": "Text",
-      "grab": "Grab",
-      "grabbing": "Grabbing",
-      "notAllowed": "Not allowed",
-      "progress": "Busy",
-      "crosshair": "Crosshair"
-    },
-    "effect": {
-      "title": "Cursor effect",
-      "description": "Particles drawn behind the pointer as it moves.",
-      "kindLabel": "Effect",
-      "reducedMotionNotice": "Reduced motion is on, so the effect is not drawn.",
-      "intensityLabel": "Intensity",
-      "scaleLabel": "Particle size",
-      "colorLabel": "Color",
-      "customColorLabel": "Custom color",
-      "clickBurstLabel": "Burst on click",
-      "clickBurstHint": "Emit an extra burst of particles wherever you click.",
-      "touchNotice": "Pointer effects are not drawn for touch input.",
-      "kinds": {
-        "none": "None",
-        "trail": "Trail",
-        "ribbon": "Ribbon",
-        "glow": "Glow",
-        "ripple": "Ripple",
-        "sparkle": "Sparkle",
-        "bubbles": "Bubbles",
-        "snow": "Snow",
-        "flame": "Flame",
-        "petals": "Petals",
-        "stardust": "Stardust"
-      },
-      "colorModes": {
-        "accent": "Theme accent",
-        "pack": "Pack colors",
-        "custom": "Custom color",
-        "rainbow": "Rainbow"
-      }
-    }
   }
 }

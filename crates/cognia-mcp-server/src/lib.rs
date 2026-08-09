@@ -1,22 +1,23 @@
 //! MCP HTTP server subsystem.
 //!
 //! Exposes the External Bridge MCP server over `127.0.0.1:<port>` with
-//! bearer-token authentication.  The HTTP layer is a thin proxy: it verifies
-//! the bearer token then forwards JSON-RPC requests to a long-lived Node
-//! sidecar process (`cognia-mcp.js`) over stdin/stdout.
+//! per-client bearer authentication. The only public MCP transport is
+//! `/mcp/stream`; each authenticated session is bound to its client identity
+//! and forwards JSON-RPC over stdin/stdout to the bundled Node sidecar.
 //!
 //! # Architecture
 //!
 //! ```text
 //! External Agent (Cursor / HTTP mode)
-//!     │ POST http://127.0.0.1:<port>/mcp
-//!     │ Authorization: Bearer <token>
+//!     │ GET|POST|DELETE http://127.0.0.1:<port>/mcp/stream
+//!     │ Authorization: Bearer <client credential>
+//!     │ Mcp-Session-Id: <session id>
 //!     ▼
-//! http_server.rs   (axum, bearer auth, body-size limit)
-//!     │ verify token (subtle constant-time)
+//! http_server.rs   (axum, per-client verifier, body-size limit)
+//!     │ bind client identity + scopes
 //!     ▼
-//! sidecar.rs       (tokio::process, mutex-guarded stdin/stdout)
-//!     │ persistent `node cognia-mcp.js` process
+//! streamable_http.rs (session registry, SSE, capacity + idle bounds)
+//!     │ session-scoped `node cognia-mcp.js` process
 //!     ▼
 //! standalone-entry.ts  (node, COGNIA_BRIDGED=1)
 //!     ▼

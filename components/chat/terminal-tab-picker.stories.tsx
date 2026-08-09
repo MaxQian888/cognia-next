@@ -27,6 +27,8 @@ const tab = (over: Partial<TerminalSessionRow>): TerminalSessionRow =>
     createdAt: 1_700_000_000_000,
     agentTrusted: false,
     agentSpawner: null,
+    tabColor: "none",
+    tabIcon: "none",
     promptBoundaries: [],
     lastCommands: [],
     historyOpen: false,

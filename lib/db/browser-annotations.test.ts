@@ -1,6 +1,3 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 import type { BrowserSelection } from "@/lib/browser/protocol"
 import {
   appendBrowserAnnotationThreadMessage,
@@ -14,7 +11,8 @@ import {
   transitionBrowserAnnotation,
   type BrowserAnnotationRow,
 } from "./browser-annotations"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 const selection = {
   paneId: "browser-pane",
@@ -47,13 +45,14 @@ function annotation(id: string, over: Partial<BrowserAnnotationRow> = {}): Brows
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().browserAnnotations.clear()
 })
+afterAll(dbFixture.dispose)
 
 it("round-trips and lists annotations by base URL and status", async () => {
   await saveBrowserAnnotation(annotation("later", { createdAt: 200 }))

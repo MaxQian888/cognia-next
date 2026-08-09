@@ -1,0 +1,16 @@
+{
+  "license": "Apache-2.0",
+  "upstream": {
+    "package": "ai-elements",
+    "version": "1.9.0",
+    "commit": "0c1f5e8c75273f0e95c8faa031544a8aa2bb1a5b"
+  },
+  "assets": {
+    "command-2.0.riv": "9d4dd75565da1bed3048b4dbe0e21efb192058fc0399d77077e0fa2de7a60ec3",
+    "glint-2.0.riv": "3a7a1ab4bf456082da7eaa1c6148881a740af87253f34580238c3ff0cef1940c",
+    "halo-2.0.riv": "c8d97df33c47f52c993667515700e12f110539a46048b142a0ec787dba9dcc96",
+    "mana-2.0.riv": "5d00ae2a04147e70a10033250c64cae50d84c20be728bfb0a9ef37349395477a",
+    "obsidian-2.0.riv": "c6ae7d08f5787a560e38d3453ba155c28250acf2db75e6acf2b0d1a0cd6017db",
+    "opal-1.2.riv": "ff2e885d4f065bbfd9b855b1a7aeaecb771c1047d9ef196ba910ba114aac06f8"
+  }
+}

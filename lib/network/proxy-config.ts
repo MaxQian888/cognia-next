@@ -17,19 +17,87 @@ export function isProxyActive(cfg?: NetworkProxySettings | null): cfg is Network
 }
 
 /**
- * Build a proxy URL — `http://user:pass@host:port` (or socks5://...).
+ * Build a public proxy endpoint URL without credentials.
  *
  * Returns `null` when the config isn't actionable (off, missing host, or
- * port = 0). Auth is URL-encoded so passwords with `:` / `@` survive.
+ * port = 0). Credentials live in the native keyring and must never be
+ * reconstructed in the renderer.
  */
 export function buildProxyUrl(cfg?: NetworkProxySettings | null): string | null {
   if (!isProxyActive(cfg)) return null
   const scheme = cfg.protocol === "socks5" ? "socks5" : cfg.protocol
-  const auth =
-    cfg.username && cfg.password
-      ? `${encodeURIComponent(cfg.username)}:${encodeURIComponent(cfg.password)}@`
-      : ""
-  return `${scheme}://${auth}${cfg.host}:${cfg.port}`
+  return `${scheme}://${cfg.host}:${cfg.port}`
+}
+
+type ParsedIp = { bits: 32 | 128; bytes: number[] }
+
+function parseIpv4(input: string): ParsedIp | null {
+  const parts = input.split(".")
+  if (parts.length !== 4) return null
+  const bytes: number[] = []
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null
+    const octet = Number(part)
+    if (octet > 255) return null
+    bytes.push(octet)
+  }
+  return { bits: 32, bytes }
+}
+
+function ipv6Words(part: string): number[] | null {
+  if (!part) return []
+  const words: number[] = []
+  for (const token of part.split(":")) {
+    if (!token) return null
+    if (token.includes(".")) {
+      const ipv4 = parseIpv4(token)
+      if (!ipv4) return null
+      words.push(ipv4.bytes[0] * 256 + ipv4.bytes[1], ipv4.bytes[2] * 256 + ipv4.bytes[3])
+      continue
+    }
+    if (!/^[0-9a-f]{1,4}$/i.test(token)) return null
+    words.push(Number.parseInt(token, 16))
+  }
+  return words
+}
+
+function parseIpv6(input: string): ParsedIp | null {
+  const normalized = input.replace(/^\[|\]$/g, "")
+  const halves = normalized.split("::")
+  if (halves.length > 2) return null
+  const left = ipv6Words(halves[0] ?? "")
+  const right = ipv6Words(halves[1] ?? "")
+  if (!left || !right) return null
+  const omitted = 8 - left.length - right.length
+  if (halves.length === 1 ? omitted !== 0 : omitted < 1) return null
+  const words = [...left, ...Array.from({ length: omitted }, () => 0), ...right]
+  if (words.length !== 8) return null
+  return {
+    bits: 128,
+    bytes: words.flatMap((word) => [word >> 8, word & 0xff]),
+  }
+}
+
+function parseIp(input: string): ParsedIp | null {
+  return parseIpv4(input) ?? parseIpv6(input)
+}
+
+function cidrMatches(host: string, entry: string): boolean {
+  const separator = entry.lastIndexOf("/")
+  if (separator <= 0) return false
+  const network = parseIp(entry.slice(0, separator))
+  const target = parseIp(host)
+  const prefix = Number(entry.slice(separator + 1))
+  if (!network || !target || network.bits !== target.bits || !Number.isInteger(prefix)) return false
+  if (prefix < 0 || prefix > network.bits) return false
+  const wholeBytes = Math.floor(prefix / 8)
+  for (let index = 0; index < wholeBytes; index += 1) {
+    if (network.bytes[index] !== target.bytes[index]) return false
+  }
+  const remainingBits = prefix % 8
+  if (remainingBits === 0) return true
+  const mask = (0xff << (8 - remainingBits)) & 0xff
+  return (network.bytes[wholeBytes] & mask) === (target.bytes[wholeBytes] & mask)
 }
 
 /**
@@ -55,9 +123,22 @@ export function shouldBypass(targetUrl: string, bypass: string[]): boolean {
   return bypass.some((raw) => {
     const entry = raw.trim().toLowerCase()
     if (!entry) return false
+    if (entry.includes("/")) return cidrMatches(host.replace(/^\[|\]$/g, ""), entry)
     if (entry.startsWith(".")) return host === entry.slice(1) || host.endsWith(entry)
     return host === entry
   })
+}
+
+/** Redact proxy URL userinfo before it reaches logs, IPC, or diagnostic UI. */
+export function redactProxyUrl(value: string): string {
+  try {
+    const parsed = new URL(value)
+    parsed.username = ""
+    parsed.password = ""
+    return parsed.toString()
+  } catch {
+    return "<invalid-proxy-url>"
+  }
 }
 
 /**
@@ -83,16 +164,4 @@ export function proxyEnvVars(cfg?: NetworkProxySettings | null): Record<string, 
     env.no_proxy = noProxy
   }
   return env
-}
-
-/**
- * Build a base64-encoded Proxy-Authorization header value. Used by the WSS
- * CONNECT tunnel and any direct HTTP CONNECT call site.
- */
-export function proxyAuthHeader(cfg?: NetworkProxySettings | null): string | null {
-  if (!isProxyActive(cfg)) return null
-  if (!cfg.username || !cfg.password) return null
-  const credentials = `${cfg.username}:${cfg.password}`
-  if (typeof btoa === "function") return `Basic ${btoa(credentials)}`
-  return `Basic ${Buffer.from(credentials, "utf8").toString("base64")}`
 }

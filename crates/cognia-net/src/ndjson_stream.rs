@@ -61,9 +61,36 @@ where
     T: DeserializeOwned,
     B: serde::Serialize + ?Sized,
 {
+    stream_ndjson_post_with_headers(
+        client,
+        url,
+        json_body,
+        reqwest::header::HeaderMap::new(),
+        on_line,
+    )
+    .await
+}
+
+/// Header-aware variant used by authenticated local/self-hosted providers.
+pub async fn stream_ndjson_post_with_headers<T, B>(
+    client: &reqwest::Client,
+    url: &str,
+    json_body: &B,
+    headers: reqwest::header::HeaderMap,
+    on_line: &mut (dyn FnMut(T) + Send),
+) -> Result<u64, NdjsonError>
+where
+    T: DeserializeOwned,
+    B: serde::Serialize + ?Sized,
+{
     use futures_util::StreamExt as _;
 
-    let resp = client.post(url).json(json_body).send().await?;
+    let resp = client
+        .post(url)
+        .headers(headers)
+        .json(json_body)
+        .send()
+        .await?;
 
     // Surface the server's own error text rather than a bare status: Ollama
     // explains itself here ("model not found", …) and that message is the
@@ -155,6 +182,33 @@ mod tests {
         addr
     }
 
+    async fn serve_once_and_capture_headers(
+        chunks: Vec<&'static str>,
+    ) -> (SocketAddr, tokio::sync::oneshot::Receiver<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = sock.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+            }
+            let _ = request_tx.send(String::from_utf8_lossy(&request).into_owned());
+            sock.write_all(OK_HEADERS.as_bytes()).await.unwrap();
+            for chunk in chunks {
+                sock.write_all(chunk.as_bytes()).await.unwrap();
+            }
+            let _ = sock.shutdown().await;
+        });
+        (addr, request_rx)
+    }
+
     const OK_HEADERS: &str =
         "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n";
 
@@ -182,6 +236,35 @@ mod tests {
         assert_eq!(n, 2);
         assert_eq!(seen[0].status, "pulling");
         assert_eq!(seen[1].completed, 2);
+    }
+
+    #[tokio::test]
+    async fn header_aware_stream_stamps_headers_on_the_post_request() {
+        let (addr, request_rx) =
+            serve_once_and_capture_headers(vec!["{\"status\":\"success\",\"completed\":1}\n"])
+                .await;
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-tenant",
+            reqwest::header::HeaderValue::from_static("local"),
+        );
+
+        let delivered = stream_ndjson_post_with_headers(
+            &reqwest::Client::new(),
+            &format!("http://{addr}/api/pull"),
+            &serde_json::json!({ "name": "m" }),
+            headers,
+            &mut |_progress: Progress| {},
+        )
+        .await
+        .unwrap();
+        let request = request_rx.await.unwrap().to_ascii_lowercase();
+
+        assert_eq!(delivered, 1);
+        assert!(
+            request.contains("x-tenant: local\r\n"),
+            "request was: {request}"
+        );
     }
 
     /// The load-bearing case: the network splits lines wherever it likes, so a

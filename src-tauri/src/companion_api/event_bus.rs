@@ -103,6 +103,9 @@ pub enum SubscribeResult {
         receiver: tokio::sync::broadcast::Receiver<EventFrame>,
         /// Frames with `seq > since` still within the retention window.
         replay: Vec<EventFrame>,
+        /// Last sequence included in the replay snapshot. The WebSocket layer
+        /// publishes this as its replay/live boundary.
+        replay_cursor: u64,
     },
     /// The requested `since` cursor is older than the oldest retained frame,
     /// so a full resync is required.
@@ -128,6 +131,14 @@ pub struct ConnectorEventEmitter(pub Arc<EventBus>);
 impl crate::connectors::axum_app::EventEmitter for ConnectorEventEmitter {
     fn emit(&self, topic: &str, payload: Value) {
         self.0.publish(topic.to_string(), payload);
+    }
+
+    fn emit_ephemeral_to_brain(&self, topic: &str, payload: Value) {
+        self.0.publish_ephemeral_to(
+            topic.to_string(),
+            payload,
+            super::jwt::SERVICE_DEVICE_ID.to_string(),
+        );
     }
 }
 
@@ -197,6 +208,26 @@ impl EventBus {
         frame
     }
 
+    /// Broadcast a sensitive frame to one authenticated device without adding
+    /// it to replay history. OAuth authorization codes use this path so paired
+    /// clients and reconnect cursors can never observe or replay them.
+    pub fn publish_ephemeral_to(
+        &self,
+        event_type: String,
+        payload: Value,
+        target_device_id: String,
+    ) -> EventFrame {
+        let frame = EventFrame {
+            event_type,
+            seq: self.seq_counter.fetch_add(1, Ordering::Relaxed) + 1,
+            payload,
+            ts_ms: now_ms(),
+            target_device_id: Some(target_device_id),
+        };
+        let _ = self.tx.send(frame.clone());
+        frame
+    }
+
     /// Subscribe to the bus.
     ///
     /// - `since`: the last sequence number the client has seen.  Pass `None`
@@ -245,8 +276,13 @@ impl EventBus {
             .filter(|frame| frame.seq > since_seq)
             .cloned()
             .collect();
+        let replay_cursor = replay.last().map_or(since_seq, |frame| frame.seq);
 
-        SubscribeResult::Ok { receiver, replay }
+        SubscribeResult::Ok {
+            receiver,
+            replay,
+            replay_cursor,
+        }
     }
 
     /// Current number of frames in the replay buffer (test helper).
@@ -357,6 +393,27 @@ mod tests {
         assert_eq!(r2.seq, 2);
     }
 
+    #[test]
+    fn ephemeral_targeted_frames_are_live_only_and_device_scoped() {
+        let bus = EventBus::new();
+        let mut rx = bus.tx.subscribe();
+
+        let frame = bus.publish_ephemeral_to(
+            "connectors://lark-oauth/callback".into(),
+            json!({ "code": "secret" }),
+            "brain-local".into(),
+        );
+
+        assert!(frame.visible_to("brain-local"));
+        assert!(!frame.visible_to("paired-phone"));
+        assert_eq!(bus.buffer_len(), 0);
+        assert_eq!(rx.try_recv().expect("live frame").seq, frame.seq);
+        match bus.subscribe(Some(0), now_ms()) {
+            SubscribeResult::Ok { replay, .. } => assert!(replay.is_empty()),
+            SubscribeResult::ResyncRequired => panic!("empty replay cannot require resync"),
+        }
+    }
+
     // ── subscribe(None) → empty replay + active receiver ─────────────────────
 
     #[test]
@@ -389,6 +446,7 @@ mod tests {
             SubscribeResult::Ok {
                 replay,
                 mut receiver,
+                ..
             } => {
                 assert_eq!(replay.len(), 5, "expected 5 replay frames");
                 // Receiver is live: publish a new frame and it arrives.
@@ -501,6 +559,29 @@ mod tests {
                 assert_eq!(replay[2].seq, 10);
             }
             SubscribeResult::ResyncRequired => panic!("unexpected ResyncRequired"),
+        }
+    }
+
+    #[test]
+    fn subscribe_reports_the_exact_replay_boundary() {
+        let bus = EventBus::new();
+        for value in 0..5 {
+            bus.publish("event".into(), json!({ "value": value }));
+        }
+
+        match bus.subscribe(Some(2), now_ms()) {
+            SubscribeResult::Ok {
+                replay,
+                replay_cursor,
+                ..
+            } => {
+                assert_eq!(
+                    replay.iter().map(|frame| frame.seq).collect::<Vec<_>>(),
+                    vec![3, 4, 5]
+                );
+                assert_eq!(replay_cursor, 5);
+            }
+            SubscribeResult::ResyncRequired => panic!("unexpected resync requirement"),
         }
     }
 

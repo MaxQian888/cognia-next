@@ -13,6 +13,8 @@
  *   --tier server               + cognia-server (pair → chat → agent → webhook).
  *                               Added by ADR-0059 W6 (D6).
  *   --tier tls                  + Caddy front door. Added by F2 (D7).
+ *   --tier im                   + a configured OneBot reverse-WS event → brain
+ *                               AI turn → outbound action. Added by F6/H8.
  *
  * Env knobs:
  *   SIGNALING_URL   default http://localhost:7892
@@ -24,10 +26,15 @@
  *   COGNIA_SMOKE_EXEC     override the in-container exec prefix entirely —
  *                         lets tier 2 run on k8s, e.g.
  *                         COGNIA_SMOKE_EXEC="kubectl -n cognia-kind exec -i cognia-server-0 --"
+ *   COGNIA_SMOKE_ONEBOT_ADAPTER_ID   enabled reverse-WS adapter already seeded
+ *   COGNIA_SMOKE_ONEBOT_BEARER       its configured onebotBearer credential
  */
 
 import process from "node:process"
-import { randomBytes, webcrypto } from "node:crypto"
+import { randomBytes, randomUUID, webcrypto } from "node:crypto"
+import http from "node:http"
+import https from "node:https"
+import { readFileSync } from "node:fs"
 import { execFile as execFileCb } from "node:child_process"
 import { promisify } from "node:util"
 import { setTimeout as delay } from "node:timers/promises"
@@ -45,7 +52,7 @@ if (typeof globalThis.WebSocket !== "function") {
 // CLI + helpers
 // ---------------------------------------------------------------------------
 
-const TIERS = ["services", "server", "tls"]
+const TIERS = ["services", "server", "tls", "im"]
 function parseTier() {
   const i = process.argv.indexOf("--tier")
   const t = i >= 0 ? process.argv[i + 1] : "services"
@@ -136,8 +143,8 @@ async function shareRoundtrip() {
   check(gone.status === 404, `GET after delete → 404 (got ${gone.status})`)
 }
 
-function signalingWs(label) {
-  const ws = new WebSocket(`${SIGNALING_URL.replace(/^http/, "ws")}/v2/signaling`)
+function signalingWs(label, url = `${SIGNALING_URL.replace(/^http/, "ws")}/v2/signaling`) {
+  const ws = new WebSocket(url)
   const inbox = []
   const waiters = []
   ws.addEventListener("message", (e) => {
@@ -310,6 +317,10 @@ const COMPOSE_FILE = path.resolve(
   REPO_ROOT,
   process.env.COMPOSE_FILE_PATH ?? "deploy/compose/docker-compose.yml"
 )
+const COMMAND_MANIFEST = JSON.parse(
+  readFileSync(path.join(REPO_ROOT, "protocol/companion-commands.json"), "utf8")
+)
+const COMMANDS = new Map(COMMAND_MANIFEST.commands.map((command) => [command.name, command]))
 
 /**
  * Run a command INSIDE the cognia-server container → stdout.
@@ -338,11 +349,19 @@ async function composeExec(argv, { timeoutMs = 60_000 } = {}) {
   return stdout
 }
 
-/** Device-JWT RPC against the published port. */
-async function rpc(name, args, jwt) {
-  const res = await fetch(`${SERVER_URL}/api/v1/_rpc/${name}`, {
+/** Canonical DPoP RPC against the published port. */
+async function rpc(name, args, auth) {
+  const path = `/api/_rpc/${name}`
+  const descriptor = COMMANDS.get(name)
+  const headers = {
+    Authorization: `Bearer ${auth.accessToken}`,
+    DPoP: await deviceProof(auth.privateKey, auth.accessJti, "POST", path),
+    "Content-Type": "application/json",
+  }
+  if (descriptor?.idempotency === "required") headers["Idempotency-Key"] = randomUUID()
+  const res = await fetch(`${SERVER_URL}${path}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(args ?? {}),
   })
   const body = await res.json().catch(() => null)
@@ -356,7 +375,7 @@ async function containerRpc(name, args, token) {
     "-sk",
     "-X",
     "POST",
-    `https://127.0.0.1:27890/api/v1/_rpc/${name}`,
+    `https://127.0.0.1:27890/internal/_rpc/${name}`,
     "-H",
     `Authorization: Bearer ${token}`,
     "-H",
@@ -374,19 +393,19 @@ async function containerRpc(name, args, token) {
 async function waitForServerHealthz() {
   for (let i = 0; i < 60; i++) {
     try {
-      const res = await fetch(`${SERVER_URL}/api/v1/healthz`)
+      const res = await fetch(`${SERVER_URL}/healthz`)
       if (res.ok) return await res.json()
     } catch {
       // not up yet
     }
     await delay(2000)
   }
-  fatal(`${SERVER_URL}/api/v1/healthz did not become healthy in 120s`)
+  fatal(`${SERVER_URL}/healthz did not become healthy in 120s`)
 }
 
 async function waitForBrainReady() {
   for (let i = 0; i < 60; i++) {
-    const res = await fetch(`${SERVER_URL}/api/v1/healthz`).catch(() => null)
+    const res = await fetch(`${SERVER_URL}/healthz`).catch(() => null)
     if (res?.ok) {
       const body = await res.json()
       if (body?.brain?.ready === true) return body
@@ -398,27 +417,116 @@ async function waitForBrainReady() {
 
 async function pairDevice() {
   const out = await composeExec(["cognia-server", "pair", "--device-name", "smoke"])
-  const match = out.match(/cgnp2\|([A-Za-z0-9_-]+)/)
-  check(!!match, "pair subcommand printed a cgnp2 payload")
+  const match = out.match(/cgnp3\|([A-Za-z0-9_-]+)/)
+  check(!!match, "pair subcommand printed a cgnp3 payload")
   if (!match) return null
   const payload = JSON.parse(Buffer.from(match[1], "base64url").toString())
-  check(typeof payload.pairJwt === "string", "pair payload carries pairJwt")
-
-  const res = await fetch(`${SERVER_URL}/api/v1/auth/pair`, {
+  check(payload.mode === "owner-invitation", "pair payload uses Owner invitation mode")
+  const config = await fetch(`${SERVER_URL}/api/auth/config`).then((response) => response.json())
+  check(config.hostId === payload.host, "auth config Host matches the cgnp3 payload")
+  const authKeys = await webcrypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"]
+  )
+  const signalingKeys = await webcrypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"]
+  )
+  const deviceId = randomUUID()
+  const publicKeyPem = spkiPem(await webcrypto.subtle.exportKey("spki", authKeys.publicKey))
+  const signalingPublicKey = Buffer.from(
+    await webcrypto.subtle.exportKey("raw", signalingKeys.publicKey)
+  ).toString("base64url")
+  const challenge = await requestDeviceChallenge(payload.tenant)
+  const res = await fetch(`${SERVER_URL}/api/auth/device/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      pairJwt: payload.pairJwt,
-      deviceLabel: "compose-smoke",
-      devicePlatform: "smoke",
-      devicePubkey: "none",
-      appVersion: "0.0.0",
+      tenantId: payload.tenant,
+      invitation: payload.invitation,
+      challengeId: challenge.challengeId,
+      challengeNonce: challenge.nonce,
+      deviceId,
+      displayName: "compose-smoke",
+      publicKeyPem,
+      signalingPublicKey,
+      proof: await deviceProof(
+        authKeys.privateKey,
+        challenge.nonce,
+        "POST",
+        "/api/auth/device/register"
+      ),
     }),
   })
-  check(res.status === 200, `POST /api/v1/auth/pair → 200 (got ${res.status})`)
+  check(res.status === 200, `POST /api/auth/device/register → 200 (got ${res.status})`)
   const body = await res.json()
-  check(typeof body.deviceJwt === "string", "pair redeem returned a device JWT")
-  return body.deviceJwt
+  check(
+    body.signaling?.roomDescriptor?.mobileSigningKey === signalingPublicKey,
+    "registration returned the bound signaling descriptor"
+  )
+  const tokenChallenge = await requestDeviceChallenge(payload.tenant)
+  const tokenResponse = await fetch(`${SERVER_URL}/api/auth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tenantId: payload.tenant,
+      deviceId,
+      challengeId: tokenChallenge.challengeId,
+      challengeNonce: tokenChallenge.nonce,
+      proof: await deviceProof(
+        authKeys.privateKey,
+        tokenChallenge.nonce,
+        "POST",
+        "/api/auth/token"
+      ),
+    }),
+  })
+  check(tokenResponse.status === 200, `POST /api/auth/token → 200 (got ${tokenResponse.status})`)
+  const token = await tokenResponse.json()
+  const claims = JSON.parse(Buffer.from(token.accessToken.split(".")[1], "base64url").toString())
+  return {
+    deviceId,
+    privateKey: authKeys.privateKey,
+    accessToken: token.accessToken,
+    accessJti: claims.jti,
+    signalingRoom: {
+      descriptor: body.signaling.roomDescriptor,
+      mobile: signalingKeys,
+    },
+  }
+}
+
+async function requestDeviceChallenge(tenantId) {
+  const response = await fetch(`${SERVER_URL}/api/auth/device/challenge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tenantId }),
+  })
+  return response.json()
+}
+
+function spkiPem(buffer) {
+  const base64 = Buffer.from(buffer).toString("base64")
+  return `-----BEGIN PUBLIC KEY-----\n${base64.match(/.{1,64}/g).join("\n")}\n-----END PUBLIC KEY-----\n`
+}
+
+async function deviceProof(privateKey, nonce, method, path) {
+  const now = Math.floor(Date.now() / 1000)
+  const header = Buffer.from(JSON.stringify({ alg: "ES256", typ: "dpop+jwt" })).toString(
+    "base64url"
+  )
+  const payload = Buffer.from(
+    JSON.stringify({ nonce, htm: method, htu: path, iat: now, exp: now + 60, jti: randomUUID() })
+  ).toString("base64url")
+  const signingInput = `${header}.${payload}`
+  const signature = await webcrypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    privateKey,
+    Buffer.from(signingInput)
+  )
+  return `${signingInput}.${Buffer.from(signature).toString("base64url")}`
 }
 
 async function dataPlaneRoundtrip(jwt) {
@@ -452,10 +560,23 @@ async function chatTurn(jwt) {
   )
   check(sendRes.status === 200, `claude_send → 200 (got ${sendRes.status})`)
 
-  // Watch /ws/v1/events for sidecar frames on our session.
+  const ticketPath = "/api/auth/socket-ticket"
+  const ticketResponse = await fetch(`${SERVER_URL}${ticketPath}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${jwt.accessToken}`,
+      DPoP: await deviceProof(jwt.privateKey, jwt.accessJti, "POST", ticketPath),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ channel: "events" }),
+  })
+  const { ticket } = await ticketResponse.json()
+  check(ticketResponse.ok && typeof ticket === "string", "chat event socket ticket issued")
+
+  // Watch canonical /ws/events with the single-use path-bound ticket.
   const sawEvent = await new Promise((resolve) => {
     const ws = new WebSocket(
-      `${SERVER_URL.replace(/^http/, "ws")}/ws/v1/events?token=${encodeURIComponent(jwt)}`
+      `${SERVER_URL.replace(/^http/, "ws")}/ws/events?ticket=${encodeURIComponent(ticket)}`
     )
     const timer = setTimeout(() => {
       ws.close()
@@ -542,8 +663,192 @@ async function webhookIngressShape() {
   check(body?.error === "adapter not registered", "webhook rejection shape is deterministic")
 }
 
-/** Device JWT from tier 2, reused by tier 3's proxied-WS assertion. */
-let tier2Jwt = null
+function encodeWebSocketFrame(opcode, payload = Buffer.alloc(0)) {
+  const body = Buffer.isBuffer(payload) ? payload : Buffer.from(payload)
+  const mask = randomBytes(4)
+  let header
+  if (body.length < 126) {
+    header = Buffer.from([0x80 | opcode, 0x80 | body.length])
+  } else if (body.length <= 0xffff) {
+    header = Buffer.alloc(4)
+    header[0] = 0x80 | opcode
+    header[1] = 0x80 | 126
+    header.writeUInt16BE(body.length, 2)
+  } else {
+    header = Buffer.alloc(10)
+    header[0] = 0x80 | opcode
+    header[1] = 0x80 | 127
+    header.writeBigUInt64BE(BigInt(body.length), 2)
+  }
+  const masked = Buffer.from(body)
+  for (let i = 0; i < masked.length; i++) masked[i] ^= mask[i % mask.length]
+  return Buffer.concat([header, mask, masked])
+}
+
+/** Minimal authenticated WebSocket client for the OneBot smoke stub. */
+function openOneBotStub(adapterId, bearer) {
+  const url = new URL(`/connectors/ws/onebot/${encodeURIComponent(adapterId)}`, SERVER_URL)
+  const client = url.protocol === "https:" ? https : http
+  const key = randomBytes(16).toString("base64")
+  let socket
+  let buffer = Buffer.alloc(0)
+  const inbox = []
+  const waiters = []
+
+  const push = (message) => {
+    if (waiters.length) waiters.shift()(message)
+    else inbox.push(message)
+  }
+  const consume = () => {
+    while (buffer.length >= 2) {
+      const opcode = buffer[0] & 0x0f
+      const masked = (buffer[1] & 0x80) !== 0
+      let length = buffer[1] & 0x7f
+      let offset = 2
+      if (length === 126) {
+        if (buffer.length < 4) return
+        length = buffer.readUInt16BE(2)
+        offset = 4
+      } else if (length === 127) {
+        if (buffer.length < 10) return
+        const wideLength = buffer.readBigUInt64BE(2)
+        if (wideLength > BigInt(Number.MAX_SAFE_INTEGER)) fatal("OneBot frame is too large")
+        length = Number(wideLength)
+        offset = 10
+      }
+      const maskOffset = masked ? 4 : 0
+      if (buffer.length < offset + maskOffset + length) return
+      const mask = masked ? buffer.subarray(offset, offset + 4) : null
+      offset += maskOffset
+      const payload = Buffer.from(buffer.subarray(offset, offset + length))
+      buffer = buffer.subarray(offset + length)
+      if (mask) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4]
+      if (opcode === 0x1) {
+        try {
+          push(JSON.parse(payload.toString("utf8")))
+        } catch {
+          // Ignore non-JSON text frames; OneBot actions are JSON objects.
+        }
+      } else if (opcode === 0x8) {
+        push(null)
+      } else if (opcode === 0x9) {
+        socket.write(encodeWebSocketFrame(0xa, payload))
+      }
+    }
+  }
+
+  const opened = new Promise((resolve, reject) => {
+    const request = client.request(url, {
+      method: "GET",
+      rejectUnauthorized: false,
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Key": key,
+        "Sec-WebSocket-Version": "13",
+      },
+    })
+    request.once("upgrade", (_response, upgraded, head) => {
+      socket = upgraded
+      socket.on("data", (chunk) => {
+        buffer = Buffer.concat([buffer, chunk])
+        consume()
+      })
+      socket.once("error", reject)
+      if (head.length) {
+        buffer = Buffer.concat([buffer, head])
+        consume()
+      }
+      resolve()
+    })
+    request.once("response", (response) =>
+      reject(new Error(`OneBot WebSocket upgrade returned HTTP ${response.statusCode}`))
+    )
+    request.once("error", reject)
+    request.end()
+  })
+
+  return {
+    opened,
+    send: (value) => socket.write(encodeWebSocketFrame(0x1, JSON.stringify(value))),
+    next: (timeoutMs = 120_000) =>
+      inbox.length
+        ? Promise.resolve(inbox.shift())
+        : Promise.race([
+            new Promise((resolve) => waiters.push(resolve)),
+            delay(timeoutMs).then(() => null),
+          ]),
+    close: () => socket?.end(encodeWebSocketFrame(0x8)),
+  }
+}
+
+async function tierIm() {
+  log("tier: im")
+  const adapterId = process.env.COGNIA_SMOKE_ONEBOT_ADAPTER_ID
+  const bearer = process.env.COGNIA_SMOKE_ONEBOT_BEARER
+  if (!adapterId || !bearer || !process.env.ANTHROPIC_API_KEY) {
+    fatal(
+      "--tier im requires COGNIA_SMOKE_ONEBOT_ADAPTER_ID, " +
+        "COGNIA_SMOKE_ONEBOT_BEARER, and ANTHROPIC_API_KEY"
+    )
+  }
+
+  const token = (await composeExec(["cognia-server", "issue-service-token"])).trim()
+  const registered = await containerRpc("connectors_list_adapters", {}, token)
+  check(
+    registered?.adapters?.some(
+      (adapter) => adapter.adapter_id === adapterId && adapter.adapter_type === "onebot"
+    ),
+    `OneBot adapter ${adapterId} is running in the headless brain`
+  )
+  if (failures) return
+
+  const stub = openOneBotStub(adapterId, bearer)
+  await stub.opened
+  stub.send({
+    time: Math.floor(Date.now() / 1000),
+    self_id: 10001,
+    post_type: "message",
+    message_type: "private",
+    sub_type: "friend",
+    message_id: Date.now(),
+    user_id: 20002,
+    message: [{ type: "text", data: { text: "Reply with the single word: pong" } }],
+    raw_message: "Reply with the single word: pong",
+    sender: { user_id: 20002, nickname: "compose-smoke" },
+  })
+
+  let outbound = null
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline && !outbound) {
+    const action = await stub.next(Math.max(1, deadline - Date.now()))
+    if (!action) break
+    if (action.action === "send_private_msg") outbound = action
+    stub.send({
+      status: "ok",
+      retcode: 0,
+      data:
+        action.action === "get_login_info"
+          ? { user_id: 10001, nickname: "cognia-smoke" }
+          : action.action === "get_version_info"
+            ? { app_name: "cognia-smoke", app_version: "1" }
+            : { message_id: Date.now() },
+      echo: action.echo,
+    })
+  }
+  stub.close()
+  check(outbound?.params?.user_id === 20002, "OneBot reply targets the inbound private chat")
+  check(
+    JSON.stringify(outbound?.params?.message ?? "")
+      .toLowerCase()
+      .includes("pong"),
+    "OneBot outbound action contains the brain's AI reply"
+  )
+}
+
+/** DPoP device identity from tier 2, reused by tier 3's proxied-WS assertion. */
+let tier2Auth = null
 
 async function tierServer() {
   log("tier: server")
@@ -562,13 +867,13 @@ async function tierServer() {
   check(ready.brain.ready === true, "brain completed the bridge hello")
   check(typeof ready.sidecar?.restart_count === "number", "healthz reports the sidecar block")
 
-  const jwt = await pairDevice()
-  if (!jwt) {
+  const auth = await pairDevice()
+  if (!auth) {
     fatal("pairing failed — cannot continue tier 2")
   }
-  tier2Jwt = jwt
-  await dataPlaneRoundtrip(jwt)
-  await chatTurn(jwt)
+  tier2Auth = auth
+  await dataPlaneRoundtrip(auth)
+  await chatTurn(auth)
   await externalAgentTurn()
   await webhookIngressShape()
 }
@@ -622,17 +927,38 @@ async function tierTls() {
   )
 
   // 2. Plain HTTPS through the proxy reaches the backend.
-  const health = await fetch(`${CADDY_URL}/api/v1/healthz`)
-  check(health.ok, `GET ${CADDY_URL}/api/v1/healthz → 200 (got ${health.status})`)
+  const health = await fetch(`${CADDY_URL}/healthz`)
+  check(health.ok, `GET ${CADDY_URL}/healthz → 200 (got ${health.status})`)
+
+  const authConfigResponse = await fetch(`${CADDY_URL}/api/auth/config`)
+  const authConfig = await authConfigResponse.json()
+  const expectedSignalingUrl = `${CADDY_URL.replace(/^http/, "ws")}/v2/signaling`
+  check(authConfigResponse.ok, "Caddy exposes /api/auth/config")
+  check(
+    authConfig?.signaling?.url === expectedSignalingUrl,
+    `auth config publishes the same-origin signaling URL (${expectedSignalingUrl})`
+  )
 
   // 3. WebSocket upgrade proxies natively.
-  if (!tier2Jwt) {
-    skip("no device JWT from tier 2 — proxied WS upgrade not exercised")
+  if (!tier2Auth) {
+    skip("no DPoP device identity from tier 2 — proxied WS upgrade not exercised")
     return
   }
+  const ticketPath = "/api/auth/socket-ticket"
+  const ticketResponse = await fetch(`${CADDY_URL}${ticketPath}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${tier2Auth.accessToken}`,
+      DPoP: await deviceProof(tier2Auth.privateKey, tier2Auth.accessJti, "POST", ticketPath),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ channel: "events" }),
+  })
+  const { ticket } = await ticketResponse.json()
+  check(ticketResponse.ok && typeof ticket === "string", "Caddy issued a single-use WS ticket")
   const wsUp = await new Promise((resolve) => {
     const ws = new WebSocket(
-      `${CADDY_URL.replace(/^http/, "ws")}/ws/v1/events?token=${encodeURIComponent(tier2Jwt)}`
+      `${CADDY_URL.replace(/^http/, "ws")}/ws/events?ticket=${encodeURIComponent(ticket)}`
     )
     const timer = setTimeout(() => {
       ws.close()
@@ -648,7 +974,27 @@ async function tierTls() {
       resolve(false)
     })
   })
-  check(wsUp, "/ws/v1/events upgrades through the Caddy proxy")
+  check(wsUp, "/ws/events upgrades through the Caddy proxy")
+
+  // 4. The registered mobile role authenticates through Caddy and observes
+  // the headless desktop role connected through the compose-internal URL.
+  const signaling = signalingWs("mobile-via-caddy", authConfig.signaling.url)
+  await signaling.open()
+  const challenge = await signaling.next()
+  check(challenge?.kind === "challenge", "mobile signaling received a challenge through Caddy")
+  signaling.send(await signalingSubscribe(tier2Auth.signalingRoom, "mobile", challenge.challenge))
+  const subscribed = await signaling.next(10_000)
+  check(subscribed?.kind === "subscribed", "mobile signaling authenticated through Caddy")
+  let desktopConnected = subscribed?.peers?.some((peer) => peer?.proof?.role === "desktop") ?? false
+  if (!desktopConnected) {
+    const joined = await signaling.next(10_000)
+    desktopConnected = joined?.kind === "peerJoined" && joined?.peer?.proof?.role === "desktop"
+  }
+  check(
+    desktopConnected,
+    "mobile signaling sees the headless desktop peer on the internal endpoint"
+  )
+  signaling.close()
 }
 
 // ---------------------------------------------------------------------------
@@ -656,8 +1002,9 @@ async function tierTls() {
 async function main() {
   const tier = parseTier()
   await tierServices()
-  if (tier === "server" || tier === "tls") await tierServer()
+  if (tier === "server" || tier === "tls" || tier === "im") await tierServer()
   if (tier === "tls") await tierTls()
+  if (tier === "im") await tierIm()
 
   if (failures > 0) fatal(`${failures} check(s) failed`)
   log("OK — all checks passed")

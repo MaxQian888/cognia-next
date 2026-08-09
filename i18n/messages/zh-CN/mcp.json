@@ -51,7 +51,9 @@
     "clone": "复制 {name}",
     "favorite": "将 {name} 加入收藏",
     "selectAria": "选择 {name}",
-    "unfavorite": "将 {name} 移出收藏"
+    "unfavorite": "将 {name} 移出收藏",
+    "reviewTrust": "检查信任设置",
+    "reviewed": "已审查"
   },
   "chips": {
     "addingToast": "{agent}：正在添加 “{name}”…",
@@ -61,7 +63,8 @@
     "tooltipDesktopOnly": "{name}（仅桌面端）",
     "tooltipMissing": "本机未检测到 {name}",
     "tooltipReadOnly": "{name}（只读）",
-    "tooltipRemove": "点击从 {name} 中移除"
+    "tooltipRemove": "点击从 {name} 中移除",
+    "plaintextCredentialWarning": "此服务器配置包含明文凭据。"
   },
   "delete": {
     "body": "“{name}” 将从 Cognia 与所有正在投影的外部 Agent 中移除。",
@@ -100,8 +103,11 @@
     "forwardedNote": "按服务器名称原样转发给 SDK。值可引用 $HOME 等环境变量，运行时由 SDK 替换。",
     "headers": "请求头",
     "kvAdd": "添加",
+    "copyValue": "复制值",
+    "hideValues": "隐藏值",
     "kvEmpty": "暂无条目。",
     "kvRemove": "删除该行",
+    "showValues": "显示值",
     "name": "名称",
     "placeholderArgs": "-y\n@modelcontextprotocol/server-filesystem\n/Users/me/work",
     "placeholderCommand": "npx",
@@ -181,7 +187,31 @@
     "statServers": "服务器",
     "stopped": "已停止",
     "title": "健康与日志",
-    "windowNote": "仅显示最近的日志行。"
+    "windowNote": "仅显示最近的日志行。",
+    "colAgent": "智能体",
+    "colAttempts": "尝试次数",
+    "colCapability": "能力",
+    "colConnectP95": "连接 p95",
+    "colEvents": "事件",
+    "colFailureRate": "失败率",
+    "colLag": "延迟",
+    "colLastError": "最近错误",
+    "colServer": "服务器",
+    "colStatus": "状态",
+    "exportLog": "导出日志",
+    "exported": "已导出 MCP 健康日志。",
+    "metricCacheHits": "能力缓存命中",
+    "metricConnectLatency": "连接延迟 p95",
+    "metricDenials": "策略拒绝",
+    "metricRetries": "重试",
+    "metricTimeouts": "超时",
+    "metricWarmReuse": "热复用",
+    "operationsEmpty": "尚无 MCP 操作记录。",
+    "operationsSubtitle": "按服务器聚合连接与能力结果。",
+    "operationsTitle": "操作",
+    "syncEmpty": "尚无智能体投影任务记录。",
+    "syncLagValue": "{seconds} 秒",
+    "syncTitle": "智能体投影同步"
   },
   "import": {
     "back": "返回",
@@ -255,13 +285,13 @@
     "edit": "编辑 {name}",
     "enableSwitch": "在 cognia 中启用 {name}",
     "failed": "失败",
+    "logs": "查看 {name} 日志",
+    "logsTooltip": "查看日志",
     "test": "测试 {name}",
     "testDesktopOnly": "仅桌面端可用",
     "testTooltip": "测试连接（10 秒超时）",
     "toolsOne": "{count} 个工具",
-    "toolsOther": "{count} 个工具",
-    "logs": "查看 {name} 日志",
-    "logsTooltip": "查看日志"
+    "toolsOther": "{count} 个工具"
   },
   "tabs": {
     "agents": "Agent 同步",

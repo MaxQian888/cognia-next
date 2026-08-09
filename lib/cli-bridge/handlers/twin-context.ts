@@ -1,6 +1,6 @@
 /**
  * Renderer handler for the CLI bridge's `twin_context_get` command
- * (`POST /api/v1/dev/twin/context`).
+ * (`POST /api/dev/twin/context`).
  *
  * The CLI is a separate Node process with its own fake-indexeddb — it can
  * never reach the GUI's Dexie tables or the native vector store, so twin

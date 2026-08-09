@@ -36,6 +36,7 @@ const CONNECT_DEADLINE_MS = 8_000
 const SUBSCRIBE_DEADLINE_MS = 5_000
 const PONG_DEADLINE_MS = 10_000
 const HEALTHY_RESET_MS = 60_000
+const OUTBOUND_QUEUE_CAPACITY = 64
 
 export type SignalingState =
   "idle" | "connecting" | "subscribed" | "awaiting-peer" | "reconnecting" | "rejected" | "closed"
@@ -75,6 +76,12 @@ interface PeerCrypto {
   inboundKey: CryptoKey
 }
 
+interface OutboundSession {
+  socket: WebSocket
+  tail: Promise<void>
+  pending: number
+}
+
 export class SignalingClient {
   private readonly opts: Required<
     Omit<
@@ -105,7 +112,7 @@ export class SignalingClient {
   private reconnectAttempt = 0
   private destroyed = false
   private rejected = false
-  private outboundTail: Promise<void> = Promise.resolve()
+  private outboundSession: OutboundSession | null = null
   private inboundTail: Promise<void> = Promise.resolve()
 
   private readonly listeners: {
@@ -155,10 +162,13 @@ export class SignalingClient {
 
   async send(kind: EnvelopeKind, body: unknown): Promise<void> {
     const socket = this.ws
+    const session = this.outboundSession
     const proof = this.ownProof
     const peer = this.peerCrypto
     if (
       !socket ||
+      !session ||
+      session.socket !== socket ||
       socket.readyState !== WebSocket.OPEN ||
       !proof ||
       !peer ||
@@ -166,8 +176,13 @@ export class SignalingClient {
     ) {
       throw new Error("signaling: authenticated peer is not connected")
     }
+    if (session.pending >= OUTBOUND_QUEUE_CAPACITY) {
+      this.failSocket("outbound_queue_overflow")
+      throw new Error("signaling: outbound signaling queue is full")
+    }
+    session.pending++
     const seq = this.outboundSeq++
-    const operation = this.outboundTail.then(async () => {
+    const operation = session.tail.then(async () => {
       if (this.destroyed || this.ws !== socket || socket.readyState !== WebSocket.OPEN) {
         throw new Error("signaling: connection changed before send")
       }
@@ -192,8 +207,11 @@ export class SignalingClient {
       }
       socket.send(JSON.stringify(frame))
     })
-    this.outboundTail = operation.catch(() => undefined)
-    return operation
+    const tracked = operation.finally(() => {
+      session.pending--
+    })
+    session.tail = tracked.catch(() => undefined)
+    return tracked
   }
 
   close(): void {
@@ -219,6 +237,7 @@ export class SignalingClient {
     this.setState(this.reconnectAttempt > 0 ? "reconnecting" : "connecting")
     const socket = this.opts.webSocketFactory(this.connectUrl())
     this.ws = socket
+    this.outboundSession = { socket, tail: Promise.resolve(), pending: 0 }
     this.armDeadline(CONNECT_DEADLINE_MS, "connect_timeout")
 
     socket.onopen = () => {
@@ -245,6 +264,7 @@ export class SignalingClient {
     socket.onclose = () => {
       if (this.ws !== socket) return
       this.ws = null
+      if (this.outboundSession?.socket === socket) this.outboundSession = null
       this.clearConnectionTimers()
       this.resetSessionCrypto()
       if (!this.destroyed && !this.rejected) this.scheduleReconnect()
@@ -469,6 +489,7 @@ export class SignalingClient {
   private closeSocket(): void {
     const socket = this.ws
     this.ws = null
+    if (this.outboundSession?.socket === socket) this.outboundSession = null
     if (socket) {
       try {
         socket.close()
@@ -483,7 +504,6 @@ export class SignalingClient {
     this.ownProof = null
     this.peerCrypto = null
     this.outboundSeq = 1
-    this.outboundTail = Promise.resolve()
     this.replay = new StrictReplayWindowV2()
   }
 

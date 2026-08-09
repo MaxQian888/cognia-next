@@ -44,9 +44,36 @@ export interface LocalCharacterPackFile {
 }
 ```
 
-<Status type="warning">
-Ed25519 签名字段（`schema.ts:51-55`）是为与 WASM 验证器的前向兼容而预留的。本地角色包存储目前尚未验证签名——未签名文件如今会被接受，畸形的签名形状仅在其结构层面被拒绝。验证是一项已记录在案的后续工作。
-</Status>
+### 签名校验
+
+签名**已经**会被校验（2026-08-03 起，见 ADR-0030 修订）。未签名文件仍然完全受支持，并会被明确标注；而一个*已签名*但验签不通过的文件会在导入时被拒绝，启动扫描时被跳过。
+
+被签名的字节是**仅 `pack` 对象**的 RFC 8785 规范化 JSON。`schemaVersion` 与 `signature` 属于外层包装，在规范化之前被剥离 —— 这正是"导入一个已签名的 v1 文件、按 v2 重写之后签名依然有效"的原因，也是提升 `CHARACTER_PACK_FILE_SCHEMA_VERSION` 不需要发起一轮重新签名的原因。
+
+信任只有两个状态，没有第三个：
+
+```ts
+// lib/plugin/character-pack/pack-trust.ts
+type CharacterPackTrust =
+  | { state: "verified"; algo; publicKey; fingerprint; shortFingerprint; signature }
+  | { state: "unsigned" }
+```
+
+刻意没有 `"invalid"` 状态：无效的已签名包根本进不了 registry，因此这个类型也就无法表达它。`resolvePackTrust` 失败即关闭 —— 签名存在却无法校验（`reason: "host-unavailable"`）时，拒绝该包，而不是假设它没问题。
+
+由**插件**贡献的角色包完全不显示信任徽章。它们的真实性由插件安装回执锚定，在旁边标注"未签名"等于声称存在一个并不存在的缺口。
+
+签名请使用 CLI：
+
+```bash
+cognia plugin keygen --out-dir .cognia
+```
+
+```bash
+cognia pack sign my-pack.cognia-pack.json --key .cognia/plugin.private.b64
+```
+
+签名**内嵌**写入文件自身的 `signature` 对象，因此角色包始终是一个自包含文件。`cognia pack sign` 在写盘前会先自验。`cognia pack verify <file>` 会按宿主的口径报告 `verified` / `unsigned` / `invalid`；`--require-signature` 让"未签名"在 CI 中变成失败，`--public-key <b64>` 则钉住期望的公钥 —— 那是唯一能识别"被他人重新签名"的检查。
 
 `parseLocalPackFile` 校验并收窄任意 JSON。校验规则：
 

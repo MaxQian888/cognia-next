@@ -180,7 +180,20 @@ export async function completeConnectorInboundJob(
     updatedAt: options.now ?? Date.now(),
   }
   if (options.executionRunId !== undefined) changes.executionRunId = options.executionRunId
-  await withDbReopenRetry(() => getDb().connectorInboundJobs.update(id, changes))
+  await withDbReopenRetry(() =>
+    // One Collection.modify transaction provides the compare-and-set without
+    // inheriting a caller's Dexie transaction context.
+    getDb()
+      .connectorInboundJobs.where("id")
+      .equals(id)
+      .filter(
+        (current) =>
+          current.status === "queued" ||
+          current.status === "running" ||
+          current.status === "steering"
+      )
+      .modify(changes)
+  )
 }
 
 /**
@@ -293,21 +306,31 @@ export async function recoverStaleConnectorInboundJobs(
 
 export async function continueConnectorInboundJobSafely(
   id: string,
-  options: { now?: number } = {}
+  options: { now?: number; recoveryAnchor?: Record<string, unknown> } = {}
 ): Promise<boolean> {
   const db = getDb()
   return db.transaction("rw", db.connectorInboundJobs, async () => {
     const current = await db.connectorInboundJobs.get(id)
     if (!current || current.status !== "recovery_required") return false
+    const continuationText =
+      "Continue from the persisted session at the last verified safe boundary. Do not repeat the original user request or completed tool calls."
+    const channelData = { ...current.event.channelData }
+    // A recovery turn must enter the canonical replay path. Retaining this
+    // hint lets the bus live-steer it into an unrelated active run before the
+    // recovery anchor and drift checks execute.
+    delete channelData.activeRunDispatchMode
     await db.connectorInboundJobs.update(id, {
       status: "steering",
       dispatchMode: "steer",
       event: {
         ...current.event,
+        plainText: continuationText,
+        segments: [{ type: "text", text: continuationText }],
         channelData: {
-          ...current.event.channelData,
+          ...channelData,
           dispatchIntent: "steer-replay",
           recoveryIntent: "continue_safely",
+          ...(options.recoveryAnchor ? { recoveryAnchor: options.recoveryAnchor } : {}),
         },
       },
       recoveryReason: "operator_continue_at_safe_boundary",

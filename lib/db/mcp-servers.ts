@@ -1,5 +1,22 @@
-import type { AgentId, McpServer, McpTransport } from "@cognia/agent-config-types"
+import type {
+  AgentId,
+  McpServer,
+  McpServerConfig,
+  McpServerOrigin,
+  McpServerTrust,
+  McpTransport,
+} from "@cognia/agent-config-types"
 import { CLAUDE_CODE_AGENT } from "@/lib/claude/agents/claude-code"
+import { MCP_AGENT_ADAPTERS } from "@/lib/claude/agents"
+import { externalizeMcpSecrets, hasMcpSecretRefs, resolveMcpSecrets } from "@/lib/mcp/credentials"
+import {
+  assertUniqueMcpNamespace,
+  fingerprintMcpDefinition,
+  normalizeMcpNamespace,
+  toMcpServerSummary,
+  validateMcpDefinition,
+} from "@/lib/mcp/server-definition"
+import { validateMcpRemoteEgress } from "@/lib/mcp/policy"
 import { getDb } from "./schema"
 
 function newId() {
@@ -14,7 +31,9 @@ export async function listEnabledMcpServers(): Promise<McpServer[]> {
   // `enabled` is indexed but we treat the boolean stored value as 1/0 via
   // Dexie's filtering — equality on booleans is supported.
   return getDb()
-    .mcpServers.filter((s) => s.enabled)
+    .mcpServers.filter(
+      (s) => s.enabled && (!s.trust || s.trust.state === "legacy" || s.trust.state === "trusted")
+    )
     .toArray()
 }
 
@@ -26,26 +45,48 @@ export async function createMcpServer(
   partial: Pick<McpServer, "name" | "transport" | "config"> & {
     enabled?: boolean
     appsEnabled?: McpServer["appsEnabled"]
+    displayName?: string
+    origin?: McpServerOrigin
+    trust?: McpServerTrust
     /** Optional plugin origin tag (§A-6). Set by the plugin manager only. */
     pluginId?: string
   }
 ): Promise<McpServer> {
   const now = Date.now()
-  const server: McpServer = {
+  const origin = partial.origin ?? (partial.pluginId ? "plugin" : "manual")
+  const trust = partial.trust ?? { state: "pending" as const }
+  const reviewed = trust.state === "trusted" || trust.state === "legacy"
+  let server: McpServer = {
     id: newId(),
-    name: partial.name.trim() || "unnamed",
+    name: partial.name.trim(),
+    displayName: partial.displayName?.trim() || partial.name.trim(),
+    schemaVersion: 1,
+    revision: 1,
+    credentialVersion: 0,
+    origin,
+    trust,
     transport: partial.transport,
     config: partial.config,
-    enabled: partial.enabled ?? true,
-    appsEnabled: partial.appsEnabled ?? {},
+    enabled: reviewed ? (partial.enabled ?? true) : false,
+    appsEnabled: reviewed ? (partial.appsEnabled ?? {}) : {},
     // Tag the row only when explicitly provided so user-created rows stay
     // structurally identical to pre-port serialized data.
     ...(partial.pluginId !== undefined ? { pluginId: partial.pluginId } : {}),
     createdAt: now,
     updatedAt: now,
   }
-  await getDb().mcpServers.put(server)
-  scheduleSyncFor(server.appsEnabled)
+  validateMcpDefinition(server)
+  assertUniqueMcpNamespace(server.name, await listMcpServers())
+  server = (await externalizeMcpSecrets(server)).server
+
+  const db = getDb()
+  await db.transaction("rw", db.mcpServers, db.mcpServerSummaries, db.mcpSyncJobs, async () => {
+    assertUniqueMcpNamespace(server.name, await db.mcpServers.toArray())
+    await db.mcpServers.add(server)
+    await db.mcpServerSummaries.put(toMcpServerSummary(server))
+    await enqueueSyncJobs(server.appsEnabled, server.revision ?? 1)
+  })
+  wakeSyncCoordinator()
   return server
 }
 
@@ -63,14 +104,85 @@ export async function listMcpServersByPlugin(pluginId: string): Promise<McpServe
 
 export async function updateMcpServer(
   id: string,
-  patch: Partial<Pick<McpServer, "name" | "transport" | "config" | "enabled" | "appsEnabled">>
+  patch: Partial<
+    Pick<McpServer, "name" | "displayName" | "transport" | "config" | "enabled" | "appsEnabled">
+  >
 ): Promise<void> {
-  // Capture the row's pre-patch apps map so we sync agents the toggle was
-  // *removed* from (otherwise we'd never delete from those files).
-  const prev = await getDb().mcpServers.get(id)
-  await getDb().mcpServers.update(id, { ...patch, updatedAt: Date.now() })
-  const merged = { ...(prev?.appsEnabled ?? {}), ...(patch.appsEnabled ?? {}) }
-  scheduleSyncFor(merged)
+  const db = getDb()
+  const prev = await db.mcpServers.get(id)
+  if (!prev) return
+
+  const now = Date.now()
+  const nextName = patch.name?.trim() ?? prev.name
+  let next: McpServer = {
+    ...prev,
+    ...patch,
+    name: nextName,
+    displayName: patch.displayName?.trim() || prev.displayName || nextName,
+    schemaVersion: 1,
+    revision: prev.revision ?? 1,
+    credentialVersion: prev.credentialVersion ?? 0,
+    origin: prev.origin ?? "manual",
+    trust: prev.trust ?? { state: "legacy" },
+    updatedAt: now,
+  }
+  validateMcpDefinition(next)
+  assertUniqueMcpNamespace(next.name, await db.mcpServers.toArray(), id)
+
+  const beforeFingerprint = fingerprintMcpDefinition(prev)
+  const afterFingerprint = fingerprintMcpDefinition(next)
+  const materialChange = beforeFingerprint !== afterFingerprint
+  if (materialChange) {
+    next.revision = (prev.revision ?? 1) + 1
+    next.trust = { state: "pending" }
+    next.enabled = false
+  }
+  next = (await externalizeMcpSecrets(next)).server
+
+  const affectedApps = mergeAffectedApps(prev.appsEnabled, next.appsEnabled)
+  const renamed = normalizeMcpNamespace(prev.name) !== normalizeMcpNamespace(next.name)
+  await db.transaction(
+    "rw",
+    db.mcpServers,
+    db.mcpServerSummaries,
+    db.mcpSyncJobs,
+    db.mcpCapabilityCache,
+    async () => {
+      assertUniqueMcpNamespace(next.name, await db.mcpServers.toArray(), id)
+      await db.mcpServers.put(next)
+      await db.mcpServerSummaries.put(toMcpServerSummary(next))
+      if (materialChange || next.credentialVersion !== prev.credentialVersion) {
+        await db.mcpCapabilityCache.where("serverId").equals(id).delete()
+      }
+      await enqueueSyncJobs(affectedApps, next.revision ?? 1, renamed ? [prev.name] : [])
+    }
+  )
+  wakeSyncCoordinator()
+}
+
+export async function reviewMcpServer(id: string, trusted: boolean): Promise<void> {
+  const db = getDb()
+  const server = await db.mcpServers.get(id)
+  if (!server) return
+  const now = Date.now()
+  const next: McpServer = {
+    ...server,
+    trust: trusted
+      ? {
+          state: "trusted",
+          reviewedFingerprint: fingerprintMcpDefinition(server),
+          reviewedAt: now,
+        }
+      : { state: "blocked" },
+    enabled: trusted ? server.enabled : false,
+    updatedAt: now,
+  }
+  await db.transaction("rw", db.mcpServers, db.mcpServerSummaries, db.mcpSyncJobs, async () => {
+    await db.mcpServers.put(next)
+    await db.mcpServerSummaries.put(toMcpServerSummary(next))
+    await enqueueSyncJobs(next.appsEnabled, next.revision ?? 1)
+  })
+  wakeSyncCoordinator()
 }
 
 export async function deleteMcpServer(id: string): Promise<void> {
@@ -78,30 +190,73 @@ export async function deleteMcpServer(id: string): Promise<void> {
   // the server out of their files (otherwise the entry would survive — after
   // delete, the name is no longer in `managedNames`, so the next project()
   // wouldn't know to remove it).
-  const prev = await getDb().mcpServers.get(id)
-  await getDb().mcpServers.delete(id)
-  if (prev) scheduleSyncFor(prev.appsEnabled, prev.name)
+  const db = getDb()
+  const prev = await db.mcpServers.get(id)
+  if (!prev) return
+  await db.transaction(
+    "rw",
+    db.mcpServers,
+    db.mcpServerSummaries,
+    db.mcpSyncJobs,
+    db.mcpCapabilityCache,
+    async () => {
+      await db.mcpServers.delete(id)
+      await db.mcpServerSummaries.delete(id)
+      await db.mcpCapabilityCache.where("serverId").equals(id).delete()
+      await enqueueSyncJobs(prev.appsEnabled, prev.revision ?? 1, [prev.name])
+    }
+  )
+  wakeSyncCoordinator()
 }
 
-/**
- * Fire-and-forget: lazily import the sync orchestrator so the DB module
- * stays self-contained (and the import doesn't bring Tauri IPC into web /
- * SSR contexts where it would error). `tombstone` is the name of a deleted
- * server that should be removed from the target agents' files.
- */
-function scheduleSyncFor(apps: McpServer["appsEnabled"], tombstone?: string): void {
-  if (!apps) return
-  const ids: AgentId[] = []
-  for (const [agentId, enabled] of Object.entries(apps)) {
-    if (enabled) ids.push(agentId as AgentId)
+const WRITABLE_AGENT_IDS = new Set(
+  MCP_AGENT_ADAPTERS.filter((adapter) => adapter.writable).map((adapter) => adapter.id)
+)
+
+function mergeAffectedApps(
+  before: McpServer["appsEnabled"],
+  after: McpServer["appsEnabled"]
+): McpServer["appsEnabled"] {
+  const affected: McpServer["appsEnabled"] = {}
+  for (const [agentId, selected] of [
+    ...Object.entries(before ?? {}),
+    ...Object.entries(after ?? {}),
+  ]) {
+    if (selected) affected[agentId as AgentId] = true
   }
-  if (ids.length === 0) return
-  void import("@/lib/claude/sync")
-    .then(({ scheduleSync }) => {
-      for (const id of ids) scheduleSync(id, tombstone)
+  return affected
+}
+
+async function enqueueSyncJobs(
+  apps: McpServer["appsEnabled"],
+  desiredRevision: number,
+  tombstones: ReadonlyArray<string> = []
+): Promise<void> {
+  if (!apps) return
+  const db = getDb()
+  const now = Date.now()
+  for (const [rawAgentId, selected] of Object.entries(apps)) {
+    if (!selected || !WRITABLE_AGENT_IDS.has(rawAgentId as AgentId)) continue
+    const agentId = rawAgentId as AgentId
+    const prior = await db.mcpSyncJobs.get(agentId)
+    await db.mcpSyncJobs.put({
+      id: agentId,
+      desiredRevision: Math.max(desiredRevision, prior?.desiredRevision ?? 0),
+      tombstones: [...new Set([...(prior?.tombstones ?? []), ...tombstones])],
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: now,
+      createdAt: prior?.createdAt ?? now,
+      updatedAt: now,
     })
+  }
+}
+
+function wakeSyncCoordinator(): void {
+  void import("@/lib/mcp/sync-coordinator")
+    .then(({ scheduleMcpSyncDrain }) => scheduleMcpSyncDrain())
     .catch(() => {
-      // Sync is best-effort; failure shouldn't block CRUD success.
+      // The durable row is the source of truth; startup will retry the drain.
     })
 }
 
@@ -113,12 +268,44 @@ function scheduleSyncFor(apps: McpServer["appsEnabled"], tombstone?: string): vo
  */
 export function buildMcpServerMap(servers: McpServer[]): Record<string, Record<string, unknown>> {
   const out: Record<string, Record<string, unknown>> = {}
+  const namespaces = new Set<string>()
   const sorted = [...servers].sort((a, b) => a.name.localeCompare(b.name))
   for (const s of sorted) {
     if (!s.enabled) continue
+    const normalized = normalizeMcpNamespace(s.name)
+    if (namespaces.has(normalized)) {
+      throw new Error(`Duplicate MCP namespace: ${s.name}`)
+    }
+    namespaces.add(normalized)
+    if (s.transport !== "stdio") {
+      const config = s.config as Record<string, unknown>
+      validateMcpRemoteEgress(String(config.url ?? ""), config.allowPrivateNetwork === true)
+    }
     out[s.name] = { type: s.transport, ...s.config }
   }
   return out
+}
+
+async function resolveMcpServerDefinitions(
+  servers: McpServer[],
+  resolveConfig: (config: McpServer["config"]) => Promise<Record<string, unknown>>
+): Promise<McpServer[]> {
+  return Promise.all(
+    servers.map(async (server) =>
+      hasMcpSecretRefs(server.config)
+        ? { ...server, config: (await resolveConfig(server.config)) as never }
+        : server
+    )
+  )
+}
+
+/** Resolve keyring-backed values before projecting an SDK-compatible map. */
+export async function buildMcpServerMapResolved(
+  servers: McpServer[],
+  resolveConfig: (config: McpServer["config"]) => Promise<Record<string, unknown>> =
+    resolveMcpSecrets
+): Promise<Record<string, Record<string, unknown>>> {
+  return buildMcpServerMap(await resolveMcpServerDefinitions(servers, resolveConfig))
 }
 
 /** A remote MCP server's stored OAuth state, projected for header injection. */
@@ -129,13 +316,14 @@ export interface McpAuthInjection {
 }
 
 export interface BuildMcpAuthDeps {
-  /** Load a server's stored OAuth entry by server NAME (keyring-backed on desktop). */
-  loadEntry: (serverName: string) => Promise<McpAuthInjection | undefined>
+  /** Load by stable server ID, with the namespace available for legacy fallback. */
+  loadEntry: (serverId: string, legacyName: string) => Promise<McpAuthInjection | undefined>
   /** Optionally refresh a near-expiry token; returns the refreshed entry. */
   refresh?: (serverName: string) => Promise<McpAuthInjection | undefined>
   /** Refresh when the token expires within this many ms. Default 60s. */
   refreshSkewMs?: number
   now?: () => number
+  resolveConfig?: (config: McpServer["config"]) => Promise<Record<string, unknown>>
 }
 
 /**
@@ -153,36 +341,42 @@ export async function buildMcpServerMapWithAuth(
   servers: McpServer[],
   deps: BuildMcpAuthDeps
 ): Promise<Record<string, Record<string, unknown>>> {
-  const base = buildMcpServerMap(servers)
+  const resolvedServers = await resolveMcpServerDefinitions(
+    servers,
+    deps.resolveConfig ?? resolveMcpSecrets
+  )
+  const base = buildMcpServerMap(resolvedServers)
   const now = deps.now ?? (() => Date.now())
   const skew = deps.refreshSkewMs ?? 60_000
-  const byName = new Map(servers.filter((s) => s.enabled).map((s) => [s.name, s]))
-  const out: Record<string, Record<string, unknown>> = {}
-
-  for (const [name, cfg] of Object.entries(base)) {
-    const server = byName.get(name)
-    if (!server || server.transport === "stdio") {
-      out[name] = cfg
-      continue
-    }
-    let entry: McpAuthInjection | undefined
-    try {
-      entry = await deps.loadEntry(name)
-      if (entry?.expiresAtMs && deps.refresh && entry.expiresAtMs - now() < skew) {
-        entry = (await deps.refresh(name)) ?? entry
+  const byName = new Map(resolvedServers.filter((s) => s.enabled).map((s) => [s.name, s]))
+  const entries = await Promise.all(
+    Object.entries(base).map(async ([name, cfg]) => {
+      const server = byName.get(name)
+      if (!server || server.transport === "stdio") {
+        return [name, cfg] as const
       }
-    } catch {
-      // Auth lookup is best-effort — fall back to the un-authed config.
-      entry = undefined
-    }
-    if (entry?.accessToken) {
-      const existing = (cfg.headers as Record<string, string> | undefined) ?? {}
-      out[name] = { ...cfg, headers: { ...existing, Authorization: `Bearer ${entry.accessToken}` } }
-    } else {
-      out[name] = cfg
-    }
-  }
-  return out
+      let entry: McpAuthInjection | undefined
+      try {
+        entry = await deps.loadEntry(server.id, name)
+        if (entry?.expiresAtMs && deps.refresh && entry.expiresAtMs - now() < skew) {
+          entry = (await deps.refresh(name)) ?? entry
+        }
+      } catch {
+        // Auth lookup is best-effort — fall back to the un-authed config.
+        entry = undefined
+      }
+      if (entry?.accessToken) {
+        const existing = (cfg.headers as Record<string, string> | undefined) ?? {}
+        return [
+          name,
+          { ...cfg, headers: { ...existing, Authorization: `Bearer ${entry.accessToken}` } },
+        ] as const
+      } else {
+        return [name, cfg] as const
+      }
+    })
+  )
+  return Object.fromEntries(entries)
 }
 
 export const MCP_TRANSPORTS: McpTransport[] = ["stdio", "sse", "http"]
@@ -192,7 +386,7 @@ export type McpImportStrategy = "skip" | "duplicate" | "overwrite"
 export interface McpImportDraft {
   name: string
   transport: McpTransport
-  config: Record<string, unknown>
+  config: McpServerConfig
 }
 
 export interface McpBulkImportResult {
@@ -211,7 +405,11 @@ export interface McpBulkImportResult {
  */
 export async function bulkImportMcpServers(
   drafts: McpImportDraft[],
-  strategy: McpImportStrategy = "skip"
+  strategy: McpImportStrategy = "skip",
+  origin: Extract<
+    McpServerOrigin,
+    "agent-import" | "project-import" | "plugin" | "preset"
+  > = "agent-import"
 ): Promise<McpBulkImportResult> {
   const result: McpBulkImportResult = {
     created: 0,
@@ -219,45 +417,71 @@ export async function bulkImportMcpServers(
     skipped: 0,
     errored: [],
   }
+  const db = getDb()
   const existing = await listMcpServers()
-  const byName = new Map(existing.map((s) => [s.name.toLowerCase(), s]))
+  const byName = new Map(existing.map((s) => [normalizeMcpNamespace(s.name), s]))
+  const creates: McpServer[] = []
+  const updates: McpServer[] = []
 
   for (const draft of drafts) {
     try {
-      if (!draft.name?.trim()) {
-        throw new Error("Server is missing a name.")
-      }
-      const collision = byName.get(draft.name.trim().toLowerCase())
-      if (!collision) {
-        const created = await createMcpServer({
-          name: draft.name.trim(),
-          transport: draft.transport,
-          config: draft.config,
-        })
-        byName.set(created.name.toLowerCase(), created)
-        result.created += 1
-        continue
-      }
-      if (strategy === "skip") {
+      const baseName = draft.name?.trim()
+      if (!baseName) throw new Error("Server is missing a name.")
+      let name = baseName
+      let collision = byName.get(normalizeMcpNamespace(name))
+      if (collision && strategy === "skip") {
         result.skipped += 1
         continue
       }
-      if (strategy === "overwrite") {
-        await updateMcpServer(collision.id, {
+      if (collision && strategy === "duplicate") {
+        let suffix = 1
+        do {
+          name = `${baseName}-imported${suffix === 1 ? "" : `-${suffix}`}`
+          suffix += 1
+          collision = byName.get(normalizeMcpNamespace(name))
+        } while (collision)
+      }
+
+      const now = Date.now()
+      if (collision && strategy === "overwrite") {
+        let next: McpServer = {
+          ...collision,
           transport: draft.transport,
           config: draft.config,
-        })
+          revision: (collision.revision ?? 1) + 1,
+          trust: { state: "pending" },
+          enabled: false,
+          updatedAt: now,
+        }
+        validateMcpDefinition(next)
+        next = (await externalizeMcpSecrets(next)).server
+        updates.push(next)
+        byName.set(normalizeMcpNamespace(next.name), next)
         result.updated += 1
         continue
       }
-      // duplicate path
-      const renamed = `${draft.name} (imported)`
-      const created = await createMcpServer({
-        name: renamed,
+
+      let next: McpServer = {
+        id: newId(),
+        name,
+        displayName: name,
+        schemaVersion: 1,
+        revision: 1,
+        credentialVersion: 0,
+        origin,
+        trust: { state: "pending" },
         transport: draft.transport,
         config: draft.config,
-      })
-      byName.set(created.name.toLowerCase(), created)
+        enabled: false,
+        appsEnabled: {},
+        createdAt: now,
+        updatedAt: now,
+      }
+      validateMcpDefinition(next)
+      assertUniqueMcpNamespace(next.name, [...byName.values()])
+      next = (await externalizeMcpSecrets(next)).server
+      creates.push(next)
+      byName.set(normalizeMcpNamespace(next.name), next)
       result.created += 1
     } catch (err) {
       result.errored.push({
@@ -265,6 +489,31 @@ export async function bulkImportMcpServers(
         error: err instanceof Error ? err.message : String(err),
       })
     }
+  }
+
+  if (creates.length || updates.length) {
+    await db.transaction(
+      "rw",
+      db.mcpServers,
+      db.mcpServerSummaries,
+      db.mcpSyncJobs,
+      db.mcpCapabilityCache,
+      async () => {
+        const current = await db.mcpServers.toArray()
+        for (const server of creates) {
+          assertUniqueMcpNamespace(server.name, current)
+          current.push(server)
+        }
+        if (creates.length) await db.mcpServers.bulkAdd(creates)
+        if (updates.length) await db.mcpServers.bulkPut(updates)
+        await db.mcpServerSummaries.bulkPut([...creates, ...updates].map(toMcpServerSummary))
+        for (const server of updates) {
+          await db.mcpCapabilityCache.where("serverId").equals(server.id).delete()
+          await enqueueSyncJobs(server.appsEnabled, server.revision ?? 1)
+        }
+      }
+    )
+    wakeSyncCoordinator()
   }
   return result
 }

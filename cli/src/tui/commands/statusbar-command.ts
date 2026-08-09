@@ -22,18 +22,37 @@ import type { CommandContext, CommandDescriptor, CommandEffect } from "./types"
 function handle(ctx: CommandContext): CommandEffect {
   const args = ctx.args.trim()
   if (!args) {
+    const currentSegments = ctx.config.statusBar?.segments ?? DEFAULT_STATUS_SEGMENTS
+    const currentTheme = ctx.config.statusBar?.theme ?? "default"
     return {
       kind: "openOverlay",
       overlay: {
         kind: "select",
-        title: "Status-bar theme",
-        items: STATUS_THEMES.map((t) => ({
-          id: t,
-          label: t,
-          hint: ctx.config.statusBar?.theme === t ? "current" : undefined,
-        })),
+        title: "Customize status bar",
+        items: [
+          ...(["minimal", "balanced", "detailed"] as const).map((preset) => ({
+            id: `preset ${preset}`,
+            label: `Layout: ${preset}`,
+          })),
+          ...STATUS_THEMES.map((theme) => ({
+            id: `theme ${theme}`,
+            label: `Theme: ${theme}`,
+            hint: currentTheme === theme ? "current" : undefined,
+          })),
+          ...STATUS_SEGMENTS.map((segment) => ({
+            id: `toggle ${segment}`,
+            label: `${currentSegments.includes(segment) ? "✓" : " "} Segment: ${segment}`,
+            hint: currentSegments.includes(segment) ? "shown" : "hidden",
+          })),
+          {
+            id: `hints ${ctx.config.statusBar?.showHints === false ? "on" : "off"}`,
+            label: "Idle command hints",
+            hint: ctx.config.statusBar?.showHints === false ? "hidden" : "shown",
+          },
+          { id: "reset", label: "Reset to defaults" },
+        ],
         index: 0,
-        onSelectCommand: "statusbar theme",
+        onSelectCommand: "statusbar",
       },
     }
   }
@@ -64,23 +83,54 @@ function handle(ctx: CommandContext): CommandEffect {
       }
       return { kind: "statusBar", patch: { segments: ids as StatusSegment[] } }
     }
+    case "toggle": {
+      if (!(STATUS_SEGMENTS as readonly string[]).includes(value)) {
+        return { kind: "notice", message: `Unknown segment "${value}"` }
+      }
+      const segment = value as StatusSegment
+      const current = ctx.config.statusBar?.segments ?? DEFAULT_STATUS_SEGMENTS
+      const segments = current.includes(segment)
+        ? current.filter((id) => id !== segment)
+        : [...current, segment]
+      if (segments.length === 0) {
+        return { kind: "notice", message: "The status bar needs at least one segment" }
+      }
+      return { kind: "statusBar", patch: { segments } }
+    }
+    case "preset": {
+      const presets: Record<string, StatusSegment[]> = {
+        minimal: ["model", "mode", "ctx"],
+        balanced: [...DEFAULT_STATUS_SEGMENTS],
+        detailed: [...STATUS_SEGMENTS],
+      }
+      const segments = presets[value]
+      return segments
+        ? { kind: "statusBar", patch: { segments } }
+        : { kind: "notice", message: "Presets: minimal, balanced, detailed" }
+    }
+    case "hints":
+      if (value !== "on" && value !== "off") {
+        return { kind: "notice", message: "Usage: /statusbar hints <on|off>" }
+      }
+      return { kind: "statusBar", patch: { showHints: value === "on" } }
     case "reset":
       return {
         kind: "statusBar",
-        patch: { segments: [...DEFAULT_STATUS_SEGMENTS], theme: "default" },
+        patch: { segments: [...DEFAULT_STATUS_SEGMENTS], theme: "default", showHints: true },
       }
     default:
       return {
         kind: "notice",
-        message: "Usage: /statusbar [theme <name> | segments <a,b,c> | reset]",
+        message:
+          "Usage: /statusbar [theme <name> | preset <name> | toggle <segment> | segments <a,b,c> | hints <on|off> | reset]",
       }
   }
 }
 
 export const statusbarCommand: CommandDescriptor = {
   name: "statusbar",
-  description: "customize the status bar (segments + theme)",
+  description: "customize status-bar layout, segments, theme and hints",
   category: "config",
-  argumentHint: "[theme <name> | segments <a,b,c>]",
+  argumentHint: "[theme|preset|toggle|segments|hints|reset]",
   handler: handle,
 }

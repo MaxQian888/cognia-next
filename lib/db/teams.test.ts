@@ -1,8 +1,6 @@
-/** @jest-environment jsdom */
 // Coverage for the teams CRUD layer + member management + supervisor
 // validation.
 
-import "fake-indexeddb/auto"
 import {
   TEAM_ORCHESTRATIONS,
   addMember,
@@ -17,18 +15,20 @@ import {
   updateMemberOverride,
   updateTeam,
 } from "./teams"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 // Built-in characters power the built-in team seed; making sure they exist
 // keeps `seedBuiltInTeams` consistent with what production runs.
 import { seedBuiltInCharacters } from "./characters"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().teams.clear()
 })
+afterAll(dbFixture.dispose)
 
 describe("TEAM_ORCHESTRATIONS", () => {
   it("exposes the four supported strategies in a stable order", () => {
@@ -93,6 +93,18 @@ describe("createTeam", () => {
     })
     expect(team.supervisorCharacterId).toBe("c2")
   })
+
+  it("persists and validates the per-turn response cap", async () => {
+    const team = await createTeam({
+      name: "Capped",
+      members: [{ characterId: "c1" }],
+      maxResponses: 3,
+    })
+    expect(team.maxResponses).toBe(3)
+    await expect(
+      createTeam({ name: "Invalid", members: [{ characterId: "c1" }], maxResponses: 13 })
+    ).rejects.toThrow(/1 through 12/)
+  })
 })
 
 describe("listTeams / getTeam", () => {
@@ -130,6 +142,11 @@ describe("updateTeam", () => {
 
   it("throws when team is missing", async () => {
     await expect(updateTeam("missing", { name: "x" })).rejects.toThrow(/not found/)
+  })
+
+  it("rejects an invalid response-cap patch", async () => {
+    const team = await createTeam({ name: "X", members: [{ characterId: "c1" }] })
+    await expect(updateTeam(team.id, { maxResponses: 0 })).rejects.toThrow(/1 through 12/)
   })
 
   it("respects explicit supervisor=undefined patch", async () => {

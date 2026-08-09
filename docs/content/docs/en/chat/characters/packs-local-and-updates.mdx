@@ -44,9 +44,36 @@ export interface LocalCharacterPackFile {
 }
 ```
 
-<Status type="warning">
-The Ed25519 signature field (`schema.ts:51-55`) is reserved for forward compatibility with the WASM verifier. The local-pack store does NOT yet verify signatures — unsigned files are accepted today, and a malformed signature shape is rejected only on its structure. Verification is a documented follow-up.
-</Status>
+### Signature verification
+
+Signatures **are** verified, as of 2026-08-03 (ADR-0030 amendment). Unsigned files remain fully supported and are visibly labelled; a *signed* file whose signature does not verify is refused at import and skipped by the boot scan.
+
+The signed bytes are the RFC 8785 canonical JSON of the **`pack` object alone**. `schemaVersion` and `signature` sit on the wrapper and are stripped before canonicalization — which is exactly why importing a signed v1 file and rewriting it as v2 leaves the signature valid, and why bumping `CHARACTER_PACK_FILE_SCHEMA_VERSION` needs no re-signing campaign.
+
+Trust has two states and no third:
+
+```ts
+// lib/plugin/character-pack/pack-trust.ts
+type CharacterPackTrust =
+  | { state: "verified"; algo; publicKey; fingerprint; shortFingerprint; signature }
+  | { state: "unsigned" }
+```
+
+There is deliberately no `"invalid"` state: an invalid signed pack never reaches the registry, so the type cannot represent one. `resolvePackTrust` fails closed — if a signature is present and cannot be checked (`reason: "host-unavailable"`), the pack is refused rather than assumed fine.
+
+Packs contributed by a **plugin** show no trust chip at all. Their authenticity is anchored by the plugin's install receipt, so an "Unsigned" label beside them would claim a gap that does not exist.
+
+To sign a pack, use the CLI:
+
+```bash
+cognia plugin keygen --out-dir .cognia
+```
+
+```bash
+cognia pack sign my-pack.cognia-pack.json --key .cognia/plugin.private.b64
+```
+
+The signature is written **in-band** into the file's own `signature` object, so a pack stays a single self-contained file. `cognia pack sign` self-verifies before writing anything. `cognia pack verify <file>` reports `verified` / `unsigned` / `invalid` exactly as the host will; `--require-signature` turns unsigned into a CI failure, and `--public-key <b64>` pins an expected key, which is the only check that detects a pack re-signed by someone else.
 
 `parseLocalPackFile` validates and narrows arbitrary JSON. Validation rules:
 

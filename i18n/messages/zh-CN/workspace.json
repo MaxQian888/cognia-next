@@ -63,6 +63,8 @@
   "switcher": {
     "active": "当前工作区：{name}",
     "allHeading": "全部",
+    "pin": "置顶 {name}",
+    "pinnedHeading": "已置顶",
     "clearSearch": "清除搜索",
     "empty": "暂无工作区",
     "folderCount": "{count, plural, other {# 个文件夹}}",
@@ -73,6 +75,7 @@
     "none": "无活动工作区",
     "openFolder": "打开文件夹…",
     "recentHeading": "最近",
+    "unpin": "取消置顶 {name}",
     "searchPlaceholder": "搜索工作区…",
     "untrustedHint": "未受信任的工作区"
   }

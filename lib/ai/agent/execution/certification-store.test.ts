@@ -1,9 +1,18 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto"
 
 import type { CompatibilityManifest } from "@cognia/agent-config-types/compatibility-manifest"
-import { manifestSigningPayload } from "@cognia/agent-config-types/compatibility-manifest"
+import {
+  compatibilityKeyId,
+  manifestSigningPayload,
+} from "@cognia/agent-config-types/compatibility-manifest"
 
-import { CertificationStore, type CertificationFs } from "./certification-store"
+import {
+  CertificationStore,
+  installCertificationRuntime,
+  recordCertifiedCapabilityOutcome,
+  resolveActiveCertification,
+  type CertificationFs,
+} from "./certification-store"
 
 function memFs(): CertificationFs & { files: Map<string, string> } {
   const files = new Map<string, string>()
@@ -41,7 +50,7 @@ function manifest(overrides: Partial<CompatibilityManifest> = {}): Compatibility
       agentSdkVersion: "0.3.183",
       claudeCodeVersion: "2.1.0",
       gatewayVersion: "0.1.0",
-      suiteVersion: "1",
+      suiteVersion: "2",
     },
     evidence: "cognia-verified",
     level: "core",
@@ -127,6 +136,207 @@ describe("CertificationStore", () => {
     expect(await store.readHealth()).toHaveLength(1)
     fs.files.set(`${ROOT}/health.json`, "{broken")
     expect(await store.readHealth()).toEqual([])
+  })
+})
+
+describe("active certification runtime", () => {
+  afterEach(() => {
+    installCertificationRuntime(null)
+  })
+
+  it("projects the signed active bundle into a certified resolver path", async () => {
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519")
+    const fs = memFs()
+    const unsigned = manifest({
+      capabilities: { streaming: "supported", compaction: "unsupported" },
+    })
+    const signed = {
+      ...unsigned,
+      signature: edSign(
+        null,
+        Buffer.from(manifestSigningPayload(unsigned), "utf8"),
+        privateKey
+      ).toString("base64"),
+    }
+    await seedBundle(fs, signed)
+    fs.files.set(
+      `${ROOT}/active-bundle.json`,
+      JSON.stringify({ bundleId: signed.bundleId, activatedAt: "2026-08-09T00:00:00.000Z" })
+    )
+    const store = new CertificationStore(fs, ROOT)
+    installCertificationRuntime({
+      store,
+      publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
+      current: {
+        agentSdkVersion: signed.key.agentSdkVersion,
+        gatewayVersion: signed.key.gatewayVersion,
+        claudeCodeVersion: signed.key.claudeCodeVersion,
+        suiteVersion: signed.key.suiteVersion,
+      },
+    })
+
+    await expect(
+      resolveActiveCertification({
+        runtime: signed.key.runtime,
+        ingressProtocol: signed.key.ingressProtocol,
+        routeMode: signed.key.routeMode,
+        translationMode: signed.key.translationMode,
+        deploymentRef: signed.key.deploymentRef,
+        model: signed.key.model,
+        requires: ["streaming"],
+        prefers: ["compaction"],
+      })
+    ).resolves.toEqual({
+      accepted: true,
+      certifiedPath: {
+        recordRef: expect.stringContaining("bundle-a:"),
+        evidence: "cognia-verified",
+        suiteVersion: "2",
+        disabledOptional: ["compaction"],
+      },
+    })
+  })
+
+  it("fails closed when the active bundle describes another execution path", async () => {
+    const fs = memFs()
+    const active = manifest()
+    await seedBundle(fs, active)
+    fs.files.set(
+      `${ROOT}/active-bundle.json`,
+      JSON.stringify({ bundleId: active.bundleId, activatedAt: "2026-08-09T00:00:00.000Z" })
+    )
+    installCertificationRuntime({
+      store: new CertificationStore(fs, ROOT),
+      publicKeyPem: "unused",
+      current: {
+        agentSdkVersion: active.key.agentSdkVersion,
+        gatewayVersion: active.key.gatewayVersion,
+        claudeCodeVersion: active.key.claudeCodeVersion,
+        suiteVersion: active.key.suiteVersion,
+      },
+    })
+
+    await expect(
+      resolveActiveCertification({
+        ...active.key,
+        model: "different-model",
+        requires: [],
+        prefers: [],
+      })
+    ).resolves.toEqual({ accepted: false, reasons: ["active manifest path mismatch: model"] })
+  })
+
+  it("keeps a hard-required capability blocked while its certified health circuit is open", async () => {
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519")
+    const fs = memFs()
+    const unsigned = manifest({ capabilities: { streaming: "supported" } })
+    const signed = {
+      ...unsigned,
+      signature: edSign(
+        null,
+        Buffer.from(manifestSigningPayload(unsigned), "utf8"),
+        privateKey
+      ).toString("base64"),
+    }
+    await seedBundle(fs, signed)
+    fs.files.set(
+      `${ROOT}/active-bundle.json`,
+      JSON.stringify({ bundleId: signed.bundleId, activatedAt: "2026-08-09T00:00:00.000Z" })
+    )
+    fs.files.set(
+      `${ROOT}/health.json`,
+      JSON.stringify([
+        {
+          keyId: compatibilityKeyId(signed.key),
+          capability: "streaming",
+          consecutiveFailures: 3,
+          openUntil: "2099-01-01T00:00:00.000Z",
+        },
+      ])
+    )
+    installCertificationRuntime({
+      store: new CertificationStore(fs, ROOT),
+      publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
+      current: {
+        agentSdkVersion: signed.key.agentSdkVersion,
+        gatewayVersion: signed.key.gatewayVersion,
+        claudeCodeVersion: signed.key.claudeCodeVersion,
+        suiteVersion: signed.key.suiteVersion,
+      },
+    })
+
+    await expect(
+      resolveActiveCertification({ ...signed.key, requires: ["streaming"], prefers: [] })
+    ).resolves.toEqual({
+      accepted: false,
+      reasons: ["required capability streaming is unknown"],
+      blockedRequired: ["streaming"],
+    })
+  })
+
+  it("does not let an untrusted manifest supply blocked-required capability verdicts", async () => {
+    const fs = memFs()
+    const active = manifest({ capabilities: { streaming: "unsupported" } })
+    await seedBundle(fs, active)
+    fs.files.set(
+      `${ROOT}/active-bundle.json`,
+      JSON.stringify({ bundleId: active.bundleId, activatedAt: "2026-08-09T00:00:00.000Z" })
+    )
+    installCertificationRuntime({
+      store: new CertificationStore(fs, ROOT),
+      publicKeyPem: "not-a-public-key",
+      current: {
+        agentSdkVersion: active.key.agentSdkVersion,
+        gatewayVersion: active.key.gatewayVersion,
+        claudeCodeVersion: active.key.claudeCodeVersion,
+        suiteVersion: active.key.suiteVersion,
+      },
+    })
+
+    await expect(
+      resolveActiveCertification({ ...active.key, requires: ["streaming"], prefers: [] })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        accepted: false,
+        reasons: expect.arrayContaining([
+          "manifest signature did not verify",
+          "required capability streaming is unsupported",
+        ]),
+      })
+    )
+    expect(
+      await resolveActiveCertification({
+        ...active.key,
+        requires: ["streaming"],
+        prefers: [],
+      })
+    ).not.toHaveProperty("blockedRequired")
+  })
+
+  it("persists capability outcomes through the existing health overlay", async () => {
+    const fs = memFs()
+    installCertificationRuntime({
+      store: new CertificationStore(fs, ROOT),
+      publicKeyPem: "unused",
+      current: {
+        agentSdkVersion: "0.3.220",
+        gatewayVersion: "0.1.0",
+        claudeCodeVersion: "2.1.220",
+        suiteVersion: "2",
+      },
+    })
+
+    await recordCertifiedCapabilityOutcome("bundle-a:key-a", "compaction", "failure")
+    await expect(new CertificationStore(fs, ROOT).readHealth()).resolves.toEqual([
+      expect.objectContaining({
+        keyId: "key-a",
+        capability: "compaction",
+        consecutiveFailures: 1,
+      }),
+    ])
+
+    await recordCertifiedCapabilityOutcome("bundle-a:key-a", "compaction", "success")
+    await expect(new CertificationStore(fs, ROOT).readHealth()).resolves.toEqual([])
   })
 })
 

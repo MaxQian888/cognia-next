@@ -7,7 +7,7 @@
 
 "use client"
 
-import { lazy, Suspense, useEffect, useRef, useState } from "react"
+import { lazy, Suspense, useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import {
@@ -28,11 +28,14 @@ import { extractMotionGroupCounts } from "@/lib/pet/live2d/manifest"
 import { readBlobText } from "@/lib/pet/live2d/read-blob-text"
 import { STATE_KEYS, type MappingRow } from "@/lib/pet/live2d/state-keys"
 import { normalizeTransform } from "@/lib/pet/live2d/transform"
+import { getPetSkinRuntime, type PetRuntimeLease } from "@/lib/pet/skin-runtime"
 import { generateBones } from "@/lib/pet/bones/generate"
 import { useCubismCoreAvailable } from "@/hooks/pet/use-active-live2d-model"
 import {
   DEFAULT_LIVE2D_TRANSFORM,
   type Live2dMotionOverrides,
+  type Live2dParameterMapping,
+  type Live2dParameterRole,
   type Live2dTransform,
   type PetOneShot,
   type PetVisualState,
@@ -50,6 +53,16 @@ const PREVIEW_SIZE = 220
 
 /** How long a tested one-shot stays active before clearing back to resting. */
 const TEST_SHOT_MS = 1500
+const PARAMETER_ROLES: Live2dParameterRole[] = [
+  "headX",
+  "headY",
+  "headZ",
+  "eyeX",
+  "eyeY",
+  "bodyX",
+  "bodyY",
+  "mouthOpen",
+]
 
 export interface PetModelConfigDialogProps {
   /**
@@ -74,12 +87,31 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
   const [overrides, setOverrides] = useState<Live2dMotionOverrides>(
     () => model.motionOverrides ?? {}
   )
+  const [parameterMapping, setParameterMapping] = useState<Live2dParameterMapping>(
+    () => model.parameterMapping ?? {}
+  )
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [previewState, setPreviewState] = useState<PetVisualState>("idle")
   const [previewShot, setPreviewShot] = useState<PetOneShot | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const shotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const runtime = getPetSkinRuntime()
+  const leaseOwner = useId()
+  const [lease, setLease] = useState<PetRuntimeLease | null>(null)
+  useSyncExternalStore(runtime.subscribe, runtime.snapshotRevision, runtime.snapshotRevision)
+  useEffect(() => {
+    if (!open) return
+    const next = runtime.acquireLease(leaseOwner, "configuration", `live2d:${model.id}`)
+    let active = true
+    queueMicrotask(() => {
+      if (active) setLease(next)
+    })
+    return () => {
+      active = false
+      next.release()
+    }
+  }, [leaseOwner, model.id, open, runtime])
 
   // A model that fails to load reports a typed code through the canvas's
   // `onError`; surface it instead of leaving an empty preview surface. Clear it
@@ -139,6 +171,7 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
       await updatePetModelCustomization(model.id, {
         transform: normalizeTransform(transform),
         motionOverrides: overrides,
+        parameterMapping,
       })
       onOpenChange(false)
     } finally {
@@ -149,6 +182,19 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
   const handleResetAll = () => {
     setTransform({ ...DEFAULT_LIVE2D_TRANSFORM })
     setOverrides({})
+    setParameterMapping({})
+  }
+
+  const setParameterRoleMode = (
+    role: Live2dParameterRole,
+    mode: "auto" | "custom" | "disabled"
+  ) => {
+    setParameterMapping((current) => {
+      const next = { ...current }
+      if (mode === "auto") delete next[role]
+      else next[role] = mode === "disabled" ? null : ""
+      return next
+    })
   }
 
   return (
@@ -169,7 +215,7 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
               >
                 {tErr(previewError)}
               </div>
-            ) : (
+            ) : lease?.mode() === "live" ? (
               <Suspense fallback={<div style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }} />}>
                 <Live2dCanvas
                   modelId={model.id}
@@ -181,9 +227,18 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
                   size={PREVIEW_SIZE}
                   transform={normalizeTransform(transform)}
                   motionOverrides={overrides}
+                  parameterMappingOverrides={parameterMapping}
+                  selection={{ skinId: "live2d", modelId: model.id }}
+                  renderMode="live"
                   onError={(code) => setPreviewError(code)}
                 />
               </Suspense>
+            ) : (
+              <div
+                data-pet-render-mode="placeholder"
+                className="rounded-xl bg-muted/40"
+                style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }}
+              />
             )}
             <div className="flex items-center gap-2">
               <label htmlFor="pet-preview-state" className="text-xs text-muted-foreground">
@@ -214,6 +269,7 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
           <TabsList>
             <TabsTrigger value="transform">{t("tabTransform")}</TabsTrigger>
             <TabsTrigger value="motion">{t("tabMotion")}</TabsTrigger>
+            <TabsTrigger value="parameters">{t("tabParameters")}</TabsTrigger>
           </TabsList>
           <TabsContent value="transform">
             <PetModelTransformEditor value={transform} onChange={setTransform} />
@@ -227,6 +283,52 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
               onChange={setOverrides}
               onTest={handleTest}
             />
+          </TabsContent>
+          <TabsContent value="parameters" className="space-y-2">
+            <p className="text-xs text-muted-foreground">{t("parameters.description")}</p>
+            {PARAMETER_ROLES.map((role) => {
+              const value = parameterMapping[role]
+              const mode =
+                value === null ? "disabled" : typeof value === "string" ? "custom" : "auto"
+              return (
+                <div key={role} className="grid gap-2 sm:grid-cols-[8rem_8rem_1fr] sm:items-center">
+                  <label htmlFor={`pet-parameter-mode-${role}`} className="text-sm">
+                    {t(`parameters.roles.${role}`)}
+                  </label>
+                  <select
+                    id={`pet-parameter-mode-${role}`}
+                    className="rounded-md border bg-background px-2 py-1 text-sm"
+                    value={mode}
+                    onChange={(event) =>
+                      setParameterRoleMode(
+                        role,
+                        event.target.value as "auto" | "custom" | "disabled"
+                      )
+                    }
+                  >
+                    <option value="auto">{t("parameters.auto")}</option>
+                    <option value="custom">{t("parameters.custom")}</option>
+                    <option value="disabled">{t("parameters.disabled")}</option>
+                  </select>
+                  {mode === "custom" && (
+                    <input
+                      aria-label={t("parameters.parameterIdFor", {
+                        role: t(`parameters.roles.${role}`),
+                      })}
+                      className="rounded-md border bg-background px-2 py-1 text-sm"
+                      value={typeof value === "string" ? value : ""}
+                      placeholder={t("parameters.parameterIdPlaceholder")}
+                      onChange={(event) =>
+                        setParameterMapping((current) => ({
+                          ...current,
+                          [role]: event.target.value,
+                        }))
+                      }
+                    />
+                  )}
+                </div>
+              )
+            })}
           </TabsContent>
         </Tabs>
 

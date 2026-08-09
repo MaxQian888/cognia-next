@@ -19,7 +19,6 @@
     "heading": "Allow cloud embeddings",
     "label": "Allow cloud embeddings"
   },
-  "description": "What the assistant remembers about you across sessions.",
   "danger": {
     "backupFirst": "Back up first",
     "clear": "Clear memories",
@@ -52,15 +51,29 @@
     },
     "title": "Danger zone"
   },
+  "description": "What the assistant remembers about you across sessions.",
   "enabled": {
     "description": "Recall durable facts about you and inject them into future chats.",
     "heading": "Enable long-term memory",
     "label": "Enable long-term memory"
   },
+  "externalContext": {
+    "description": "Do not learn automatically from turns that used web search, MCP, screen context, or connectors. Local code tools stay eligible.",
+    "heading": "Block external-context learning",
+    "label": "Block external-context learning"
+  },
+  "halfLife": {
+    "label": "Recency half-life (days)"
+  },
   "hybrid": {
     "description": "Combine semantic (vector) and keyword search when recalling.",
     "heading": "Hybrid retrieval",
     "label": "Hybrid retrieval"
+  },
+  "learnFromChats": {
+    "description": "Learn durable facts from eligible chats in the background. Each chat can override this independently from recall.",
+    "heading": "Learn from chats",
+    "label": "Learn from chats"
   },
   "learning": {
     "autoExtract": {
@@ -89,26 +102,10 @@
       }
     }
   },
-  "useMemory": {
-    "description": "Allow eligible chats to recall saved memories. Each chat can override this.",
-    "heading": "Use memories",
-    "label": "Use memories"
-  },
-  "learnFromChats": {
-    "description": "Learn durable facts from eligible chats in the background. Each chat can override this independently from recall.",
-    "heading": "Learn from chats",
-    "label": "Learn from chats"
-  },
-  "externalContext": {
-    "description": "Do not learn automatically from turns that used web search, MCP, screen context, or connectors. Local code tools stay eligible.",
-    "heading": "Block external-context learning",
-    "label": "Block external-context learning"
-  },
-  "tokenBudget": { "label": "Recall token budget" },
-  "relevanceFloor": { "label": "Minimum recall relevance" },
-  "halfLife": { "label": "Recency half-life (days)" },
-  "maxIdle": { "label": "Forget after unused days (0 = never)" },
   "manage": "Manage memories",
+  "maxIdle": {
+    "label": "Forget after unused days (0 = never)"
+  },
   "nav": {
     "items": {
       "learning": {
@@ -132,6 +129,7 @@
         "label": "Retrieval"
       }
     },
+    "mobileTrigger": "Sections",
     "title": "Memory settings"
   },
   "overview": {
@@ -176,6 +174,9 @@
     "description": "Widen the keyword leg with synonym expansion when recalling memories.",
     "heading": "Query expansion",
     "label": "Query expansion"
+  },
+  "relevanceFloor": {
+    "label": "Minimum recall relevance"
   },
   "retrieval": {
     "gates": {
@@ -230,8 +231,8 @@
     "character": "Per character",
     "description": "Where new memories are stored. Narrower scopes override broader memories with the same stable key.",
     "global": "Global (all characters)",
-    "workspace": "Current workspace",
-    "heading": "Default scope"
+    "heading": "Default scope",
+    "workspace": "Current workspace"
   },
   "temporary": {
     "description": "Pause memory for now — neither read nor write this session.",
@@ -239,7 +240,15 @@
     "label": "Temporary mode"
   },
   "title": "Memory",
+  "tokenBudget": {
+    "label": "Recall token budget"
+  },
   "topK": {
     "label": "Memories injected per turn"
+  },
+  "useMemory": {
+    "description": "Allow eligible chats to recall saved memories. Each chat can override this.",
+    "heading": "Use memories",
+    "label": "Use memories"
   }
 }

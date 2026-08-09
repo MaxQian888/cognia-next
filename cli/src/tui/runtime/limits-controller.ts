@@ -41,24 +41,49 @@ function defaultLoad(config: ResolvedConfig, now: number): Promise<ProviderLimit
   })
 }
 
-export async function runLimits(deps: LimitsDeps): Promise<void> {
+let nextLimitsRequestId = 0
+
+export function runLimits(deps: LimitsDeps): void {
   const now = (deps.now ?? (() => Date.now()))()
+  const requestId = ++nextLimitsRequestId
   const analysis = analyzeSession({
     usageHistory: deps.usageHistory,
     toolStats: deps.toolStats,
   })
 
-  const snapshots = await (deps.loadLimits ?? defaultLoad)(deps.config, now)
-
   deps.dispatch({
     type: "OVERLAY_OPEN",
     overlay: {
       kind: "limits",
-      snapshots,
+      snapshots: [],
+      loading: true,
+      requestId,
       analysis,
       now,
       rateLimits: deps.rateLimits,
       activeProvider: deps.config.provider,
     },
   })
+
+  // Loading is deliberately detached from the runtime request. The panel is
+  // interactive immediately and the shared runtime busy marker is released, so
+  // a slow provider cannot turn subsequent command input into a queued steer.
+  void (deps.loadLimits ?? defaultLoad)(deps.config, now)
+    .then((snapshots) => deps.dispatch({ type: "LIMITS_LOADED", requestId, snapshots }))
+    .catch((error: unknown) =>
+      deps.dispatch({
+        type: "LIMITS_LOADED",
+        requestId,
+        snapshots: [
+          {
+            provider: deps.config.provider,
+            accountId: deps.config.provider,
+            accountLabel: deps.config.provider,
+            fetchedAt: now,
+            meters: [],
+            error: error instanceof Error ? error.message : String(error),
+          },
+        ],
+      })
+    )
 }

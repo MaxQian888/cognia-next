@@ -11,9 +11,9 @@
  *    under; a namespace that changed on a re-pair or a label edit would orphan
  *    all three. `upsert` therefore preserves the stored namespace and only
  *    derives a fresh one for a genuinely new record.
- * 2. **`remove` drops the secret before the record.** The record is the only
- *    thing that can address the credential, so the reverse order would leave an
- *    unreachable device JWT sitting in the keystore forever.
+ * 2. **`remove` drops the secret before the record.** It also attempts secret
+ *    removal when the public record is already absent, so an interrupted
+ *    pairing can be compensated without leaving an unreachable private key.
  */
 import {
   deriveCursorNamespace,
@@ -95,8 +95,11 @@ export function createCredentialBook(opts: CredentialBookOptions): CompanionCred
     return serialize(async () => {
       const storageKey = hostRecordKey(key)
       const book = await opts.records.read()
-      if (!book.hosts[storageKey]) return
+      // Always address the secret even if the public write never completed.
+      // This is what makes adapter-level compensation able to clean up a
+      // saveCredential -> failed upsert sequence.
       await opts.credentials.remove(key)
+      if (!book.hosts[storageKey]) return
       delete book.hosts[storageKey]
       if (book.active[key.accountNamespace] === storageKey) {
         // Promote whatever else this account has, so removing the active host

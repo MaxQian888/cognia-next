@@ -3,6 +3,7 @@ import {
   detachActiveCompanionRuntimeTarget,
   deriveCompanionRuntimeTargetId,
   prepareAccountRuntimeTarget,
+  registerCompanionRuntimeTarget,
   removeAccountRuntimeTargets,
   switchAccountRuntimeTarget,
 } from "./account-runtime-target"
@@ -74,21 +75,25 @@ it("deletes every physical target database before removing registry metadata", a
     getActiveTarget: jest.fn(),
     ensureStandaloneTarget: jest.fn(),
     activateTarget: jest.fn(),
-    listTargets: jest.fn(async () => [
-      standalone,
-      { ...standalone, id: "desktop-studio", kind: "companion" as const },
-    ]),
+    listTargets: jest
+      .fn()
+      .mockResolvedValueOnce([
+        standalone,
+        { ...standalone, id: "desktop-studio", kind: "companion" as const },
+      ])
+      .mockResolvedValueOnce([]),
     deleteTarget: jest.fn(),
     deleteAccountTargets: jest.fn(async () => {
       events.push("metadata")
     }),
   }
 
-  await removeAccountRuntimeTargets("acct_runtime", {
+  const result = await removeAccountRuntimeTargets("acct_runtime", {
     registry,
     deleteDatabase: async (name) => {
       events.push(name)
     },
+    databaseExists: async () => false,
   })
 
   expect(events).toEqual([
@@ -96,6 +101,35 @@ it("deletes every physical target database before removing registry metadata", a
     "cognia-account-acct_runtime-target-desktop-studio",
     "metadata",
   ])
+  expect(result).toEqual({
+    accountId: "acct_runtime",
+    targetIds: ["web-standalone", "desktop-studio"],
+    deletedDatabases: [
+      "cognia-account-acct_runtime-target-web-standalone",
+      "cognia-account-acct_runtime-target-desktop-studio",
+    ],
+    registryRowsDeleted: 2,
+  })
+})
+
+it("fails before metadata removal when physical deletion cannot be verified", async () => {
+  const registry = {
+    getActiveTarget: jest.fn(),
+    ensureStandaloneTarget: jest.fn(),
+    activateTarget: jest.fn(),
+    listTargets: jest.fn(async () => [standalone]),
+    deleteTarget: jest.fn(),
+    deleteAccountTargets: jest.fn(),
+  }
+
+  await expect(
+    removeAccountRuntimeTargets("acct_runtime", {
+      registry,
+      deleteDatabase: jest.fn(async () => {}),
+      databaseExists: jest.fn(async () => true),
+    })
+  ).rejects.toThrow(/could not be verified/)
+  expect(registry.deleteAccountTargets).not.toHaveBeenCalled()
 })
 
 it("derives a stable opaque target id without embedding the endpoint", async () => {
@@ -111,13 +145,110 @@ it("derives a stable opaque target id without embedding the endpoint", async () 
   expect(first).not.toContain("studio")
 })
 
+it("atomically registers the Companion metadata before switching database context", async () => {
+  const events: string[] = []
+  const companion = {
+    ...standalone,
+    id: "companion-studio",
+    kind: "companion" as const,
+    hostKind: "desktop" as const,
+  }
+
+  await expect(
+    registerCompanionRuntimeTarget(
+      {
+        targetId: companion.id,
+        baseUrl: "https://studio.local:27890",
+        deviceId: "device-studio",
+        serverVersion: "2.0.0",
+      },
+      {
+        registry: {
+          upsertAndActivateCompanionTarget: async (input) => {
+            events.push(`registry:${input.id}`)
+            expect(input.credentialRef).toBe(
+              "companion-host:acct_runtime:companion-studio:device-private-jwk"
+            )
+            return companion
+          },
+        },
+        getContext: () => ({ accountId: "acct_runtime", targetId: "web-standalone" }),
+        activateDatabase: (_accountId, targetId) => events.push(`database:${targetId}`),
+        setContext: (_accountId, targetId) => events.push(`context:${targetId}`),
+      }
+    )
+  ).resolves.toEqual(companion)
+
+  expect(events).toEqual([
+    "registry:companion-studio",
+    "database:companion-studio",
+    "context:companion-studio",
+  ])
+})
+
+it("does not create a Companion target without an active account context", async () => {
+  const upsertAndActivateCompanionTarget = jest.fn()
+  await expect(
+    registerCompanionRuntimeTarget(
+      {
+        baseUrl: "https://studio.local:27890",
+        deviceId: "device-studio",
+        serverVersion: "2.0.0",
+      },
+      {
+        registry: { upsertAndActivateCompanionTarget },
+        getContext: () => null,
+        activateDatabase: jest.fn(),
+        setContext: jest.fn(),
+      }
+    )
+  ).resolves.toBeNull()
+  expect(upsertAndActivateCompanionTarget).not.toHaveBeenCalled()
+})
+
+it("uses the account captured by pairing when the live context is unavailable", async () => {
+  const companion = {
+    ...standalone,
+    id: "companion-studio",
+    kind: "companion" as const,
+    hostKind: "desktop" as const,
+  }
+  const upsertAndActivateCompanionTarget = jest.fn(async () => companion)
+  const activateDatabase = jest.fn()
+  const setContext = jest.fn()
+
+  await expect(
+    registerCompanionRuntimeTarget(
+      {
+        accountId: "acct_runtime",
+        targetId: companion.id,
+        baseUrl: "https://studio.local:27890",
+        deviceId: "device-studio",
+        serverVersion: "2.0.0",
+      },
+      {
+        registry: { upsertAndActivateCompanionTarget },
+        getContext: () => null,
+        activateDatabase,
+        setContext,
+      }
+    )
+  ).resolves.toEqual(companion)
+
+  expect(upsertAndActivateCompanionTarget).toHaveBeenCalledWith(
+    expect.objectContaining({ accountId: "acct_runtime", id: companion.id })
+  )
+  expect(activateDatabase).toHaveBeenCalledWith("acct_runtime", companion.id)
+  expect(setContext).toHaveBeenCalledWith("acct_runtime", companion.id)
+})
+
 it("switches database/context only after validating the target credential", async () => {
   const companion = {
     ...standalone,
     id: "companion-studio",
     kind: "companion" as const,
     hostKind: "desktop" as const,
-    credentialRef: "companion:companion-studio:device-jwt",
+    credentialRef: "companion-host:acct-a:companion-studio:device-private-jwk",
   }
   const events: string[] = []
   const registry = {
@@ -168,7 +299,7 @@ it("blocks a target switch during a local turn and rolls back a failed transport
     id: "companion-studio",
     kind: "companion" as const,
     hostKind: "desktop" as const,
-    credentialRef: "companion:companion-studio:device-jwt",
+    credentialRef: "companion-host:acct-a:companion-studio:device-private-jwk",
   }
   const registry = {
     getActiveTarget: jest.fn(async () => standalone),
@@ -219,7 +350,7 @@ it("switches to standalone before removing a revoked active Companion target", a
     id: "companion-studio",
     kind: "companion",
     hostKind: "desktop",
-    credentialRef: "companion:companion-studio:device-jwt",
+    credentialRef: "companion-host:acct-a:companion-studio:device-private-jwk",
   }
   const events: string[] = []
   const registry = {

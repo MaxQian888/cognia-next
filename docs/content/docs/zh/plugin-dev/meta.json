@@ -1,0 +1,9 @@
+{
+  "title": "插件开发",
+  "pages": [
+    "author-sdk",
+    "extension-points-v2",
+    "inter-plugin-communication",
+    "native-anthropic-tools"
+  ]
+}

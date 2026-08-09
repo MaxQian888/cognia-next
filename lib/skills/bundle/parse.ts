@@ -23,6 +23,8 @@ export interface BundleManifestParseInput {
   openaiYaml?: string
   /** Used by `parseSkillMarkdown` when the frontmatter omits `name`. */
   fallbackName?: string
+  /** Bundle root directory, checked against the normalized portable slug. */
+  directoryName?: string
 }
 
 export interface BundleManifestParseResult {
@@ -70,6 +72,7 @@ export function parseBundleManifest(input: BundleManifestParseInput): BundleMani
     flavor = "codex"
     codexMeta = parseCodexOpenaiYaml(input.openaiYaml)
     warnings.push(...codexMeta.warnings)
+    draft = { ...draft, codexOpenAiYaml: input.openaiYaml }
 
     // Display-name precedence: SKILL.md frontmatter > Codex interface >
     // filename fallback. We only override when the markdown name equals
@@ -80,6 +83,7 @@ export function parseBundleManifest(input: BundleManifestParseInput): BundleMani
     }
 
     if (codexMeta.policy?.allowImplicitInvocation === false) {
+      draft = { ...draft, invocationPolicy: "explicit" }
       warnings.push(
         "agents/openai.yaml policy disables implicit invocation — the skill will only run when the user calls it explicitly."
       )
@@ -102,14 +106,26 @@ export function parseBundleManifest(input: BundleManifestParseInput): BundleMani
 
   const validationErrors = validateSkill({
     name: draft.name,
+    slug: draft.slug,
     description: draft.description,
+    compatibility: draft.compatibility,
+    metadata: draft.metadata,
     content: draft.content,
+    directoryName: input.directoryName,
   })
   const fatal = validationErrors.find((e) => FATAL_VALIDATION_CODES.has(e.code))
   if (fatal) {
     throw new Error(`Skill bundle refused: ${fatal.message}`)
   }
-  const nonFatal = validationErrors.filter((e) => !FATAL_VALIDATION_CODES.has(e.code))
+  const nonFatal = [
+    ...skillMdParse.portabilityIssues,
+    ...validationErrors.filter((e) => !FATAL_VALIDATION_CODES.has(e.code)),
+  ].filter(
+    (issue, index, all) =>
+      all.findIndex(
+        (candidate) => candidate.code === issue.code && candidate.message === issue.message
+      ) === index
+  )
 
   return {
     draft,

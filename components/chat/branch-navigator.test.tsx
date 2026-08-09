@@ -7,6 +7,11 @@ import type { UIMessage } from "ai"
 import { BranchNavigator } from "./branch-navigator"
 import { useChatStore } from "@/stores/chat/chat-store"
 
+const mockPersistBranchSelection = jest.fn(async () => undefined)
+jest.mock("@/lib/db/sessions", () => ({
+  setSessionActiveBranchSelection: (...args: unknown[]) => mockPersistBranchSelection(...args),
+}))
+
 const branchMsg = (id: string, branchGroupId: string, branchIndex: number): UIMessage =>
   ({
     id,
@@ -18,6 +23,7 @@ const branchMsg = (id: string, branchGroupId: string, branchIndex: number): UIMe
 describe("BranchNavigator", () => {
   beforeEach(() => {
     useChatStore.getState().clear()
+    mockPersistBranchSelection.mockClear()
   })
 
   it("renders nothing when the message has no branchGroupId", () => {
@@ -113,6 +119,7 @@ describe("BranchNavigator", () => {
 
     fireEvent.click(screen.getByTestId("branch-navigator-prev"))
     expect(useChatStore.getState().sessions["pane-b"].activeBranchByGroup.g1).toBe("a")
+    expect(mockPersistBranchSelection).toHaveBeenCalledWith("pane-b", "g1", "a")
     // The focused pane's own selection is untouched.
     expect(useChatStore.getState().activeBranchByGroup.g1).toBeUndefined()
   })

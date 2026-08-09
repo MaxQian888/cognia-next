@@ -23,6 +23,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { detectNativePlatform, type NativePlatform } from "@/lib/capacitor/_shared"
 import type { ProbeOutcome } from "@/lib/ocr/probe"
 import type { ExtractDeps } from "@/lib/ocr/index"
+import type { OcrRuntimeStatus } from "@cognia/ocr/runtime-status"
 import {
   DEFAULT_OCR_SETTINGS,
   type OcrProviderCategory,
@@ -161,7 +162,7 @@ export const OCR_PROVIDER_REGISTRY: ReadonlyArray<OcrProviderDescriptor> = [
   { id: "mlkit-android", category: "local", credentialKeys: [], shells: SHELLS_ANDROID_ONLY },
   { id: "ocrs", category: "local", credentialKeys: [], shells: SHELLS_TAURI_ONLY },
   { id: "paddle-ocr", category: "local", credentialKeys: [], shells: SHELLS_TAURI_ONLY },
-  { id: "local-http", category: "local", credentialKeys: [], shells: SHELLS_ALL },
+  { id: "local-http", category: "local", credentialKeys: ["apiKey"], shells: SHELLS_ALL },
 ]
 
 /**
@@ -206,6 +207,8 @@ export interface OcrSectionProps {
    * ready" alert. Tests pass a stub.
    */
   ocrDepsFactory?: () => ExtractDeps | null
+  /** Runtime truth loaded by the persisted shell; prevents placeholder providers showing Ready. */
+  runtimeStatuses?: Record<string, OcrRuntimeStatus>
 }
 
 export function OcrSection(props: OcrSectionProps): React.ReactElement {
@@ -266,8 +269,19 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
       if (!q) return true
       const label = (t(`ocr.providers.${p.id}.label`) ?? p.id).toLowerCase()
       return p.id.toLowerCase().includes(q) || label.includes(q)
-    }).map((p) => buildSidebarRow(p, settings, credentials, probeResults, platform, t))
-  }, [search, categoryFilter, settings, credentials, probeResults, platform, t])
+    }).map((p) =>
+      buildSidebarRow(p, settings, credentials, probeResults, platform, props.runtimeStatuses, t)
+    )
+  }, [
+    search,
+    categoryFilter,
+    settings,
+    credentials,
+    probeResults,
+    platform,
+    props.runtimeStatuses,
+    t,
+  ])
 
   const stats = useMemo(() => computeSidebarStats(OCR_PROVIDER_REGISTRY, settings), [settings])
 
@@ -363,7 +377,8 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
       selectedProvider,
       credentials,
       probeResults[selectedProvider.id],
-      platform
+      platform,
+      props.runtimeStatuses?.[selectedProvider.id]
     )
     return (
       <OcrDetailPanel
@@ -384,24 +399,42 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
           })
         }
         configTab={
-          <OcrConfigTab
-            providerId={selectedProvider.id}
-            credentialKeys={selectedProvider.credentialKeys}
-            reusesMainProviderKey={selectedProvider.reusesMainProviderKey}
-            shells={selectedProvider.shells}
-            credentials={credentials[selectedProvider.id] ?? {}}
-            onCredentialChange={(key, value) =>
-              handleCredentialChange(selectedProvider.id, key, value)
-            }
-            description={t(`ocr.providers.${selectedProvider.id}.description`)}
-            onProbe={props.onProbeProvider ? handleProbe : undefined}
-            probeOutcome={probeResults[selectedProvider.id]}
-            isProbing={probingId === selectedProvider.id}
-          />
+          <div className="space-y-3">
+            {props.runtimeStatuses?.[selectedProvider.id]?.reason && (
+              <p
+                className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                role="status"
+              >
+                {t(`ocr.runtime.reasons.${props.runtimeStatuses[selectedProvider.id]!.reason}`)}
+              </p>
+            )}
+            <OcrConfigTab
+              providerId={selectedProvider.id}
+              credentialKeys={selectedProvider.credentialKeys}
+              reusesMainProviderKey={selectedProvider.reusesMainProviderKey}
+              shells={selectedProvider.shells}
+              credentials={credentials[selectedProvider.id] ?? {}}
+              onCredentialChange={(key, value) =>
+                handleCredentialChange(selectedProvider.id, key, value)
+              }
+              description={t(`ocr.providers.${selectedProvider.id}.description`)}
+              onProbe={props.onProbeProvider ? handleProbe : undefined}
+              probeOutcome={probeResults[selectedProvider.id]}
+              isProbing={probingId === selectedProvider.id}
+            />
+          </div>
         }
         modelsTab={
           BACKENDS_WITH_MANAGED_MODELS.has(selectedProvider.id) ? (
-            <OcrModelsTab providerId={selectedProvider.id} bridge={props.modelBridge} />
+            <OcrModelsTab
+              providerId={selectedProvider.id}
+              bridge={props.modelBridge}
+              modelVariant={
+                settings.providerConfig[selectedProvider.id]?.model === "v6-tiny"
+                  ? "v6-tiny"
+                  : "v6-small"
+              }
+            />
           ) : (
             <OcrModelsTab providerId={selectedProvider.id} bridge={null} />
           )
@@ -493,9 +526,16 @@ function buildSidebarRow(
   credentials: Record<string, Record<string, string>>,
   probeResults: Record<string, ProbeOutcome>,
   platform: NativePlatform,
+  runtimeStatuses: Record<string, OcrRuntimeStatus> | undefined,
   t: ReturnType<typeof useTranslations>
 ): OcrSidebarProvider {
-  const status = deriveStatus(provider, credentials, probeResults[provider.id], platform)
+  const status = deriveStatus(
+    provider,
+    credentials,
+    probeResults[provider.id],
+    platform,
+    runtimeStatuses?.[provider.id]
+  )
   const disabled = settings.providerEnabled[provider.id] === false
   return {
     id: provider.id,
@@ -511,10 +551,22 @@ function deriveStatus(
   provider: OcrProviderDescriptor,
   credentials: Record<string, Record<string, string>>,
   lastProbe: ProbeOutcome | undefined,
-  platform: NativePlatform
+  platform: NativePlatform,
+  runtimeStatus?: OcrRuntimeStatus
 ): OcrProviderStatus {
   if (!shellAllowsPlatform(provider.shells, platform)) return "unsupported"
   if (lastProbe) return lastProbe.ok ? "connected" : "error"
+  if (runtimeStatus) {
+    if (runtimeStatus.ready) return provider.category === "local" ? "ready" : "connected"
+    if (runtimeStatus.reason === "model-corrupt") return "error"
+    if (
+      runtimeStatus.reason === "unsupported-shell" ||
+      runtimeStatus.reason === "backend-not-bound"
+    ) {
+      return "unsupported"
+    }
+    return "not-configured"
+  }
   if (provider.reusesMainProviderKey) {
     // We can't know without probing — surface "not configured" so the UI
     // nudges the user toward the AI Providers page.

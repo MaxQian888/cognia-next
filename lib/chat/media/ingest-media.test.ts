@@ -1,28 +1,28 @@
-/** @jest-environment jsdom */
 // Coverage for the single minting point of chat media. jsdom has no canvas, so
 // `downscaleImage` / `measureImage` return their input unchanged — that is the
 // documented degradation, and it lets these tests pin the policy (hashing,
 // dedupe, GIF handling, original retention) without a real image codec. The
 // re-encoding itself is covered by `packages/ocr`.
 
-import "fake-indexeddb/auto"
 import {
   CANONICAL_MAX_LONG_EDGE,
+  MAX_IMAGE_INPUT_BYTES,
   THUMBNAIL_MAX_LONG_EDGE,
   ingestImage,
   ingestImageDataUrl,
   sha256Hex,
 } from "./ingest-media"
 import { getMessageMedia, parseMediaRef } from "@/lib/db/message-media"
-import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
 jest.setTimeout(30_000)
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
 
 const bytesOf = (text: string) => new TextEncoder().encode(text)
@@ -35,6 +35,8 @@ const bytesOf = (text: string) => new TextEncoder().encode(text)
 // accounting and retention. The real round-trip is covered end-to-end in
 // `tests/e2e/mobile/chat-render-perf.spec.ts`, which runs against a browser
 // with a real IndexedDB.
+
+afterAll(dbFixture.dispose)
 
 describe("sha256Hex", () => {
   it("produces a stable 64-character hex digest", async () => {
@@ -63,6 +65,15 @@ describe("sha256Hex", () => {
 })
 
 describe("ingestImage", () => {
+  it("rejects images above the persistence input limit", async () => {
+    const oversized = new Uint8Array(MAX_IMAGE_INPUT_BYTES + 1)
+
+    await expect(
+      ingestImage({ bytes: oversized, mediaType: "image/png" })
+    ).rejects.toThrow(/10 MiB/)
+    expect(await getDb().messageMedia.count()).toBe(0)
+  })
+
   it("stores the bytes and returns a reference plus geometry", async () => {
     const result = await ingestImage({ bytes: bytesOf("frame"), mediaType: "image/png" })
 

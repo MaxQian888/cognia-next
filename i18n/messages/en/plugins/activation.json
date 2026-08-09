@@ -1,0 +1,16 @@
+{
+  "cancelled": "Activation cancelled at: {phase}",
+  "countLabel": "Step {processed} of {total}",
+  "failed": "Activation failed at: {phase}",
+  "label": "Activating {name}",
+  "phase": {
+    "commit": "Finishing activation",
+    "contributions": "Registering contributions",
+    "dependencies": "Enabling dependencies",
+    "hooks": "Running enable hooks",
+    "preflight": "Checking compatibility",
+    "runtime": "Starting the plugin",
+    "schema": "Preparing storage"
+  },
+  "progressAria": "Activating {name} — {phase}, step {processed} of {total}"
+}

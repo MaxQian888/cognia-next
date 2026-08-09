@@ -106,6 +106,22 @@ describe("MobileConversationPage", () => {
     })
   })
 
+  it("defaults the thinking-level control to the slider presentation", () => {
+    render(<Page />)
+    expect(screen.getByTestId("composer-effort-selector-mode")).toBeChecked()
+  })
+
+  it("switches the thinking-level control to the list presentation", async () => {
+    settingsRef.current = { composerBehavior: { persistDrafts: false } }
+    render(<Page />)
+    fireEvent.click(screen.getByTestId("composer-effort-selector-mode"))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledWith({
+      composerBehavior: { persistDrafts: false, effortSelectorMode: "list" },
+    })
+  })
+
   it("writes streamPartialMessages directly", async () => {
     render(<Page />)
     fireEvent.click(screen.getByTestId("conversation-stream-partial"))

@@ -32,7 +32,10 @@ import type {
   OpticalCompactionOptions,
   SessionCompressionOverrides,
 } from "./compression"
-import type { AgentExecutionSendSpec } from "./agent-execution"
+import type { AgentCapabilityId, AgentExecutionSendSpec } from "./agent-execution"
+import type { ClaudeAgentSdkOptionsV1 } from "./claude-agent-sdk-options"
+
+export * from "./transcript"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -218,6 +221,33 @@ export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
   webclone: false,
 }
 
+/**
+ * Every permission mode the Agent SDK accepts.
+ *
+ * Declared once because it was previously written out by hand at each use site
+ * and the copies disagreed: `SendOptions.permissionMode` listed six values
+ * while `AgentExecutionHandle.setPermissionMode` listed four, so `dontAsk` and
+ * `auto` could be set when a session STARTED but never switched to mid-session
+ * — with nothing in the types saying why.
+ *
+ * `dontAsk` and `auto` are the autonomous end of the range and belong behind an
+ * Advanced affordance in UI; the safety-ordered cycle in
+ * `components/chat/permission-mode-indicator.tsx` deliberately does not include
+ * them.
+ */
+export type AgentPermissionMode =
+  "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
+
+/** Every {@link AgentPermissionMode}, in escalation order. */
+export const AGENT_PERMISSION_MODES: readonly AgentPermissionMode[] = [
+  "plan",
+  "default",
+  "acceptEdits",
+  "dontAsk",
+  "auto",
+  "bypassPermissions",
+]
+
 export interface SendOptions {
   /**
    * Host-only task workspace envelope. The Rust/Companion host consumes it
@@ -269,10 +299,50 @@ export interface SendOptions {
   systemPrompt?: string
   /** Appended to the SDK's default system prompt. Mutually exclusive with `systemPrompt`. */
   appendSystemPrompt?: string
+  /**
+   * Runtime-wide tool surface policy. `none` is an explicit deny-all contract:
+   * adapters must expose neither SDK-native tools nor built-in, plugin, MCP,
+   * LSP, A2UI, or subagent tool entry points. It is intentionally distinct
+   * from an empty `allowedTools` array because several runtimes interpret an
+   * empty allowlist as "no filtering".
+   */
+  toolSurface?: "default" | "none"
   allowedTools?: string[]
   disallowedTools?: string[]
   additionalDirectories?: string[]
-  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
+  /**
+   * Active workspace roots whose local contents the user explicitly trusted.
+   *
+   * Host-only proof: the sidecar consumes it to authorize SDK-native
+   * `skills`/`plugins`, then strips it before calling the Claude Agent SDK.
+   * Merely naming `cwd` or `additionalDirectories` is never a trust grant.
+   * Workspace Trust is the explicit disclosure decision for these files: their
+   * provider-visible contents are intentionally exempt from prompt PII
+   * redaction because rewriting executable instructions would change them.
+   */
+  trustedWorkspaceRoots?: string[]
+  permissionMode?: AgentPermissionMode
+  /**
+   * The second gate on `claudeAgentSdk.allowDangerouslySkipPermissions`.
+   *
+   * Deliberately a SEPARATE field from `permissionMode`, and never inferred
+   * from it: choosing `bypassPermissions` says "stop asking me per tool", while
+   * this says "disable the permission system entirely, including the checks
+   * that would still have run". Collapsing the two would let the first choice
+   * silently buy the second.
+   *
+   * Set only by the layer that has both the host policy verdict and an explicit
+   * user confirmation. The sidecar re-checks it, so an unset value fails closed.
+   */
+  bypassPermissionsConfirmed?: boolean
+  /**
+   * Serialisable Claude Agent SDK options, grouped so the whole SDK-specific
+   * surface travels and validates together. Ignored by the ai-sdk and external
+   * rails. Precedence is fixed: this block > the flat fields above > SDK
+   * defaults, with every conflict reported as a warning rather than resolved
+   * silently. See `claude-agent-sdk-options.ts`.
+   */
+  claudeAgentSdk?: ClaudeAgentSdkOptionsV1
   env?: Record<string, string>
   /** Per-name MCP server configs forwarded to the SDK. */
   mcpServers?: Record<string, Record<string, unknown>>
@@ -319,6 +389,24 @@ export interface SendOptions {
   includePartialMessages?: boolean
   /** Which on-disk settings the SDK loads — subset of "user" | "project" | "local". */
   settingSources?: Array<"user" | "project" | "local">
+  /**
+   * Per-send control over telemetry in the Claude Code SUBPROCESS. Whether any
+   * telemetry happens at all is decided by the sidecar's own OTLP endpoint —
+   * this only narrows or widens what the child does once that is configured.
+   *
+   * Deliberately not a bag of `OTEL_*` strings: the collector URL and its
+   * credentials are host configuration, and letting a send name them would
+   * make "run an agent" a way to redirect a user's traces.
+   */
+  telemetry?: {
+    /** Set false to keep the subprocess silent even when the host exports. */
+    child?: boolean
+    /**
+     * Opt into `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA`. Opt-in per send because
+     * it widens what the child records; never inherited from the parent env.
+     */
+    enhanced?: boolean
+  }
   /** Dynamic subagent definitions keyed by name. */
   agents?: Record<string, Record<string, unknown>>
   /**
@@ -839,6 +927,40 @@ export interface SendOptions {
     degraded: boolean
   }
 
+  /** Reusable Agent Knowledge Base context injected this turn. */
+  agentKnowledgeContext?: {
+    retrievedChunks: Array<{
+      chunk: {
+        id: string
+        knowledgeBaseId: string
+        sourceId: string
+        content: string
+        vectorDocId: string
+      }
+      score: number
+    }>
+    citations: Array<{
+      scope: "agent-knowledge-base"
+      knowledgeBaseId: string
+      knowledgeBaseName: string
+      sourceId: string
+      sourceTitle: string
+      chunkId: string
+      charStart: number
+      charEnd: number
+      pageNumber?: number
+      filePath?: string
+      score: number
+    }>
+    failures: Array<{
+      knowledgeBaseId: string
+      reason: string
+      rebuildRequired: boolean
+    }>
+    budget: { limit: number; used: number; truncated: boolean }
+    degraded: boolean
+  }
+
   /**
    * Agent-trace correlation identifiers — set by the chat hook before the
    * sidecar call so downstream events (tool spans, sub-agent spans,
@@ -1038,16 +1160,83 @@ export interface ToolResultReviewEvent {
 // a `control_response` event correlated by `requestId`. Mirrors the
 // `permission_request` / `plugin_tool_exec` round-trips. See `lib/claude/ipc.ts`.
 
-/** Allowlisted SDK `Query` control methods reachable via `sessionControl`. */
+/**
+ * Allowlisted SDK `Query` control methods reachable via `sessionControl`.
+ *
+ * Mirrors `protocol/agent-control-methods.json`, which is the source of truth
+ * for this list and for the four other places it is written down (the sidecar
+ * allowlist, the Rust allowlist, and the Rust test's own copy).
+ * `pnpm audit:agent-control-methods` proves they still agree.
+ *
+ * Two Query methods are deliberately NOT here, and the manifest records why:
+ * `streamInput` (takes an AsyncIterable, which a JSON control frame cannot
+ * carry — sends reach the same input stream) and the experimental `usage_…`
+ * method (the SDK says its name will change). `close`, `interrupt` and
+ * `setPermissionMode` are also absent: they have dedicated commands, and a
+ * second path to them would be a second thing to audit.
+ */
 export type SessionControlMethod =
+  | "accountInfo"
+  | "applyFlagSettings"
+  | "backgroundTasks"
   | "getContextUsage"
+  | "initializationResult"
   | "mcpServerStatus"
+  | "readFile"
   | "reconnectMcpServer"
-  | "toggleMcpServer"
-  | "supportedModels"
-  | "supportedCommands"
+  | "reinitialize"
+  | "reloadPlugins"
+  | "reloadSkills"
+  | "rewindFiles"
+  | "seedReadState"
+  | "setMaxThinkingTokens"
+  | "setMcpPermissionModeOverride"
+  | "setMcpServers"
   | "setModel"
   | "steer"
+  | "stopTask"
+  | "supportedAgents"
+  | "supportedCommands"
+  | "supportedModels"
+  | "toggleMcpServer"
+
+/**
+ * Capability each control method needs, so callers can fail closed BEFORE any
+ * IPC (ADR-0090 constraint 3) instead of discovering it from a
+ * `control_response`.
+ *
+ * The same map exists in `sidecar/dispatch/control.mjs` — it has to, since the
+ * sidecar cannot import TypeScript — and both are compared against
+ * `protocol/agent-control-methods.json` by `pnpm audit:agent-control-methods`.
+ * Written as a full `Record<SessionControlMethod, …>` so that adding a method
+ * to the union without deciding its capability is a compile error rather than
+ * an ungated control.
+ */
+export const SESSION_CONTROL_CAPABILITIES: Record<SessionControlMethod, AgentCapabilityId> = {
+  accountInfo: "session.manage",
+  applyFlagSettings: "session.manage",
+  backgroundTasks: "tasks.background",
+  getContextUsage: "context-management",
+  initializationResult: "session.manage",
+  mcpServerStatus: "mcp",
+  readFile: "checkpoint",
+  reconnectMcpServer: "mcp",
+  reinitialize: "session.manage",
+  reloadPlugins: "plugins.native",
+  reloadSkills: "skills.native",
+  rewindFiles: "checkpoint",
+  seedReadState: "checkpoint",
+  setMaxThinkingTokens: "thinking",
+  setMcpPermissionModeOverride: "mcp.dynamic",
+  setMcpServers: "mcp.dynamic",
+  setModel: "set-model",
+  steer: "steer",
+  stopTask: "tasks.background",
+  supportedAgents: "subagents.manage",
+  supportedCommands: "commands.dynamic",
+  supportedModels: "set-model",
+  toggleMcpServer: "mcp",
+}
 
 /**
  * Sidecar → renderer reply to a `sessionControl` request. `ok` distinguishes a
@@ -1069,12 +1258,109 @@ export function isControlResponseEvent(evt: ClaudeEvent): evt is ControlResponse
   return evt.type === "control_response"
 }
 
+// ---- Session-level SDK functions (the `session_api` frame) ----------------
+//
+// These are MODULE-level Agent SDK exports, not `Query` methods: they read and
+// mutate session transcripts with no live session, so they cannot ride the
+// `control` frame (which resolves a running query by id). They get their own
+// request/response pair — see `sidecar/dispatch/session-api.mjs`.
+
+/**
+ * Allowlisted session-level SDK functions reachable via `sessionApi`.
+ *
+ * Mirrors the `sessionApi` array in `protocol/agent-control-methods.json`,
+ * which is the source of truth for this union, the capability map below, the
+ * sidecar's `SESSION_API_METHODS`, the Rust allowlist and the Rust test's own
+ * copy. `pnpm audit:agent-control-methods` proves they still agree.
+ */
+export type SessionApiMethod =
+  | "deleteSession"
+  | "forkSession"
+  | "getSessionInfo"
+  | "getSessionMessages"
+  | "getSubagentMessages"
+  | "importSessionToStore"
+  | "listSessions"
+  | "listSubagents"
+  | "renameSession"
+  | "resolveSettings"
+  | "tagSession"
+
+/**
+ * Capability each session function needs, so a caller fails closed BEFORE any
+ * IPC (ADR-0090 constraint 3) rather than learning it from the response.
+ *
+ * Written as a full `Record<SessionApiMethod, …>` so adding a method to the
+ * union without deciding its capability is a compile error.
+ */
+export const SESSION_API_CAPABILITIES: Record<SessionApiMethod, AgentCapabilityId> = {
+  deleteSession: "session.manage",
+  forkSession: "session.manage",
+  getSessionInfo: "session.manage",
+  getSessionMessages: "session.manage",
+  getSubagentMessages: "subagents.manage",
+  importSessionToStore: "session.store",
+  listSessions: "session.manage",
+  listSubagents: "subagents.manage",
+  renameSession: "session.manage",
+  resolveSettings: "session.manage",
+  tagSession: "session.manage",
+}
+
+/**
+ * The five methods that rewrite a user's transcripts on disk.
+ *
+ * Callers use this to decide whether a confirmation is owed, so it is exported
+ * rather than left implicit in each call site — a rename dialog and a delete
+ * dialog should not disagree about which one is destructive. The gate compares
+ * it against the manifest's `mutates` flags.
+ */
+export const MUTATING_SESSION_API_METHODS: readonly SessionApiMethod[] = [
+  "deleteSession",
+  "forkSession",
+  "importSessionToStore",
+  "renameSession",
+  "tagSession",
+]
+
+export function isMutatingSessionApiMethod(method: SessionApiMethod): boolean {
+  return MUTATING_SESSION_API_METHODS.includes(method)
+}
+
+/**
+ * Sidecar → renderer reply to a `sessionApi` request. Shaped like
+ * {@link ControlResponseEvent} but deliberately a distinct `type`: these carry
+ * no `sessionId` (there is no live session), so reusing `control_response`
+ * would mean one event type whose `sessionId` is sometimes meaningless.
+ */
+export interface SessionApiResponseEvent {
+  type: "session_api_response"
+  requestId: string
+  ok: boolean
+  method: SessionApiMethod
+  result?: unknown
+  error?: string
+}
+
+export function isSessionApiResponseEvent(evt: ClaudeEvent): evt is SessionApiResponseEvent {
+  return evt.type === "session_api_response"
+}
+
 export type FeatureCallOperation =
   | "language-generate"
   | "language-stream"
   | "embedding"
   | "bedrock-discover"
   | "opencode-v2-discover"
+  | "mcp-discover"
+
+/** Ephemeral, secret-resolved definition sent only to the trusted sidecar. */
+export interface McpFeatureServer {
+  id: string
+  name: string
+  transport: McpTransport
+  config: Record<string, unknown>
+}
 
 export interface FeatureCallCredentials {
   protocol?: string
@@ -1098,6 +1384,7 @@ export interface FeatureCallRequest {
   providerId?: string
   model?: string
   credentials: FeatureCallCredentials
+  mcpServer?: McpFeatureServer
   /** Same protocol-adapter descriptor used by ordinary provider execution. */
   protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
   options?: Record<string, unknown>
@@ -1201,6 +1488,7 @@ export type ClaudeEvent =
   | ProtocolAdapterCancelEvent
   | ToolResultReviewEvent
   | ControlResponseEvent
+  | SessionApiResponseEvent
   | FeatureCallEvent
   | McpLogEvent
 
@@ -1303,10 +1591,29 @@ export interface SDKUserMessage {
 
 export interface SDKResultMessage {
   type: "result"
-  subtype: "success" | string
+  /**
+   * Stays open (`| (string & {})`) for the same forward-compatibility reason as
+   * {@link SDKMessage}, while still offering the five known endings to
+   * autocomplete and to `switch`. Narrow with {@link SDK_RESULT_SUBTYPES}
+   * before branching on it.
+   */
+  subtype: SdkResultSubtype | (string & {})
   duration_ms: number
   is_error: boolean
+  /** The model's plain-text answer. Kept even when `structured_output` parsed. */
   result?: string
+  /**
+   * The parsed value for a turn that ran with
+   * `outputFormat: { type: "json_schema" }`.
+   *
+   * Typed `unknown`, not the caller's shape: the SDK validates against the
+   * schema it was handed, and this contract has no way to know which schema
+   * that was. Callers own the cast, at the point where they also own the
+   * schema. Absent for every turn that did not request structured output —
+   * and, importantly, ALSO absent on some turns that did, which is why the
+   * outcome needs `classifyStructuredOutcome` rather than a truthiness check.
+   */
+  structured_output?: unknown
   total_cost_usd?: number
   uuid: string
   session_id: string
@@ -1389,6 +1696,102 @@ export type SDKMessage =
   | SDKTaskUpdatedMessage
   | { type: string; session_id: string; [k: string]: unknown }
 
+/**
+ * Every `SDKMessage.type` the pinned Agent SDK can emit.
+ *
+ * The union above is deliberately OPEN — its trailing catch-all is what lets a
+ * host one version ahead deliver something this build predates without a type
+ * error. The cost is that `switch (evt.type)` can never narrow to `never`, so
+ * for eight SDK releases nothing noticed that 30 of the 39 union members were
+ * falling through a default branch.
+ *
+ * These two vocabularies restore the missing half. Consumers assert
+ * exhaustiveness against THEM rather than against the open union, and
+ * `check:sdk-surface` proves they still equal the discriminants in the
+ * installed `sdk.d.ts`. A new SDK message therefore fails the gate, and a
+ * consumer that forgets to handle it fails `tsc` — while the open union keeps
+ * the runtime tolerant.
+ */
+export const SDK_MESSAGE_TYPES = [
+  "assistant",
+  "auth_status",
+  "conversation_reset",
+  "prompt_suggestion",
+  "rate_limit_event",
+  "result",
+  "stream_event",
+  "system",
+  "tool_progress",
+  "tool_use_summary",
+  "user",
+] as const
+
+export type SdkMessageType = (typeof SDK_MESSAGE_TYPES)[number]
+
+/**
+ * Every `subtype` of a `type: "system"` message. 28 of the 39 union members
+ * differ only here, which is why the type-level vocabulary needs both halves.
+ *
+ * `hook_fire` is deliberately absent: it is synthesized by the Rust hook
+ * runtime (`src-tauri/src/claude/sidecar.rs:emit_hook_fire`), not by the SDK,
+ * so including it would make the gate reject the real SDK surface.
+ */
+export const SDK_SYSTEM_SUBTYPES = [
+  "api_retry",
+  "background_tasks_changed",
+  "commands_changed",
+  "compact_boundary",
+  "control_request_progress",
+  "elicitation_complete",
+  "files_persisted",
+  "hook_progress",
+  "hook_response",
+  "hook_started",
+  "informational",
+  "init",
+  "local_command_output",
+  "memory_recall",
+  "mirror_error",
+  "model_refusal_fallback",
+  "model_refusal_no_fallback",
+  "notification",
+  "permission_denied",
+  "plugin_install",
+  "session_state_changed",
+  "status",
+  "task_notification",
+  "task_progress",
+  "task_started",
+  "task_updated",
+  "thinking_tokens",
+  "worker_shutting_down",
+] as const
+
+export type SdkSystemSubtype = (typeof SDK_SYSTEM_SUBTYPES)[number]
+
+/**
+ * Every `subtype` a `type: "result"` message can carry — the turn's outcome.
+ *
+ * Closed for the same reason as the two vocabularies above, and load-bearing
+ * for structured output in particular: a turn that asked for
+ * `outputFormat: { type: "json_schema" }` has FIVE possible endings, and three
+ * of them are failures that must be told apart. `"success"` alone is not
+ * enough — the SDK also reports `subtype: "success"` when it gave up on the
+ * schema and returned prose, so a consumer that only checks `is_error` reports
+ * a structured-output failure as a completed turn.
+ *
+ * @see classifyStructuredOutcome in `claude-agent-sdk-options.ts`
+ */
+export const SDK_RESULT_SUBTYPES = [
+  "error_during_execution",
+  "error_max_budget_usd",
+  "error_max_structured_output_retries",
+  "error_max_turns",
+  "success",
+] as const
+
+export type SdkResultSubtype = (typeof SDK_RESULT_SUBTYPES)[number]
+
 // ---- Persistence shapes --------------------------------------------------
 
 /** Distinguishes 1:1 character chats from multi-character team chats. */
@@ -1410,6 +1813,30 @@ export type SDKMessage =
 export type SessionKind = "direct" | "team" | "workflow-editor" | "resource-workbench" | "subagent"
 
 export type SessionVisibility = "standard" | "embedded"
+
+export type AttachedSessionContextMode =
+  { mode: "none" } | { mode: "last-n"; turns: number } | { mode: "full" }
+
+export type AttachedSessionStatus = "staged" | "running" | "completed" | "interrupted" | "closed"
+
+export type CrossSessionInboundPolicy = "accept" | "hold" | "refuse"
+
+/** Durable parent-owned lifecycle for a Codex-style attached child chat. */
+export interface AttachedChildSession {
+  parentSessionId: string
+  lifecycleOwnerSessionId: string
+  context: AttachedSessionContextMode
+  /** Conversation ancestry does not imply filesystem isolation. */
+  workspace: "shared" | "independent"
+  status: AttachedSessionStatus
+  createdAt: number
+  updatedAt?: number
+  result?: {
+    summary: string
+    messageId?: string
+    completedAt: number
+  }
+}
 
 export type SessionSurfaceBinding =
   | { kind: "canvas-document"; documentId: string }
@@ -1434,7 +1861,13 @@ export interface ChatSession {
    * `lib/db/project-scope.ts`.
    */
   projectId?: string
+  /** Durable Local/managed-worktree binding reused by subsequent turns. */
+  executionContext?: import("@/types/execution-context").SessionExecutionContext
   title: string
+  /** Monotonic lineage for timeline pages, turn details, and opaque cursors. */
+  transcriptRevision?: number
+  /** Persisted branch choices; absent entries resolve to the highest branchIndex. */
+  activeBranchByGroup?: Record<string, string>
   /**
    * True while the title is auto-derived (instant first-message truncation
    * or the LLM-generated upgrade). A manual rename sets this to `false`,
@@ -1483,6 +1916,8 @@ export interface ChatSession {
   memoryUse?: boolean
   /** Per-chat automatic learned-memory write override. */
   memoryLearn?: boolean
+  /** Per-session Agent execution overrides; values beat the bound Agent profile. */
+  executionPolicy?: AgentExecutionPolicy
   pinned?: boolean
   /**
    * Manual sort position within this session's ChannelList section — the
@@ -1523,7 +1958,7 @@ export interface ChatSession {
    * Per-session account override (ADR-0028). Picks which `ProviderVault::accounts[]`
    * entry supplies the OAuth / API key, `CLAUDE_CONFIG_DIR`, base URL, and proxy
    * for this conversation. Precedence chain: `session.accountId →
-   * character.accountIdOverride → settings.defaultAccountId →
+   * character.accountIdOverride → settings.defaultAccountIds[provider] →
    * ActiveAccountState.get(provider).active_account_id` (today's single-active
    * pointer is the final fallback). Undefined here = inherit from character or
    * the global active pointer, preserving today's behaviour for legacy rows.
@@ -1601,6 +2036,10 @@ export interface ChatSession {
    * non-branch sessions.
    */
   parentSessionId?: string
+  /** Parent-owned attached-chat state; absent on ordinary conversation branches. */
+  attachedChild?: AttachedChildSession
+  /** Receiver-owned policy for independent-session messages. Defaults to hold. */
+  crossSessionInboundPolicy?: CrossSessionInboundPolicy
   /** The source message id (in the parent session) this branch was taken at. */
   branchedFromMessageId?: string
   /** How the branch was created: a verbatim copy or an LLM summary seed. */
@@ -1615,6 +2054,15 @@ export interface ChatSession {
    * Undefined once consumed, and on tail branches that use SDK fork instead.
    */
   branchSeed?: { kind: "transcript" | "summary"; content: string }
+  /**
+   * Durable handoff state for a task dispatched into a resource-workbench
+   * sidechat. The first prompt remains here until that sidechat successfully
+   * submits it, so reloads cannot silently lose the task.
+   */
+  spawnedTask?: {
+    mode: "aside" | "inherit"
+    pendingPrompt?: string
+  }
   /**
    * Imported-session ownership flag (ADR-0062 fidelity upgrade). An
    * `import:*` session is a live mirror of an external agent's on-disk history
@@ -1689,6 +2137,22 @@ export interface ChatSession {
    * streaming, so streamed reasoning still renders.
    */
   effort?: SendOptions["effort"]
+  /**
+   * The user-facing thinking TIER this session sits on, kept in sync with
+   * {@link effort} by whoever writes it (`lib/ai/thinking-level.ts`
+   * `thinkingLevelPatch` writes both, and is the only supported writer).
+   *
+   * `effort` alone cannot express the tier set: `"off"` and `undefined` are
+   * indistinguishable once persisted, and `"ultracode"` — Cognia's composite
+   * top tier — maps DOWN to `"xhigh"` effort while additionally exposing the
+   * dynamic-workflow (`wf_*`) tool suite for the turn. This field is what
+   * `resolveSendOptions` reads to decide the workflow-tool coupling, and what
+   * the composer's selector renders.
+   *
+   * Non-indexed, so it needs no Dexie version bump. Legacy rows carry only
+   * `effort`; `resolveThinkingLevel` derives the tier from it for those.
+   */
+  thinkingLevel?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | "ultracode"
   /** Set when this session is bound to an external IM platform conversation. */
   platformBinding?: import("@/types/connectors/binding").PlatformBinding
   /**
@@ -1756,6 +2220,8 @@ export type MessageSenderKind = "user" | "assistant" | "system"
 export interface StoredMessage {
   id: string
   sessionId: string
+  /** Stable provider-agnostic turn identity used by the lazy transcript index. */
+  turnKey?: string
   /** Owning workspace id — Workspace isolation column (Dexie v86). Inherits the session's project. */
   projectId?: string
   role: UIMessage["role"]
@@ -2070,6 +2536,65 @@ export const DEFAULT_UPDATE_SETTINGS: UpdateSettings = {
   useProxy: true,
 }
 
+/**
+ * Live-voice (realtime speech-to-speech) region. CN and Global deployments
+ * never fall back across the boundary — a CN user's audio must not silently
+ * reach a Global endpoint, or vice versa.
+ */
+export type LiveVoiceRegion = "cn" | "global"
+
+/** Providers the live-voice layer can talk to. */
+export type LiveVoiceProviderId = "openai" | "google" | "xai" | "qwen" | "doubao" | "baidu"
+
+/** One configured provider endpoint the user can select or fall back to. */
+export interface LiveVoiceDeployment {
+  id: string
+  provider: LiveVoiceProviderId
+  region: LiveVoiceRegion
+  enabled: boolean
+  /** Model id, or the account-bound resource id for providers that use one. */
+  model?: string
+  resourceId?: string
+  appKey?: string
+  voice?: string
+}
+
+/**
+ * The `liveVoice` block of {@link AppSettings}.
+ *
+ * Deliberately separate from the flat `realtimeVoice` / `realtimeModel` /
+ * `realtimeInstructions` keys below, which belong to the retired OpenAI
+ * Realtime *TTS* provider and are still read by it.
+ */
+export interface LiveVoiceSettings {
+  enabled: boolean
+  region: LiveVoiceRegion
+  preferredDeploymentId?: string
+  fallbackEnabled: boolean
+  /** Max connection candidates to try, including the user's preferred one. */
+  maxCandidates: number
+  connectTimeoutMs: number
+  /** How many trailing final text turns to inject as context. */
+  historyTurnLimit: number
+  /** Hard character budget across all injected history. */
+  historyCharacterLimit: number
+  instructions?: string
+  deployments: LiveVoiceDeployment[]
+}
+
+export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = {
+  enabled: false,
+  region: "global",
+  fallbackEnabled: true,
+  maxCandidates: 3,
+  connectTimeoutMs: 10_000,
+  historyTurnLimit: 12,
+  historyCharacterLimit: 16_000,
+  deployments: [],
+}
+
+export type SubscriptionAccountProvider = "anthropic" | "codex" | "opencode"
+
 export interface AppSettings {
   id: "singleton"
   /** Opt-in local Chromium-cookie import for the embedded desktop browser. */
@@ -2228,6 +2753,17 @@ export interface AppSettings {
      * linked project; a session with no project cannot use them.
      */
     vector?: boolean
+    /**
+     * Expose `spawn_task`, which stages a scoped task in a named sidechat for
+     * the user to start. Host-routed on desktop and web; unavailable on native
+     * mobile where the sidechat host is not mounted. Default false.
+     */
+    spawnTask?: boolean
+    /**
+     * Expose live independent-session discovery and plain-text messaging.
+     * Receiver policy and permission checks remain authoritative. Default false.
+     */
+    sessionMessaging?: boolean
   }
   /**
    * Desktop → cognia CLI storage sync (ADR: CLI ↔ APP storage unification).
@@ -2409,6 +2945,14 @@ export interface AppSettings {
     inputHistoryRecall?: boolean
     /** Persist unsent drafts per session in Dexie and restore on session switch. Default true. */
     persistDrafts?: boolean
+    /**
+     * How the composer renders the thinking-level ("reasoning effort") control
+     * inside the model picker. `"slider"` (default) is the Faster→Smarter track
+     * mirroring the CLI's effort slider; `"list"` is a vertical menu with a
+     * one-line description per tier. Both drive the SAME state — this only
+     * chooses the presentation. See `components/chat/composer/effort-selector.tsx`.
+     */
+    effortSelectorMode?: "slider" | "list"
   }
   /**
    * Agent command-execution permission policy — the "Auto mode" that
@@ -3010,6 +3554,15 @@ export interface AppSettings {
    */
   workbenchRailPersistent?: boolean
   /**
+   * Per-project overrides of the workbench rail layout. Keyed by project id.
+   * When a project-specific layout exists, it takes precedence over the global
+   * `workbenchRail`. Falls back to the global layout when absent.
+   */
+  workbenchRailPerProject?: Record<
+    string,
+    import("@/types/shell/workbench-rail").WorkbenchRailLayout
+  >
+  /**
    * Customization of the desktop title bar (the top window bar): the order of
    * its segments plus the ones the user removed. Lives in settings JSON (same
    * pattern as `sidebarLayout`) so it persists without a Dexie migration and
@@ -3199,6 +3752,7 @@ export interface AppSettings {
     | "deepgram"
     | "xiaomi"
     | "mistral"
+    | "local-openai-compatible"
   /** Browser SpeechSynthesisVoice.voiceURI (system provider). */
   systemVoice?: string
 
@@ -3208,6 +3762,14 @@ export interface AppSettings {
   openaiSpeed?: number
   openaiInstructions?: string
   openaiResponseFormat?: string
+
+  /** Loopback-only OpenAI-compatible TTS endpoint settings. */
+  localOpenaiBaseUrl?: string
+  localOpenaiModel?: string
+  localOpenaiVoice?: string
+  localOpenaiSpeed?: number
+  localOpenaiResponseFormat?: string
+  localOpenaiTimeoutMs?: number
 
   /** Gemini TTS settings. */
   geminiVoice?: string
@@ -3256,6 +3818,14 @@ export interface AppSettings {
   realtimeVoice?: string
   realtimeModel?: string
   realtimeInstructions?: string
+
+  /**
+   * Multi-provider live voice (realtime speech-to-speech). Distinct from the
+   * three `realtime*` keys above, which configure the OpenAI Realtime TTS
+   * provider — sharing them would tie an unrelated subsystem's model choice to
+   * the voice conversation's.
+   */
+  liveVoice?: LiveVoiceSettings
 
   /** Common TTS controls. */
   ttsEnabled?: boolean
@@ -3418,12 +3988,19 @@ export interface AppSettings {
   /** Active default AI provider id (e.g. "openai", "anthropic", "google"). */
   defaultProvider?: string
   /**
+   * Provider-scoped default subscription accounts. These are lower priority
+   * than session and character overrides and higher priority than each
+   * provider vault's active pointer.
+   */
+  defaultAccountIds?: Partial<Record<SubscriptionAccountProvider, string>>
+  /**
    * Default account override (ADR-0028) for sessions / characters that do not
    * set their own `accountId` / `accountIdOverride`. Refers to a UUIDv7 in
    * `ProviderVault::accounts[]` for the provider matched by `defaultProvider`.
    * Undefined keeps today's behaviour exactly — the single global active pointer
    * (`ActiveAccountState`) remains the source of truth.
    */
+  /** @deprecated Migrated into {@link defaultAccountIds} on the next settings write. */
   defaultAccountId?: string
   /**
    * Pet subsystem preferences (v67). Undefined ⇒ defaults from
@@ -3767,7 +4344,7 @@ export interface AppSettings {
    * `mode === "off"`, every caller goes direct.
    *
    * The Rust side reads this via `proxy_config::current()`; the
-   * frontend mirrors writes into Rust by calling `proxy_set` after
+   * frontend mirrors writes into Rust by calling `proxy_apply` after
    * every save so the in-memory config stays coherent without a Dexie
    * round-trip on the hot path.
    */
@@ -4057,18 +4634,57 @@ export type AgentId =
   | "opencode"
   | "cognia"
 
+export interface McpSecretRef {
+  /** Stable keyring locator. Secret material is never serialized here. */
+  secretRef: string
+}
+
+export type McpConfigValue = string | McpSecretRef
+
+export interface McpConfigShape extends Record<string, unknown> {
+  command?: string
+  args?: McpConfigValue[]
+  cwd?: string
+  env?: Record<string, McpConfigValue>
+  url?: McpConfigValue
+  headers?: Record<string, McpConfigValue>
+  allowPrivateNetwork?: boolean
+}
+
+export interface McpStdioConfig extends McpConfigShape {
+  command: string
+}
+
+export interface McpRemoteConfig extends McpConfigShape {
+  url: McpConfigValue
+  /** Explicitly reviewed exception to the default private-network egress block. */
+}
+
+/**
+ * Compatibility shape for pre-governance rows. Registry writes validate this
+ * into a transport-specific shape; legacy rows remain readable during the
+ * resumable host migration.
+ */
+export type McpLegacyConfig = McpConfigShape
+
+export type McpServerConfig = McpStdioConfig | McpRemoteConfig | McpLegacyConfig
+export type McpServerTrustState = "legacy" | "pending" | "trusted" | "blocked"
+export type McpServerOrigin =
+  "manual" | "preset" | "agent-import" | "project-import" | "plugin" | "builtin"
+
+export interface McpServerTrust {
+  state: McpServerTrustState
+  /** Fingerprint of the executable/endpoint shape approved by the user. */
+  reviewedFingerprint?: string
+  reviewedAt?: number
+}
+
 export interface McpServer {
   id: string
   name: string
   transport: McpTransport
-  /**
-   * Free-form configuration object passed verbatim to the SDK as
-   * `options.mcpServers[name]`. Shape varies per transport:
-   *   stdio: { command: string, args?: string[], env?: Record<string,string> }
-   *   sse:   { url: string, headers?: Record<string,string> }
-   *   http:  { url: string, headers?: Record<string,string> }
-   */
-  config: Record<string, unknown>
+  /** Validated transport-discriminated configuration. Sensitive values are SecretRef. */
+  config: McpServerConfig
   /** Whether this server is exposed to Claude in cognia-next's own chats. */
   enabled: boolean
   /**
@@ -4088,8 +4704,65 @@ export interface McpServer {
    * User-created MCP rows leave this field undefined.
    */
   pluginId?: string
+  /** Human-facing label; changing it never changes the SDK namespace. */
+  displayName?: string
+  /** Persisted governance contract version. Legacy rows omit this until migration. */
+  schemaVersion?: 1
+  /** Monotonic config revision used by runtime/cache/sync fingerprints. */
+  revision?: number
+  /** Increments when a referenced credential is rotated. */
+  credentialVersion?: number
+  origin?: McpServerOrigin
+  trust?: McpServerTrust
   createdAt: number
   updatedAt: number
+}
+
+export interface McpServerSummary {
+  id: string
+  displayName: string
+  transport: McpTransport
+  enabled: boolean
+  trustState: McpServerTrustState
+  updatedAt: number
+}
+
+export type McpSyncJobStatus = "pending" | "running" | "retrying" | "succeeded" | "failed"
+
+export interface McpSyncJob {
+  /** AgentId; one durable coalescing row per target Agent. */
+  id: AgentId
+  desiredRevision: number
+  tombstones: string[]
+  status: McpSyncJobStatus
+  attempts: number
+  nextAttemptAt: number
+  createdAt: number
+  updatedAt: number
+  lastError?: string
+}
+
+export interface McpCapabilityCacheRow {
+  /** `${serverId}:${fingerprint}` */
+  id: string
+  serverId: string
+  fingerprint: string
+  tools: Array<{ name: string; description?: string; inputSchema?: unknown }>
+  resources: Array<{ uri: string; name?: string; description?: string; mimeType?: string }>
+  prompts: Array<{ name: string; description?: string }>
+  expiresAt: number
+  updatedAt: number
+}
+
+export type McpRuntimeStatusState =
+  "idle" | "connecting" | "ready" | "needs-auth" | "degraded" | "blocked" | "failed" | "closing"
+
+export interface McpRuntimeStatusSnapshot {
+  scopeId: string
+  serverId: string
+  state: McpRuntimeStatusState
+  updatedAt: number
+  errorCode?: string
 }
 
 export interface PendingApproval {
@@ -4129,6 +4802,46 @@ export interface PendingApproval {
 
 // ---- Characters / Skills / Teams -----------------------------------------
 
+/** Semantic role used when selecting one of an Agent's model targets. */
+export type AgentModelRole = "plan" | "execute" | "utility"
+
+/**
+ * A concrete model id, an existing model alias, or the application's `auto`
+ * route. The provider router resolves capability, health, cost, and fallback;
+ * Agent profiles only select the semantic target.
+ */
+export type ModelTarget = string
+
+export interface AgentModelRouting {
+  plan?: ModelTarget
+  execute?: ModelTarget
+  utility?: ModelTarget
+}
+
+/** Persistable environment binding. Secret values live only in the keyring. */
+export type AgentEnvBinding =
+  | { name: string; kind: "plain"; value: string }
+  | { name: string; kind: "secret"; secretRef: string }
+
+export interface AgentExecutionPolicy {
+  effort?: SendOptions["effort"]
+  /** Hard agentic-turn ceiling. The runtime accepts integers from 1 through 100. */
+  maxTurns?: number
+  envBindings?: AgentEnvBinding[]
+}
+
+export interface AgentMemoryPolicy {
+  operations: {
+    recall: boolean
+    create: boolean
+    update: boolean
+    forget: boolean
+  }
+  readableScopes: import("@/types/memory/memory").MemoryScope[]
+  writableScopes: import("@/types/memory/memory").MemoryScope[]
+  autoLearn: boolean
+}
+
 /**
  * A reusable persona. When a session has `characterId`, the character's config
  * supplies the system prompt, model, tool whitelist, MCP subset, and skills,
@@ -4143,6 +4856,14 @@ export interface Character {
   /** Optional one-glyph icon shown inside the avatar. */
   avatarEmoji?: string
   systemPrompt: string
+  /** Semantic Agent model targets. Legacy `model` remains the execute fallback. */
+  modelRouting?: AgentModelRouting
+  /** Agent-level defaults; a session execution policy overrides these fields. */
+  executionPolicy?: AgentExecutionPolicy
+  /** Independently managed knowledge bases attached to this Agent. */
+  knowledgeBaseIds?: string[]
+  /** Fine-grained memory ceiling below the application-wide memory policy. */
+  memoryPolicy?: AgentMemoryPolicy
   model?: string
   /**
    * Provider id this character prefers. Beats `AppSettings.defaultProvider`
@@ -4155,7 +4876,7 @@ export interface Character {
    * Per-character account override (ADR-0028). Picks which `ProviderVault::accounts[]`
    * entry supplies credentials for every session bound to this character — unless
    * the session itself sets `ChatSession.accountId`, which wins. Undefined here
-   * falls through to `AppSettings.defaultAccountId` and then to the global
+   * falls through to `AppSettings.defaultAccountIds[provider]` and then to the global
    * `ActiveAccountState` pointer (today's behaviour).
    */
   accountIdOverride?: string
@@ -4432,6 +5153,9 @@ export interface Character {
   updatedAt: number
 }
 
+/** Product-facing name for Character. Kept structurally compatible on purpose. */
+export type AgentProfile = Character
+
 /**
  * Frozen snapshot of every pack-managed field on a character row at the
  * moment of its last clone / apply-update. Lives in `Character.pristineSnapshot`.
@@ -4451,6 +5175,9 @@ export interface PackPristineSnapshot {
   avatarColor?: string
   avatarEmoji?: string
   model?: string
+  modelRouting?: AgentModelRouting
+  executionPolicy?: AgentExecutionPolicy
+  memoryPolicy?: AgentMemoryPolicy
   providerId?: string
   permissionMode?: SendOptions["permissionMode"]
   allowedTools?: string[]
@@ -4478,8 +5205,20 @@ export interface PackPristineSnapshot {
  */
 export interface Skill {
   id: string
+  /** Portable Agent Skills name and bundle directory (lowercase kebab-case). */
+  slug?: string
   name: string
   description?: string
+  /** Environment requirements declared by the Agent Skills specification. */
+  compatibility?: string
+  /** Standard string-to-string Agent Skills metadata. */
+  metadata?: Record<string, string>
+  /** Whether the skill may appear in an implicit discovery catalog. */
+  invocationPolicy?: "implicit" | "explicit"
+  /** Unknown SKILL.md frontmatter retained for lossless round-trips. */
+  frontmatterExtensions?: Record<string, unknown>
+  /** Original Codex agents/openai.yaml text, retained until explicitly edited. */
+  codexOpenAiYaml?: string
   /** Markdown body, appended verbatim to the system prompt under `## <name>`. */
   content: string
   /** Tools this skill expects to call; unioned with the character's whitelist. */
@@ -4596,13 +5335,22 @@ export interface SkillValidationError {
     | "missing-name"
     | "name-too-long"
     | "name-format"
+    | "missing-slug"
+    | "slug-too-long"
+    | "slug-format"
+    | "missing-description"
     | "missing-content"
     | "description-too-long"
+    | "compatibility-too-long"
+    | "metadata-format"
+    | "directory-name-mismatch"
     | "duplicate-resource-path"
     | "resource-path-traversal"
     | "frontmatter-parse"
     | "unknown"
   message: string
+  /** Runtime issues block loading; portability blocks standard export; warnings are advisory. */
+  severity?: "runtime" | "portability" | "warning"
   /** Frontmatter field or resource id this error applies to. */
   field?: string
 }
@@ -4638,6 +5386,8 @@ export interface Team {
   /** Ordered member slots. The order determines round-robin reply order. */
   members: TeamMember[]
   orchestration: TeamOrchestration
+  /** Maximum Agent replies produced for one user turn. Legacy rows default to four. */
+  maxResponses?: number
   /** When orchestration === "supervisor", which member acts as the leader. */
   supervisorCharacterId?: string
   /** Team-level MCP override applied to members without their own subset. */

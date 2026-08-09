@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // Coverage for the chat-history search-text store: idempotent projection writes,
 // the delete paths that keep stale hits from surviving, and the descending lazy
 // backfill's watermark. Uses fake-indexeddb so the real Dexie query path runs.
 
-import "fake-indexeddb/auto"
 import type { StoredMessage } from "@cognia/agent-config-types"
 import {
   BACKFILL_BATCH_SIZE,
@@ -21,19 +19,19 @@ import {
   setChatSearchState,
   type ChatSearchTextRow,
 } from "./chat-search-text"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 // A cold open of the full schema chain crosses Jest's default 5s hook timeout
 // under coverage instrumentation. Mirrors the repo pattern for high-version
 // tables.
 jest.setTimeout(30_000)
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 function message(over: Partial<StoredMessage> = {}): StoredMessage {
   return {

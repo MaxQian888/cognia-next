@@ -78,6 +78,7 @@ import {
   useReducedMotionVariants,
 } from "@/lib/ui/motion"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { useProjectStore } from "@/stores/project/project-store"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
 import { usePlatform } from "@/hooks/use-platform"
@@ -86,6 +87,7 @@ import { type AgentTeamTemplate } from "@/types/agent/agent-team"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createSampleTeam } from "@/lib/ai/agent/sample-team"
 import { AutoComposeDialog } from "@/components/agent/workspace/auto-compose-dialog"
+import { AgentTeamCommandCenter } from "@/components/agent/team/command-center"
 import { createLogger } from "@cognia/logging"
 import {
   getTemplateWarnings,
@@ -97,6 +99,7 @@ import { instantiateAgentTeamTemplate } from "@/lib/agent-team/instantiate-templ
 import { getTemplateRuntime } from "@/lib/templates/runtime"
 import type { AgentTeamTemplatePayload } from "@/lib/templates/adapters"
 import type { TemplateDefinitionEnvelope } from "@/lib/templates/contracts"
+import { resolveDurableNewTeamConfig } from "@/lib/ai/agent/team/durable-new-team"
 
 const log = createLogger("agentTeams.list")
 
@@ -222,6 +225,9 @@ export default function AgentTeamsListPage() {
   const createTask = useAgentTeamStore((s) => s.createTask)
   const deleteTeam = useAgentTeamStore((s) => s.deleteTeam)
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
+  const activeProject = useProjectStore((state) =>
+    state.projects.find((project) => project.id === state.activeProjectId)
+  )
 
   const [search, setSearch] = useState("")
   const [activeTab, setActiveTab] = useState("my-teams")
@@ -292,10 +298,20 @@ export default function AgentTeamsListPage() {
   }, [allTemplates, categoryFilter])
 
   /* ---- actions ---- */
+  const applyDurableDefaults = async (teamId: string): Promise<void> => {
+    const team = useAgentTeamStore.getState().teams[teamId]
+    if (!team || team.config.runtimeVersion === "durable-v2") return
+    const durableConfig = await resolveDurableNewTeamConfig(activeProject)
+    if (!durableConfig) return
+    updateTeam(teamId, { config: { ...team.config, ...durableConfig } })
+  }
+
   const instantiatePickedTemplate = async (tpl: AgentTeamTemplate): Promise<string | undefined> => {
     const definition = catalogProjection.byPickerId.get(tpl.id)
     if (!definition) {
-      return instantiateAgentTeamTemplate(tpl, { createTeam, addTeammate, createTask }).id
+      const teamId = instantiateAgentTeamTemplate(tpl, { createTeam, addTeammate, createTask }).id
+      await applyDurableDefaults(teamId)
+      return teamId
     }
     const plan = await getTemplateRuntime().service.preflight({
       definitionId: definition.id,
@@ -312,7 +328,9 @@ export default function AgentTeamsListPage() {
       plan,
       confirmed: false,
     })
-    return result.resources.find((resource) => resource.domain === "agentTeam")?.id
+    const teamId = result.resources.find((resource) => resource.domain === "agentTeam")?.id
+    if (teamId) await applyDurableDefaults(teamId)
+    return teamId
   }
 
   const handlePickTemplate = async (tpl: AgentTeamTemplate) => {
@@ -428,8 +446,13 @@ export default function AgentTeamsListPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="my-teams">{t("myTeams")}</TabsTrigger>
+          <TabsTrigger value="command-center">{t("commandCenter.tab")}</TabsTrigger>
           <TabsTrigger value="templates">{t("templatesTab")}</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="command-center" className="pt-4">
+          <AgentTeamCommandCenter />
+        </TabsContent>
 
         {/* ---- My Teams ---- */}
         <TabsContent value="my-teams" className="space-y-4 pt-4">
@@ -834,6 +857,9 @@ function CreateTeamDialog({
 }: CreateTeamDialogProps) {
   const t = useTranslations("agentTeamsWorkspace")
   const createTeam = useAgentTeamStore((s) => s.createTeam)
+  const activeProject = useProjectStore((state) =>
+    state.projects.find((project) => project.id === state.activeProjectId)
+  )
 
   const [mode, setMode] = useState<"template" | "scratch">("template")
   const [name, setName] = useState("")
@@ -841,18 +867,19 @@ function CreateTeamDialog({
   const [requirePlanApproval, setRequirePlanApproval] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const handleCreateFromScratch = () => {
+  const handleCreateFromScratch = async () => {
     if (!name.trim()) {
       toast.error(t("teamNameRequired"))
       return
     }
     setSaving(true)
     try {
+      const durableConfig = await resolveDurableNewTeamConfig(activeProject)
       const team = createTeam({
         name: name.trim(),
         description: description.trim() || t("defaultTeamDescription"),
         task: description.trim() || name.trim(),
-        config: { requirePlanApproval },
+        config: { requirePlanApproval, ...(durableConfig ?? {}) },
       })
       toast.success(t("teamCreated", { name: team.name }))
       onCreated(team.id)
@@ -981,7 +1008,7 @@ function CreateTeamDialog({
             {t("cancel")}
           </Button>
           {mode === "scratch" && (
-            <Button size="sm" onClick={handleCreateFromScratch} disabled={saving}>
+            <Button size="sm" onClick={() => void handleCreateFromScratch()} disabled={saving}>
               {saving ? t("creating") : t("createTeam")}
             </Button>
           )}

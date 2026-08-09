@@ -11,7 +11,13 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs"
+import {
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -21,6 +27,7 @@ import {
   renderModule,
   MAX_WALLPAPER_BYTES,
   DEFAULT_DEST,
+  parseArgs,
 } from "./download-share-wallpapers.mjs"
 
 function tmpRoot() {
@@ -45,6 +52,12 @@ const MANIFEST = {
   arknights: { url: "https://img.test/a.webp", credit: "A — CC0" },
   cyberpunk: { url: "https://img.test/c.webp", credit: "C — CC0" },
 }
+
+test("parseArgs supports forced refresh and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { force: false })
+  assert.deepEqual(parseArgs(["--force"]), { force: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 test("exports sensible defaults", () => {
   assert.match(DEFAULT_DEST, /wallpapers\.generated\.ts$/)
@@ -89,7 +102,7 @@ test("generates a module with a data URL per theme (atomic, creates dir)", async
   assert.match(src, /"arknights": "data:image\/webp;base64,/)
   assert.match(src, /"cyberpunk": "data:image\/webp;base64,/)
   assert.match(calls[0].ua, /Mozilla/)
-  assert.equal(existsSync(`${dest}.tmp-${process.pid}`), false)
+  assert.deepEqual(readdirSync(join(root, "nested")), ["wallpapers.generated.ts"])
   rmSync(root, { recursive: true, force: true })
 })
 

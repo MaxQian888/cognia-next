@@ -1,6 +1,6 @@
 ---
 title: Server & Authentication
-description: The axum bootstrap, the 10-year self-signed TLS certificate, the two non-overlapping middleware layers, and the full pairing pipeline — pair JWT vs device JWT, the 6-digit code path, single-use redemption, and the deny / remote-control lists.
+description: The current Companion TLS listener, cgnp3 bootstrap, DPoP access tokens, WebSocket tickets, signaling identity, and OIDC boundary.
 ---
 
 # Server & Authentication
@@ -8,236 +8,89 @@ description: The axum bootstrap, the 10-year self-signed TLS certificate, the tw
 <Status variant="beta" />
 
 <TLDR>
-  `CompanionServerState::start` (`mod.rs:349`) loads the HS256 signing secret, builds the shared
-  state, and calls `spawn_server` (`server.rs:108`), which binds a TCP socket (loopback or
-  `0.0.0.0`), terminates Rustls TLS, and serves `build_router` with a 10-second graceful-shutdown
-  drain. Two non-overlapping middleware layers protect the routes: a per-IP token bucket on the three
-  pairing endpoints and a device-JWT verifier on everything else. Pairing issues a **5-minute,
-  single-use** pair JWT (`jwt.rs:27`) that the phone redeems — by QR or by a 6-digit code — for a
-  **90-day** device JWT (`jwt.rs:29`); replay is blocked by a 256-entry redemption LRU.
+  The canonical device API no longer treats a long-lived bearer token as the normal credential.
+  A device registers a public key, signs a one-minute challenge, exchanges it for a five-minute
+  DPoP-bound access token, and mints a 60-second single-use ticket for each WebSocket connection.
+  Headless mode uses a separate loopback-only service token and never enters the device flow.
 </TLDR>
 
-<StatGrid>
-  <Stat label="Default port" value="27890" hint="server.rs — DEFAULT_PORT" />
-  <Stat label="Body limit" value="64 KiB" hint="server.rs:47" />
-  <Stat label="Pair JWT TTL" value="5 min" hint="jwt.rs:27 — single-use" />
-  <Stat label="Device JWT TTL" value="90 days" hint="jwt.rs:29" />
-  <Stat label="TLS validity" value="10 years" hint="tls.rs:30 — stable key, stable fingerprint" />
-  <Stat label="Pre-auth limit" value="20 / min" hint="mod.rs:203 — 5 burst, per IP" />
-</StatGrid>
+## Listener boundary
 
-## Server bootstrap
+The desktop-managed Companion listener uses loopback unless LAN access is enabled. The standalone
+`cognia-server serve` entry point binds `0.0.0.0:27890` for deployment use; the development launcher
+adds `--bind-loopback` when `pnpm dev:headless --local-debug` is selected. TLS is terminated in Rust,
+request bodies are bounded, and middleware classifies the request before it reaches a handler.
 
-`spawn_server` (`server.rs:108`) is the single entry point. The bind IP depends on the mode:
-`Ipv4Addr::LOCALHOST` for `BindMode::Loopback`, `Ipv4Addr::UNSPECIFIED` (`0.0.0.0`) for `BindMode::Lan`
-(`server.rs:114-118`). It binds a **synchronous** `TcpListener` first (`server.rs:122-130`) so an
-OS-assigned ephemeral port (`port = 0`) can be read back and advertised, then hands the socket to
-`axum_server::from_tcp_rustls` (`server.rs:156`) with `into_make_service_with_connect_info::<SocketAddr>()`
-(`server.rs:165`) — that connect-info is what lets the pre-auth rate limiter see the peer IP.
+| Route family | Credential |
+| --- | --- |
+| `/healthz`, `/livez`, `/readyz`, agent card | None |
+| `GET /api/auth/config` | None; deployment-safe discovery only |
+| `/api/auth/device/challenge`, `/api/auth/device/register` | Signed device challenge plus invitation or configured OIDC authority |
+| `/api/auth/token` | Registered device signature over the challenge |
+| Canonical `/api/*` | `Authorization: Bearer <access-token>` plus matching `DPoP` proof header |
+| Canonical `/ws/*` | Path-bound ticket from `POST /api/auth/socket-ticket` |
+| `/internal/*`, `/ide/content*` | Loopback service token |
 
-```mermaid
-flowchart TB
-  START["CompanionServerState::start<br/>mod.rs:349"]
-  GUARD{"already running?<br/>mod.rs:357"}
-  SECRET["secret::load_or_generate<br/>secret.rs:36"]
-  TLS["tls::ensure_certificate<br/>tls.rs"]
-  BIND["TcpListener::bind<br/>server.rs:122"]
-  RUSTLS["RustlsConfig::from_pem_file<br/>server.rs:132"]
-  ROUTER["build_router<br/>server.rs:199"]
-  SERVE["axum_server::from_tcp_rustls<br/>server.rs:156"]
-  PORT["set_advertised_port(bound_port)<br/>mod.rs:381"]
-  SHUT["watch::channel → drain 10 s<br/>server.rs:139,145"]
-
-  START --> GUARD
-  GUARD -- "no" --> SECRET --> TLS --> BIND --> RUSTLS --> ROUTER --> SERVE --> PORT
-  GUARD -- "yes (guard)" --> STOP["return — no double start"]
-  SERVE -. "on stop signal" .-> SHUT
-
-  classDef n fill:#7c2d12,stroke:#fb923c,color:#fed7aa
-  classDef d fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
-  class START,SECRET,TLS,BIND,RUSTLS,ROUTER,SERVE,PORT,SHUT n
-  class GUARD,STOP d
-```
-
-### State containers
-
-| Struct | Where | Role |
-| --- | --- | --- |
-| `CompanionState` | `mod.rs:92` | the axum handler state (`Arc`-wrapped as `SharedState`, `mod.rs:89`): secret, event bus, bridges, registries |
-| `CompanionServerState` | `mod.rs:221` | the Tauri-managed lifecycle wrapper holding the running `ServerHandle` |
-| `CompanionServerInner` | `mod.rs:274` | `handle` + `bound_port` + `bind_mode` |
-| `BindMode` | `mod.rs:287` | `Loopback` \| `Lan` |
-| `ServerHandle` | `server.rs:60` | `bound_port` + `shutdown` sender |
-
-A handful of process-global singletons live in `mod.rs`: the TLS fingerprint (`mod.rs:160`), the
-advertised port (`mod.rs:176`), the push dispatcher set (`mod.rs:148`), and the **pre-auth** rate
-limiter (`mod.rs:199`, configured `capacity: 5.0`, `refill: 20.0/60.0` at `mod.rs:202-203`).
-
-## The middleware stack
-
-The two layers are registered in `build_router` but applied to different sub-routers, so they never
-both run on the same request.
-
-### Pre-auth rate limit — `pre_auth_rate_limit` (`middleware.rs:201`)
-
-Guards only the pairing routes (`server.rs:216`). It extracts the peer IP from `ConnectInfo<SocketAddr>`
-(`middleware.rs:202`), **short-circuits loopback** (`middleware.rs:212-214` — same-machine debugging is
-never throttled), then checks the per-IP token bucket. A reject returns `429 { "code": "rate_limited" }`
-with a `Retry-After` header (`middleware.rs:219-233`).
-
-### Device JWT — `require_device_jwt` (`middleware.rs:79`)
-
-Guards `whoami` / `_rpc` / both WebSockets (`server.rs:239-242`). The sequence:
-
-<Steps>
-<Step>
-**Extract the token** — `Authorization: Bearer <jwt>` (`middleware.rs:85-90`), falling back to the
-`?token=` query string for WebSockets (`middleware.rs:92-96`); the header wins when both are present
-(`middleware.rs:99`). Neither → `401 missing_authorization`.
-</Step>
-<Step>
-**Verify** — `verify(secret, token, "device")` (`middleware.rs:111` → `jwt.rs:109`). The error maps
-to a specific code: `WrongScope` → `wrong_scope`, expired → `expired_token`, otherwise
-`invalid_signature` (`middleware.rs:113-124`).
-</Step>
-<Step>
-**Extract `device_id`** from the claims, or `401 malformed_token` (`middleware.rs:127-135`).
-</Step>
-<Step>
-**Deny-list gate** — `deny_list.is_revoked(device_id)` → `401 device_revoked`
-(`middleware.rs:138-140` → `deny_list.rs:73`).
-</Step>
-<Step>
-**Inject `DeviceContext`** into request extensions (`middleware.rs:143-146`), run the handler, then
-**best-effort emit** `companion://device-seen` with `{ device_id, seen_at_ms }` (`middleware.rs:152-164`)
-so the desktop UI can show last-seen times.
-</Step>
-</Steps>
-
-Both layers use the same flat error envelope — `{ code, message }` (`middleware.rs:174`, mirrored in
-`auth.rs:410`).
-
-## JWT scopes
-
-```rust title="src-tauri/src/companion_api/jwt.rs"
-const PAIR_TTL_SECS: i64 = 5 * 60;             // jwt.rs:27  — 5 minutes, single-use
-const DEVICE_TTL_SECS: i64 = 90 * 24 * 3600;   // jwt.rs:29  — 90 days
-```
-
-`Claims` (`jwt.rs:37`) carries `scope` (`"pair"` or `"device"`), `iat`, `exp`, an optional `jti`
-(only on pair tokens, for single-use tracking), and an optional `device_id` (only on device tokens).
-`verify` (`jwt.rs:109`) uses HS256 with **zero leeway** (`jwt.rs:112`), `validate_exp`, and a required
-`exp` claim. The two issue functions are `issue_pair_jwt` (`jwt.rs:68`, mints a fresh UUIDv4 `jti`)
-and `issue_device_jwt` (`jwt.rs:89`).
-
-The signing secret is a single 32-byte value persisted in the OS keyring under service
-`"com.cognia.companion/v1"`, account `"signing-key"` (`secret.rs:21-22`), via `load_or_generate`
-(`secret.rs:36`). Rotating it (`secret.rs:55`) invalidates every issued token at once.
-
-## The pairing pipeline
-
-Pairing is the only moment bilateral identity is established. There are two redemption paths — a
-scanned QR and a typed 6-digit code — that converge on one shared core, `redeem_with_pair_jwt`
-(`auth.rs:270`).
+## Device bootstrap
 
 ```mermaid
 sequenceDiagram
-  participant D as Desktop UI
-  participant R as Rust (auth.rs)
-  participant P as Phone
-  participant L as redemption / pair-code LRU
-
-  D->>R: companion_issue_pair_jwt (commands.rs:498)
-  R->>R: issue_pair_jwt — 5 min, jti (jwt.rs:68)
-  R->>R: resolve base_url<br/>tunnel > named > LAN > loopback (commands.rs:510)
-  R->>L: pair_code_lru.insert(code → jwt) (commands.rs:539)
-  R-->>D: { pairJwt, pairCode, expiresAtMs }
-
-  alt QR path
-    P->>R: POST /api/v1/auth/pair { pairJwt, deviceLabel… } (auth.rs:178)
-  else 6-digit code path
-    P->>R: POST /api/v1/auth/pair/redeem-code { code… } (auth.rs:211)
-    R->>L: pair_code_lru.take(code) (pair_code_lru.rs:91)
-  end
-
-  R->>R: redeem_with_pair_jwt (auth.rs:270)
-  R->>R: verify(pairJwt, "pair") (jwt.rs:109)
-  R->>L: redemption_lru.mark_redeemed(jti) (redemption_lru.rs:50)
-  alt jti already used
-    R-->>P: 409 pair_jwt_redeemed (auth.rs:310)
-  else first use
-    R->>R: issue_device_jwt (jwt.rs:89) + rendezvous tuple (auth.rs:337)
-    R-->>D: emit companion://device-paired (auth.rs:358)
-    R-->>P: { deviceId, deviceJwt, rendezvousId, roomDescriptor, signalingKeyRef }
-    P->>R: GET /api/v1/whoami (auth.rs:389) — confirm JWT + re-pin TLS
-  end
+  participant D as Device
+  participant C as Companion server
+  D->>C: GET /api/auth/config
+  C-->>D: mode, Host id, OIDC config, public signaling + ICE
+  D->>C: POST /api/auth/device/challenge
+  C-->>D: challengeId, nonce, expiresAt
+  D->>C: POST /api/auth/device/register + auth key + independent signaling key + signed proof
+  C-->>D: deviceId, tenantId, role, serverVersion, room descriptor
+  D->>C: POST /api/auth/device/challenge
+  C-->>D: fresh challenge
+  D->>C: POST /api/auth/token + signed proof
+  C-->>D: DPoP access token (300 s)
 ```
 
-### Handlers and their shapes
+The `cgnp3` payload declares either `owner-invitation` or `oidc`. Only the former contains a one-time
+invitation. Managed mode validates Logto issuer, resource/audience, Web client, and organization
+before registering the device. Authentication and signaling private keys remain in Browser Vault or
+system secure storage; the target book contains only public metadata.
 
-| Handler | Where | Request | Response |
-| --- | --- | --- | --- |
-| `issue_handler` | `auth.rs:119` | empty | `IssueResponse { pairJwt, expiresAtMs, pairCode, pairCodeExpiresAtMs }` (`auth.rs:49`) |
-| `pair_handler` | `auth.rs:178` | `PairRequest { pairJwt, deviceLabel, devicePlatform, devicePubkey, appVersion }` (`auth.rs:81`) | `PairResponse` (below) |
-| `redeem_code_handler` | `auth.rs:211` | `RedeemCodeRequest { code, deviceLabel, … }` (`auth.rs:70`) | `PairResponse` |
-| `whoami_handler` | `auth.rs:389` | (device JWT) | `{ device_id, server_version, tls_fingerprint }` |
+## Calling canonical HTTP routes
 
-`PairResponse` includes `{ deviceId, deviceJwt, serverVersion, rendezvousId,
-roomDescriptor, signalingKeyRef }`. `rendezvousId` is the canonical descriptor hash. The descriptor
-contains both role public keys and no secret; the host role private key is stored behind
-`signalingKeyRef`. The phone-generated private key never crosses the pairing boundary. See the
-[v2 WebRTC plane](./signaling-webrtc).
+Each protected request sends the five-minute access token and a signed proof bound to its token
+identifier, HTTP method, and request path:
 
-### Single-use enforcement
+```http
+POST /api/_rpc/session_list HTTP/1.1
+Authorization: Bearer eyJ…
+DPoP: eyJ…
+Content-Type: application/json
 
-The 6-digit code (`generate_pair_code`, `auth.rs:158`, range `100_000..=999_999`) maps to the pair
-JWT in `PairCodeLru` (cap 64, `pair_code_lru.rs:39`); `take` (`pair_code_lru.rs:91`) removes it on
-first redemption and returns `Expired` past the underlying JWT's `exp`. The pair JWT itself is then
-guarded a second time by `RedemptionLru` (cap 256 FIFO, `redemption_lru.rs:26`): `mark_redeemed(jti)`
-(`redemption_lru.rs:50`) returns `false` on replay, yielding `409 pair_jwt_redeemed`. So a leaked QR
-is useless after one successful pair, and useless after 5 minutes regardless.
+{}
+```
 
-## Revocation: deny-list and control allow-list
+High-risk commands also follow the capability, approval, rate-limit, and idempotency policy stored
+in `protocol/companion-commands.json`.
 
-Two process-global sets gate an already-paired device:
+## WebSocket tickets
 
-- **`DenyList`** (`deny_list.rs`) — revoked device IDs. `revoke` / `unrevoke` / `is_revoked` /
-  `seed` (`deny_list.rs:52-82`); checked on every protected request (`middleware.rs:138`). The
-  desktop seeds it from Dexie at startup and on every revoke from the Settings UI. A 1000-entry
-  threshold logs a warning but is not a hard cap (`deny_list.rs:27`).
-- **`ControlAllowList`** (`control_allow_list.rs:35`) — the *opt-in* set of devices allowed to call
-  session-control verbs (`session_attach`, `goal_pause`, `automation_consent_respond`, …;
-  `control_allow_list.rs:3-11`). `allow` / `disallow` / `is_allowed` / `reseed` (`control_allow_list.rs:59-80`).
-  Enforced in `rpc_handler` (`rpc.rs:591`) and again in `dispatch` (`rpc.rs:724`).
+Call `POST /api/auth/socket-ticket` with a valid DPoP request and the target channel. The returned
+ticket expires after 60 seconds, is single-use, and is bound to the intended socket path. Pass it as
+the `ticket` query parameter; never put the DPoP access token in a WebSocket URL.
 
-Both are mirrored from Dexie via Tauri commands — `companion_seed_deny_list` (`commands.rs:257`),
-`companion_revoke_device` (`commands.rs:282`), `companion_set_remote_control` (`commands.rs:309`),
-`companion_seed_remote_control` (`commands.rs:323`).
+## Breaking-upgrade policy
 
-## TLS: self-signed, pinned, stable
+The server mounts only the unversioned canonical routes. A target record without a P-256 device key
+is invalidated and shown as requiring a fresh `cgnp3` pairing; long-lived bearer device JWTs are not
+accepted or migrated.
 
-`tls::ensure_certificate` generates a **10-year** (`tls.rs:30`) self-signed certificate with `rcgen`
-on first launch, common name `"cognia-companion"` (`tls.rs:29`), persisted to
-`<data_dir>/cognia/companion/tls.pem` + `tls.key` (`tls.rs:27-28,57`). It computes the SHA-256 of the
-SubjectPublicKeyInfo and exposes it as the fingerprint (`mod.rs:160`). Because the **key is reused**
-across re-signs, the fingerprint is stable — the phone pins it once at pairing and never needs to
-re-pair. Desktop browsers visiting the URL still see a warning; only the phone's pinning path treats
-it as trusted. See [Discovery, tunnel & TLS](./discovery-tunnel) for the fingerprint delivery path.
+## Developer credentials
 
-## Known limitations
+For renderer-free local debugging, prefer automatic process-scoped authentication:
 
-- **Single signing key, process scope.** Multi-account / multi-vault would require a service-name
-  bump (`com.cognia.companion/v2`). Rotating the key re-pairs every device.
-- **Pre-auth limiter is per-IP, not per-device.** It exists only to slow brute-forcing the pairing
-  endpoints; loopback is exempt entirely.
-- **`store.rs` is not on the live path.** The `AppStore` / `SqliteAppStore` abstraction (`store.rs`)
-  is the headless-mode persistence layer ([data plane](./data-plane-bridges)); the Tauri desktop
-  build always uses the WebView bridges, not the SQLite store.
+```bash
+pnpm dev:headless --local-debug --skip-build
+```
 
-## Related pages
-
-<Cards>
-  <Card title="RPC command manifest" href="./rpc-manifest" description="What a paired device can actually call once it holds a device JWT." />
-  <Card title="WebRTC signaling plane" href="./signaling-webrtc" description="Where the rendezvous tuple from pairing is used." />
-  <Card title="Mobile: discovery & pairing" href="../../ui/mobile-architecture/discovery-pairing" description="The client half of this flow — QR scan, code entry, TLS pinning." />
-</Cards>
+The launcher forces a loopback bind and writes a temporary Apifox/Postman environment. It does not
+disable authentication. Use `pnpm --silent dev:headless token` only when a 24-hour service JWT is
+required across restarts. See [Headless service plane](./headless-service-plane).

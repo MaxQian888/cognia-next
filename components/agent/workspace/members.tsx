@@ -65,6 +65,7 @@ import { DEFAULT_TEAMMATE_RUNTIME } from "@/types/agent/agent-team"
 import { RuntimeBadge } from "./runtime-badge"
 import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
 import { TeammateConfigDialog } from "./teammate-config-dialog"
+import { AgentTeamAvatar } from "./agent-team-avatar"
 
 export interface AgentTeamMembersProps {
   /**
@@ -287,9 +288,10 @@ function MemberRow({
 
   return (
     <div className="flex items-start gap-3">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium">
-        {member.name.charAt(0).toUpperCase()}
-      </span>
+      <AgentTeamAvatar
+        subject={member}
+        className="size-9 rounded-full bg-primary/10 ring-1 ring-inset ring-primary/10"
+      />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-sm font-medium">{member.name}</p>

@@ -155,6 +155,14 @@ describe("SettingsShell reset button", () => {
     expect(screen.getByTestId("section-body")).toBeInTheDocument()
     expect(replace).not.toHaveBeenCalled()
   })
+
+  it("mounts the outbound Webhooks section without a legacy Remote Control redirect", () => {
+    setDesktop(true)
+    mockSection = "webhooks"
+    render(<SettingsShell />)
+    expect(screen.getByTestId("section-body")).toBeInTheDocument()
+    expect(replace).not.toHaveBeenCalled()
+  })
 })
 
 describe("SettingsShell desktop-only backstop", () => {

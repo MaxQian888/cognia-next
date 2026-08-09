@@ -82,6 +82,12 @@ export function getSidebarCatalog(
 ): SidebarCatalogItem[] {
   return SIDEBAR_NAV_META.filter((meta) => {
     if (platform === "tauri") return true
+    // `desktopOnly` is a shell constraint, not a runtime capability. A paired
+    // desktop may advertise the underlying operation to a phone, but the
+    // mobile drawer must still not expose destinations designed only for the
+    // desktop shell. Check this before the runtime contract so the initial
+    // target-less snapshot cannot temporarily reveal them either.
+    if (platform === "mobile" && meta.desktopOnly) return false
     if (runtimeSnapshot) {
       const contract = getSurfaceContract(meta.id)
       return contract ? shouldShowSurface(contract, runtimeSnapshot) : false

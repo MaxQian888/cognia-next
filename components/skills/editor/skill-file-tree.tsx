@@ -6,7 +6,9 @@ import { cn } from "@/lib/utils"
 import type { Skill, SkillResource, SkillResourceKind } from "@cognia/agent-config-types"
 
 type Selection =
-  { id: "main"; kind: "main" } | { id: string; kind: "resource"; resource: SkillResource }
+  | { id: "main"; kind: "main" }
+  | { id: "codex"; kind: "codex"; content: string }
+  | { id: string; kind: "resource"; resource: SkillResource }
 
 interface Props {
   skill: Skill
@@ -42,6 +44,14 @@ export function SkillFileTree({ skill, resources, activeFileId, onSelect }: Prop
         onClick={() => onSelect({ id: "main", kind: "main" })}
         icon={<FileTextIcon className="size-3.5" />}
         label="SKILL.md"
+      />
+      <TreeRow
+        active={activeFileId === "codex"}
+        onClick={() =>
+          onSelect({ id: "codex", kind: "codex", content: skill.codexOpenAiYaml ?? "" })
+        }
+        icon={<FileCodeIcon className="size-3.5" />}
+        label="agents/openai.yaml"
       />
       {grouped.map((g) => (
         <div key={g.kind}>

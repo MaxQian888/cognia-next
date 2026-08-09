@@ -30,6 +30,7 @@ export interface MemoryJob {
   sessionId?: string
   projectId?: string
   characterId?: string
+  agentId?: string
   scope: MemoryScope
   provenance: MemoryProvenance
   /** Evidence references only. Raw transcript content is never persisted here. */

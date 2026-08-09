@@ -9,6 +9,10 @@ import { expect, test } from "@/tests/e2e/fixtures/test"
 
 import { bootstrapCogniaMobile } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
+import {
+  companionConfigSecureStorage,
+  provisionMockCompanionConfig,
+} from "./companion-fixture"
 
 function mockV2BaseUrl(): string {
   const baseUrl = process.env.E2E_V2_BASE_URL
@@ -20,17 +24,14 @@ test.describe("mobile — Network settings", () => {
   test("renders live device connectivity while keeping proxy configuration read-only", async ({
     page,
   }) => {
+    const companionConfig = await provisionMockCompanionConfig(
+      mockV2BaseUrl(),
+      "device-e2e-network"
+    )
     await injectCapacitor(page, {
       platform: "android",
       network: { connected: true, connectionType: "wifi" },
-      secureStorage: {
-        "cognia.companion.config.v1": JSON.stringify({
-          baseUrl: mockV2BaseUrl(),
-          deviceJwt: "e2e-network-jwt",
-          deviceId: "device-e2e-network",
-          serverVersion: "1.0.0",
-        }),
-      },
+      secureStorage: companionConfigSecureStorage(companionConfig),
     })
     await page.goto("/welcome")
     await bootstrapCogniaMobile(page, "paired")

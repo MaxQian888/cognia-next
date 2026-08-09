@@ -89,8 +89,18 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
       // The default button chains the configured post-commit action; the split
       // menu items pass an explicit override.
       const after = afterOverride ?? prefs.postCommit
-      if (after === "push") await actions.push({ setUpstream: true })
-      else if (after === "sync") await actions.sync()
+      const hasUpstream = useGitStore.getState().status?.upstream != null
+      if (after === "push") {
+        // Preserve an existing tracking target (which may not be `origin`).
+        // `--set-upstream` is only a publish operation for a new branch.
+        if (hasUpstream) await actions.push()
+        else await actions.push({ setUpstream: true })
+      } else if (after === "sync") {
+        // A new branch cannot pull/sync until it has an upstream; publishing it
+        // already leaves local and remote synchronized.
+        if (hasUpstream) await actions.sync()
+        else await actions.push({ setUpstream: true })
+      }
     },
     [
       canCommit,

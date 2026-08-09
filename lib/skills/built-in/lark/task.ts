@@ -44,6 +44,7 @@ function mk<S extends z.ZodTypeAny>(input: {
     summary: string
     details?: { label: string; value: string }[]
   }
+  buildArgs?: (args: z.infer<S>) => string[]
 }): BuiltInSkill<S> {
   const skill: BuiltInSkill<S> = {
     id: input.id,
@@ -57,7 +58,10 @@ function mk<S extends z.ZodTypeAny>(input: {
     inputSchema: input.schema,
     execute: async (args, ctx) =>
       runLarkCli({
-        args: [...input.subcommand, ...argsToFlags(args as Record<string, unknown>)],
+        args: [
+          ...input.subcommand,
+          ...(input.buildArgs?.(args) ?? argsToFlags(args as Record<string, unknown>)),
+        ],
         confirmed: ctx.hitlBypass === true,
         adapterId: larkAdapterIdFromCtx(ctx),
       }),
@@ -91,15 +95,17 @@ registerBuiltInSkill(
         .enum(["pending", "completed", "all"])
         .optional()
         .describe("Filter by completion status (default pending)."),
-      pageSize: z
-        .number()
-        .int()
-        .min(1)
-        .max(100)
-        .optional()
-        .describe("Max tasks to return (1–100)."),
+      pageSize: z.number().int().min(1).max(40).optional().describe("Max tasks to return (1–100)."),
     }),
     subcommand: ["task", "+get-my-tasks"],
+    buildArgs: (args) => [
+      ...(args.status === "completed"
+        ? ["--complete"]
+        : args.status === "pending"
+          ? ["--complete=false"]
+          : []),
+      ...argsToFlags({ pageLimit: args.pageSize }),
+    ],
     mutation: "read",
     imAccess: "always",
   })
@@ -115,7 +121,7 @@ registerBuiltInSkill(
       "zh-CN": "按 id 读取单条 Lark 任务。",
     },
     schema: z.object({ taskGuid: taskGuidParam }),
-    subcommand: ["task", "+get-task"],
+    subcommand: ["task", "tasks", "get"],
     mutation: "read",
     imAccess: "always",
   })
@@ -144,6 +150,14 @@ registerBuiltInSkill(
         .describe("Optional tasklist GUID to file the task under."),
     }),
     subcommand: ["task", "+create"],
+    buildArgs: (args) =>
+      argsToFlags({
+        summary: args.summary,
+        description: args.description,
+        due: args.dueTime,
+        assignee: args.assignees?.join(","),
+        tasklistId: args.tasklistGuid,
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Create Lark task",
@@ -170,6 +184,7 @@ registerBuiltInSkill(
     },
     schema: z.object({ taskGuid: taskGuidParam }),
     subcommand: ["task", "+complete"],
+    buildArgs: (args) => argsToFlags({ taskId: args.taskGuid }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Complete task",
@@ -195,6 +210,13 @@ registerBuiltInSkill(
       dueTime: z.string().optional().describe("New due time in RFC3339."),
     }),
     subcommand: ["task", "+update"],
+    buildArgs: (args) =>
+      argsToFlags({
+        taskId: args.taskGuid,
+        summary: args.summary,
+        description: args.description,
+        due: args.dueTime,
+      }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Update task",
@@ -218,6 +240,7 @@ registerBuiltInSkill(
       assignees: assigneesParam.min(1),
     }),
     subcommand: ["task", "+assign"],
+    buildArgs: (args) => argsToFlags({ taskId: args.taskGuid, add: args.assignees.join(",") }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Assign task",
@@ -241,7 +264,8 @@ registerBuiltInSkill(
       taskGuid: taskGuidParam,
       tasklistGuid: tasklistGuidParam,
     }),
-    subcommand: ["task", "+add-to-tasklist"],
+    subcommand: ["task", "+tasklist-task-add"],
+    buildArgs: (args) => argsToFlags({ taskId: args.taskGuid, tasklistId: args.tasklistGuid }),
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Add task to tasklist",

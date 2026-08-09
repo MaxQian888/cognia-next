@@ -6,7 +6,12 @@
 import { BridgeClient, type WebSocketLike } from "./bridge-client"
 import { BRIDGE_PROTOCOL_VERSION } from "./protocol"
 
-type Listener = (event: { data?: string }) => void
+type Listener = (event: {
+  data?: string
+  error?: unknown
+  message?: unknown
+  code?: unknown
+}) => void
 
 class FakeSocket implements WebSocketLike {
   sent: string[] = []
@@ -28,7 +33,10 @@ class FakeSocket implements WebSocketLike {
     this.listeners.set(type, list)
   }
 
-  fire(type: string, event: { data?: string }): void {
+  fire(
+    type: string,
+    event: { data?: string; error?: unknown; message?: unknown; code?: unknown }
+  ): void {
     for (const listener of this.listeners.get(type) ?? []) listener(event)
   }
 
@@ -69,7 +77,7 @@ function makeClient(
   const scheduled: Array<{ fn: () => void; ms: number }> = []
   const refreshed: string[] = []
   const client = new BridgeClient({
-    url: "wss://127.0.0.1:7890/ws/v1/bridge",
+    url: "wss://127.0.0.1:7890/internal/bridge",
     token: "tok-initial",
     accountId: "local_acct_a",
     brainVersion: "0.0.0-test",
@@ -166,6 +174,21 @@ describe("BridgeClient", () => {
       h.client.invoke("companion_sync_pull_response", { requestId: "r1" })
     ).resolves.toBeNull()
     expect(logs.some((l) => l.includes("dropped"))).toBe(true)
+  })
+
+  it("logs the socket error cause while redacting service tokens", () => {
+    const logs: string[] = []
+    const h = makeClient({ log: (_level, message) => logs.push(message), reconnect: false })
+    void h.client.connect()
+    const cause = new Error(
+      "Unexpected server response: 401 at wss://127.0.0.1/internal/bridge?token=secret-value"
+    )
+    h.sockets[0].fire("error", { error: new Error("WebSocket handshake failed", { cause }) })
+
+    expect(logs).toContain(
+      "bridge socket error: WebSocket handshake failed: Unexpected server response: 401 at wss://127.0.0.1/internal/bridge?token=[redacted]"
+    )
+    expect(logs.join("\n")).not.toContain("secret-value")
   })
 
   it("answers pings with a pong carrying the RSS gauge", async () => {

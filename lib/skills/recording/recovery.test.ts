@@ -115,4 +115,8 @@ describe("danglingRows", () => {
   it("ignores rows whose bundle is present", () => {
     expect(danglingRows([row()], [bundle()])).toEqual([])
   })
+
+  it("ignores conversation-derived rows that do not use a native bundle", () => {
+    expect(danglingRows([row({ source: { kind: "session" } })], [])).toEqual([])
+  })
 })

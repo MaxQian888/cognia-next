@@ -20,13 +20,9 @@ use cognia_net::proxy_config;
 const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
 
 fn build_client(target_url: &str) -> Result<reqwest::Client, String> {
-    let proxy_cfg = proxy_config::current();
-    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(120));
-    if proxy_cfg.is_active() && !proxy_cfg.should_bypass(target_url) {
-        if let Some(proxy) = proxy_cfg.build_reqwest_proxy() {
-            builder = builder.proxy(proxy);
-        }
-    }
+    let builder = reqwest::Client::builder().timeout(Duration::from_secs(120));
+    let (builder, _) = proxy_config::apply_reqwest_policy(builder, target_url)
+        .map_err(|error| error.to_string())?;
     builder
         .build()
         .map_err(|e| format!("reqwest build failed: {e}"))

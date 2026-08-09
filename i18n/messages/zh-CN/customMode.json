@@ -75,6 +75,7 @@
   "mcpTools": "MCP 工具",
   "modeGenerationFailed": "根据描述生成模式失败",
   "modePreview": "模式预览",
+  "noToolsSelected": "未选择工具",
   "modelOverride": "模型覆盖",
   "modelOverridePlaceholder": "留空表示使用默认模型",
   "modelSettings": "模型",
@@ -99,6 +100,7 @@
   "templates": "快速开始模板",
   "tools": "工具",
   "toolsLabel": "工具：",
+  "unnamedMode": "未命名模式",
   "toolsUnavailable": "部分工具需要先完成配置",
   "yes": "是"
 }

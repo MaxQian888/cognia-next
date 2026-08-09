@@ -2,10 +2,11 @@
 // mtime under a directory so a prebuild `tsc` can be skipped when the
 // existing dist output is already newer than every source file.
 
-import { readdirSync, statSync } from "node:fs"
-import { extname, join } from "node:path"
+import { statSync } from "node:fs"
+import { extname } from "node:path"
+import { globSync } from "glob"
 
-const SKIP_DIRS = new Set(["node_modules", "dist", ".git"])
+const IGNORE_GLOBS = ["**/node_modules/**", "**/dist/**", "**/.git/**"]
 
 /**
  * Newest mtime (ms) of any file under `dir`, recursively. Returns 0 when the
@@ -15,24 +16,24 @@ const SKIP_DIRS = new Set(["node_modules", "dist", ".git"])
  */
 export function newestMtimeMs(dir, { exts } = {}) {
   let newest = 0
-  let entries
+  let files
   try {
-    entries = readdirSync(dir, { withFileTypes: true })
+    files = globSync("**/*", {
+      absolute: true,
+      cwd: dir,
+      dot: true,
+      ignore: IGNORE_GLOBS,
+      nodir: true,
+    })
   } catch {
     return 0
   }
-  for (const entry of entries) {
-    const full = join(dir, entry.name)
-    if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue
-      newest = Math.max(newest, newestMtimeMs(full, { exts }))
-    } else if (entry.isFile()) {
-      if (exts && !exts.includes(extname(entry.name))) continue
-      try {
-        newest = Math.max(newest, statSync(full).mtimeMs)
-      } catch {
-        // racing deletion — ignore
-      }
+  for (const file of files) {
+    if (exts && !exts.includes(extname(file))) continue
+    try {
+      newest = Math.max(newest, statSync(file).mtimeMs)
+    } catch {
+      // Racing deletion — ignore.
     }
   }
   return newest

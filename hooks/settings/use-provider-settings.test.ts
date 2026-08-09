@@ -70,10 +70,17 @@ jest.mock("@/lib/ai/providers/bedrock-connection", () => ({
   testAndDiscoverBedrock: (...args: unknown[]) => testAndDiscoverBedrock(...args),
 }))
 
+const discoverLocalProviderModels = jest.fn()
+jest.mock("@cognia/provider-core/providers/model-discovery", () => ({
+  discoverLocalProviderModels: (...args: unknown[]) =>
+    discoverLocalProviderModels(...(args as [string, string?])),
+}))
+
 import { useProviderSettings } from "./use-provider-settings"
 
 beforeEach(() => {
   jest.clearAllMocks()
+  discoverLocalProviderModels.mockReset()
   // Reset store fixture between tests
   settingsState.settings = {
     providerSettings: {
@@ -245,6 +252,42 @@ describe("useProviderSettings — testProvider", () => {
         lastVerifiedAt: expect.any(Number),
         verificationMessage: "ok",
         healthStatus: "healthy",
+      })
+    )
+  })
+
+  it("persists discovered models for local providers after a successful test", async () => {
+    settingsState.settings!.providerSettings.ollama = {
+      providerId: "ollama",
+      enabled: true,
+      defaultModel: "llama3.2",
+      baseURL: "http://localhost:11434",
+    }
+    testProviderConnection.mockResolvedValue({
+      success: true,
+      message: "ok",
+      outcome: "verified",
+    } as ApiTestResult)
+    discoverLocalProviderModels.mockResolvedValue([
+      { id: "llama3.2", name: "llama3.2" },
+      { id: "qwen2.5", name: "qwen2.5" },
+    ])
+
+    const { result } = renderHook(() => useProviderSettings())
+    await act(async () => {
+      const r = await result.current.testProvider("ollama")
+      expect(r?.success).toBe(true)
+    })
+
+    expect(discoverLocalProviderModels).toHaveBeenCalledWith("ollama", "http://localhost:11434")
+    expect(settingsState.setProviderConfig).toHaveBeenCalledWith(
+      "ollama",
+      expect.objectContaining({
+        discoveredModels: [
+          { id: "llama3.2", name: "llama3.2" },
+          { id: "qwen2.5", name: "qwen2.5" },
+        ],
+        discoveredModelsLastFetched: expect.any(Number),
       })
     )
   })

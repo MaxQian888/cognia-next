@@ -2,9 +2,10 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { PairStep } from "./pair-step"
+import { encodePairPayload } from "@/lib/qr/pair-payload"
 
-// Manual-entry pair form (QR scan + URL + JWT/code tabs). Pure: the prefill
-// props seed the form once on mount and `lockBaseUrl` makes the URL read-only.
+// Canonical device-key pair form. The payload contains a one-shot invitation;
+// no long-lived bearer credential is rendered or persisted.
 // `scanBarcode`/`saveCompanionConfig` only fire on user actions, so the form
 // renders fully in the Storybook browser.
 const meta = {
@@ -24,25 +25,21 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Fresh form — defaults to the 6-digit code tab. */
+/** Fresh form. */
 export const Default: Story = {}
 
-/** Arrived from Discover: base URL pre-filled + locked, JWT tab active. */
-export const PrefilledServer: Story = {
+/** Full one-shot invitation payload pasted by the user. */
+export const PrefilledInvitation: Story = {
   args: {
-    prefilledBaseUrl: "https://192.168.1.42:7890",
-    prefilledPairJwt: "eyJhbGciOiJIUzI1Ni;example.pair.jwt",
-    lockBaseUrl: true,
-  },
-}
-
-/** Pre-filled with a pinned TLS fingerprint — shows the security banner. */
-export const WithFingerprintPin: Story = {
-  args: {
-    prefilledBaseUrl: "https://192.168.1.42:7890",
-    prefilledPairJwt: "eyJhbGciOiJIUzI1Ni;example.pair.jwt",
-    prefilledFingerprint:
-      "ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12",
-    lockBaseUrl: true,
+    prefilledPairPayload: encodePairPayload({
+      baseUrl: "https://192.168.1.42:7890",
+      mode: "owner-invitation",
+      invitation: "owner-invitation",
+      hostId: "host-story",
+      tenantId: "local_acct_a",
+      expiresAt: Date.now() + 10 * 60_000,
+      serverVersion: "1.0.0",
+      fingerprint: "ab".repeat(32),
+    }),
   },
 }

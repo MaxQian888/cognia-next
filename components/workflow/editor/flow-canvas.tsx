@@ -36,7 +36,6 @@ import {
 import {
   Background,
   BackgroundVariant,
-  ReactFlow,
   applyEdgeChanges,
   applyNodeChanges,
   addEdge,
@@ -50,6 +49,7 @@ import {
   type OnConnectEnd,
   type OnConnectStart,
 } from "@xyflow/react"
+import { Canvas } from "@/components/ai-elements/canvas"
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -449,7 +449,8 @@ export function FlowCanvas({
       />
       <ConnectionPointerListener store={useStore} />
       <PerfBoundary id="workflow:canvas">
-        <ReactFlow
+        <Canvas
+          showBackground={false}
           nodes={nodes}
           edges={edges}
           defaultViewport={initialViewport}
@@ -510,7 +511,7 @@ export function FlowCanvas({
             />
           ) : null}
           <AlignmentGuidesLayer ref={guidesRef} />
-        </ReactFlow>
+        </Canvas>
       </PerfBoundary>
       {overlays}
     </div>

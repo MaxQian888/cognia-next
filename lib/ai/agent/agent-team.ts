@@ -141,11 +141,13 @@ const RESUME_SKIP_STATUSES: ReadonlySet<TeamTaskStatus> = new Set([
 async function runManaged(
   id: string,
   opts?: Parameters<AgentTeamManager["start"]>[1],
-  taskFilter?: RunTeamLifecycleDeps["taskFilter"]
+  taskFilter?: RunTeamLifecycleDeps["taskFilter"],
+  existingRunId?: string
 ): Promise<void> {
   const deps = await ensureConfiguredDeps()
   useAgentTeamStore.getState().setTeamStatus(id, "executing")
   const result = await runTeamLifecycle(id, {
+    ...(existingRunId ? { runId: existingRunId } : {}),
     storeReader: bindStoreReader(),
     storeWriter: bindStoreWriter(),
     runLeadPlanning: deps.runLeadPlanning,
@@ -172,9 +174,73 @@ async function runManaged(
   // teams-list card both consume; `deriveTeamStatus` only lets this
   // optimistic write win while it's still non-terminal.
   useAgentTeamStore.getState().setTeamStatus(id, result.status)
+  const team = useAgentTeamStore.getState().teams[id]
+  if (
+    team?.config.runtimeVersion === "durable-v2" &&
+    result.status === "completed" &&
+    result.runId &&
+    team.config.githubDeliveryPolicy?.enabled
+  ) {
+    const [{ prepareAndPublishGithubStack }, { updateAgentTeamRun }] = await Promise.all([
+      import("./team/github-delivery-adapter"),
+      import("@/lib/db/agent-team-runtime"),
+    ])
+    try {
+      await prepareAndPublishGithubStack(team, result.runId, {
+        resolveTeamRepo: deps.resolveTeamRepo,
+        resolveOctokit: deps.resolvePrObserveOctokit,
+      })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      await updateAgentTeamRun(result.runId, {
+        status: "needs_input",
+        recoveryReason: `delivery_failed:${reason}`,
+        updatedAt: Date.now(),
+      })
+      useAgentTeamStore.getState().setTeamStatus(id, "paused")
+    }
+  }
+  if (
+    team?.config.runtimeVersion === "durable-v2" &&
+    result.runId &&
+    team.config.retrospectivePolicy?.enabled !== false
+  ) {
+    const { generateConfiguredRetrospective } = await import("./team/retrospective")
+    await generateConfiguredRetrospective(result.runId).catch(() => undefined)
+  }
   // Emit a scheduler event so event-triggered tasks / forward chains can
   // react to a team finishing. Lazy import + best-effort.
   void emitTeamCompletedSchedulerEvent(id, result.status)
+}
+
+/** Rebuild durable queues after renderer restart and replay only safe checkpoints. */
+export async function recoverDurableAgentTeams(): Promise<
+  Array<{ runId: string; status: "recovering" | "needs_input" }>
+> {
+  const [{ getDurableTeamCoordinator }, { getAgentTeamRun }] = await Promise.all([
+    import("./team/durable-runtime"),
+    import("@/lib/db/agent-team-runtime"),
+  ])
+  const outcomes = await getDurableTeamCoordinator().recover()
+  await Promise.all(
+    outcomes.map(async (outcome) => {
+      const run = await getAgentTeamRun(outcome.runId)
+      if (!run) return
+      const team = useAgentTeamStore.getState().getTeam(run.teamId)
+      if (!team || team.config.runtimeVersion !== "durable-v2") return
+      if (outcome.status === "needs_input") {
+        useAgentTeamStore.getState().setTeamStatus(team.id, "paused")
+        return
+      }
+      await runManaged(
+        team.id,
+        undefined,
+        (task) => !RESUME_SKIP_STATUSES.has(task.status),
+        outcome.runId
+      )
+    })
+  )
+  return outcomes
 }
 
 export const agentTeamManager: AgentTeamManager = {
@@ -194,13 +260,44 @@ export const agentTeamManager: AgentTeamManager = {
     await runManaged(id, opts)
   },
   pause: async (id) => {
+    const team = useAgentTeamStore.getState().teams[id]
+    if (team?.config.runtimeVersion === "durable-v2") {
+      const { listAgentTeamRuns } = await import("@/lib/db/agent-team-runtime")
+      const active = (await listAgentTeamRuns(id)).find((run) =>
+        ["queued", "running", "pausing", "recovering"].includes(run.status)
+      )
+      if (active) {
+        const { controlDurableRun } = await import("./team/durable-control")
+        await controlDurableRun(active.id, "pause")
+      }
+      useAgentTeamStore.getState().setTeamStatus(id, "paused")
+      return
+    }
     abortTeam(id, new Error("paused"))
     useAgentTeamStore.getState().setTeamStatus(id, "paused")
+    if (!team) return
+    const { listAgentTeamRuns, updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+    const active = (await listAgentTeamRuns(id)).find((run) =>
+      ["queued", "running", "pausing", "recovering"].includes(run.status)
+    )
+    if (active) await updateAgentTeamRun(active.id, { status: "paused", updatedAt: Date.now() })
   },
   resume: async (id, opts) => {
     const store = useAgentTeamStore.getState()
     const team = store.teams[id]
     if (!team || team.status !== "paused") return
+    if (team.config.runtimeVersion === "durable-v2") {
+      const { listAgentTeamRuns } = await import("@/lib/db/agent-team-runtime")
+      const active = (await listAgentTeamRuns(id)).find((run) =>
+        ["paused", "pausing", "sleeping"].includes(run.status)
+      )
+      if (active) {
+        const { controlDurableRun } = await import("./team/durable-control")
+        await controlDurableRun(active.id, "resume")
+        useAgentTeamStore.getState().setTeamStatus(id, "executing")
+        return
+      }
+    }
 
     const teamTasks = Object.values(store.tasks).filter((t) => t.teamId === id)
 
@@ -258,6 +355,19 @@ export const agentTeamManager: AgentTeamManager = {
   shutdown: async (id) => {
     abortTeam(id, new Error("shutdown"))
     useAgentTeamStore.getState().setTeamStatus(id, "cancelled")
+    const team = useAgentTeamStore.getState().teams[id]
+    if (team?.config.runtimeVersion !== "durable-v2") return
+    const { listAgentTeamRuns, updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+    const active = (await listAgentTeamRuns(id)).find(
+      (run) => !["completed", "failed", "cancelled", "terminated"].includes(run.status)
+    )
+    if (active) {
+      await updateAgentTeamRun(active.id, {
+        status: "terminated",
+        completedAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+    }
   },
 }
 

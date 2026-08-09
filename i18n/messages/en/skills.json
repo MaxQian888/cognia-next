@@ -83,8 +83,8 @@
   "delete": {
     "body": "\"{name}\" will be removed. Characters using it will silently drop the reference on next save.",
     "bundles": {
-      "label": "Also delete {count} recording(s) of this skill",
-      "hint": "The capture and its screenshots are removed from this device. This cannot be undone."
+      "hint": "The capture and its screenshots are removed from this device. This cannot be undone.",
+      "label": "Also delete {count} recording(s) of this skill"
     },
     "cancel": "Cancel",
     "confirm": "Remove",
@@ -93,6 +93,7 @@
   "description": "Reusable instruction blobs appended to the system prompt at send time.",
   "detail": {
     "addResource": "Add resource",
+    "bundleFilterName": "Skill bundle",
     "metaAuthor": "Author",
     "metaCategory": "Category",
     "metaCreated": "Created",
@@ -112,7 +113,15 @@
     "tabSecurity": "Security",
     "tabValidation": "Validation",
     "update": "Update",
-    "updateAvailable": "Update available"
+    "updateAvailable": "Update available",
+    "exportBundle": "Export standard bundle (.zip)",
+    "exportMarkdownCompatibility": "Export Markdown (compatibility)",
+    "compatibilityExportTitle": "Compatibility export may lose data",
+    "compatibilityExportDescription": "A single SKILL.md cannot contain every bundle file. Review the omitted content before continuing.",
+    "compatibilityExportResources": "{count, plural, =1 {1 bundled resource} other {# bundled resources}}",
+    "compatibilityExportCodex": "agents/openai.yaml",
+    "compatibilityExportCancel": "Cancel",
+    "compatibilityExportContinue": "Export Markdown"
   },
   "discovery": {
     "errorDesktopOnly": "Discovery requires desktop mode.",
@@ -125,6 +134,7 @@
     "scanCodex": "Scan ~/.agents/skills/",
     "scanCustom": "Scan a directory…",
     "scanHome": "Scan ~/.claude/skills/",
+    "scanOpencode": "Scan OpenCode skills",
     "scanning": "Scanning {label}…",
     "title": "Find skills"
   },
@@ -144,16 +154,24 @@
     "content": "Content (markdown)",
     "contentHint": "Rendered as it'll appear in the system prompt: `## name` followed by your content.",
     "contentPlaceholder": "Append-only system-prompt augmentation. The user can disable this per session.",
+    "compatibility": "Compatibility requirements",
+    "compatibilityPlaceholder": "Requires git and internet access",
     "create": "Create",
     "creating": "Creating…",
     "description": "Description",
-    "descriptionPlaceholder": "(optional) one-line summary",
+    "descriptionPlaceholder": "What this skill does and when to use it",
     "emptyPickSkill": "Pick a skill from the list to start editing.",
     "errorEmpty": "Skill content cannot be empty.",
     "errorRequired": "This field is required.",
     "errorTooLong": "Too long (max {max}).",
     "fileTreeAria": "Skill files",
     "license": "License",
+    "invocationExplicit": "Explicit only",
+    "invocationImplicit": "Allow automatic discovery",
+    "invocationPolicy": "Invocation policy",
+    "metadata": "Metadata",
+    "metadataHint": "One key=value pair per line. Values are exported as Agent Skills metadata.",
+    "metadataPlaceholder": "owner=acme\ntier=stable",
     "name": "Name",
     "namePlaceholder": "Cite sources",
     "openFileTree": "Open file tree",
@@ -170,13 +188,22 @@
     "saving": "Saving…",
     "settingsSaved": "Settings saved.",
     "settingsTitle": "Skill settings",
+    "slug": "Portable slug",
+    "slugHint": "Used as the SKILL.md name and bundle directory. Lowercase letters, numbers, and single hyphens only.",
+    "slugPlaceholder": "cite-sources",
     "tabEdit": "Edit",
     "tabPreview": "Preview",
     "tags": "Tags (comma-sep)",
     "tagsPlaceholder": "style, accuracy",
     "unsaved": "● unsaved",
     "validation": "Validation",
-    "version": "Version"
+    "version": "Version",
+    "saveConflict": "Conflict — reload before saving",
+    "saveBlocked": "Save blocked",
+    "saveError": "Save failed",
+    "saveConflictDetail": "The stored file changed after it was opened. Reload it before saving.",
+    "saveBlockedDetail": "The draft is invalid and was not written.",
+    "saveErrorDetail": "The draft is still available. Edit it or use the save shortcut to retry."
   },
   "fallbackName": "Skill",
   "filter": {
@@ -386,6 +413,8 @@
       "toolbarButton": "Record a skill"
     },
     "generate": {
+      "blockedByVariables": "{count, plural, one {# variable still needs confirming} other {# variables still need confirming}} before a skill can be generated.",
+      "blockedByVariablesHint": "Open the review step and confirm or exclude each one.",
       "failed": "The skill could not be generated.",
       "manualFallback": "Write it from the timeline instead",
       "manualFallbackHint": "Produces a complete skill from the steps you reviewed, with no model involved.",
@@ -411,9 +440,7 @@
         "title": "Tools this skill may use",
         "unknown": "The model suggested {count} tools that do not exist. They were left out."
       },
-      "truncated": "{count} further steps were left out for length.",
-      "blockedByVariables": "{count, plural, one {# variable still needs confirming} other {# variables still need confirming}} before a skill can be generated.",
-      "blockedByVariablesHint": "Open the review step and confirm or exclude each one."
+      "truncated": "{count} further steps were left out for length."
     },
     "generateFailed": "Couldn't generate a skill from this recording.",
     "generating": "Generating skill…",
@@ -480,6 +507,7 @@
     },
     "redacted": "Sensitive text was redacted before sending to the model.",
     "review": {
+      "blockedByVariables": "{count, plural, one {# unconfirmed variable} other {# unconfirmed variables}}",
       "blockers": {
         "noIncludedSteps": "Include at least one step.",
         "sensitiveVariableHasValue": "\"{name}\" is marked secret but still holds a value.",
@@ -533,8 +561,7 @@
       "verify": "Check afterwards",
       "verifyPlaceholder": "How would you know this step worked?",
       "viewDetail": "Details",
-      "viewTimeline": "Timeline",
-      "blockedByVariables": "{count, plural, one {# unconfirmed variable} other {# unconfirmed variables}}"
+      "viewTimeline": "Timeline"
     },
     "save": {
       "assetsPromoted": "{count} screenshots attached",
@@ -573,14 +600,14 @@
       "scopeWindow": "A single window",
       "start": "Start recording",
       "storage": "{used} of {limit} used by recordings",
-      "targetRequired": "Pick a target to record.",
-      "targetRefresh": "Refresh",
-      "targetLoading": "Looking for open windows…",
-      "targetFailed": "Couldn't list open windows. Refresh to try again.",
+      "targetApplication": "Application to record",
       "targetEmpty": "No open windows to record.",
+      "targetFailed": "Couldn't list open windows. Refresh to try again.",
+      "targetLoading": "Looking for open windows…",
       "targetMinimized": "Minimized",
-      "targetWindow": "Window to record",
-      "targetApplication": "Application to record"
+      "targetRefresh": "Refresh",
+      "targetRequired": "Pick a target to record.",
+      "targetWindow": "Window to record"
     },
     "srStatus": "Recorder stage {stage}, step {current} of {total}.",
     "stages": {
@@ -641,12 +668,12 @@
       "regenerate": "Regenerate",
       "saveAsNew": "Save as another skill",
       "status": {
-        "recording": "Recording",
         "captured": "Captured",
+        "discarded": "Discarded",
         "drafting": "Draft",
-        "saved": "Saved",
         "interrupted": "Interrupted",
-        "discarded": "Discarded"
+        "recording": "Recording",
+        "saved": "Saved"
       },
       "stepCount": "{count} steps",
       "stepCounts": "{included} of {total} steps kept",
@@ -764,9 +791,10 @@
     "disabledCount": "{count, plural, =1 {Disabled 1 skill.} other {Disabled # skills.}}",
     "duplicatedAs": "Duplicated as \"{name}\".",
     "enabledCount": "{count, plural, =1 {Enabled 1 skill.} other {Enabled # skills.}}",
-    "exportedCount": "{count, plural, =1 {Exported 1 skill file.} other {Exported # skill files.}}",
+    "exportedCount": "{count, plural, =1 {Exported 1 skill bundle.} other {Exported # skills in one bundle.}}",
     "exportedPartial": "Exported {ok}/{total} ({failed} failed).",
     "exportedSingle": "Exported \"{name}\".",
+    "exportFailed": "Export failed: {error}",
     "importFromClaudeDesktopOnly": "Importing from ~/.claude/skills/ requires desktop mode.",
     "importNoFilesParsed": "{count, plural, =1 {Couldn't parse the selected file.} other {Couldn't parse any of # files.}}",
     "importNoSkillMd": "No SKILL.md files found under ~/.claude/skills/.",

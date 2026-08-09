@@ -30,6 +30,7 @@ import { useShallow } from "zustand/react/shallow"
 import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
 import { buildClipboardEnvelope, serializeClipboard } from "@/lib/workflow/editor/clipboard"
 import { NodeFloatingToolbar } from "./node-floating-toolbar"
+import { Node as AiNode } from "@/components/ai-elements/node"
 
 const CATEGORY_COLORS = {
   trigger: "border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300",
@@ -377,9 +378,10 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       : null
 
   return (
-    <div
+    <AiNode
+      handles={{ target: false, source: false }}
       className={cn(
-        "group relative min-w-[200px] max-w-[280px] rounded-md border-2 bg-card text-card-foreground shadow-sm transition-shadow",
+        "group relative w-auto min-w-[200px] max-w-[280px] rounded-md border-2 bg-card text-card-foreground shadow-sm transition-shadow",
         // Sticky color (when set) overrides the category palette.
         stickyColor ?? CATEGORY_COLORS[category],
         // Selection ring is the OUTERMOST layer — always visible, even
@@ -616,6 +618,6 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
           />
         )
       ) : null}
-    </div>
+    </AiNode>
   )
 })

@@ -29,6 +29,8 @@ export interface MessageMediaRow {
   /** Canonical bytes: what renders inline and what the model is sent. */
   blob: Blob
   byteSize: number
+  /** False only for a remote thumbnail cached before its canonical variant. */
+  canonicalAvailable?: boolean
   /** Small preview for galleries and for holding space while the canonical decodes. */
   thumbBlob?: Blob
   thumbWidth?: number
@@ -75,7 +77,26 @@ export async function putMessageMedia(row: MessageMediaRow): Promise<string> {
   await db.transaction("rw", db.messageMedia, async () => {
     const existing = await db.messageMedia.get(row.hash)
     if (existing) {
-      await db.messageMedia.update(row.hash, { lastUsedAt: row.lastUsedAt })
+      if (existing.canonicalAvailable === false && row.canonicalAvailable !== false) {
+        await db.messageMedia.update(row.hash, {
+          mediaType: row.mediaType,
+          width: row.width,
+          height: row.height,
+          blob: row.blob,
+          byteSize: row.byteSize,
+          canonicalAvailable: true,
+          lastUsedAt: row.lastUsedAt,
+        })
+      } else if (row.canonicalAvailable === false && existing.thumbBlob === undefined) {
+        await db.messageMedia.update(row.hash, {
+          thumbBlob: row.thumbBlob ?? row.blob,
+          thumbWidth: row.thumbWidth ?? row.width,
+          thumbHeight: row.thumbHeight ?? row.height,
+          lastUsedAt: row.lastUsedAt,
+        })
+      } else {
+        await db.messageMedia.update(row.hash, { lastUsedAt: row.lastUsedAt })
+      }
       return
     }
     await db.messageMedia.add(row)

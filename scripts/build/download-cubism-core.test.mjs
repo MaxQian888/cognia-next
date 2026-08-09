@@ -11,7 +11,14 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs"
+import {
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  readdirSync,
+  rmSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -104,8 +111,7 @@ test("downloads and atomically writes the core file (creates parent dir)", async
   assert.equal(calledUrl, "https://example.test/core.js")
   assert.match(calledHeaders["User-Agent"], /Mozilla/)
   assert.match(messages[0], /done/)
-  // No leftover temp file.
-  assert.equal(existsSync(`${dest}.tmp-${process.pid}`), false)
+  assert.deepEqual(readdirSync(join(root, "nested")), ["live2dcubismcore.min.js"])
   rmSync(root, { recursive: true, force: true })
 })
 

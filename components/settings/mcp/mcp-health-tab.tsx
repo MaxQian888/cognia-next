@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
 import Link from "next/link"
-import { CircleIcon, ExternalLinkIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
+import { CircleIcon, DownloadIcon, ExternalLinkIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -24,6 +25,9 @@ import { getIndexedDBTransport, IndexedDBTransport, loggers } from "@/lib/loggin
 import { LogPanel } from "@/components/logging"
 import { getMcpServerStatus, type McpServerStatus } from "@/lib/external-bridge/tauri-control"
 import { clearMcpAuditLog, listMcpAuditLog } from "@/lib/db/mcp-audit-log"
+import { downloadFile } from "@/lib/files/download"
+import { defaultMcpRuntimeGateway, type McpRuntimeMetricsSnapshot } from "@/lib/mcp/runtime-gateway"
+import { loadMcpOperationsSnapshot } from "@/lib/mcp/operations"
 import type { McpAuditLogRow } from "@/types/wiki"
 
 /** Rolling window for the outbound-log overview stats. */
@@ -57,6 +61,12 @@ export function McpHealthTab() {
   const [deniedOnly, setDeniedOnly] = useState(false)
   const [loadingStatus, setLoadingStatus] = useState(false)
   const [overview, setOverview] = useState<McpLogOverview | null>(null)
+  const [runtimeMetrics, setRuntimeMetrics] = useState<McpRuntimeMetricsSnapshot>(() =>
+    defaultMcpRuntimeGateway.getMetricsSnapshot()
+  )
+  const operations = useLiveQuery(() => loadMcpOperationsSnapshot(), [])
+
+  useEffect(() => defaultMcpRuntimeGateway.subscribeMetrics(setRuntimeMetrics), [])
 
   // Manual refresh (button handler — sets the loading spinner). Not called
   // from an effect, so the synchronous setState is fine here.
@@ -143,6 +153,20 @@ export function McpHealthTab() {
     }
   }
 
+  const handleExport = async () => {
+    try {
+      const exported = await listMcpAuditLog({ deniedOnly })
+      downloadFile(
+        `cognia-mcp-audit-${new Date().toISOString().slice(0, 10)}.json`,
+        JSON.stringify(exported, null, 2),
+        "application/json"
+      )
+      toast.success(t("exported"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   const running = status?.running ?? false
 
   return (
@@ -163,7 +187,7 @@ export function McpHealthTab() {
           {!desktop ? (
             <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>
           ) : (
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
               <div className="space-y-0.5">
                 <p className="text-lg font-semibold tabular-nums">{overview?.servers ?? 0}</p>
                 <p className="text-[11px] text-muted-foreground">{t("statServers")}</p>
@@ -184,8 +208,132 @@ export function McpHealthTab() {
                 <p className="text-[11px] text-muted-foreground">{t("statErrors")}</p>
               </div>
               <span className="text-[11px] text-muted-foreground">{t("windowNote")}</span>
+              <div className="basis-full border-t pt-3" data-testid="mcp-runtime-metrics">
+                <div className="flex flex-wrap gap-x-6 gap-y-2">
+                  <Metric label={t("metricWarmReuse")} value={runtimeMetrics.warmReuses} />
+                  <Metric label={t("metricCacheHits")} value={runtimeMetrics.capabilityCacheHits} />
+                  <Metric label={t("metricRetries")} value={runtimeMetrics.retries} />
+                  <Metric label={t("metricTimeouts")} value={runtimeMetrics.timeouts} />
+                  <Metric label={t("metricDenials")} value={runtimeMetrics.policyDenials} />
+                  <Metric
+                    label={t("metricConnectLatency")}
+                    value={
+                      runtimeMetrics.successfulConnections > 0
+                        ? `${Math.round(runtimeMetrics.connectionLatencyMs / runtimeMetrics.successfulConnections)}ms`
+                        : "—"
+                    }
+                  />
+                </div>
+              </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card data-testid="mcp-persisted-operations">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">{t("operationsTitle")}</CardTitle>
+          <CardDescription className="text-xs">{t("operationsSubtitle")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {(operations?.servers.length ?? 0) === 0 ? (
+            <p className="text-xs text-muted-foreground">{t("operationsEmpty")}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-[10px] uppercase">{t("colServer")}</TableHead>
+                    <TableHead className="text-right text-[10px] uppercase">
+                      {t("colEvents")}
+                    </TableHead>
+                    <TableHead className="text-right text-[10px] uppercase">
+                      {t("colFailureRate")}
+                    </TableHead>
+                    <TableHead className="text-right text-[10px] uppercase">
+                      {t("colConnectP95")}
+                    </TableHead>
+                    <TableHead className="text-[10px] uppercase">{t("colCapability")}</TableHead>
+                    <TableHead className="text-[10px] uppercase">{t("colLastError")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {operations?.servers.map((server) => (
+                    <TableRow key={server.serverId}>
+                      <TableCell className="text-[11px] font-medium">
+                        {server.displayName}
+                      </TableCell>
+                      <TableCell className="text-right text-[11px] tabular-nums">
+                        {server.events}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          "text-right text-[11px] tabular-nums",
+                          server.failures > 0 && "text-destructive"
+                        )}
+                      >
+                        {new Intl.NumberFormat(undefined, {
+                          style: "percent",
+                          maximumFractionDigits: 1,
+                        }).format(server.failureRate)}
+                      </TableCell>
+                      <TableCell className="text-right text-[11px] tabular-nums">
+                        {server.connectP95Ms === undefined ? "—" : `${server.connectP95Ms}ms`}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-[11px] text-muted-foreground">
+                        {server.capabilityUpdatedAt
+                          ? new Date(server.capabilityUpdatedAt).toLocaleString()
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="font-mono text-[10px] text-muted-foreground">
+                        {server.lastErrorCode ?? "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium">{t("syncTitle")}</p>
+            {(operations?.sync.length ?? 0) === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("syncEmpty")}</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-[10px] uppercase">{t("colAgent")}</TableHead>
+                      <TableHead className="text-[10px] uppercase">{t("colStatus")}</TableHead>
+                      <TableHead className="text-right text-[10px] uppercase">
+                        {t("colLag")}
+                      </TableHead>
+                      <TableHead className="text-right text-[10px] uppercase">
+                        {t("colAttempts")}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {operations?.sync.map((job) => (
+                      <TableRow key={job.agentId}>
+                        <TableCell className="font-mono text-[11px]">{job.agentId}</TableCell>
+                        <TableCell className="text-[11px]">
+                          {t(`syncStatus.${job.status}`)}
+                        </TableCell>
+                        <TableCell className="text-right text-[11px] tabular-nums">
+                          {t("syncLagValue", { seconds: Math.round(job.lagMs / 1000) })}
+                        </TableCell>
+                        <TableCell className="text-right text-[11px] tabular-nums">
+                          {job.attempts}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -298,6 +446,16 @@ export function McpHealthTab() {
               <Button
                 variant="ghost"
                 size="sm"
+                className="h-7 px-2 text-[11px] text-muted-foreground"
+                onClick={() => void handleExport()}
+                disabled={rows.length === 0}
+              >
+                <DownloadIcon className="mr-1 size-3" />
+                {t("exportLog")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive"
                 onClick={() => void handleClear()}
                 disabled={rows.length === 0}
@@ -358,6 +516,15 @@ export function McpHealthTab() {
           )}
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="space-y-0.5">
+      <p className="text-sm font-semibold tabular-nums">{value}</p>
+      <p className="text-[10px] text-muted-foreground">{label}</p>
     </div>
   )
 }

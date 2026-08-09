@@ -9,7 +9,7 @@
  * exposes a composer to send follow-ups and an interrupt control.
  */
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { SendIcon, SquareIcon } from "lucide-react"
 
@@ -23,18 +23,14 @@ import { OfflineBanner } from "@/components/mobile/offline-banner"
 import { CONNECTION_STATE_META } from "@/components/mobile/connection-state-badge"
 import { cn } from "@/lib/utils"
 import { ApprovalCard } from "./approval-card"
-import type { UIMessage } from "ai"
+import { TranscriptMessageList } from "@/components/chat/transcript-message-list"
+import { TranscriptTimelineSurface } from "@/components/chat/transcript-timeline-surface"
+import { useTranscriptController } from "@/hooks/chat/use-transcript-controller"
+import { SessionMediaProvider } from "@/hooks/chat/session-media-provider"
+import { createRemoteTranscriptSource } from "@/lib/chat/transcript/source"
+import { transport } from "@/lib/tauri"
 
-
-function messageText(message: UIMessage): string {
-  return message.parts
-    .map((p) => {
-      const part = p as { type?: string; text?: string }
-      return part.type === "text" && typeof part.text === "string" ? part.text : ""
-    })
-    .filter(Boolean)
-    .join("\n")
-}
+const remoteTranscriptSource = createRemoteTranscriptSource(transport)
 
 export interface RemoteSessionDetailProps {
   sessionId: string
@@ -43,8 +39,23 @@ export interface RemoteSessionDetailProps {
 export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
   const t = useTranslations("mobile.remoteSessions.detail")
   const tc = useTranslations("mobile.connectionState")
-  const { messages, status, pendingApproval, canControl, sessionEnded, notFound, send, interrupt, respond } =
-    useRemoteSessionStream(sessionId)
+  const transcript = useTranscriptController(sessionId, remoteTranscriptSource)
+  const {
+    messages,
+    status,
+    pendingApproval,
+    canControl,
+    sessionEnded,
+    notFound,
+    send,
+    interrupt,
+    respond,
+    reconcileTranscript,
+  } =
+    useRemoteSessionStream(sessionId, {
+      seedHistory: transcript.snapshot.mode === "legacy",
+    })
+  const reconciledRevisionRef = useRef<number | null>(null)
   const connection = useConnectionState()
   const [draft, setDraft] = useState("")
   // Shell-style ↑/↓ recall of previously sent follow-ups, persisted per remote
@@ -55,6 +66,13 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
   // composer so the user gets an explicit hint instead of a silent failure.
   const offlineLike = connection === "offline" || connection === "reconnecting"
   const composable = canControl && !sessionEnded && !notFound
+
+  useEffect(() => {
+    if (transcript.snapshot.mode !== "timeline" || transcript.snapshot.revision === null) return
+    if (reconciledRevisionRef.current === transcript.snapshot.revision) return
+    reconciledRevisionRef.current = transcript.snapshot.revision
+    reconcileTranscript()
+  }, [reconcileTranscript, transcript.snapshot.mode, transcript.snapshot.revision])
 
   const onSend = async () => {
     const text = draft.trim()
@@ -101,28 +119,65 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
 
       <OfflineBanner />
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+      <div className="flex min-h-0 flex-1 flex-col">
         {notFound ? (
-          <p className="text-xs text-muted-foreground" data-testid="remote-session-not-found">
+          <p
+            className="flex-1 p-4 text-xs text-muted-foreground"
+            data-testid="remote-session-not-found"
+          >
             {t("notFound")}
           </p>
+        ) : transcript.snapshot.mode === "timeline" ? (
+          transcript.snapshot.items.length === 0 && messages.length === 0 && !transcript.snapshot.loading ? (
+            <p className="flex-1 p-4 text-xs text-muted-foreground">{t("empty")}</p>
+          ) : (
+            <SessionMediaProvider sessionId={sessionId} transport={transport}>
+              <TranscriptTimelineSurface
+                sessionId={sessionId}
+                items={transcript.snapshot.items}
+                expandedTurnKeys={transcript.snapshot.expandedTurnKeys}
+                getDetail={transcript.getDetail}
+                onExpand={(turnKey, revision, detailRevision) => {
+                  void transcript.expandTurn(turnKey, revision, detailRevision)
+                }}
+                onCollapse={transcript.collapseTurn}
+                onLoadOlder={() => void transcript.loadOlder()}
+                onRetry={() => void transcript.retry()}
+                hasMore={transcript.snapshot.hasMore}
+                loading={transcript.snapshot.loading}
+                loadingOlder={transcript.snapshot.loadingOlder}
+                error={transcript.snapshot.error}
+                liveMessages={messages}
+                liveStatus={status}
+                labels={{
+                  expand: t("expandTurn"),
+                  collapse: t("collapseTurn"),
+                  loadOlder: t("loadOlder"),
+                  loading: t("loadingTranscript"),
+                  retry: t("retryTranscript"),
+                }}
+              />
+            </SessionMediaProvider>
+          )
+        ) : transcript.snapshot.mode === "unknown" ? (
+          <p className="flex-1 p-4 text-xs text-muted-foreground">{t("loadingTranscript")}</p>
         ) : messages.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("empty")}</p>
+          <p className="flex-1 p-4 text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
-          messages.map((m) => (
-            <div key={m.id} data-testid={`remote-msg-${m.role}`} className="text-sm">
-              <span className="mr-2 text-[10px] uppercase text-muted-foreground">{m.role}</span>
-              <span className="whitespace-pre-wrap">{messageText(m)}</span>
-            </div>
-          ))
+          <TranscriptMessageList messages={messages} status={status} sessionId={sessionId} />
         )}
 
         {pendingApproval && composable ? (
-          <ApprovalCard approval={pendingApproval} onRespond={respond} />
+          <div className="shrink-0 p-4 pt-0">
+            <ApprovalCard approval={pendingApproval} onRespond={respond} />
+          </div>
         ) : null}
 
         {sessionEnded ? (
-          <p className="text-xs text-muted-foreground" data-testid="remote-session-ended">
+          <p
+            className="shrink-0 px-4 pb-4 text-xs text-muted-foreground"
+            data-testid="remote-session-ended"
+          >
             {t("ended")}
           </p>
         ) : null}

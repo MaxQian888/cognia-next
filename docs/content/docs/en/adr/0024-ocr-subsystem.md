@@ -5,9 +5,10 @@ description: Cross-shell text extraction from images and PDFs. Plumbs 20 OCR pro
 
 # ADR 0024 — OCR subsystem
 
-> **Status**: Accepted on 2026-05-18. Revised 2026-05-18 to add three more
+> **Status**: Accepted on 2026-05-18. Revised 2026-08-08 to repair runtime
+> capability reporting, routing, model delivery, and local transports. The
 > local providers — `ocrs` (pure-Rust ONNX via RTen), `paddle-ocr`
-> (PP-OCRv5 via `oar-ocr` + ONNX Runtime), and `local-http` (generic
+> (PP-OCRv6 via `oar-ocr` + ONNX Runtime), and `local-http` (generic
 > adapter for self-hosted servers like Umi-OCR / PaddleOCR-Server).
 
 ## Context
@@ -54,18 +55,21 @@ under the keyring namespace `"ocr"` keyed by provider id.
 
 `lib/ocr/auto-router.ts:pickDefaultProvider` consults three signals in order:
 
-1. `UserOcrSettings.defaultProviderId` when it's a concrete id (not `"auto"`)
-   and the provider is registered, enabled, and shell-compatible.
-2. The platform-local preference table — Windows + MSIX picks
-   `windows-media-ocr`, macOS / iOS pick `apple-vision`, Android picks
-   `mlkit-android`, browsers pick `tesseract-wasm`.
+1. `UserOcrSettings.defaultProviderId` when it is a concrete id, enabled, and
+   reported ready by the shared runtime-capability contract. An unavailable
+   persisted default is normalized to `"auto"` with a visible reason.
+2. The ready local candidate chain. macOS tries `apple-vision` then
+   `paddle-ocr`; Windows and Linux try `paddle-ocr`; mobile uses the matching
+   OS engine; browsers use `tesseract-wasm`. `ocrs` and
+   `windows-media-ocr` remain stable advanced ids but are never auto-routed.
 3. The configured cloud fallback (default `mistral-ocr`) when local engines
    are unavailable and credentials are configured.
 
-The router is pure — it takes a registry, settings, platform tag, optional
-readiness probe (`isReady`), and optional credentials probe
-(`hasCredentials`). All three are stubbed in unit tests so the table is
-fully covered without spinning up real backends.
+Automatic extraction executes this ordered candidate chain, continuing after
+retryable availability, rate-limit, network, and provider failures. Explicit
+provider requests never switch providers. Abort, invalid input, and unsupported
+language failures stop immediately. Cache identity uses the provider that
+actually succeeds.
 
 ### Output schema
 
@@ -111,7 +115,7 @@ clear manually.
 
 ### Native bindings (Rust)
 
-`src-tauri/src/ocr/mod.rs` exposes four Tauri commands:
+`crates/cognia-ocr` exposes the Tauri command surface:
 
 - `ocr_extract_native(payload)` — dispatches by `payload.backend`
   (`tesseract` / `windows-media-ocr` / `apple-vision` / `ocrs` /
@@ -119,29 +123,38 @@ clear manually.
 - `ocr_msix_status()` — reports whether the running Windows process has an
   MSIX package identity. The frontend caches this at boot and uses it to
   gate `windows-media-ocr` in the auto-router.
-- `ocr_model_status(backend)` — reports per-file installation state for
+- `ocr_model_status(backend, variant)` — reports version, selected variant,
+  integrity, and per-file installation state for
   backends that download their own weights (`ocrs`, `paddle-ocr`). Returns
   `{ installed, files[], total_bytes, model_dir }`; the auto-router
   consults this to skip backends whose models aren't downloaded yet.
-- `ocr_download_model(backend)` — streams the upstream model files into
-  `<app_data>/cognia/ocr/<backend>/`, emitting `ocr://download-progress`
+- `ocr_download_model(backend, variant, request_id)` — streams pinned model
+  files into versioned directories, emitting `ocr://download-progress`
   events as bytes land. Writes a `manifest.json` with SHA-256s on
-  completion. Idempotent — re-running a successful download is a no-op
-  for files whose digest already matches.
+  completion. Downloads use temporary files plus atomic replacement, recover
+  corrupt files, deduplicate concurrent requests per variant, and can be
+  terminated by `ocr_cancel_model_download(request_id)`.
+- `ocr_http_fetch` / `ocr_http_cancel` — packaged-desktop transport for
+  `local-http`. Redirects and public/link-local/metadata targets are rejected;
+  loopback is allowed, while private/LAN endpoints require exact-endpoint user
+  confirmation.
 
-Real bindings ride four Cargo features (all default-off so the standard
-build stays fast; release pipeline turns on `ocr-ocrs` and `ocr-paddle`),
-plus one target-gated backend that is always on for its platform:
+The standard desktop build enables `ocr-paddle`; CI rejects a release whose
+default feature no longer binds `cognia-ocr/ocr-paddle`. `ocr-ocrs` remains an
+opt-in advanced feature. Apple Vision is target-gated and always compiled on
+macOS:
 
-- `ocr-tesseract` → `tesseract-rs` (cross-platform, statically linked
-  libtesseract + leptonica).
-- `ocr-windows` → `winocr` crate (Windows + MSIX).
+- `ocr-tesseract` → the locally installed Tesseract CLI. Its `tempfile`
+  dependency is available in the feature-gated runtime path.
+- `ocr-windows` retains the stable `windows-media-ocr` id, but its real
+  Windows.Media.Ocr binding is not implemented and is always reported
+  unavailable.
 - `apple-vision` (no feature; compiled whenever the target is macOS) →
   Vision.framework's `VNRecognizeTextRequest` in-process via the
   `objc2-vision` bindings — no sidecar, no model downloads.
 - `ocr-ocrs` → `ocrs` + `rten` (pure-Rust, no system deps).
-- `ocr-paddle` → `oar-ocr` + `ort` (PP-OCRv5 via ONNX Runtime; pinned to
-  `ort = "=2.0.0-rc.12"` to avoid ABI churn between RCs).
+- `ocr-paddle` → `oar-ocr` 0.9.x + ONNX Runtime, with selectable PP-OCRv6
+  Small (default) and Tiny variants.
 
 When a feature is off the registry advertises a `PlaceholderBackend` that
 returns `MissingBinding(id)`. The TS layer surfaces that as
@@ -150,19 +163,33 @@ next candidate.
 
 ### Model distribution
 
-`ocrs` and `paddle-ocr` would each add ~12–17 MB of weights to the
+`ocrs` and `paddle-ocr` add substantial weights to the
 installer. Instead the bundle ships without weights and the settings UI
 exposes a "Download models" button per backend. Files land in
-`<app_data>/cognia/ocr/<backend>/` and are advertised to the auto-router
-via `ocr_model_status`. License notes:
+`<app_data>/cognia/ocr/<backend>/`; Paddle variants use separate
+`v6-small` / `v6-tiny` directories. Unversioned PP-OCRv5 files are preserved
+and reported as legacy/non-active. License notes:
 
 - `ocrs` detection + recognition models — Apache-2.0 (trained on HierText,
   CC-BY-SA 4.0 for the dataset; weights themselves are Apache-2.0).
-- PP-OCRv5_mobile models — Apache-2.0.
+- PP-OCRv6 models — Apache-2.0.
 
-The download path goes through the OS's normal HTTPS stack; no signing
-or pinning beyond standard TLS. The optional `manifest.json` written
-alongside the files records SHA-256s for tamper detection on later boots.
+The download manifest pins every expected SHA-256. Readiness requires live
+digest verification; file presence alone is never treated as an installed
+model.
+
+### Local HTTP dialects
+
+`local-http` is configured from `OCR_PARAMETER_SCHEMAS`. A legacy plaintext
+token is migrated into the OCR keyring and removed from settings. Umi-OCR
+queries `/api/ocr/get_options` and maps BCP-47 hints to the exact advertised
+`ocr.language` model value while preserving each response `end` separator.
+The Paddle dialect sends the PaddleOCR 3.x `/ocr` request shape and accepts its
+`result.ocrResults[].prunedResult` response, while retaining compatibility with
+the older hubserving dict and tuple response shapes. Language hints are hints,
+not evidence that every native backend consumes them. `ocrs` is a Latin-only
+early preview; Tesseract WASM requires traineddata download unless `langPath`
+points to local assets.
 
 ### Testing strategy
 

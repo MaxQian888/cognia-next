@@ -1,6 +1,6 @@
 ---
 title: Discovery, Tunnel & TLS
-description: How a phone finds and reaches the desktop — the mDNS broadcast of _cognia._tcp.local., the unauthenticated healthz discovery endpoint, the cloudflared quick/named tunnel launcher, the named-tunnel persistence, and the SPKI fingerprint the phone pins.
+description: Current health and readiness endpoints, LAN discovery, TLS identity, and tunnel reachability for the Companion listener.
 ---
 
 # Discovery, Tunnel & TLS
@@ -8,141 +8,51 @@ description: How a phone finds and reaches the desktop — the mDNS broadcast of
 <Status variant="beta" />
 
 <TLDR>
-  A phone needs a `baseUrl` and a TLS fingerprint before it can pair. Three Rust pieces provide them:
-  `mdns.rs` broadcasts `_cognia._tcp.local.` with the version + fingerprint in TXT records so a phone
-  on the same LAN can auto-discover the desktop; `healthz.rs` serves an **unauthenticated**
-  `GET /api/v1/healthz` that returns version + fingerprint + a stable `server_id` so a probing phone
-  can confirm "this is a Cognia server" and pin TLS; and `tunnel.rs` spawns a cloudflared child
-  process (quick or named) to give the desktop a public HTTPS URL when LAN won't reach. The fingerprint
-  that ties it all together is the SHA-256 of the 10-year self-signed certificate's public key.
+  The Companion listener defaults to TLS on port `27890`. LAN discovery advertises the listener and
+  certificate identity; `GET /healthz` confirms the process, while `/livez` and `/readyz` separate
+  liveness from dependency readiness. Tunnel or managed front doors preserve the same canonical
+  `/api/*` and `/ws/*` paths. There is no versioned compatibility alias.
 </TLDR>
 
-<StatGrid>
-  <Stat label="mDNS service" value="_cognia._tcp.local." hint="mdns.rs:20" />
-  <Stat label="Discovery route" value="GET /api/v1/healthz" hint="unauthenticated — healthz.rs:38" />
-  <Stat label="Tunnel" value="cloudflared" hint="quick + named — tunnel.rs" />
-  <Stat label="server_id" value="SHA-256(secret)[..16]" hint="healthz.rs:54" />
-</StatGrid>
+## Probe endpoints
 
-## The reach problem
+| Route | Authentication | Purpose |
+| --- | --- | --- |
+| `GET /healthz` | None | Basic server identity and health discovery |
+| `GET /livez` | None | Process liveness |
+| `GET /readyz` | None | Readiness of required runtime dependencies |
+| `GET /.well-known/agent-card.json` | None | Agent capability discovery |
 
-The same `baseUrl` resolution underlies pairing and reconnection. The desktop can be reachable three
-ways, in priority order — and `companion_issue_pair_jwt` (`commands.rs:510-520`) bakes that priority
-into the QR it generates: **tunnel > named tunnel > LAN IP > loopback**.
+Probes intentionally expose no session or command data. After discovery, a device must still finish
+device registration and the DPoP token flow.
+
+## Reachability order
 
 ```mermaid
 flowchart LR
-  PHONE["📱 Phone"]
-  subgraph REACH["Reach candidates (priority order)"]
-    direction TB
-    TUN["Cloudflared tunnel<br/>tunnel.rs:87 — public HTTPS"]
-    LAN["LAN IP + mDNS<br/>mdns.rs:20 — _cognia._tcp.local."]
-    LOOP["Loopback<br/>127.0.0.1:27890 — same machine"]
-  end
-  HEALTH["GET /api/v1/healthz<br/>healthz.rs:38 (unauth)"]
-  PAIR["pair / reconnect"]
-
-  PHONE --> TUN
-  PHONE --> LAN
-  PHONE --> LOOP
-  TUN --> HEALTH
-  LAN --> HEALTH
-  LOOP --> HEALTH
-  HEALTH -- "version + fp + server_id" --> PAIR
-
-  classDef p fill:#0f172a,stroke:#38bdf8,color:#e0f2fe
-  classDef r fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
-  classDef h fill:#7c2d12,stroke:#fb923c,color:#fed7aa
-  class PHONE p
-  class TUN,LAN,LOOP r
-  class HEALTH,PAIR h
+  D["Device"] --> L["LAN / mDNS"]
+  D --> T["Configured tunnel"]
+  D --> M["Managed front door"]
+  L --> C["Companion TLS listener :27890"]
+  T --> C
+  M --> C
 ```
 
-## healthz — the discovery handshake
+The advertised base URL changes with deployment, but the contract paths do not. A reverse proxy must
+forward WebSocket upgrades and preserve the request path used by DPoP verification and socket-ticket
+binding.
 
-`healthz_handler` (`healthz.rs:38`) is the **only** unauthenticated route on the Companion API. It
-exists so a phone scanning the LAN can confirm a candidate IP is a Cognia server *before* sending any
-credential, and so a paired phone can probe reachability cheaply. It returns:
+## TLS identity
 
-- `version` — the app version,
-- the TLS SHA-256 `fingerprint`,
-- `server_id` — `SHA-256(secret)[..16]` as 32 hex chars (`healthz.rs:54-57`), a stable identifier
-  derived from the signing secret that lets a phone tell two desktops apart without exposing the secret
-  itself.
+The native runtime owns the certificate and exposes its fingerprint through discovery metadata. A
+client should pin or otherwise validate that identity according to its deployment policy before
+sending registration material. A tunnel's public certificate does not implicitly authorize a
+different Companion instance.
 
-Deliberately, it reveals nothing actionable: no session data, no command surface, just enough to pin
-TLS and recognize the server. (The LAN scanner on the client actually probes `GET /api/v1/whoami` and
-treats a `401` as proof-of-Cognia, then enriches with `healthz` for the fingerprint — see [discovery &
-pairing](../../ui/mobile-architecture/discovery-pairing).)
+## Browser front door
 
-## mDNS
-
-`mdns.rs` broadcasts the service type `_cognia._tcp.local.` (`SERVICE_TYPE`, `mdns.rs:20`) with TXT
-records (`mdns.rs:67-69`):
-
-| Key | Value |
-| --- | --- |
-| `ver` | app version |
-| `fp` | TLS SHA-256 fingerprint |
-| `path` | `/api/v1` |
-
-`Broadcaster::start` (`mdns.rs:63`) registers a `ServiceInfo` (`:71`); `start_auto` (`:122`) resolves
-the LAN IP via `local-ip-address`. It is **off by default** — the user enables it in Settings —
-because most corporate networks filter multicast, and it is unregistered on drop. The Tauri commands
-are `companion_mdns_start` (`commands.rs:610`), `companion_mdns_stop` (`commands.rs:636`), and
-`companion_mdns_status` (`commands.rs:642`).
-
-## Cloudflared tunnel
-
-`tunnel.rs` gives the desktop a public HTTPS URL by orchestrating a `cloudflared` child process. The
-binary is **not bundled** — the user installs it (`brew` / `winget` / apt). Two modes:
-
-- **Quick tunnel** (`tunnel.rs:87-94`) — `cloudflared tunnel --no-autoupdate --url <local>`, adding
-  `--no-tls-verify` because the origin is the self-signed HTTPS server. The ephemeral
-  `https://<random>.trycloudflare.com` URL is parsed from stderr with a regex
-  (`(https://[a-z0-9-]+\.trycloudflare\.com)`, `:113-124`).
-- **Named tunnel** (`tunnel.rs:151-156`) — `cloudflared tunnel --no-autoupdate --token <token>` for a
-  stable custom hostname; liveness is detected by the `Registered tunnel connection` log line
-  (`:175-186`).
-
-`TunnelError` distinguishes `NotInstalled` (ENOENT → actionable "install cloudflared" message),
-`Io`, and `Timeout` (`tunnel.rs:23-31`). `TunnelState` (`:209`) waits up to 20 s for the URL. The
-commands are `companion_tunnel_start` (`commands.rs:656`), `companion_tunnel_stop` (`:696`),
-`companion_tunnel_current` (`:702`), plus the named-config commands below.
-
-### Named-tunnel persistence
-
-`tunnel_config.rs` persists the named-tunnel setup the same way credentials are split: the **token**
-goes to the OS keyring (service `"com.cognia.companion-tunnel/v1"`, account `"token"`,
-`tunnel_config.rs:17-18`), while the **mode + hostname** go to a JSON file
-`<data_dir>/cognia/tunnel-config.json` (`:19-20,59`). `save_token` / `load_token` / `clear_token`
-(`:80-101`); `summarize` (`:148`) optimistically reports the token as present on Windows to dodge the
-Credential-Manager read delay. The commands are `companion_tunnel_save_named_config` (`commands.rs:709`),
-`companion_tunnel_get_config` (`:725`), `companion_tunnel_set_mode` (`:734`), `companion_tunnel_clear_named`
-(`:761`).
-
-## TLS & the fingerprint
-
-The certificate that all of this pins is described in [Server &
-authentication](./server-and-auth#tls-self-signed-pinned-stable): a 10-year self-signed cert
-(`tls.rs:30`) whose SPKI SHA-256 is the fingerprint. The fingerprint is computed once (`mod.rs:160`),
-embedded in the mDNS TXT `fp` record, returned by `healthz`, and baked into the QR pairing payload —
-three delivery channels for the same value, so however the phone reaches the desktop it can verify it
-is talking to the right one. The phone then performs certificate pinning on every subsequent request
-(`pinned-fetch` on the client side), which is why a self-signed certificate is safe here even though a
-desktop browser would reject it.
-
-## Reachability diagnostics
-
-`companion_test_local_reachability` (`commands.rs:879`) probes each candidate host's
-`…/api/v1/auth/pair/issue` with a 5-second timeout (`commands.rs:895`) and returns a
-`Vec<CompanionReachability>` so the Settings UI can show which reach paths are currently live before
-the user generates a QR.
-
-## Related pages
-
-<Cards>
-  <Card title="Server & authentication" href="./server-and-auth" description="The certificate, the fingerprint, and how the QR bakes in the resolved baseUrl." />
-  <Card title="Mobile: discovery & pairing" href="../../ui/mobile-architecture/discovery-pairing" description="The client side — mDNS subscribe, LAN scan, connection-strategy candidate walk, TLS pinning." />
-  <Card title="WebRTC signaling plane" href="./signaling-webrtc" description="The fourth reach path for when neither LAN nor tunnel works." />
-</Cards>
+The primary deployment serves the static export, API, WebSockets, and signaling from one HTTPS
+origin. Split-origin deployments must explicitly list exact HTTPS origins in
+`COGNIA_ALLOWED_WEB_ORIGINS`; PNA additionally requires `COGNIA_ALLOW_PRIVATE_NETWORK=true`.
+Wildcard origins and cookie credentials are never enabled, and browser WebSocket upgrades follow
+the same Origin decision as HTTP.

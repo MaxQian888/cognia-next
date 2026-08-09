@@ -10,9 +10,8 @@ function sys(content: string, providerOptions?: SystemModelMessage["providerOpti
 
 describe("partitionPrompt", () => {
   it("emits under the key the installed AI SDK accepts", () => {
-    // ai@6 only accepts `system` on generateText/streamText; `instructions` is
     // ToolLoopAgent-only. Flip both this pin and the helper in the v7 bump.
-    expect(EMITTED_INSTRUCTIONS_KEY).toBe("system")
+    expect(EMITTED_INSTRUCTIONS_KEY).toBe("instructions")
   })
 
   it("leaves a system-free conversation untouched", () => {
@@ -24,7 +23,7 @@ describe("partitionPrompt", () => {
     const result = partitionPrompt(messages)
 
     expect(result).toEqual({ messages })
-    expect(result.system).toBeUndefined()
+    expect(result.instructions).toBeUndefined()
     expect(result.allowSystemInMessages).toBeUndefined()
   })
 
@@ -35,7 +34,7 @@ describe("partitionPrompt", () => {
   it("hoists a single leading system message", () => {
     const result = partitionPrompt([sys("be terse"), { role: "user", content: "hi" }])
 
-    expect(result.system).toEqual([{ role: "system", content: "be terse" }])
+    expect(result.instructions).toEqual([{ role: "system", content: "be terse" }])
     expect(result.messages).toEqual([{ role: "user", content: "hi" }])
     expect(result.allowSystemInMessages).toBeUndefined()
   })
@@ -50,7 +49,7 @@ describe("partitionPrompt", () => {
       { role: "user", content: "hi" },
     ])
 
-    expect(result.system).toEqual([
+    expect(result.instructions).toEqual([
       { role: "system", content: "base", providerOptions: CACHE_CONTROL },
       { role: "system", content: "stable append", providerOptions: CACHE_CONTROL },
       { role: "system", content: "per-turn tail" },
@@ -64,7 +63,7 @@ describe("partitionPrompt", () => {
       "composed"
     )
 
-    expect(result.system).toEqual([
+    expect(result.instructions).toEqual([
       { role: "system", content: "composed" },
       { role: "system", content: "from history" },
     ])
@@ -77,13 +76,13 @@ describe("partitionPrompt", () => {
   ])("drops %s leading instructions instead of emitting an empty system turn", (_label, value) => {
     const result = partitionPrompt([{ role: "user", content: "hi" }], value)
 
-    expect(result.system).toBeUndefined()
+    expect(result.instructions).toBeUndefined()
   })
 
   it("accepts a single SystemModelMessage as leading instructions", () => {
     const result = partitionPrompt([{ role: "user", content: "hi" }], sys("solo", CACHE_CONTROL))
 
-    expect(result.system).toEqual([
+    expect(result.instructions).toEqual([
       { role: "system", content: "solo", providerOptions: CACHE_CONTROL },
     ])
   })
@@ -91,7 +90,7 @@ describe("partitionPrompt", () => {
   it("accepts an array of SystemModelMessages as leading instructions", () => {
     const result = partitionPrompt([{ role: "user", content: "hi" }], [sys("a"), sys("b")])
 
-    expect(result.system).toEqual([
+    expect(result.instructions).toEqual([
       { role: "system", content: "a" },
       { role: "system", content: "b" },
     ])
@@ -100,7 +99,7 @@ describe("partitionPrompt", () => {
   it("drops blank system messages so they never reach the provider", () => {
     const result = partitionPrompt([sys("   "), sys("real"), { role: "user", content: "hi" }])
 
-    expect(result.system).toEqual([{ role: "system", content: "real" }])
+    expect(result.instructions).toEqual([{ role: "system", content: "real" }])
   })
 
   it("leaves mid-history system messages in place and opts them back in", () => {
@@ -112,7 +111,7 @@ describe("partitionPrompt", () => {
 
     const result = partitionPrompt(messages)
 
-    expect(result.system).toBeUndefined()
+    expect(result.instructions).toBeUndefined()
     expect(result.messages).toEqual(messages)
     expect(result.allowSystemInMessages).toBe(true)
   })
@@ -125,7 +124,7 @@ describe("partitionPrompt", () => {
       { role: "assistant", content: "ok" },
     ])
 
-    expect(result.system).toEqual([{ role: "system", content: "base" }])
+    expect(result.instructions).toEqual([{ role: "system", content: "base" }])
     expect(result.messages).toEqual([
       { role: "user", content: "hi" },
       { role: "system", content: "mid" },
@@ -137,7 +136,7 @@ describe("partitionPrompt", () => {
   it("treats an all-system conversation as pure instructions", () => {
     const result = partitionPrompt([sys("a"), sys("b")])
 
-    expect(result.system).toEqual([
+    expect(result.instructions).toEqual([
       { role: "system", content: "a" },
       { role: "system", content: "b" },
     ])

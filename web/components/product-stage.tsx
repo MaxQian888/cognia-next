@@ -1,5 +1,6 @@
 import { DesktopReconstruction } from "@web/components/product/desktop-reconstruction"
 import { WorkbenchReconstruction } from "@web/components/product/workbench-reconstruction"
+import { BorderBeam } from "@web/components/ui/border-beam"
 import { getCopy } from "@web/content"
 import type { Locale } from "@web/lib/locale"
 import { findShotPair } from "@web/lib/product-assets"
@@ -15,6 +16,8 @@ interface ProductStageProps {
   /** Renders the frame on the dark execution substrate instead of paper. */
   tone?: "surface" | "stage"
   className?: string
+  /** Adds one restrained Magic UI signal pass around an authentic product frame. */
+  signalBorder?: boolean
 }
 
 /**
@@ -44,6 +47,7 @@ export function ProductStage({
   caption,
   tone = "surface",
   className,
+  signalBorder = false,
 }: ProductStageProps) {
   const pair = findShotPair(section, locale)
 
@@ -77,6 +81,16 @@ export function ProductStage({
             loading="lazy"
             decoding="async"
           />
+          {signalBorder ? (
+            <BorderBeam
+              size={240}
+              duration={12}
+              borderWidth={1}
+              colorFrom="var(--action)"
+              colorTo="var(--hairline-strong)"
+              transition={{ repeat: 1 }}
+            />
+          ) : null}
         </div>
         {caption ? (
           <figcaption className="mt-3 font-mono text-xs text-muted">{caption}</figcaption>
@@ -104,14 +118,26 @@ export function ProductStage({
        * are real content, kept in the tree and translated, which is the reason
        * ADR-0092 §8 has them as DOM in the first place.
        */}
-      <div role="img" aria-label={alt}>
-        <div aria-hidden>
-          {section === "desktop" ? (
-            <DesktopReconstruction copy={copy} />
-          ) : (
-            <WorkbenchReconstruction copy={copy} />
-          )}
+      <div className="relative overflow-hidden rounded-stage">
+        <div role="img" aria-label={alt}>
+          <div aria-hidden>
+            {section === "desktop" ? (
+              <DesktopReconstruction copy={copy} />
+            ) : (
+              <WorkbenchReconstruction copy={copy} />
+            )}
+          </div>
         </div>
+        {signalBorder ? (
+          <BorderBeam
+            size={240}
+            duration={12}
+            borderWidth={1}
+            colorFrom="var(--action)"
+            colorTo="var(--hairline-strong)"
+            transition={{ repeat: 1 }}
+          />
+        ) : null}
       </div>
 
       <figcaption className="mt-3 flex flex-col gap-1 font-mono text-xs text-muted">

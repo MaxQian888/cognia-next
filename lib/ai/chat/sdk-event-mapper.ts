@@ -839,6 +839,14 @@ export function createSdkEventMapper(ctx: SdkEventMapperContext): SdkEventMapper
           // loop exits cleanly.
           return out
         }
+        case "reasoning-file":
+          // AI SDK 7 split files referenced inside a model's reasoning trace out
+          // of `file` into their own part type. DELIBERATELY DROPPED: raw
+          // chain-of-thought artifacts are never rendered or persisted, matching
+          // both the sidecar event-adapter and this mapper's `reasoning`
+          // handling. Handled explicitly rather than falling through to
+          // `default` so the drop is a decision, not an oversight.
+          return out
         case "error":
         default:
           return out

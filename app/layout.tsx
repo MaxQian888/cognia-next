@@ -2,6 +2,8 @@
 // If you call an external API from the browser, add its origin to the
 // `connect-src` directive there, otherwise the request will be blocked.
 import type { Metadata, Viewport } from "next"
+import dynamic from "next/dynamic"
+import { Suspense } from "react"
 // Geist ships as a self-hosted local font package (geist/font/*), so the build
 // never fetches from fonts.gstatic.com. This keeps offline / proxied / CI and
 // the Tauri + Capacitor static-export builds deterministic; the exposed CSS
@@ -24,30 +26,22 @@ import { RecoveryBootGate } from "@/components/providers/recovery-boot-gate"
 import { AccountAutoLock } from "@/components/account/account-auto-lock"
 import { AccountGate } from "@/components/account/account-gate"
 import { AccountStoreInitializer } from "@/components/providers/initializers/account-store-initializer"
-import { ExternalAgentInitializer } from "@/components/providers/initializers/external-agent-initializer"
 import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
 import { PluginRuntimeInitializer } from "@/components/providers/initializers/plugin-runtime-initializer"
 import { ChatMiddlewareFlagInitializer } from "@/components/providers/initializers/chat-middleware-flag-initializer"
-import { BackgroundTaskInitializer } from "@/components/providers/initializers/background-task-initializer"
 import { ApprovalJournalInitializer } from "@/components/providers/initializers/approval-journal-initializer"
-import { AutomationPolicyInitializer } from "@/components/providers/initializers/automation-policy-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { StorageRetentionInitializer } from "@/components/providers/initializers/storage-retention-initializer"
 import { StoragePersistenceInitializer } from "@/components/providers/initializers/storage-persistence-initializer"
-import { AutoModeInitializer } from "@/components/providers/initializers/auto-mode-initializer"
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
-import { ModelsDevCatalogInitializer } from "@/components/providers/initializers/models-dev-catalog-initializer"
-import { OpenRouterCatalogInitializer } from "@/components/providers/initializers/openrouter-catalog-initializer"
-import { OcrRuntimeInitializer } from "@/components/providers/initializers/ocr-runtime-initializer"
-import { ProviderCostMirrorInitializer } from "@/components/providers/initializers/provider-cost-mirror-initializer"
 import { WindowTitleInitializer } from "@/components/providers/initializers/window-title-initializer"
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
 import { SessionFocusInitializer } from "@/components/providers/initializers/session-focus-initializer"
 import { AppShortcutDispatcher } from "@/components/providers/app-shortcut-dispatcher"
 import { DeferredBootInitializers } from "@/components/providers/initializers/deferred-boot-initializers"
+import { BootCapabilityRouteActivator } from "@/components/providers/initializers/boot-capability-route-activator"
+import { BootProfileStartupProbe } from "@/components/providers/initializers/boot-profile-startup-probe"
 import { WindowLivenessInitializers } from "@/components/providers/initializers/window-liveness-initializers"
-import { TwinWorkerInitializer } from "@/components/twin/twin-worker-initializer"
-import { ProjectKnowledgeWorkerInitializer } from "@/components/shell/project-kb-worker-initializer"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { WebDavStartupPromptProvider } from "@/components/providers/webdav-startup-prompt-provider"
 import { WebDavMobileAutosyncProvider } from "@/components/providers/webdav-mobile-autosync-provider"
@@ -61,7 +55,6 @@ import { DesktopAppShell } from "@/components/desktop/desktop-app-shell"
 import { CompanionEventBridgeProvider } from "@/components/providers/companion-event-bridge-provider"
 import { DesktopSyncSourceProvider } from "@/components/providers/desktop-sync-source-provider"
 import { DesktopMessageSourceProvider } from "@/components/providers/desktop-message-source-provider"
-import { RemoteControlReceiver } from "@/components/providers/remote-control-receiver"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { HookTrustSyncProvider } from "@/components/providers/hook-trust-sync-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
@@ -75,7 +68,6 @@ import { PluginErrorToaster } from "@/components/plugins/plugin-error-toaster"
 import { SettingsLoadFailedBanner } from "@/components/error/settings-load-failed-banner"
 import { DbUpgradeBlockedDialog } from "@/components/error/db-upgrade-blocked-dialog"
 import { DiagnosticNotifier } from "@/components/error/diagnostic-notifier"
-import { PluginSurfaceReferenceHarness } from "@/app/e2e/plugin-ui-surfaces/plugin-surface-reference-harness"
 import { WorkflowRunToaster } from "@/components/workflow/runs/workflow-run-toaster"
 import { OrchestrationDispatchProvider } from "@/components/providers/orchestration-dispatch-provider"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
@@ -103,6 +95,16 @@ import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
 import { AskUserDialog } from "@/components/chat/ask-user-dialog"
 import { SkillRecorderRoot } from "@/components/skills/recorder/recorder-root"
 import "./globals.css"
+
+// This harness reaches nearly every plugin surface and renderer by design.
+// Keeping it as a static import made ordinary `pnpm dev` compile the E2E-only
+// graph even though NEXT_PUBLIC_E2E is unset. The conditional render below now
+// has a real module boundary; E2E builds still load the exact same component.
+const PluginSurfaceReferenceHarness = dynamic(() =>
+  import("@/app/e2e/plugin-ui-surfaces/plugin-surface-reference-harness").then(
+    (module) => module.PluginSurfaceReferenceHarness
+  )
+)
 
 export const metadata: Metadata = {
   title: "Cognia · Claude Code",
@@ -172,7 +174,7 @@ export default async function RootLayout({
             <LocaleGate>
               {process.env.NEXT_PUBLIC_E2E === "1" ? (
                 <>
-                  <PluginRuntimeInitializer />
+                  <PluginRuntimeInitializer onlyForPluginSurfaceE2E />
                   <PluginSurfaceReferenceHarness />
                 </>
               ) : null}
@@ -216,7 +218,6 @@ export default async function RootLayout({
                            * getPluginManager(). */}
                           <PluginRuntimeInitializer />
                           <ChatMiddlewareFlagInitializer />
-                          <BackgroundTaskInitializer />
                           <ApprovalJournalInitializer />
                           <SubscriptionInitializer />
                           {/* Desktop-only boot initializers (Tauri). Consolidated +
@@ -225,30 +226,19 @@ export default async function RootLayout({
                            * build loads them at runtime. See the component for the
                            * full rationale. */}
                           <DesktopOnlyInitializers />
-                          <AutomationPolicyInitializer />
                           <AuditRetentionInitializer />
                           <StorageRetentionInitializer />
                           <StoragePersistenceInitializer />
-                          <AutoModeInitializer />
-                          <ExternalAgentInitializer />
                           <ProjectStoreInitializer />
-                          <ModelsDevCatalogInitializer />
-                          <OpenRouterCatalogInitializer />
-                          <OcrRuntimeInitializer />
-                          {/* Agent-team, scheduler, workflow-trigger, provider-
-                           * routing, gateway, and connector runtimes — bundled
-                           * behind one dynamic(ssr:false) boundary so their
-                           * subsystem graphs stay out of every route's
-                           * first-paint compile (ADR-0068 C3). Mount order
-                           * inside the bundle preserves the previous document
-                           * order here, incl. Routing-before-Gateway. */}
+                          {/* Capability-scoped dynamic boundaries keep optional
+                           * subsystem graphs out of the main profile's initial
+                           * compile. Production/eager requests every group;
+                           * ordering constraints stay within each group. */}
+                          <Suspense fallback={null}>
+                            <BootCapabilityRouteActivator />
+                          </Suspense>
+                          <BootProfileStartupProbe />
                           <DeferredBootInitializers />
-                          <TwinWorkerInitializer />
-                          {/* Keeps each workspace's project-scoped RAG index
-                           * (`projectChunks`) in sync with its `knowledgeBase`.
-                           * No-op when no vector backend is configured. */}
-                          <ProjectKnowledgeWorkerInitializer />
-                          <ProviderCostMirrorInitializer />
                           <ContextKeysInitializer />
                           {/* Drops the right rail's conversation-shaped leftovers
                            * (reveal intents, workspace target, artifact-list
@@ -304,29 +294,24 @@ export default async function RootLayout({
                                                     <WebCompanionBootProvider>
                                                       <DesktopSyncSourceProvider>
                                                         <DesktopMessageSourceProvider>
-                                                          {/* Subscribes the renderer to the remote-control axum
-                                                    server's Tauri events so inbound HTTP triggers
-                                                    actually dispatch. No-op off Tauri. */}
-                                                          <RemoteControlReceiver>
-                                                            {/* id="app" is the scope root for user
+                                                          {/* id="app" is the scope root for user
                                                         custom CSS when `customCssScope` is
                                                         "app" (see lib/appearance/custom-css/apply).
                                                         display:contents keeps it box-less but
                                                         still a valid @scope (#app) root. */}
-                                                            <div
-                                                              id="app"
-                                                              data-bg-target="global"
-                                                              className="contents"
-                                                            >
-                                                              <MobileShellWrapper>
-                                                                <DesktopAppShell>
-                                                                  <SurfaceAvailabilityBoundary>
-                                                                    {children}
-                                                                  </SurfaceAvailabilityBoundary>
-                                                                </DesktopAppShell>
-                                                              </MobileShellWrapper>
-                                                            </div>
-                                                          </RemoteControlReceiver>
+                                                          <div
+                                                            id="app"
+                                                            data-bg-target="global"
+                                                            className="contents"
+                                                          >
+                                                            <MobileShellWrapper>
+                                                              <DesktopAppShell>
+                                                                <SurfaceAvailabilityBoundary>
+                                                                  {children}
+                                                                </SurfaceAvailabilityBoundary>
+                                                              </DesktopAppShell>
+                                                            </MobileShellWrapper>
+                                                          </div>
                                                         </DesktopMessageSourceProvider>
                                                       </DesktopSyncSourceProvider>
                                                     </WebCompanionBootProvider>

@@ -490,7 +490,7 @@ impl Driver for ComposeDriver {
                     "content-type: application/json",
                     "--data",
                     &request,
-                    "https://127.0.0.1:27890/api/v1/maintenance/backups",
+                    "https://127.0.0.1:27890/operator/maintenance/backups",
                 ],
                 None,
             )
@@ -1038,7 +1038,7 @@ impl Driver for KubernetesDriver {
                 "content-type: application/json",
                 "--data",
                 &request,
-                "https://127.0.0.1:27890/api/v1/maintenance/backups",
+                "https://127.0.0.1:27890/operator/maintenance/backups",
             ])
             .await?;
         let mut result = parse_stdout_json(output)?;
@@ -1268,7 +1268,7 @@ async fn http_strict_smoke(
     release: &AgentRelease,
 ) -> Result<Value, DriverError> {
     let ready_url = public_url
-        .join("/api/v1/readyz")
+        .join("/readyz")
         .map_err(|error| DriverError::Configuration(error.to_string()))?;
     let response = client
         .get(ready_url)
@@ -1296,7 +1296,7 @@ async fn http_ready_smoke(
     public_url: &Url,
 ) -> Result<Value, DriverError> {
     let ready_url = public_url
-        .join("/api/v1/readyz")
+        .join("/readyz")
         .map_err(|error| DriverError::Configuration(error.to_string()))?;
     let response = client
         .get(ready_url)

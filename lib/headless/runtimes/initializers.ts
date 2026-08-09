@@ -53,12 +53,14 @@ registerHeadlessRuntime({
     const [
       { initTriggerSubscriptions, disposeTriggerSubscriptions },
       { listWorkflows },
-      { syncWorkflowTriggers },
+      { resolveWorkflowDeployment },
+      { syncWorkflowTriggers, unsyncWorkflowTriggers },
       { resumeInFlightRuns },
       { initPluginTriggerLifecycle, disposePluginTriggerLifecycle },
     ] = await Promise.all([
       import("@/lib/workflow/runtime/trigger-subscriptions"),
       import("@/lib/db/workflows"),
+      import("@/lib/db/workflow-deployments"),
       import("@/lib/workflow/runtime/webhook-bridge"),
       import("@/lib/workflow/runtime/resume-controller"),
       import("@/lib/workflow/triggers/lifecycle"),
@@ -68,7 +70,13 @@ registerHeadlessRuntime({
     initPluginTriggerLifecycle()
     try {
       const all = await listWorkflows()
-      await Promise.allSettled(all.map((workflow) => syncWorkflowTriggers(workflow)))
+      await Promise.allSettled(
+        all.map(async (workflow) => {
+          const deployed = await resolveWorkflowDeployment(workflow.id)
+          if (deployed) await syncWorkflowTriggers(deployed.workflow)
+          else await unsyncWorkflowTriggers(workflow)
+        })
+      )
     } catch (error) {
       ctx.log(
         "warn",
@@ -112,6 +120,22 @@ registerHeadlessRuntime({
   start: async () => {
     const { startExternalAgentRehydration } = await import("@/lib/ai/agent/external/rehydrate")
     return startExternalAgentRehydration()
+  },
+})
+
+// ── Server OCR provider registry ───────────────────────────────────────────
+
+registerHeadlessRuntime({
+  name: "ocr-runtime",
+  hosts: ["brain"],
+  start: async () => {
+    const [{ installOcrRuntime, __resetOcrRuntime }, { __resetSharedOcrRegistry }] =
+      await Promise.all([import("@/lib/ocr/runtime"), import("@/lib/ocr/registry")])
+    await installOcrRuntime()
+    return () => {
+      __resetOcrRuntime()
+      __resetSharedOcrRegistry()
+    }
   },
 })
 

@@ -25,6 +25,11 @@ describe("getActiveAccountId", () => {
     expect(getActiveAccountId()).toBe("acct_1")
   })
 
+  it("does not include the runtime target suffix in the account boundary", () => {
+    mockDbName = "cognia-account-acct_1-target-headless_primary"
+    expect(getActiveAccountId()).toBe("acct_1")
+  })
+
   it("falls back to the default for a pre-multi-account database name", () => {
     mockDbName = "cognia"
     delete process.env.COGNIA_LOCAL_ACCOUNT_ID

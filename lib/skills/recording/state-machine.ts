@@ -79,7 +79,13 @@ export function stageForPhase(phase: RecorderPhase): RecorderStage {
 }
 
 export type RecorderEntrySource =
-  "toolbar" | "palette" | "slash-command" | "shortcut" | "plugin-command" | "recovery"
+  | "toolbar"
+  | "palette"
+  | "slash-command"
+  | "shortcut"
+  | "plugin-command"
+  | "recovery"
+  | "session-suggestion"
 
 export interface RecorderError {
   /** Stable code; the renderer maps it to localized copy. */

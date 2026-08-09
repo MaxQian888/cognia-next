@@ -10,8 +10,10 @@ describe("OcrPlatformOverridesTab", () => {
   it("renders the Windows bucket with DEFAULT_LOCAL_PREFERENCE entries", () => {
     render(<OcrPlatformOverridesTab settings={freshSettings()} onChange={jest.fn()} />)
     expect(screen.getByTestId("ocr-os-tab-windows")).toBeInTheDocument()
-    // Windows default starts with windows-media-ocr.
-    expect(screen.getByTestId("ocr-engine-row-windows-media-ocr")).toBeInTheDocument()
+    // Standard Windows builds route to the ready Paddle backend; the
+    // unimplemented Windows.Media.Ocr id stays out of default routing.
+    expect(screen.getByTestId("ocr-engine-row-paddle-ocr")).toBeInTheDocument()
+    expect(screen.queryByTestId("ocr-engine-row-windows-media-ocr")).not.toBeInTheDocument()
   })
 
   it("uses the override list when one is set", () => {

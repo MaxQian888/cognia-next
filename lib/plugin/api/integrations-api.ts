@@ -13,6 +13,7 @@ import {
   createIntegrationSubscription,
   getIntegrationActionJob,
   getIntegrationAccount,
+  getIntegrationIngressEndpoint,
   listIntegrationAccounts,
   listIntegrationSubscriptions,
   updateIntegrationAccount,
@@ -28,6 +29,10 @@ import {
   rollbackIntegrationMigration,
 } from "@/lib/integrations/migration"
 import { getRegisteredIntegration, listRegisteredIntegrations } from "@/lib/integrations/registry"
+import {
+  checkIntegrationAccountHealth,
+  listIntegrationResources,
+} from "@/lib/integrations/providers"
 
 type IntegrationPermission =
   "integrations:read" | "integrations:events" | "integrations:execute" | "integrations:manage"
@@ -75,10 +80,28 @@ export function createIntegrationsAPI(
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.listSubscriptions")
       return listIntegrationSubscriptions(pluginId, accountId)
     },
+    async listResources(query) {
+      requirePermission(hasPermission, "integrations:read", "ctx.integrations.listResources")
+      return listIntegrationResources(pluginId, query)
+    },
+    async checkAccountHealth(accountId) {
+      requirePermission(hasPermission, "integrations:read", "ctx.integrations.checkAccountHealth")
+      return checkIntegrationAccountHealth(pluginId, accountId)
+    },
     async createSubscription(
       input: IntegrationSubscriptionInput
     ): Promise<IntegrationSubscription> {
       requirePermission(hasPermission, "integrations:manage", "ctx.integrations.createSubscription")
+      const definition = getRegisteredIntegration(pluginId, input.integrationId)?.definition
+      if (!definition) throw new Error(`Integration "${input.integrationId}" is not registered`)
+      if (
+        input.inboxProjectionId &&
+        !definition.inboxProjections?.some(
+          (projection) => projection.id === input.inboxProjectionId
+        )
+      ) {
+        throw new Error(`Inbox projection "${input.inboxProjectionId}" is not declared`)
+      }
       return createIntegrationSubscription(pluginId, input)
     },
     async removeSubscription(subscriptionId) {
@@ -123,9 +146,36 @@ export function createIntegrationsAPI(
       const subscription = (await listIntegrationSubscriptions(pluginId)).find(
         (candidate) => candidate.id === subscriptionId
       )
-      if (!subscription?.ingressRouteId) return undefined
+      if (!subscription) return undefined
+      const endpoint = await getIntegrationIngressEndpoint(pluginId, subscription.accountId)
+      if (!endpoint) return undefined
       const { getIntegrationIngressPublicUrl } = await import("@/lib/integrations/ingress-client")
-      return getIntegrationIngressPublicUrl(subscription.ingressRouteId)
+      return getIntegrationIngressPublicUrl(endpoint.routeId)
+    },
+    async listIngressDeadletters(accountId) {
+      requirePermission(
+        hasPermission,
+        "integrations:read",
+        "ctx.integrations.listIngressDeadletters"
+      )
+      const { listIntegrationIngressDeadletters } =
+        await import("@/lib/integrations/ingress-client")
+      return listIntegrationIngressDeadletters(pluginId, accountId)
+    },
+    async getIngressDeadletter(accountId, routeId, deliveryId) {
+      requirePermission(hasPermission, "integrations:read", "ctx.integrations.getIngressDeadletter")
+      const { getIntegrationIngressDeadletter } = await import("@/lib/integrations/ingress-client")
+      return getIntegrationIngressDeadletter(pluginId, accountId, routeId, deliveryId)
+    },
+    async requeueIngressDeadletter(accountId, routeId, deliveryId) {
+      requirePermission(
+        hasPermission,
+        "integrations:manage",
+        "ctx.integrations.requeueIngressDeadletter"
+      )
+      const { requeueIntegrationIngressDeadletter } =
+        await import("@/lib/integrations/ingress-client")
+      return requeueIntegrationIngressDeadletter(pluginId, accountId, routeId, deliveryId)
     },
     async migrateLegacy(plan) {
       requirePermission(hasPermission, "integrations:manage", "ctx.integrations.migrateLegacy")

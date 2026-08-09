@@ -15,8 +15,11 @@
  */
 
 import { resolveWorkflowByNameOrId } from "@/lib/workflow/library/lookup"
-import { getWorkflow } from "@/lib/db/workflows"
 import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-validate"
+import {
+  executeDeployedWorkflow,
+  WorkflowAdmissionError,
+} from "@/lib/workflow/runtime/execution-authority"
 
 export type RunWorkflowTypedResult =
   | {
@@ -68,52 +71,18 @@ export async function executeRunWorkflowTyped(
     }
     if (!lookup.ok) throw new Error("unreachable")
 
-    const workflow = await getWorkflow(lookup.workflowId)
-    if (!workflow) {
-      return {
-        ok: false,
-        error: {
-          code: "workflow-not-found",
-          message: `Workflow ${lookup.workflowId} not found.`,
-        },
-      }
-    }
-    if (!workflow.published) {
-      return {
-        ok: false,
-        error: {
-          code: "not-published",
-          message: `Workflow "${workflow.name}" is not published as a callable unit. Open it in the editor and click Publish first.`,
-        },
-      }
-    }
-
     const input = (args.input as Record<string, unknown> | undefined) ?? {}
-    const inputSchema = workflow.interface?.inputSchema
-    if (inputSchema && Object.keys(inputSchema).length > 0) {
-      const v = validateAgainstJsonSchema(inputSchema, input)
-      if (!v.ok) {
-        return {
-          ok: false,
-          error: {
-            code: "input-schema-violation",
-            message: `input does not match the workflow's declared schema: ${v.errors.join("; ")}`,
-            detail: { schema: inputSchema },
-          },
-        }
-      }
-    }
-
-    const { runWorkflow } = await import("@/lib/workflow/runtime/orchestrator")
-    const result = await runWorkflow({
-      workflow,
-      trigger: {
-        workflowId: workflow.id,
-        kind: "trigger.manual",
-        payload: { input, source: "api" },
-        originAt: Date.now(),
-      },
+    const execution = await executeDeployedWorkflow({
+      workflowId: lookup.workflowId,
+      entrypoint: "agent-tool",
+      caller: "wf_run_workflow_typed",
+      ...(typeof args.idempotencyKey === "string" && args.idempotencyKey.trim()
+        ? { idempotencyKey: args.idempotencyKey.trim() }
+        : {}),
+      triggerKind: "trigger.manual",
+      payload: { input, source: "api" },
     })
+    const result = execution.result
     if (result.status !== "succeeded") {
       return {
         ok: false,
@@ -124,7 +93,7 @@ export async function executeRunWorkflowTyped(
       }
     }
 
-    const outputSchema = workflow.interface?.outputSchema
+    const outputSchema = execution.version.interface.outputSchema
     if (outputSchema && Object.keys(outputSchema).length > 0) {
       const v = validateAgainstJsonSchema(outputSchema, result.output)
       if (!v.ok) {
@@ -141,12 +110,27 @@ export async function executeRunWorkflowTyped(
 
     return {
       ok: true,
-      workflowId: workflow.id,
-      workflowName: workflow.name,
+      workflowId: execution.version.workflowId,
+      workflowName: execution.version.name,
       runId: result.runId,
       output: result.output,
     }
   } catch (err) {
+    if (err instanceof WorkflowAdmissionError) {
+      if (err.code === "deployment-not-found") {
+        return {
+          ok: false,
+          error: {
+            code: "not-published",
+            message: err.message,
+          },
+        }
+      }
+      return {
+        ok: false,
+        error: { code: err.code, message: err.message, detail: err.detail },
+      }
+    }
     const message = err instanceof Error ? err.message : String(err)
     return { ok: false, error: { code: "tool-execution-failed", message } }
   }

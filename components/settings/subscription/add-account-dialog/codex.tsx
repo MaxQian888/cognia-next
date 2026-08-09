@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import {
   CopyIcon,
   ExternalLinkIcon,
@@ -54,7 +55,7 @@ import type {
   DeviceCodeResponse,
   TokenResponse,
 } from "@/lib/subscription/core/transport"
-import { saveAccount } from "@/lib/subscription/core/transport"
+import { persistProviderAccount } from "@/lib/subscription/core/account-lifecycle"
 import { uuidv7 } from "@/lib/subscription/core/uuidv7"
 import { useCodexDiscovery } from "@/lib/subscription/codex/hooks"
 import type { DiscoveredCodexAuth } from "@/lib/subscription/codex/discovery"
@@ -69,6 +70,7 @@ export interface CodexAddAccountDialogProps {
   onAdded?: (account: Account) => void
   /** Default mode shown when the dialog opens. */
   initialMode?: CodexLoginMode
+  existingAccount?: Account
 }
 
 type OAuthStep = "request" | "awaiting" | "exchanging" | "done"
@@ -78,8 +80,10 @@ export function CodexAddAccountDialog({
   onOpenChange,
   onAdded,
   initialMode,
+  existingAccount,
 }: CodexAddAccountDialogProps) {
   const t = useTranslations("subscription.codex")
+  const tAccountList = useTranslations("subscription.common.accountList")
 
   const { discovered, loading: discoveryLoading, reload: reloadDiscovery } = useCodexDiscovery()
 
@@ -104,12 +108,14 @@ export function CodexAddAccountDialog({
     const now = Date.now()
     const tagged = toCodexProviderCredential(data)
     const account: Account = {
-      id: uuidv7(now),
+      ...(existingAccount ?? {}),
+      id: existingAccount?.id ?? uuidv7(now),
       credential: tagged,
-      createdAtMs: now,
+      createdAtMs: existingAccount?.createdAtMs ?? now,
       lastUsedAtMs: now,
     }
-    await saveAccount("codex", account)
+    await persistProviderAccount("codex", account)
+    toast.success(tAccountList(existingAccount ? "credentialsUpdated" : "accountAdded"))
     onAdded?.(account)
     onOpenChange(false)
   }

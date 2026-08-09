@@ -15,6 +15,7 @@ import { listMessages, persistMessages } from "@/lib/db/messages"
 import { findMatchingWorkflows } from "@/lib/workflow/runtime/trigger-subscriptions"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { getRegisteredIntegration } from "./registry"
+import { reconcileGithubLifecycle } from "./github-lifecycle"
 import type { UIMessage } from "ai"
 
 export interface PublishIntegrationEventResult {
@@ -60,7 +61,7 @@ async function projectEventToInbox(
   if (!projection.eventTypes.includes(event.eventType)) return false
   const threadKey = pointerString(event.payload, projection.threadKeyPointer)
   const title = pointerString(event.payload, projection.titlePointer)
-  const body = pointerString(event.payload, projection.bodyPointer)
+  const body = pointerString(event.payload, projection.bodyPointer) ?? title
   if (!threadKey || !title || !body) return false
   const url = projection.urlPointer
     ? pointerString(event.payload, projection.urlPointer)
@@ -126,34 +127,39 @@ export async function publishIntegrationEvent(
     return { inserted: false, workflowDispatches: 0, inboxProjections: 0 }
   }
 
+  await reconcileGithubLifecycle(event)
+
   const subscriptions = (await listIntegrationSubscriptions(pluginId, event.accountId)).filter(
     (subscription) => subscriptionMatches(subscription, event)
   )
-  let workflowDispatches = 0
+  const subscriptionIds = subscriptions.map((subscription) => subscription.id).sort()
+  const payload = {
+    ...event,
+    subscriptionId: subscriptionIds[0],
+    subscriptionIds,
+  }
+  const matches = findMatchingWorkflows("trigger.integration.event", {
+    pluginId,
+    integrationId: event.integrationId,
+    accountId: event.accountId,
+    eventType: event.eventType,
+    resourceKind: event.resource?.kind,
+    resourceId: event.resource?.id,
+  })
+  await Promise.all(
+    matches.map(async (match) => {
+      await dispatchTrigger({
+        workflowId: match.workflowId,
+        kind: "trigger.integration.event",
+        triggerId: match.nodeId,
+        payload,
+        originAt: Date.now(),
+      })
+    })
+  )
+  const workflowDispatches = matches.length
   let inboxProjections = 0
   for (const subscription of subscriptions) {
-    const payload = { ...event, subscriptionId: subscription.id }
-    const matches = findMatchingWorkflows("trigger.integration.event", {
-      pluginId,
-      integrationId: event.integrationId,
-      accountId: event.accountId,
-      eventType: event.eventType,
-      resourceKind: event.resource?.kind,
-      resourceId: event.resource?.id,
-    })
-    await Promise.all(
-      matches.map(async (match) => {
-        await dispatchTrigger({
-          workflowId: match.workflowId,
-          kind: "trigger.integration.event",
-          triggerId: match.nodeId,
-          payload,
-          originAt: Date.now(),
-        })
-        workflowDispatches += 1
-      })
-    )
-
     if (subscription.inboxProjectionId) {
       const projection = registered.definition.inboxProjections?.find(
         (candidate) => candidate.id === subscription.inboxProjectionId

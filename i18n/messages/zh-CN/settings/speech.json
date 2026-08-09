@@ -11,16 +11,40 @@
     "showKey": "显示密钥"
   },
   "live": {
-    "apiKey": "OpenAI API 密钥",
-    "description": "配置低延迟全双工语音，支持自动轮次检测和随时插话打断。",
+    "apiKey": "API 密钥",
+    "description": "低延迟、全双工语音，支持自动轮次检测与打断，可选多家服务商。",
+    "enabled": "启用实时语音",
+    "enabledHint": "在输入框中显示实时语音按钮。",
+    "fallback": "失败时尝试其他服务商",
+    "fallbackHint": "仅在开启麦克风之前生效；会话开始后不会更换服务商。",
     "instructions": "对话指令",
     "instructionsPlaceholder": "保持简洁自然，执行有影响的操作前先确认。",
     "model": "实时模型",
-    "privacy": "仅在实时语音会话开启时，麦克风音频才会流式发送至 OpenAI。",
+    "noProviders": "该地区暂无可用的实时语音服务商。",
+    "preferred": "首选服务商",
+    "preferredHint": "优先使用，其余作为备选。",
+    "preferredPlaceholder": "请选择服务商",
+    "privacy": "仅在实时语音会话进行期间，麦克风音频会直接传输至所选服务商，无法在本地脱敏。",
+    "providers": {
+      "google": "Gemini",
+      "openai": "OpenAI",
+      "xai": "Grok"
+    },
+    "providersTitle": "服务商",
+    "region": "地区",
+    "regionCn": "中国大陆",
+    "regionGlobal": "全球",
+    "regionHint": "会话不会跨地区自动切换。",
     "title": "实时语音",
-    "voice": "音色"
+    "voice": "音色",
+    "voiceDefault": "服务商默认"
   },
   "provider": {
+    "apiKeyPlaceholder": {
+      "elevenlabs": "sk_…",
+      "generic": "sk-…",
+      "google": "AIza…"
+    },
     "audioFormat": "音频格式",
     "cartesiaEmotion": "情感",
     "cartesiaEmotionPlaceholder": "例如：positivity:high、sadness:medium",
@@ -42,11 +66,12 @@
       "lmnt": "LMNT API 密钥",
       "mistral": "Mistral API 密钥",
       "openai": "OpenAI API 密钥",
-      "xiaomi": "小米 MiMo API 密钥"
+      "xiaomi": "小米 MiMo API 密钥",
+      "local-openai-compatible": "本地 OpenAI 兼容服务"
     },
-    "model": "模型",
     "mistralVoiceIdHint": "请输入在 Mistral 控制台创建的 Voice Library ID。",
     "mistralVoiceIdPlaceholder": "voice_…",
+    "model": "模型",
     "realtimeDesktopOnly": "OpenAI Realtime 经 WebSocket 流式传输,仅在桌面应用中可用。",
     "realtimeIntro": "低延迟流式声音,首个音频块到达即开始朗读。使用你的 OpenAI API 密钥。",
     "speed": "语速",
@@ -55,6 +80,11 @@
     "voiceAutoPlaceholder": "按语言自动选择",
     "voiceInstructions": "声音风格说明（仅 gpt-4o-mini-tts）",
     "voiceInstructionsPlaceholder": "用愉快、鼓舞人心的语气说话。",
+    "voiceNoResults": "没有匹配的声音",
+    "voicePausePreview": "停止声音试听",
+    "voicePreview": "试听声音",
+    "voiceSearchPlaceholder": "搜索声音…",
+    "voiceSelectorTitle": "选择声音",
     "voicesLoading": "加载已安装声音中…（由浏览器提供）",
     "xiaomiDialect": "方言",
     "xiaomiDialectPlaceholder": "例如：东北话、四川话、粤语",
@@ -62,11 +92,14 @@
     "xiaomiStyle": "风格",
     "xiaomiStyleHint": "风格标签：开心、悲伤、生气、东北话、四川话、粤语、台湾腔、变快、变慢、唱歌、孙悟空、林黛玉",
     "xiaomiStylePlaceholder": "无风格",
-    "apiKeyPlaceholder": {
-      "elevenlabs": "sk_…",
-      "generic": "sk-…",
-      "google": "AIza…"
-    }
+    "elevenVoiceIdPlaceholder": "ElevenLabs Voice ID",
+    "localEndpoint": "本地端点",
+    "localEndpointHint": "请输入 OpenAI 兼容语音服务器的基础地址。",
+    "localEndpointPlaceholder": "http://127.0.0.1:8000/v1",
+    "localModelPlaceholder": "本地模型名称",
+    "localOpenaiIntro": "连接本地 OpenAI 兼容文本转语音服务器。",
+    "localVoicePlaceholder": "音色名称",
+    "timeoutSeconds": "超时（秒）"
   },
   "stt": {
     "description": "组合输入框的语音输入按钮使用浏览器的 Web Speech API。请选择你常说的语言以及偏好的麦克风。",
@@ -115,6 +148,8 @@
     "streamingHint": "部分服务商能首字节即播,降低延迟。",
     "testVoice": "测试声音",
     "title": "文字转语音",
-    "volume": "音量"
+    "volume": "音量",
+    "mobileSystemPlayback": "移动端使用系统音频播放。",
+    "webCloudWarning": "网页播放会将文本发送到已配置的云提供方。"
   }
 }

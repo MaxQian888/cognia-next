@@ -16,7 +16,139 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "contributes": {},
+  "contributes": {
+    "commands": [
+      {
+        "command": "cognia.chat.addSelection",
+        "title": "Add Selection to Cognia Chat",
+        "category": "Cognia"
+      },
+      {
+        "command": "cognia.chat.addFile",
+        "title": "Add File to Cognia Context",
+        "category": "Cognia"
+      },
+      {
+        "command": "cognia.chat.explain",
+        "title": "Explain This Code",
+        "category": "Cognia"
+      },
+      {
+        "command": "cognia.chat.fix",
+        "title": "Fix This Code",
+        "category": "Cognia"
+      },
+      {
+        "command": "cognia.chat.review",
+        "title": "Review This Code",
+        "category": "Cognia"
+      },
+      {
+        "command": "cognia.chat.customAction",
+        "title": "Custom Action...",
+        "category": "Cognia"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "cognia.chat.submenu",
+        "label": "Cognia"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "cognia.chat.submenu",
+          "group": "cognia@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "cognia.chat.addFile",
+          "group": "cognia@1",
+          "when": "resourceScheme == file"
+        }
+      ],
+      "cognia.chat.submenu": [
+        {
+          "command": "cognia.chat.addSelection",
+          "group": "1_context@1",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "cognia.chat.addFile",
+          "group": "1_context@2"
+        },
+        {
+          "command": "cognia.chat.explain",
+          "group": "2_actions@1",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "cognia.chat.fix",
+          "group": "2_actions@2",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "cognia.chat.review",
+          "group": "2_actions@3",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "cognia.chat.customAction",
+          "group": "3_custom@1",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "cognia.chat.addSelection",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a",
+        "when": "editorTextFocus && editorHasSelection"
+      },
+      {
+        "command": "cognia.chat.explain",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorTextFocus && editorHasSelection"
+      },
+      {
+        "command": "cognia.chat.fix",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "editorTextFocus && editorHasSelection"
+      }
+    ],
+    "configuration": {
+      "title": "Cognia",
+      "properties": {
+        "cognia.customActions": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Custom context menu actions for Cognia chat. Each item defines a menu entry with a label and a prompt template. Use `${selection}` in the prompt to include the selected text.",
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "prompt"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "The label shown in the Cognia context submenu."
+              },
+              "prompt": {
+                "type": "string",
+                "description": "The prompt template. ${selection} is replaced with the selected text."
+              }
+            }
+          }
+        }
+      }
+    }
+  },
   "scripts": {
     "build": "node build.mjs",
     "test": "node --test tests/*.test.mjs"

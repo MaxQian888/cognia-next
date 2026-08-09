@@ -31,6 +31,27 @@ describe("mapCliProvider", () => {
 })
 
 describe("buildCliLimits", () => {
+  it("loads independent provider balances concurrently", async () => {
+    const releases: Array<() => void> = []
+    const authedGet = jest.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          releases.push(() => resolve(JSON.stringify({ balance_infos: [{ total_balance: 5 }] })))
+        })
+    )
+
+    const result = buildCliLimits({
+      config: config({ deepseek: { apiKey: "d" }, moonshot: { apiKey: "m" } }),
+      now: NOW,
+      authedGet,
+    })
+    await Promise.resolve()
+
+    expect(authedGet).toHaveBeenCalledTimes(2)
+    releases.forEach((release) => release())
+    await result
+  })
+
   it("probes anthropic and builds a credit meter for a moonshot key", async () => {
     mockProbe.mockResolvedValue({
       ok: true,
@@ -103,11 +124,12 @@ describe("buildCliLimits", () => {
     const out = await buildCliLimits({
       config: config({ deepseek: { apiKey: "b" } }, "deepseek"),
       now: NOW,
-      authedGet: async () => JSON.stringify({ balance_infos: [{ total_balance: 5 }] }),
+      authedGet: async () =>
+        JSON.stringify({ balance_infos: [{ currency: "CNY", total_balance: "5.25" }] }),
       activeProvider: "deepseek",
     })
     expect(out.filter((s) => s.accountId === "deepseek")).toHaveLength(1)
-    expect(out[0].meters[0]).toMatchObject({ id: "credit" })
+    expect(out[0].meters[0]).toMatchObject({ id: "credit", remaining: 5.25, currency: "CNY" })
   })
 
   it("skips providers with no credential and those with no matching source", async () => {

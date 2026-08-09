@@ -7,7 +7,7 @@ description: "Documents the autonomous long-term memory subsystem (Dexie v65 + v
 
 **Status**: Accepted (2026-07-14), amended (2026-07-19)
 **Authors**: Max Qian + Claude Fable 5
-**Builds on**: the Digital Twin runtime (ADR-0003, shared embedding/vector backend), the external bridge MCP server (ADR-0008), the companion remote-control surface (ADR-0005 / ADR-0060 / Wave 4.1), the plugin permission model (ADR-0032, `goal:read`/`goal:write` precedent), and the visual-workflow memory nodes (ADR-0011).
+**Builds on**: the Digital Twin runtime (ADR-0003, shared embedding/vector backend), the external bridge MCP server (ADR-0008), the Companion control plane (ADR-0061 / Wave 4.1), the plugin permission model (ADR-0032, `goal:read`/`goal:write` precedent), and the visual-workflow memory nodes (ADR-0011).
 
 ## Context
 

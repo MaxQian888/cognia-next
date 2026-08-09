@@ -28,8 +28,8 @@ const grantedPermissions = new Map<string, Set<PluginAPIPermission>>()
 // Permission mapping from manifest permissions to API permissions
 const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "network:fetch": [],
-  "filesystem:read": [],
-  "filesystem:write": [],
+  "filesystem:read": ["filesystem:read"],
+  "filesystem:write": ["filesystem:write"],
   "fs:read": [],
   "fs:write": [],
   "clipboard:read": [],
@@ -59,6 +59,7 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "ai:chat": ["ai:chat"],
   "ai:embed": ["ai:embed"],
   "agent:control": ["agent:control"],
+  "builtin-skills:invoke": ["builtin-skills:invoke"],
   "agent:dispatch-external": ["agent:dispatch-external"],
   // Subagent dispatch + shared-memory/twin introspection. Identity mappings —
   // without these the manifest declarations are silently dropped and
@@ -82,6 +83,7 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "media:video:write": ["media:video:write"],
   "media:video:export": ["media:video:export"],
   "extension:ui": ["extension:ui"],
+  "extension:workflow": ["extension:workflow"],
   "notification:show": ["notification:show"],
   // Inter-plugin IPC. Identity mappings — without these a plugin that
   // declares `ipc:call` / `ipc:expose` in its manifest never has the API

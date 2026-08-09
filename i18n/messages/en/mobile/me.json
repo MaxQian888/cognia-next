@@ -108,7 +108,18 @@
     "diagnosticsTitle": "More diagnostics",
     "openIssueDescription": "Includes templates for bug reports and feature requests.",
     "openIssueLabel": "Open a GitHub issue",
-    "reportTitle": "Report a problem"
+    "reportTitle": "Report a problem",
+    "support": {
+      "cancel": "Cancel",
+      "confirmExport": "Confirm and export",
+      "description": "After confirmation, Cognia generates a local Markdown draft from your description and redacted diagnostics. Nothing is sent automatically.",
+      "exportFailed": "Could not generate the support feedback export.",
+      "exported": "Support feedback exported.",
+      "placeholder": "What happened, and what did you expect?",
+      "summary": "Feedback description",
+      "title": "Generate support feedback?",
+      "trigger": "Generate redacted support feedback"
+    }
   },
   "feedbackRow": "Feedback & diagnostics",
   "goalsRow": "Goals",
@@ -126,10 +137,10 @@
   "hooksRow": "Hooks",
   "instructionsRow": "Project instructions",
   "logsRow": "Logs",
-  "modelCatalogRow": "Model catalog",
   "mcpRow": "MCP servers",
   "memoryRow": "Memory",
   "memorySettingsRow": "Memory settings",
+  "modelCatalogRow": "Model catalog",
   "networkRow": "Network",
   "notificationsRow": "Notifications",
   "ocrRow": "OCR providers",

@@ -9,7 +9,7 @@
 // `D:\Project\Cognia\components\chat\dialogs\model-picker-dialog.tsx`,
 // but renders inline (Popover + Command) instead of as a full dialog.
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   BrainIcon,
@@ -29,19 +29,21 @@ import { setSessionModel, closeSession } from "@/lib/claude/ipc"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { collectModelOptions, type ModelOption } from "@/lib/ai/model-options"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
+import { resolveThinkingLevel } from "@/lib/ai/thinking-level"
 import { EffortSelector } from "./effort-selector"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorInput,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorSeparator,
+  ModelSelectorTrigger,
+} from "@/components/ai-elements/model-selector"
 import { DEFAULT_AUTO_ROUTING } from "@/types/routing/tool-route"
 
 interface ModelPickerProps {
@@ -123,6 +125,7 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   const saveSettings = useSettingsStore((s) => s.save)
   const autoEnabled = autoRouting?.enabled === true
   const [open, setOpen] = useState(false)
+  const positionedActiveModelRef = useRef(false)
   // Optimistic state so the button label reflects the user's selection
   // immediately, before the parent re-renders with the updated session prop.
   const [optimisticModel, setOptimisticModel] = useState<string | null>(null)
@@ -145,6 +148,25 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   const activeProvider =
     optimisticProvider ?? session?.providerOverride ?? defaultProvider ?? "anthropic"
   const autoActive = activeModel === "auto"
+
+  // The dialog content is mounted in a portal after the open state changes, so
+  // position from the active item's ref callback instead of an opening effect.
+  // The callback stays stable while open and the guard prevents remounts or
+  // user interaction from pulling the list back after the initial alignment.
+  const positionActiveModelItem = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node || !open || positionedActiveModelRef.current) return
+      positionedActiveModelRef.current = true
+      node.scrollIntoView?.({ behavior: "auto", block: "center" })
+    },
+    [open]
+  )
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) positionedActiveModelRef.current = false
+    setOpen(nextOpen)
+  }
+
   // Friendly label for the active model — prefer the matching option's display
   // name (provider-scoped), else any option with that id, else the raw id.
   const activeModelName = useMemo(() => {
@@ -156,10 +178,13 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   }, [options, activeModel, activeProvider, autoActive, t])
 
   // Only surfaced when the user has actually chosen a level AND the active
-  // model honours it — an "Auto" suffix on every chip would be noise.
+  // model honours it — an "Auto" suffix on every chip would be noise. Read the
+  // TIER rather than `session.effort`: `ultracode` persists as `"xhigh"` effort,
+  // so the raw field would label the chip with the wrong tier.
+  const effortTier = resolveThinkingLevel(session)
   const effortLabel =
-    session?.effort && modelSupportsEffort(activeProvider, activeModel)
-      ? tEffortLevels(`effort.${session.effort}`)
+    effortTier !== "off" && modelSupportsEffort(activeProvider, activeModel)
+      ? tEffortLevels(`effort.${effortTier}`)
       : null
 
   const handleSelect = (providerId: string, modelId: string) => {
@@ -238,8 +263,8 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <ModelSelector open={open} onOpenChange={handleOpenChange}>
+      <ModelSelectorTrigger asChild>
         <Button
           variant="ghost"
           size="sm"
@@ -274,106 +299,106 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
           ) : null}
           <ChevronsUpDownIcon className="size-3 opacity-50" />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        sideOffset={8}
+      </ModelSelectorTrigger>
+      <ModelSelectorContent
+        title={t("title")}
         className="w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0 shadow-xl"
       >
-        <Command>
-          <CommandInput placeholder={t("searchPlaceholder")} />
-          <CommandList>
-            <CommandGroup heading={t("routingGroup")}>
-              <CommandItem
-                value={`auto ${t("autoModel")} ${t("autoToggleHint")}`}
-                onSelect={handleSelectAuto}
-                className="mx-1 rounded-lg"
-              >
-                <CheckIcon
-                  className={cn("mr-2 size-4 shrink-0", autoActive ? "opacity-100" : "opacity-0")}
-                />
-                <BrainIcon className="mr-2 size-4 shrink-0 text-primary" />
-                <span className="flex min-w-0 flex-col">
-                  <span className="text-xs">{t("autoModel")}</span>
-                  <span className="truncate text-[10px] text-muted-foreground">
-                    {autoEnabled ? t("autoToggleHint") : t("autoEnableHint")}
-                  </span>
+        <ModelSelectorInput placeholder={t("searchPlaceholder")} />
+        <ModelSelectorList>
+          <ModelSelectorGroup heading={t("routingGroup")}>
+            <ModelSelectorItem
+              ref={autoActive ? positionActiveModelItem : undefined}
+              value={`auto ${t("autoModel")} ${t("autoToggleHint")}`}
+              onSelect={handleSelectAuto}
+              className="mx-1 rounded-lg"
+            >
+              <CheckIcon
+                className={cn("mr-2 size-4 shrink-0", autoActive ? "opacity-100" : "opacity-0")}
+              />
+              <BrainIcon className="mr-2 size-4 shrink-0 text-primary" />
+              <span className="flex min-w-0 flex-col">
+                <span className="text-xs">{t("autoModel")}</span>
+                <span className="truncate text-[10px] text-muted-foreground">
+                  {autoEnabled ? t("autoToggleHint") : t("autoEnableHint")}
                 </span>
-              </CommandItem>
-            </CommandGroup>
-            <CommandSeparator />
-            {groups.length === 0 ? (
-              <CommandEmpty>{t("noProviders")}</CommandEmpty>
-            ) : (
-              groups.map((group, idx) => (
-                <div key={group.providerId}>
-                  {idx > 0 ? <CommandSeparator /> : null}
-                  <CommandGroup heading={group.providerName}>
-                    {group.models.map((gm) => {
-                      const { id: modelId, name: modelName } = gm
-                      const isActive =
-                        modelId === activeModel && group.providerId === activeProvider
-                      const hasMeta =
-                        gm.contextLength !== undefined ||
-                        gm.supportsTools ||
-                        gm.supportsVision ||
-                        gm.supportsReasoning
-                      return (
-                        <CommandItem
-                          key={`${group.providerId}:${modelId}`}
-                          // Include both name and id so the command filter matches
-                          // either the friendly name or the raw id the user types.
-                          value={`${group.providerId} ${modelName} ${modelId}`}
-                          onSelect={() => handleSelect(group.providerId, modelId)}
-                          className="mx-1 rounded-lg"
-                        >
-                          <CheckIcon
-                            className={cn(
-                              "mr-2 size-4 shrink-0",
-                              isActive ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          <span className="flex min-w-0 flex-col">
-                            <span className="truncate text-xs">{modelName}</span>
-                            {modelName !== modelId ? (
-                              <span className="truncate font-mono text-[10px] text-muted-foreground">
-                                {modelId}
-                              </span>
-                            ) : null}
-                            {hasMeta ? (
-                              <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                                {gm.contextLength !== undefined ? (
-                                  <span title={t("contextWindowLabel")}>
-                                    {formatContextWindow(gm.contextLength)}
-                                  </span>
-                                ) : null}
-                                {gm.supportsTools ? (
-                                  <WrenchIcon className="size-3" aria-label={t("capTools")} />
-                                ) : null}
-                                {gm.supportsVision ? (
-                                  <EyeIcon className="size-3" aria-label={t("capVision")} />
-                                ) : null}
-                                {gm.supportsReasoning ? (
-                                  <BrainIcon className="size-3" aria-label={t("capReasoning")} />
-                                ) : null}
-                              </span>
-                            ) : null}
-                          </span>
-                        </CommandItem>
-                      )
-                    })}
-                  </CommandGroup>
-                </div>
-              ))
-            )}
-          </CommandList>
-        </Command>
-        {/* Reasoning effort lives here rather than as its own toolbar chip. It
-            self-gates to nothing on models that ignore effort, so this row
-            simply does not appear for them. */}
-        <EffortSelector session={session} disabled={disabled} variant="section" />
-      </PopoverContent>
-    </Popover>
+              </span>
+            </ModelSelectorItem>
+          </ModelSelectorGroup>
+          <ModelSelectorSeparator />
+          {groups.length === 0 ? (
+            <ModelSelectorEmpty>{t("noProviders")}</ModelSelectorEmpty>
+          ) : (
+            groups.map((group, idx) => (
+              <div key={group.providerId}>
+                {idx > 0 ? <ModelSelectorSeparator /> : null}
+                <ModelSelectorGroup heading={group.providerName}>
+                  {group.models.map((gm) => {
+                    const { id: modelId, name: modelName } = gm
+                    const isActive = modelId === activeModel && group.providerId === activeProvider
+                    const hasMeta =
+                      gm.contextLength !== undefined ||
+                      gm.supportsTools ||
+                      gm.supportsVision ||
+                      gm.supportsReasoning
+                    return (
+                      <ModelSelectorItem
+                        key={`${group.providerId}:${modelId}`}
+                        ref={isActive ? positionActiveModelItem : undefined}
+                        // Include both name and id so the command filter matches
+                        // either the friendly name or the raw id the user types.
+                        value={`${group.providerId} ${modelName} ${modelId}`}
+                        onSelect={() => handleSelect(group.providerId, modelId)}
+                        className="mx-1 rounded-lg"
+                      >
+                        <CheckIcon
+                          className={cn(
+                            "mr-2 size-4 shrink-0",
+                            isActive ? "opacity-100" : "opacity-0"
+                          )}
+                        />
+                        <span className="flex min-w-0 flex-col">
+                          <span className="truncate text-xs">{modelName}</span>
+                          {modelName !== modelId ? (
+                            <span className="truncate font-mono text-[10px] text-muted-foreground">
+                              {modelId}
+                            </span>
+                          ) : null}
+                          {hasMeta ? (
+                            <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                              {gm.contextLength !== undefined ? (
+                                <span title={t("contextWindowLabel")}>
+                                  {formatContextWindow(gm.contextLength)}
+                                </span>
+                              ) : null}
+                              {gm.supportsTools ? (
+                                <WrenchIcon className="size-3" aria-label={t("capTools")} />
+                              ) : null}
+                              {gm.supportsVision ? (
+                                <EyeIcon className="size-3" aria-label={t("capVision")} />
+                              ) : null}
+                              {gm.supportsReasoning ? (
+                                <BrainIcon className="size-3" aria-label={t("capReasoning")} />
+                              ) : null}
+                            </span>
+                          ) : null}
+                        </span>
+                      </ModelSelectorItem>
+                    )
+                  })}
+                </ModelSelectorGroup>
+              </div>
+            ))
+          )}
+        </ModelSelectorList>
+        {/* The thinking level lives here rather than as its own toolbar chip —
+            it qualifies a model and is meaningless on its own. It self-gates to
+            nothing on models that ignore effort, so this block simply does not
+            appear for them, and picks its own slider/list presentation from
+            `composerBehavior.effortSelectorMode`. */}
+        <EffortSelector session={session} disabled={disabled} />
+      </ModelSelectorContent>
+    </ModelSelector>
   )
 }
 

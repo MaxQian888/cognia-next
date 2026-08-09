@@ -1,24 +1,16 @@
-//! Companion API — QR-pairing exchange and mobile device authentication.
+//! Companion API — device-key pairing and canonical remote execution.
 //!
-//! This module implements the server-side of the cognia mobile companion
-//! pairing flow (M2.3).  It exposes an axum HTTP server on a configurable
-//! port (default 27890) with two endpoints:
-//!
-//! - `POST /api/v1/auth/pair/issue` — desktop-only (127.0.0.1 listener when
-//!   `bind_loopback_only = true`); issues a short-lived pair JWT that the QR
-//!   generator encodes into an image.
-//!
-//! - `POST /api/v1/auth/pair` — redeems the pair JWT and returns a long-lived
-//!   device JWT.  Callable from the phone over LAN or a cloudflared tunnel
-//!   (M2.8).
+//! Public HTTP and WebSocket paths are intentionally unversioned. Pairing
+//! uses one-time Owner invitations, ES256 device identities, short-lived
+//! access tokens, and DPoP proofs; remote commands pass through
+//! [`remote_execution`] before reaching their registered dispatcher.
 //!
 //! # Module layout
 //!
-//! - [`secret`]          — HS256 signing-secret persistence (OS keyring).
-//! - [`jwt`]             — HS256 JWT issue + verify helpers.
-//! - [`redemption_lru`]  — Single-use JTI tracker.
-//! - [`auth`]            — Axum handlers for the two pair endpoints.
-//! - [`server`]          — Axum server spawn + router builder.
+//! - [`api`]              — canonical authentication and resource adapters.
+//! - [`remote_execution`] — shared authorization, ledger, audit, and dispatch.
+//! - [`security_store`]   — durable device, policy, run, and audit state.
+//! - [`server`]           — Axum server spawn and route composition.
 //!
 //! # Tauri integration
 //!
@@ -31,8 +23,8 @@
 pub mod a2a;
 pub mod acp;
 pub mod admin_lease;
+pub mod api;
 pub mod audit;
-pub mod auth;
 pub mod bridge_transport;
 pub mod browser_gateway;
 pub mod command_manifest;
@@ -57,18 +49,16 @@ pub mod mdns;
 pub mod metrics;
 pub mod middleware;
 pub mod oidc;
-pub mod pair_code_guard;
-pub mod pair_code_lru;
-pub mod pair_flow_test;
 pub mod push;
 pub mod push_creds;
 pub mod rate_limit;
-pub mod redemption_lru;
 pub mod remote_execution;
+pub mod replay_cache;
 pub mod rpc;
 pub mod secret;
 pub mod security_store;
 pub mod server;
+pub mod session_media;
 pub mod settings_sync_generated;
 pub mod signaling;
 pub mod skill_transactions;
@@ -79,7 +69,8 @@ pub mod sync_registry;
 pub mod tls;
 pub mod tunnel;
 pub mod tunnel_config;
-pub mod v2;
+pub mod web_origin;
+pub mod workflow_api;
 pub mod ws;
 pub mod ws_bridge;
 pub mod ws_terminal;
@@ -98,8 +89,6 @@ use std::sync::Arc;
 use deny_list::DenyList;
 use event_bus::EventBus;
 use idempotency::IdempotencyCache;
-use pair_code_lru::PairCodeLru;
-use redemption_lru::RedemptionLru;
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -115,19 +104,13 @@ pub struct CompanionState {
     /// The HS256 signing secret (raw bytes).  Protected by a `RwLock` so the
     /// secret can be rotated (M3+) without restarting the server.
     pub secret: RwLock<Vec<u8>>,
-    /// Single-use redemption tracker for pair JWTs.
-    pub redemption_lru: RedemptionLru,
-    /// 6-digit numeric code → pair JWT map (emulator-friendly path that
-    /// avoids QR camera scanning). Single-use; entries TTL-pruned in lock
-    /// step with the underlying pair JWT's `exp` claim.
-    pub pair_code_lru: Arc<PairCodeLru>,
     /// In-memory set of revoked device IDs.  Shared with [`CompanionServerState`]
     /// via `Arc` so Tauri commands (`companion_revoke_device`, etc.) can mutate
     /// it even when the axum server holds a clone of the same `SharedState`.
     pub deny_list: Arc<DenyList>,
     /// Tauri `AppHandle` — `None` in unit tests, `Some` in production.
     pub app_handle: Option<tauri::AppHandle>,
-    /// Per-device idempotency cache for `POST /api/v1/_rpc/:name`.
+    /// Per-device idempotency cache for `POST /api/_rpc/:name`.
     ///
     /// Keyed by `(device_id, Idempotency-Key header)`.  Successful responses
     /// are stored for 60 s; read-only commands skip caching entirely.
@@ -178,7 +161,7 @@ pub fn push_dispatchers() -> Arc<push::DispatcherSet> {
 /// process-wide value rather than a field on `CompanionState` so the many
 /// test constructors of `CompanionState` aren't forced to pass a value.
 /// Set at server start by [`commands::companion_server_start`] from the
-/// loaded `TlsMaterial`; returned in `/api/v1/whoami` (P0.3).
+/// loaded `TlsMaterial`; returned in `/api/whoami`.
 static TLS_FINGERPRINT: parking_lot::RwLock<String> = parking_lot::RwLock::new(String::new());
 
 pub fn set_tls_fingerprint(fp: String) {
@@ -194,7 +177,7 @@ pub fn tls_fingerprint() -> String {
 /// constructors (production + tests + bin entry points) don't need to
 /// thread the port through. Set by [`CompanionServerState::start`] after
 /// the listener has actually bound; read by [`healthz::healthz_handler`]
-/// to surface to mobile clients in `/api/v1/healthz`.
+/// to surface to mobile clients in `/healthz`.
 static ADVERTISED_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
 
 pub fn set_advertised_port(port: u16) {
@@ -226,19 +209,13 @@ pub fn ensure_crypto_provider() {
     });
 }
 
-/// Per-source-IP rate limiter for the pre-auth (`public_routes`) surface —
-/// the only endpoints reachable without a verified device JWT. Lives as a
-/// process-wide singleton (like [`TLS_FINGERPRINT`] / [`ADVERTISED_PORT`])
-/// so the many test constructors of `CompanionState` aren't forced to
-/// thread a value.
+/// Per-source-IP limiter for unauthenticated challenge, registration, token,
+/// and socket-ticket requests. It is process-global so the many
+/// `CompanionState` constructors do not need to carry another shared field.
 ///
-/// Bucket: 5 burst, refill 20 req/min (≈ 1 every 3 s). The numeric
-/// `/auth/pair/redeem-code` endpoint accepts only `100_000..=999_999` (a
-/// ~900 000-code keyspace), and the pair-code LRU caps at 64 live entries
-/// — without this gate, an unauthenticated LAN peer could redeem the
-/// keyspace in O(minutes). With the gate the same brute force takes
-/// roughly 31 hours per source IP, well beyond the ~5-minute pair-code
-/// TTL.
+/// Bucket: 5 burst, refill 20 req/min (approximately one request every three
+/// seconds). Device proofs and one-time invitations remain the primary
+/// controls; this limiter prevents resource exhaustion before authentication.
 static PRE_AUTH_RATE_LIMITER: once_cell::sync::Lazy<Arc<rate_limit::RateLimiter>> =
     once_cell::sync::Lazy::new(|| {
         rate_limit::RateLimiter::new(rate_limit::RateLimitConfig {
@@ -254,10 +231,10 @@ pub fn pre_auth_rate_limiter() -> Arc<rate_limit::RateLimiter> {
 /// Process-global OIDC authenticator (ADR-0059 cloud/headless Logto mode).
 ///
 /// Built once from the environment: `None` unless BOTH `COGNIA_LOGTO_ISSUER`
-/// and `COGNIA_LOGTO_AUDIENCE` are set, so the offline desktop app never
-/// activates OIDC — the companion gateway keeps using the self-issued HS256
-/// device/service tokens. When present, [`middleware::require_device_jwt`]
-/// tries a Logto access token first and falls back to the HS256 path.
+/// and `COGNIA_LOGTO_AUDIENCE` are set. OIDC authenticates multi-tenant device
+/// registration; steady-state public calls use short-lived DPoP-bound access
+/// tokens. The independent HS256 authority is restricted to the loopback
+/// service plane.
 ///
 /// Kept process-global (like [`PRE_AUTH_RATE_LIMITER`] / [`TLS_FINGERPRINT`])
 /// so the many `CompanionState` constructors don't have to thread it through.
@@ -318,9 +295,6 @@ pub struct CompanionServerState {
     /// re-paired phone keeps its existing FCM/APNs token until the
     /// phone itself re-registers.
     pub push_tokens: Arc<push::PushTokenRegistry>,
-    /// 6-digit pair-code map — survives restarts so codes generated just
-    /// before a server bounce still resolve. Capped at 64 entries.
-    pub pair_code_lru: Arc<PairCodeLru>,
     /// mDNS broadcaster (Wave 1.5) — exposes the running server on the LAN
     /// so paired phones can discover the desktop without manual baseUrl
     /// entry. Optional — broadcast must be opted into via Settings.
@@ -389,7 +363,6 @@ impl CompanionServerState {
             sync_registry: sync_registry::SyncTableRegistry::with_defaults(),
             rate_limiter: rate_limit::RateLimiter::with_defaults(),
             push_tokens,
-            pair_code_lru: Arc::new(PairCodeLru::new()),
             mdns: mdns::BroadcasterState::new(),
             tunnel,
         }
@@ -435,7 +408,7 @@ impl CompanionServerState {
             inner.bound_port = Some(bound_port);
             inner.bind_mode = Some(mode);
         }
-        // Publish the live bind port so `/api/v1/healthz` can advertise it
+        // Publish the live bind port so `/healthz` can advertise it
         // to mobile clients — the same process-global pattern used by the
         // TLS fingerprint, set here so test + production paths both hit it.
         set_advertised_port(bound_port);
@@ -502,8 +475,6 @@ mod tests {
     fn test_shared_state() -> SharedState {
         Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),

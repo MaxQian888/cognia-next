@@ -25,6 +25,19 @@ export type PluginSecurityPosture = "strict" | "balanced"
 export interface NetworkAllowlist {
   allowedDomains?: string[]
   reasoning?: string
+  rules?: NetworkAccessRule[]
+}
+
+export type NetworkHttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS"
+
+/** A least-privilege network rule declared by a plugin manifest. */
+export interface NetworkAccessRule {
+  /** Host suffix (`example.com` includes `api.example.com`) or `*`. */
+  domain: string
+  /** HTTP methods this rule admits. An empty list admits nothing. */
+  methods: NetworkHttpMethod[]
+  /** URL pathname globs. `*` matches within and across path segments. */
+  paths: string[]
 }
 
 export type EgressReason =
@@ -70,7 +83,7 @@ export function evaluateEgress(
   const host = hostFromUrl(url)
   if (host === null) return { allowed: false, reason: "bad-url" }
 
-  const domains = networkAccess?.allowedDomains
+  const domains = networkAccess?.allowedDomains ?? networkAccess?.rules?.map((rule) => rule.domain)
   if (!domains) {
     // No declaration: deny under every posture (fail-closed) — matches the
     // Rust host gate and the webview CSP. `["*"]` is the explicit opt-in to
@@ -86,6 +99,45 @@ export function evaluateEgress(
 
   return matchHost(host, domains)
     ? { allowed: true, reason: "host-match" }
+    : { allowed: false, reason: "host-denied" }
+}
+
+function wildcardPathMatches(pathname: string, pattern: string): boolean {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")
+  return new RegExp(`^${escaped}$`).test(pathname)
+}
+
+/**
+ * Decide whether a request is admitted by the optional method/path rules.
+ * Legacy manifests without `rules` retain their domain-only behavior.
+ */
+export function evaluateNetworkRequest(
+  url: string,
+  method: NetworkHttpMethod,
+  networkAccess: NetworkAllowlist | undefined,
+  posture: PluginSecurityPosture = "balanced"
+): EgressDecision & { rule?: NetworkAccessRule } {
+  const domainDecision = evaluateEgress(url, networkAccess, posture)
+  if (!domainDecision.allowed) return domainDecision
+
+  const rules = networkAccess?.rules
+  if (rules === undefined) return domainDecision
+
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return { allowed: false, reason: "bad-url" }
+  }
+
+  const rule = rules.find(
+    (candidate) =>
+      matchHost(parsed.hostname, [candidate.domain]) &&
+      candidate.methods.includes(method) &&
+      candidate.paths.some((pattern) => wildcardPathMatches(parsed.pathname, pattern))
+  )
+  return rule
+    ? { allowed: true, reason: "host-match", rule }
     : { allowed: false, reason: "host-denied" }
 }
 
@@ -106,6 +158,17 @@ export class PluginEgressError extends Error {
   }
 }
 
+export class PluginNetworkPolicyError extends PluginEgressError {
+  readonly method: NetworkHttpMethod
+
+  constructor(pluginId: string, url: string, method: NetworkHttpMethod, reason: EgressReason) {
+    super(pluginId, url, hostFromUrl(url) ?? url, reason)
+    this.name = "PluginNetworkPolicyError"
+    this.method = method
+    this.message = `network policy denied ${method} ${url} for plugin ${pluginId}`
+  }
+}
+
 /**
  * Enforce the egress allowlist for a renderer-side plugin fetch. Throws
  * {@link PluginEgressError} when the target host is not permitted.
@@ -118,6 +181,23 @@ export function assertEgressAllowed(
 ): void {
   const decision = evaluateEgress(url, networkAccess, posture)
   if (!decision.allowed) {
+    throw new PluginEgressError(pluginId, url, hostFromUrl(url) ?? url, decision.reason)
+  }
+}
+
+/** Enforce domain plus optional HTTP method/path rules for one request. */
+export function assertNetworkRequestAllowed(
+  pluginId: string,
+  url: string,
+  method: NetworkHttpMethod,
+  networkAccess: NetworkAllowlist | undefined,
+  posture: PluginSecurityPosture = "balanced"
+): void {
+  const decision = evaluateNetworkRequest(url, method, networkAccess, posture)
+  if (!decision.allowed) {
+    if (networkAccess?.rules !== undefined && evaluateEgress(url, networkAccess, posture).allowed) {
+      throw new PluginNetworkPolicyError(pluginId, url, method, decision.reason)
+    }
     throw new PluginEgressError(pluginId, url, hostFromUrl(url) ?? url, decision.reason)
   }
 }

@@ -6,6 +6,7 @@ import "fake-indexeddb/auto"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
 import {
+  CanonicalLogCorruptionError,
   __resetCanonicalLogForTesting,
   appendCanonicalEnvelopes,
   projectCanonicalHeader,
@@ -28,9 +29,9 @@ function envelope(sequence: number, attemptId = "a1"): AgentEventEnvelope {
     runtime: "claude-agent-sdk",
     timestamp: `2026-07-24T00:00:0${sequence}.000Z`,
     event: {
-      type: "text_delta",
-      text: `chunk-${sequence}`,
-    } as unknown as AgentEventEnvelope["event"],
+      kind: "text-delta",
+      delta: `chunk-${sequence}`,
+    },
   }
 }
 
@@ -56,6 +57,19 @@ describe("canonical envelope log", () => {
     expect((await readCanonicalEnvelopes("run-b")).map((e) => e.sequence)).toEqual([0, 1, 2])
   })
 
+  it("serializes concurrent appends so duplicate ids remain exactly once", async () => {
+    const first = envelope(0)
+    const second = envelope(1)
+
+    const [a, b] = await Promise.all([
+      appendCanonicalEnvelopes("run-concurrent", [first, second]),
+      appendCanonicalEnvelopes("run-concurrent", [first, second]),
+    ])
+
+    expect(a + b).toBe(2)
+    expect(await readCanonicalEnvelopes("run-concurrent")).toHaveLength(2)
+  })
+
   it("coexists with ordinary workflow events and stays OUT of the semantic journal", async () => {
     await appendEvent({ runId: "run-c", type: "run_started" })
     await appendCanonicalEnvelopes("run-c", [envelope(0)])
@@ -69,6 +83,28 @@ describe("canonical envelope log", () => {
     expect(mapWorkflowRunEvent(envelopeRow)).toBeNull()
     // And reading envelopes ignores the ordinary events.
     expect(await readCanonicalEnvelopes("run-c")).toHaveLength(1)
+  })
+
+  it("fails closed when an agent-envelope log row is corrupted", async () => {
+    await appendEvent({
+      runId: "run-corrupt",
+      type: "run_log",
+      payload: { kind: "agent_envelope", envelope: { eventId: 42 } },
+    })
+    await expect(readCanonicalEnvelopes("run-corrupt")).rejects.toThrow(
+      "canonical agent envelope log is corrupt"
+    )
+  })
+
+  it("rejects an eventId-only envelope as canonical-log corruption", async () => {
+    await appendEvent({
+      runId: "run-event-id-only",
+      type: "run_log",
+      payload: { kind: "agent_envelope", envelope: { eventId: "partial" } },
+    })
+    await expect(readCanonicalEnvelopes("run-event-id-only")).rejects.toBeInstanceOf(
+      CanonicalLogCorruptionError
+    )
   })
 
   it("projects the session header (counts, per-attempt sequences, time range)", async () => {

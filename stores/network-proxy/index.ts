@@ -14,7 +14,7 @@
  *      `stores/system/index.ts`.
  *
  *   2. `applyProxyToRust(cfg)` — pushes the latest config into the Rust
- *      `proxy_config` module via the `proxy_set` Tauri command so reqwest
+ *      `proxy_config` module via the `proxy_apply` Tauri command so reqwest
  *      clients see the change without re-reading Dexie. Called by the
  *      settings store after every successful save and at boot.
  */
@@ -24,11 +24,19 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import { isTauri } from "@/lib/tauri"
 import { isMainAppWindow } from "@/lib/pet/window-role"
 import { buildProxyUrl, isProxyActive } from "@/lib/network/proxy-config"
+import { notifyNetworkProxyApplied } from "@/lib/network/proxy-events"
+import {
+  applyProxyPasswordMutation,
+  migrateLegacyProxyPassword,
+  type ProxyPasswordMutation,
+} from "@/lib/network/proxy-credentials"
 import { loggers } from "@cognia/logging"
 import {
   DEFAULT_NETWORK_PROXY_SETTINGS,
+  type LegacyNetworkProxySettings,
   type NetworkProxySettings,
   type ProxyCandidate,
+  type ProxyRuntimeStatus,
 } from "@/types/network/proxy"
 
 const log = loggers.network
@@ -37,11 +45,6 @@ const log = loggers.network
 // Legacy ProxyConfig shape (consumed by proxy-fetch.ts).
 // ---------------------------------------------------------------------------
 
-export interface ProxyManualCredentials {
-  username?: string
-  password?: string
-}
-
 export interface ProxyConfig {
   enabled: boolean
   mode: "system" | "manual" | "off"
@@ -49,7 +52,6 @@ export interface ProxyConfig {
   host?: string | null
   port?: number | null
   protocol?: string | null
-  manual?: ProxyManualCredentials | null
 }
 
 export interface ProxyStoreState {
@@ -72,8 +74,6 @@ function deriveLegacyConfig(np?: NetworkProxySettings | null): ProxyConfig {
     host: cfg.host || null,
     port: cfg.port || null,
     protocol: cfg.protocol || null,
-    manual:
-      cfg.username && cfg.password ? { username: cfg.username, password: cfg.password } : null,
   }
 }
 
@@ -136,39 +136,60 @@ let lastPushedSerialized: string | null = null
 
 /**
  * Send the latest proxy config to the Rust `proxy_config::set_current`
- * setter. Cheap to call repeatedly — short-circuits when the serialized
+ * apply command. Cheap to call repeatedly — short-circuits when the serialized
  * payload hasn't changed since the last push. No-op outside Tauri and in
  * least-privilege secondary windows, where process-level proxy commands are
  * intentionally unavailable.
  */
 export async function applyProxyToRust(cfg?: NetworkProxySettings | null): Promise<void> {
   if (!isTauri() || !isMainAppWindow()) return
-  const settings = cfg ?? getNetworkProxy()
+  const source = (cfg ?? getNetworkProxy()) as LegacyNetworkProxySettings
+  const migration = await migrateLegacyProxyPassword(source)
+  const settings = migration.settings
   const payload = {
     mode: settings.mode,
     protocol: settings.protocol,
     host: settings.host,
     port: settings.port,
     username: settings.username ?? null,
-    password: settings.password ?? null,
     bypass: settings.bypass,
     proxy_websockets: settings.proxyWebsockets,
   }
   const serialized = JSON.stringify(payload)
   if (serialized === lastPushedSerialized) return
-  try {
-    await invoke("proxy_set", { cfg: payload })
-    lastPushedSerialized = serialized
-    if (isProxyActive(settings)) {
-      log.debug(
-        `Pushed proxy config to Rust: ${settings.protocol}://${settings.host}:${settings.port}`
-      )
-    } else {
-      log.debug("Pushed empty proxy config to Rust")
-    }
-  } catch (err) {
-    log.warn(`Failed to push proxy config to Rust: ${String(err)}`)
+  await invoke("proxy_apply", { input: payload })
+  lastPushedSerialized = serialized
+  notifyNetworkProxyApplied()
+
+  if (migration.migrated) {
+    // Persist the sanitized row only after both keyring verification and the
+    // atomic native apply succeed. The recursive apply triggered by `save` is
+    // deduped by the marker above.
+    await useSettingsStore.getState().save({ networkProxy: settings })
   }
+
+  if (isProxyActive(settings)) {
+    log.debug(`Applied proxy endpoint ${settings.protocol}://${settings.host}:${settings.port}`)
+  } else {
+    log.debug("Applied explicit direct network policy")
+  }
+}
+
+/** Update only the keyring-backed password, then atomically rebuild native state. */
+export async function updateProxyPassword(mutation: ProxyPasswordMutation): Promise<boolean> {
+  if (!isTauri() || !isMainAppWindow()) return false
+  const configured = await applyProxyPasswordMutation(mutation)
+  lastPushedSerialized = null
+  await applyProxyToRust()
+  return configured
+}
+
+/** Read sanitized native state for the settings UI and diagnostics. */
+export async function getProxyRuntimeStatus(): Promise<ProxyRuntimeStatus> {
+  if (!isTauri() || !isMainAppWindow()) {
+    return { state: "ready", credentialConfigured: false }
+  }
+  return invoke<ProxyRuntimeStatus>("proxy_get_active")
 }
 
 /** Test-only — clears the dedupe cache so subsequent applyProxyToRust pushes. */
@@ -197,7 +218,7 @@ export async function maybeAutoDetectProxy(): Promise<void> {
   if (cfg.mode !== "auto") return
   try {
     const candidates = await invoke<ProxyCandidate[]>("proxy_detect")
-    const best = candidates?.[0]
+    const best = candidates?.find((candidate) => candidate.verified === true)
     if (!best) return
     if (best.host === cfg.host && best.port === cfg.port) return
     const next: NetworkProxySettings = {

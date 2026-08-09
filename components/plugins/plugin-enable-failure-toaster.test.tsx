@@ -7,7 +7,7 @@ import { PluginEnableFailureToaster } from "./plugin-enable-failure-toaster"
 import {
   PLUGIN_ENABLE_FAILED_EVENT,
   type PluginEnableFailedEventDetail,
-} from "@/lib/plugin/core/manager"
+} from "@/lib/plugin/error-bus"
 
 // Capture toast.error calls — sonner's actual side effect (DOM toast)
 // happens in <Toaster /> which we don't mount; this jest.mock lets us

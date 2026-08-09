@@ -117,6 +117,21 @@ export function createWorkRuntime(ctx: WorkPluginContext): WorkRuntime {
     createDeliverable: async (input) => {
       const title = requireText(input.title, "title")
       const content = requireText(input.content, "content")
+      if (input.kind === "spreadsheet") {
+        const result = (await ctx.agent.invokeDependencyTool(
+          "cognia-office",
+          "office_create_workbook",
+          { title, content },
+          {
+            ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+            ...(input.messageId ? { messageId: input.messageId } : {}),
+          }
+        )) as { ok?: boolean; artifactId?: string }
+        if (!result?.ok || !result.artifactId) {
+          throw new Error("cognia-office did not return a workbook artifact")
+        }
+        return { ok: true, artifactId: result.artifactId, kind: input.kind }
+      }
       const format = DELIVERABLE_FORMATS[input.kind]
       if (!format) throw new Error(`unsupported deliverable kind: ${String(input.kind)}`)
 
@@ -146,10 +161,17 @@ export function createWorkRuntime(ctx: WorkPluginContext): WorkRuntime {
       if (input.title === undefined && input.content === undefined) {
         throw new Error("at least one of title or content is required")
       }
-      const updates: Partial<Artifact> = {}
+      if (artifact.metadata?.plugin?.kind === "cognia-office/workbook") {
+        throw new Error("spreadsheet edits must use cognia-office workbook operations")
+      }
+      const updates: { title?: string; content?: string } = {}
       if (input.title !== undefined) updates.title = requireText(input.title, "title")
       if (input.content !== undefined) updates.content = requireText(input.content, "content")
-      ctx.artifact.updateArtifact(artifactId, updates)
+      ctx.artifact.updateArtifact(artifactId, {
+        ...updates,
+        expectedVersion: artifact.version,
+        changeDescription: "Updated by Work Mode",
+      })
       ctx.artifact.openArtifact(artifactId)
       return { ok: true, artifactId }
     },

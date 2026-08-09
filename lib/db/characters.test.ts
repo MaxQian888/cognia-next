@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // CRUD coverage for the characters table — list/get/create/update/delete
 // plus the duplicate path and idempotent built-in seeder. ADR-0030 added
 // overlay-aware paths exercised below.
 
-import "fake-indexeddb/auto"
 import {
   createCharacter,
   deleteCharacter,
@@ -16,7 +14,8 @@ import {
   seedBuiltInCharacters,
   updateCharacter,
 } from "./characters"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   __resetCharacterPacksForTesting,
   registerCharacterPack,
@@ -58,14 +57,15 @@ function makeOverlayPack(
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().characters.clear()
   __resetCharacterPacksForTesting()
 })
+afterAll(dbFixture.dispose)
 
 describe("createCharacter", () => {
   it("inserts a row with sensible defaults", async () => {
@@ -103,6 +103,35 @@ describe("createCharacter", () => {
     expect(c.allowedTools).toEqual(["fs"])
     expect(c.workingDir).toBe("/tmp")
     expect(c.description).toBe("small fox")
+  })
+
+  it("persists Agent profile routing, execution, knowledge, and memory policy", async () => {
+    const c = await createCharacter({
+      name: "Nia",
+      systemPrompt: "x",
+      modelRouting: { plan: "plan", execute: "run", utility: "fast" },
+      executionPolicy: {
+        effort: "high",
+        maxTurns: 12,
+        envBindings: [{ name: "TOKEN", kind: "secret", secretRef: "nia:TOKEN" }],
+      },
+      knowledgeBaseIds: ["kb-one", "kb-two"],
+      memoryPolicy: {
+        operations: { recall: true, create: true, update: false, forget: false },
+        readableScopes: ["global", "character"],
+        writableScopes: ["character"],
+        autoLearn: false,
+      },
+    })
+
+    expect(await getCharacter(c.id)).toEqual(
+      expect.objectContaining({
+        modelRouting: { plan: "plan", execute: "run", utility: "fast" },
+        executionPolicy: expect.objectContaining({ maxTurns: 12 }),
+        knowledgeBaseIds: ["kb-one", "kb-two"],
+        memoryPolicy: expect.objectContaining({ autoLearn: false }),
+      })
+    )
   })
 })
 
@@ -185,14 +214,14 @@ describe("duplicateCharacter", () => {
 })
 
 describe("seedBuiltInCharacters", () => {
-  it("inserts the canonical 6 built-ins idempotently", async () => {
+  it("inserts the canonical 7 built-ins idempotently", async () => {
     await seedBuiltInCharacters()
     const first = await listCharacters()
-    expect(first.filter((c) => c.isBuiltIn).length).toBe(6)
+    expect(first.filter((c) => c.isBuiltIn).length).toBe(7)
     // re-seed: count should remain 6
     await seedBuiltInCharacters()
     const second = await listCharacters()
-    expect(second.filter((c) => c.isBuiltIn).length).toBe(6)
+    expect(second.filter((c) => c.isBuiltIn).length).toBe(7)
   })
 
   it("includes the Goal Tracker character with acceptEdits permission mode", async () => {
@@ -203,6 +232,19 @@ describe("seedBuiltInCharacters", () => {
     expect(goalTracker?.isBuiltIn).toBe(true)
     expect(goalTracker?.permissionMode).toBe("acceptEdits")
     expect(goalTracker?.systemPrompt).toMatch(/outcome-driven agent/i)
+  })
+
+  it("seeds an immutable, read-only Cognia Support Agent", async () => {
+    await seedBuiltInCharacters()
+    const support = await getCharacter("char_builtin_support")
+    expect(support).toMatchObject({
+      name: "Cognia Support",
+      isBuiltIn: true,
+      permissionMode: "plan",
+    })
+    await expect(updateCharacter("char_builtin_support", { name: "Modified" })).rejects.toThrow(
+      /immutable/
+    )
   })
 })
 
@@ -392,14 +434,14 @@ describe("cognia-builtin-characters overlay/Dexie coexistence", () => {
     return `cognia-pack:${BUILTIN_PLUGIN_ID}:${BUILTIN_PACK.id}:${localId}`
   }
 
-  it("shows exactly 6 built-ins with no duplicates when the overlay is active", async () => {
+  it("shows exactly 7 built-ins with no duplicates when the overlay is active", async () => {
     registerBuiltinOverlay()
     await seedBuiltInCharacters()
 
     const rows = await listCharacters()
-    // The 6 seeded Dexie rows hide the 6 overlay copies (clone-hides-overlay).
+    // The 7 seeded Dexie rows hide the 7 overlay copies (clone-hides-overlay).
     const builtins = rows.filter((c) => c.sourcePluginId === BUILTIN_PLUGIN_ID)
-    expect(builtins.length).toBe(6)
+    expect(builtins.length).toBe(7)
     // No synthetic overlay id leaks into the picker — every built-in is a
     // persisted Dexie row keyed by its legacy id.
     const legacyIds = new Set(Object.keys(BUILTIN_LEGACY_ID_TO_LOCAL_ID))

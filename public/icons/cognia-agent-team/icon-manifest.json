@@ -1,0 +1,40 @@
+{
+  "name": "cognia-agent-team-avatars",
+  "version": 1,
+  "grid": {
+    "columns": 4,
+    "rows": 4,
+    "order": "row-major"
+  },
+  "formats": {
+    "png": {
+      "directory": "png",
+      "size": 512,
+      "transparent": true
+    },
+    "webp": {
+      "directory": "webp",
+      "size": 512,
+      "transparent": true,
+      "lossless": true
+    }
+  },
+  "avatars": [
+    { "id": "coordinator", "label": "Coordinator", "labelZh": "协调者" },
+    { "id": "researcher", "label": "Researcher", "labelZh": "研究员" },
+    { "id": "coder", "label": "Coder", "labelZh": "程序员" },
+    { "id": "designer", "label": "Designer", "labelZh": "设计师" },
+    { "id": "planner", "label": "Planner", "labelZh": "规划师" },
+    { "id": "data-analyst", "label": "Data Analyst", "labelZh": "数据分析师" },
+    { "id": "writer", "label": "Writer", "labelZh": "写作者" },
+    { "id": "browser-scout", "label": "Browser Scout", "labelZh": "信息探索员" },
+    { "id": "workflow-engineer", "label": "Workflow Engineer", "labelZh": "工作流工程师" },
+    { "id": "memory-archivist", "label": "Memory Archivist", "labelZh": "记忆管理员" },
+    { "id": "security-guardian", "label": "Security Guardian", "labelZh": "安全守卫" },
+    { "id": "reviewer", "label": "Reviewer", "labelZh": "审查员" },
+    { "id": "operator", "label": "Operator", "labelZh": "运维执行员" },
+    { "id": "translator", "label": "Translator", "labelZh": "翻译员" },
+    { "id": "creative-agent", "label": "Creative Agent", "labelZh": "创意智能体" },
+    { "id": "general-assistant", "label": "General Assistant", "labelZh": "通用助手" }
+  ]
+}

@@ -4,7 +4,7 @@
 //! Commands added in M2.4: `companion_seed_deny_list`, `companion_revoke_device`,
 //! `companion_unrevoke_device`.
 //! Commands added in M2.8: `companion_server_stop`, `companion_server_status`,
-//! `companion_issue_pair_jwt`.
+//! `companion_create_owner_invitation`.
 
 use parking_lot::RwLock;
 use serde::Serialize;
@@ -13,12 +13,9 @@ use std::sync::Arc;
 use tauri::{Manager, State};
 
 use super::{
-    auth::{generate_pair_code, now_ms},
     desktop_messages_bridge, desktop_writes_bridge,
     event_bus::{register_tauri_event, EventBus},
-    jwt::issue_pair_jwt,
     mdns::AutoStartConfig,
-    pair_code_lru::PairCodeEntry,
     secret, security_store,
     server::{CompanionServerError, DEFAULT_PORT},
     tls,
@@ -77,7 +74,6 @@ pub async fn companion_server_start(
     // server share the same live deny list.
     let shared: SharedState = Arc::new(CompanionState {
         secret: RwLock::new(signing_secret),
-        redemption_lru: super::redemption_lru::RedemptionLru::new(),
         deny_list: Arc::clone(&state.deny_list),
         app_handle: Some(app_handle),
         idempotency: Arc::new(idempotency),
@@ -106,10 +102,6 @@ pub async fn companion_server_start(
         // restarts so the desktop never has to re-prompt the phone for
         // re-registration just because the user toggled the server off.
         push_tokens: Arc::clone(&state.push_tokens),
-        // Wave 4.x — share the long-lived pair-code LRU so codes minted
-        // by `companion_pair_issue` before a server bounce can still be
-        // redeemed afterwards.
-        pair_code_lru: Arc::clone(&state.pair_code_lru),
     });
 
     // Load TLS material (M2.9 — every companion-server bind terminates HTTPS).
@@ -147,7 +139,7 @@ pub async fn companion_server_start(
                 hub.sync_devices(persisted);
             } else {
                 signaling_store
-                    .replace_all(&pending, super::auth::now_ms())
+                    .replace_all(&pending, unix_time_secs().saturating_mul(1_000))
                     .map_err(|error| CompanionServerError::Security(error.to_string()))?;
             }
         }
@@ -225,6 +217,42 @@ pub fn companion_message_response(
             request_id,
             result,
             error,
+        });
+    Ok(())
+}
+
+/// Resolve a pending session-media read with a raw IPC body. Metadata travels
+/// in bounded headers so image bytes never expand through JSON/base64.
+#[tauri::command]
+pub fn companion_media_response(
+    request: tauri::ipc::Request<'_>,
+    state: State<'_, CompanionServerState>,
+) -> Result<(), String> {
+    const MAX_MEDIA_BYTES: usize = 10 * 1024 * 1024;
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    let request_id = header("x-cognia-request-id")
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .ok_or_else(|| "missing media request id".to_string())?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) if bytes.len() <= MAX_MEDIA_BYTES => bytes.clone(),
+        tauri::ipc::InvokeBody::Raw(_) => return Err("media response too large".to_string()),
+        _ => return Err("media response must use a raw invoke body".to_string()),
+    };
+    state
+        .desktop_messages_bridge
+        .resolve_media(desktop_messages_bridge::MediaBridgeResponse {
+            request_id,
+            bytes,
+            media_type: header("content-type")
+                .unwrap_or_else(|| "application/octet-stream".to_string()),
+            etag: header("etag"),
+            error: header("x-cognia-error"),
         });
     Ok(())
 }
@@ -456,12 +484,18 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     register_tauri_event(app, Arc::clone(&bus), "claude://message-added");
     register_tauri_event(app, Arc::clone(&bus), "claude://message-updated");
     register_tauri_event(app, Arc::clone(&bus), "claude://message-deleted");
+    // Transcript V1 invalidation contains only session identity + monotonic
+    // revision. Clients reconcile the bounded newest page on receipt.
+    register_tauri_event(app, Arc::clone(&bus), "transcript://revision");
     // Remote Session Control — /goal lifecycle status so a remote watcher
     // sees pause / resume / stop / completion transitions live.
     register_tauri_event(app, Arc::clone(&bus), "goal://status");
     // Remote Session Control — host computer-use HITL consent prompts so a
     // remote watcher can render and resolve them via `automation_consent_respond`.
     register_tauri_event(app, Arc::clone(&bus), AUTOMATION_CONSENT_CHANNEL);
+    // Server OCR and desktop OCR share one progress channel. Headless emits
+    // directly into EventBus; desktop forwards the Tauri event here.
+    register_tauri_event(app, Arc::clone(&bus), "ocr://download-progress");
     // Pairing-lifecycle events — useful for multi-device observation.
     register_tauri_event(app, Arc::clone(&bus), "companion://device-paired");
     // ADR-0061 P2 — live workflow run-status frames (every transition incl.
@@ -688,59 +722,32 @@ pub fn companion_server_status(state: State<'_, CompanionServerState>) -> Compan
     }
 }
 
-/// Response payload for [`companion_issue_pair_jwt`].
+/// One-time owner invitation and discovery data encoded in a pairing QR.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PairJwtIssue {
-    /// Short-lived (5 min) HS256 JWT — encoded into the QR payload.
-    pub pair_jwt: String,
-    /// Millisecond epoch when the pair JWT expires.
+pub struct OwnerInvitationIssue {
+    pub invitation: String,
     pub expires_at_ms: i64,
-    /// Best-reachable URL the QR encodes. Tunnel takes priority over LAN
-    /// when active. When the server is bound loopback-only, falls back to
-    /// `http://127.0.0.1:<port>` so the developer can still verify the
-    /// QR pipeline on a single machine.
     pub base_url: String,
-    /// SHA-256 SubjectPublicKeyInfo fingerprint of the desktop server's
-    /// TLS certificate (lower-case hex). The mobile client pins this in
-    /// SecureStorage and refuses to talk to a peer whose presented cert
-    /// doesn't match. Empty string when the cert subsystem is uninitialized
-    /// (Wave 1.4 cert generation guarantees this is non-empty in practice).
     pub fingerprint: String,
-    /// App version surfaced in the QR for forward-compat — phone uses this
-    /// to gate breaking pair-payload changes.
     pub app_version: String,
-    /// 6-digit numeric code that maps server-side to the same pair JWT.
-    /// Emulator-friendly path for the mobile client when scanning a QR is
-    /// impractical (Pixel 7 AVD has no working camera passthrough). Single-
-    /// use, same TTL as the underlying JWT.
-    pub pair_code: String,
-    /// Millisecond epoch when the numeric code stops being redeemable —
-    /// equal to [`expires_at_ms`] so the desktop UI can render one shared
-    /// countdown next to both surfaces.
-    pub pair_code_expires_at_ms: i64,
+    pub host_id: String,
+    pub tenant_id: String,
 }
 
-/// Issue a one-shot pair JWT for the QR flow.
-///
-/// Calls into the auth helpers directly rather than via HTTP — the desktop UI
-/// runs in-process so a self-call would just round-trip the same router.
-/// The token is a copy of what `POST /api/v1/auth/pair/issue` would return.
+/// Create the destructive-upgrade pairing payload. No bearer credential is
+/// placed in the QR; the invitation can be consumed exactly once by device-key
+/// registration.
 #[tauri::command]
-pub async fn companion_issue_pair_jwt(
-    local_account_id: String,
+pub async fn companion_create_owner_invitation(
+    _local_account_id: String,
     state: State<'_, CompanionServerState>,
     app_handle: tauri::AppHandle,
-) -> Result<PairJwtIssue, String> {
-    let signing_secret = secret::load_or_generate().map_err(|e| e.to_string())?;
-    let (pair_jwt, exp_secs) =
-        issue_pair_jwt(&signing_secret, &local_account_id).map_err(|e| e.to_string())?;
-    let port = state.bound_port().unwrap_or(DEFAULT_PORT);
+) -> Result<OwnerInvitationIssue, String> {
+    const TENANT_ID: &str = "local_acct_a";
+    const INVITATION_TTL_SECS: i64 = 5 * 60;
 
-    // URL priority: active tunnel (quick or named) > persisted named hostname
-    // > LAN > loopback fallback.
-    // Local origins use HTTPS (M2.9 self-signed termination); the tunnel URL
-    // is already Cloudflare HTTPS upstream.
+    let port = state.bound_port().unwrap_or(DEFAULT_PORT);
     let (base_url, is_tunnel) = if let Some(info) = state.tunnel.current() {
         (info.public_url, true)
     } else if let Some(hostname) = state.tunnel.named_public_url() {
@@ -752,42 +759,35 @@ pub async fn companion_issue_pair_jwt(
         };
         (format!("https://{host}:{port}"), false)
     };
-
-    // Tunnel hosts (quick or named) terminate TLS with Cloudflare's real
-    // certificate; the self-signed fingerprint is only meaningful for direct
-    // LAN/loopback connections.
     let fingerprint = if is_tunnel {
         String::new()
     } else {
         ensure_tls_fingerprint(&app_handle).unwrap_or_default()
     };
-    let app_version = app_handle.package_info().version.to_string();
+    let now = unix_time_secs();
+    let security = security_store::security_store()
+        .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    let invitation = security
+        .create_owner_invitation(TENANT_ID, "local-trust-root", now, INVITATION_TTL_SECS)
+        .map_err(|error| error.to_string())?;
+    let signing_secret = secret::load_or_generate().map_err(|error| error.to_string())?;
 
-    let expires_at_ms = exp_secs * 1000;
-
-    // Mint a 6-digit numeric code that maps to the same pair JWT in the
-    // server-side LRU. PairDeviceCard renders the code alongside the QR
-    // so an emulator user (no camera) can still complete pairing by
-    // typing the digits.
-    let pair_code = generate_pair_code();
-    state.pair_code_lru.insert(
-        pair_code.clone(),
-        PairCodeEntry {
-            pair_jwt: pair_jwt.clone(),
-            expires_at_ms,
-        },
-        now_ms(),
-    );
-
-    Ok(PairJwtIssue {
-        pair_jwt,
-        expires_at_ms,
+    Ok(OwnerInvitationIssue {
+        invitation,
+        expires_at_ms: now.saturating_add(INVITATION_TTL_SECS) * 1_000,
         base_url,
         fingerprint,
-        app_version,
-        pair_code,
-        pair_code_expires_at_ms: expires_at_ms,
+        app_version: app_handle.package_info().version.to_string(),
+        host_id: super::healthz::derive_server_id(&signing_secret),
+        tenant_id: TENANT_ID.to_string(),
     })
+}
+
+fn unix_time_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 // ---------------------------------------------------------------------------
@@ -1119,16 +1119,19 @@ pub async fn companion_test_local_reachability(
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .timeout(std::time::Duration::from_secs(5))
+        // These are audited self-reachability probes (loopback, LAN address,
+        // and this process's own tunnel), not desktop public egress.
+        .no_proxy()
         .build()
         .map_err(|e| format!("reqwest builder: {e}"))?;
 
     let mut out = Vec::with_capacity(candidates.len());
     for url in candidates {
         let started = std::time::Instant::now();
-        // Hit a public-pre-auth endpoint so we don't need a JWT — issue/pair
-        // accepts an empty POST and returns 200.
-        let probe_url = format!("{}/api/v1/auth/pair/issue", url.trim_end_matches('/'));
-        match client.post(&probe_url).send().await {
+        // Hit the canonical public health endpoint; reachability diagnostics
+        // must not mint or depend on any credential.
+        let probe_url = format!("{}/healthz", url.trim_end_matches('/'));
+        match client.get(&probe_url).send().await {
             Ok(resp) => {
                 let ok = resp.status().is_success();
                 out.push(CompanionReachability {
@@ -1343,7 +1346,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn issue_pair_jwt_returns_loopback_when_stopped() {
+    async fn owner_invitation_uses_loopback_when_stopped() {
         // Server is never started → bind_mode is None → loopback fallback.
         // Post-M2.9 the loopback URL is HTTPS (the desktop server always
         // terminates TLS, so the same scheme works whether the QR is

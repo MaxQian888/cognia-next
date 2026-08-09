@@ -21,11 +21,27 @@ export interface UpdateExternalMemoryPatch {
 }
 
 export type MutateExternalMemoryResult =
-  { ok: true } | { ok: false; reason: "disabled" | "temporary" | "pii_blocked" | "not_found" }
+  | { ok: true }
+  | {
+      ok: false
+      reason:
+        | "disabled"
+        | "temporary"
+        | "pii_blocked"
+        | "not_found"
+        | "policy_denied"
+        | "scope_denied"
+    }
+
+export interface MemoryMutationPolicyContext {
+  characterId?: string
+  sessionId?: string
+}
 
 export async function updateExternalMemory(
   id: string,
-  patch: UpdateExternalMemoryPatch
+  patch: UpdateExternalMemoryPatch,
+  policyContext: MemoryMutationPolicyContext = {}
 ): Promise<MutateExternalMemoryResult> {
   const text = patch.text?.trim()
   if (text === "") throw new Error("memory update: 'text' must be non-empty when provided")
@@ -56,6 +72,17 @@ export async function updateExternalMemory(
   const memDb = await import("@/lib/db/memories")
   const existing = await memDb.getMemory(id)
   if (!existing) return { ok: false, reason: "not_found" }
+  const { resolvePersistedAgentMemoryPolicy, scopeAllowedByAgentMemoryPolicy } =
+    await import("@/lib/memory/agent-policy")
+  const policy = await resolvePersistedAgentMemoryPolicy({
+    config,
+    characterId: policyContext.characterId ?? existing.agentId ?? existing.characterId,
+    sessionId: policyContext.sessionId,
+  })
+  if (!policy.canUpdate) return { ok: false, reason: "policy_denied" }
+  if (!scopeAllowedByAgentMemoryPolicy(policy, "update", existing.scope)) {
+    return { ok: false, reason: "scope_denied" }
+  }
 
   await memDb.updateMemory(id, {
     ...(text !== undefined ? { text, bumpVersion: true } : {}),
@@ -102,7 +129,10 @@ export async function updateExternalMemory(
   return { ok: true }
 }
 
-export async function forgetExternalMemory(id: string): Promise<MutateExternalMemoryResult> {
+export async function forgetExternalMemory(
+  id: string,
+  policyContext: MemoryMutationPolicyContext = {}
+): Promise<MutateExternalMemoryResult> {
   const [{ getSettings }, { resolveMemoryConfig }] = await Promise.all([
     import("@/lib/db/settings"),
     import("@/types/memory/memory"),
@@ -114,6 +144,17 @@ export async function forgetExternalMemory(id: string): Promise<MutateExternalMe
   const memDb = await import("@/lib/db/memories")
   const existing = await memDb.getMemory(id)
   if (!existing) return { ok: false, reason: "not_found" }
+  const { resolvePersistedAgentMemoryPolicy, scopeAllowedByAgentMemoryPolicy } =
+    await import("@/lib/memory/agent-policy")
+  const policy = await resolvePersistedAgentMemoryPolicy({
+    config,
+    characterId: policyContext.characterId ?? existing.agentId ?? existing.characterId,
+    sessionId: policyContext.sessionId,
+  })
+  if (!policy.canForget) return { ok: false, reason: "policy_denied" }
+  if (!scopeAllowedByAgentMemoryPolicy(policy, "forget", existing.scope)) {
+    return { ok: false, reason: "scope_denied" }
+  }
 
   await memDb.invalidateMemory(id)
   if (existing.vectorDocId) {

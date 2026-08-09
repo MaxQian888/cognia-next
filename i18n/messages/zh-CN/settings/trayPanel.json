@@ -1,0 +1,99 @@
+{
+  "actions": {
+    "add": "添加操作",
+    "builtIn": "内置",
+    "description": "面板中提供的操作及其顺序。每个操作都可以携带自定义输入框。",
+    "edit": "编辑",
+    "hide": "隐藏",
+    "moveDown": "下移",
+    "moveUp": "上移",
+    "remove": "删除",
+    "reset": "重置",
+    "show": "显示",
+    "title": "面板操作"
+  },
+  "behavior": {
+    "description": "位于托盘图标下方的弹窗，可用于委派任务或执行快捷操作。",
+    "leftClick": "点击托盘图标时",
+    "leftClickHint": "右键始终打开托盘菜单。",
+    "leftClickOptions": {
+      "none": "不做任何事",
+      "panel": "打开快捷面板",
+      "toggle-window": "显示或隐藏主窗口"
+    },
+    "preview": "预览",
+    "previewAction": "打开面板",
+    "previewHint": "在托盘图标最近所在的位置打开面板。",
+    "title": "托盘快捷面板"
+  },
+  "desktopOnly": "托盘快捷面板仅在桌面版中可用。",
+  "editor": {
+    "cancel": "取消",
+    "chord": "快捷键",
+    "commandId": "命令 id",
+    "description": "设置该操作何时出现、执行什么，以及需要收集哪些输入。",
+    "effect": "执行",
+    "effects": {
+      "command": "执行已注册命令",
+      "delegate": "委派任务",
+      "native": "执行托盘动作",
+      "navigate": "打开页面",
+      "slash": "执行斜杠命令"
+    },
+    "fields": "输入字段",
+    "fieldsHint": "执行前收集；在效果中用 '{{fieldId}}' 引用。",
+    "focusMainWindow": "同时切换到主窗口",
+    "icon": "图标",
+    "iconPlaceholder": "Lucide 图标名，例如 rocket",
+    "issues": {
+      "duplicateFieldId": "字段 id 重复：{id}",
+      "emptyEffect": "请填写该操作要执行的内容。",
+      "emptySelect": "下拉框「{id}」至少需要一个选项。",
+      "illegalTrigger": "只有「打开页面」和「执行命令」可以在面板打开时自动执行。",
+      "invalidFieldId": "字段 id「{id}」只能包含字母、数字、- 和 _。",
+      "missingChord": "请输入快捷键，例如 mod+1。",
+      "missingLabel": "请填写操作名称。",
+      "unknownPlaceholder": "没有匹配的字段：{ids}"
+    },
+    "label": "名称",
+    "nativeAction": "托盘动作",
+    "path": "路径",
+    "prompt": "提示词",
+    "promptHint": "使用 '{{fieldId}}' 引用输入字段。",
+    "promptPlaceholder": "审阅 '{{path}}' 并总结风险",
+    "save": "保存",
+    "slash": "斜杠命令",
+    "target": "目标",
+    "targetHint": "可填 newSession、activeSession，或用 '{{fieldId}}' 由输入决定。",
+    "title": "编辑操作",
+    "trigger": "触发方式",
+    "triggers": {
+      "hotkey": "快捷键",
+      "manual": "点击时",
+      "open": "面板打开时",
+      "submit": "主操作（回车）"
+    },
+    "when": "显示条件",
+    "whenHint": "可选。表达式为真时该操作才会显示。",
+    "whenPlaceholder": "例如 automation.running"
+  },
+  "fieldEditor": {
+    "add": "添加字段",
+    "empty": "没有输入字段 — 该操作会直接执行。",
+    "id": "Id",
+    "kind": "类型",
+    "kinds": {
+      "number": "数字",
+      "select": "下拉框",
+      "switch": "开关",
+      "text": "单行文本",
+      "textarea": "多行文本"
+    },
+    "label": "名称",
+    "options": "选项",
+    "optionsPlaceholder": "value=显示名，每行一个",
+    "remove": "删除字段",
+    "required": "必填",
+    "submitOnEnter": "回车提交"
+  }
+}

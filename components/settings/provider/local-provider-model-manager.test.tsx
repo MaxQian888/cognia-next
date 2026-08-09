@@ -118,6 +118,33 @@ describe("LocalProviderModelManager", () => {
     expect(statusIndicator).toBeInTheDocument()
   })
 
+  it("forwards transport settings and successful discovery to the provider hook", () => {
+    const onModelsChange = jest.fn()
+    const { useLocalProvider } = jest.requireMock("@/hooks/provider/use-local-provider") as {
+      useLocalProvider: jest.Mock
+    }
+
+    renderWithProviders(
+      <LocalProviderModelManager
+        providerId="ollama"
+        baseUrl="http://127.0.0.1:11500"
+        apiKey="secret"
+        customHeaders={{ "X-Tenant": "local" }}
+        onModelsChange={onModelsChange}
+      />
+    )
+
+    expect(useLocalProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "ollama",
+        baseUrl: "http://127.0.0.1:11500",
+        apiKey: "secret",
+        customHeaders: { "X-Tenant": "local" },
+        onModelsDiscovered: onModelsChange,
+      })
+    )
+  })
+
   it("should show version when connected", () => {
     renderWithProviders(<LocalProviderModelManager providerId="ollama" />)
 

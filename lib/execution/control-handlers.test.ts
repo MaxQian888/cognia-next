@@ -63,6 +63,22 @@ describe("execution source control handlers", () => {
     installed.dispose()
   })
 
+  it("routes agent resume through the canonical crashed-run recovery entry", async () => {
+    const resumeAgentRun = jest.fn(async () => ({ resumed: true as const }))
+    const installed = installExecutionRunControlHandlers({ resumeAgentRun })
+
+    await installed.agent({
+      runId: "run-recovery",
+      action: "resume",
+      idempotencyKey: "resume-1",
+      expectedRevision: 0,
+      actor: {},
+    })
+
+    expect(resumeAgentRun).toHaveBeenCalledWith("run-recovery")
+    installed.dispose()
+  })
+
   it("routes Goal and Plan lifecycle controls to their canonical runtimes", async () => {
     const installed = installExecutionRunControlHandlers()
     await createExecutionRun({

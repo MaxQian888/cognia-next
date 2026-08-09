@@ -23,9 +23,12 @@
  */
 
 import { build } from "esbuild"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { Command, CommanderError } from "commander"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 export const ENTRY = resolve(repoRoot, "lib/plugin/convert/bin.ts")
@@ -142,8 +145,30 @@ function readExisting() {
   }
 }
 
-async function main() {
-  const check = process.argv.includes("--check")
+const cliSchema = z.object({ check: z.boolean().default(false) })
+
+function createProgram() {
+  return new Command()
+    .name("pnpm plugin-convert:bundle")
+    .description("Bundle or verify the embedded plugin import converter.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--check", "Verify the checked-in bundle without rewriting it.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+async function main({ check = false } = {}) {
   const next = await bundle()
 
   if (check) {
@@ -162,10 +187,11 @@ async function main() {
   }
 
   mkdirSync(dirname(OUTFILE), { recursive: true })
-  writeFileSync(OUTFILE, next, "utf8")
+  writeFileAtomic.sync(OUTFILE, next, { encoding: "utf8" })
   process.stdout.write(`wrote ${OUTFILE} (${next.length} bytes)\n`)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  await main()
+  const options = parseArgs(process.argv.slice(2))
+  if (options) await main(options)
 }

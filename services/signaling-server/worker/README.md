@@ -35,9 +35,10 @@ deployments can't drift:
   peers that have actually `Subscribe`d. A socket that connects but never
   subscribes receives nothing. SDP/ICE are additionally AES-256-GCM encrypted
   end to end, so the relay cannot inspect them even for an admitted room.
-- **Origin allowlist** — `SIGNALING_ALLOWED_ORIGINS` (empty = allow all; a
-  missing `Origin`, as native clients send, is always allowed). A present,
-  unlisted browser `Origin` gets `403`.
+- **Origin allowlist** — `SIGNALING_ALLOWED_ORIGINS` (empty = same-origin only;
+  a missing `Origin`, as native clients send, is always allowed). Cross-origin
+  entries must be exact HTTPS origins; a present, unlisted browser `Origin`
+  gets `403`.
 - **Per-connection rate limit** — the shared 20-token / 10-per-sec bucket;
   `rate_limited` closes the socket, `frame_too_large` (8 KiB soft cap) does not.
 - **Malformed frames** are rejected with `malformed_frame`, matching the axum
@@ -49,13 +50,13 @@ deployments can't drift:
 
 ## Configuration (`wrangler.toml` `[vars]`)
 
-| Var                                  | Default | Meaning                                                                                                                            |
-| ------------------------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `SIGNALING_MAX_PEERS_PER_ROOM`       | `2`     | One desktop plus one mobile; same-role reconnects replace atomically.                                                              |
-| `SIGNALING_MAX_DESKTOPS`             | `1`     | Max desktop peers per room.                                                                                                        |
-| `SIGNALING_MAX_CONN_PER_IP_PER_ROOM` | `4`     | Max sockets one IP may hold in one room (needs `cf-connecting-ip`, i.e. a real edge — a no-op under local `wrangler dev`).         |
-| `SIGNALING_ALLOWED_ORIGINS`          | `""`    | Comma-separated browser Origin allowlist; empty = allow all. e.g. `https://app.cognia.cn,capacitor://localhost,https://localhost`. |
-| `AE_SAMPLE_N`                        | `10`    | 1-in-N Analytics Engine sampling for hot events.                                                                                   |
+| Var                                  | Default | Meaning                                                                                                                    |
+| ------------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `SIGNALING_MAX_PEERS_PER_ROOM`       | `2`     | One desktop plus one mobile; same-role reconnects replace atomically.                                                      |
+| `SIGNALING_MAX_DESKTOPS`             | `1`     | Max desktop peers per room.                                                                                                |
+| `SIGNALING_MAX_CONN_PER_IP_PER_ROOM` | `4`     | Max sockets one IP may hold in one room (needs `cf-connecting-ip`, i.e. a real edge — a no-op under local `wrangler dev`). |
+| `SIGNALING_ALLOWED_ORIGINS`          | `""`    | Exact HTTPS split-origin allowlist; empty = same-origin only. e.g. `https://app.cognia.cn`.                                |
+| `AE_SAMPLE_N`                        | `10`    | 1-in-N Analytics Engine sampling for hot events.                                                                           |
 
 These names mirror the axum server's env vars, so both backends are tuned the
 same way.

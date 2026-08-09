@@ -1,6 +1,4 @@
 /**
- * @jest-environment jsdom
- *
  * Tests for the F-path synthesizer (ADR-0022). The legacy in-place
  * orchestrator was rewritten to a thin synthesizer that delegates to
  * workflow runtime; tests below exercise the new contract:
@@ -9,8 +7,6 @@
  *  - terminal status mapping ({completed, failed, cancelled})
  *  - double-start prevention via inflightControllers
  */
-import "fake-indexeddb/auto"
-
 // Mock plugin hooks so we don't need to boot the plugin store.
 jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: jest.fn(() => ({
@@ -62,7 +58,8 @@ jest.mock("./team/twin-context", () => ({
 import { resolveTeamTwinRuntime } from "./team/twin-context"
 const resolveTeamTwinRuntimeMock = resolveTeamTwinRuntime as jest.Mock
 
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import {
   runTeamLifecycle,
   parseProposedPlan,
@@ -174,11 +171,11 @@ const buildDeps = (
   }
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await getDb().workflowRuns.clear()
   await getDb().workflowRunEvents.clear()
   __resetInflightForTesting()
@@ -190,6 +187,8 @@ afterEach(() => {
   __resetInflightForTesting()
   resetApprovalBus()
 })
+
+afterAll(dbFixture.dispose)
 
 describe("parseProposedPlan", () => {
   it("parses a fenced ```json block", () => {

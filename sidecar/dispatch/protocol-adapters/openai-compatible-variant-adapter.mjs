@@ -9,6 +9,7 @@
 // renderer round-trip path is the planned phase-2 escape hatch).
 
 import { getPath } from "./json-path-lite.mjs"
+import { GENERIC_REASONING_EFFORT } from "./reasoning-effort-tables.mjs"
 
 /** Keys a well-formed spec must carry (parity-tested against the renderer). */
 export const SPEC_REQUIRED_KEYS = ["kind", "urlTemplate", "responsePaths"]
@@ -31,22 +32,9 @@ function interpolate(template, vars) {
   return template.replace(/\{(apiKey|model|baseURL)\}/g, (_, key) => vars[key] ?? "")
 }
 
-/**
- * Conservative app-effort → wire value map for generic openai-compatible
- * channels. Most one-api channels accept only `low|medium|high`, so the two
- * high tiers fold to `high` and `minimal` folds to `low` — a channel that truly
- * supports finer levels overrides this via `spec.reasoningEffortMap`.
- */
-const GENERIC_REASONING_EFFORT = {
-  minimal: "low",
-  low: "low",
-  medium: "medium",
-  high: "high",
-  xhigh: "high",
-  max: "high",
-}
-
-/** Resolve the wire reasoning-effort value, honoring a per-channel override map. */
+/** Resolve the wire reasoning-effort value, honoring a per-channel override map.
+ * The default map lives in `reasoning-effort-tables.mjs`, shared with the
+ * renderer so it never offers tiers this channel folds together. */
 function resolveVariantEffort(effort, map) {
   if (map && typeof map[effort] === "string") return map[effort]
   return GENERIC_REASONING_EFFORT[effort] ?? "medium"

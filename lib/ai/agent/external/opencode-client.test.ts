@@ -1332,10 +1332,41 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
       a.translateSdkEvent("s1", {
         type: "message.part.updated",
         properties: {
-          part: { type: "tool", id: "p1", sessionID: "s1", state: { status: "pending" } },
+          part: {
+            type: "tool",
+            id: "p1",
+            sessionID: "s1",
+            tool: "read",
+            state: { status: "running", input: { filePath: "a.ts" }, title: "Reading a.ts" },
+          },
         },
       } as never)[0]
-    ).toMatchObject({ type: "tool_use_start", toolUseId: "p1", toolName: "unknown" })
+    ).toMatchObject({
+      type: "tool_use_start",
+      toolUseId: "p1",
+      toolName: "read",
+      title: "Reading a.ts",
+    })
+
+    expect(
+      a.translateSdkEvent("s1", {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            type: "tool",
+            id: "p1",
+            sessionID: "s1",
+            tool: "read",
+            state: {
+              status: "completed",
+              input: { filePath: "a.ts" },
+              output: "contents",
+              title: "Read a.ts",
+            },
+          },
+        },
+      } as never)[0]
+    ).toMatchObject({ type: "tool_result", toolUseId: "p1", title: "Read a.ts" })
     // Lifecycle / unknown events translate to nothing.
     expect(
       a.translateSdkEvent("s1", { type: "server.connected", properties: {} } as never)

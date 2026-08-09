@@ -8,6 +8,7 @@ import {
   loadTable,
   renderOpenApi,
   renderRust,
+  parseArgs,
 } from "./gen-settings-sync.mjs"
 
 const TABLE_SOURCE = "packages/agent-config-types/src/settings-sync.ts"
@@ -21,6 +22,12 @@ export const SETTINGS_SYNC = {
   secret: { category: "desktop-only" },
 }
 `
+
+test("parseArgs supports check mode and rejects unknown options", () => {
+  assert.deepEqual(parseArgs([]), { check: false })
+  assert.deepEqual(parseArgs(["--check"]), { check: true })
+  assert.throws(() => parseArgs(["--unknown"]), /unknown option/i)
+})
 
 test("loadTable evaluates the TypeScript table without a compiler", async () => {
   const table = await loadTable(FAKE_TABLE)

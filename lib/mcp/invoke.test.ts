@@ -56,28 +56,12 @@ describe("invokeMcpTool", () => {
     })
   })
 
-  it("falls back to a preset when no stored row exists", async () => {
-    const { open, openSpy } = fakeOpen()
-    await invokeMcpTool(
-      { serverId: "playwright", toolName: "screenshot" },
-      {
-        getServer: async () => undefined,
-        getPreset: () => ({ name: "Playwright", transport: "stdio", config: { command: "npx" } }),
-        open,
-      }
-    )
-    const passedServer = openSpy.mock.calls[0][0] as McpServer
-    expect(passedServer.name).toBe("Playwright")
-    expect(passedServer.transport).toBe("stdio")
-    expect(passedServer.config).toEqual({ command: "npx" })
-  })
-
-  it("throws McpServerNotFoundError when neither row nor preset matches", async () => {
+  it("does not execute plugin presets that lack a stored Registry row", async () => {
     const { open } = fakeOpen()
     await expect(
       invokeMcpTool(
         { serverId: "missing", toolName: "x" },
-        { getServer: async () => undefined, getPreset: () => undefined, open }
+        { getServer: async () => undefined, open }
       )
     ).rejects.toBeInstanceOf(McpServerNotFoundError)
   })

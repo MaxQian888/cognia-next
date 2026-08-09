@@ -58,6 +58,8 @@ pub mod rpc_error_code {
     pub const METHOD_NOT_FOUND: i64 = -32601;
     pub const INVALID_PARAMS: i64 = -32602;
     pub const INTERNAL_ERROR: i64 = -32603;
+    /// Request cancelled by the peer (LSP/JSON-RPC convention adopted by ACP).
+    pub const REQUEST_CANCELLED: i64 = -32800;
     /// ACP auth-required error (spec-defined).
     pub const AUTH_REQUIRED: i64 = -32000;
 }
@@ -105,9 +107,16 @@ pub fn initialize_result() -> Value {
                 "audio": false,
                 "embeddedContext": true,
             },
+            "sessionCapabilities": {
+                "list": {},
+                "delete": {},
+                "resume": {},
+                "close": {},
+                "additionalDirectories": {},
+            },
         },
-        // Auth is out-of-band: the ACP socket is mounted behind the device-JWT
-        // middleware, so there is no in-protocol `authenticate` step. Advertise
+        // Auth is out-of-band: the ACP socket redeems a path-bound one-time
+        // ticket, so there is no in-protocol `authenticate` step. Advertise
         // an explicit empty set (rather than an absent field) so an
         // introspecting client sees "no auth methods" unambiguously.
         "authMethods": [],
@@ -201,6 +210,39 @@ pub fn session_new_result(session_id: &str) -> Value {
             "currentModelId": DEFAULT_MODEL_ID,
             "availableModels": available_models,
         },
+        "configOptions": session_config_options(DEFAULT_MODEL_ID),
+    })
+}
+
+pub fn session_config_options(current_model_id: &str) -> Value {
+    let options: Vec<Value> = ACP_SESSION_MODELS
+        .iter()
+        .map(|(value, name)| json!({ "value": value, "name": name }))
+        .collect();
+    json!([{
+        "id": "model",
+        "name": "Model",
+        "description": "Model used for subsequent turns",
+        "category": "model_config",
+        "type": "select",
+        "currentValue": current_model_id,
+        "options": options,
+    }])
+}
+
+pub fn session_state_result(current_mode_id: &str, current_model_id: &str) -> Value {
+    let available_modes: Vec<Value> = ACP_SESSION_MODES
+        .iter()
+        .map(
+            |(id, name, description)| json!({ "id": id, "name": name, "description": description }),
+        )
+        .collect();
+    json!({
+        "modes": {
+            "currentModeId": current_mode_id,
+            "availableModes": available_modes,
+        },
+        "configOptions": session_config_options(current_model_id),
     })
 }
 
@@ -497,6 +539,10 @@ mod tests {
         assert!(v["agentInfo"]["version"].as_str().is_some());
         // Auth is out-of-band — advertise an explicit empty method set.
         assert_eq!(v["authMethods"], json!([]));
+        let session = &v["agentCapabilities"]["sessionCapabilities"];
+        for capability in ["list", "delete", "resume", "close", "additionalDirectories"] {
+            assert_eq!(session[capability], json!({}));
+        }
     }
 
     #[test]
@@ -525,6 +571,11 @@ mod tests {
         }
         assert!(is_valid_model(DEFAULT_MODEL_ID));
         assert!(models.iter().any(|m| m["modelId"] == "claude-opus-4-8"));
+
+        let model_config = &v["configOptions"][0];
+        assert_eq!(model_config["id"], "model");
+        assert_eq!(model_config["category"], "model_config");
+        assert_eq!(model_config["type"], "select");
     }
 
     #[test]

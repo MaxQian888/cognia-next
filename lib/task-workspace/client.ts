@@ -1,4 +1,5 @@
 import { onTauriEvent, transport } from "@/lib/tauri"
+import { recordTaskWorkspaceOutcome } from "@/lib/code-adoption/outcome"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { projectTaskWorkspaceRun } from "./projection"
 import type {
@@ -224,6 +225,10 @@ export function getTaskPatchSet(runId: string): Promise<PatchSet | null> {
   return transport.call("task_workspace_get_patch_set", { runId })
 }
 
+export function restoreTaskWorkspaceSnapshot(runId: string): Promise<TaskRun> {
+  return transport.call("task_workspace_restore_snapshot", { runId })
+}
+
 export function readTaskResourceDiff(
   runId: string,
   path: string,
@@ -232,30 +237,55 @@ export function readTaskResourceDiff(
   return transport.call("task_resource_read_diff", { runId, path, allowSensitive })
 }
 
-export function applyTaskWorkspace(
+async function projectAdoptionOutcome(
+  runId: string,
+  kind: "apply" | "undo" | "keepCurrent"
+): Promise<void> {
+  try {
+    const patch = await transport.call<PatchSet | null>("task_workspace_get_patch_set", { runId })
+    if (patch) await recordTaskWorkspaceOutcome(patch, kind)
+  } catch {
+    // Adoption accounting is best-effort and must not change the completed
+    // workspace operation's success/failure semantics.
+  }
+}
+
+export async function applyTaskWorkspace(
   runId: string,
   selection: PatchSelection[] = [],
   allowIrreversible = false
 ): Promise<ApplyOutcome> {
-  return transport.call("task_workspace_apply", { runId, selection, allowIrreversible })
+  const outcome = await transport.call<ApplyOutcome>("task_workspace_apply", {
+    runId,
+    selection,
+    allowIrreversible,
+  })
+  if (outcome.state === "applied") await projectAdoptionOutcome(runId, "apply")
+  return outcome
 }
 
-export function undoTaskWorkspace(runId: string): Promise<ApplyOutcome> {
-  return transport.call("task_workspace_undo", { runId })
+export async function undoTaskWorkspace(runId: string): Promise<ApplyOutcome> {
+  const outcome = await transport.call<ApplyOutcome>("task_workspace_undo", { runId })
+  if (outcome.state === "reverted") await projectAdoptionOutcome(runId, "undo")
+  return outcome
 }
 
-export function resolveTaskWorkspaceConflict(
+export async function resolveTaskWorkspaceConflict(
   runId: string,
   resolution: "retryMerge" | "applyTask" | "keepCurrent",
   selection: PatchSelection[] = [],
   allowIrreversible = false
 ): Promise<ApplyOutcome> {
-  return transport.call("task_workspace_resolve_conflict", {
+  const outcome = await transport.call<ApplyOutcome>("task_workspace_resolve_conflict", {
     runId,
     resolution,
     selection,
     allowIrreversible,
   })
+  if (outcome.state === "applied" || outcome.state === "reverted") {
+    await projectAdoptionOutcome(runId, resolution === "keepCurrent" ? "keepCurrent" : "apply")
+  }
+  return outcome
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {

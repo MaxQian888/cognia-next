@@ -128,6 +128,15 @@ test("system_info returns platform + arch + cpu count", async () => {
   assert.ok(data.cpuCount >= 1)
   assert.ok(data.totalMemoryBytes > 0)
   assert.ok(typeof data.hostname === "string")
+  assert.equal(data.cogniaTools.serverName, "cognia-tools")
+  assert.match(data.cogniaTools.serverVersion, /^\d+\.\d+\.\d+$/)
+  assert.equal(data.cogniaTools.pid, process.pid)
+  assert.ok(!Number.isNaN(Date.parse(data.cogniaTools.startedAt)))
+  assert.match(data.cogniaTools.runtimeFingerprint, /^cognia-tools@\d+\.\d+\.\d+:\d+:/)
+  assert.equal(data.cogniaTools.health.status, "ok")
+  assert.equal(data.cogniaTools.health.checks.stdio.ok, true)
+  assert.equal(data.cogniaTools.health.checks.tempDirectory.ok, true)
+  assert.equal(data.cogniaTools.health.checks.git.ok, true)
 })
 
 test("current_time returns UTC + epoch + localized fields", async () => {

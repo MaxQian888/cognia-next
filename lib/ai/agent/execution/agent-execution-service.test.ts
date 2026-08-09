@@ -1,11 +1,27 @@
 // AgentExecutionService (ADR-0090 Phase 6): rail routing, fail-before-spend,
 // explicit-only completion fallback with degradedReason.
 
+import { AGENT_CAPABILITY_IDS } from "@cognia/agent-config-types/agent-execution"
+
 import {
   executeAgentTurn,
   AgentCapabilityUnsatisfiedError,
   AgentHostUnavailableError,
 } from "./agent-execution-service"
+import { RUNTIME_CAPABILITIES } from "./resolve-agent-execution-spec"
+
+/**
+ * A capability the Claude rail genuinely does not serve, read off the table
+ * instead of written down. These cases used `steer`, which the rail turned out
+ * to support all along — so they were asserting fail-closed against a
+ * capability that should never have failed.
+ */
+const UNSERVED_BY_CLAUDE = (() => {
+  const served = new Set(RUNTIME_CAPABILITIES["claude-agent-sdk"])
+  const id = AGENT_CAPABILITY_IDS.find((c) => !served.has(c))
+  if (!id) throw new Error("claude-agent-sdk now serves every capability — pick a new probe")
+  return id
+})()
 
 const workspaceLease = jest.fn(
   async (_input: unknown, execute: (cwd: string) => Promise<unknown>) => ({
@@ -14,6 +30,13 @@ const workspaceLease = jest.fn(
     executionRoot: "/isolated",
   })
 )
+
+const resolveActiveCertification = jest.fn<Promise<unknown>, [unknown]>(async () => undefined)
+
+jest.mock("./certification-store", () => ({
+  resolveActiveCertification: (...args: unknown[]) =>
+    resolveActiveCertification(...(args as [unknown])),
+}))
 
 jest.mock("@/lib/task-workspace/run-lease", () => ({
   withTaskWorkspaceRun: (...args: unknown[]) =>
@@ -45,6 +68,7 @@ const completionRail = runCompletionRail as jest.Mock
 
 beforeEach(() => {
   jest.clearAllMocks()
+  resolveActiveCertification.mockResolvedValue(undefined)
 })
 
 it("routes an intentional completion (toolsEnabled absent) to the completion rail and stamps the spec", async () => {
@@ -123,7 +147,7 @@ it("fails BEFORE any rail spend when a hard-required capability is unsatisfied",
       "p",
       { toolsEnabled: true },
       { isTauri: true, isHeadlessHost: false },
-      { policy: { requires: ["steer"] } } // claude-agent-sdk has no "steer"
+      { policy: { requires: [UNSERVED_BY_CLAUDE] } }
     )
   ).rejects.toBeInstanceOf(AgentCapabilityUnsatisfiedError)
   expect(agentRail).not.toHaveBeenCalled()
@@ -170,9 +194,91 @@ it("openAgentSession fails closed on unsatisfied hard capabilities before creati
       sessionId: "s-43",
       environment: { isTauri: true, isHeadlessHost: false },
       legacy: { toolsEnabled: true },
-      options: { policy: { requires: ["steer"] } },
+      options: { policy: { requires: [UNSERVED_BY_CLAUDE] } },
     })
   ).rejects.toBeInstanceOf(AgentCapabilityUnsatisfiedError)
+})
+
+it("passes the accepted active certification into the single resolver", async () => {
+  resolveActiveCertification.mockResolvedValueOnce({
+    accepted: true,
+    certifiedPath: {
+      recordRef: "bundle-a:path-a",
+      evidence: "cognia-verified",
+      suiteVersion: "1",
+      disabledOptional: ["compaction"],
+    },
+  })
+
+  const { openAgentSession } = await import("./agent-execution-service")
+  const { spec } = await openAgentSession({
+    sessionId: "s-certified",
+    environment: { isTauri: true, isHeadlessHost: false },
+    legacy: {
+      providerId: "anthropic",
+      modelId: "claude-opus-4-8",
+      toolsEnabled: true,
+    },
+    options: {
+      policy: {
+        runtimePolicy: "auto",
+        deploymentRef: "conf-anthropic",
+        routePolicy: "direct",
+        prefers: ["compaction"],
+      },
+    },
+  })
+
+  expect(resolveActiveCertification).toHaveBeenCalledTimes(1)
+  expect(spec.compatibility).toEqual({
+    evidence: "cognia-verified",
+    recordRef: "bundle-a:path-a",
+    suiteVersion: "1",
+  })
+  expect(spec.capabilities.disabledOptional).toContain("compaction")
+})
+
+it("fails before spend when the active certification health gate blocks a hard requirement", async () => {
+  const required = RUNTIME_CAPABILITIES["claude-agent-sdk"][0]
+  resolveActiveCertification.mockResolvedValueOnce({
+    accepted: false,
+    reasons: [`required capability ${required} is unknown`],
+    blockedRequired: [required],
+  })
+
+  await expect(
+    executeAgentTurn(
+      "p",
+      { provider: "anthropic", toolsEnabled: true },
+      { isTauri: true, isHeadlessHost: false },
+      {
+        policy: {
+          runtimePolicy: "auto",
+          deploymentRef: "conf-anthropic",
+          routePolicy: "direct",
+          requires: [required],
+        },
+      }
+    )
+  ).rejects.toBeInstanceOf(AgentCapabilityUnsatisfiedError)
+  expect(agentRail).not.toHaveBeenCalled()
+  expect(completionRail).not.toHaveBeenCalled()
+})
+
+it("records the resolver decision without changing the legacy path while the flag is off", async () => {
+  const { recordAgentExecutionShadow } = await import("./agent-execution-service")
+  await recordAgentExecutionShadow(
+    { provider: "anthropic", model: "claude-opus-4-8", toolsEnabled: true },
+    { isTauri: true, isHeadlessHost: false }
+  )
+
+  expect(trackEvent).toHaveBeenCalledWith(
+    "agent.execution.shadow",
+    expect.objectContaining({
+      runtimeAdapter: "claude-agent-sdk",
+      executionKind: "agent",
+    })
+  )
 })
 
 it("threads the caller session id into the resolved identity fingerprint deterministically", async () => {
@@ -213,4 +319,43 @@ it("runs managed filesystem work through one Task Workspace lease", async () => 
   expect(agentRail).toHaveBeenCalledWith("p", expect.objectContaining({ cwd: "/isolated" }))
   expect(result.taskWorkspaceRunId).toBe("workspace-run-1")
   expect(result.trackingUnavailable).toBeUndefined()
+})
+
+describe("openAgentSession dormancy label (CLAUDE.md working rule 7)", () => {
+  it("still has no production caller, which is what the docblock claims", async () => {
+    // Rule 7: intentional dormancy must be labelled at the type AND pinned by a
+    // test. `openAgentSession` carries an "INTENTIONALLY DORMANT until Phase 7"
+    // docblock, and it is the only caller of `createAgentExecutionHandle` — so
+    // the entire handle path is currently test-only. A comment alone rots; this
+    // fails the day someone wires a real caller, forcing the label to be
+    // removed in the same change rather than left behind as a lie.
+    const { execFileSync } = await import("node:child_process")
+    const out = execFileSync(
+      "git",
+      [
+        "grep",
+        "-l",
+        "-E",
+        "openAgentSession|createAgentExecutionHandle",
+        "--",
+        "*.ts",
+        "*.tsx",
+        ":!*.test.ts",
+        ":!*.test.tsx",
+      ],
+      { encoding: "utf8", cwd: process.cwd() }
+    )
+
+    const callers = out
+      .split("\n")
+      .filter(Boolean)
+      // The two files that DEFINE the path are not callers of it.
+      .filter(
+        (f) =>
+          !f.endsWith("lib/ai/agent/execution/agent-execution-service.ts") &&
+          !f.endsWith("lib/ai/agent/execution/agent-execution-handle.ts")
+      )
+
+    expect(callers).toEqual([])
+  })
 })

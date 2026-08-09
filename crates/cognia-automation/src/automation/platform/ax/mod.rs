@@ -58,9 +58,9 @@ use objc2_app_kit::NSWorkspace;
 use once_cell::sync::Lazy;
 
 use crate::automation::backend::{ApplicationScreenshot, AutomationBackend, SelectionPreflight};
+use crate::automation::platform::shared::element_locator;
 use crate::automation::platform::shared::keymap::{parse_chord, KeyToken, Modifier, NamedKey};
 use crate::automation::platform::shared::screenshot;
-use crate::automation::platform::shared::element_locator;
 use crate::automation::platform::shared::tree_shape::{self, TreeBudget};
 use crate::automation::selection::{build_text_selection, TextSelectionSnapshot};
 use crate::automation::session::{AppLocator, ResolvedApplication};

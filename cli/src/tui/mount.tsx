@@ -11,6 +11,7 @@ import { AppErrorBoundary } from "./components/AppErrorBoundary"
 import { defaultCrashLogger } from "./crash-log"
 import { installProcessCrashGuards } from "./process-guards"
 import { loadHistory } from "./input/history-store"
+import { TuiInputProvider } from "./input/input-router"
 import { mintSessionId } from "../agent/run"
 import { createExternalAgentSession } from "../agent/external-agent-session"
 import { resolveBackendModel } from "../config/active-model"
@@ -35,7 +36,7 @@ export interface RenderTuiDeps {
    * `createSession` from the live `agentBackend`, so `/backend` can switch
    * without restarting the command. */
   createExternalSession?: React.ComponentProps<typeof App>["createExternalSession"]
-  pushHandoff?: (sessionId: string) => void | Promise<void>
+  pushHandoff?: (sessionId: string) => boolean | Promise<boolean>
   sessionId?: string
   render?: typeof inkRender
   /** Slash command to run once on mount (launch flags: `--continue`/`--resume`). */
@@ -107,23 +108,25 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
     })
   }
   const instance = render(
-    <AppErrorBoundary onCrash={(err, stack) => crashLogger("render", err, stack)}>
-      <App
-        config={config}
-        sessionId={sessionId}
-        createSession={deps.createSession}
-        {...(deps.createExternalSession
-          ? { createExternalSession: deps.createExternalSession }
-          : { createExternalSession: createExternalAgentSession })}
-        pushHandoff={deps.pushHandoff}
-        trusted={trusted}
-        initialHistory={initialHistory}
-        initialCommand={deps.initialCommand}
-        sessionOnlyPermissionMode={deps.sessionOnlyPermissionMode}
-        altScreenPreEntered={fullscreen}
-        frames={frames}
-      />
-    </AppErrorBoundary>,
+    <TuiInputProvider>
+      <AppErrorBoundary onCrash={(err, stack) => crashLogger("render", err, stack)}>
+        <App
+          config={config}
+          sessionId={sessionId}
+          createSession={deps.createSession}
+          {...(deps.createExternalSession
+            ? { createExternalSession: deps.createExternalSession }
+            : { createExternalSession: createExternalAgentSession })}
+          pushHandoff={deps.pushHandoff}
+          trusted={trusted}
+          initialHistory={initialHistory}
+          initialCommand={deps.initialCommand}
+          sessionOnlyPermissionMode={deps.sessionOnlyPermissionMode}
+          altScreenPreEntered={fullscreen}
+          frames={frames}
+        />
+      </AppErrorBoundary>
+    </TuiInputProvider>,
     // The App owns Ctrl+C: a single press shows the "press again to exit" hint,
     // a double press exits. Ink's built-in `exitOnCtrlC` (default true) would
     // also fire on the first press, calling `disableRawMode()` + tearing down

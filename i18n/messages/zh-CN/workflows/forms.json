@@ -159,8 +159,8 @@
       "summarization": "摘要",
       "text-classification": "文本分类",
       "text-generation": "文本生成",
-      "text2text-generation": "文本到文本生成",
       "text-to-speech": "文本转语音",
+      "text2text-generation": "文本到文本生成",
       "token-classification": "词元分类",
       "translation": "翻译",
       "zero-shot-classification": "零样本分类",
@@ -562,8 +562,8 @@
       "label": "适配器"
     },
     "messageId": {
-      "label": "消息 ID",
       "hint": "要撤回/删除的平台消息 ID。",
+      "label": "消息 ID",
       "placeholder": "om_..."
     }
   },
@@ -583,6 +583,21 @@
     "ttlMs": {
       "hint": "0 = 永不过期",
       "label": "TTL（毫秒，可选）"
+    }
+  },
+  "connectorForward": {
+    "adapter": {
+      "label": "适配器"
+    },
+    "messageId": {
+      "hint": "要转发的平台消息 ID。",
+      "label": "消息 ID",
+      "placeholder": "om_..."
+    },
+    "target": {
+      "hint": "目标会话键（platform:adapterId:chatId）或原始 receive id。",
+      "label": "目标会话",
+      "placeholder": "lark:bot:oc_..."
     }
   },
   "connectorInbound": {
@@ -623,41 +638,19 @@
       "placeholder": "ou_abc, ou_def"
     }
   },
-  "integrationEventTrigger": {
-    "pluginId": {
-      "label": "插件（可选）",
-      "hint": "仅接收指定已安装 Marketplace 插件的事件。",
-      "placeholder": "example-delivery"
-    },
-    "integrationId": {
-      "label": "Integration（可选）",
-      "hint": "仅接收插件中指定 Integration 定义的事件。",
-      "placeholder": "delivery"
-    },
-    "accountId": {
-      "label": "账号（可选）",
-      "hint": "仅接收指定已连接账号的事件。",
-      "placeholder": "account_..."
-    },
-    "resourceKind": {
-      "label": "资源类型（可选）",
-      "hint": "仅接收指定规范化资源类型的事件。",
-      "placeholder": "repository"
-    },
-    "resourceId": {
-      "label": "资源 ID（可选）",
-      "hint": "仅接收指定仓库、工作区、团队或其他资源的事件。",
-      "placeholder": "owner/project"
-    },
-    "eventTypes": {
-      "label": "事件类型（可选）",
-      "hint": "以逗号分隔的规范化事件类型；留空匹配全部事件。",
-      "placeholder": "pull_request.opened, issue.updated"
-    }
-  },
   "connectorReaction": {
     "adapter": {
       "label": "适配器"
+    },
+    "emoji": {
+      "hint": "平台回应代码（飞书：THUMBSUP、OK 等）或 Unicode 表情。",
+      "label": "表情",
+      "placeholder": "THUMBSUP"
+    },
+    "messageId": {
+      "hint": "要添加回应的平台消息 ID。",
+      "label": "消息 ID",
+      "placeholder": "om_..."
     },
     "op": {
       "label": "操作",
@@ -666,41 +659,21 @@
         "remove": "移除回应"
       }
     },
-    "messageId": {
-      "label": "消息 ID",
-      "hint": "要添加回应的平台消息 ID。",
-      "placeholder": "om_..."
-    },
-    "emoji": {
-      "label": "表情",
-      "hint": "平台回应代码（飞书：THUMBSUP、OK 等）或 Unicode 表情。",
-      "placeholder": "THUMBSUP"
-    },
     "reactionId": {
-      "label": "回应 ID",
       "hint": "要移除的回应 ID（来自前置添加节点的输出）。",
+      "label": "回应 ID",
       "placeholder": "ZCaGnix..."
-    }
-  },
-  "connectorForward": {
-    "adapter": {
-      "label": "适配器"
-    },
-    "messageId": {
-      "label": "消息 ID",
-      "hint": "要转发的平台消息 ID。",
-      "placeholder": "om_..."
-    },
-    "target": {
-      "label": "目标会话",
-      "hint": "目标会话键（platform:adapterId:chatId）或原始 receive id。",
-      "placeholder": "lark:bot:oc_..."
     }
   },
   "connectorSend": {
     "adapter": {
       "label": "适配器",
       "placeholder": "telegram_main"
+    },
+    "cardJson": {
+      "hint": "A2UI surface 对象（'{'components, dataModel, rootId, …'}'）。设置后发送交互卡片，消息内容作为纯文本降级。",
+      "label": "A2UI 卡片 JSON（可选）",
+      "placeholder": "'{'\"components\": '{'...'}', \"dataModel\": '{}', \"rootId\": \"root\"'}'"
     },
     "content": {
       "label": "消息内容"
@@ -733,35 +706,30 @@
     "waitTimeoutMs": {
       "hint": "等待送达的最长时间（毫秒），超时后携带最新状态继续（默认 30000，最大 300000）。",
       "label": "送达等待超时（毫秒）"
-    },
-    "cardJson": {
-      "label": "A2UI 卡片 JSON（可选）",
-      "hint": "A2UI surface 对象（'{'components, dataModel, rootId, …'}'）。设置后发送交互卡片，消息内容作为纯文本降级。",
-      "placeholder": "'{'\"components\": '{'...'}', \"dataModel\": '{}', \"rootId\": \"root\"'}'"
     }
   },
   "connectorWaitReply": {
     "conversationKey": {
-      "label": "会话键",
-      "hint": "组合键 platform:adapterId:chatId——要监听的会话。"
-    },
-    "senderIds": {
-      "label": "发送者 ID（可选）",
-      "hint": "逗号分隔的平台用户 ID；留空则接受任何发送者。",
-      "placeholder": "ou_abc, ou_def"
+      "hint": "组合键 platform:adapterId:chatId——要监听的会话。",
+      "label": "会话键"
     },
     "keywords": {
-      "label": "关键词（可选）",
       "hint": "逗号分隔、不区分大小写的子串；任一匹配即接受回复。",
+      "label": "关键词（可选）",
       "placeholder": "approve, done"
     },
     "requireMention": {
-      "label": "要求 @提及",
-      "hint": "只接受 @提及机器人的回复。"
+      "hint": "只接受 @提及机器人的回复。",
+      "label": "要求 @提及"
+    },
+    "senderIds": {
+      "hint": "逗号分隔的平台用户 ID；留空则接受任何发送者。",
+      "label": "发送者 ID（可选）",
+      "placeholder": "ou_abc, ou_def"
     },
     "timeoutMs": {
-      "label": "超时（毫秒）",
-      "hint": "等待预算，超时后以 replied=false 继续（默认 120000，最大 3600000）。"
+      "hint": "等待预算，超时后以 replied=false 继续（默认 120000，最大 3600000）。",
+      "label": "超时（毫秒）"
     }
   },
   "cron": {
@@ -1392,6 +1360,38 @@
       "placeholder": "https://api.example.com/v1/things"
     }
   },
+  "integrationEventTrigger": {
+    "accountId": {
+      "hint": "仅接收指定已连接账号的事件。",
+      "label": "账号（可选）",
+      "placeholder": "account_..."
+    },
+    "eventTypes": {
+      "hint": "以逗号分隔的规范化事件类型；留空匹配全部事件。",
+      "label": "事件类型（可选）",
+      "placeholder": "pull_request.opened, issue.updated"
+    },
+    "integrationId": {
+      "hint": "仅接收插件中指定 Integration 定义的事件。",
+      "label": "Integration（可选）",
+      "placeholder": "delivery"
+    },
+    "pluginId": {
+      "hint": "仅接收指定已安装 Marketplace 插件的事件。",
+      "label": "插件（可选）",
+      "placeholder": "example-delivery"
+    },
+    "resourceId": {
+      "hint": "仅接收指定仓库、工作区、团队或其他资源的事件。",
+      "label": "资源 ID（可选）",
+      "placeholder": "owner/project"
+    },
+    "resourceKind": {
+      "hint": "仅接收指定规范化资源类型的事件。",
+      "label": "资源类型（可选）",
+      "placeholder": "repository"
+    }
+  },
   "join": {
     "aggregate": {
       "hint": "把汇聚的分支输出一步归约。",
@@ -1567,14 +1567,14 @@
       "hint": "这条事实有多关键。/remember 使用 7。",
       "label": "重要度（1–10）"
     },
+    "pathPattern": {
+      "label": "工作区相对路径前缀"
+    },
     "piiGate": {
       "block": "拦截（步骤失败）",
       "hint": "记忆会持久保存——拦截（含 PII 即失败）或脱敏占位符。不可关闭。",
       "label": "PII 防护",
       "redact": "脱敏占位符"
-    },
-    "pathPattern": {
-      "label": "工作区相对路径前缀"
     },
     "projectId": {
       "label": "项目 ID"

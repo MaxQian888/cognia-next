@@ -14,8 +14,7 @@
 import { useState, useMemo, useCallback } from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
-import { Bot, ChevronDown, Plus, Wand2, X, Loader2, type LucideIcon } from "lucide-react"
-import { LucideIcons } from "@/lib/agent/resolve-icon"
+import { ChevronDown, Plus, Wand2, X, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -59,6 +58,13 @@ import { IconSelector } from "./icon-selector"
 import { ToolSelector } from "./tool-selector"
 import { McpToolSelector } from "./mcp-tool-selector"
 import { A2UITemplatePreview } from "../a2ui-template-preview"
+import {
+  Agent,
+  AgentContent,
+  AgentHeader,
+  AgentInstructions,
+  AgentOutput,
+} from "@/components/ai-elements/agent"
 
 // =============================================================================
 // Types
@@ -528,59 +534,37 @@ export function CustomModeEditor({ open, onOpenChange, mode, onSave }: CustomMod
               </Card>
 
               {/* Mode Preview Summary */}
-              <Card className="border-dashed">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <Bot className="h-4 w-4" />
-                    {t("modePreview") || "Mode Preview"}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    {(() => {
-                      const IconComp = (LucideIcons[icon] as LucideIcon) || Bot
-                      return (
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                          <IconComp className="h-5 w-5 text-primary" />
-                        </div>
-                      )
-                    })()}
-                    <div>
-                      <p className="font-medium">{name || "Unnamed Mode"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {description || "No description"}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="p-2 bg-muted rounded">
-                      <span className="text-muted-foreground">{t("categoryLabel")}</span>{" "}
-                      <span className="font-medium">{category}</span>
-                    </div>
-                    <div className="p-2 bg-muted rounded">
-                      <span className="text-muted-foreground">{t("outputLabel")}</span>{" "}
-                      <span className="font-medium">{outputFormat}</span>
-                    </div>
-                    <div className="p-2 bg-muted rounded">
-                      <span className="text-muted-foreground">{t("toolsLabel")}</span>{" "}
-                      <span className="font-medium">{tools.length + mcpTools.length}</span>
-                    </div>
-                    <div className="p-2 bg-muted rounded">
-                      <span className="text-muted-foreground">{t("previewLabel")}</span>{" "}
-                      <span className="font-medium">{previewEnabled ? t("yes") : t("no")}</span>
-                    </div>
-                  </div>
-                  {tags.length > 0 && (
+              <Agent className="border-dashed" data-testid="custom-mode-agent-preview">
+                <AgentHeader name={name || t("unnamedMode")} model={modelOverride || undefined} />
+                <AgentContent>
+                  {description && <p className="text-sm text-muted-foreground">{description}</p>}
+                  <AgentInstructions label={t("systemPrompt")}>
+                    {systemPrompt || t("systemPromptPlaceholder")}
+                  </AgentInstructions>
+                  <div className="space-y-2">
+                    <span className="font-medium text-sm text-muted-foreground">{t("tools")}</span>
                     <div className="flex flex-wrap gap-1">
-                      {tags.map((tag) => (
-                        <Badge key={tag} variant="outline" className="text-[10px]">
-                          {tag}
+                      {[
+                        ...tools,
+                        ...mcpTools.map((tool) => `${tool.serverId}:${tool.toolName}`),
+                      ].map((tool) => (
+                        <Badge key={tool} variant="outline" className="font-mono text-[10px]">
+                          {tool}
                         </Badge>
                       ))}
+                      {tools.length + mcpTools.length === 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          {t("noToolsSelected")}
+                        </span>
+                      )}
                     </div>
-                  )}
-                </CardContent>
-              </Card>
+                  </div>
+                  <AgentOutput
+                    label={t("outputFormat")}
+                    schema={JSON.stringify({ type: outputFormat }, null, 2)}
+                  />
+                </AgentContent>
+              </Agent>
             </TabsContent>
 
             {/* AI Generation */}

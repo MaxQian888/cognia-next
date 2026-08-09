@@ -274,6 +274,29 @@ describe("probeMcpServer", () => {
     expect(aborted).toBe(true)
   })
 
+  it("closes a transport that finishes connecting after the probe timed out", async () => {
+    const close = jest.fn(async () => undefined)
+    const res = await probeMcpServer(srv(), {
+      timeoutMs: 5,
+      attempts: 1,
+      open: () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                client: {} as OpenedMcp["client"],
+                transport: {},
+                close,
+              }),
+            15
+          )
+        }),
+    })
+    expect(res.status).toBe("failed")
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
   it("skips resource/prompt listing when asked (status-only)", async () => {
     const listResources = jest.fn(async () => ({ resources: [] }))
     const listPrompts = jest.fn(async () => ({ prompts: [] }))

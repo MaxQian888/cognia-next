@@ -19,7 +19,54 @@
  *   node scripts/dev/free-port.mjs 4000       # frees 4000
  */
 
-import { execSync } from "node:child_process"
+import { Argument, Command, CommanderError } from "commander"
+import { execa } from "execa"
+import { z } from "zod"
+
+class UsageError extends Error {}
+
+const cliOptionsSchema = z.object({
+  port: z.coerce
+    .number({ error: "--port must be an integer between 1 and 65535" })
+    .int("--port must be an integer between 1 and 65535")
+    .min(1, "--port must be an integer between 1 and 65535")
+    .max(65_535, "--port must be an integer between 1 and 65535"),
+})
+
+function createProgram() {
+  return new Command()
+    .name("node scripts/dev/free-port.mjs")
+    .description("Release a stale TCP listener without ever blocking development startup.")
+    .configureHelp({ helpWidth: 120 })
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .addArgument(new Argument("[port]", "TCP port to release (legacy positional form)."))
+    .option("-p, --port <port>", "TCP port to release.")
+    .addHelpText(
+      "after",
+      "\nExamples:\n  node scripts/dev/free-port.mjs\n  node scripts/dev/free-port.mjs 4000\n  node scripts/dev/free-port.mjs --port 4000\n"
+    )
+}
+
+function parseCli(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    if (error instanceof CommanderError) throw new UsageError(error.message)
+    throw error
+  }
+  const positionalPort = program.args[0]
+  const optionPort = program.opts().port
+  if (positionalPort && optionPort) {
+    throw new UsageError("Specify the port either positionally or with --port, not both")
+  }
+  const result = cliOptionsSchema.safeParse({ port: positionalPort ?? optionPort ?? "3000" })
+  if (!result.success) throw new UsageError(result.error.issues[0].message)
+  return result.data
+}
 
 /** Parse `lsof -ti` output (one PID per line) into a unique numeric PID list. */
 export function parseUnixPids(stdout) {
@@ -67,7 +114,8 @@ export function parseSsPids(stdout) {
 
 /**
  * Parse `fuser <port>/tcp` output: a space-separated PID list (the `<port>/tcp:`
- * label is printed to stderr, which we drop). Last-ditch Linux fallback.
+ * label is usually printed to stderr and is included in the combined command
+ * output). Last-ditch Linux fallback.
  */
 export function parseFuserPids(stdout) {
   return uniquePids(
@@ -82,20 +130,21 @@ function uniquePids(pids) {
   return [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))]
 }
 
-/** Default runner: execute a command, returning stdout; "" on any failure. */
-function defaultExec(command) {
+/** Default runner: execute a command, returning combined output; "" on any failure. */
+async function defaultExec(command, args) {
   try {
-    return execSync(command, { stdio: ["ignore", "pipe", "ignore"] }).toString()
+    const result = await execa(command, args, { all: true, reject: false })
+    return result.all ?? ""
   } catch {
     return ""
   }
 }
 
 /** Default killer: SIGKILL on POSIX, `taskkill /F` on Windows. Never throws. */
-function defaultKill(pid, platform) {
+async function defaultKill(pid, platform) {
   try {
     if (platform === "win32") {
-      execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" })
+      await execa("taskkill", ["/F", "/PID", String(pid)], { reject: false })
     } else {
       process.kill(pid, "SIGKILL")
     }
@@ -111,18 +160,23 @@ function defaultKill(pid, platform) {
  * Linux), but minimal Linux environments (containers, CI images) often ship
  * without it, so we cascade `lsof → ss → fuser` and return the first tool that
  * yields any PID. Each tool is tried independently; a missing binary just
- * produces empty output via `defaultExec` and we fall through.
+ * produces empty output via `defaultExec` and we fall through. Command names
+ * and arguments stay separate, so an invalid CLI value can never become shell
+ * syntax.
  */
-export function findListenerPids(port, { platform = process.platform, exec = defaultExec } = {}) {
+export async function findListenerPids(
+  port,
+  { platform = process.platform, exec = defaultExec } = {}
+) {
   if (platform === "win32") {
-    return parseWindowsPids(exec("netstat -ano -p tcp"), port)
+    return parseWindowsPids(await exec("netstat", ["-ano", "-p", "tcp"]), port)
   }
   // -t = terse (PID only), restrict to LISTEN sockets.
-  const viaLsof = parseUnixPids(exec(`lsof -ti tcp:${port} -sTCP:LISTEN`))
+  const viaLsof = parseUnixPids(await exec("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"]))
   if (viaLsof.length > 0) return viaLsof
-  const viaSs = parseSsPids(exec(`ss -lptnH sport = :${port}`))
+  const viaSs = parseSsPids(await exec("ss", ["-lptnH", "sport", "=", `:${port}`]))
   if (viaSs.length > 0) return viaSs
-  return parseFuserPids(exec(`fuser ${port}/tcp 2>&1`))
+  return parseFuserPids(await exec("fuser", [`${port}/tcp`]))
 }
 
 /**
@@ -130,28 +184,30 @@ export function findListenerPids(port, { platform = process.platform, exec = def
  * side effects go through injectable `exec`/`kill`, so tests never touch real
  * processes. Never throws.
  */
-export function freePort(
+export async function freePort(
   port,
   { platform = process.platform, exec = defaultExec, kill = defaultKill, log = console.log } = {}
 ) {
-  const pids = findListenerPids(port, { platform, exec })
+  const pids = await findListenerPids(port, { platform, exec })
   if (pids.length === 0) {
     log(`[free-port] :${port} is free.`)
     return { killed: [] }
   }
-  for (const pid of pids) kill(pid, platform)
+  for (const pid of pids) await kill(pid, platform)
   log(`[free-port] killed ${pids.length} stale listener(s) on :${port} (pid ${pids.join(", ")}).`)
   return { killed: pids }
 }
 
-// Run only when invoked directly, not when imported by the test.
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
-  const port = Number.parseInt(process.argv[2] ?? "3000", 10) || 3000
+async function main() {
   try {
-    freePort(port)
+    const options = parseCli(process.argv.slice(2))
+    if (!options) return
+    await freePort(options.port)
   } catch (error) {
     // Defensive: dev startup must never be blocked by this guard.
     console.warn(`[free-port] skipped (${error?.message ?? error}).`)
   }
-  process.exit(0)
 }
+
+// Run only when invoked directly, not when imported by the test.
+if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) await main()

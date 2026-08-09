@@ -34,7 +34,18 @@ SHARE_UPLOAD_SECRET=... node ../../scripts/smoke/compose-smoke.mjs   # tier-1 sm
 For the `server` profile, `.env` additionally needs `COGNIA_MASTER_KEY`
 (`openssl rand -hex 32`) — there is no OS keyring inside a container, so the
 headless secret store (ADR-0059 W5) takes its master key from the environment.
-Losing it makes the store (device JWTs, provider creds) unreadable.
+Losing it makes the store (Host signaling identities, provider credentials,
+and other encrypted secrets) unreadable. Paired device private keys remain on
+the client and five-minute access tokens are process-memory only.
+
+The server-side WebRTC rendezvous uses `COGNIA_SIGNALING_URL`, which defaults
+to the Compose-internal `ws://signaling:7892/v2/signaling`. Browsers and mobile
+clients must never receive that Docker DNS name: set
+`COGNIA_PUBLIC_SIGNALING_URL` to the public `wss://<domain>/v2/signaling` URL,
+or leave it empty for `/api/auth/config` to derive the same-origin URL from the
+Caddy forwarded host and scheme. Caddy routes `/v2/signaling` to the signaling
+service while keeping the remaining API and WebSocket paths on
+`cognia-server`.
 
 ## Smoke test
 
@@ -51,6 +62,24 @@ Tiers `server`/`tls` shell into the container for the loopback-only steps
 (pair, service token). The default transport is `docker compose exec`; set
 `COGNIA_SMOKE_EXEC` to swap it (e.g. `kubectl exec` — see
 `deploy/k8s/README.md`).
+
+The nightly `Compose E2E` workflow also builds the Web image with its dedicated
+test bridge and runs `pnpm test:e2e:web-headless`. That lane creates a real
+Browser Vault, consumes a fresh cgnp3 Owner invitation through the `/pair` UI,
+checks the SecurityStore grant snapshot, proves single-use-ticket WS delivery
+and reconnect, observes a real WebRTC upgrade, forces HTTPS/WS fallback, reloads
+and unlocks the Vault, completes a streamed chat turn through the real Headless
+sidecar and a network-private deterministic Anthropic fixture, grants and
+revokes a second real browser device, switches between two independent Headless
+hosts and their isolated target databases, and exercises the exact-origin
+CORS/PNA matrix. It also runs the actual popup PKCE callback against a local
+OIDC discovery/JWKS/token fixture and verifies both the default multi-tenant
+member grants and a `brain:admin` Owner registration. The fixtures and extra
+hosts are defined only in `docker-compose.web-headless-e2e.yml`; the provider
+fixture has no host port, while the OIDC fixture's loopback port exists only for
+the browser test. None are part of the production topology. The test
+configuration is isolated in `playwright.web-headless.config.ts`; it is not
+part of the mock-backed default Playwright suite.
 
 ## T2 — split execution plane (`docker-compose.t2.yml`)
 

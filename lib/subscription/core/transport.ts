@@ -29,6 +29,7 @@ import type {
  */
 function vaultMutated(): void {
   markSubscriptionVaultChanged()
+  notifySubscriptionChanged()
 }
 
 function requireLocalAccountId(): string {
@@ -82,11 +83,16 @@ export async function saveAccount(provider: ProviderId, account: Account): Promi
   vaultMutated()
 }
 
-export async function deleteAccount(provider: ProviderId, accountId: string): Promise<void> {
+export async function deleteAccount(
+  provider: ProviderId,
+  accountId: string,
+  replacementAccountId: string | null = null
+): Promise<void> {
   await transport.call("subscription_delete_account", {
     provider,
     ...subscriptionScope(),
     accountId,
+    replacementAccountId,
   })
   vaultMutated()
 }
@@ -123,11 +129,16 @@ export async function setActiveAccount(
 ): Promise<void> {
   await transport.call("subscription_set_active", { provider, ...subscriptionScope(), accountId })
   vaultMutated()
-  // The active credential (and, for Anthropic, the in-process OAuth bearer) just
-  // changed. Wake any UI mirroring auth state (e.g. the chat header's
-  // No-API-key / subscription-tier badge) so it re-reads immediately instead of
-  // latching the pre-activation value.
-  notifySubscriptionChanged()
+}
+
+/**
+ * Clear every in-process provider credential owned by one local Cognia
+ * account. Unlike the vault-scoped helpers this accepts the scope explicitly:
+ * local-account lock/switch calls it before clearing `unlockedAccountId`.
+ */
+export async function clearSubscriptionRuntime(localAccountId: string): Promise<void> {
+  if (!localAccountId.trim()) throw new Error("localAccountId must not be empty")
+  await transport.call("subscription_clear_runtime", { localAccountId })
 }
 
 export async function getActiveAccount(provider: ProviderId): Promise<ActiveSnapshot> {
@@ -296,9 +307,8 @@ export async function volcengineUsage(
 // ---------------------------------------------------------------------------
 
 /**
- * Persist the result of a successful TS-side PKCE exchange. The renderer
- * holds the access/refresh tokens after the PKCE round-trip and posts them
- * down here; Rust validates + appends to the Anthropic vault.
+ * Validate and construct the result of a successful TS-side PKCE exchange.
+ * The renderer then passes the account to the generic atomic save command.
  *
  * `label` is the optional user-provided alias; pass `null` and the Rust side
  * derives one from plan + email claims.
@@ -312,7 +322,6 @@ export async function anthropicOauthSavePkceResult(
     payload,
     label,
   })
-  vaultMutated()
   return account
 }
 
@@ -460,10 +469,14 @@ export async function opencodeOauthDiscover(): Promise<DiscoveredOpencodeAuth | 
  * `opencode-discovered` accounts. The key is re-read host-side, so the secret
  * never crosses the renderer.
  */
-export async function opencodeAdoptDiscovered(subProvider: string): Promise<Account> {
-  const account = await transport.call<Account>("opencode_adopt_discovered", {
+export async function opencodeAdoptDiscovered(
+  subProvider: string,
+  accountId: string | null = null
+): Promise<AccountSummary> {
+  const account = await transport.call<AccountSummary>("opencode_adopt_discovered", {
     ...subscriptionScope(),
     subProvider,
+    accountId,
   })
   vaultMutated()
   return account
@@ -482,6 +495,5 @@ export async function opencodeSaveZenKey(
     label,
     plan,
   })
-  vaultMutated()
   return account
 }

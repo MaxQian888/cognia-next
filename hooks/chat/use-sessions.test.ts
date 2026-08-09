@@ -26,6 +26,7 @@ const archiveSessionMock = jest.fn()
 const unarchiveSessionMock = jest.fn()
 const bulkArchiveSessionsMock = jest.fn()
 const bulkUnarchiveSessionsMock = jest.fn()
+const bulkSetSessionsPinnedMock = jest.fn()
 const assignSessionToFolderMock = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
   createSession: (p: unknown) => createSessionMock(p),
@@ -39,6 +40,8 @@ jest.mock("@/lib/db/sessions", () => ({
   unarchiveSession: (id: string) => unarchiveSessionMock(id),
   bulkArchiveSessions: (ids: readonly string[]) => bulkArchiveSessionsMock(ids),
   bulkUnarchiveSessions: (ids: readonly string[]) => bulkUnarchiveSessionsMock(ids),
+  bulkSetSessionsPinned: (ids: readonly string[], pinned: boolean) =>
+    bulkSetSessionsPinnedMock(ids, pinned),
   assignSessionToFolder: (sid: string, fid: string | null) => assignSessionToFolderMock(sid, fid),
 }))
 
@@ -70,7 +73,10 @@ jest.mock("@/lib/claude/ipc", () => ({
 const chatStoreState = {
   setActiveSession: jest.fn(),
   setMessages: jest.fn(),
+  setMessagesLoadError: jest.fn(),
+  hydrateSessionActiveBranches: jest.fn(),
   activeSessionId: null as string | null,
+  messagesReloadNonce: 0,
 }
 
 jest.mock("@/stores/chat", () => ({
@@ -113,6 +119,7 @@ jest.mock("@/lib/tauri/transport-instance", () => ({
 const mockProjectState = {
   activeProjectId: null as string | null,
   loaded: false,
+  projects: [],
   addSessionToProject: jest.fn(),
 }
 jest.mock("@/stores/project/project-store", () => ({
@@ -147,6 +154,7 @@ beforeEach(() => {
   unarchiveSessionMock.mockReset().mockResolvedValue(undefined)
   bulkArchiveSessionsMock.mockReset().mockResolvedValue(undefined)
   bulkUnarchiveSessionsMock.mockReset().mockResolvedValue(undefined)
+  bulkSetSessionsPinnedMock.mockReset().mockResolvedValue(undefined)
   assignSessionToFolderMock.mockReset().mockResolvedValue(undefined)
   listFoldersMock.mockReset().mockResolvedValue([])
   createFolderDbMock.mockReset().mockResolvedValue({ id: "f-new" })
@@ -156,11 +164,17 @@ beforeEach(() => {
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   chatStoreState.setActiveSession.mockClear()
   chatStoreState.setMessages.mockClear()
+  chatStoreState.setMessagesLoadError.mockClear()
+  chatStoreState.hydrateSessionActiveBranches.mockClear()
   chatStoreState.activeSessionId = null
   isTauriMock.mockReset().mockReturnValue(true)
   isCapacitorMock.mockReset().mockReturnValue(false)
   hasWebCompanionTargetMock.mockReset().mockReturnValue(false)
-  hydrateSessionHistoryMock.mockReset().mockResolvedValue({ applied: 0, total: 0 })
+  hydrateSessionHistoryMock.mockReset().mockResolvedValue({
+    applied: 0,
+    total: 0,
+    mode: "legacy",
+  })
   mockProjectState.activeProjectId = null
   mockProjectState.loaded = false
   mockProjectState.addSessionToProject.mockReset()
@@ -265,6 +279,7 @@ describe("useSessions", () => {
     listMessagesMock.mockResolvedValueOnce([{ id: "m1" }])
     renderHook(() => useSessions())
     await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "m1" }]))
+    expect(chatStoreState.hydrateSessionActiveBranches).toHaveBeenCalledWith("s1", {})
   })
 
   it("unfolds complete cloud history before publishing the active session", async () => {
@@ -284,6 +299,21 @@ describe("useSessions", () => {
       ])
     )
     expect(hydrateSessionHistoryMock).toHaveBeenCalledWith(companionTransportMock, "s1")
+  })
+
+  it("keeps the bounded synced tail when the host supports transcript pages", async () => {
+    chatStoreState.activeSessionId = "s1"
+    isTauriMock.mockReturnValue(false)
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    listMessagesMock.mockResolvedValueOnce([{ id: "recent-tail" }])
+    hydrateSessionHistoryMock.mockResolvedValueOnce({ applied: 0, total: 0, mode: "timeline" })
+
+    renderHook(() => useSessions())
+
+    await waitFor(() =>
+      expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "recent-tail" }])
+    )
+    expect(listMessagesMock).toHaveBeenCalledTimes(1)
   })
 
   it.each([
@@ -500,13 +530,13 @@ describe("useSessions", () => {
     expect(closeSessionIpcMock).not.toHaveBeenCalled()
   })
 
-  it("bulkSetPinned fans out updateSession({pinned}) across every id", async () => {
+  it("bulkSetPinned delegates the whole selection to the atomic database operation", async () => {
     const { result } = renderHook(() => useSessions())
     await act(async () => {
       await result.current.bulkSetPinned(["s1", "s2"], true)
     })
-    expect(updateSessionMock).toHaveBeenCalledWith("s1", { pinned: true })
-    expect(updateSessionMock).toHaveBeenCalledWith("s2", { pinned: true })
+    expect(bulkSetSessionsPinnedMock).toHaveBeenCalledWith(["s1", "s2"], true)
+    expect(updateSessionMock).not.toHaveBeenCalled()
   })
 
   it("bulkSetPinned on an empty array does not touch Dexie", async () => {
@@ -514,7 +544,7 @@ describe("useSessions", () => {
     await act(async () => {
       await result.current.bulkSetPinned([], false)
     })
-    expect(updateSessionMock).not.toHaveBeenCalled()
+    expect(bulkSetSessionsPinnedMock).not.toHaveBeenCalled()
   })
 
   it("archive stamps the row and deselects it when it is the active session", async () => {

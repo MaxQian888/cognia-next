@@ -24,7 +24,11 @@ function initialStatus(transport: McpTransport): McpOAuthUiStatus {
   return isTauri() ? "loading" : "none"
 }
 
-export function useMcpOAuthStatus(serverName: string, transport: McpTransport): UseMcpOAuthStatus {
+export function useMcpOAuthStatus(
+  serverId: string,
+  transport: McpTransport,
+  legacyName?: string
+): UseMcpOAuthStatus {
   const [status, setStatus] = useState<McpOAuthUiStatus>(() => initialStatus(transport))
   const [expiresAtMs, setExpiresAtMs] = useState<number | undefined>(undefined)
 
@@ -32,7 +36,7 @@ export function useMcpOAuthStatus(serverName: string, transport: McpTransport): 
   // never fires synchronously inside the effect body.
   const probe = useCallback(async () => {
     try {
-      const s = await mcpOAuthStatus(serverName)
+      const s = await mcpOAuthStatus(serverId, legacyName)
       setExpiresAtMs(s.expiresAtMs)
       if (!s.hasTokens) setStatus("none")
       else if (s.expiresAtMs && s.expiresAtMs < Date.now()) setStatus("expired")
@@ -40,7 +44,7 @@ export function useMcpOAuthStatus(serverName: string, transport: McpTransport): 
     } catch {
       setStatus("none")
     }
-  }, [serverName])
+  }, [serverId, legacyName])
 
   useEffect(() => {
     // The synchronous states (stdio / web) are already set by the initializer.

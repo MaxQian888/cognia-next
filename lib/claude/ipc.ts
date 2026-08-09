@@ -17,6 +17,7 @@ import type {
   SdkSlashCommand,
   SendContent,
   SendOptions,
+  SessionApiMethod,
   SessionControlMethod,
   StoredMessage,
 } from "@cognia/agent-config-types"
@@ -24,6 +25,7 @@ import {
   isControlResponseEvent,
   isPluginToolExecEvent,
   isProtocolAdapterCancelEvent,
+  isSessionApiResponseEvent,
 } from "@cognia/agent-config-types"
 import type { PluginToolExecResponse } from "./plugin-tool-ipc"
 import type { ProtocolAdapterExecEvent } from "./protocol-adapter-ipc"
@@ -45,11 +47,27 @@ export async function sendPrompt(
   prompt: SendContent,
   options?: SendOptions
 ): Promise<void> {
+  const sdk = options?.claudeAgentSdk
   if (
     !hasNoLeakingPiiDeep({
       prompt,
       systemPrompt: options?.systemPrompt,
       appendSystemPrompt: options?.appendSystemPrompt,
+      ...(options?.agents ? { agents: options.agents } : {}),
+      ...(sdk
+        ? {
+            claudeAgentSdk: {
+              outputFormat: sdk.outputFormat,
+              permissionPromptToolName: sdk.permissionPromptToolName,
+              planModeInstructions: sdk.planModeInstructions,
+              plugins: sdk.plugins,
+              skills: sdk.skills,
+              toolAliases: sdk.toolAliases,
+              toolConfig: sdk.toolConfig,
+              tools: sdk.tools,
+            },
+          }
+        : {}),
     })
   ) {
     throw new Error("prompt rejected by the renderer PII gate")
@@ -159,7 +177,10 @@ function ensureControlListener(): Promise<UnlistenFn> {
         }
         return
       }
-      if (!isControlResponseEvent(evt)) return
+      // Both round-trips settle here. They share the map because they share a
+      // requestId space and the crash handling above: a session_api call
+      // orphaned by a sidecar restart is exactly as unanswerable as a control.
+      if (!isControlResponseEvent(evt) && !isSessionApiResponseEvent(evt)) return
       const pending = pendingControl.get(evt.requestId)
       if (!pending) return
       pendingControl.delete(evt.requestId)
@@ -182,10 +203,11 @@ const CONTROL_TIMEOUT_MS = 8000
  * call can't run. Anthropic-path + open-session only — callers degrade
  * gracefully on rejection.
  */
-async function sessionControlRequest<T>(
-  sessionId: string,
-  method: SessionControlMethod,
-  params?: Record<string, unknown>
+async function sidecarRoundTrip<T>(
+  command: string,
+  buildArgs: (requestId: string) => Record<string, unknown>,
+  label: string,
+  timeoutMs: number
 ): Promise<T> {
   // Await the subscription before firing so a fast reply can't race the listener.
   await ensureControlListener()
@@ -193,23 +215,34 @@ async function sessionControlRequest<T>(
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingControl.delete(requestId)
-      reject(new Error(`control "${method}" timed out`))
-    }, CONTROL_TIMEOUT_MS)
+      reject(new Error(`${label} timed out`))
+    }, timeoutMs)
     pendingControl.set(requestId, {
       resolve: (value) => resolve(value as T),
       reject,
       timer,
     })
-    transport
-      .call("claude_session_control", { sessionId, requestId, method, params })
-      .catch((err) => {
-        const pending = pendingControl.get(requestId)
-        if (!pending) return
-        pendingControl.delete(requestId)
-        clearTimeout(timer)
-        reject(err instanceof Error ? err : new Error(String(err)))
-      })
+    transport.call(command, buildArgs(requestId)).catch((err) => {
+      const pending = pendingControl.get(requestId)
+      if (!pending) return
+      pendingControl.delete(requestId)
+      clearTimeout(timer)
+      reject(err instanceof Error ? err : new Error(String(err)))
+    })
   })
+}
+
+async function sessionControlRequest<T>(
+  sessionId: string,
+  method: SessionControlMethod,
+  params?: Record<string, unknown>
+): Promise<T> {
+  return sidecarRoundTrip<T>(
+    "claude_session_control",
+    (requestId) => ({ sessionId, requestId, method, params }),
+    `control "${method}"`,
+    CONTROL_TIMEOUT_MS
+  )
 }
 
 export async function sessionControl<T = unknown>(
@@ -233,18 +266,26 @@ export function getSessionMcpStatus(sessionId: string): Promise<SdkMcpServerStat
   return sessionControl<SdkMcpServerStatus[]>(sessionId, "mcpServerStatus")
 }
 
-/** Reconnect a failed/needs-auth MCP server on the running session. */
-export function reconnectSessionMcpServer(sessionId: string, name: string): Promise<void> {
-  return sessionControl<void>(sessionId, "reconnectMcpServer", { name })
+/**
+ * Reconnect a failed/needs-auth MCP server on the running session.
+ *
+ * The wire param is `serverName`, matching the SDK's own parameter name. Every
+ * control's params are named after the SDK signature so that
+ * `protocol/agent-control-methods.json` can carry one `args` list and the gate
+ * can compare it against `controlArgs` — the old `name` here was the single
+ * exception, and it was already out of step with the manifest.
+ */
+export function reconnectSessionMcpServer(sessionId: string, serverName: string): Promise<void> {
+  return sessionControl<void>(sessionId, "reconnectMcpServer", { serverName })
 }
 
 /** Enable/disable an MCP server on the running session. */
 export function toggleSessionMcpServer(
   sessionId: string,
-  name: string,
+  serverName: string,
   enabled: boolean
 ): Promise<unknown> {
-  return sessionControl<unknown>(sessionId, "toggleMcpServer", { name, enabled })
+  return sessionControl<unknown>(sessionId, "toggleMcpServer", { serverName, enabled })
 }
 
 /** Account-authoritative model list (with per-model capability flags). */
@@ -281,6 +322,155 @@ export async function steerSession(
     priority: "now",
     ...(sourceMessageId ? { sourceMessageId } : {}),
   })
+}
+
+// ---- Session-level SDK functions (the `session_api` frame) ----------------
+//
+// `sessionControl` above drives a LIVE query by session id. These do the
+// opposite: they read and mutate transcripts on disk with no session running,
+// which is what makes session management reachable from Settings with no chat
+// open. Same correlation machinery, different Tauri command and frame type.
+
+/**
+ * A filesystem scan across every project directory can genuinely outrun the
+ * 8s control budget on a large machine, and a timeout there reads to the user
+ * as a broken feature rather than a slow one.
+ */
+const SESSION_API_TIMEOUT_MS = 20_000
+
+/**
+ * Call an allowlisted session-level SDK function and await its result.
+ *
+ * `sendOptions` names the SessionStore backend for the call — it is forwarded
+ * verbatim to the sidecar, which resolves it to a live store. The renderer
+ * never sends a store: the descriptor names a backend, never a location.
+ *
+ * Rejects with the sidecar's stable error code (`unknown_method`,
+ * `invalid_session_id`, `no_session_store`, …) or `sidecar exited`. Callers
+ * that can run against a non-Anthropic runtime must gate on
+ * `SESSION_API_CAPABILITIES` first — this is IPC, and ADR-0090 constraint 3
+ * wants the fail-closed decision made before it.
+ */
+export async function sessionApi<T = unknown>(
+  method: SessionApiMethod,
+  params?: Record<string, unknown>,
+  sendOptions?: Pick<SendOptions, "cwd" | "execution" | "claudeAgentSdk">
+): Promise<T> {
+  return sidecarRoundTrip<T>(
+    "agent_session_api",
+    (requestId) => ({ requestId, method, params, sendOptions }),
+    `session api "${method}"`,
+    SESSION_API_TIMEOUT_MS
+  )
+}
+
+/** Sessions the SDK can see, from the store and/or `dir`'s transcripts. */
+export function listSdkSessions<T = unknown>(
+  params?: { dir?: string },
+  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+): Promise<T> {
+  return sessionApi<T>("listSessions", params, sendOptions)
+}
+
+/** Metadata for one session (title, tag, timestamps). */
+export function getSdkSessionInfo<T = unknown>(
+  sessionId: string,
+  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+): Promise<T> {
+  return sessionApi<T>("getSessionInfo", { sessionId }, sendOptions)
+}
+
+/**
+ * One session's message chain.
+ *
+ * This is the COMPACTED chain — the SDK drops what compaction replaced. A
+ * caller that needs the raw history reads the store directly rather than
+ * "fixing" a short result by re-fetching here.
+ */
+export function getSdkSessionMessages<T = unknown>(
+  sessionId: string,
+  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+): Promise<T> {
+  return sessionApi<T>("getSessionMessages", { sessionId }, sendOptions)
+}
+
+/** Subagents that ran inside a session. */
+export function listSdkSubagents<T = unknown>(
+  sessionId: string,
+  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+): Promise<T> {
+  return sessionApi<T>("listSubagents", { sessionId }, sendOptions)
+}
+
+/** One subagent's own message chain. */
+export function getSdkSubagentMessages<T = unknown>(
+  sessionId: string,
+  agentId: string,
+  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+): Promise<T> {
+  return sessionApi<T>("getSubagentMessages", { sessionId, agentId }, sendOptions)
+}
+
+/** Retitle a session. */
+export function renameSdkSession(
+  sessionId: string,
+  title: string,
+  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+): Promise<void> {
+  return sessionApi<void>("renameSession", { sessionId, title }, sendOptions)
+}
+
+/** Set or clear a session's tag. `null` is the documented "clear" value. */
+export function tagSdkSession(
+  sessionId: string,
+  tag: string | null,
+  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+): Promise<void> {
+  return sessionApi<void>("tagSession", { sessionId, tag }, sendOptions)
+}
+
+/**
+ * Delete a session's transcript.
+ *
+ * Irreversible, and it cascades to the session's subagent transcripts. Callers
+ * owe the user a confirmation — {@link isMutatingSessionApiMethod} is exported
+ * from the contract so a UI can decide that from the method rather than from a
+ * hand-maintained list of "the scary ones".
+ */
+export function deleteSdkSession(
+  sessionId: string,
+  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+): Promise<void> {
+  return sessionApi<void>("deleteSession", { sessionId }, sendOptions)
+}
+
+/** Copy a session so a new branch can diverge from it. */
+export function forkSdkSession<T = unknown>(
+  sessionId: string,
+  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+): Promise<T> {
+  return sessionApi<T>("forkSession", { sessionId }, sendOptions)
+}
+
+/**
+ * Copy a local JSONL transcript into the configured SessionStore.
+ *
+ * Requires a store — without one the sidecar rejects with `no_session_store`
+ * rather than silently doing nothing.
+ */
+export function importSdkSessionToStore<T = unknown>(
+  sessionId: string,
+  sendOptions?: Pick<SendOptions, "cwd" | "execution" | "claudeAgentSdk">
+): Promise<T> {
+  return sessionApi<T>("importSessionToStore", { sessionId }, sendOptions)
+}
+
+/** The effective settings layers the SDK would apply (user/project/local). */
+export function resolveSdkSettings<T = unknown>(
+  params?: { dir?: string },
+  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+): Promise<T> {
+  return sessionApi<T>("resolveSettings", params, sendOptions)
 }
 
 // ---- Mobile-only message + session RPCs (mobile completeness Phase 2) ----
@@ -682,6 +872,15 @@ export async function writeAgentConfig(agent: AgentId, value: unknown): Promise<
   return transport.call<AgentWriteResult>("write_agent_config", { agent, value })
 }
 
+/**
+ * Read a workspace's project-scoped `.mcp.json`. Read-only: that file is
+ * normally committed and shared with the user's teammates, so Cognia imports
+ * from it but never writes back.
+ */
+export async function readProjectMcpConfig(cwd: string): Promise<AgentReadResult> {
+  return transport.call<AgentReadResult>("read_project_mcp_config", { cwd })
+}
+
 // ---- Skills (native sync, marketplace registry, scanner) -----------------
 
 export interface NativeSkillResource {
@@ -843,6 +1042,17 @@ export async function skillsScanCodex(): Promise<NativeSkill[]> {
   return transport.call<NativeSkill[]>("skills_scan_codex")
 }
 
+/** Scan OpenCode's environment-aware global `skills/` directory. */
+export async function skillsScanOpencode(): Promise<NativeSkill[]> {
+  const [{ resolveVendorRoots }, { joinPath }] = await Promise.all([
+    import("@/lib/agent-roots"),
+    import("@/lib/claude/instructions/paths"),
+  ])
+  const { opencodeConfigDir } = await resolveVendorRoots()
+  if (!opencodeConfigDir) return []
+  return skillsScanDir(joinPath(opencodeConfigDir, "skills"))
+}
+
 export async function skillsMoveToTrash(dirName: string): Promise<string> {
   return transport.call<string>("skills_move_to_trash", { dirName })
 }
@@ -906,65 +1116,4 @@ export async function skillsScanResources(
   resources: Array<[string, string]>
 ): Promise<SkillScanIssue[]> {
   return transport.call<SkillScanIssue[]>("skills_scan_resources", { resources })
-}
-
-// ---- MCP server health-check / tool discovery ----------------------------
-
-export interface McpToolInfo {
-  name: string
-  description?: string
-}
-
-export interface McpTestResult {
-  ok: boolean
-  toolCount: number
-  tools: McpToolInfo[]
-  error?: string
-  durationMs: number
-}
-
-export interface McpTestRequest {
-  transport: "stdio" | "sse" | "http"
-  /** stdio only — the executable to spawn. */
-  command?: string
-  /** stdio only — argv after the executable. */
-  args?: string[]
-  /** stdio only — environment overrides. */
-  env?: Record<string, string>
-  /** sse / http only — endpoint URL. */
-  url?: string
-  /** sse / http only — extra request headers. */
-  headers?: Record<string, string>
-}
-
-/**
- * Probe an MCP server and report whether it responded plus the discovered
- * tool list. Times out at 10s.
- *
- *   - `stdio`: spawn the executable, walk the JSON-RPC handshake.
- *   - `http`:  open a streamable-HTTP session, run `initialize` + `tools/list`.
- *   - `sse`:   open the SSE endpoint, run the same handshake over the stream.
- *
- * Per-transport implementations live in `src-tauri/src/claude/mcp_test.rs`.
- * Errors are normalised to a single `error` string so the UI can render any
- * failure mode without branching on transport.
- */
-export async function testMcpServer(req: McpTestRequest): Promise<McpTestResult> {
-  const raw = await transport.call<{
-    ok: boolean
-    tool_count: number
-    tools: { name: string; description?: string | null }[]
-    error?: string | null
-    duration_ms: number
-  }>("test_mcp_server", { ...req })
-  return {
-    ok: raw.ok,
-    toolCount: raw.tool_count,
-    tools: raw.tools.map((t) => ({
-      name: t.name,
-      description: t.description ?? undefined,
-    })),
-    error: raw.error ?? undefined,
-    durationMs: raw.duration_ms,
-  }
 }

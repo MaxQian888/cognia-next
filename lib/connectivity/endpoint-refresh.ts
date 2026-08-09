@@ -40,7 +40,7 @@ export interface CompanionEndpoints {
   tunnelBaseUrl: string | null
   /** Lower-case hex SHA-256 of the desktop's self-signed TLS SPKI. */
   fingerprint: string
-  /** Stable installation id — same value `/api/v1/healthz` returns. */
+  /** Stable installation id — same value `/healthz` returns. */
   serverId: string
 }
 

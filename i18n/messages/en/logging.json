@@ -416,6 +416,39 @@
       "remoteQueueEntriesDesc": "Maximum queued log entries for remote retry",
       "title": "Advanced Controls"
     },
+    "behaviorTelemetry": {
+      "categories": {
+        "agentTeam": "Agent Team execution",
+        "chat": "Chat lifecycle",
+        "connector": "Connector messages",
+        "description": "Disable any product area you do not want included.",
+        "system": "Telemetry preferences",
+        "title": "Event categories",
+        "workflow": "Workflow runs"
+      },
+      "clear": "Clear local events",
+      "destinations": {
+        "description": "Choose where eligible events are written. Remote export also requires an enabled OTLP exporter.",
+        "local": {
+          "description": "Keep a bounded event history in this device's local database.",
+          "label": "Store locally"
+        },
+        "remote": {
+          "description": "Send sampled events to the configured OTLP Logs endpoint.",
+          "label": "Export remotely"
+        },
+        "title": "Destinations"
+      },
+      "disclosure": "When enabled, Cognia stores registered interaction events locally and can send them to your configured OTLP endpoint. Message content, prompts, responses, and secrets are not collected.",
+      "exportCsv": "Export CSV",
+      "exportJson": "Export JSON",
+      "maxStoredEvents": "Maximum local events",
+      "optIn": "Share behavior events",
+      "optInDesc": "Off by default. Engineering traces and behavior events use separate switches.",
+      "retentionDays": "Local retention (days)",
+      "sampleRate": "Sampling rate",
+      "title": "Behavior telemetry"
+    },
     "logLevel": {
       "debug": "Debug",
       "debugDesc": "Development debugging information",
@@ -500,39 +533,6 @@
       "title": "Sampling Rules"
     },
     "save": "Save",
-    "behaviorTelemetry": {
-      "title": "Behavior telemetry",
-      "disclosure": "When enabled, Cognia stores registered interaction events locally and can send them to your configured OTLP endpoint. Message content, prompts, responses, and secrets are not collected.",
-      "optIn": "Share behavior events",
-      "optInDesc": "Off by default. Engineering traces and behavior events use separate switches.",
-      "destinations": {
-        "title": "Destinations",
-        "description": "Choose where eligible events are written. Remote export also requires an enabled OTLP exporter.",
-        "local": {
-          "label": "Store locally",
-          "description": "Keep a bounded event history in this device's local database."
-        },
-        "remote": {
-          "label": "Export remotely",
-          "description": "Send sampled events to the configured OTLP Logs endpoint."
-        }
-      },
-      "categories": {
-        "title": "Event categories",
-        "description": "Disable any product area you do not want included.",
-        "chat": "Chat lifecycle",
-        "workflow": "Workflow runs",
-        "connector": "Connector messages",
-        "agentTeam": "Agent Team execution",
-        "system": "Telemetry preferences"
-      },
-      "sampleRate": "Sampling rate",
-      "retentionDays": "Local retention (days)",
-      "maxStoredEvents": "Maximum local events",
-      "exportJson": "Export JSON",
-      "exportCsv": "Export CSV",
-      "clear": "Clear local events"
-    },
     "saveError": "Failed to save settings",
     "saved": "Saved!",
     "saving": "Saving...",
@@ -547,6 +547,7 @@
       "agentTraceDesc": "Persist one span per chat turn, tool call, and teammate handoff to local Dexie. Powers the /logs Agent Trace tab.",
       "agentTraceOtlp": "OTLP exporter (Grafana)",
       "agentTraceOtlpDesc": "Push agent-trace spans to an OTel-compatible backend (Grafana Cloud, Tempo, Honeycomb, Datadog, or a self-hosted collector).",
+      "clearStoredSecret": "Clear stored secret",
       "console": "Console Output",
       "consoleDesc": "Output logs to browser console",
       "consoleDetail": "Always mirrors logs to the current runtime console.",
@@ -563,8 +564,6 @@
       "langfusePublicKeyPlaceholder": "pk-live-...",
       "langfuseSecretKey": "Secret Key",
       "langfuseSecretKeyPlaceholder": "sk-live-...",
-      "secretConfiguredPlaceholder": "Stored securely — enter a new value to replace",
-      "clearStoredSecret": "Clear stored secret",
       "native": "Platform Logging",
       "nativeBatchSize": "Batch Size",
       "nativeDesc": "Forward warn/error/fatal entries to OS-native diagnostics.",
@@ -578,12 +577,14 @@
       "remoteFlushInterval": "Flush Interval",
       "remoteMaxRetries": "Max Retries",
       "remoteRetryDelay": "Retry Delay",
+      "secretConfiguredPlaceholder": "Stored securely — enter a new value to replace",
       "title": "Log Transports"
     },
     "unsavedChanges": "Unsaved changes"
   },
   "settingsDescription": "Configure log levels, transports, and retention policies",
   "settingsTitle": "Logging Configuration",
+  "statusSr": "status: {status}",
   "timeline": {
     "clear": "Clear",
     "empty": "No data yet",
@@ -612,7 +613,6 @@
     "toolName": "Tool",
     "totalTokens": "Total"
   },
-  "statusSr": "status: {status}",
   "workspace": {
     "advanced": {
       "capabilities": {

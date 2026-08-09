@@ -8,7 +8,7 @@
 import React, { memo } from "react"
 import { cn } from "@/lib/utils"
 import { AlertCircle, RefreshCw } from "lucide-react"
-import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
+import { ErrorTraceDetails } from "@/components/error/error-trace-details"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
 import type { A2UIComponentProps, A2UIBaseComponent } from "@/types/a2ui/schema"

@@ -1,0 +1,682 @@
+{
+  "id": "github-delivery",
+  "name": "GitHub Delivery",
+  "description": "GitHub pull request, issue, review, release, tag, and Issue→PR delivery.",
+  "author": {
+    "name": "Cognia Official",
+    "publicKey": "HywtZKOopAEuRqZGzXIfdqo9ID/FfBgXFvKIj9TF4N0="
+  },
+  "version": "3.0.0",
+  "type": "frontend",
+  "capabilities": ["integrations"],
+  "permissions": [
+    "integrations:read",
+    "integrations:events",
+    "integrations:execute",
+    "integrations:manage"
+  ],
+  "main": "dist/index.js",
+  "integrations": [
+    {
+      "id": "github",
+      "label": "GitHub",
+      "description": "Pull requests, issues, reviews, releases, tags, and Issue→PR delivery.",
+      "authStrategies": [
+        {
+          "id": "github-app",
+          "type": "app",
+          "label": "GitHub App",
+          "providerId": "github-app",
+          "scopes": [
+            "checks:read",
+            "contents:write",
+            "issues:write",
+            "metadata:read",
+            "pull_requests:write"
+          ],
+          "configSchema": {
+            "type": "object",
+            "required": ["appId", "installationId", "privateKey"],
+            "properties": {
+              "appId": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "installationId": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "privateKey": {
+                "type": "string",
+                "format": "secret",
+                "minLength": 1
+              },
+              "accountLabel": {
+                "type": "string"
+              }
+            }
+          },
+          "requestAuth": {
+            "type": "bearer"
+          }
+        },
+        {
+          "id": "pat",
+          "type": "personal-access-token",
+          "label": "Personal access token (advanced)",
+          "providerId": "github-pat",
+          "scopes": ["repo"],
+          "configSchema": {
+            "type": "object",
+            "required": ["token", "accountLabel"],
+            "properties": {
+              "token": {
+                "type": "string",
+                "format": "secret",
+                "minLength": 1
+              },
+              "accountLabel": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "requestAuth": {
+            "type": "bearer"
+          }
+        }
+      ],
+      "resourceKinds": ["repository", "installation"],
+      "resourceProvider": {
+        "handler": "listGithubResources",
+        "kinds": ["repository"]
+      },
+      "healthProvider": {
+        "handler": "checkGithubHealth"
+      },
+      "eventTypes": [
+        {
+          "id": "pull_request.opened",
+          "label": "pull_request.opened",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.synchronize",
+          "label": "pull_request.synchronize",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.closed",
+          "label": "pull_request.closed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.review_requested",
+          "label": "pull_request.review_requested",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.opened",
+          "label": "issues.opened",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.closed",
+          "label": "issues.closed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.assigned",
+          "label": "issues.assigned",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.labeled",
+          "label": "issues.labeled",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issue_comment.created",
+          "label": "issue_comment.created",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "check_run.completed",
+          "label": "check_run.completed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request_review.submitted",
+          "label": "pull_request_review.submitted",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "release.published",
+          "label": "release.published",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "push.received",
+          "label": "push.received",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "installation.created",
+          "label": "installation.created",
+          "resourceKinds": ["installation"]
+        },
+        {
+          "id": "installation.deleted",
+          "label": "installation.deleted",
+          "resourceKinds": ["installation"]
+        },
+        {
+          "id": "installation.suspend",
+          "label": "installation.suspend",
+          "resourceKinds": ["installation"]
+        },
+        {
+          "id": "installation.unsuspend",
+          "label": "installation.unsuspend",
+          "resourceKinds": ["installation"]
+        },
+        {
+          "id": "installation.new_permissions_accepted",
+          "label": "installation.new_permissions_accepted",
+          "resourceKinds": ["installation"]
+        },
+        {
+          "id": "installation_repositories.added",
+          "label": "installation_repositories.added",
+          "resourceKinds": ["installation"]
+        },
+        {
+          "id": "installation_repositories.removed",
+          "label": "installation_repositories.removed",
+          "resourceKinds": ["installation"]
+        },
+        {
+          "id": "github_app_authorization.revoked",
+          "label": "github_app_authorization.revoked",
+          "resourceKinds": ["repository"]
+        }
+      ],
+      "inboxProjections": [
+        {
+          "id": "pull-request-thread",
+          "label": "Pull request thread",
+          "eventTypes": [
+            "pull_request.opened",
+            "pull_request.synchronize",
+            "pull_request.closed",
+            "pull_request.review_requested",
+            "pull_request_review.submitted"
+          ],
+          "threadKeyPointer": "/pull_request/number",
+          "titlePointer": "/pull_request/title",
+          "bodyPointer": "/pull_request/body",
+          "urlPointer": "/pull_request/html_url"
+        },
+        {
+          "id": "issue-thread",
+          "label": "Issue thread",
+          "eventTypes": ["issues.opened", "issues.closed", "issues.assigned", "issues.labeled"],
+          "threadKeyPointer": "/issue/number",
+          "titlePointer": "/issue/title",
+          "bodyPointer": "/issue/body",
+          "urlPointer": "/issue/html_url"
+        },
+        {
+          "id": "issue-comment-thread",
+          "label": "Issue comment thread",
+          "eventTypes": ["issue_comment.created"],
+          "threadKeyPointer": "/issue/number",
+          "titlePointer": "/issue/title",
+          "bodyPointer": "/comment/body",
+          "urlPointer": "/comment/html_url"
+        }
+      ],
+      "actions": [
+        {
+          "id": "openPr",
+          "label": "openPr",
+          "handler": "openPr",
+          "risk": "write",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "title", "head", "base"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "title": {
+                "type": "string"
+              },
+              "head": {
+                "type": "string"
+              },
+              "base": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "draft": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "closePr",
+          "label": "closePr",
+          "handler": "closePr",
+          "risk": "destructive",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "prNumber"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "prNumber": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "mergePr",
+          "label": "mergePr",
+          "handler": "mergePr",
+          "risk": "destructive",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "prNumber"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "prNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "mergeMethod": {
+                "type": "string",
+                "enum": ["merge", "squash", "rebase"]
+              },
+              "commitTitle": {
+                "type": "string"
+              },
+              "commitMessage": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "reviewPr",
+          "label": "reviewPr",
+          "handler": "reviewPr",
+          "risk": "write",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "prNumber", "body"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "prNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "body": {
+                "type": "string"
+              },
+              "event": {
+                "type": "string",
+                "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT"]
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "reviewPrInline",
+          "label": "reviewPrInline",
+          "handler": "reviewPrInline",
+          "risk": "write",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "prNumber", "comments"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "prNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "body": {
+                "type": "string"
+              },
+              "event": {
+                "type": "string",
+                "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT"]
+              },
+              "comments": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "commentPr",
+          "label": "commentPr",
+          "handler": "commentPr",
+          "risk": "write",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "prNumber", "body"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "prNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "body": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "commentIssue",
+          "label": "commentIssue",
+          "handler": "commentIssue",
+          "risk": "write",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "issueNumber", "body"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "issueNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "body": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "labelIssue",
+          "label": "labelIssue",
+          "handler": "labelIssue",
+          "risk": "write",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "issueNumber", "labels"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "issueNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "closeIssue",
+          "label": "closeIssue",
+          "handler": "closeIssue",
+          "risk": "destructive",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "issueNumber"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "issueNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["completed", "not_planned"]
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "createRelease",
+          "label": "createRelease",
+          "handler": "createRelease",
+          "risk": "destructive",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "tag"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "tag": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "draft": {
+                "type": "boolean"
+              },
+              "prerelease": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "generateChangelog",
+          "label": "generateChangelog",
+          "handler": "generateChangelog",
+          "risk": "read",
+          "idempotency": "supported",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "base", "head"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "base": {
+                "type": "string"
+              },
+              "head": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "pushTag",
+          "label": "pushTag",
+          "handler": "pushTag",
+          "risk": "destructive",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "tag", "sha"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "tag": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "runIssueLoop",
+          "label": "runIssueLoop",
+          "handler": "runIssueLoop",
+          "risk": "write",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "issueNumber", "head", "base"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "issueNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "head": {
+                "type": "string"
+              },
+              "base": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 1800000
+        }
+      ],
+      "ingress": {
+        "normalizer": "normalizeGithub",
+        "verification": {
+          "type": "hmac-sha256",
+          "signatureHeader": "x-hub-signature-256",
+          "encoding": "hex",
+          "prefix": "sha256=",
+          "signedPayload": [
+            {
+              "source": "body"
+            }
+          ]
+        },
+        "deliveryIdHeader": "x-github-delivery",
+        "eventTypeHeader": "x-github-event"
+      },
+      "allowedOrigins": ["https://api.github.com"]
+    }
+  ],
+  "workflowKindAliases": {
+    "trigger.github.webhook": "trigger.integration.event",
+    "action.github.openPr": "github-delivery.action.openPr",
+    "action.github.closePr": "github-delivery.action.closePr",
+    "action.github.mergePr": "github-delivery.action.mergePr",
+    "action.github.reviewPr": "github-delivery.action.reviewPr",
+    "action.github.reviewPrInline": "github-delivery.action.reviewPrInline",
+    "action.github.commentPr": "github-delivery.action.commentPr",
+    "action.github.commentIssue": "github-delivery.action.commentIssue",
+    "action.github.labelIssue": "github-delivery.action.labelIssue",
+    "action.github.closeIssue": "github-delivery.action.closeIssue",
+    "action.github.createRelease": "github-delivery.action.createRelease",
+    "action.github.generateChangelog": "github-delivery.action.generateChangelog",
+    "action.github.pushTag": "github-delivery.action.pushTag",
+    "action.github.runIssueLoop": "github-delivery.action.runIssueLoop"
+  },
+  "dexie": {
+    "tables": [
+      {
+        "name": "repos",
+        "schema": "&fullName, credentialMode, createdAt"
+      },
+      {
+        "name": "workOrders",
+        "schema": "++id, [status+repoFullName], issueNumber, prNumber, createdAt, updatedAt"
+      },
+      {
+        "name": "events",
+        "schema": "&deliveryId, [repoFullName+seenAt], kind, source"
+      },
+      {
+        "name": "audit",
+        "schema": "++id, [repoFullName+at], runId, &[runId+stepId+at]"
+      }
+    ]
+  }
+}

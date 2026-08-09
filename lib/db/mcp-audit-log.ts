@@ -3,19 +3,20 @@
  *
  * Every MCP request that flows through the bridge writes one row here so the
  * Settings UI can render a "what's been called recently" table and the user
- * can spot scope-denied calls or unexpected tools. The cap is 5000 newest
- * rows — `appendMcpAuditLog` prunes the oldest 100 in the same transaction
- * once a write would exceed the cap, so the table stays bounded without a
- * background sweep.
+ * can spot scope-denied calls or unexpected tools. `appendMcpAuditLog` keeps
+ * the newest 10,000 rows and removes entries older than 30 days in the same
+ * transaction, so the table stays bounded without a background sweep.
  *
  * Pattern mirrors `lib/db/backup-history.ts` (50-row cap there); the wider
- * cap here reflects the higher per-session call volume from external agents.
+ * cap here reflects the higher per-session call volume from external agents;
+ * rows also expire after 30 days.
  */
 
 import type { McpAuditLogRow } from "@/types/wiki"
 import { getDb } from "./schema"
 
-const AUDIT_CAP = 5000
+const AUDIT_CAP = 10_000
+const AUDIT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
 function newId(): string {
   return "mau_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -34,10 +35,24 @@ export async function appendMcpAuditLog(draft: McpAuditDraft): Promise<McpAuditL
     allowed: draft.allowed,
     latencyMs: draft.latencyMs,
     reason: draft.reason,
-    errorMessage: draft.errorMessage,
+    // Raw exception text can contain arguments, endpoints, or credentials.
+    // New rows persist only a bounded errorCode; the optional legacy field
+    // remains in the read type so old databases can still be opened.
+    errorMessage: undefined,
+    direction: draft.direction,
+    phase: draft.phase,
+    serverId: draft.serverId,
+    executionSurface: draft.executionSurface,
+    decision: draft.decision,
+    durationMs: draft.durationMs,
+    errorCode: draft.errorCode,
   }
   await db.transaction("rw", db.mcpAuditLog, async () => {
     await db.mcpAuditLog.add(row)
+    await db.mcpAuditLog
+      .where("ts")
+      .below(row.ts - AUDIT_RETENTION_MS)
+      .delete()
     await pruneOldest(AUDIT_CAP)
   })
   return row
@@ -91,4 +106,4 @@ async function pruneOldest(keep: number): Promise<void> {
 }
 
 /** Test-only escape hatch so suites can validate the prune math. */
-export const __TESTING__ = { AUDIT_CAP, pruneOldest }
+export const __TESTING__ = { AUDIT_CAP, AUDIT_RETENTION_MS, pruneOldest }

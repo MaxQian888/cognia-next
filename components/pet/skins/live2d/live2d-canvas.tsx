@@ -11,9 +11,10 @@
 
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { createLive2dLoader } from "@/lib/pet/live2d/loader"
-import { getPetModel, getPetModelEntries } from "@/lib/db/pet-models"
+import { loadLive2dSkinAsset } from "@/lib/pet/skin-assets"
+import { getPetSkinRuntime } from "@/lib/pet/skin-runtime"
 import { extractMotionGroupCounts } from "@/lib/pet/live2d/manifest"
 import { readBlobText } from "@/lib/pet/live2d/read-blob-text"
 import type { Live2DManifest, Live2dCapabilities } from "@/lib/pet/live2d/types"
@@ -28,6 +29,12 @@ import { useIdleQuiescence } from "@/hooks/pet/use-idle-quiescence"
 import { useLive2dMotion, type Live2dModelLike } from "./use-live2d-motion"
 import { useLive2dLipSync, type Live2dLipSyncModel } from "./use-live2d-lip-sync"
 import { useLive2dParamEmotion } from "./use-live2d-param-emotion"
+import { useLive2dGaze } from "./use-live2d-gaze"
+import {
+  readLive2dParameterIds,
+  resolveLive2dParameterMapping,
+} from "@/lib/pet/live2d/parameter-mapping"
+import type { Live2dParameterMapping } from "@/types/pet"
 
 export interface Live2dCanvasProps extends PetSkinRenderProps {
   modelId: string
@@ -38,6 +45,8 @@ export interface Live2dCanvasProps extends PetSkinRenderProps {
   transform?: Live2dTransform
   /** Per-model state→motion/expression overrides. */
   motionOverrides?: Live2dMotionOverrides
+  /** Draft per-model parameter mappings used by the configuration preview. */
+  parameterMappingOverrides?: Live2dParameterMapping
   /** True while a speech bubble is showing — drives the lip-sync mouth flap. */
   speaking?: boolean
   /** Reports a typed failure so the boundary can degrade to the SVG skin. */
@@ -133,7 +142,10 @@ export default function Live2dCanvas({
   lowPower = false,
   transform,
   motionOverrides,
+  parameterMappingOverrides,
   speaking = false,
+  lookTarget,
+  held,
   onError,
 }: Live2dCanvasProps) {
   const ready = useStrictModeSafeInit()
@@ -144,6 +156,20 @@ export default function Live2dCanvas({
     motionGroups: [],
     expressionIds: [],
   })
+  const [assetTransform, setAssetTransform] = useState<Live2dTransform | undefined>()
+  const [assetMotionOverrides, setAssetMotionOverrides] = useState<
+    Live2dMotionOverrides | undefined
+  >()
+  const [parameterIds, setParameterIds] = useState<string[]>([])
+  const [assetParameterMapping, setAssetParameterMapping] = useState<Live2dParameterMapping>()
+  const parameterMapping = useMemo(
+    () =>
+      resolveLive2dParameterMapping(
+        parameterIds,
+        parameterMappingOverrides ?? assetParameterMapping
+      ),
+    [assetParameterMapping, parameterIds, parameterMappingOverrides]
+  )
 
   // Report errors through a ref so the async init closure doesn't capture a
   // stale callback and so changing `onError` never re-runs the heavy effect.
@@ -166,15 +192,24 @@ export default function Live2dCanvas({
     let cancelled = false
     let app: PixiAppLike | null = null
     let dispose: (() => void) | null = null
+    let releaseContext: (() => void) | null = null
+    let snapshotFrame: number | null = null
+    const onContextLost = (event: Event) => {
+      event.preventDefault()
+      app?.ticker.stop()
+      onErrorRef.current?.("contextLost")
+    }
+    canvas.addEventListener("webglcontextlost", onContextLost)
 
     async function init() {
       try {
-        const row = await getPetModel(modelId)
+        const asset = await loadLive2dSkinAsset(modelId)
         if (cancelled) return
-        if (!row) {
+        if (!asset) {
           onErrorRef.current?.("modelMissing")
           return
         }
+        const { row, entries } = asset
 
         const { Application } = (await import("pixi.js")) as unknown as {
           Application: new () => PixiAppLike
@@ -208,6 +243,8 @@ export default function Live2dCanvas({
         })
         if (cancelled) return
         appRef.current = app
+        releaseContext = getPetSkinRuntime().track("webglContexts")
+        if (reducedMotion || paused) app.ticker.stop()
 
         // pixi auto-renders by adding `app.render` to the ticker (TickerPlugin,
         // LOW priority). Swap it for a guarded render: a throw inside the Live2D
@@ -233,9 +270,6 @@ export default function Live2dCanvas({
           RENDER_PRIORITY_LOW
         )
 
-        const entries = await getPetModelEntries(modelId)
-        if (cancelled) return
-
         // The loader only reads `settingsPath` off the manifest; the remaining
         // resource paths are resolved from the entries at replace time, so a
         // minimal manifest reconstructed from the row is sufficient.
@@ -246,6 +280,10 @@ export default function Live2dCanvas({
           texturePaths: [],
           motionGroups: row.motionGroups,
           expressionIds: row.expressionIds,
+          motionPaths: [],
+          expressionPaths: [],
+          soundPaths: [],
+          metadataPaths: [],
         }
 
         const loader = createLive2dLoader()
@@ -286,7 +324,8 @@ export default function Live2dCanvas({
 
         dispose = result.dispose
         const loaded = result.model as PixiModelLike
-        fitModel(loaded, size)
+        const resolvedTransform = transform ?? row.transform
+        fitModel(loaded, size, locomotion?.facing ?? "right", resolvedTransform)
         app.stage.addChild(loaded)
         // Motion counts per group power the "random index" override option;
         // read from the stored settings blob so legacy rows work too.
@@ -309,7 +348,23 @@ export default function Live2dCanvas({
           expressionIds: row.expressionIds,
           motionGroupCounts,
         })
+        setAssetTransform(row.transform)
+        setAssetMotionOverrides(row.motionOverrides)
+        const core = (
+          loaded as unknown as {
+            internalModel?: { coreModel?: Parameters<typeof readLive2dParameterIds>[0] }
+          }
+        ).internalModel?.coreModel
+        setParameterIds(readLive2dParameterIds(core))
+        setAssetParameterMapping(row.parameterMapping as Live2dParameterMapping | undefined)
         setModel(loaded)
+        snapshotFrame = requestAnimationFrame(() => {
+          try {
+            getPetSkinRuntime().publishSnapshot(`live2d:${modelId}`, canvas.toDataURL("image/png"))
+          } catch {
+            // A snapshot is an optimization; rendering remains live if capture fails.
+          }
+        })
       } catch {
         if (!cancelled) onErrorRef.current?.("modelFailed")
       }
@@ -320,6 +375,8 @@ export default function Live2dCanvas({
     return () => {
       cancelled = true
       setModel(null)
+      canvas.removeEventListener("webglcontextlost", onContextLost)
+      if (snapshotFrame !== null) cancelAnimationFrame(snapshotFrame)
       try {
         dispose?.()
       } catch {
@@ -331,6 +388,7 @@ export default function Live2dCanvas({
         // Same: pixi teardown is best-effort.
       }
       appRef.current = null
+      releaseContext?.()
     }
     // `size` is intentionally omitted — resizing is handled by the resize effect
     // below so a slider drag doesn't tear down and rebuild the whole model.
@@ -345,8 +403,8 @@ export default function Live2dCanvas({
     const app = appRef.current
     if (!app || !model) return
     app.renderer.resize(size, size)
-    fitModel(model, size, facing, transform)
-  }, [size, model, facing, transform])
+    fitModel(model, size, facing, transform ?? assetTransform)
+  }, [size, model, facing, transform, assetTransform])
 
   // Reduced motion / paused (hidden window, minimized widget) stops the ticker.
   useEffect(() => {
@@ -355,6 +413,11 @@ export default function Live2dCanvas({
     if (reducedMotion || paused) app.ticker.stop()
     else app.ticker.start()
   }, [reducedMotion, paused, model])
+
+  useEffect(() => {
+    if (!model || reducedMotion || paused) return
+    return getPetSkinRuntime().track("tickers")
+  }, [model, paused, reducedMotion])
 
   // FPS cap follows the low-power setting live (unlike antialias), dropping
   // further after a quiet idle stretch (same trigger as the SVG skin's
@@ -377,7 +440,7 @@ export default function Live2dCanvas({
     caps,
     reducedMotion,
     locomotion?.mode === "walking",
-    motionOverrides
+    motionOverrides ?? assetMotionOverrides
   )
 
   // Ambient head/eye envelopes for the idle-collapsed AI states
@@ -394,7 +457,21 @@ export default function Live2dCanvas({
   useLive2dLipSync(
     model as unknown as Live2dLipSyncModel | null,
     speaking && !paused,
-    reducedMotion
+    reducedMotion,
+    undefined,
+    parameterMapping.mouthOpen
+  )
+
+  useLive2dGaze(
+    model as unknown as Live2dLipSyncModel | null,
+    lookTarget,
+    parameterMapping,
+    state === "idle" &&
+      oneShot === null &&
+      (locomotion?.mode ?? "resting") === "resting" &&
+      !held &&
+      !reducedMotion &&
+      !paused
   )
 
   return (

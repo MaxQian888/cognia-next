@@ -23,6 +23,7 @@ import { pruneOlderThan as pruneAgentTraces } from "@/lib/db/agent-traces"
 import { deleteExpiredEvalArtifacts } from "@/lib/db/eval-lab"
 import { recoverEvalQueueOnStartup } from "@/lib/ai/eval/recovery"
 import { getSettings, DEFAULTS } from "@/lib/db/settings"
+import { centralRetentionExecutorIds } from "@/lib/data-governance/table-catalog"
 
 const MS_PER_DAY = 86_400_000
 /** Re-sweep cadence — once per day matches the resolution of `traceRetentionDays`. */
@@ -34,21 +35,35 @@ export type Unsubscribe = () => void
  * cutoff and returns the count removed. */
 export interface RetentionTarget {
   id: string
+  policy?: "configured-window" | "row-expiry"
   prune: (cutoffEpochMs: number) => Promise<number>
 }
 
 /** The tables the sweeper manages. Extensible — add a `{ id, prune }` entry to
  * bring another unbounded table under the same time-window policy. */
-export const RETENTION_TARGETS: RetentionTarget[] = [
-  { id: "agentTraces", prune: (cutoff) => pruneAgentTraces(cutoff) },
-  {
-    id: "evalArtifacts",
+const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
+  agentTraces: {
+    policy: "configured-window",
+    prune: (cutoff) => pruneAgentTraces(cutoff),
+  },
+  evalArtifacts: {
+    policy: "row-expiry",
     prune: async () => {
       const removed = await deleteExpiredEvalArtifacts()
       return removed.samplesDeleted + removed.assetsDeleted
     },
   },
-]
+}
+
+function governedRetentionTargets(): RetentionTarget[] {
+  return centralRetentionExecutorIds().map((id) => {
+    const executor = RETENTION_EXECUTORS[id]
+    if (!executor) throw new Error(`Missing central retention executor: ${id}`)
+    return { id, ...executor }
+  })
+}
+
+export const RETENTION_TARGETS: RetentionTarget[] = governedRetentionTargets()
 
 export interface RetentionResult {
   id: string
@@ -56,18 +71,25 @@ export interface RetentionResult {
 }
 
 /**
- * Prune every target older than `now() - days`. `days <= 0` short-circuits
- * (operator opted into "keep forever"). Each target is isolated: one failing
- * prune logs and reports `removed: 0` rather than aborting the rest.
+ * Prune configured-window targets older than `now() - days`; `days <= 0`
+ * disables only those targets. Independently expiring rows still run so a
+ * trace "keep forever" preference cannot retain expired eval artifacts. Each
+ * target is isolated: one failure does not abort the remaining executors.
  */
 export async function pruneRetainedTables(
   days: number,
   targets: RetentionTarget[] = RETENTION_TARGETS
 ): Promise<RetentionResult[]> {
-  if (!Number.isFinite(days) || days <= 0) return []
-  const cutoff = Date.now() - days * MS_PER_DAY
+  const configuredWindowEnabled = Number.isFinite(days) && days > 0
+  const cutoff = configuredWindowEnabled ? Date.now() - days * MS_PER_DAY : Date.now()
   const out: RetentionResult[] = []
   for (const target of targets) {
+    if (
+      (target.policy ?? "configured-window") === "configured-window" &&
+      !configuredWindowEnabled
+    ) {
+      continue
+    }
     try {
       const removed = await target.prune(cutoff)
       out.push({ id: target.id, removed })

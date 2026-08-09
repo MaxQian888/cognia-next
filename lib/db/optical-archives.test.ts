@@ -1,9 +1,7 @@
-/** @jest-environment jsdom */
 // Coverage for the opticalArchives CRUD module — save/replace, per-session and
 // global newest-first listing, get/delete/clear, and cap pruning. Uses
 // fake-indexeddb so we exercise the real Dexie query path in memory.
 
-import "fake-indexeddb/auto"
 import {
   saveOpticalArchive,
   listOpticalArchives,
@@ -13,19 +11,21 @@ import {
   __TESTING__,
   type OpticalArchiveRow,
 } from "./optical-archives"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 // The Dexie schema is at v101; a cold open crosses Jest's 5s default hook
 // timeout (worse under coverage instrumentation). Mirror the repo pattern for
 // high-version tables.
 jest.setTimeout(30_000)
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
+afterAll(dbFixture.dispose)
 
 function makeRow(over: Partial<OpticalArchiveRow> = {}): OpticalArchiveRow {
   return {

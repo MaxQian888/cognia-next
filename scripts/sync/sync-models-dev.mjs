@@ -12,9 +12,12 @@
 
 import { createHash } from "node:crypto"
 import { gzipSync } from "node:zlib"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import { dirname, resolve } from "node:path"
+import { Command, CommanderError } from "commander"
+import writeFileAtomic from "write-file-atomic"
+import { z } from "zod"
 
 const API_URL = "https://models.dev/api.json"
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -47,17 +50,35 @@ function assertGzipBudget(label, content, maxBytes) {
   return bytes
 }
 
-async function main() {
-  const inputIndex = process.argv.indexOf("--input")
-  const revisionIndex = process.argv.indexOf("--revision")
-  const inputPath =
-    inputIndex >= 0 && process.argv[inputIndex + 1]
-      ? resolve(process.cwd(), process.argv[inputIndex + 1])
-      : undefined
-  const upstreamRevision =
-    revisionIndex >= 0 && process.argv[revisionIndex + 1]
-      ? process.argv[revisionIndex + 1]
-      : undefined
+const cliSchema = z.object({
+  input: z.string().trim().min(1).optional(),
+  revision: z.string().trim().min(1).optional(),
+})
+
+function createProgram() {
+  return new Command()
+    .name("pnpm sync:models-dev")
+    .description("Generate the local models.dev catalog artifacts.")
+    .configureOutput({ writeErr: () => {} })
+    .showHelpAfterError()
+    .exitOverride()
+    .option("--input <path>", "Read a local models.dev payload instead of fetching it.")
+    .option("--revision <revision>", "Record the upstream catalog revision in the manifest.")
+}
+
+export function parseArgs(argv) {
+  const program = createProgram()
+  try {
+    program.parse(argv, { from: "user" })
+  } catch (error) {
+    if (error instanceof CommanderError && error.code === "commander.helpDisplayed") return null
+    throw error
+  }
+  return cliSchema.parse(program.opts())
+}
+
+async function main({ input, revision: upstreamRevision } = {}) {
+  const inputPath = input ? resolve(process.cwd(), input) : undefined
   let json
   if (inputPath) {
     process.stdout.write(`Reading ${inputPath} ...\n`)
@@ -108,7 +129,7 @@ async function main() {
       content,
       MAX_SHARD_GZIP_BYTES
     )
-    await writeFile(resolve(SHARD_DIR, filename), content, "utf8")
+    await writeFileAtomic(resolve(SHARD_DIR, filename), content, { encoding: "utf8" })
 
     const providerCapabilities = {}
     for (const [modelId, model] of Object.entries(provider.models ?? {})) {
@@ -141,8 +162,8 @@ async function main() {
     searchContent,
     MAX_SUMMARY_GZIP_BYTES
   )
-  await writeFile(SEARCH_INDEX_PATH, searchContent, "utf8")
-  await writeFile(CAPABILITIES_PATH, serialize(capabilities), "utf8")
+  await writeFileAtomic(SEARCH_INDEX_PATH, searchContent, { encoding: "utf8" })
+  await writeFileAtomic(CAPABILITIES_PATH, serialize(capabilities), { encoding: "utf8" })
 
   const manifest = {
     schemaVersion: 1,
@@ -156,7 +177,7 @@ async function main() {
       searchIndexGzipBytes: searchGzipBytes,
     },
   }
-  await writeFile(MANIFEST_PATH, serialize(manifest), "utf8")
+  await writeFileAtomic(MANIFEST_PATH, serialize(manifest), { encoding: "utf8" })
   process.stdout.write(
     `Wrote ${MANIFEST_PATH}\n` +
       `  providers: ${providerCount}\n` +
@@ -165,7 +186,13 @@ async function main() {
   )
 }
 
-main().catch((err) => {
-  process.stderr.write(`sync-models-dev failed: ${err?.message ?? err}\n`)
-  process.exitCode = 1
-})
+const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])
+if (isDirectRun) {
+  const options = parseArgs(process.argv.slice(2))
+  if (options) {
+    main(options).catch((err) => {
+      process.stderr.write(`sync-models-dev failed: ${err?.message ?? err}\n`)
+      process.exitCode = 1
+    })
+  }
+}

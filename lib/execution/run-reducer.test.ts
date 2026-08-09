@@ -127,6 +127,9 @@ describe("reduceRunEvents", () => {
     const pausedWorkflow = reduceRunEvents({ ...baseRun, status: "running" }, [
       event({ type: "run.paused", seq: 1 }),
     ])
+    const pausedAgent = reduceRunEvents({ ...baseRun, kind: "agent-turn", status: "running" }, [
+      event({ type: "run.paused", seq: 1 }),
+    ])
     const pausedGoal = reduceRunEvents({ ...baseRun, kind: "goal", status: "running" }, [
       event({ type: "run.paused", seq: 1 }),
     ])
@@ -134,6 +137,7 @@ describe("reduceRunEvents", () => {
     expect(waitingPlan.allowedActions).toEqual(["stop", "open_details"])
     expect(approvalPlan.allowedActions).toEqual(["approve", "deny", "stop", "open_details"])
     expect(pausedWorkflow.allowedActions).toEqual(["stop", "open_details"])
+    expect(pausedAgent.allowedActions).toEqual(["resume", "stop", "open_details"])
     expect(pausedGoal.allowedActions).toEqual(["resume", "stop", "open_details"])
   })
 

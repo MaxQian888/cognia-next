@@ -29,11 +29,14 @@ import { downloadFromUrl } from "@/lib/files/download"
 import { openExternal } from "@/lib/tauri/opener"
 import { mobileTransition } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
+import { useMediaUrl } from "@/hooks/chat/use-media-url"
 import { loggers } from "@cognia/logging"
 
 export interface ImageLightboxItem {
   id: string
   src: string
+  /** Stable content-addressed source used to fetch the canonical variant. */
+  sourceRef?: string
   alt?: string
   title?: string
   filename?: string
@@ -306,10 +309,19 @@ export function ImageLightbox({
 }: ImageLightboxProps) {
   const t = useTranslations("chat.renderers.image")
   const reduceMotion = useReducedMotion() ?? false
-  if (items.length === 0) return null
-
   const safeIndex = clampIndex(activeIndex, items.length)
   const activeItem = items[safeIndex]
+  const adjacentIndex = safeIndex < items.length - 1 ? safeIndex + 1 : safeIndex - 1
+  const adjacentItem = adjacentIndex >= 0 ? items[adjacentIndex] : undefined
+  const activeCanonical = useMediaUrl(open ? activeItem?.sourceRef : null)
+  // Keep exactly one neighbour warm. The hook owns and releases its object URL
+  // with the dialog lifecycle, so a large gallery never pins every canonical.
+  useMediaUrl(open ? adjacentItem?.sourceRef : null)
+  if (!activeItem) return null
+  const displayedItem =
+    activeCanonical.status === "ready" && activeCanonical.url
+      ? { ...activeItem, src: activeCanonical.url }
+      : activeItem
   const select = (index: number) => onActiveIndexChange(clampIndex(index, items.length))
 
   return (
@@ -340,8 +352,8 @@ export function ImageLightbox({
       >
         <AnimatePresence initial={false} mode="popLayout">
           <LightboxView
-            key={activeItem.id}
-            item={activeItem}
+            key={`${displayedItem.id}:${displayedItem.src}`}
+            item={displayedItem}
             canGoPrevious={safeIndex > 0}
             canGoNext={safeIndex < items.length - 1}
             onPrevious={() => select(safeIndex - 1)}

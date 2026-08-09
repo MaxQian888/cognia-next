@@ -5,8 +5,8 @@
  * The connection pattern is the same one the desktop workflow runtime uses
  * (`lib/workflow/nodes/built-ins.ts` → `action.mcp.invokeTool`): the official
  * `@modelcontextprotocol/sdk` Client over a stdio child process or a
- * Streamable-HTTP endpoint. The Rust `test_mcp_server` probe is Tauri-only, so
- * the pure-Node CLI cannot reach it — this is the Node equivalent.
+ * Streamable-HTTP endpoint. The CLI owns this client-managed scope directly,
+ * while desktop settings discovery uses the trusted sidecar Runtime Gateway.
  *
  * A wall-clock timeout guards the interactive TUI: a misconfigured server that
  * never completes its handshake aborts the client (killing the child / socket)

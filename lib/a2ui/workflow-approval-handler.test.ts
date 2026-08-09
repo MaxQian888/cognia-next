@@ -1,15 +1,14 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWorkflow } from "@/lib/db/workflows"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { handleWorkflowApprovalCallback } from "./workflow-approval-handler"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
 })
 
 async function seedBindingPair(workflowId: string, workflowName: string) {
@@ -47,6 +46,8 @@ async function seedBindingPair(workflowId: string, workflowName: string) {
   })
   return { adapterId, surfaceId, conversationKey }
 }
+
+afterAll(dbFixture.dispose)
 
 describe("handleWorkflowApprovalCallback", () => {
   it("approve path starts the workflow + enqueues a confirmation + deletes bindings", async () => {

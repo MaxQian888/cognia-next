@@ -6,7 +6,7 @@
 import { createExportAPI, clearCustomExporters } from "./export-api"
 import { initializePluginPermissions } from "./permission-api"
 import { getPluginEventHooks } from "../messaging/hooks-system"
-import type { CustomExporter, ExportData } from "@/types/plugin/plugin"
+import type { CustomExporter, ExportData, ExportFormat } from "@/types/plugin/plugin"
 
 // Mock stores and dependencies
 const mockSessions = [
@@ -352,6 +352,31 @@ describe("Export API", () => {
 
       unregister()
       expect(api.getCustomExporters().length).toBe(0)
+    })
+
+    it("executes only by the owner plugin's namespaced registration id", async () => {
+      initializePluginPermissions("owner", ["export:session"])
+      initializePluginPermissions("other", ["export:session"])
+      const owner = createExportAPI("owner")
+      const other = createExportAPI("other")
+      const exporter = jest.fn(async () => "native bytes")
+      owner.registerExporter({
+        id: "workbook",
+        name: "Workbook",
+        description: "xlsx",
+        format: "xlsx",
+        extension: "xlsx",
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        export: exporter,
+      })
+
+      await expect(
+        owner.exportMessages([], { format: "owner:workbook" as ExportFormat })
+      ).resolves.toMatchObject({ success: true, filename: expect.stringMatching(/\.xlsx$/) })
+      await expect(
+        other.exportMessages([], { format: "owner:workbook" as ExportFormat })
+      ).resolves.toMatchObject({ success: false })
+      expect(exporter).toHaveBeenCalledTimes(1)
     })
   })
 

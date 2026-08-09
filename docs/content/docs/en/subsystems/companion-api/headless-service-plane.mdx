@@ -1,0 +1,155 @@
+---
+title: Headless Service Plane
+description: Run every agent runtime without rendering the frontend, mint a local debugging token, and call the loopback internal API.
+---
+
+# Headless Service Plane
+
+<Status variant="beta">developer surface</Status>
+
+<TLDR>
+  `pnpm dev:headless` starts the native Companion server and all configured agent runtimes without
+  launching Next.js or a WebView. The local Brain connects through `/internal/events`,
+  `/internal/bridge`, and `/internal/_rpc/{name}`. Add `--local-debug` for a loopback-only listener
+  and an automatically generated, process-scoped Apifox/Postman credential.
+</TLDR>
+
+## Start without the frontend
+
+```bash
+pnpm dev:headless --local-debug --data-dir .cache/headless-apifox
+```
+
+The launcher supervises the native server and enabled agent runtime processes, forwards their logs,
+and shuts the process group down together. CLI options are available through:
+
+```bash
+pnpm dev:headless --help
+```
+
+`--data-dir` owns the master key, encrypted secret store, SQLite databases, and TLS certificate. An
+existing directory whose encrypted store outlived its original master key cannot be recovered and
+fails with `secret-store decrypt failed`. Use an isolated directory for local API debugging rather
+than generating an unrelated new key beside an unknown old store. After the first build, add
+`--skip-build` for a fast restart.
+
+## Automatic local-debug authentication
+
+The launcher writes a `0600` Postman environment under the data directory, prints its path, and
+deletes it when the server exits. Import it into Apifox or read the `serviceToken` variable from that
+file while the process is running. The random token is accepted only from loopback on
+`/internal/*` and `/ide/content*`; it is not accepted by paired-device routes.
+
+For a direct shell smoke test, use the existing persistent-token fallback in another shell:
+
+```bash
+TOKEN="$(pnpm --silent dev:headless token --data-dir .cache/headless-apifox)"
+curl --insecure \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"limit":20,"offset":0}' \
+  https://127.0.0.1:27890/internal/_rpc/session_list
+```
+
+The token is service-scoped, expires after 24 hours, and is accepted only when the peer is loopback.
+It is intentionally unsuitable for mobile or remote-device authentication. Token issuance and the
+running server must use the same `--data-dir`, or they will use different signing secrets.
+
+For graphical API debugging, follow [Local debugging with Apifox](./apifox-debugging) for import,
+certificate, and environment setup.
+
+## Internal routes
+
+| Route | Purpose |
+| --- | --- |
+| `POST /internal/_rpc/{name}` | Invoke any command accepted by the shared dispatcher |
+| `GET /internal/events?token=…&since=…` | Brain event stream with replay cursor |
+| `GET /internal/bridge?token=…` | Bidirectional Rust-to-Brain data-plane bridge |
+| `POST /ide/content` | Publish managed IDE content through the loopback broker |
+| `GET /ide/content/{handle_id}` | Resolve a brokered content handle |
+
+The full generated contract is `docs/api/headless-service-api.openapi.yaml`. It is deliberately
+separate from the paired-device specification so a service-only command can never be mistaken for a
+public mobile endpoint.
+
+## Agent-first operator CLI
+
+The Rust `cognia` binary embeds the generated Headless command catalog and exposes it through
+`cognia host`. Discovery, schema inspection, skills, and dry-run work offline; calls and events stay
+on the loopback service-token boundary.
+
+```bash
+cognia host categories
+cognia host resources --category development
+cognia host skills list
+cognia host skills list --kind workflow
+cognia host skills install --scope project
+cognia host skills read cognia-host-development
+cognia host commands --query session
+cognia host commands --resource git --operation read
+cognia host schema session_list
+cognia host call session_list --data '{"limit":20,"offset":0}'
+cognia host events --event claude://message
+```
+
+When `COGNIA_SERVICE_TOKEN` is absent, the CLI invokes the colocated
+`cognia-server issue-service-token` and retains the token only in memory. The CLI trusts the
+persisted self-signed certificate under `COGNIA_DATA_DIR`; it does not offer an insecure TLS mode.
+High- and critical-risk commands require an interactive confirmation or a user-approved global
+`--yes`. This is an operator safety prompt, not a second authorization authority.
+
+The generated catalog classifies every command into exactly one stable domain: `sessions`,
+`agents`, `tasks`, `automation`, `connectors`, `extensions`, `knowledge`, `development`, or
+`system`. `cognia host categories` reports per-domain operation/risk counts and the matching
+embedded skill. `cognia host resources` exposes generated resource groups within those domains, and
+`commands --resource <id>` narrows discovery without copying or guessing the RPC tree. The core
+`cognia-host` skill owns shared safety and output rules; nine domain skills provide focused command
+selection, while six workflow skills cover observation, safe Git, agent incidents, backup recovery,
+extension rollout, and connector delivery. Filter the inventory with
+`skills list --kind core|domain|workflow`.
+
+### Installing the embedded Agent Skills
+
+Installation is offline and requires an explicit destination:
+
+```bash
+# Available to compatible agents for the current user.
+cognia host skills install --scope user
+
+# Available from the nearest Git worktree root, or the current non-Git directory.
+cognia host skills install --scope project
+```
+
+Both scopes use the shared Agent Skills layout, `$HOME/.agents/skills` or
+`<project>/.agents/skills`, so Codex, Gemini CLI, OpenCode, and compatible clients can discover the
+same 16 skills. Refresh the client's skill inventory or restart its session after installation.
+The command does not contact `cognia-server` and does not read credentials.
+
+The hidden `.cognia-host-manifest.json` records the CLI bundle version and the SHA-256 hash of every
+managed file. A later install updates or removes only files that still match the previous manifest.
+The complete bundle is preflighted before writing; modified or untracked managed files, a corrupt
+manifest, or a symlinked `.agents`, skills root, or managed destination returns
+`skill_install_conflict` with zero writes. Fully written Cognia temporary files that match the
+current bundle are recovered on the next successful retry, and the manifest is replaced last;
+other temporary content conflicts instead of being deleted. Preserve intentional edits elsewhere
+and restore each reported file from
+`cognia host skills read <skill> [path]`, or move all Cognia-managed directories and the manifest
+aside before retrying. There is deliberately no force or partial-install mode.
+
+In Compose and Kubernetes, execute `cognia host` inside the server container or Pod. A separate
+management Pod is intentionally unsupported because a service token is rejected from a non-loopback
+peer.
+
+## Contract maintenance
+
+Headless RPC paths are generated from the same command manifest and Rust allowlist as the public
+specification:
+
+```bash
+pnpm companion-api:gen
+pnpm companion-api:check
+pnpm companion-api:lint
+```
+
+When a command is added to the dispatcher, the generator and Rust parity test require the Headless
+spec to expose it. Public exposure still requires the stricter target and transport classification.

@@ -998,6 +998,7 @@ async fn ocr_fallback<R: Runtime>(
             bytes,
             mime_type: "image/png".to_string(),
             languages: vec![],
+            model_variant: None,
         })
         .await
         .map_err(|error| log::debug!("selection toolbar: OCR failed: {error}"))

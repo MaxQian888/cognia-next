@@ -53,15 +53,22 @@ export function resetRepoCache() {
 }
 
 /** Throw unless `cwd` is inside a git repository. */
-export async function assertRepo(cwd) {
+export async function assertRepo(cwd, runner = runGit) {
   if (typeof cwd !== "string" || cwd.length === 0) {
     throw new Error("cwd must be a non-empty absolute path")
   }
   if (validatedRepos.has(cwd)) return
   try {
-    await runGit(["rev-parse", "--git-dir"], cwd)
+    await runner(["rev-parse", "--git-dir"], cwd)
   } catch (err) {
-    throw new Error(`not a git repository: ${cwd} (${err.message})`)
+    const detail = String(err?.message ?? err)
+    if (/not a git repository|not a git work tree/i.test(detail)) {
+      throw new Error(`not a git repository: ${cwd} (${detail})`)
+    }
+    throw new Error(
+      `git subprocess health check failed for ${cwd}: ${detail}. ` +
+        "The Cognia Tools host may have stale or invalid stdio/temp permissions; restart the sidecar and retry."
+    )
   }
   validatedRepos.add(cwd)
 }

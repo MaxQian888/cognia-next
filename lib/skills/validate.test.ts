@@ -20,6 +20,8 @@ describe("validateSkill", () => {
   it("accepts a name with hyphens, underscores, spaces, digits", () => {
     const errs = validateSkill({
       name: "Skill 42_Name-OK",
+      slug: "skill-42-name-ok",
+      description: "Useful skill",
       content: "body",
     })
     expect(errs).toHaveLength(0)
@@ -33,6 +35,7 @@ describe("validateSkill", () => {
   it("flags an over-long description", () => {
     const errs = validateSkill({
       name: "Good",
+      slug: "good",
       description: "x".repeat(1025),
       content: "body",
     })
@@ -42,6 +45,8 @@ describe("validateSkill", () => {
   it("flags resource path traversal", () => {
     const errs = validateSkill({
       name: "Good",
+      slug: "good",
+      description: "Useful skill",
       content: "body",
       resources: [{ id: "r1", path: "scripts/../../etc/passwd" }],
     })
@@ -51,6 +56,8 @@ describe("validateSkill", () => {
   it("flags duplicate resource paths case-insensitively", () => {
     const errs = validateSkill({
       name: "Good",
+      slug: "good",
+      description: "Useful skill",
       content: "body",
       resources: [
         { id: "r1", path: "scripts/foo.sh" },
@@ -64,6 +71,7 @@ describe("validateSkill", () => {
     expect(
       validateSkill({
         name: "Good",
+        slug: "good",
         description: "x",
         content: "body",
         resources: [{ id: "r1", path: "scripts/setup.sh" }],
@@ -74,7 +82,9 @@ describe("validateSkill", () => {
   it("isValidSkill returns true for a valid skill row", () => {
     const skill: Skill = {
       id: "skill_1",
+      slug: "good",
       name: "Good",
+      description: "Useful skill",
       content: "body",
       createdAt: 0,
       updatedAt: 0,
@@ -85,11 +95,33 @@ describe("validateSkill", () => {
   it("isValidSkill returns false for an invalid skill row", () => {
     const skill: Skill = {
       id: "skill_2",
+      slug: "bad",
       name: "",
+      description: "Useful skill",
       content: "body",
       createdAt: 0,
       updatedAt: 0,
     }
     expect(isValidSkill(skill)).toBe(false)
+  })
+
+  it("classifies standard portability and runtime issues", () => {
+    const errs = validateSkill({
+      name: "中文显示名",
+      slug: "bad--slug",
+      description: "",
+      compatibility: "x".repeat(501),
+      metadata: { ok: "yes", bad: 1 },
+      content: "",
+    })
+    expect(errs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "slug-format", severity: "portability" }),
+        expect.objectContaining({ code: "missing-description", severity: "portability" }),
+        expect.objectContaining({ code: "compatibility-too-long", severity: "portability" }),
+        expect.objectContaining({ code: "metadata-format", severity: "portability" }),
+        expect.objectContaining({ code: "missing-content", severity: "runtime" }),
+      ])
+    )
   })
 })

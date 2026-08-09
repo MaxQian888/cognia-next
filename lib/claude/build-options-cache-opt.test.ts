@@ -1,4 +1,3 @@
-/** @jest-environment jsdom */
 /**
  * Targeted coverage for the cache-friendly prompt assembly branch of
  * `resolveSendOptions` (`AppSettings.cacheOptimizationEnabled`). The flag is
@@ -7,8 +6,6 @@
  * twin retrieved chunks + style few-shot) moves to the END of
  * `appendSystemPrompt` so the leading prompt prefix stays stable across turns.
  */
-
-import "fake-indexeddb/auto"
 
 // Memory runtime is dynamically imported by resolveSendOptions — mock it so
 // the test controls the recalled section without a vector store.
@@ -25,17 +22,17 @@ jest.mock("@/lib/twin/runtime", () => ({
 }))
 
 import { resolveSendOptions } from "./build-options"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
 
 const MEMORY_SECTION = "## Memory\n\nRECALLED_FACT_FOR_THIS_TURN"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   jest.clearAllMocks()
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   mApplyMemoryContext.mockResolvedValue({
     systemPromptSection: MEMORY_SECTION,
     retrievedMemories: [],
@@ -57,6 +54,8 @@ const memoryCtx = {
   memoryDeps: {} as never,
   memoryUserMessage: "what did I say about caching?",
 }
+
+afterAll(dbFixture.dispose)
 
 describe("cacheOptimizationEnabled = OFF (explicit opt-out, legacy assembly)", () => {
   // Default is ON, so the legacy path now requires an explicit `false`.

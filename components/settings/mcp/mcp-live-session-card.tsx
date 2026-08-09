@@ -4,7 +4,7 @@
  * Live in-session MCP client health for the active chat session, driven by the
  * Claude Agent SDK's `mcpServerStatus()` control method (see
  * `lib/claude/ipc.ts:getSessionMcpStatus`). Complements the per-server
- * config-time probe (`testMcpServer`): that asks "is this config valid?"; this
+ * config-time sidecar discovery: that asks "is this config valid?"; this
  * shows "what the running agent session actually sees right now" — including the
  * in-process cognia / a2ui / plugin servers that have no `McpServer` row — and
  * lets the user reconnect a dropped server or toggle one without restarting.

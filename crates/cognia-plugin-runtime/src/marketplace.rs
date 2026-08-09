@@ -292,9 +292,11 @@ pub fn recover_update_transactions_for_state(state: &PluginRuntimeState) -> Upda
     report
 }
 
-fn http_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent("cognia-plugin-installer/0.1")
+fn http_client(url: &str) -> Result<reqwest::Client> {
+    let builder = reqwest::Client::builder().user_agent("cognia-plugin-installer/0.1");
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, url)
+        .map_err(|error| PluginError::Internal(error.to_string()))?;
+    builder
         .build()
         .map_err(|e| PluginError::Internal(format!("http client init: {e}")))
 }
@@ -341,7 +343,7 @@ pub async fn plugin_marketplace_versions(
         return Ok(Vec::new());
     }
     let url = format!("{base}/plugins/{plugin_id}/versions");
-    let response = http_client()?
+    let response = http_client(&url)?
         .get(&url)
         .send()
         .await
@@ -844,7 +846,7 @@ async fn download_verified_archive(
             "plugin_download_version: downloadUrl is required".into(),
         ));
     }
-    let response = http_client()?
+    let response = http_client(download_url.trim())?
         .get(download_url.trim())
         .send()
         .await

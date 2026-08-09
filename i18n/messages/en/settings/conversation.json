@@ -18,6 +18,10 @@
       "label": "Use compact composer layout"
     },
     "description": "Control how the message composer handles typing, sending, and drafts.",
+    "effortSelectorMode": {
+      "hint": "Show thinking levels as a continuous slider instead of a list.",
+      "label": "Use a slider for thinking levels"
+    },
     "inputHistory": {
       "hint": "Press Up / Down in an empty composer to recall previous messages.",
       "label": "Recall input history"

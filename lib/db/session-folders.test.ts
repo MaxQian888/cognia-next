@@ -1,12 +1,10 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-
 import { liveQuery } from "dexie"
 
 import { createFolder, deleteFolder, listFolders, renameFolder } from "./session-folders"
 import { createSession, getSession, assignSessionToFolder } from "./sessions"
 import { saveSettings } from "./settings"
-import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 
 // The /loop cascade tears down backing scheduler tasks via a dynamic import —
 // mock the scheduler singleton so no real timing engine spins up.
@@ -15,13 +13,14 @@ jest.mock("@/lib/scheduler/task-scheduler", () => ({
   getTaskScheduler: () => schedulerMock,
 }))
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await saveSettings({ activeProjectId: "proj-A" })
 })
+afterAll(dbFixture.dispose)
 
 describe("session-folders CRUD", () => {
   it("creates folders at the end of the workspace list and lists them in order", async () => {

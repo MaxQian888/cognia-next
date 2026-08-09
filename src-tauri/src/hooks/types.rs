@@ -6,9 +6,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Hook lifecycle events. Phase 1 wires `UserPromptSubmit` (in `claude_send`)
-/// and `PreToolUse` (intercepted inside `sidecar.rs`'s stdout reader). Other
-/// variants are recognised so settings.json round-trips cleanly.
+/// Hook lifecycle events exposed by the pinned Claude Agent SDK. Execution
+/// ownership is SDK-native for the built-in rail and host-native for external
+/// adapters; the shared identity keeps settings round-trippable across both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum HookEvent {
@@ -39,6 +39,10 @@ pub enum HookEvent {
     StopFailure,
     TeammateIdle,
     UserPromptExpansion,
+    Setup,
+    SubagentStart,
+    DirectoryAdded,
+    MessageDisplay,
 }
 
 /// One hook block in `settings.json`'s `hooks.{Event}` array.
@@ -65,6 +69,15 @@ pub enum HookHandler {
     },
     /// HTTP POST with the event payload as JSON body. Phase 2.
     Webhook {
+        url: String,
+        #[serde(default)]
+        headers: std::collections::HashMap<String, String>,
+        #[serde(default)]
+        timeout: Option<u64>,
+    },
+    /// Claude Code's current settings name for an HTTP POST handler. The
+    /// legacy Cognia `webhook` spelling remains accepted for compatibility.
+    Http {
         url: String,
         #[serde(default)]
         headers: std::collections::HashMap<String, String>,

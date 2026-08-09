@@ -1,4 +1,4 @@
-import { windowList } from "./list-window"
+import { windowList, windowListWithinRows } from "./list-window"
 
 describe("windowList", () => {
   it("shows the whole list when it fits", () => {
@@ -39,5 +39,19 @@ describe("windowList", () => {
     expect(windowList(0, 0, 8)).toEqual({ start: 0, end: 0, above: 0, below: 0 })
     expect(windowList(5, 2, 0)).toEqual({ start: 0, end: 0, above: 0, below: 5 })
     expect(windowList(5, 2, -1)).toEqual({ start: 0, end: 0, above: 0, below: 5 })
+  })
+})
+
+describe("windowListWithinRows", () => {
+  it("includes scroll indicators in the row budget", () => {
+    const window = windowListWithinRows(20, 10, 6)
+    const used = window.end - window.start + Number(window.above > 0) + Number(window.below > 0)
+    expect(used).toBeLessThanOrEqual(6)
+    expect(10).toBeGreaterThanOrEqual(window.start)
+    expect(10).toBeLessThan(window.end)
+  })
+
+  it("uses the whole budget when the list fits", () => {
+    expect(windowListWithinRows(3, 1, 6)).toEqual({ start: 0, end: 3, above: 0, below: 0 })
   })
 })

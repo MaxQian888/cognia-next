@@ -6,7 +6,7 @@
  * `transport-ws.ts`); everything here is one-shot request/response and rides
  * the process-wide `Transport` (`@/lib/tauri`), so the SAME calls work from
  * the desktop renderer (Tauri `invoke`), the Capacitor mobile shell
- * (companion `/api/v1/_rpc/*`), and the WebRTC RPC tier.
+ * (companion `/api/_rpc/*`), and the WebRTC RPC tier.
  *
  * Server side: local arms in `src-tauri/src/terminal/`, remote arms in
  * `src-tauri/src/companion_api/rpc.rs` (the `terminal_*` section). Over the

@@ -101,12 +101,22 @@ jest.mock("@/lib/db/schema", () => ({
   clearAccountDatabaseSelection: mockClearAccountDatabaseSelection,
 }))
 
+const mockEnsureActiveDatabaseReady = jest.fn(async () => ({
+  databaseName: "test",
+  restoredPluginTables: [],
+}))
+jest.mock("@/lib/db/boot", () => ({
+  ensureActiveDatabaseReady: mockEnsureActiveDatabaseReady,
+}))
+
 const mockDropAccountDatabase = jest.fn<Promise<void>, [string]>()
 const mockPurgeAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockActivateAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockClearAccountLocalState = jest.fn<void, []>()
 const mockPrepareRuntimeTarget = jest.fn()
+const mockPrepareDatabase = jest.fn<Promise<unknown>, []>()
 const mockRemoveRuntimeTargets = jest.fn<Promise<void>, [string]>()
+const mockClearSubscriptionRuntime = jest.fn<Promise<void>, [string]>()
 
 let createAccountStore: typeof import("./account-store").createAccountStore
 let selectActiveAccount: typeof import("./account-store").selectActiveAccount
@@ -143,7 +153,9 @@ function makeStore() {
     activateAccountLocalState: mockActivateAccountLocalState,
     clearAccountLocalState: mockClearAccountLocalState,
     prepareRuntimeTarget: mockPrepareRuntimeTarget,
+    prepareDatabase: mockPrepareDatabase,
     removeRuntimeTargets: mockRemoveRuntimeTargets,
+    clearSubscriptionRuntime: mockClearSubscriptionRuntime,
   }
   return createAccountStore(dependencies)
 }
@@ -197,7 +209,9 @@ beforeEach(() => {
     updatedAt: 1,
     lastUsedAt: 1,
   })
+  mockPrepareDatabase.mockResolvedValue({ databaseName: "test", restoredPluginTables: [] })
   mockRemoveRuntimeTargets.mockResolvedValue()
+  mockClearSubscriptionRuntime.mockResolvedValue()
 })
 
 describe("account store load", () => {
@@ -315,7 +329,7 @@ describe("browser Vault lifecycle", () => {
     expect(mockUnlockBrowserVault).toHaveBeenCalledWith(browserAccount.id, "secret")
     expect(mockPrepareRuntimeTarget).toHaveBeenCalledWith(browserAccount.id)
 
-    store.getState().lock()
+    await store.getState().lock()
     expect(mockLockBrowserVault).toHaveBeenCalledTimes(1)
   })
 
@@ -429,6 +443,7 @@ describe("account store create and unlock", () => {
     expect(store.getState().locked).toBe(false)
     expect(store.getState().accountRevision).toBe(1)
     expect(mockActivateAccountDatabase).toHaveBeenCalledWith("acct_first")
+    expect(mockPrepareDatabase).toHaveBeenCalledTimes(1)
     expect(mockActivateAccountLocalState).toHaveBeenCalledWith("acct_first")
   })
 
@@ -463,6 +478,10 @@ describe("account store create and unlock", () => {
     expect(mockVerifyPassword).toHaveBeenCalledWith("secret", alpha.passwordVerifier)
     expect(mockSetActiveAccountId).toHaveBeenCalledWith("acct_alpha")
     expect(mockActivateAccountDatabase).toHaveBeenCalledWith("acct_alpha")
+    expect(mockPrepareDatabase).toHaveBeenCalledTimes(1)
+    expect(mockPrepareDatabase.mock.invocationCallOrder[0]).toBeLessThan(
+      mockActivateAccountLocalState.mock.invocationCallOrder[0]
+    )
     expect(mockActivateAccountLocalState).toHaveBeenCalledWith("acct_alpha")
     expect(store.getState().unlockedAccountId).toBe("acct_alpha")
     expect(store.getState().locked).toBe(false)
@@ -580,6 +599,10 @@ describe("account store switching, locking, and lifecycle", () => {
     await store.getState().switchAccount("acct_beta", "beta-password")
 
     expect(mockVerifyPassword).toHaveBeenLastCalledWith("beta-password", beta.passwordVerifier)
+    expect(mockClearSubscriptionRuntime).toHaveBeenCalledWith("acct_alpha")
+    expect(mockClearSubscriptionRuntime.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetActiveAccountId.mock.invocationCallOrder.at(-1)!
+    )
     expect(mockSetActiveAccountId).toHaveBeenLastCalledWith("acct_beta")
     expect(mockActivateAccountDatabase).toHaveBeenLastCalledWith("acct_beta")
     expect(mockActivateAccountLocalState).toHaveBeenLastCalledWith("acct_beta")
@@ -644,12 +667,29 @@ describe("account store switching, locking, and lifecycle", () => {
     await store.getState().load()
     await store.getState().unlockAccount("acct_alpha", "secret")
 
-    store.getState().lock()
+    await store.getState().lock()
 
+    expect(mockClearSubscriptionRuntime).toHaveBeenCalledWith("acct_alpha")
     expect(mockClearAccountDatabaseSelection).toHaveBeenCalled()
     expect(mockClearAccountLocalState).toHaveBeenCalled()
     expect(store.getState().unlockedAccountId).toBeNull()
     expect(store.getState().locked).toBe(true)
+  })
+
+  it("keeps the local account unlocked when runtime clearing fails", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "secret")
+    mockClearSubscriptionRuntime.mockRejectedValueOnce(new Error("runtime clear failed"))
+
+    await expect(store.getState().lock()).rejects.toThrow(/runtime clear failed/)
+
+    expect(mockClearAccountDatabaseSelection).not.toHaveBeenCalled()
+    expect(store.getState().unlockedAccountId).toBe("acct_alpha")
+    expect(store.getState().locked).toBe(false)
   })
 
   it("renames accounts in registry and local state", async () => {
@@ -743,7 +783,7 @@ describe("account store switching, locking, and lifecycle", () => {
     await store.getState().load()
     await store.getState().unlockAccount("acct_alpha", "secret")
 
-    await store.getState().deleteAccount("acct_beta")
+    const result = await store.getState().deleteAccount("acct_beta")
 
     expect(mockDeleteRegistryAccount).toHaveBeenCalledWith("acct_beta", {
       replacementAccountId: undefined,
@@ -752,6 +792,13 @@ describe("account store switching, locking, and lifecycle", () => {
     expect(mockPurgeAccountLocalState).toHaveBeenCalledWith("acct_beta")
     expect(store.getState().accounts.map((item) => item.id)).toEqual(["acct_alpha"])
     expect(store.getState().unlockedAccountId).toBe("acct_alpha")
+    expect(result).toMatchObject({
+      accountId: "acct_beta",
+      wasActive: false,
+      registryDeleted: true,
+      accountDatabaseDeleted: true,
+      localStatePurged: true,
+    })
   })
 
   it("records delete failures before local cascade runs", async () => {
@@ -778,7 +825,9 @@ describe("account store switching, locking, and lifecycle", () => {
     await store.getState().load()
     await store.getState().unlockAccount("acct_alpha", "secret")
 
-    await store.getState().deleteAccount("acct_alpha", { replacementAccountId: "acct_beta" })
+    const result = await store
+      .getState()
+      .deleteAccount("acct_alpha", { replacementAccountId: "acct_beta" })
 
     expect(mockDeleteRegistryAccount).toHaveBeenCalledWith("acct_alpha", {
       replacementAccountId: "acct_beta",
@@ -788,6 +837,7 @@ describe("account store switching, locking, and lifecycle", () => {
     expect(store.getState().activeAccountId).toBe("acct_beta")
     expect(store.getState().unlockedAccountId).toBeNull()
     expect(store.getState().locked).toBe(true)
+    expect(result.wasActive).toBe(true)
   })
 
   it("uses default account-local storage helpers when no dependency override is supplied", async () => {
@@ -804,7 +854,7 @@ describe("account store switching, locking, and lifecycle", () => {
     await store.getState().load()
     await store.getState().unlockAccount("acct_alpha", "secret")
     await store.getState().deleteAccount("acct_beta")
-    store.getState().lock()
+    await store.getState().lock()
 
     expect(mockDropAccountDatabase).toHaveBeenCalledWith("acct_beta")
     expect(window.localStorage.getItem("cognia-account-acct_beta:panel")).toBeNull()
@@ -895,7 +945,7 @@ describe("account store dev auto-unlock", () => {
     const store = makeStore()
     await store.getState().load()
 
-    store.getState().lock()
+    await store.getState().lock()
 
     expect(store.getState().unlockedAccountId).toBeNull()
     expect(store.getState().locked).toBe(true)

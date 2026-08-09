@@ -9,7 +9,7 @@ description: Desktop ↔ Phone sync-down protocol — the phone is a read-only r
 
 <TLDR>
   The desktop is the source of truth; the phone is a read-only cache. The phone pulls deltas via
-  `POST /api/v1/_rpc/sync_pull`, the desktop Rust layer forwards the request to the webview, the
+  `POST /api/_rpc/sync_pull`, the desktop Rust layer forwards the request to the webview, the
   webview queries Dexie and returns a `SyncDelta`, which goes back through Rust to the phone. 9
   mirrorable tables, each with an independent cursor, three trigger modes (manual / foreground / WS
   event-driven). V1 has no tombstones — deletions rely on the V2 `deletedAt` index.
@@ -53,7 +53,7 @@ flowchart TB
 
   subgraph Desktop["💻 Desktop (Tauri)"]
     direction TB
-    DeskHTTP[axum POST /api/v1/_rpc/sync_pull]
+    DeskHTTP[axum POST /api/_rpc/sync_pull]
     Bridge[companion_api/sync_bridge.rs]
     Registry[companion_api/sync_registry.rs<br/>ALLOWED whitelist]
     Source[lib/sync/desktop-sync-source.ts<br/>installDesktopSyncSource]
@@ -138,7 +138,7 @@ sequenceDiagram
     Orch->>H: syncXxx(transport, { since: cursor })
     H->>B: runSyncHandler<TRow>(opts, transport, cursor)
     B->>T: transport.call("sync_pull", { table, since })
-    T->>R: HTTP POST /api/v1/_rpc/sync_pull
+    T->>R: HTTP POST /api/_rpc/sync_pull
     R->>Reg: validateTable(table)
     alt Table not in whitelist
       Reg-->>T: 404 Not Implemented

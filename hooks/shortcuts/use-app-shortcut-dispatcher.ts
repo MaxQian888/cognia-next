@@ -17,7 +17,7 @@
 
 import { useEffect } from "react"
 
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { evaluateContextWhen } from "@/lib/plugin/context-keys/context-key-store"
 import { matchingAppShortcuts } from "@/lib/shortcuts/app-runtime"
 import { isEditableTarget, isInsideEditorSurface } from "@/lib/shortcuts/dom"

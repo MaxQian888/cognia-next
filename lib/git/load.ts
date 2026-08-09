@@ -15,8 +15,10 @@ import {
 import { useGitStore } from "@/stores/git/git-store"
 import { asGitError } from "@/types/git"
 
-let fullLoadRequestId = 0
-let statusRefreshRequestId = 0
+// Full loads and watcher refreshes compete to write the same repository
+// snapshot. One shared generation prevents a slower, older request of either
+// kind from overwriting a newer one.
+let loadRequestId = 0
 
 function errorDetail(error: unknown): string {
   return asGitError(error)?.detail ?? (error instanceof Error ? error.message : String(error))
@@ -28,11 +30,14 @@ function isCurrentRoot(rootDir: string): boolean {
 
 /** Load repo state + status (+ branches/stashes/conflicts) into the store. */
 export async function loadGitRepo(rootDir: string | null): Promise<void> {
-  const requestId = ++fullLoadRequestId
+  const requestId = ++loadRequestId
   const store = useGitStore.getState()
   if (!rootDir) {
     store.setRepoState(null)
     store.setStatus(null)
+    store.setBranches([])
+    store.setStashes([])
+    store.setConflicts([])
     store.setLoadError(null)
     store.setLoadingStatus(false)
     return
@@ -42,7 +47,16 @@ export async function loadGitRepo(rootDir: string | null): Promise<void> {
   store.setLoadError(null)
   try {
     const state = await gitRepoState(rootDir)
-    if (requestId !== fullLoadRequestId || !isCurrentRoot(rootDir)) return
+    if (requestId !== loadRequestId || !isCurrentRoot(rootDir)) return
+
+    // `Repository::discover` accepts a nested project directory. Bind the UI
+    // to the discovered work-tree root it returns so watcher paths and every
+    // repo-relative mutation share the same coordinate system.
+    if (state.isRepo && state.rootDir && state.rootDir !== rootDir) {
+      store.setRootDir(state.rootDir)
+      await loadGitRepo(state.rootDir)
+      return
+    }
     store.setRepoState(state)
     if (!state.isRepo) {
       store.setStatus(null)
@@ -57,46 +71,68 @@ export async function loadGitRepo(rootDir: string | null): Promise<void> {
       gitStashList(rootDir),
       gitConflicts(rootDir),
     ])
-    if (requestId !== fullLoadRequestId || !isCurrentRoot(rootDir)) return
+    if (requestId !== loadRequestId || !isCurrentRoot(rootDir)) return
     store.setStatus(status)
     store.setBranches(branches)
     store.setStashes(stashes)
     store.setConflicts(conflicts)
   } catch (error) {
-    if (requestId === fullLoadRequestId && isCurrentRoot(rootDir)) {
+    if (requestId === loadRequestId && isCurrentRoot(rootDir)) {
       useGitStore.getState().setLoadError(errorDetail(error))
     }
     throw error
   } finally {
-    if (requestId === fullLoadRequestId && isCurrentRoot(rootDir)) {
+    if (requestId === loadRequestId && isCurrentRoot(rootDir)) {
       useGitStore.getState().setLoadingStatus(false)
     }
   }
 }
 
-/** Refresh only the status (lighter path for high-frequency watcher events). */
+/** Refresh all mutable repository lists after a debounced watcher event. */
 export async function refreshGitStatus(rootDir: string | null): Promise<void> {
   if (!rootDir) return
-  const requestId = ++statusRefreshRequestId
+  const requestId = ++loadRequestId
   if (!isCurrentRoot(rootDir)) return
   const store = useGitStore.getState()
   store.setLoadError(null)
   try {
     const state = await gitRepoState(rootDir)
-    if (requestId !== statusRefreshRequestId || !isCurrentRoot(rootDir)) return
+    if (requestId !== loadRequestId || !isCurrentRoot(rootDir)) return
+    if (state.isRepo && state.rootDir && state.rootDir !== rootDir) {
+      store.setRootDir(state.rootDir)
+      await loadGitRepo(state.rootDir)
+      return
+    }
     store.setRepoState(state)
     if (!state.isRepo) {
       store.setStatus(null)
+      store.setBranches([])
+      store.setStashes([])
+      store.setConflicts([])
       return
     }
-    const [status, conflicts] = await Promise.all([gitStatus(rootDir), gitConflicts(rootDir)])
-    if (requestId !== statusRefreshRequestId || !isCurrentRoot(rootDir)) return
+    const [status, branches, stashes, conflicts] = await Promise.all([
+      gitStatus(rootDir),
+      gitBranches(rootDir),
+      gitStashList(rootDir),
+      gitConflicts(rootDir),
+    ])
+    if (requestId !== loadRequestId || !isCurrentRoot(rootDir)) return
     store.setStatus(status)
+    store.setBranches(branches)
+    store.setStashes(stashes)
     store.setConflicts(conflicts)
   } catch (error) {
-    if (requestId === statusRefreshRequestId && isCurrentRoot(rootDir)) {
+    if (requestId === loadRequestId && isCurrentRoot(rootDir)) {
       useGitStore.getState().setLoadError(errorDetail(error))
     }
     throw error
+  } finally {
+    // A watcher refresh can supersede a full load that set this flag. Since
+    // this refresh now derives the same complete mutable snapshot, it also owns
+    // clearing the superseded load indicator.
+    if (requestId === loadRequestId && isCurrentRoot(rootDir)) {
+      useGitStore.getState().setLoadingStatus(false)
+    }
   }
 }

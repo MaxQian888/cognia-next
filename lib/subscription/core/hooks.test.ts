@@ -4,7 +4,7 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-import type { ProviderPreset } from "@/types/subscription"
+import type { AccountSummary, ProviderPreset } from "@/types/subscription"
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -16,6 +16,11 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 const transport = {
+  listAccounts: jest.fn<Promise<AccountSummary[]>, [unknown]>(),
+  getActiveAccount: jest.fn<Promise<{ activeAccountId?: string; env: [] }>, [unknown]>(),
+  setActiveAccount: jest.fn<Promise<void>, [unknown, string | null]>(),
+  renameAccount: jest.fn<Promise<void>, [unknown, string, string | null]>(),
+  deleteAccount: jest.fn<Promise<void>, [unknown, string, (string | null)?]>(),
   listPresets: jest.fn<Promise<ProviderPreset[]>, [unknown]>(),
   getProviderPreset: jest.fn<Promise<ProviderPreset | null>, [unknown]>(),
   saveProviderPreset: jest.fn<Promise<void>, [unknown, unknown]>(),
@@ -25,12 +30,12 @@ const transport = {
 
 jest.mock("./transport", () => ({
   // Account fns referenced by the module but unused in this suite.
-  deleteAccount: jest.fn(),
+  deleteAccount: (...args: [unknown, string, (string | null)?]) => transport.deleteAccount(...args),
   getAccount: jest.fn(),
-  getActiveAccount: jest.fn(),
-  listAccounts: jest.fn(),
-  renameAccount: jest.fn(),
-  setActiveAccount: jest.fn(),
+  getActiveAccount: (...args: [unknown]) => transport.getActiveAccount(...args),
+  listAccounts: (...args: [unknown]) => transport.listAccounts(...args),
+  renameAccount: (...args: [unknown, string, string | null]) => transport.renameAccount(...args),
+  setActiveAccount: (...args: [unknown, string | null]) => transport.setActiveAccount(...args),
   setProviderPreset: jest.fn(),
   listPresets: (...args: [unknown]) => transport.listPresets(...args),
   getProviderPreset: (...args: [unknown]) => transport.getProviderPreset(...args),
@@ -39,7 +44,13 @@ jest.mock("./transport", () => ({
   setDefaultPreset: (...args: [unknown, unknown]) => transport.setDefaultPreset(...args),
 }))
 
-import { useProviderPresets } from "./hooks"
+jest.mock("./account-lifecycle", () => ({
+  deleteProviderAccount: ({ provider, accountId, replacementAccountId }: Record<string, unknown>) =>
+    transport.deleteAccount(provider, accountId as string, replacementAccountId as string | null),
+}))
+
+import { useAccounts, useProviderPresets } from "./hooks"
+import { notifySubscriptionChanged } from "./subscription-events"
 
 const PRESET_A: ProviderPreset = { id: "a", label: "Bedrock", baseUrl: "https://a.example" }
 const PRESET_B: ProviderPreset = { id: "b", label: "Azure", baseUrl: "https://b.example" }
@@ -52,6 +63,69 @@ beforeEach(() => {
   transport.saveProviderPreset.mockResolvedValue(undefined)
   transport.deleteProviderPreset.mockResolvedValue(undefined)
   transport.setDefaultPreset.mockResolvedValue(undefined)
+  transport.listAccounts.mockResolvedValue([])
+  transport.getActiveAccount.mockResolvedValue({ env: [] })
+  transport.setActiveAccount.mockResolvedValue(undefined)
+  transport.renameAccount.mockResolvedValue(undefined)
+  transport.deleteAccount.mockResolvedValue(undefined)
+})
+
+describe("useAccounts", () => {
+  const ACCOUNT: AccountSummary = {
+    id: "account-a",
+    label: "A",
+    provider: "anthropic",
+    variant: "anthropic",
+    createdAtMs: 1,
+    lastUsedAtMs: 1,
+    expiresAtMs: 2,
+  }
+
+  it("surfaces load failures and allows a retry", async () => {
+    transport.listAccounts.mockRejectedValueOnce(new Error("keyring unavailable"))
+    const { result } = renderHook(() => useAccounts("anthropic"))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.error).toMatch(/keyring unavailable/)
+
+    transport.listAccounts.mockResolvedValueOnce([ACCOUNT])
+    await act(async () => result.current.reload())
+    expect(result.current.accounts).toEqual([ACCOUNT])
+    expect(result.current.error).toBeNull()
+  })
+
+  it("reloads when another subscription surface mutates", async () => {
+    transport.listAccounts.mockResolvedValueOnce([]).mockResolvedValueOnce([ACCOUNT])
+    const { result } = renderHook(() => useAccounts("anthropic"))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    act(() => notifySubscriptionChanged())
+
+    await waitFor(() => expect(result.current.accounts).toEqual([ACCOUNT]))
+  })
+
+  it("exposes the pending account action and selected replacement", async () => {
+    transport.listAccounts.mockResolvedValue([ACCOUNT])
+    let finish!: () => void
+    transport.deleteAccount.mockImplementation(
+      () => new Promise<void>((resolve) => (finish = resolve))
+    )
+    const { result } = renderHook(() => useAccounts("anthropic"))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let removal!: Promise<void>
+    act(() => {
+      removal = result.current.remove("account-a", "account-b")
+    })
+    expect(result.current.pendingAction).toBe("delete")
+    expect(result.current.pendingAccountId).toBe("account-a")
+    expect(transport.deleteAccount).toHaveBeenCalledWith("anthropic", "account-a", "account-b")
+
+    await act(async () => {
+      finish()
+      await removal
+    })
+    expect(result.current.pendingAction).toBeNull()
+  })
 })
 
 describe("useProviderPresets", () => {

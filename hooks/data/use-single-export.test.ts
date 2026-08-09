@@ -35,7 +35,7 @@ jest.mock("@/lib/files/save-export", () => ({
 }))
 
 import { useSingleExport } from "./use-single-export"
-import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 
 const SAVED = {
   kind: "saved" as const,

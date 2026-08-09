@@ -14,6 +14,7 @@
 import { getAdapter } from "./providers/registry"
 import {
   DEFAULT_SPEECH_SETTINGS,
+  normalizeTTSProvider,
   type CartesiaTTSModel,
   type CartesiaTTSVoice,
   type DeepgramTTSVoice,
@@ -59,10 +60,10 @@ export function selectSpeechSettings(
   settings: SpeechSettingsSource | null | undefined
 ): SpeechSettings {
   if (!settings) return DEFAULT_SPEECH_SETTINGS
+  const provider = normalizeTTSProvider(settings.ttsProvider)
   return {
     ...DEFAULT_SPEECH_SETTINGS,
-    ttsProvider:
-      (settings.ttsProvider as TTSProvider | undefined) ?? DEFAULT_SPEECH_SETTINGS.ttsProvider,
+    ttsProvider: provider,
     systemVoice: settings.systemVoice ?? DEFAULT_SPEECH_SETTINGS.systemVoice,
 
     openaiVoice:
@@ -72,8 +73,23 @@ export function selectSpeechSettings(
     openaiSpeed: settings.openaiSpeed ?? DEFAULT_SPEECH_SETTINGS.openaiSpeed,
     openaiInstructions: settings.openaiInstructions ?? DEFAULT_SPEECH_SETTINGS.openaiInstructions,
     openaiResponseFormat:
-      (settings.openaiResponseFormat as TTSSettings["openaiResponseFormat"] | undefined) ??
-      DEFAULT_SPEECH_SETTINGS.openaiResponseFormat,
+      settings.openaiResponseFormat === "pcm"
+        ? "mp3"
+        : ((settings.openaiResponseFormat as TTSSettings["openaiResponseFormat"] | undefined) ??
+          DEFAULT_SPEECH_SETTINGS.openaiResponseFormat),
+
+    localOpenaiBaseUrl: settings.localOpenaiBaseUrl ?? DEFAULT_SPEECH_SETTINGS.localOpenaiBaseUrl,
+    localOpenaiModel: settings.localOpenaiModel ?? DEFAULT_SPEECH_SETTINGS.localOpenaiModel,
+    localOpenaiVoice: settings.localOpenaiVoice ?? DEFAULT_SPEECH_SETTINGS.localOpenaiVoice,
+    localOpenaiSpeed: settings.localOpenaiSpeed ?? DEFAULT_SPEECH_SETTINGS.localOpenaiSpeed,
+    localOpenaiResponseFormat:
+      settings.localOpenaiResponseFormat === "pcm"
+        ? "mp3"
+        : ((settings.localOpenaiResponseFormat as
+            TTSSettings["localOpenaiResponseFormat"] | undefined) ??
+          DEFAULT_SPEECH_SETTINGS.localOpenaiResponseFormat),
+    localOpenaiTimeoutMs:
+      settings.localOpenaiTimeoutMs ?? DEFAULT_SPEECH_SETTINGS.localOpenaiTimeoutMs,
 
     geminiVoice:
       (settings.geminiVoice as GeminiTTSVoice | undefined) ?? DEFAULT_SPEECH_SETTINGS.geminiVoice,
@@ -131,8 +147,10 @@ export function selectSpeechSettings(
       (settings.mistralModel as MistralTTSModel | undefined) ??
       DEFAULT_SPEECH_SETTINGS.mistralModel,
     mistralResponseFormat:
-      (settings.mistralResponseFormat as MistralTTSResponseFormat | undefined) ??
-      DEFAULT_SPEECH_SETTINGS.mistralResponseFormat,
+      settings.mistralResponseFormat === "pcm"
+        ? "mp3"
+        : ((settings.mistralResponseFormat as MistralTTSResponseFormat | undefined) ??
+          DEFAULT_SPEECH_SETTINGS.mistralResponseFormat),
 
     realtimeVoice:
       (settings.realtimeVoice as RealtimeTTSVoice | undefined) ??

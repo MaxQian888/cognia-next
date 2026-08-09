@@ -72,7 +72,7 @@ M1 仅为承重的调用点交付迁移——目标是这个抽象，而非穷�
 
 - 三个 transport 类全部 + 选择器
 - `lib/tauri.ts:greet`（M1.2 试点）
-- `lib/tauri/canvas.ts` 与 `lib/tauri/remote-control.ts`（M1.3——插件 wrapper
+- `lib/tauri/canvas.ts` 与现已退役的 `lib/tauri/remote-control.ts`（历史 M1.3——插件 wrapper
   中仅有的直接调 `invoke` 的调用方）
 - `lib/claude/ipc.ts`、`lib/external-bridge/tauri-control.ts`、
   `lib/native/system-scheduler.ts`、

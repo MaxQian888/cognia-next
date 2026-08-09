@@ -284,10 +284,13 @@ async fn execute_template(
             .ok_or_else(|| "request URL is missing a host".to_string())?;
         // Pin the exact addresses that passed policy validation. Reqwest must
         // not perform a second DNS lookup that could be rebound to a private IP.
-        let client = reqwest::Client::builder()
+        let builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(MAX_WALL_TIME)
-            .resolve_to_addrs(host, &addresses)
+            .resolve_to_addrs(host, &addresses);
+        let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, current.as_str())
+            .map_err(|error| error.to_string())?;
+        let client = builder
             .build()
             .map_err(|error| format!("HTTP client failed: {error}"))?;
         let mut request = client.request(method.clone(), current.clone());

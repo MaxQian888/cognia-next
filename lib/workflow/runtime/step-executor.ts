@@ -11,6 +11,7 @@ import type {
   WorkflowNode,
   WorkflowRetryPolicy,
 } from "@/types/workflow/visual"
+import type { WorkflowExecutionBinding } from "@/types/workflow/deployment"
 import { getExecutor } from "@/lib/workflow/nodes/registry"
 import { retiredNodeKind } from "@/lib/workflow/nodes/retired-kinds"
 import { resolveDeep } from "./expression"
@@ -43,6 +44,8 @@ export interface RunStepInput {
   honorPinData?: boolean
   /** Run-scoped agent-trace id, threaded onto the step context for AI-node spans. */
   traceId?: string
+  /** Formal-run provenance inherited by every node executor. */
+  executionBinding?: WorkflowExecutionBinding
   /**
    * Extra expression idents merged over `upstream` for this step only — the
    * loop container injects `$item` / `$loop` here (see the ident fallback in
@@ -199,6 +202,8 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     runId,
     workflowId: input.workflow.id,
     stepId: node.id,
+    ...(input.iterationMeta ? { iteration: input.iterationMeta } : {}),
+    ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
     params: resolvedParamRecord,
     upstream,
     trigger: input.trigger,

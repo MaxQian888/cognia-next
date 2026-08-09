@@ -11,6 +11,10 @@ import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
 import { bootstrapCogniaMobile, readDexieRow, readDexieRows } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
+import {
+  companionConfigSecureStorage,
+  provisionMockCompanionConfig,
+} from "./companion-fixture"
 
 const PLUGIN_ID = "plugin-e2e-release-tools"
 
@@ -59,7 +63,7 @@ async function installPluginDesktop(page: Page): Promise<{ calls: CapturedRpc[] 
     updatedAt: now,
   }
 
-  await page.route(`${baseUrl}/api/v1/_rpc/**`, async (route) => {
+  await page.route(`${baseUrl}/api/_rpc/**`, async (route) => {
     const request = route.request()
     const command = new URL(request.url()).pathname.split("/").pop() ?? ""
     const body = (request.postDataJSON() ?? {}) as Record<string, unknown>
@@ -91,18 +95,14 @@ test.describe("mobile — plugin toggle lifecycle", () => {
     page,
   }) => {
     const desktop = await installPluginDesktop(page)
-    const companionConfig = {
-      baseUrl: mockV2BaseUrl(),
-      deviceJwt: "e2e-plugin-toggle-jwt",
-      deviceId: "device-e2e-plugin-toggle",
-      serverVersion: "1.0.0",
-    }
+    const companionConfig = await provisionMockCompanionConfig(
+      mockV2BaseUrl(),
+      "device-e2e-plugin-toggle"
+    )
     await injectCapacitor(page, {
       platform: "android",
       network: { connected: true, connectionType: "wifi" },
-      secureStorage: {
-        "cognia.companion.config.v1": JSON.stringify(companionConfig),
-      },
+      secureStorage: companionConfigSecureStorage(companionConfig),
     })
     await page.goto("/welcome")
     await bootstrapCogniaMobile(page, "paired")

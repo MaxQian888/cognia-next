@@ -54,6 +54,27 @@ export interface TelemetryEventCatalog {
     executionKind: string
     legacyMigrated: boolean
   }
+  /** Resolver-v2 observation while the legacy rail still owns execution. */
+  "agent.execution.shadow": {
+    runtimeAdapter: string
+    executionKind: string
+    routeKind: string
+    missingRequiredCount: number
+    compatibilityEvidence: string
+  }
+  "support.session.opened": { sessionId: string }
+  "support.diagnostics.consent.changed": {
+    enabled: boolean
+    surface: "chat" | "settings"
+  }
+  "support.feedback.draft.opened": {
+    surface: "chat" | "mobile"
+    sessionId?: string
+  }
+  "support.feedback.draft.exported": {
+    surface: "chat" | "mobile"
+    sessionId?: string
+  }
 }
 
 export type TelemetryEventName = keyof TelemetryEventCatalog
@@ -79,4 +100,9 @@ export const TELEMETRY_EVENT_CATALOG: Readonly<
   "agent.teammate.failed": { category: "agentTeam" },
   "telemetry.preference.changed": { category: "system" },
   "agent.execution.resolved": { category: "system" },
+  "agent.execution.shadow": { category: "system" },
+  "support.session.opened": { category: "system" },
+  "support.diagnostics.consent.changed": { category: "system" },
+  "support.feedback.draft.opened": { category: "system" },
+  "support.feedback.draft.exported": { category: "system" },
 }

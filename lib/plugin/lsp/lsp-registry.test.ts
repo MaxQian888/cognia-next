@@ -28,12 +28,26 @@ import {
   type LspClientAdapter,
 } from "./lsp-registry"
 import type { PluginLspServerDef } from "@/types/plugin"
+import {
+  __resetLspWorkspaceManagerForTesting,
+  configureLspWorkspaceManager,
+  ensureWorkspace,
+  FLUSH_DEBOUNCE_MS,
+  registerProjectWorkspace,
+  type LspWorkspaceFsAdapter,
+} from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 
 function makeFakeAdapters(): {
   client: LspClientAdapter & {
     started: Array<{ ownerId: string; serverId: string; foldersCount: number }>
     stopped: Array<{ ownerId: string; serverId: string }>
     onDiagnosticsHandles: Map<string, (uri: string, markers: unknown[]) => void>
+    emitState(input: {
+      ownerId: string
+      serverId: string
+      state: "stopped" | "starting" | "running" | "broken"
+      lastError?: string
+    }): void
   }
   bridge: LspBridgeAdapter & {
     diagnosticsCalls: Array<{ extensionId: string; uri: string; markersCount: number }>
@@ -43,6 +57,14 @@ function makeFakeAdapters(): {
   const started: Array<{ ownerId: string; serverId: string; foldersCount: number }> = []
   const stopped: Array<{ ownerId: string; serverId: string }> = []
   const diagnosticsCalls: Array<{ extensionId: string; uri: string; markersCount: number }> = []
+  let stateListener:
+    | ((input: {
+        ownerId: string
+        serverId: string
+        state: "stopped" | "starting" | "running" | "broken"
+        lastError?: string
+      }) => void)
+    | undefined
 
   const client: LspClientAdapter & typeof started extends never
     ? never
@@ -50,6 +72,7 @@ function makeFakeAdapters(): {
         started: typeof started
         stopped: typeof stopped
         onDiagnosticsHandles: typeof onDiagnosticsHandles
+        emitState(input: Parameters<NonNullable<typeof stateListener>>[0]): void
       } = {
     started,
     stopped,
@@ -67,6 +90,15 @@ function makeFakeAdapters(): {
     async stop(ownerId, serverId) {
       stopped.push({ ownerId, serverId })
       onDiagnosticsHandles.delete(`${ownerId}:${serverId}`)
+    },
+    onStateChange(listener) {
+      stateListener = listener
+      return () => {
+        stateListener = undefined
+      }
+    },
+    emitState(input) {
+      stateListener?.(input)
     },
   }
 
@@ -99,6 +131,7 @@ function makeServer(overrides: Partial<PluginLspServerDef> = {}): PluginLspServe
 
 beforeEach(() => {
   __resetLspRegistryForTesting()
+  __resetLspWorkspaceManagerForTesting()
   evaluateLspBinaryMock.mockReset()
   evaluateLspBinaryMock.mockResolvedValue({
     allowed: true,
@@ -417,6 +450,176 @@ describe("lsp-registry", () => {
       await registerLspServer({ ownerId: "p", config: makeServer(), pluginPath: "/p" })
       // The record exists but in stopped/consent-required state.
       expect(getLspServerForLanguage("typescript")).toBeUndefined()
+    })
+
+    it("prefers user configuration over plugin servers, then preserves configuration order", async () => {
+      const { client, bridge } = makeFakeAdapters()
+      configureLspRegistry({ client, bridge, resolveWorkspaceFolders: () => [], now: () => 0 })
+      await registerLspServer({
+        ownerId: "plugin.publisher",
+        config: makeServer({ id: "plugin-ts", languages: ["typescript"] }),
+        pluginPath: "/p",
+      })
+      await registerLspServer({
+        ownerId: "user",
+        config: makeServer({ id: "user-first", languages: ["typescript"] }),
+        pluginPath: "/u",
+      })
+      await registerLspServer({
+        ownerId: "user",
+        config: makeServer({ id: "user-second", languages: ["typescript"] }),
+        pluginPath: "/u",
+      })
+
+      expect(getLspServerForLanguage("typescript")?.serverId).toBe("user-first")
+    })
+
+    it("falls back to the next running server when the active server crashes", async () => {
+      const { client, bridge } = makeFakeAdapters()
+      configureLspRegistry({ client, bridge, resolveWorkspaceFolders: () => [], now: () => 0 })
+      await registerLspServer({
+        ownerId: "user",
+        config: makeServer({ id: "primary", languages: ["typescript"] }),
+        pluginPath: "/u",
+      })
+      await registerLspServer({
+        ownerId: "plugin.publisher",
+        config: makeServer({ id: "fallback", languages: ["typescript"] }),
+        pluginPath: "/p",
+      })
+
+      client.emitState({ ownerId: "user", serverId: "primary", state: "broken", lastError: "exit" })
+
+      expect(getLspServerForLanguage("typescript")?.serverId).toBe("fallback")
+      expect(listLspServers().find((record) => record.serverId === "primary")).toMatchObject({
+        state: "crashed",
+        lastError: "exit",
+      })
+    })
+  })
+
+  describe("workspace folder updates", () => {
+    it("notifies servers that declare dynamic workspace folder support", async () => {
+      const { client, bridge } = makeFakeAdapters()
+      const clientNotification = jest.fn(async () => true)
+      client.clientNotification = clientNotification
+      client.start = async (input) => {
+        client.started.push({
+          ownerId: input.ownerId,
+          serverId: input.serverId,
+          foldersCount: input.workspaceFolders?.length ?? 0,
+        })
+        return {
+          capabilities: {
+            workspace: { workspaceFolders: { supported: true, changeNotifications: true } },
+          },
+        }
+      }
+      let folders: Array<{ uri: string; name: string }> = []
+      configureLspRegistry({ client, bridge, resolveWorkspaceFolders: () => folders, now: () => 0 })
+      await registerLspServer({ ownerId: "user", config: makeServer(), pluginPath: "/u" })
+
+      folders = [{ uri: "file:///tmp/project", name: "project" }]
+      registerProjectWorkspace("/tmp/project", "project")
+      await Promise.resolve()
+
+      expect(clientNotification).toHaveBeenCalledWith({
+        ownerId: "user",
+        serverId: "eslint",
+        method: "workspace/didChangeWorkspaceFolders",
+        payload: {
+          event: {
+            added: [{ uri: "file:///tmp/project", name: "project" }],
+            removed: [],
+          },
+        },
+      })
+      expect(client.started).toHaveLength(1)
+    })
+
+    it("restarts servers that cannot update workspace folders dynamically", async () => {
+      const { client, bridge } = makeFakeAdapters()
+      let folders: Array<{ uri: string; name: string }> = []
+      configureLspRegistry({ client, bridge, resolveWorkspaceFolders: () => folders, now: () => 0 })
+      await registerLspServer({ ownerId: "user", config: makeServer(), pluginPath: "/u" })
+
+      folders = [{ uri: "file:///tmp/project", name: "project" }]
+      registerProjectWorkspace("/tmp/project", "project")
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(client.stopped).toContainEqual({ ownerId: "user", serverId: "eslint" })
+      expect(client.started).toHaveLength(2)
+      expect(client.started[1]?.foldersCount).toBe(1)
+    })
+  })
+
+  describe("document lifecycle", () => {
+    it("opens after materialization, then flushes before didChange and closes the routed document", async () => {
+      const events: string[] = []
+      const files = new Map<string, string>()
+      const fs: LspWorkspaceFsAdapter = {
+        appDataDir: async () => "/tmp/app-data",
+        createDir: async () => undefined,
+        writeFile: async (path, content) => {
+          files.set(path, content)
+          events.push(`write:${content}`)
+        },
+        removeDir: async () => undefined,
+        joinPath: (...segments) => segments.join("/").replace(/\/{2,}/g, "/"),
+        pathToFileUri: (path) => `file://${path}`,
+      }
+      configureLspWorkspaceManager(fs)
+      const monacoUri = "skill:///skill-1/scripts/a.ts"
+      await ensureWorkspace({
+        surface: "skill",
+        documentId: "skill-1",
+        fileName: "scripts/a.ts",
+        initialContent: "const value = 1",
+        monacoUri,
+      })
+      events.length = 0
+
+      let text = "const value = 1"
+      let emitEditorEvent:
+        | ((event: {
+            editorId: string
+            uri: string
+            kind: "open" | "close" | "change-selection" | "change-content"
+          }) => void)
+        | undefined
+      const { client, bridge } = makeFakeAdapters()
+      bridge.onEditorChange = (listener) => {
+        emitEditorEvent = listener
+        return () => {
+          emitEditorEvent = undefined
+        }
+      }
+      bridge.getEditorById = () => ({
+        getModel: () => ({ uri: monacoUri, language: "typescript", getValue: () => text }),
+      })
+      client.didOpen = async () => {
+        events.push("didOpen")
+      }
+      client.didChange = async () => {
+        events.push("didChange")
+      }
+      client.didClose = async () => {
+        events.push("didClose")
+      }
+      configureLspRegistry({ client, bridge, resolveWorkspaceFolders: () => [], now: () => 0 })
+      await registerLspServer({ ownerId: "user", config: makeServer(), pluginPath: "/u" })
+
+      emitEditorEvent?.({ editorId: "editor-1", uri: monacoUri, kind: "open" })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      text = "const value = 2"
+      emitEditorEvent?.({ editorId: "editor-1", uri: monacoUri, kind: "change-content" })
+      await new Promise((resolve) => setTimeout(resolve, FLUSH_DEBOUNCE_MS + 10))
+      emitEditorEvent?.({ editorId: "editor-1", uri: monacoUri, kind: "close" })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(events).toEqual(["didOpen", "write:const value = 2", "didChange", "didClose"])
+      expect([...files.values()]).toContain("const value = 2")
     })
   })
 

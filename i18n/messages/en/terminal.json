@@ -22,21 +22,21 @@
     },
     "closePane": "Close pane",
     "closePanel": "Close panel",
-    "maximize": "Maximize terminal panel",
-    "newSession": "New terminal",
-    "resize": "Drag to resize the terminal dock (arrow keys also work)",
-    "restore": "Restore terminal panel size",
     "detachError": "Couldn't detach terminal: {message}",
-    "spawnDenied": "Terminal blocked by a plugin",
-    "spawnError": "Couldn't open terminal: {message}",
-    "splitRight": "Split terminal right (Ctrl+\\)",
     "dragToMove": "Drag to move the terminal dock",
     "dropZoneBottom": "Drop here to dock the terminal at the bottom",
     "dropZoneRight": "Drop here to dock the terminal on the right",
+    "maximize": "Maximize terminal panel",
     "moveToBottom": "Dock the terminal at the bottom",
     "moveToRight": "Dock the terminal on the right",
+    "newSession": "New terminal",
     "overflowTabs": "More terminal tabs",
-    "resizeVertical": "Drag to resize the terminal dock (arrow keys also work)"
+    "resize": "Drag to resize the terminal dock (arrow keys also work)",
+    "resizeVertical": "Drag to resize the terminal dock (arrow keys also work)",
+    "restore": "Restore terminal panel size",
+    "spawnDenied": "Terminal blocked by a plugin",
+    "spawnError": "Couldn't open terminal: {message}",
+    "splitRight": "Split terminal right (Ctrl+\\)"
   },
   "emptyState": {
     "desktop": {
@@ -64,6 +64,11 @@
     "error": "Failed to open file: {message}",
     "loading": "Loading…",
     "title": "File viewer"
+  },
+  "fold": {
+    "collapse": "Fold output",
+    "expand": "Unfold output",
+    "linesHidden": "{count} lines hidden"
   },
   "ghost": {
     "acceptHint": "Tab"
@@ -154,9 +159,44 @@
   "stickyScroll": {
     "label": "Sticky command header"
   },
+  "template": {
+    "cancel": "Cancel",
+    "inputPlaceholder": "Enter value",
+    "run": "Run",
+    "selectPlaceholder": "Choose an option",
+    "title": "Fill template variables"
+  },
   "tab": {
+    "appearance": {
+      "colorLabel": "Color",
+      "colors": {
+        "blue": "Blue",
+        "cyan": "Cyan",
+        "green": "Green",
+        "none": "None",
+        "orange": "Orange",
+        "pink": "Pink",
+        "purple": "Purple",
+        "red": "Red",
+        "yellow": "Yellow"
+      },
+      "iconLabel": "Icon",
+      "icons": {
+        "bug": "Bug",
+        "code": "Code",
+        "container": "Container",
+        "database": "Database",
+        "globe": "Globe",
+        "none": "None",
+        "rocket": "Rocket",
+        "server": "Server",
+        "terminal": "Terminal"
+      },
+      "trigger": "Customize appearance"
+    },
     "close": "Close terminal",
     "menu": {
+      "appearance": "Change appearance",
       "clear": "Clear",
       "close": "Close",
       "closeOthers": "Close others",
@@ -178,7 +218,106 @@
       "exitedFail": "Exited with non-zero code",
       "exitedOk": "Exited cleanly",
       "idle": "Idle",
+      "newOutput": "New output",
       "running": "Running"
+    }
+  },
+  "aiShell": {
+    "title": "AI Shell",
+    "toggle": "Toggle AI Shell (Ctrl+Shift+I)",
+    "inputPlaceholder": "Describe what you want to do…",
+    "send": "Send",
+    "context": {
+      "branch": "Branch",
+      "cwd": "CWD",
+      "shell": "Shell"
+    },
+    "plan": {
+      "title": "Execution Plan",
+      "empty": "No steps generated.",
+      "generating": "Generating plan…",
+      "ready": "Plan ready — review and run.",
+      "executing": "Executing…",
+      "completed": "All steps completed.",
+      "cancelled": "Plan cancelled.",
+      "error": "Failed to generate plan."
+    },
+    "step": {
+      "pending": "Pending",
+      "running": "Running…",
+      "succeeded": "Done",
+      "failed": "Failed (exit {code})",
+      "failedNoCode": "Failed",
+      "skipped": "Skipped",
+      "cancelled": "Cancelled",
+      "confirm": "This step may be destructive. Run it?",
+      "edit": "Edit command",
+      "skip": "Skip step",
+      "retry": "Retry step"
+    },
+    "actions": {
+      "runAll": "Run all",
+      "stepByStep": "Step by step",
+      "cancel": "Cancel",
+      "stop": "Stop execution",
+      "newPlan": "New plan"
+    },
+    "error": {
+      "noModel": "No model configured. Set one in settings.",
+      "piiBlocked": "Context contains secrets — redact before retrying.",
+      "generating": "Error generating plan.",
+      "advisory": "Diagnosis"
+    },
+    "advisory": {
+      "title": "Error Diagnosis",
+      "fix": "Suggested fix:",
+      "noFix": "No automatic fix available.",
+      "applyFix": "Apply fix",
+      "retryHint": "Re-run the original step after applying the fix."
+    },
+    "history": {
+      "title": "AI Shell history",
+      "clear": "Clear history",
+      "empty": "No messages yet."
+    }
+  },
+  "recording": {
+    "title": "Recording",
+    "start": "Start recording",
+    "stop": "Stop recording",
+    "pause": "Pause recording",
+    "resume": "Resume recording",
+    "discard": "Discard recording",
+    "save": "Save recording",
+    "status": {
+      "idle": "Ready to record",
+      "recording": "Recording…",
+      "paused": "Paused",
+      "stopped": "Recording complete"
+    },
+    "elapsed": "{time}",
+    "frames": "{count} frames",
+    "player": {
+      "play": "Play",
+      "pause": "Pause",
+      "speed": "Speed: {speed}×",
+      "seek": "Seek",
+      "duration": "{time}",
+      "restart": "Restart"
+    },
+    "export": {
+      "title": "Export",
+      "gif": "Export as GIF",
+      "cast": "Export as .cast",
+      "exporting": "Exporting…",
+      "done": "Export complete",
+      "error": "Export failed: {message}"
+    },
+    "list": {
+      "title": "Recordings",
+      "empty": "No recordings yet.",
+      "delete": "Delete recording",
+      "deleteConfirm": "Delete this recording? This cannot be undone."
     }
   }
 }

@@ -178,8 +178,8 @@ const ToolSettingsSection = dynamic(
   () => import("./tools/tool-settings-section").then((m) => m.ToolSettingsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
-const RemoteControlSection = dynamic(
-  () => import("./remote-control/remote-control-section").then((m) => m.RemoteControlSection),
+const WebhooksSection = dynamic(
+  () => import("./webhooks/webhooks-section").then((module) => module.WebhooksSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const GatewaySection = dynamic(
@@ -597,8 +597,8 @@ function SectionContent({
       return <GoalsSection />
     case "pet":
       return <PetSection />
-    case "remote-control":
-      return <RemoteControlSection />
+    case "webhooks":
+      return <WebhooksSection />
     case "gateway":
       return <GatewaySection />
     case "external-bridge":

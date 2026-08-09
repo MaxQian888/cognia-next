@@ -66,11 +66,22 @@ services:
     mem_limit: 8g
     stop_grace_period: 300s
     healthcheck:
-      test: [CMD, curl, -kfsS, https://localhost:27890/api/v1/readyz]
+      test: [CMD, curl, -kfsS, https://localhost:27890/readyz]
       interval: 15s
       timeout: 5s
       retries: 4
       start_period: 60s
+    logging: *production-logging
+
+  caddy:
+    image: ${COGNIA_WEB_IMAGE:?set a digest-pinned COGNIA_WEB_IMAGE}
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+      - /config:size=32m,nosuid,nodev
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
     logging: *production-logging
 
 secrets:

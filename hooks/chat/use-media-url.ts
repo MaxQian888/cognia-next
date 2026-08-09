@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import { isMediaRef } from "@/lib/db/message-media"
 import {
@@ -9,6 +9,7 @@ import {
   type AcquireOptions,
   type ResolvedMedia,
 } from "@/lib/chat/media/resolve-media"
+import { useSessionMediaLoader } from "./session-media-provider"
 
 export type MediaUrlStatus = "inactive" | "loading" | "ready" | "missing"
 
@@ -20,19 +21,16 @@ export interface MediaUrlState {
   height: number
   isThumbnail: boolean
   status: MediaUrlStatus
+  /** Retry a failed local resolve or remote session-media request. */
+  retry: () => void
 }
 
-const INACTIVE: MediaUrlState = {
+const BASE_STATE = {
   url: null,
   width: 0,
   height: 0,
   isThumbnail: false,
-  status: "inactive",
 }
-
-const LOADING: MediaUrlState = { ...INACTIVE, status: "loading" }
-
-const MISSING: MediaUrlState = { ...INACTIVE, status: "missing" }
 
 /** What the effect has settled on, tagged with the ref it settled for. */
 interface Settled {
@@ -63,6 +61,9 @@ export function useMediaUrl(
   { thumbnail = false }: AcquireOptions = {}
 ): MediaUrlState {
   const [settled, setSettled] = useState<Settled | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const loadMissing = useSessionMediaLoader()
+  const retry = useCallback(() => setAttempt((value) => value + 1), [])
   const active = Boolean(ref) && isMediaRef(ref)
 
   useEffect(() => {
@@ -82,36 +83,52 @@ export function useMediaUrl(
       releaseMedia(ref, { thumbnail })
     }
 
-    void acquireMedia(ref, { thumbnail }).then((resolved: ResolvedMedia | null) => {
-      // A null resolve never registered a holder, so there is nothing to own.
-      if (resolved) owns = true
-      if (cancelled) {
-        release()
-        return
-      }
-      setSettled({
-        ref,
-        thumbnail,
-        state: resolved
-          ? {
-              url: resolved.url,
-              width: resolved.width,
-              height: resolved.height,
-              isThumbnail: resolved.isThumbnail,
-              status: "ready",
-            }
-          : MISSING,
+    void acquireMedia(ref, { thumbnail, loadMissing })
+      .then((resolved: ResolvedMedia | null) => {
+        // A null resolve never registered a holder, so there is nothing to own.
+        if (resolved) owns = true
+        if (cancelled) {
+          release()
+          return
+        }
+        setSettled({
+          ref,
+          thumbnail,
+          state: {
+            ...BASE_STATE,
+            ...(resolved
+              ? {
+                  url: resolved.url,
+                  width: resolved.width,
+                  height: resolved.height,
+                  isThumbnail: resolved.isThumbnail,
+                  status: "ready" as const,
+                }
+              : { status: "missing" as const }),
+            retry,
+          },
+        })
       })
-    })
+      .catch(() => {
+        if (!cancelled) {
+          setSettled({
+            ref,
+            thumbnail,
+            state: { ...BASE_STATE, status: "missing", retry },
+          })
+        }
+      })
 
     return () => {
       cancelled = true
       release()
     }
-  }, [ref, thumbnail])
+  }, [attempt, loadMissing, ref, retry, thumbnail])
 
-  if (!active) return INACTIVE
+  if (!active) return { ...BASE_STATE, status: "inactive", retry }
   // Nothing settled yet, or settled for a different reference: still in flight.
-  if (!settled || settled.ref !== ref || settled.thumbnail !== thumbnail) return LOADING
+  if (!settled || settled.ref !== ref || settled.thumbnail !== thumbnail) {
+    return { ...BASE_STATE, status: "loading", retry }
+  }
   return settled.state
 }

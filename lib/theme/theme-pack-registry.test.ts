@@ -1,6 +1,8 @@
 import {
   __resetThemePackRegistryForTesting,
   getThemePack,
+  hasThemePackKey,
+  listThemePackKeys,
   listThemePacks,
   registerThemePack,
   subscribeThemePackRegistry,
@@ -80,6 +82,30 @@ describe("unregister", () => {
     subscribeThemePackRegistry(() => fires.push(0))
     expect(unregisterThemePacksByPlugin("ghost")).toBe(0)
     expect(fires).toHaveLength(0)
+  })
+})
+
+describe("Character Pack dependency keys", () => {
+  it("lists and resolves canonical pluginId.packId keys", () => {
+    registerThemePack({ pluginId: "p1", pack: packFixture("light") })
+    registerThemePack({ pluginId: "p2", pack: packFixture("light") })
+
+    expect(listThemePackKeys()).toEqual(["p1.light", "p2.light"])
+    expect(hasThemePackKey("p1.light")).toBe(true)
+    expect(hasThemePackKey("p2.light")).toBe(true)
+    expect(hasThemePackKey("light")).toBe(false)
+    expect(hasThemePackKey("p1.dark")).toBe(false)
+  })
+
+  it("drops keys when a pack is removed or the test registry resets", () => {
+    registerThemePack({ pluginId: "p1", pack: packFixture("light") })
+    expect(unregisterThemePack("p1", "light")).toBe(true)
+    expect(hasThemePackKey("p1.light")).toBe(false)
+
+    registerThemePack({ pluginId: "p1", pack: packFixture("dark") })
+    __resetThemePackRegistryForTesting()
+    expect(listThemePackKeys()).toEqual([])
+    expect(hasThemePackKey("p1.dark")).toBe(false)
   })
 })
 

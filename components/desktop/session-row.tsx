@@ -35,10 +35,12 @@ import {
   CheckIcon,
   FolderIcon,
   FolderInputIcon,
+  ExternalLinkIcon,
   GitBranchIcon,
   GripVerticalIcon,
   HashIcon,
   ListChecksIcon,
+  Loader2Icon,
   MessageSquareIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -177,6 +179,7 @@ function SessionRowImpl({
   const [cogniaAgentStatus, setCogniaAgentStatus] = useState<
     "unknown" | "checking" | "available" | "missing"
   >("unknown")
+  const [codexDispatching, setCodexDispatching] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const liRef = useRef<HTMLLIElement>(null)
 
@@ -309,6 +312,21 @@ function SessionRowImpl({
         log.warn("session open-in-terminal failed", { error: String(err) })
       }
     })()
+  }
+
+  const handleOpenInCodexApp = () => {
+    setCodexDispatching(true)
+    void import("@/lib/chat/dispatch-to-codex-app")
+      .then(({ dispatchSessionToCodexApp }) => dispatchSessionToCodexApp(session))
+      .then(() => {
+        log.info("session open-in-codex-app", { sessionId: session.id })
+        toast.success(t("openedInCodexApp"))
+      })
+      .catch((error) => {
+        log.warn("session open-in-codex-app failed", { error: String(error) })
+        toast.error(t("openInCodexAppFailed"))
+      })
+      .finally(() => setCodexDispatching(false))
   }
 
   const Icon =
@@ -482,20 +500,30 @@ function SessionRowImpl({
               </DropdownMenuSub>
             ) : null}
             {isTauri() ? (
-              <DropdownMenuItem
-                onSelect={handleOpenInTerminal}
-                disabled={cogniaAgentStatus !== "available"}
-                title={
-                  cogniaAgentStatus === "missing"
-                    ? t("cogniaAgentNotInstalled")
-                    : cogniaAgentStatus !== "available"
-                      ? t("cogniaAgentChecking")
-                      : undefined
-                }
-              >
-                <TerminalIcon className="mr-2 size-4" />
-                {t("openInTerminal")}
-              </DropdownMenuItem>
+              <>
+                <DropdownMenuItem onSelect={handleOpenInCodexApp} disabled={codexDispatching}>
+                  {codexDispatching ? (
+                    <Loader2Icon className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <ExternalLinkIcon className="mr-2 size-4" />
+                  )}
+                  {t("openInCodexApp")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={handleOpenInTerminal}
+                  disabled={cogniaAgentStatus !== "available"}
+                  title={
+                    cogniaAgentStatus === "missing"
+                      ? t("cogniaAgentNotInstalled")
+                      : cogniaAgentStatus !== "available"
+                        ? t("cogniaAgentChecking")
+                        : undefined
+                  }
+                >
+                  <TerminalIcon className="mr-2 size-4" />
+                  {t("openInTerminal")}
+                </DropdownMenuItem>
+              </>
             ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem

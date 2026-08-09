@@ -35,6 +35,7 @@ pub mod header_policy;
 pub mod host;
 pub mod keyed_rate_limit;
 pub mod lease;
+pub mod route_planner;
 pub mod route_ticket;
 pub mod server;
 pub mod session_key;
@@ -102,6 +103,8 @@ pub struct GatewayState {
     /// least-used counts). Shared with the running server so the cursor
     /// advances across requests; process-local, reset on restart.
     key_rotation: Arc<KeyRotationMap>,
+    /// Gateway-local V2 alias/Auto distribution cursors.
+    route_planner: Arc<route_planner::RoutePlannerState>,
     /// Per-upstream-key cooldown / permanent-disable state (W1.1 + W3.1).
     /// Shared with the running server so a parked key stays parked across
     /// requests; process-local, reset on restart.
@@ -148,6 +151,7 @@ impl GatewayState {
             snapshot: Arc::new(RwLock::new(None)),
             decisions: Arc::new(Mutex::new(HashMap::new())),
             key_rotation: Arc::new(KeyRotationMap::default()),
+            route_planner: Arc::new(route_planner::RoutePlannerState::default()),
             key_cooldown: Arc::new(KeyCooldownMap::default()),
             concurrency: Arc::new(ConcurrencyLimiter::default()),
             tickets: Arc::new(route_ticket::RouteTicketRegistry::new(Arc::new(
@@ -273,7 +277,14 @@ impl GatewayState {
             log::warn!("gateway config rejected: {error}");
             return Err(error);
         }
+        let local_routing_enabled = next.gateway_local_routing_v2
+            && self
+                .snapshot
+                .read()
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.routing_policy.is_some());
         *self.config.write() = next;
+        self.inner.lock().status.local_routing_enabled = local_routing_enabled;
         self.persist_config();
         Ok(())
     }
@@ -386,11 +397,28 @@ impl GatewayState {
         let provider_count = snapshot.providers.iter().filter(|p| p.enabled).count() as u32;
         let alias_count = snapshot.aliases.len() as u32;
         let generated_at = snapshot.generated_at_ms;
+        let policy_revision = snapshot
+            .routing_policy
+            .as_ref()
+            .map(|policy| policy.policy_revision.clone());
+        let routing_strategy = snapshot
+            .routing_policy
+            .as_ref()
+            .map(|policy| policy.auto.strategy.clone());
+        let routing_strategy_unavailable = snapshot
+            .routing_policy
+            .as_ref()
+            .and_then(|policy| policy.auto.strategy_unavailable.clone());
         *self.snapshot.write() = Some(snapshot);
         let mut inner = self.inner.lock();
         inner.status.snapshot_generated_at_ms = Some(generated_at);
         inner.status.snapshot_provider_count = provider_count;
         inner.status.snapshot_alias_count = alias_count;
+        inner.status.local_routing_enabled =
+            policy_revision.is_some() && self.config.read().gateway_local_routing_v2;
+        inner.status.routing_policy_revision = policy_revision;
+        inner.status.routing_strategy = routing_strategy;
+        inner.status.routing_strategy_unavailable = routing_strategy_unavailable;
     }
 
     /// Authority-checked snapshot ingest (ADR-0090 Phase 2, R3).
@@ -463,6 +491,7 @@ impl GatewayState {
             self.snapshot.clone(),
             self.decisions.clone(),
             self.key_rotation.clone(),
+            self.route_planner.clone(),
             self.key_cooldown.clone(),
             self.concurrency.clone(),
             observer,

@@ -104,6 +104,7 @@ const WASM_API_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
 const WASM_PREOPEN_PATH_PATTERN = /^[^\0]+$/
 
 const ID_PATTERN = /^[a-z0-9]([a-z0-9-_.]*[a-z0-9])?$/
+const INTEGRATION_ACTION_ID_PATTERN = /^[a-z0-9]([A-Za-z0-9-_.]*[A-Za-z0-9])?$/
 const RESERVED_PLUGIN_IDS = new Set([".host-state", "_marketplace_cache", "_backups"])
 const MAX_PLUGIN_ID_LENGTH = 128
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9]+)?$/i
@@ -711,7 +712,7 @@ function validateIntegrations(
         )
         continue
       }
-      if (typeof action.id !== "string" || !ID_PATTERN.test(action.id)) {
+      if (typeof action.id !== "string" || !INTEGRATION_ACTION_ID_PATTERN.test(action.id)) {
         pushError(
           `${actionField}.id`,
           "manifest.integrations.actions.id.invalid",
@@ -1289,7 +1290,12 @@ export function validatePluginManifest(
         '"networkAccess" must be an object with an "allowedDomains" array'
       )
     } else {
-      const na = m.networkAccess as { allowedDomains?: unknown; reasoning?: unknown }
+      const na = m.networkAccess as {
+        allowedDomains?: unknown
+        reasoning?: unknown
+        rules?: unknown
+      }
+      let wantsAnyHost = false
       if (na.allowedDomains !== undefined) {
         if (!Array.isArray(na.allowedDomains)) {
           pushError(
@@ -1307,17 +1313,71 @@ export function validatePluginManifest(
                 '(e.g. "api.example.com", "*.example.com", "*", or "none")'
             )
           }
-          const wantsAnyHost = domains.some((d) => typeof d === "string" && d.trim() === "*")
-          if (wantsAnyHost && (typeof na.reasoning !== "string" || na.reasoning.trim() === "")) {
-            pushWarning(
-              "networkAccess.reasoning",
-              "manifest.networkAccess.reasoning.required",
-              'networkAccess.allowedDomains includes "*" (any host) but no "reasoning" is given',
-              'Add a "reasoning" string explaining why the plugin needs unrestricted network ' +
-                "access — it is shown to the user before they enable the plugin."
-            )
-          }
+          wantsAnyHost = domains.some((d) => typeof d === "string" && d.trim() === "*")
         }
+      }
+      if (na.rules !== undefined) {
+        if (!Array.isArray(na.rules) || na.rules.length === 0) {
+          pushError(
+            "networkAccess.rules",
+            "manifest.networkAccess.rules.invalid",
+            '"networkAccess.rules" must be a non-empty array'
+          )
+        } else {
+          const validMethods = new Set(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+          na.rules.forEach((value, index) => {
+            const field = `networkAccess.rules[${index}]`
+            if (!value || typeof value !== "object" || Array.isArray(value)) {
+              pushError(
+                field,
+                "manifest.networkAccess.rules.entry.invalid",
+                `${field} must be an object`
+              )
+              return
+            }
+            const rule = value as Record<string, unknown>
+            if (typeof rule.domain !== "string" || rule.domain.trim() === "") {
+              pushError(
+                `${field}.domain`,
+                "manifest.networkAccess.rules.domain.invalid",
+                `${field}.domain must be a non-empty host pattern`
+              )
+            } else if (rule.domain.trim() === "*") {
+              wantsAnyHost = true
+            }
+            if (
+              !Array.isArray(rule.methods) ||
+              rule.methods.length === 0 ||
+              rule.methods.some((method) => typeof method !== "string" || !validMethods.has(method))
+            ) {
+              pushError(
+                `${field}.methods`,
+                "manifest.networkAccess.rules.methods.invalid",
+                `${field}.methods must contain supported uppercase HTTP methods`
+              )
+            }
+            if (
+              !Array.isArray(rule.paths) ||
+              rule.paths.length === 0 ||
+              rule.paths.some((path) => typeof path !== "string" || !path.startsWith("/"))
+            ) {
+              pushError(
+                `${field}.paths`,
+                "manifest.networkAccess.rules.paths.invalid",
+                `${field}.paths must contain absolute pathname globs`
+              )
+            }
+          })
+        }
+      }
+      if (wantsAnyHost && (typeof na.reasoning !== "string" || na.reasoning.trim() === "")) {
+        pushWarning(
+          "networkAccess.reasoning",
+          "manifest.networkAccess.reasoning.required",
+          'networkAccess requests "*" (any host) but no "reasoning" is given',
+          'Add a "reasoning" string explaining why the plugin needs unrestricted network ' +
+            "access — it is shown to the user before they enable the plugin."
+        )
       }
     }
   }
@@ -2451,7 +2511,7 @@ function validateConfigSchema(schema: unknown): ValidationResult {
   return { valid: errors.length === 0, errors, warnings }
 }
 
-function validateConfigProperty(name: string, prop: unknown): ValidationResult {
+function validateConfigProperty(name: string, prop: unknown, depth = 0): ValidationResult {
   const errors: string[] = []
   const warnings: string[] = []
 
@@ -2470,7 +2530,7 @@ function validateConfigProperty(name: string, prop: unknown): ValidationResult {
   }
 
   if (p.type === "array" && p.items) {
-    const itemsResult = validateConfigProperty(`${name}.items`, p.items)
+    const itemsResult = validateConfigProperty(`${name}.items`, p.items, depth + 1)
     errors.push(...itemsResult.errors)
     warnings.push(...itemsResult.warnings)
   }
@@ -2478,10 +2538,34 @@ function validateConfigProperty(name: string, prop: unknown): ValidationResult {
   if (p.type === "object" && p.properties) {
     const props = p.properties as Record<string, unknown>
     for (const [key, value] of Object.entries(props)) {
-      const propResult = validateConfigProperty(`${name}.${key}`, value)
+      const propResult = validateConfigProperty(`${name}.${key}`, value, depth + 1)
       errors.push(...propResult.errors)
       warnings.push(...propResult.warnings)
     }
+  }
+
+  // `secret: true` fields are stored in the OS keyring, not the plaintext
+  // plugin-config store; the constraints below prevent a manifest from
+  // shipping a value or from placing a secret in a runtime slot the keyring
+  // API cannot reach (Phase 1: top-level string properties only).
+  if (p.secret === true) {
+    if (p.type !== "string") {
+      errors.push(
+        `Config property "${name}" declares secret: true but type "${String(p.type)}" is not "string"`
+      )
+    }
+    if (Object.hasOwn(p, "default")) {
+      errors.push(
+        `Config property "${name}" declares secret: true and must not carry a default — secrets live in the OS keyring`
+      )
+    }
+    if (depth > 0) {
+      errors.push(
+        `Config property "${name}" declares secret: true inside a nested property; only top-level configSchema properties may be secret`
+      )
+    }
+  } else if (p.secret !== undefined && typeof p.secret !== "boolean") {
+    errors.push(`Config property "${name}" has invalid "secret" flag (must be boolean)`)
   }
 
   return { valid: errors.length === 0, errors, warnings }

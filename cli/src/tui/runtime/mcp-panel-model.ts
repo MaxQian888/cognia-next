@@ -80,6 +80,38 @@ export function fixHint(server: McpPanelServer): string | null {
 }
 
 /**
+ * Diagnostic lines for the selected unhealthy server. Probe errors already
+ * contain the transport's useful stderr tail; preserve those lines here instead
+ * of collapsing the only actionable detail into the row's short hint.
+ * The component budgets these lines inside the overlay, so the detail cannot
+ * grow into the composer/footer region.
+ */
+export function connectionIssueDetails(server: McpPanelServer): string[] {
+  if (!server.enabled) return []
+  if (server.status === "needs_auth") {
+    return [`Authentication required for ${server.transport}. Press Enter to authorize.`]
+  }
+  if (server.status !== "failed") return []
+
+  const errorLines = (server.error ?? "No error detail was reported by the transport.")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-3)
+  const timedOut = errorLines.some((line) => /timed out|timeout/i.test(line))
+  const summary = timedOut
+    ? `Timeout while connecting over ${server.transport}.`
+    : `Connection over ${server.transport} failed.`
+  return [summary, ...errorLines]
+}
+
+/** Heading paired with {@link connectionIssueDetails}; kept in the shared
+ * presentation model so the Ink component contains no message literals. */
+export function connectionIssueTitle(server: McpPanelServer): string {
+  return `Connection issue · ${server.name}`
+}
+
+/**
  * What pressing Enter on a row does, given its status — the context-sensitive
  * primary action (so single-letter keys stay free for the filter box):
  *  - connected → open the per-tool list

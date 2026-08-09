@@ -443,8 +443,54 @@ Until step 1's precondition holds, the flag-off legacy paths are the
 production fleet and MUST keep byte-identical behavior (pinned by the
 per-caller parity tests added in Phase 6).
 
+## Addendum (2026-08-03) — Claude Agent SDK 0.3.220 parity
+
+The Anthropic runtime now covers the complete public SDK surface through a versioned nested options contract, generated/audited control and session-function manifests, exhaustive canonical message mapping, all hook events, structured output, dynamic MCP/plugins/skills, checkpoint controls, background tasks, child telemetry, a tenant-isolated Rust `SessionStore`, and fingerprint-isolated prewarming.
+
+Desktop, CLI, headless, and companion surfaces share one secret-free capability snapshot. The desktop additionally exposes guarded advanced-feature toggles and native SDK-session management; `cognia-agent sdk` provides typed session operations without a raw-options escape hatch. Rollout is controlled by `claudeSdkParityV1`, with independent `claudeSdkSessionStore`, `claudeSdkCheckpoint`, and `claudeSdkPrewarm` risk flags. Session storage and checkpointing are fail-closed as mutually exclusive.
+
+Conformance suite version `2` expands certification to the complete 40-capability vocabulary. An SDK version, surface manifest, suite version, and certification bundle are one rollback unit.
+
 ### Long-lived gates
 
 `check:provider-name-branches` (greps runtime code for provider-name
 special-casing), `check:runtime-versions` (stale-detection version pins), the
 suite-manifest hash pin, and the colocated-test audit all run in `check:all`.
+
+## Addendum (2026-08-04) — Gateway-local routing policy V2
+
+Gateway snapshots now carry a versioned, secret-free routing policy. The Rust
+Gateway selects explicit aliases locally with `priority`, `weighted`, or
+`round-robin` distribution; the virtual `auto` model uses the configured
+built-in strategy. Chat, Responses, embeddings, and upstream probes no longer
+wait for the renderer's `gateway://decide` round trip. Legacy snapshots remain
+readable and keep priority ordering, while invalid V2 snapshots are rejected as
+a whole so the previous valid policy remains active.
+
+Deployment selection precedes the existing per-provider credential rotation.
+Round-robin cursors are process-local and candidate-set scoped, begin at the
+first member, and reset safely when the policy changes. Cooldown filtering is
+fail-fast when every pooled credential is parked; retryable failures use bounded
+exponential backoff and may honor the upstream recovery window. Affinity and
+route-ticket candidate freezing continue to override per-request distribution,
+and no fallback is permitted after response bytes are committed.
+
+The executable protocol boundary remains OpenAI-compatible and Anthropic.
+Other provider protocols are never silently treated as compatible.
+
+## Addendum (2026-08-06) — AgentFleet projection and control plane
+
+AgentFleet is the observation and control projection of this ADR's canonical execution model; it
+is not a fourth runtime rail or an independent event authority. Built-in, Team, Workflow, Claude
+Code, Codex, and OpenCode sessions attach to the canonical identity hierarchy and publish through
+the existing event envelope. Fleet snapshots and history are projections over that journal.
+
+External adapters publish a versioned capability descriptor. Native lifecycle events take
+precedence over inferred Task/tool heuristics, and inferred lineage is marked as such. Monitor
+shutdown detaches live external sessions rather than fabricating `SessionEnd`; startup reconciles
+detached sessions from provider identity and durable lineage, never PID alone.
+
+Control commands use durable, idempotent envelopes with leases, acknowledgement, retry, expiry,
+and a sanitized result audit. OpenCode question reply/reject and per-session interrupt/abort use
+the bound client's native APIs when advertised. Claude Code and Codex expose only runtime-proven
+controls; Fleet does not inject terminal keystrokes as a substitute for a protocol capability.

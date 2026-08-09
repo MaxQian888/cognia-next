@@ -1,7 +1,13 @@
 import { detectPlatform } from "@/lib/platform/detect"
 import { transport } from "@/lib/tauri"
 import { publishIntegrationEvent } from "./events"
-import { drainIntegrationIngress, syncIntegrationIngressRoutes } from "./ingress-client"
+import {
+  drainIntegrationIngress,
+  getIntegrationIngressDeadletter,
+  listIntegrationIngressDeadletters,
+  requeueIntegrationIngressDeadletter,
+  syncIntegrationIngressRoutes,
+} from "./ingress-client"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 
 const subscription = {
@@ -26,6 +32,15 @@ const account = {
   label: "Demo",
   enabled: true,
   health: "healthy",
+  ingressEndpoint: {
+    id: "endpoint-1",
+    accountId: "account-1",
+    routeId: "route-1",
+    secretHandle: "secret-1",
+    enabled: true,
+    createdAt: "2026-07-28T00:00:00.000Z",
+    updatedAt: "2026-07-28T00:00:00.000Z",
+  },
   createdAt: "2026-07-28T00:00:00.000Z",
   updatedAt: "2026-07-28T00:00:00.000Z",
 }
@@ -108,15 +123,25 @@ beforeEach(() => {
   })
 })
 
-it("syncs enabled subscriptions as generic Rust ingress routes", async () => {
+it("syncs one account-level generic Rust ingress route", async () => {
   await expect(syncIntegrationIngressRoutes()).resolves.toBe(1)
   expect(mockedCall).toHaveBeenCalledWith("integration_ingress_register", {
     input: expect.objectContaining({
       routeId: "route-1",
       pluginId: "demo-delivery",
+      accountId: "account-1",
       verification: expect.objectContaining({ secretHandle: "secret-1" }),
     }),
   })
+  expect(
+    (
+      mockedCall.mock.calls.find(
+        ([command]) => command === "integration_ingress_register"
+      )?.[1] as {
+        input: { subscriptionId?: string }
+      }
+    ).input.subscriptionId
+  ).toBeUndefined()
 })
 
 it("normalizes, persists, and only then acknowledges spooled deliveries", async () => {
@@ -165,4 +190,58 @@ it("uses the same command plane in a headless brain", async () => {
     "integration_ingress_register",
     expect.objectContaining({ input: expect.objectContaining({ routeId: "route-1" }) })
   )
+})
+
+it("lists, reads, and requeues only the plugin account's deadletters", async () => {
+  mockedCall.mockImplementation(async (command) => {
+    if (command === "integration_ingress_deadletters") {
+      return [
+        {
+          routeId: "route-1",
+          deliveryId: "delivery-1",
+          eventType: "issue.created",
+          receivedAt: "2026-07-28T00:00:00.000Z",
+          attempts: 5,
+        },
+        {
+          routeId: "another-plugin-route",
+          deliveryId: "delivery-2",
+          receivedAt: "2026-07-28T00:00:00.000Z",
+          attempts: 5,
+        },
+      ] as never
+    }
+    if (command === "integration_ingress_deadletter") {
+      return {
+        routeId: "route-1",
+        deliveryId: "delivery-1",
+        eventType: "issue.created",
+        receivedAt: "2026-07-28T00:00:00.000Z",
+        attempts: 5,
+        headers: { "x-github-delivery": "delivery-1" },
+        body: '{"issue":1}',
+      } as never
+    }
+    if (command === "integration_ingress_requeue") return true as never
+    if (command === "integration_ingress_poll") return [] as never
+    return undefined as never
+  })
+
+  await expect(listIntegrationIngressDeadletters("demo-delivery", "account-1")).resolves.toEqual([
+    expect.objectContaining({ routeId: "route-1", deliveryId: "delivery-1" }),
+  ])
+  await expect(
+    getIntegrationIngressDeadletter("demo-delivery", "account-1", "route-1", "delivery-1")
+  ).resolves.toMatchObject({ body: '{"issue":1}' })
+  await expect(
+    requeueIntegrationIngressDeadletter("demo-delivery", "account-1", "route-1", "delivery-1")
+  ).resolves.toBe(true)
+  await expect(
+    requeueIntegrationIngressDeadletter(
+      "demo-delivery",
+      "account-1",
+      "another-plugin-route",
+      "delivery-2"
+    )
+  ).rejects.toThrow("does not belong")
 })

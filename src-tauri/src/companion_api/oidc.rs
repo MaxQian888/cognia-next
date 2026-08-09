@@ -1,11 +1,10 @@
 //! OIDC resource-server validation for the companion API inbound gateway
 //! (ADR-0059 cloud/headless brain — Logto integration).
 //!
-//! The desktop app authenticates local devices with self-issued HS256 JWTs
-//! ([`super::jwt`]). When the same axum gateway runs as the **cloud/headless
-//! brain** serving a multi-user product, requests instead carry a Logto-issued
-//! **OIDC access token** (OAuth 2.1 resource-server model). This module
-//! validates those tokens.
+//! In a multi-tenant **cloud/headless brain**, cgnp3 registration carries a
+//! Logto-issued **OIDC access token** (OAuth 2.1 resource-server model). This
+//! module validates that registration credential. Steady-state public device
+//! requests use separately minted, short-lived P-256 DPoP-bound access tokens.
 //!
 //! # What "validate" means here
 //!
@@ -253,8 +252,9 @@ impl JwksCache {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
+            .no_proxy()
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("static OIDC HTTP client configuration must build");
         Self {
             issuer: issuer.into(),
             ttl,
@@ -385,12 +385,9 @@ impl OidcAuthenticator {
     /// Fetch (cached) JWKS and verify `token` against the configured issuer,
     /// audience, and required scopes.
     pub async fn authenticate(&self, token: &str) -> Result<OidcClaims, OidcError> {
-        // Cheap pre-check BEFORE any network I/O: a device (HS256) token carries
-        // no `kid`, so reject it here without fetching the JWKS. This keeps every
-        // non-Logto request off the JWKS path — so a slow/unreachable issuer
-        // can't stall the HS256 fall-through — and avoids a redundant refetch at
-        // TTL expiry for tokens that would never verify anyway. Real Logto JWTs
-        // always carry a `kid`.
+        // Cheap pre-check BEFORE any network I/O. Registration accepts only a
+        // real IdP JWT with a `kid`; malformed or unrelated bearer values must
+        // not trigger discovery/JWKS traffic.
         let header = decode_header(token)?;
         if header.kid.is_none() {
             return Err(OidcError::MissingKid);

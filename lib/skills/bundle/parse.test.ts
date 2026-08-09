@@ -36,7 +36,9 @@ describe("parseBundleManifest", () => {
     expect(result.draft.category).toBe("development")
     expect(result.draft.version).toBe("1.2.3")
     expect(result.draft.content).toContain("Review the staged diff")
-    expect(result.nonFatalValidationErrors).toEqual([])
+    expect(result.nonFatalValidationErrors).toEqual([
+      expect.objectContaining({ code: "slug-format", severity: "portability" }),
+    ])
   })
 
   it("flips flavor to codex and folds in openai.yaml warnings", () => {
@@ -85,11 +87,27 @@ describe("parseBundleManifest", () => {
     expect(() => parseBundleManifest({ skillMd: noBody })).toThrow(/refused|content body/i)
   })
 
-  it("surfaces non-fatal validation errors on the result so the row can persist with status=error", () => {
+  it("surfaces non-fatal validation findings for persistence and editor repair", () => {
     const longName = "a".repeat(80)
     const md = `---\nname: ${longName}\n---\nBody.\n`
     const result = parseBundleManifest({ skillMd: md })
     expect(result.nonFatalValidationErrors.map((e) => e.code)).toContain("name-too-long")
+  })
+
+  it("classifies portability issues and removes duplicate parser/validator findings", () => {
+    const md = `---\nname: Display Name\n---\nBody.\n`
+    const result = parseBundleManifest({ skillMd: md, directoryName: "legacy-folder" })
+    expect(result.nonFatalValidationErrors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "slug-format", severity: "portability" }),
+        expect.objectContaining({ code: "missing-description", severity: "portability" }),
+        expect.objectContaining({ code: "directory-name-mismatch", severity: "portability" }),
+      ])
+    )
+    const identities = result.nonFatalValidationErrors.map(
+      (issue) => `${issue.code}:${issue.message}`
+    )
+    expect(new Set(identities).size).toBe(identities.length)
   })
 
   it("propagates SKILL.md parse warnings", () => {
