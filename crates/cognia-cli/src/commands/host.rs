@@ -206,6 +206,14 @@ struct HttpOutcome {
     body: Value,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OutputValidation {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    violations: Vec<String>,
+}
+
 pub(crate) fn run(command: HostCommand, config: HostConfig, ui: &mut RuntimeUi) -> Result<()> {
     let catalog = load_catalog().map_err(|failure| emit_failure("catalog", None, failure))?;
     match command {
@@ -249,6 +257,7 @@ pub(crate) fn run(command: HostCommand, config: HostConfig, ui: &mut RuntimeUi) 
             idempotency_key,
             dry_run,
             no_wait,
+            strict_output,
             timeout_seconds,
             format,
         } => {
@@ -260,6 +269,7 @@ pub(crate) fn run(command: HostCommand, config: HostConfig, ui: &mut RuntimeUi) 
                 idempotency_key.as_deref(),
                 dry_run,
                 no_wait,
+                strict_output,
                 timeout_seconds,
                 format,
                 ui,
@@ -656,7 +666,14 @@ fn run_schema(
             println!("  risk: {} ({})", command.risk, command.approval);
             println!("  capability: {}", command.capability);
             println!("  idempotency: {}", command.idempotency);
-            println!("  output: opaque JSON (outputTyped=false)");
+            println!(
+                "  output: {}",
+                if command.output_typed {
+                    "typed JSON (outputTyped=true)"
+                } else {
+                    "opaque JSON (outputTyped=false)"
+                }
+            );
             println!(
                 "\n{}",
                 serde_json::to_string_pretty(&command.input_schema).map_err(|error| {
@@ -677,6 +694,7 @@ fn run_call(
     explicit_idempotency_key: Option<&str>,
     dry_run: bool,
     no_wait: bool,
+    strict_output: bool,
     timeout_seconds: u64,
     format: HostCallFormat,
     ui: &mut RuntimeUi,
@@ -715,7 +733,7 @@ fn run_call(
                 "confirmationRequired": command.risk != "low",
                 "idempotency": command.idempotency,
                 "idempotencyKeyGenerated": command.idempotency == "required" && explicit_idempotency_key.is_none(),
-                "outputTyped": false,
+                "outputTyped": command.output_typed,
             }
         }));
     }
@@ -752,6 +770,7 @@ fn run_call(
                     outcome.body,
                     idempotency_key.as_deref(),
                     last_operation_id.as_deref(),
+                    None,
                     format,
                 );
             }
@@ -772,6 +791,13 @@ fn run_call(
             delay = (delay * 2).min(Duration::from_secs(2));
             continue;
         }
+        let output_validation = validate_completed_output(command, &outcome.body, strict_output)?;
+        if output_validation.status == "invalid" {
+            eprintln!(
+                "warning: Headless command `{name}` returned data that violates its output contract: {}",
+                output_validation.violations.join("; ")
+            );
+        }
         return print_call_success(
             name,
             command,
@@ -779,6 +805,7 @@ fn run_call(
             outcome.body,
             idempotency_key.as_deref(),
             last_operation_id.as_deref(),
+            Some(&output_validation),
             format,
         );
     }
@@ -863,6 +890,67 @@ fn validate_body(
         )
         .with_details(json!({ "violations": errors })))
     }
+}
+
+fn validate_completed_output(
+    command: &HostCatalogCommand,
+    body: &Value,
+    strict: bool,
+) -> std::result::Result<OutputValidation, HostFailure> {
+    if !command.output_typed {
+        return Ok(OutputValidation {
+            status: "untyped",
+            violations: Vec::new(),
+        });
+    }
+    let schema = command.output_schema.as_ref().ok_or_else(|| {
+        HostFailure::configuration(
+            "missing_embedded_output_schema",
+            format!(
+                "embedded catalog marks `{}` as typed but contains no output schema",
+                command.name
+            ),
+        )
+    })?;
+    let validator = jsonschema::draft202012::options()
+        .should_validate_formats(true)
+        .build(schema)
+        .map_err(|error| {
+            HostFailure::configuration(
+                "invalid_embedded_output_schema",
+                format!(
+                    "embedded output schema for `{}` cannot compile: {error}",
+                    command.name
+                ),
+            )
+        })?;
+    let violations: Vec<String> = validator
+        .iter_errors(body)
+        .take(20)
+        .map(|error| error.to_string())
+        .collect();
+    if violations.is_empty() {
+        return Ok(OutputValidation {
+            status: "valid",
+            violations,
+        });
+    }
+    if strict {
+        return Err(HostFailure::new(
+            "contract",
+            "invalid_server_output",
+            format!(
+                "Headless command `{}` returned data that violates its output contract",
+                command.name
+            ),
+        )
+        .with_exit(6)
+        .with_details(json!({ "violations": violations })));
+    }
+    Ok(OutputValidation {
+        status: "invalid",
+        violations,
+    })
 }
 
 fn resolve_idempotency_key(
@@ -1234,6 +1322,7 @@ fn print_call_success(
     data: Value,
     idempotency_key: Option<&str>,
     operation_id: Option<&str>,
+    output_validation: Option<&OutputValidation>,
     format: HostCallFormat,
 ) -> std::result::Result<(), HostFailure> {
     match format {
@@ -1250,7 +1339,8 @@ fn print_call_success(
                 "resource": command.resource,
                 "risk": command.risk,
                 "approval": command.approval,
-                "outputTyped": false,
+                "outputTyped": command.output_typed,
+                "outputValidation": output_validation,
                 "idempotencyKey": idempotency_key,
                 "operationId": operation_id,
             }
@@ -2105,6 +2195,52 @@ mod tests {
             &json!({"agentId":"agent-a","taskId":"task-a","text":"hello","extra":true})
         )
         .is_err());
+    }
+
+    #[test]
+    fn output_validation_reports_valid_invalid_and_untyped_results() {
+        let catalog = catalog();
+        let mut command = find_command(&catalog, "session_list").unwrap().clone();
+        command.output_typed = true;
+        command.output_schema = Some(json!({
+            "type": "object",
+            "required": ["total"],
+            "properties": { "total": { "type": "integer", "minimum": 0 } },
+            "additionalProperties": false
+        }));
+
+        assert_eq!(
+            validate_completed_output(&command, &json!({"total": 1}), false)
+                .unwrap()
+                .status,
+            "valid"
+        );
+        let invalid = validate_completed_output(&command, &json!({"total": -1}), false).unwrap();
+        assert_eq!(invalid.status, "invalid");
+        assert!(!invalid.violations.is_empty());
+
+        command.output_typed = false;
+        command.output_schema = None;
+        assert_eq!(
+            validate_completed_output(&command, &json!({"anything": true}), false)
+                .unwrap()
+                .status,
+            "untyped"
+        );
+    }
+
+    #[test]
+    fn strict_output_validation_rejects_contract_violations() {
+        let catalog = catalog();
+        let mut command = find_command(&catalog, "session_list").unwrap().clone();
+        command.output_typed = true;
+        command.output_schema = Some(json!({"type": "boolean"}));
+
+        let failure = validate_completed_output(&command, &json!({}), true).unwrap_err();
+        assert_eq!(failure.error_type, "contract");
+        assert_eq!(failure.code, "invalid_server_output");
+        assert_eq!(failure.exit_code, 6);
+        assert!(failure.details["violations"].as_array().unwrap().len() <= 20);
     }
 
     #[test]

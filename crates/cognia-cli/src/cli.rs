@@ -225,6 +225,9 @@ pub(crate) enum HostCommand {
         dry_run: bool,
         #[arg(long)]
         no_wait: bool,
+        /// Fail when a completed response violates the embedded output contract.
+        #[arg(long)]
+        strict_output: bool,
         #[arg(long, default_value_t = 30)]
         timeout_seconds: u64,
         #[arg(long, value_enum, default_value_t = HostCallFormat::Json)]
@@ -1197,5 +1200,36 @@ mod tests {
         assert_eq!(public_key.as_deref(), Some("base64-public-key"));
         assert!(require_signature);
         assert!(json);
+    }
+
+    #[test]
+    fn host_call_parses_strict_output_without_changing_the_default() {
+        let strict = Cli::try_parse_from([
+            "cognia",
+            "host",
+            "call",
+            "session_list",
+            "--strict-output",
+        ])
+        .expect("strict Headless output validation should parse");
+        let TopCommand::Host {
+            command: HostCommand::Call { strict_output, .. },
+            ..
+        } = strict.command
+        else {
+            panic!("expected host call command");
+        };
+        assert!(strict_output);
+
+        let compatible = Cli::try_parse_from(["cognia", "host", "call", "session_list"])
+            .expect("host call should keep parsing without strict validation");
+        let TopCommand::Host {
+            command: HostCommand::Call { strict_output, .. },
+            ..
+        } = compatible.command
+        else {
+            panic!("expected host call command");
+        };
+        assert!(!strict_output);
     }
 }
