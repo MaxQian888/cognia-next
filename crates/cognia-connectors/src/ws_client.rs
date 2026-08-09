@@ -74,10 +74,11 @@ pub async fn open_ws(
     }
 
     let id = Uuid::new_v4().to_string();
-    let proxy_cfg = proxy_config::current();
-    let proxy_url_for_log = proxy_cfg.proxy_url();
-    let use_proxy =
-        proxy_cfg.is_active() && proxy_cfg.proxy_websockets && !proxy_cfg.should_bypass(&url);
+    let proxy_cfg = proxy_config::current().map_err(|error| error.to_string())?;
+    let route = proxy_cfg
+        .websocket_route_for(&url)
+        .map_err(|error| error.to_string())?;
+    let use_proxy = matches!(route, proxy_config::ProxyRouteSummary::Proxy { .. });
 
     // Pre-parse the target so both paths know what to dial.
     let parsed = url::Url::parse(&url).map_err(|e| format!("invalid WS URL: {e}"))?;
@@ -93,10 +94,7 @@ pub async fn open_ws(
     // Both branches produce the same erased `ProxyStream` type so the
     // downstream split() / send / recv plumbing has a single concrete type.
     let raw_stream: ProxyStream = if use_proxy {
-        log::info!(
-            "WS connecting via proxy {:?} → {target_host}:{target_port}",
-            proxy_url_for_log
-        );
+        log::info!("WS connecting via {route:?} → {target_host}:{target_port}");
         proxy_config::wsproxy::connect_via_proxy(&proxy_cfg, &target_host, target_port)
             .await
             .map_err(|e| format!("WS proxy tunnel failed: {e}"))?

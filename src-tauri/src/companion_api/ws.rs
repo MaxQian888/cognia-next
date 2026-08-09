@@ -66,19 +66,13 @@ pub async fn ws_handler(
     State(state): State<SharedState>,
 ) -> Response {
     let Some(store) = super::security_store::security_store() else {
-        return (
+        return super::api::public_error_response(
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "error": {
-                    "code": "security_store_unavailable",
-                    "message": "the security database is unavailable",
-                    "requestId": uuid::Uuid::new_v4().to_string(),
-                    "retryable": true,
-                    "details": {}
-                }
-            })),
-        )
-            .into_response();
+            "security_store_unavailable",
+            "the security database is unavailable",
+            true,
+            json!({}),
+        );
     };
     let identity = match store.redeem_socket_ticket(
         &params.ticket,
@@ -88,19 +82,13 @@ pub async fn ws_handler(
     ) {
         Ok(identity) => identity,
         Err(_) => {
-            return (
+            return super::api::public_error_response(
                 StatusCode::UNAUTHORIZED,
-                Json(json!({
-                    "error": {
-                        "code": "invalid_socket_ticket",
-                        "message": "the socket ticket is invalid or already used",
-                        "requestId": uuid::Uuid::new_v4().to_string(),
-                        "retryable": false,
-                        "details": {}
-                    }
-                })),
-            )
-                .into_response();
+                "invalid_socket_ticket",
+                "the socket ticket is invalid or already used",
+                false,
+                json!({}),
+            );
         }
     };
     upgrade_events_ws(
@@ -155,42 +143,6 @@ pub async fn internal_ws_handler(
     )
 }
 
-/// Deprecated event stream retained for released mobile clients. The legacy
-/// JWT middleware authenticates the query token before this handler runs.
-/// New clients must redeem a single-use ticket against `/ws/events` instead.
-pub async fn legacy_ws_handler(
-    ws: WebSocketUpgrade,
-    Query(params): Query<InternalWsParams>,
-    State(state): State<SharedState>,
-    request: axum::extract::Request,
-) -> Response {
-    let Some(context) = request
-        .extensions()
-        .get::<super::middleware::DeviceContext>()
-        .cloned()
-    else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "code": "missing_device_context",
-                "message": "JWT middleware did not run"
-            })),
-        )
-            .into_response();
-    };
-    if context.scope != "device" {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "code": "device_scope_required",
-                "message": "the deprecated v1 event stream requires a device token"
-            })),
-        )
-            .into_response();
-    }
-    upgrade_events_ws(ws, params.since, None, context.device_id, state)
-}
-
 fn upgrade_events_ws(
     ws: WebSocketUpgrade,
     since: Option<u64>,
@@ -226,8 +178,12 @@ async fn handle_socket(
         .as_millis() as i64;
 
     // 1. Subscribe to the event bus (or bail if cursor is too old).
-    let (mut receiver, replay) = match state.event_bus.subscribe(since, now_ms) {
-        SubscribeResult::Ok { receiver, replay } => (receiver, replay),
+    let (mut receiver, replay, replay_cursor) = match state.event_bus.subscribe(since, now_ms) {
+        SubscribeResult::Ok {
+            receiver,
+            replay,
+            replay_cursor,
+        } => (receiver, replay, replay_cursor),
         SubscribeResult::ResyncRequired => {
             let msg = serde_json::to_string(&json!({
                 "type": "resync_required",
@@ -270,6 +226,17 @@ async fn handle_socket(
                 log::warn!("companion-api ws: failed to serialize replay frame: {e}");
             }
         }
+    }
+
+    // Explicit replay/live boundary. `onopen` only proves that the transport
+    // upgraded; clients become ready after this marker and an authoritative
+    // sync. Older clients safely ignore the unknown control frame.
+    if socket
+        .send(Message::Text(stream_ready_text(replay_cursor).into()))
+        .await
+        .is_err()
+    {
+        return;
     }
 
     // 3. Enter the live-streaming loop.
@@ -376,6 +343,14 @@ async fn handle_socket(
     }
 }
 
+fn stream_ready_text(cursor: u64) -> String {
+    serde_json::to_string(&json!({
+        "type": "stream_ready",
+        "cursor": cursor,
+    }))
+    .unwrap_or_else(|_| r#"{"type":"stream_ready","cursor":0}"#.to_owned())
+}
+
 fn revocation_targets(
     frame: &super::event_bus::EventFrame,
     tenant_id: Option<&str>,
@@ -402,8 +377,7 @@ fn unix_time_secs() -> i64 {
 mod tests {
     use super::*;
     use crate::companion_api::{
-        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
-        redemption_lru::RedemptionLru, CompanionState,
+        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache, CompanionState,
     };
     use parking_lot::RwLock;
     use serde_json::{json, Value};
@@ -413,8 +387,6 @@ mod tests {
         let bus = EventBus::new();
         let state = Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -450,7 +422,9 @@ mod tests {
 
         let result = state.event_bus.subscribe(None, now_ms);
         let mut receiver = match result {
-            SubscribeResult::Ok { replay, receiver } => {
+            SubscribeResult::Ok {
+                replay, receiver, ..
+            } => {
                 assert!(replay.is_empty(), "no replay expected for since=None");
                 receiver
             }
@@ -480,6 +454,12 @@ mod tests {
         assert!(!revocation_targets(&frame, Some("tenant-b"), "device-a"));
         assert!(!revocation_targets(&frame, Some("tenant-a"), "device-b"));
         assert!(!revocation_targets(&frame, None, "device-a"));
+    }
+
+    #[test]
+    fn stream_ready_frame_carries_the_replay_boundary() {
+        let frame: Value = serde_json::from_str(&stream_ready_text(42)).expect("valid JSON");
+        assert_eq!(frame, json!({ "type": "stream_ready", "cursor": 42 }));
     }
 
     // ── subscribe with valid `since` → replay frames in order ────────────────

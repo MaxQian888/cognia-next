@@ -128,12 +128,10 @@ pub struct HeadlessServices {
     /// Embedded MCP server lifecycle state. The status surface is host-neutral;
     /// future start/stop wiring can reuse this same process-owned instance.
     pub mcp_server: Arc<crate::mcp_server::McpServerState>,
-    /// Lazily-created native automation worker + canonical enforcement gate
-    /// used by the MCP `computer_use` tool in a no-Tauri host.
-    mcp_automation: tokio::sync::OnceCell<(
-        crate::automation::worker::AutomationHandle,
-        crate::automation::dispatcher::Enforcement,
-    )>,
+    /// Lazily initialized native OCR registry. Backend registration is async,
+    /// so the headless container owns it behind a OnceCell rather than racing
+    /// server boot with a detached initializer task.
+    ocr_registry: tokio::sync::OnceCell<crate::ocr::NativeOcrRegistry>,
     /// Native plugin install/snapshot/backup service shared by every companion
     /// RPC arm. The Node brain observes the same install directory.
     pub plugin_runtime: Arc<crate::plugin_api::PluginRuntimeState>,
@@ -309,7 +307,7 @@ impl HeadlessServices {
             api_keys,
             gateway: Arc::new(crate::gateway::GatewayState::new()),
             mcp_server: Arc::new(crate::mcp_server::McpServerState::new()),
-            mcp_automation: tokio::sync::OnceCell::new(),
+            ocr_registry: tokio::sync::OnceCell::new(),
             plugin_runtime: Arc::new(crate::plugin_api::PluginRuntimeState::new(
                 plugin_install_dir,
             )),
@@ -328,38 +326,16 @@ impl HeadlessServices {
         }))
     }
 
-    /// Return the process-owned MCP automation plane, creating the native
-    /// backend only when the embedded MCP server is first started.
-    pub async fn mcp_automation(
-        &self,
-    ) -> Result<
-        (
-            crate::automation::worker::AutomationHandle,
-            crate::automation::dispatcher::Enforcement,
-        ),
-        String,
-    > {
-        self.mcp_automation
-            .get_or_try_init(|| async {
-                tokio::task::spawn_blocking(|| {
-                    let handle = crate::automation::Worker::spawn(|| {
-                        crate::automation::make_default_backend_with_app(None)
-                    });
-                    let enforcement = crate::automation::dispatcher::Enforcement {
-                        gate: crate::automation::PermissionGate::new(
-                            crate::automation::persist::load_settings(),
-                        ),
-                        audit: crate::automation::AuditRing::new(),
-                        consent: crate::automation::ConsentBroker::new(),
-                        policy: crate::automation::persist::load_policy_state(),
-                    };
-                    (handle, enforcement)
-                })
-                .await
-                .map_err(|error| format!("initialize MCP automation plane: {error}"))
+    /// Return the process-owned OCR registry after installing every backend
+    /// compiled into this server artifact.
+    pub async fn ocr_registry(&self) -> &crate::ocr::NativeOcrRegistry {
+        self.ocr_registry
+            .get_or_init(|| async {
+                let registry = crate::ocr::NativeOcrRegistry::new();
+                crate::ocr::backend::install_server_backends(&registry).await;
+                registry
             })
             .await
-            .cloned()
     }
 
     /// A registry with a never-resolving sidecar script — for dispatch tests
@@ -582,17 +558,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_automation_plane_is_lazy_and_process_owned() {
+    async fn ocr_registry_is_lazy_and_reports_compiled_backends() {
         let services = HeadlessServices::stub_for_tests();
-        assert!(services.mcp_automation.get().is_none());
-        let _first = services
-            .mcp_automation()
-            .await
-            .expect("first initialization");
-        assert!(services.mcp_automation.get().is_some());
-        let _second = services
-            .mcp_automation()
-            .await
-            .expect("cached initialization");
+        assert!(services.ocr_registry.get().is_none());
+        let registry = services.ocr_registry().await;
+        assert!(services.ocr_registry.get().is_some());
+        assert!(!registry.list_ids().await.is_empty());
+        let available = registry.available_ids().await;
+        assert!(!available.contains(&"apple-vision"));
+        assert!(!available.contains(&"windows-media-ocr"));
     }
 }

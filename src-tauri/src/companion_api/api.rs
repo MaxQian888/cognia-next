@@ -1,23 +1,29 @@
 //! Canonical Companion device-key authentication and API adapters.
 
 use axum::{
-    extract::{ConnectInfo, Path, Request, State},
+    extract::{rejection::JsonRejection, ConnectInfo, Path, Request, State},
     http::{header::AUTHORIZATION, HeaderMap, StatusCode},
     middleware::{from_fn, Next},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
     Extension, Json, Router,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use cognia_signaling_core::{proto::RoomDescriptorV2, v2::validate_room_descriptor};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use once_cell::sync::Lazy;
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 
+use super::signaling::envelope_v2::{build_room_descriptor, V2Identity, SIGNALING_KEY_NAMESPACE};
 use super::{
     command_manifest::{CommandApproval, CommandIdempotency, CommandTarget, CommandTransport},
     deployment::{deployment_mode, DeploymentMode},
     middleware::DeviceContext,
+    replay_cache::ReplayCache,
     security_store::{security_store, SecurityStore, SecurityStoreError},
     SharedState,
 };
@@ -30,14 +36,131 @@ const PROOF_CLOCK_SKEW_SECS: i64 = 60;
 const MAX_POLICY_TTL_SECS: i64 = 30 * 24 * 60 * 60;
 const MAX_POLICY_BYTES: usize = 16 * 1024;
 const MAX_POLICY_COMMANDS: usize = 64;
+const ROOM_DESCRIPTOR_TTL_MS: i64 = 10 * 365 * 24 * 60 * 60 * 1_000;
+
+static ACCESS_TOKEN_AUTHORITY: Lazy<AccessTokenAuthority> = Lazy::new(AccessTokenAuthority::random);
+static DPOP_REPLAY_CACHE: Lazy<ReplayCache> = Lazy::new(ReplayCache::new);
 
 pub fn router() -> Router<SharedState> {
     Router::new()
+        .route("/api/auth/config", get(auth_config_handler))
         .route("/api/auth/device/challenge", post(challenge_handler))
         .route("/api/auth/device/register", post(register_handler))
         .route("/api/auth/token", post(token_handler))
         .route("/api/auth/socket-ticket", post(socket_ticket_handler))
         .layer(from_fn(super::middleware::pre_auth_rate_limit))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthConfigResponse {
+    deployment_mode: &'static str,
+    host_id: String,
+    tenant_id: Option<String>,
+    oidc: Option<OidcPublicConfig>,
+    signaling: SignalingPublicConfig,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OidcPublicConfig {
+    issuer: String,
+    audience: String,
+    web_client_id: String,
+    scopes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SignalingPublicConfig {
+    url: String,
+    ice_servers: Vec<Value>,
+}
+
+async fn auth_config_handler(State(state): State<SharedState>, headers: HeaderMap) -> Response {
+    let mode = deployment_mode();
+    let host_id = super::healthz::derive_server_id(&state.secret.read());
+    let oidc = if mode == DeploymentMode::MultiTenant {
+        match (
+            non_empty_env(super::oidc::ENV_ISSUER),
+            non_empty_env(super::oidc::ENV_AUDIENCE),
+            non_empty_env("COGNIA_LOGTO_WEB_CLIENT_ID"),
+        ) {
+            (Some(issuer), Some(audience), Some(web_client_id)) => {
+                let mut scopes = vec!["openid".to_string(), "offline_access".to_string()];
+                if let Some(raw) = non_empty_env(super::oidc::ENV_REQUIRED_SCOPES) {
+                    for scope in
+                        raw.split(|character: char| character == ',' || character.is_whitespace())
+                    {
+                        if !scope.is_empty() && !scopes.iter().any(|existing| existing == scope) {
+                            scopes.push(scope.to_string());
+                        }
+                    }
+                }
+                Some(OidcPublicConfig {
+                    issuer,
+                    audience,
+                    web_client_id,
+                    scopes,
+                })
+            }
+            _ => {
+                return ApiError::unavailable(
+                    "multi-tenant browser authentication is not fully configured",
+                )
+                .into_response()
+            }
+        }
+    } else {
+        None
+    };
+    let signaling_url = non_empty_env("COGNIA_PUBLIC_SIGNALING_URL")
+        .unwrap_or_else(|| same_origin_signaling_url(&headers));
+    Json(AuthConfigResponse {
+        deployment_mode: match mode {
+            DeploymentMode::SingleUser => "single-user",
+            DeploymentMode::MultiTenant => "multi-tenant",
+        },
+        host_id,
+        tenant_id: (mode == DeploymentMode::SingleUser).then(|| LOCAL_TENANT_ID.to_string()),
+        oidc,
+        signaling: SignalingPublicConfig {
+            url: signaling_url,
+            ice_servers: vec![
+                json!({ "urls": ["stun:stun.l.google.com:19302"] }),
+                json!({ "urls": ["stun:stun.cloudflare.com:3478"] }),
+            ],
+        },
+    })
+    .into_response()
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn same_origin_signaling_url(headers: &HeaderMap) -> String {
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            if value.eq_ignore_ascii_case("http") {
+                "ws"
+            } else {
+                "wss"
+            }
+        })
+        .unwrap_or("wss");
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("localhost");
+    format!("{scheme}://{host}/v2/signaling")
 }
 
 pub async fn require_device_access(
@@ -84,7 +207,7 @@ pub(crate) async fn whoami_handler(Extension(context): Extension<DeviceContext>)
 }
 
 fn authenticate_owner_request(
-    state: &SharedState,
+    _state: &SharedState,
     request: &Request,
 ) -> Result<DeviceContext, ApiError> {
     if deployment_mode() == DeploymentMode::SingleUser
@@ -100,10 +223,10 @@ fn authenticate_owner_request(
             "single-user Owner invitations can only be created from loopback",
         ));
     }
-    let access = decode_access_token(state, bearer_token(request.headers())?)?;
+    let access = decode_access_token(bearer_token(request.headers())?)?;
     let security = store()?;
-    let (public_key, active_thumbprint) = security
-        .active_device_key(&access.tenant_id, &access.sub)
+    let snapshot = security
+        .authorization_snapshot(&access.tenant_id, &access.sub)
         .map_err(store_error)?
         .ok_or_else(|| {
             ApiError::new(
@@ -112,10 +235,11 @@ fn authenticate_owner_request(
                 "the device is unknown or revoked",
             )
         })?;
-    if active_thumbprint != access.cnf.key_thumbprint
-        || !security
-            .has_capability(&access.tenant_id, &access.sub, "host.admin")
-            .map_err(store_error)?
+    if snapshot.key_thumbprint != access.cnf.key_thumbprint
+        || !snapshot
+            .capabilities
+            .iter()
+            .any(|capability| capability == "host.admin")
     {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
@@ -134,28 +258,21 @@ fn authenticate_owner_request(
                 "a DPoP device proof is required",
             )
         })?;
-    let proof_jti = verify_device_proof(
-        &public_key,
+    let verified_proof = verify_device_proof(
+        &snapshot.public_key_pem,
         proof,
         &access.jti,
         request.method().as_str(),
         request.uri().path(),
         unix_time_secs(),
     )?;
-    security
-        .consume_proof_jti(
-            &access.tenant_id,
-            &access.sub,
-            &proof_jti,
-            unix_time_secs().saturating_add(PROOF_CLOCK_SKEW_SECS),
-            unix_time_secs(),
-        )
-        .map_err(store_error)?;
+    consume_device_proof(&access.tenant_id, &access.sub, &verified_proof)?;
     Ok(DeviceContext {
         device_id: access.sub,
         account_id: access.tenant_id,
         scope: "owner".to_string(),
         granted_scopes: Vec::new(),
+        authorization_capabilities: Some(snapshot.capabilities),
     })
 }
 
@@ -176,6 +293,40 @@ pub(crate) async fn devices_handler(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReplaceCapabilitiesRequest {
+    capabilities: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceCapabilitiesResponse {
+    device_id: String,
+    capabilities: Vec<String>,
+}
+
+pub(crate) async fn replace_device_capabilities_handler(
+    Path(device_id): Path<String>,
+    Extension(context): Extension<DeviceContext>,
+    body: Result<Json<ReplaceCapabilitiesRequest>, JsonRejection>,
+) -> ApiResult<ReplaceCapabilitiesResponse> {
+    let request = parse_public_json(body)?;
+    let capabilities = store()?
+        .replace_device_capabilities(
+            &context.account_id,
+            &context.device_id,
+            &device_id,
+            &request.capabilities,
+            unix_time_secs(),
+        )
+        .map_err(store_error)?;
+    Ok(Json(ReplaceCapabilitiesResponse {
+        device_id,
+        capabilities,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InvitationRequest {
     ttl_seconds: Option<i64>,
 }
@@ -189,8 +340,9 @@ pub struct InvitationResponse {
 
 pub(crate) async fn invitation_handler(
     Extension(context): Extension<DeviceContext>,
-    Json(request): Json<InvitationRequest>,
+    body: Result<Json<InvitationRequest>, JsonRejection>,
 ) -> ApiResult<InvitationResponse> {
+    let request = parse_public_json(body)?;
     if deployment_mode() != DeploymentMode::SingleUser {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -240,6 +392,15 @@ pub(crate) async fn revoke_device_handler(
             unix_time_secs(),
         )
         .map_err(store_error)?;
+    cleanup_signaling(&device_id)?;
+    super::signaling::refresh_installed_hub().map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "signaling_revocation_activate_failed",
+            error,
+        )
+    })?;
+    state.deny_list.revoke(device_id.clone());
     state.event_bus.publish(
         "security://device-revoked".to_string(),
         json!({
@@ -299,8 +460,9 @@ pub(crate) async fn policies_handler(
 
 pub(crate) async fn create_policy_handler(
     Extension(context): Extension<DeviceContext>,
-    Json(request): Json<CreatePolicyRequest>,
+    body: Result<Json<CreatePolicyRequest>, JsonRejection>,
 ) -> ApiResult<super::security_store::HostPolicySummary> {
+    let request = parse_public_json(body)?;
     validate_policy_request(&request, unix_time_secs())?;
     let policy = json!({
         "version": 1,
@@ -394,8 +556,12 @@ pub async fn rpc_handler(
     Extension(context): Extension<DeviceContext>,
     headers: HeaderMap,
     State(state): State<SharedState>,
-    Json(args): Json<serde_json::Value>,
+    body: Result<Json<serde_json::Value>, JsonRejection>,
 ) -> Response {
+    let args = match parse_public_json(body) {
+        Ok(args) => args,
+        Err(error) => return error.into_response(),
+    };
     let idempotency_key = headers
         .get("idempotency-key")
         .and_then(|value| value.to_str().ok())
@@ -412,15 +578,10 @@ pub async fn rpc_handler(
             request_id,
             operation_id,
             result,
-            replayed,
+            replayed: _,
         }) => (
             StatusCode::OK,
-            Json(json!({
-                "requestId": request_id,
-                "operationId": operation_id,
-                "replayed": replayed,
-                "result": result,
-            })),
+            Json(completed_rpc_response(request_id, operation_id, result)),
         )
             .into_response(),
         Ok(super::remote_execution::ExecutionOutcome::Accepted {
@@ -439,32 +600,106 @@ pub async fn rpc_handler(
     }
 }
 
-fn execution_error_response(error: super::remote_execution::ExecutionError) -> Response {
-    (
-        error.status,
-        Json(json!({
-            "error": {
+/// Loopback Headless RPC adapter. Authentication is provided by
+/// `require_service_jwt`; command governance and dispatch remain exclusively
+/// owned by `remote_execution`.
+pub async fn internal_rpc_handler(
+    Path(name): Path<String>,
+    Extension(context): Extension<DeviceContext>,
+    headers: HeaderMap,
+    State(state): State<SharedState>,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Response {
+    let Json(args) = match body {
+        Ok(body) => body,
+        Err(rejection) => {
+            return (
+                rejection.status(),
+                Json(json!({
+                    "code": "invalid_json_request",
+                    "message": "the request body must be valid JSON for this endpoint",
+                })),
+            )
+                .into_response()
+        }
+    };
+    let idempotency_key = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let request = super::remote_execution::ExecutionRequest::new(
+        name,
+        args,
+        context,
+        super::remote_execution::ExecutionTransport::Internal,
+        idempotency_key,
+    );
+    match super::remote_execution::execute(&state, request).await {
+        Ok(super::remote_execution::ExecutionOutcome::Completed { result, .. }) => {
+            (StatusCode::OK, Json(result)).into_response()
+        }
+        Ok(super::remote_execution::ExecutionOutcome::Accepted { operation_id, .. }) => (
+            StatusCode::ACCEPTED,
+            Json(json!({
+                "operationId": operation_id,
+                "status": "running",
+            })),
+        )
+            .into_response(),
+        Err(error) => (
+            error.status,
+            Json(json!({
                 "code": error.code,
                 "message": error.message,
-                "requestId": error.request_id,
-                "retryable": error.retryable,
-                "details": error.details,
-                "operationId": error.operation_id,
-            }
-        })),
-    )
-        .into_response()
+            })),
+        )
+            .into_response(),
+    }
+}
+
+fn execution_error_response(error: super::remote_execution::ExecutionError) -> Response {
+    let status = error.status;
+    (status, Json(execution_error_body(error))).into_response()
+}
+
+fn completed_rpc_response(
+    request_id: String,
+    operation_id: Option<String>,
+    result: Value,
+) -> Value {
+    let mut body = serde_json::Map::from_iter([
+        ("requestId".to_string(), Value::String(request_id)),
+        ("result".to_string(), result),
+    ]);
+    if let Some(operation_id) = operation_id {
+        body.insert("operationId".to_string(), Value::String(operation_id));
+    }
+    Value::Object(body)
+}
+
+fn execution_error_body(error: super::remote_execution::ExecutionError) -> Value {
+    let mut detail = serde_json::Map::from_iter([
+        ("code".to_string(), Value::String(error.code)),
+        ("message".to_string(), Value::String(error.message)),
+        ("requestId".to_string(), Value::String(error.request_id)),
+        ("retryable".to_string(), Value::Bool(error.retryable)),
+        ("details".to_string(), error.details),
+    ]);
+    if let Some(operation_id) = error.operation_id {
+        detail.insert("operationId".to_string(), Value::String(operation_id));
+    }
+    json!({ "error": detail })
 }
 
 fn authenticate_device_request(
-    state: &SharedState,
+    _state: &SharedState,
     request: &Request,
 ) -> Result<DeviceContext, ApiError> {
     let token = bearer_token(request.headers())?;
-    let access = decode_access_token(state, token)?;
+    let access = decode_access_token(token)?;
     let security = store()?;
-    let (public_key, active_thumbprint) = security
-        .active_device_key(&access.tenant_id, &access.sub)
+    let snapshot = security
+        .authorization_snapshot(&access.tenant_id, &access.sub)
         .map_err(store_error)?
         .ok_or_else(|| {
             ApiError::new(
@@ -473,7 +708,7 @@ fn authenticate_device_request(
                 "the device is unknown or revoked",
             )
         })?;
-    if active_thumbprint != access.cnf.key_thumbprint {
+    if snapshot.key_thumbprint != access.cnf.key_thumbprint {
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "token_key_mismatch",
@@ -538,28 +773,21 @@ fn authenticate_device_request(
                 "a DPoP device proof is required",
             )
         })?;
-    let proof_jti = verify_device_proof(
-        &public_key,
+    let verified_proof = verify_device_proof(
+        &snapshot.public_key_pem,
         proof,
         &access.jti,
         request.method().as_str(),
         path,
         unix_time_secs(),
     )?;
-    security
-        .consume_proof_jti(
-            &access.tenant_id,
-            &access.sub,
-            &proof_jti,
-            unix_time_secs().saturating_add(PROOF_CLOCK_SKEW_SECS),
-            unix_time_secs(),
-        )
-        .map_err(store_error)?;
+    consume_device_proof(&access.tenant_id, &access.sub, &verified_proof)?;
     Ok(DeviceContext {
         device_id: access.sub,
         account_id: access.tenant_id,
         scope: "device".to_string(),
         granted_scopes: Vec::new(),
+        authorization_capabilities: Some(snapshot.capabilities),
     })
 }
 
@@ -572,25 +800,26 @@ struct ErrorBody {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ErrorDetail {
-    code: &'static str,
+    code: String,
     message: String,
     request_id: String,
     retryable: bool,
     details: serde_json::Value,
 }
 
+#[derive(Debug)]
 pub(crate) struct ApiError {
     status: StatusCode,
-    code: &'static str,
+    code: String,
     message: String,
     retryable: bool,
 }
 
 impl ApiError {
-    fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
+    fn new(status: StatusCode, code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             status,
-            code,
+            code: code.into(),
             message: message.into(),
             retryable: false,
         }
@@ -599,7 +828,7 @@ impl ApiError {
     fn unavailable(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
-            code: "security_store_unavailable",
+            code: "security_store_unavailable".to_string(),
             message: message.into(),
             retryable: true,
         }
@@ -608,23 +837,52 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
+        public_error_response(
             self.status,
-            Json(ErrorBody {
-                error: ErrorDetail {
-                    code: self.code,
-                    message: self.message,
-                    request_id: uuid::Uuid::new_v4().to_string(),
-                    retryable: self.retryable,
-                    details: json!({}),
-                },
-            }),
+            self.code,
+            self.message,
+            self.retryable,
+            json!({}),
         )
-            .into_response()
     }
 }
 
+/// Build the canonical public Companion error envelope used by HTTP handlers
+/// and WebSocket upgrade rejections. Protocol frames keep their native error
+/// shapes after a successful upgrade.
+pub(crate) fn public_error_response(
+    status: StatusCode,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    retryable: bool,
+    details: Value,
+) -> Response {
+    (
+        status,
+        Json(ErrorBody {
+            error: ErrorDetail {
+                code: code.into(),
+                message: message.into(),
+                request_id: uuid::Uuid::new_v4().to_string(),
+                retryable,
+                details,
+            },
+        }),
+    )
+        .into_response()
+}
+
 type ApiResult<T> = Result<Json<T>, ApiError>;
+
+fn parse_public_json<T>(body: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
+    body.map(|Json(value)| value).map_err(|rejection| {
+        ApiError::new(
+            rejection.status(),
+            "invalid_json_request",
+            "the request body must be valid JSON for this endpoint",
+        )
+    })
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -640,7 +898,10 @@ struct ChallengeResponse {
     expires_at: i64,
 }
 
-async fn challenge_handler(Json(request): Json<ChallengeRequest>) -> ApiResult<ChallengeResponse> {
+async fn challenge_handler(
+    body: Result<Json<ChallengeRequest>, JsonRejection>,
+) -> ApiResult<ChallengeResponse> {
+    let request = parse_public_json(body)?;
     let tenant_id = request_tenant(request.tenant_id)?;
     let challenge = store()?
         .issue_challenge(&tenant_id, unix_time_secs(), CHALLENGE_TTL_SECS)
@@ -662,6 +923,7 @@ struct RegisterRequest {
     device_id: String,
     display_name: String,
     public_key_pem: String,
+    signaling_public_key: String,
     proof: String,
 }
 
@@ -669,13 +931,24 @@ struct RegisterRequest {
 #[serde(rename_all = "camelCase")]
 struct RegisterResponse {
     device_id: String,
+    tenant_id: String,
     role: &'static str,
+    server_version: &'static str,
+    signaling: SignalingRegistrationResponse,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SignalingRegistrationResponse {
+    rendezvous_id: String,
+    room_descriptor: RoomDescriptorV2,
 }
 
 async fn register_handler(
     headers: HeaderMap,
-    Json(request): Json<RegisterRequest>,
+    body: Result<Json<RegisterRequest>, JsonRejection>,
 ) -> ApiResult<RegisterResponse> {
+    let request = parse_public_json(body)?;
     let authority = registration_authority(&headers, request.tenant_id.as_deref()).await?;
     let _ = verify_device_proof(
         &request.public_key_pem,
@@ -687,47 +960,166 @@ async fn register_handler(
     )?;
     let thumbprint = hex::encode(Sha256::digest(request.public_key_pem.as_bytes()));
     let security = store()?;
-    if authority.requires_invitation {
-        let invitation = request.invitation.ok_or_else(|| {
-            ApiError::new(
+    let invitation = match (authority.requires_invitation, request.invitation.as_deref()) {
+        (true, Some(invitation)) if !invitation.is_empty() => Some(invitation),
+        (true, _) => {
+            return Err(ApiError::new(
                 StatusCode::FORBIDDEN,
                 "owner_invitation_required",
                 "a one-time owner invitation is required",
-            )
-        })?;
-        security
-            .register_owner_device(
-                &authority.tenant_id,
-                &invitation,
-                &request.challenge_id,
-                &request.challenge_nonce,
-                &request.device_id,
-                &request.display_name,
-                &request.public_key_pem,
-                &thumbprint,
-                unix_time_secs(),
-            )
-            .map_err(store_error)?;
+            ))
+        }
+        (false, Some(_)) => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "owner_invitation_forbidden",
+                "OIDC registration must not include an Owner invitation",
+            ))
+        }
+        (false, None) => None,
+    };
+    let signaling = provision_signaling(&request.device_id, &request.signaling_public_key)?;
+    let registration_result = if authority.requires_invitation {
+        security.register_owner_device(
+            &authority.tenant_id,
+            invitation.expect("validated Owner invitation"),
+            &request.challenge_id,
+            &request.challenge_nonce,
+            &request.device_id,
+            &request.display_name,
+            &request.public_key_pem,
+            &thumbprint,
+            unix_time_secs(),
+        )
     } else {
+        security.register_oidc_device(
+            &authority.tenant_id,
+            &authority.actor_id,
+            &request.challenge_id,
+            &request.challenge_nonce,
+            &request.device_id,
+            &request.display_name,
+            &request.public_key_pem,
+            &thumbprint,
+            authority.role,
+            unix_time_secs(),
+        )
+    };
+    if let Err(error) = registration_result {
+        cleanup_signaling(&request.device_id)?;
+        return Err(store_error(error));
+    }
+    if let Err(error) = super::signaling::refresh_installed_hub() {
         security
-            .register_oidc_device(
+            .revoke_device(
                 &authority.tenant_id,
                 &authority.actor_id,
-                &request.challenge_id,
-                &request.challenge_nonce,
                 &request.device_id,
-                &request.display_name,
-                &request.public_key_pem,
-                &thumbprint,
-                authority.role,
+                true,
                 unix_time_secs(),
             )
             .map_err(store_error)?;
+        cleanup_signaling(&request.device_id)?;
+        return Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "signaling_registration_activate_failed",
+            error,
+        ));
     }
     Ok(Json(RegisterResponse {
         device_id: request.device_id,
+        tenant_id: authority.tenant_id,
         role: authority.role,
+        server_version: env!("CARGO_PKG_VERSION"),
+        signaling,
     }))
+}
+
+fn provision_signaling(
+    device_id: &str,
+    client_public_key: &str,
+) -> Result<SignalingRegistrationResponse, ApiError> {
+    let paired_at_ms = chrono::Utc::now().timestamp_millis();
+    let host_identity = V2Identity::generate();
+    let room_nonce = {
+        let mut bytes = [0_u8; 16];
+        OsRng.fill_bytes(&mut bytes);
+        URL_SAFE_NO_PAD.encode(bytes)
+    };
+    let room_descriptor = build_room_descriptor(
+        room_nonce,
+        host_identity.public_key_base64(),
+        client_public_key.to_string(),
+        paired_at_ms.saturating_add(ROOM_DESCRIPTOR_TTL_MS),
+    );
+    validate_room_descriptor(&room_descriptor, paired_at_ms).map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_signaling_public_key",
+            "signalingPublicKey must be an uncompressed P-256 public key",
+        )
+    })?;
+    let key_ref = device_id.to_string();
+    let private_key = URL_SAFE_NO_PAD.encode(host_identity.private_bytes());
+    cognia_secrets::keyring_secrets::set(SIGNALING_KEY_NAMESPACE, &key_ref, &private_key).map_err(
+        |_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "signaling_key_store_failed",
+                "the Host signaling identity could not be stored",
+            )
+        },
+    )?;
+    let registration = super::signaling::DeviceRegistration {
+        device_id: device_id.to_string(),
+        rendezvous_id: room_descriptor.room_id.clone(),
+        room_descriptor: room_descriptor.clone(),
+        signaling_key_ref: key_ref,
+    };
+    let Some(registration_store) = super::signaling::registration_store::installed() else {
+        cleanup_signaling(device_id)?;
+        return Err(ApiError::unavailable(
+            "the signaling registration store is unavailable",
+        ));
+    };
+    if registration_store
+        .upsert(&registration, paired_at_ms)
+        .is_err()
+    {
+        cleanup_signaling(device_id)?;
+        return Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "signaling_registration_store_failed",
+            "the signaling registration could not be persisted",
+        ));
+    }
+    Ok(SignalingRegistrationResponse {
+        rendezvous_id: registration.rendezvous_id,
+        room_descriptor,
+    })
+}
+
+fn cleanup_signaling(device_id: &str) -> Result<(), ApiError> {
+    let key_ref = match super::signaling::registration_store::installed() {
+        Some(registration_store) => registration_store
+            .remove_device(device_id)
+            .map_err(|error| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "signaling_registration_cleanup_failed",
+                    error.to_string(),
+                )
+            })?
+            .unwrap_or_else(|| device_id.to_string()),
+        None => device_id.to_string(),
+    };
+    cognia_secrets::keyring_secrets::clear(SIGNALING_KEY_NAMESPACE, &key_ref).map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "signaling_key_cleanup_failed",
+            format!("the Host signaling identity could not be removed: {error}"),
+        )
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -765,10 +1157,49 @@ struct AccessClaims {
     cnf: Confirmation,
 }
 
+/// Process-ephemeral authority for five-minute Companion access tokens.
+///
+/// The durable Companion signing secret continues to sign loopback service
+/// principals, but public device access tokens deliberately use a random key
+/// that is never persisted. Restarting the process therefore invalidates all
+/// outstanding access tokens while registered device keys remain usable for
+/// an immediate challenge/proof refresh.
+struct AccessTokenAuthority {
+    key: [u8; 32],
+}
+
+impl AccessTokenAuthority {
+    fn random() -> Self {
+        let mut key = [0u8; 32];
+        OsRng.fill_bytes(&mut key);
+        Self { key }
+    }
+
+    #[cfg(test)]
+    fn from_key(key: [u8; 32]) -> Self {
+        Self { key }
+    }
+
+    fn issue(&self, claims: &AccessClaims) -> Result<String, jsonwebtoken::errors::Error> {
+        encode(
+            &Header::new(Algorithm::HS256),
+            claims,
+            &EncodingKey::from_secret(&self.key),
+        )
+    }
+
+    fn decode(&self, token: &str) -> Result<AccessClaims, jsonwebtoken::errors::Error> {
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.set_required_spec_claims(&["exp", "sub"]);
+        decode::<AccessClaims>(token, &DecodingKey::from_secret(&self.key), &validation)
+            .map(|data| data.claims)
+    }
+}
+
 async fn token_handler(
-    State(state): State<SharedState>,
-    Json(request): Json<TokenRequest>,
+    body: Result<Json<TokenRequest>, JsonRejection>,
 ) -> ApiResult<TokenResponse> {
+    let request = parse_public_json(body)?;
     let tenant_id = request_tenant(request.tenant_id)?;
     let security = store()?;
     let (public_key, thumbprint) = security
@@ -810,12 +1241,7 @@ async fn token_handler(
             key_thumbprint: thumbprint,
         },
     };
-    let access_token = encode(
-        &Header::new(Algorithm::HS256),
-        &claims,
-        &EncodingKey::from_secret(state.secret.read().as_slice()),
-    )
-    .map_err(|_| {
+    let access_token = ACCESS_TOKEN_AUTHORITY.issue(&claims).map_err(|_| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "token_issue_failed",
@@ -833,6 +1259,8 @@ async fn token_handler(
 #[serde(rename_all = "camelCase")]
 struct SocketTicketRequest {
     channel: SocketChannel,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -845,12 +1273,32 @@ enum SocketChannel {
 }
 
 impl SocketChannel {
-    fn binding(self) -> (&'static str, &'static str) {
+    fn capability(self) -> &'static str {
         match self {
-            Self::Events => ("/ws/events", "events"),
-            Self::Terminal => ("/ws/terminal", "terminal"),
-            Self::Browser => ("/ws/browser", "browser"),
-            Self::Acp => ("/ws/acp", "acp"),
+            Self::Events => "host.observe",
+            Self::Terminal => "terminal.open",
+            Self::Browser | Self::Acp => "agent.run",
+        }
+    }
+
+    fn binding(self, session_id: Option<&str>) -> Result<(String, &'static str), ApiError> {
+        match (self, session_id) {
+            (Self::Events, None) => Ok(("/ws/events".to_string(), "events")),
+            (Self::Terminal, None) => Ok(("/ws/terminal".to_string(), "terminal")),
+            (Self::Acp, None) => Ok(("/ws/acp".to_string(), "acp")),
+            (Self::Browser, Some(session_id)) if !session_id.is_empty() => {
+                Ok((format!("/ws/browser/{session_id}"), "browser"))
+            }
+            (Self::Browser, _) => Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "browser_session_required",
+                "browser socket tickets require a sessionId",
+            )),
+            (_, Some(_)) => Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "socket_ticket_resource_forbidden",
+                "sessionId is only valid for browser socket tickets",
+            )),
         }
     }
 }
@@ -863,15 +1311,15 @@ struct SocketTicketResponse {
 }
 
 async fn socket_ticket_handler(
-    State(state): State<SharedState>,
     headers: HeaderMap,
-    Json(request): Json<SocketTicketRequest>,
+    body: Result<Json<SocketTicketRequest>, JsonRejection>,
 ) -> ApiResult<SocketTicketResponse> {
-    let (path, audience) = request.channel.binding();
+    let request = parse_public_json(body)?;
+    let (path, audience) = request.channel.binding(request.session_id.as_deref())?;
     let token = bearer_token(&headers)?;
-    let access = decode_access_token(&state, token)?;
-    let (public_key, active_thumbprint) = store()?
-        .active_device_key(&access.tenant_id, &access.sub)
+    let access = decode_access_token(token)?;
+    let snapshot = store()?
+        .authorization_snapshot(&access.tenant_id, &access.sub)
         .map_err(store_error)?
         .ok_or_else(|| {
             ApiError::new(
@@ -880,7 +1328,7 @@ async fn socket_ticket_handler(
                 "the device is unknown or revoked",
             )
         })?;
-    if active_thumbprint != access.cnf.key_thumbprint {
+    if snapshot.key_thumbprint != access.cnf.key_thumbprint {
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "token_key_mismatch",
@@ -897,8 +1345,8 @@ async fn socket_ticket_handler(
                 "a DPoP device proof is required",
             )
         })?;
-    let proof_jti = verify_device_proof(
-        &public_key,
+    let verified_proof = verify_device_proof(
+        &snapshot.public_key_pem,
         proof,
         &access.jti,
         "POST",
@@ -906,20 +1354,33 @@ async fn socket_ticket_handler(
         unix_time_secs(),
     )?;
     let security = store()?;
-    security
-        .consume_proof_jti(
-            &access.tenant_id,
-            &access.sub,
-            &proof_jti,
-            unix_time_secs().saturating_add(PROOF_CLOCK_SKEW_SECS),
-            unix_time_secs(),
-        )
-        .map_err(store_error)?;
+    consume_device_proof(&access.tenant_id, &access.sub, &verified_proof)?;
+    let required_capability = request.channel.capability();
+    if !snapshot
+        .capabilities
+        .iter()
+        .any(|capability| capability == required_capability)
+    {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "socket_capability_required",
+            format!("the {required_capability} capability is required for this channel"),
+        ));
+    }
+    if matches!(request.channel, SocketChannel::Browser) {
+        super::browser_gateway::gateway()
+            .session_for_principal(
+                &access.tenant_id,
+                &access.sub,
+                request.session_id.as_deref().unwrap_or_default(),
+            )
+            .map_err(|error| ApiError::new(StatusCode::FORBIDDEN, error.code, error.message))?;
+    }
     let ticket = security
         .issue_socket_ticket(
             &access.tenant_id,
             &access.sub,
-            path,
+            &path,
             audience,
             unix_time_secs(),
             SOCKET_TICKET_TTL_SECS,
@@ -931,22 +1392,14 @@ async fn socket_ticket_handler(
     }))
 }
 
-fn decode_access_token(state: &SharedState, token: &str) -> Result<AccessClaims, ApiError> {
-    let mut validation = Validation::new(Algorithm::HS256);
-    validation.set_required_spec_claims(&["exp", "sub"]);
-    let access = decode::<AccessClaims>(
-        token,
-        &DecodingKey::from_secret(state.secret.read().as_slice()),
-        &validation,
-    )
-    .map_err(|_| {
+fn decode_access_token(token: &str) -> Result<AccessClaims, ApiError> {
+    let access = ACCESS_TOKEN_AUTHORITY.decode(token).map_err(|_| {
         ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_access_token",
             "the access token is invalid or expired",
         )
-    })?
-    .claims;
+    })?;
     if access.scope != "device" {
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
@@ -963,9 +1416,13 @@ struct DeviceProofClaims {
     htm: String,
     htu: String,
     iat: i64,
-    #[serde(rename = "exp")]
-    _exp: i64,
+    exp: i64,
     jti: String,
+}
+
+struct VerifiedDeviceProof {
+    jti: String,
+    expires_at: i64,
 }
 
 fn verify_device_proof(
@@ -975,36 +1432,71 @@ fn verify_device_proof(
     method: &str,
     path: &str,
     now: i64,
-) -> Result<String, ApiError> {
+) -> Result<VerifiedDeviceProof, ApiError> {
     let key = DecodingKey::from_ec_pem(public_key_pem.as_bytes()).map_err(|_| {
-        ApiError::new(
+        dpop_rejected(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_device_key",
             "the device public key is invalid",
-        )
+        ))
     })?;
     let mut validation = Validation::new(Algorithm::ES256);
     validation.leeway = PROOF_CLOCK_SKEW_SECS as u64;
     validation.set_required_spec_claims(&["exp", "iat"]);
     let claims = decode::<DeviceProofClaims>(proof, &key, &validation)
         .map_err(|_| {
-            ApiError::new(
+            dpop_rejected(ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "invalid_device_proof",
                 "the device proof is invalid or expired",
-            )
+            ))
         })?
         .claims;
     let fresh = claims.iat >= now.saturating_sub(PROOF_CLOCK_SKEW_SECS)
         && claims.iat <= now.saturating_add(PROOF_CLOCK_SKEW_SECS);
-    if !fresh || claims.nonce != nonce || claims.htm != method || claims.htu != path {
-        return Err(ApiError::new(
+    if !fresh
+        || claims.jti.is_empty()
+        || claims.nonce != nonce
+        || claims.htm != method
+        || claims.htu != path
+    {
+        return Err(dpop_rejected(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "device_proof_mismatch",
             "the device proof does not match this request",
-        ));
+        )));
     }
-    Ok(claims.jti)
+    Ok(VerifiedDeviceProof {
+        jti: claims.jti,
+        expires_at: claims.exp,
+    })
+}
+
+fn dpop_rejected(error: ApiError) -> ApiError {
+    super::metrics::record_dpop_rejection();
+    error
+}
+
+fn consume_device_proof(
+    tenant_id: &str,
+    device_id: &str,
+    proof: &VerifiedDeviceProof,
+) -> Result<(), ApiError> {
+    let cache_key = format!("{tenant_id}\0{device_id}\0{}", proof.jti);
+    let now = unix_time_secs();
+    // jsonwebtoken accepts an expired proof within `PROOF_CLOCK_SKEW_SECS`, so
+    // the replay entry must live through that same leeway window.
+    let replay_expires_at = proof.expires_at.saturating_add(PROOF_CLOCK_SKEW_SECS);
+    if DPOP_REPLAY_CACHE.mark_redeemed(&cache_key, replay_expires_at, now) {
+        Ok(())
+    } else {
+        super::metrics::record_dpop_replay();
+        Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "device_proof_replay",
+            "the device proof has already been used",
+        ))
+    }
 }
 
 struct RegistrationAuthority {
@@ -1119,11 +1611,6 @@ fn store_error(error: SecurityStoreError) -> ApiError {
             "invalid_socket_ticket",
             "the socket ticket is invalid or already used",
         ),
-        SecurityStoreError::ProofReplay => ApiError::new(
-            StatusCode::CONFLICT,
-            "device_proof_replay",
-            "the device proof has already been used",
-        ),
         SecurityStoreError::IdempotencyConflict => ApiError::new(
             StatusCode::CONFLICT,
             "idempotency_conflict",
@@ -1144,6 +1631,11 @@ fn store_error(error: SecurityStoreError) -> ApiError {
             "last_owner",
             "the last owner cannot be revoked through the device API",
         ),
+        SecurityStoreError::InvalidCapabilities => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_device_capabilities",
+            "the requested capability snapshot contains an invalid grant or removes required Owner authority",
+        ),
         SecurityStoreError::Sqlite(_) => {
             ApiError::unavailable("the security database could not complete the request")
         }
@@ -1160,22 +1652,238 @@ fn unix_time_secs() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parking_lot::RwLock;
+    use std::sync::Arc;
 
-    #[test]
-    fn socket_channels_have_server_owned_bindings() {
-        assert_eq!(SocketChannel::Events.binding(), ("/ws/events", "events"));
-        assert_eq!(
-            SocketChannel::Terminal.binding(),
-            ("/ws/terminal", "terminal")
-        );
-        assert_eq!(SocketChannel::Browser.binding(), ("/ws/browser", "browser"));
-        assert_eq!(SocketChannel::Acp.binding(), ("/ws/acp", "acp"));
+    fn test_state() -> SharedState {
+        Arc::new(super::super::CompanionState {
+            secret: RwLock::new(vec![0_u8; 32]),
+            deny_list: Arc::new(super::super::deny_list::DenyList::new()),
+            app_handle: None,
+            idempotency: Arc::new(super::super::idempotency::IdempotencyCache::new()),
+            event_bus: super::super::event_bus::EventBus::new(),
+            sync_bridge: super::super::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge:
+                super::super::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge: super::super::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry: super::super::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: super::super::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: super::super::push::PushTokenRegistry::new(),
+        })
+    }
+
+    async fn response_json(response: Response) -> Value {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        serde_json::from_slice(&bytes).expect("JSON response")
+    }
+
+    fn access_claims(jti: &str) -> AccessClaims {
+        let now = unix_time_secs();
+        AccessClaims {
+            sub: "device-a".into(),
+            tenant_id: "tenant-a".into(),
+            scope: "device".into(),
+            iat: now,
+            exp: now + ACCESS_TOKEN_TTL_SECS,
+            jti: jti.into(),
+            cnf: Confirmation {
+                key_thumbprint: "thumbprint-a".into(),
+            },
+        }
     }
 
     #[test]
-    fn error_envelope_has_request_id_and_retryability() {
+    fn access_tokens_are_bound_to_one_process_ephemeral_authority() {
+        let first = AccessTokenAuthority::from_key([1; 32]);
+        let restarted = AccessTokenAuthority::from_key([2; 32]);
+        let token = first.issue(&access_claims("access-jti")).unwrap();
+
+        assert_eq!(first.decode(&token).unwrap().sub, "device-a");
+        assert!(restarted.decode(&token).is_err());
+    }
+
+    #[test]
+    fn dpop_replay_cache_is_scoped_to_tenant_and_device() {
+        let proof = VerifiedDeviceProof {
+            jti: uuid::Uuid::new_v4().to_string(),
+            expires_at: unix_time_secs() + 60,
+        };
+
+        assert!(consume_device_proof("tenant-a", "device-a", &proof).is_ok());
+        let replay = consume_device_proof("tenant-a", "device-a", &proof).unwrap_err();
+        assert_eq!(replay.code, "device_proof_replay");
+        assert!(consume_device_proof("tenant-a", "device-b", &proof).is_ok());
+        assert!(consume_device_proof("tenant-b", "device-a", &proof).is_ok());
+    }
+
+    #[test]
+    fn socket_channels_have_server_owned_bindings() {
+        assert_eq!(
+            SocketChannel::Events.binding(None).unwrap(),
+            ("/ws/events".to_string(), "events")
+        );
+        assert_eq!(
+            SocketChannel::Terminal.binding(None).unwrap(),
+            ("/ws/terminal".to_string(), "terminal")
+        );
+        assert_eq!(
+            SocketChannel::Browser.binding(Some("session-a")).unwrap(),
+            ("/ws/browser/session-a".to_string(), "browser")
+        );
+        assert_eq!(
+            SocketChannel::Acp.binding(None).unwrap(),
+            ("/ws/acp".to_string(), "acp")
+        );
+        assert_eq!(
+            SocketChannel::Browser.binding(None).unwrap_err().code,
+            "browser_session_required"
+        );
+        assert_eq!(
+            SocketChannel::Events
+                .binding(Some("session-a"))
+                .unwrap_err()
+                .code,
+            "socket_ticket_resource_forbidden"
+        );
+        assert_eq!(SocketChannel::Events.capability(), "host.observe");
+        assert_eq!(SocketChannel::Terminal.capability(), "terminal.open");
+        assert_eq!(SocketChannel::Browser.capability(), "agent.run");
+        assert_eq!(SocketChannel::Acp.capability(), "agent.run");
+    }
+
+    #[test]
+    fn public_signaling_url_defaults_to_the_forwarded_same_origin() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-proto", "https".parse().unwrap());
+        headers.insert("x-forwarded-host", "brain.example".parse().unwrap());
+        assert_eq!(
+            same_origin_signaling_url(&headers),
+            "wss://brain.example/v2/signaling"
+        );
+    }
+
+    #[test]
+    fn signaling_registration_rejects_non_p256_public_keys() {
+        let error = provision_signaling("device-invalid", "not-a-p256-key").unwrap_err();
+        assert_eq!(error.code, "invalid_signaling_public_key");
+    }
+
+    #[tokio::test]
+    async fn error_envelope_has_request_id_and_retryability() {
         let response = ApiError::unavailable("down").into_response();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response_json(response).await;
+        assert_eq!(body["error"]["code"], "security_store_unavailable");
+        assert_eq!(body["error"]["retryable"], true);
+        assert!(uuid::Uuid::parse_str(body["error"]["requestId"].as_str().unwrap()).is_ok());
+        assert_eq!(body["error"]["details"], json!({}));
+    }
+
+    #[tokio::test]
+    async fn public_json_rejections_use_the_canonical_error_envelope() {
+        use tower::ServiceExt as _;
+
+        let response = post(challenge_handler)
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/challenge")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from("{"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(response).await;
+        assert_eq!(body["error"]["code"], "invalid_json_request");
+        assert_eq!(body["error"]["retryable"], false);
+    }
+
+    #[test]
+    fn completed_rpc_envelope_omits_absent_optional_fields() {
+        let body = completed_rpc_response("request-a".into(), None, json!({ "ok": true }));
+        assert_eq!(
+            body,
+            json!({
+                "requestId": "request-a",
+                "result": { "ok": true },
+            })
+        );
+        assert!(body.get("replayed").is_none());
+        assert!(body.get("operationId").is_none());
+    }
+
+    #[test]
+    fn rpc_error_envelope_omits_absent_operation_id() {
+        let error = super::super::remote_execution::ExecutionError {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_request".into(),
+            message: "invalid".into(),
+            request_id: "request-b".into(),
+            retryable: false,
+            details: json!({}),
+            operation_id: None,
+        };
+        let body = execution_error_body(error);
+        assert_eq!(body["error"]["requestId"], "request-b");
+        assert!(body["error"].get("operationId").is_none());
+    }
+
+    #[tokio::test]
+    async fn internal_rpc_adapter_uses_the_canonical_unknown_command_error() {
+        let response = internal_rpc_handler(
+            Path("not_registered".into()),
+            Extension(DeviceContext {
+                device_id: super::super::jwt::SERVICE_DEVICE_ID.into(),
+                account_id: "local_acct_a".into(),
+                scope: "service".into(),
+                granted_scopes: Vec::new(),
+                authorization_capabilities: None,
+            }),
+            HeaderMap::new(),
+            State(test_state()),
+            Ok(Json(json!({}))),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response_json(response).await["code"], "unknown_command");
+    }
+
+    #[tokio::test]
+    async fn internal_rpc_json_rejections_keep_the_headless_error_shape() {
+        use tower::ServiceExt as _;
+
+        let service = DeviceContext {
+            device_id: super::super::jwt::SERVICE_DEVICE_ID.into(),
+            account_id: "local_acct_a".into(),
+            scope: "service".into(),
+            granted_scopes: Vec::new(),
+            authorization_capabilities: None,
+        };
+        let response = Router::new()
+            .route("/internal/_rpc/{name}", post(internal_rpc_handler))
+            .layer(Extension(service))
+            .with_state(test_state())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/internal/_rpc/claude_sidecar_status")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from("{"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(response).await;
+        assert_eq!(body["code"], "invalid_json_request");
+        assert!(body.get("error").is_none());
     }
 
     #[test]
@@ -1200,7 +1908,7 @@ mod tests {
 
         let service_command = CreatePolicyRequest {
             capability: "process.spawn".into(),
-            commands: vec!["keyring_secret_get".into()],
+            commands: vec!["secret_store_get".into()],
             constraints: json!({}),
             expires_at: 200,
         };

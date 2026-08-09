@@ -31,11 +31,13 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use futures_util::StreamExt;
+use futures_util::{future::Either, FutureExt, StreamExt};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 
 use crate::keyring::get_provider_key;
+
+const PII_BLOCKED: &str = "pii-blocked";
 
 /// Total and connect budgets. TTS chunks are small; a stuck socket must not
 /// pend forever (this command has no other cancellation path).
@@ -74,12 +76,17 @@ const CREDENTIAL_HEADERS: &[&str] = &[
     "x-api-key",
     "x-goog-api-key",
     "xi-api-key",
+    "x-hume-api-key",
 ];
 
 /// How a provider expects its credential to travel.
 enum CredentialScheme {
     /// `Authorization: Bearer <key>` — OpenAI, xAI.
     BearerHeader,
+    /// `Authorization: Token <key>` — Deepgram.
+    TokenHeader,
+    /// Provider-specific key header.
+    Header(&'static str),
     /// A query parameter. Google's auth-tokens endpoint takes `?key=`.
     QueryParam(&'static str),
 }
@@ -105,6 +112,34 @@ fn credential_binding(provider: &str) -> Option<CredentialBinding> {
         "google" => Some(CredentialBinding {
             host_suffix: "googleapis.com",
             scheme: CredentialScheme::QueryParam("key"),
+        }),
+        "elevenlabs" => Some(CredentialBinding {
+            host_suffix: "elevenlabs.io",
+            scheme: CredentialScheme::Header("xi-api-key"),
+        }),
+        "lmnt" => Some(CredentialBinding {
+            host_suffix: "lmnt.com",
+            scheme: CredentialScheme::Header("x-api-key"),
+        }),
+        "hume" => Some(CredentialBinding {
+            host_suffix: "hume.ai",
+            scheme: CredentialScheme::Header("x-hume-api-key"),
+        }),
+        "cartesia" => Some(CredentialBinding {
+            host_suffix: "cartesia.ai",
+            scheme: CredentialScheme::Header("x-api-key"),
+        }),
+        "deepgram" => Some(CredentialBinding {
+            host_suffix: "deepgram.com",
+            scheme: CredentialScheme::TokenHeader,
+        }),
+        "xiaomi" => Some(CredentialBinding {
+            host_suffix: "xiaomimimo.com",
+            scheme: CredentialScheme::BearerHeader,
+        }),
+        "mistral" => Some(CredentialBinding {
+            host_suffix: "mistral.ai",
+            scheme: CredentialScheme::BearerHeader,
         }),
         _ => None,
     }
@@ -132,6 +167,12 @@ pub struct ProxyRequest {
     /// legacy behaviour of trusting `headers`.
     #[serde(default)]
     pub provider: Option<String>,
+    /// Stable request id used by `tts_proxy_cancel`.
+    #[serde(default)]
+    pub request_id: Option<String>,
+    /// Per-request total timeout. Clamped to 1s..=300s.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
 }
 
 fn default_method() -> String {
@@ -200,6 +241,12 @@ fn apply_provider_credentials(
         CredentialScheme::BearerHeader => {
             headers.insert("authorization".into(), format!("Bearer {key}"));
         }
+        CredentialScheme::TokenHeader => {
+            headers.insert("authorization".into(), format!("Token {key}"));
+        }
+        CredentialScheme::Header(name) => {
+            headers.insert(name.into(), key.to_string());
+        }
         CredentialScheme::QueryParam(param) => {
             // Collect before taking the mutable borrow, and drop any existing
             // value for `param` so a caller's placeholder cannot survive as a
@@ -223,8 +270,24 @@ fn apply_provider_credentials(
 
 /// Validate the target: https scheme + host on the allowlist. The error never
 /// echoes the URL (Gemini carries the key in `?key=`).
-fn validate_url(raw: &str) -> Result<(), String> {
+fn is_loopback_target(url: &reqwest::Url) -> bool {
+    url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_matches(|c| c == '[' || c == ']')
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
+    })
+}
+
+fn validate_url(raw: &str, provider: Option<&str>) -> Result<(), String> {
     let url = reqwest::Url::parse(raw).map_err(|_| "invalid url".to_string())?;
+    if provider == Some("local-openai-compatible") {
+        if !matches!(url.scheme(), "http" | "https") || !is_loopback_target(&url) {
+            return Err("local TTS targets must use http(s) on a loopback address".into());
+        }
+        return Ok(());
+    }
     if url.scheme() != "https" {
         return Err("only https targets are allowed".into());
     }
@@ -265,50 +328,60 @@ fn build_headers(map: &HashMap<String, String>) -> Result<HeaderMap, String> {
     Ok(headers)
 }
 
-fn build_client(proxy: Option<reqwest::Proxy>) -> Result<reqwest::Client, String> {
-    let mut b = reqwest::Client::builder()
+fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
         .user_agent("cognia-next-tts/1.0")
         .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT);
-    if let Some(p) = proxy {
-        b = b.proxy(p);
-    }
-    b.build().map_err(|e| format!("client build failed: {e}"))
+        .redirect(reqwest::redirect::Policy::none())
 }
 
-/// Cached direct (no-proxy) client so repeated chunk synthesis reuses the
-/// connection pool and TLS session instead of re-handshaking every call. Its
-/// config is static, so it never needs invalidation; the proxied path (rare)
-/// builds fresh to keep this client proxy-free.
-fn direct_client() -> reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT
-        .get_or_init(|| build_client(None).unwrap_or_else(|_| reqwest::Client::new()))
-        .clone()
+fn build_policy_client(url: &str) -> Result<reqwest::Client, String> {
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(client_builder(), url)
+        .map_err(|error| error.to_string())?;
+    builder
+        .build()
+        .map_err(|error| format!("client build failed: {error}"))
+}
+
+fn cancellations() -> &'static cognia_net::request_cancellation::RequestCancellationRegistry {
+    static CANCELLATIONS: OnceLock<cognia_net::request_cancellation::RequestCancellationRegistry> =
+        OnceLock::new();
+    CANCELLATIONS.get_or_init(Default::default)
 }
 
 #[tauri::command]
-pub async fn tts_proxy_fetch(request: ProxyRequest) -> Result<ProxyResponse, String> {
+pub fn tts_proxy_cancel(request_id: String) -> bool {
+    cancellations().cancel(&request_id)
+}
+
+async fn execute_proxy_request(request: ProxyRequest) -> Result<ProxyResponse, String> {
     use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+
+    enforce_cloud_pii_boundary(&request)?;
 
     let mut headers = request.headers;
     // Injection validates https + the per-provider host pin itself; the general
     // allowlist then runs over the rewritten URL as a second, independent check.
     let url = match request.provider.as_deref() {
+        Some("local-openai-compatible") => {
+            validate_url(&request.url, request.provider.as_deref())?;
+            headers.retain(|name, _| {
+                let name = name.to_ascii_lowercase();
+                !CREDENTIAL_HEADERS.contains(&name.as_str())
+            });
+            if let Some(key) =
+                get_provider_key("local-openai-compatible")?.filter(|key| !key.trim().is_empty())
+            {
+                headers.insert("authorization".into(), format!("Bearer {}", key.trim()));
+            }
+            request.url.clone()
+        }
         Some(provider) => apply_provider_credentials(provider, &request.url, &mut headers)?,
         None => request.url.clone(),
     };
-    validate_url(&url)?;
+    validate_url(&url, request.provider.as_deref())?;
 
-    let proxy_cfg = cognia_net::proxy_config::current();
-    let client = if proxy_cfg.is_active() && !proxy_cfg.should_bypass(&url) {
-        match proxy_cfg.build_reqwest_proxy() {
-            Some(proxy) => build_client(Some(proxy))?,
-            None => direct_client(),
-        }
-    } else {
-        direct_client()
-    };
+    let client = build_policy_client(&url)?;
 
     let method = match request.method.to_uppercase().as_str() {
         "GET" => reqwest::Method::GET,
@@ -320,6 +393,11 @@ pub async fn tts_proxy_fetch(request: ProxyRequest) -> Result<ProxyResponse, Str
 
     let mut req = client.request(method, &url);
     req = req.headers(build_headers(&headers)?);
+    let timeout_ms = request
+        .timeout_ms
+        .unwrap_or(REQUEST_TIMEOUT.as_millis() as u64)
+        .clamp(1_000, 300_000);
+    req = req.timeout(Duration::from_millis(timeout_ms));
 
     if let Some(json) = request.json {
         req = req.json(&json);
@@ -364,6 +442,55 @@ pub async fn tts_proxy_fetch(request: ProxyRequest) -> Result<ProxyResponse, Str
     })
 }
 
+fn enforce_cloud_pii_boundary(request: &ProxyRequest) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+
+    if request.provider.as_deref() == Some("local-openai-compatible") {
+        return Ok(());
+    }
+    if request
+        .json
+        .as_ref()
+        .is_some_and(|body| !cognia_net::outbound_pii::has_no_leaking_pii(&body.to_string()))
+    {
+        return Err(PII_BLOCKED.into());
+    }
+    if let Some(body) = request.body_b64.as_deref() {
+        let bytes = B64
+            .decode(body)
+            .map_err(|_| "body_b64 decode failed".to_string())?;
+        if let Ok(text) = std::str::from_utf8(&bytes) {
+            if !cognia_net::outbound_pii::has_no_leaking_pii(text) {
+                return Err(PII_BLOCKED.into());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn tts_proxy_fetch(request: ProxyRequest) -> Result<ProxyResponse, String> {
+    let Some(request_id) = request
+        .request_id
+        .clone()
+        .filter(|id| !id.trim().is_empty())
+    else {
+        return execute_proxy_request(request).await;
+    };
+    let (generation, cancel_rx) = cancellations().register(&request_id);
+    let result = match futures_util::future::select(
+        execute_proxy_request(request).boxed(),
+        cancel_rx.map(|_| ()).boxed(),
+    )
+    .await
+    {
+        Either::Left((result, _)) => result,
+        Either::Right(((), _)) => Err("request cancelled".into()),
+    };
+    cancellations().finish(&request_id, generation);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,30 +518,41 @@ mod tests {
 
     #[test]
     fn allows_known_provider_hosts_over_https() {
-        assert!(validate_url("https://api.openai.com/v1/audio/speech").is_ok());
-        assert!(validate_url("https://api.elevenlabs.io/v1/text-to-speech").is_ok());
-        assert!(validate_url("https://generativelanguage.googleapis.com/v1beta/x").is_ok());
-        assert!(validate_url("https://api.xiaomimimo.com/x").is_ok());
-        assert!(validate_url("https://platform.xiaomimimo.com/x").is_ok());
-        assert!(validate_url("https://api.mistral.ai/v1/audio/speech").is_ok());
+        assert!(validate_url("https://api.openai.com/v1/audio/speech", None).is_ok());
+        assert!(validate_url("https://api.elevenlabs.io/v1/text-to-speech", None).is_ok());
+        assert!(validate_url("https://generativelanguage.googleapis.com/v1beta/x", None).is_ok());
+        assert!(validate_url("https://api.xiaomimimo.com/x", None).is_ok());
+        assert!(validate_url("https://platform.xiaomimimo.com/x", None).is_ok());
+        assert!(validate_url("https://api.mistral.ai/v1/audio/speech", None).is_ok());
     }
 
     #[test]
     fn rejects_ssrf_targets_and_non_https() {
         // The exact payloads the old unrestricted proxy would have relayed.
-        assert!(validate_url("http://169.254.169.254/latest/meta-data/").is_err());
-        assert!(validate_url("http://localhost:11434/api/generate").is_err());
-        assert!(validate_url("https://localhost/x").is_err());
-        assert!(validate_url("http://127.0.0.1/x").is_err());
+        assert!(validate_url("http://169.254.169.254/latest/meta-data/", None).is_err());
+        assert!(validate_url("http://localhost:11434/api/generate", None).is_err());
+        assert!(validate_url("https://localhost/x", None).is_err());
+        assert!(validate_url("http://127.0.0.1/x", None).is_err());
         // https required even for an allowed host.
-        assert!(validate_url("http://api.openai.com/x").is_err());
+        assert!(validate_url("http://api.openai.com/x", None).is_err());
         // Not an allowed host.
-        assert!(validate_url("https://evil.com/x").is_err());
+        assert!(validate_url("https://evil.com/x", None).is_err());
+    }
+
+    #[test]
+    fn local_provider_accepts_only_literal_loopback_targets() {
+        let provider = Some("local-openai-compatible");
+        assert!(validate_url("http://localhost:8880/v1/audio/speech", provider).is_ok());
+        assert!(validate_url("http://127.9.8.7:8080/v1/audio/speech", provider).is_ok());
+        assert!(validate_url("https://[::1]:8080/v1/audio/speech", provider).is_ok());
+        assert!(validate_url("http://192.168.1.10:8080/v1/audio/speech", provider).is_err());
+        assert!(validate_url("http://169.254.169.254/latest/meta-data", provider).is_err());
+        assert!(validate_url("https://local.example/v1/audio/speech", provider).is_err());
     }
 
     #[test]
     fn xai_realtime_host_is_allowlisted() {
-        assert!(validate_url("https://api.x.ai/v1/realtime/client_secrets").is_ok());
+        assert!(validate_url("https://api.x.ai/v1/realtime/client_secrets", None).is_ok());
         assert!(!host_is_allowed("x.ai.attacker.com"));
     }
 
@@ -423,6 +561,49 @@ mod tests {
         let req: ProxyRequest =
             serde_json::from_str(r#"{"url":"https://api.openai.com/v1/audio/speech"}"#).unwrap();
         assert!(req.provider.is_none());
+    }
+
+    #[test]
+    fn cloud_pii_gate_blocks_json_and_raw_text_before_dispatch() {
+        let json_request: ProxyRequest = serde_json::from_value(serde_json::json!({
+            "url": "https://api.openai.com/v1/audio/speech",
+            "provider": "openai",
+            "json": { "input": "Email user@example.com" }
+        }))
+        .unwrap();
+        assert_eq!(
+            enforce_cloud_pii_boundary(&json_request),
+            Err(PII_BLOCKED.into())
+        );
+
+        let raw_request: ProxyRequest = serde_json::from_value(serde_json::json!({
+            "url": "https://api.openai.com/v1/audio/speech",
+            "body_b64": "U1NOIDEyMy00NS02Nzg5"
+        }))
+        .unwrap();
+        assert_eq!(
+            enforce_cloud_pii_boundary(&raw_request),
+            Err(PII_BLOCKED.into())
+        );
+    }
+
+    #[test]
+    fn cloud_pii_gate_allows_safe_text_and_exempts_loopback_tts() {
+        let safe_request: ProxyRequest = serde_json::from_value(serde_json::json!({
+            "url": "https://api.openai.com/v1/audio/speech",
+            "provider": "openai",
+            "json": { "input": "Read the release notes" }
+        }))
+        .unwrap();
+        assert_eq!(enforce_cloud_pii_boundary(&safe_request), Ok(()));
+
+        let local_request: ProxyRequest = serde_json::from_value(serde_json::json!({
+            "url": "http://localhost:8880/v1/audio/speech",
+            "provider": "local-openai-compatible",
+            "json": { "input": "Email user@example.com" }
+        }))
+        .unwrap();
+        assert_eq!(enforce_cloud_pii_boundary(&local_request), Ok(()));
     }
 
     #[test]

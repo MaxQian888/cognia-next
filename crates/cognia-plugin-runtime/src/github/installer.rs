@@ -448,8 +448,11 @@ pub async fn plugin_install_from_github_for_state(
         gh.subdir = Some(s.trim().trim_matches('/').to_string());
     }
 
-    let client = reqwest::Client::builder()
-        .user_agent("cognia-plugin-installer/0.1")
+    let policy_url = format!("https://api.github.com/repos/{}/{}", gh.owner, gh.repo);
+    let builder = reqwest::Client::builder().user_agent("cognia-plugin-installer/0.1");
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, &policy_url)
+        .map_err(|error| error.to_string())?;
+    let client = builder
         .build()
         .map_err(|e| format!("http client init: {e}"))?;
 

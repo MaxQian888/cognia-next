@@ -1,7 +1,7 @@
 //! PaddleOCR-via-ONNX native backend powered by `oar-ocr` (cross-platform).
 //!
-//! Gated on the `ocr-paddle` Cargo feature. Loads PP-OCRv5 ONNX models from
-//! `<app_data>/cognia/ocr/paddle/`. The default install ships only the
+//! Gated on the `ocr-paddle` Cargo feature. Loads PP-OCRv6 ONNX models from
+//! `<app_data>/cognia/ocr/paddle/<variant>/`. The default install uses Small;
 //! `det` / `rec` / `dict` triple required by `OAROCRBuilder::new(…)`; an
 //! optional `cls.onnx` (text-line orientation classifier) is wired up when
 //! present.
@@ -35,6 +35,12 @@ pub const CLASSIFICATION_MODEL_FILE: &str = "cls.onnx";
 pub fn resolve_model_dir() -> Result<PathBuf, NativeOcrError> {
     if let Ok(override_path) = std::env::var("COGNIA_PADDLE_MODEL_DIR") {
         return Ok(PathBuf::from(override_path));
+    }
+    if let Ok(data_dir) = std::env::var("COGNIA_DATA_DIR") {
+        return Ok(PathBuf::from(data_dir)
+            .join("cognia")
+            .join("ocr")
+            .join("paddle"));
     }
     dirs::data_dir()
         .map(|d| d.join("cognia").join("ocr").join("paddle"))
@@ -114,7 +120,7 @@ pub fn decode_image(bytes: &[u8]) -> Result<image::RgbImage, NativeOcrError> {
 #[cfg(feature = "ocr-paddle")]
 pub struct PaddleOcrBackend {
     model_dir: PathBuf,
-    pipeline: std::sync::Mutex<Option<oar_ocr::prelude::OAROCR>>,
+    pipeline: std::sync::Mutex<Option<(String, oar_ocr::prelude::OAROCR)>>,
 }
 
 #[cfg(feature = "ocr-paddle")]
@@ -134,8 +140,8 @@ impl PaddleOcrBackend {
         }
     }
 
-    fn build_pipeline(&self) -> Result<oar_ocr::prelude::OAROCR, NativeOcrError> {
-        let cfg = BackendConfig::from_dir(&self.model_dir);
+    fn build_pipeline(&self, variant: &str) -> Result<oar_ocr::prelude::OAROCR, NativeOcrError> {
+        let cfg = BackendConfig::from_dir(&self.model_dir.join(variant));
         let missing = cfg.missing();
         if !missing.is_empty() {
             return Err(NativeOcrError::BackendFailure(format!(
@@ -168,10 +174,16 @@ impl NativeBackend for PaddleOcrBackend {
         let mut guard = self.pipeline.lock().map_err(|_| {
             NativeOcrError::BackendFailure("paddle-ocr: pipeline mutex poisoned".to_string())
         })?;
-        if guard.is_none() {
-            *guard = Some(self.build_pipeline()?);
+        let variant = payload.model_variant.as_deref().unwrap_or("v6-small");
+        if variant != "v6-small" && variant != "v6-tiny" {
+            return Err(NativeOcrError::BackendFailure(format!(
+                "paddle-ocr: unsupported model variant `{variant}`"
+            )));
         }
-        let pipeline = guard.as_ref().expect("pipeline just initialized above");
+        if guard.as_ref().map(|(loaded, _)| loaded.as_str()) != Some(variant) {
+            *guard = Some((variant.to_string(), self.build_pipeline(variant)?));
+        }
+        let pipeline = &guard.as_ref().expect("pipeline just initialized above").1;
 
         let image = decode_image(&payload.bytes)?;
         let (width, height) = image.dimensions();
@@ -337,6 +349,7 @@ mod tests {
                 bytes: vec![],
                 mime_type: "image/png".to_string(),
                 languages: vec!["zh-cn".to_string()],
+                model_variant: Some("v6-small".to_string()),
             })
             .unwrap_err();
         match err {

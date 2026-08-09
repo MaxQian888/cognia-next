@@ -11,7 +11,12 @@
 //! - [`ndjson_stream`] — streaming NDJSON POST that reports each parsed line as
 //!   it arrives. Backs the Ollama `/api/pull` progress command, the one call
 //!   the buffered `proxy_http_request` escape hatch cannot serve.
+//! - [`outbound_pii`] — fail-closed PII detection for text crossing native
+//!   network boundaries.
 
 pub mod http_download;
+pub mod inbound_policy;
 pub mod ndjson_stream;
+pub mod outbound_pii;
 pub mod proxy_config;
+pub mod request_cancellation;

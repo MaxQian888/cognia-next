@@ -9,7 +9,7 @@ use git2::Repository;
 
 use super::error::{GitError, Result};
 use super::exec;
-use super::read::{blob_text, open_repo};
+use super::read::{blob_text, open_repo, safe_workdir_path, validate_repo_relative_path};
 use super::types::{ConflictSide, GitConflict};
 
 /// List conflicted paths with their three sides extracted from the index.
@@ -70,26 +70,68 @@ fn cwd(repo_path: &str) -> std::path::PathBuf {
 /// Write the renderer's merged buffer to disk and stage it as resolved.
 pub async fn resolve_manual(repo_path: &str, path: &str, content: &str) -> Result<()> {
     let repo = open_repo(repo_path)?;
+    ensure_conflicted_path(&repo, path)?;
     let workdir = repo
         .workdir()
         .ok_or_else(|| GitError::NotARepo(repo_path.to_string().into()))?
         .to_path_buf();
-    let full = workdir.join(path);
+    let full = safe_workdir_path(&repo, path)?;
+    match tokio::fs::symlink_metadata(&full).await {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(GitError::InvalidArgument(
+                format!("refusing to write conflict resolution through a symlink: {path}").into(),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(GitError::CommandFailed(
+                format!("inspect conflict path {path}: {error}").into(),
+            ));
+        }
+    }
     tokio::fs::write(&full, content)
         .await
         .map_err(|e| GitError::CommandFailed(format!("write resolved {path}: {e}").into()))?;
-    exec::run(&cwd(repo_path), ["add", "--", path]).await
+    exec::run(&workdir, ["add", "--", path]).await
 }
 
 /// Check out one side of a conflict and stage it as resolved.
 pub async fn resolve_side(repo_path: &str, path: &str, side: ConflictSide) -> Result<()> {
+    let repo = open_repo(repo_path)?;
+    ensure_conflicted_path(&repo, path)?;
     let flag = match side {
         ConflictSide::Ours => "--ours",
         ConflictSide::Theirs => "--theirs",
     };
-    let c = cwd(repo_path);
+    let c = repo
+        .workdir()
+        .ok_or_else(|| GitError::NotARepo(repo_path.to_string().into()))?
+        .to_path_buf();
     exec::run(&c, ["checkout", flag, "--", path]).await?;
     exec::run(&c, ["add", "--", path]).await
+}
+
+fn ensure_conflicted_path(repo: &Repository, path: &str) -> Result<()> {
+    validate_repo_relative_path(path)?;
+    let expected = path.replace('\\', "/");
+    let index = repo.index()?;
+    let mut conflicts = index.conflicts()?;
+    let found = conflicts.any(|entry| {
+        entry.ok().is_some_and(|entry| {
+            [entry.our, entry.their, entry.ancestor]
+                .into_iter()
+                .flatten()
+                .any(|entry| String::from_utf8_lossy(&entry.path).replace('\\', "/") == expected)
+        })
+    });
+    if found {
+        Ok(())
+    } else {
+        Err(GitError::InvalidArgument(
+            format!("path is not an unresolved conflict: {path}").into(),
+        ))
+    }
 }
 
 /// `git merge <branch>` — integrate a branch into the current one. A conflict
@@ -274,5 +316,50 @@ mod tests {
             std::fs::read_to_string(tmp.path().join("a.txt")).unwrap(),
             "merged result\n"
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_manual_rejects_a_path_outside_the_repository() {
+        if !git_on_path() {
+            return;
+        }
+        let repo = conflicted_repo();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret.txt");
+        std::fs::write(&secret, "keep\n").unwrap();
+
+        let error = resolve_manual(
+            &repo.path().to_string_lossy(),
+            &secret.to_string_lossy(),
+            "overwrite\n",
+        )
+        .await
+        .expect_err("conflict resolution must stay inside the repository");
+
+        assert!(matches!(error, GitError::InvalidArgument(_)));
+        assert_eq!(std::fs::read_to_string(secret).unwrap(), "keep\n");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn resolve_manual_rejects_a_conflict_path_replaced_by_a_symlink() {
+        use std::os::unix::fs::symlink;
+
+        if !git_on_path() {
+            return;
+        }
+        let repo = conflicted_repo();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret.txt");
+        std::fs::write(&secret, "keep\n").unwrap();
+        std::fs::remove_file(repo.path().join("a.txt")).unwrap();
+        symlink(&secret, repo.path().join("a.txt")).unwrap();
+
+        let error = resolve_manual(&repo.path().to_string_lossy(), "a.txt", "overwrite\n")
+            .await
+            .expect_err("manual conflict resolution must not follow a symlink");
+
+        assert!(matches!(error, GitError::InvalidArgument(_)));
+        assert_eq!(std::fs::read_to_string(secret).unwrap(), "keep\n");
     }
 }

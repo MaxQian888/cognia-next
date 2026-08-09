@@ -77,7 +77,15 @@ pub async fn voice_live_client_secret(
         .filter(|key| !key.trim().is_empty())
         .ok_or_else(|| "OpenAI API key is required".to_string())?;
 
-    let response = reqwest::Client::new()
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(
+        reqwest::Client::builder(),
+        CLIENT_SECRETS_URL,
+    )
+    .map_err(|error| error.to_string())?;
+    let client = builder
+        .build()
+        .map_err(|error| format!("client secret client build failed: {error}"))?;
+    let response = client
         .post(CLIENT_SECRETS_URL)
         .bearer_auth(api_key)
         .json(&build_session_body(&request))

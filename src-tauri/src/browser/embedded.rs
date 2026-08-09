@@ -13,7 +13,7 @@
 //! positioning is verified via `pnpm tauri dev` smoke; the API surface is
 //! compiler-verified by the `unstable` build.
 
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 use super::commands::{handle_navigation, js_string, validate_external_url};
 use super::overlay;
@@ -163,21 +163,114 @@ fn resolve_webview_proxy_url(
     target: &url::Url,
     proxy: &crate::proxy_config::ProxyConfig,
 ) -> Result<Option<url::Url>, String> {
-    if proxy.should_bypass(target.as_str()) {
+    let route = proxy
+        .route_for(target.as_str())
+        .map_err(|_| "PROXY_INVALID_CONFIG: invalid embedded-browser proxy configuration")?;
+    if matches!(route, crate::proxy_config::ProxyRouteSummary::Direct { .. }) {
         return Ok(None);
     }
-    let Some(proxy_url) = proxy.proxy_url() else {
-        return Ok(None);
+    if matches!(proxy.protocol, crate::proxy_config::ProxyProtocol::Https) {
+        return Err(
+            "PROXY_TRANSPORT_UNSUPPORTED: embedded browser does not support HTTPS proxy endpoints"
+                .to_string(),
+        );
+    }
+    let Some(mut proxy_url) = proxy
+        .credentialed_proxy_url()
+        .map_err(|_| "PROXY_INVALID_CONFIG: invalid embedded-browser proxy configuration")?
+    else {
+        return Err("PROXY_INVALID_CONFIG: active embedded-browser route has no proxy".into());
     };
-    let parsed = url::Url::parse(&proxy_url)
-        .map_err(|error| format!("invalid browser proxy URL: {error}"))?;
-    if !matches!(parsed.scheme(), "http" | "socks5") {
-        return Err(format!(
-            "embedded browser does not support {} proxy URLs",
-            parsed.scheme()
-        ));
+    if let Some(rest) = proxy_url.strip_prefix("socks5h://") {
+        proxy_url = format!("socks5://{rest}");
     }
+    let parsed = url::Url::parse(&proxy_url)
+        .map_err(|_| "PROXY_INVALID_CONFIG: invalid embedded-browser proxy URL".to_string())?;
     Ok(Some(parsed))
+}
+
+#[cfg(desktop)]
+fn proxy_error_code(error: &str) -> &str {
+    error
+        .split_once(':')
+        .map(|(code, _)| code)
+        .filter(|code| code.starts_with("PROXY_"))
+        .unwrap_or("PROXY_CONNECT_FAILED")
+}
+
+#[cfg(desktop)]
+fn emit_embed_proxy_error(app: &AppHandle, pane_label: &str, code: &str) {
+    let _ = app.emit(
+        "browser://proxy-error",
+        serde_json::json!({ "paneId": pane_label, "code": code }),
+    );
+}
+
+#[cfg(desktop)]
+async fn recreate_embed_for_navigation(
+    app: &AppHandle,
+    lease: &EmbeddedBrowserLease,
+    target: url::Url,
+    proxy_url: Option<url::Url>,
+) -> Result<(), String> {
+    let webview = app
+        .get_webview(EMBED_LABEL)
+        .ok_or_else(|| "embedded preview is not open".to_string())?;
+    let bounds = webview.bounds().map_err(|error| error.to_string())?;
+    close_embed_webview(app).await?;
+    lease.clear_webview_proxy();
+    add_embed_webview(app, target, proxy_url.clone(), bounds)?;
+    lease.record_webview_proxy(&proxy_url);
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn handle_embed_navigation(app: &AppHandle, pane_label: &str, url_str: &str) -> bool {
+    let Ok(target) = url::Url::parse(url_str) else {
+        return handle_navigation(app, pane_label, url_str);
+    };
+    if !matches!(target.scheme(), "http" | "https") {
+        return handle_navigation(app, pane_label, url_str);
+    }
+
+    let proxy = match crate::proxy_config::current() {
+        Ok(proxy) => proxy,
+        Err(error) => {
+            let code = serde_json::to_value(error.code)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "PROXY_NOT_INITIALIZED".to_string());
+            emit_embed_proxy_error(app, pane_label, &code);
+            return false;
+        }
+    };
+    let proxy_url = match resolve_webview_proxy_url(&target, &proxy) {
+        Ok(proxy_url) => proxy_url,
+        Err(error) => {
+            emit_embed_proxy_error(app, pane_label, proxy_error_code(&error));
+            return false;
+        }
+    };
+    let lease = app.state::<EmbeddedBrowserLease>();
+    if !lease.requires_webview_recreation(&proxy_url) {
+        return handle_navigation(app, pane_label, url_str);
+    }
+
+    let _ = app.emit(
+        "browser://navigated",
+        serde_json::json!({ "paneId": pane_label, "url": url_str }),
+    );
+    let next_app = app.clone();
+    let next_pane_label = pane_label.to_string();
+    tauri::async_runtime::spawn(async move {
+        let lease = next_app.state::<EmbeddedBrowserLease>();
+        if let Err(error) =
+            recreate_embed_for_navigation(&next_app, lease.inner(), target, proxy_url).await
+        {
+            emit_embed_proxy_error(&next_app, &next_pane_label, proxy_error_code(&error));
+        }
+    });
+    false
 }
 
 #[cfg(desktop)]
@@ -197,7 +290,7 @@ fn add_embed_webview(
     let nav_label = EMBED_LABEL.to_string();
     let mut builder = WebviewBuilder::new(EMBED_LABEL, WebviewUrl::External(target))
         .initialization_script(overlay::OVERLAY_JS)
-        .on_navigation(move |url| handle_navigation(&nav_app, &nav_label, url.as_str()));
+        .on_navigation(move |url| handle_embed_navigation(&nav_app, &nav_label, url.as_str()));
     if let Some(proxy_url) = proxy_url {
         builder = builder.proxy_url(proxy_url);
     }
@@ -272,7 +365,8 @@ pub async fn browser_embed_create(
     let result: Result<String, String> = async {
         #[cfg(desktop)]
         {
-            let proxy_url = resolve_webview_proxy_url(&parsed, &crate::proxy_config::current())?;
+            let proxy = crate::proxy_config::current().map_err(|error| error.to_string())?;
+            let proxy_url = resolve_webview_proxy_url(&parsed, &proxy)?;
             if app.get_webview(EMBED_LABEL).is_some() {
                 navigate_existing_embed(&app, lease.inner(), parsed, proxy_url).await?;
             } else {
@@ -947,7 +1041,8 @@ pub async fn browser_embed_navigate(
     lease.assert_owner(&owner_token, invoking_window.label())?;
     #[cfg(desktop)]
     {
-        let proxy_url = resolve_webview_proxy_url(&parsed, &crate::proxy_config::current())?;
+        let proxy = crate::proxy_config::current().map_err(|error| error.to_string())?;
+        let proxy_url = resolve_webview_proxy_url(&parsed, &proxy)?;
         navigate_existing_embed(&app, lease.inner(), parsed, proxy_url).await
     }
     #[cfg(not(desktop))]
@@ -1277,7 +1372,7 @@ mod tests {
 
         assert_eq!(
             resolve_webview_proxy_url(&target, &proxy).unwrap_err(),
-            "embedded browser does not support https proxy URLs"
+            "PROXY_TRANSPORT_UNSUPPORTED: embedded browser does not support HTTPS proxy endpoints"
         );
     }
 
@@ -1328,7 +1423,7 @@ mod tests {
 
         assert!(resolve_webview_proxy_url(&target, &proxy)
             .unwrap_err()
-            .starts_with("invalid browser proxy URL:"));
+            .starts_with("PROXY_INVALID_CONFIG:"));
     }
 
     #[test]

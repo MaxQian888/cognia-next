@@ -387,7 +387,7 @@ pub fn status(
         config_revision: config.revision,
         endpoint: server
             .port
-            .map(|port| format!("http://127.0.0.1:{port}/mcp")),
+            .map(|port| format!("http://127.0.0.1:{port}/mcp/stream")),
         bind_mode: config.bind_mode,
         health: if state == "running" {
             "healthy".into()

@@ -42,7 +42,6 @@ pub struct FcmServiceAccount {
 #[allow(dead_code)] // used via the dyn PushDispatcher trait in the trigger wiring.
 pub struct FcmDispatcher {
     creds: FcmServiceAccount,
-    http: Client,
     token_cache: Mutex<Option<CachedBearer>>,
 }
 
@@ -76,7 +75,6 @@ impl FcmDispatcher {
     pub fn new(creds: FcmServiceAccount) -> Arc<Self> {
         Arc::new(Self {
             creds,
-            http: Client::new(),
             token_cache: Mutex::new(None),
         })
     }
@@ -104,8 +102,9 @@ impl FcmDispatcher {
             "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion={}",
             assertion
         );
-        let resp = self
-            .http
+        let http = managed_client(Client::builder(), GOOGLE_OAUTH_URL)
+            .map_err(|error| format!("FCM token client init: {error}"))?;
+        let resp = http
             .post(GOOGLE_OAUTH_URL)
             .header("content-type", "application/x-www-form-urlencoded")
             .body(body)
@@ -167,8 +166,14 @@ impl PushDispatcher for FcmDispatcher {
                 .collect();
             message["message"]["data"] = serde_json::Value::Object(data_strings);
         }
-        let resp = self
-            .http
+        let http = match managed_client(Client::builder(), &url) {
+            Ok(http) => http,
+            Err(error) => {
+                log::warn!("FCM HTTP client init: {error}");
+                return DeliveryOutcome::Failed;
+            }
+        };
+        let resp = http
             .post(&url)
             .bearer_auth(&bearer)
             .header("content-type", "application/json")
@@ -218,7 +223,6 @@ pub struct ApnsCredentials {
 #[allow(dead_code)] // used via the dyn PushDispatcher trait in the trigger wiring.
 pub struct ApnsDispatcher {
     creds: ApnsCredentials,
-    http: Client,
 }
 
 #[derive(Debug, Serialize)]
@@ -230,12 +234,7 @@ struct ApnsJwtClaims<'a> {
 impl ApnsDispatcher {
     #[allow(dead_code)]
     pub fn new(creds: ApnsCredentials) -> Result<Arc<Self>, String> {
-        // HTTP/2 is mandatory for APNs over token auth.
-        let http = Client::builder()
-            .http2_prior_knowledge()
-            .build()
-            .map_err(|e| format!("APNs HTTP client init: {e}"))?;
-        Ok(Arc::new(Self { creds, http }))
+        Ok(Arc::new(Self { creds }))
     }
 
     fn sign_jwt(&self) -> Result<String, String> {
@@ -291,8 +290,16 @@ impl PushDispatcher for ApnsDispatcher {
                 }
             }
         }
-        let resp = self
-            .http
+        // HTTP/2 is mandatory for APNs over token auth. Build per delivery so
+        // a settings change cannot leave a stale direct/proxy client cached.
+        let http = match managed_client(Client::builder().http2_prior_knowledge(), &url) {
+            Ok(http) => http,
+            Err(error) => {
+                log::warn!("APNs HTTP client init: {error}");
+                return DeliveryOutcome::Failed;
+            }
+        };
+        let resp = http
             .post(&url)
             .bearer_auth(&jwt)
             .header("apns-topic", &self.creds.bundle_id)
@@ -317,6 +324,14 @@ impl PushDispatcher for ApnsDispatcher {
             }
         }
     }
+}
+
+fn managed_client(builder: reqwest::ClientBuilder, target: &str) -> Result<Client, String> {
+    let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, target)
+        .map_err(|error| error.to_string())?;
+    builder
+        .build()
+        .map_err(|error| format!("managed HTTP client build failed: {error}"))
 }
 
 #[cfg(test)]

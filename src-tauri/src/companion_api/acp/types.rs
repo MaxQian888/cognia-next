@@ -115,8 +115,8 @@ pub fn initialize_result() -> Value {
                 "additionalDirectories": {},
             },
         },
-        // Auth is out-of-band: the ACP socket is mounted behind the device-JWT
-        // middleware, so there is no in-protocol `authenticate` step. Advertise
+        // Auth is out-of-band: the ACP socket redeems a path-bound one-time
+        // ticket, so there is no in-protocol `authenticate` step. Advertise
         // an explicit empty set (rather than an absent field) so an
         // introspecting client sees "no auth methods" unambiguously.
         "authMethods": [],

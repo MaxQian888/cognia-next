@@ -25,13 +25,13 @@ pub const FLEET_TOKEN_HEADER: &str = "x-cognia-fleet-token";
 /// Stateless fleet router — merged into the companion router post-`with_state`.
 pub fn router() -> Router {
     Router::new()
-        .route("/api/v1/fleet/hook", post(hook_handler))
+        .route("/api/fleet/hook", post(hook_handler))
         .route(
-            "/api/v1/fleet/opencode/commands",
+            "/api/fleet/opencode/commands",
             post(opencode_commands_handler),
         )
         .route(
-            "/api/v1/fleet/opencode/commands/ack",
+            "/api/fleet/opencode/commands/ack",
             post(opencode_commands_ack_handler),
         )
 }
@@ -75,7 +75,7 @@ async fn opencode_commands_ack_handler(
     }
 }
 
-/// `POST /api/v1/fleet/opencode/commands` — the OpenCode plugin long-polls for
+/// `POST /api/fleet/opencode/commands` — the OpenCode plugin long-polls for
 /// queued send-message commands targeting the sessions it owns. Same loopback
 /// + fleet-token gate as the hook endpoint.
 async fn opencode_commands_handler(
@@ -100,7 +100,7 @@ async fn opencode_commands_handler(
     Json(serde_json::json!({ "commands": commands })).into_response()
 }
 
-/// `POST /api/v1/fleet/hook` — Claude/Codex hook envelope ingress.
+/// `POST /api/fleet/hook` — Claude/Codex hook envelope ingress.
 ///
 /// Fire-and-forget events answer `204` immediately. `PermissionRequest`
 /// long-polls until the island answers (→ `200` with the Claude hook decision
@@ -215,7 +215,7 @@ mod tests {
     ) -> axum::http::Request<axum::body::Body> {
         let mut builder = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/v1/fleet/hook")
+            .uri("/api/fleet/hook")
             .header("content-type", "application/json");
         if let Some(t) = token {
             builder = builder.header(FLEET_TOKEN_HEADER, t);
@@ -485,7 +485,7 @@ mod tests {
         let req = |peer: ConnectInfo<SocketAddr>, tok: Option<&str>| {
             let mut b = axum::http::Request::builder()
                 .method("POST")
-                .uri("/api/v1/fleet/opencode/commands")
+                .uri("/api/fleet/opencode/commands")
                 .header("content-type", "application/json");
             if let Some(t) = tok {
                 b = b.header(FLEET_TOKEN_HEADER, t);
@@ -522,7 +522,7 @@ mod tests {
             .oneshot(
                 axum::http::Request::builder()
                     .method("POST")
-                    .uri("/api/v1/fleet/opencode/commands")
+                    .uri("/api/fleet/opencode/commands")
                     .header("content-type", "application/json")
                     .header(FLEET_TOKEN_HEADER, &token)
                     .extension(loopback_peer())

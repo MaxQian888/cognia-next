@@ -226,10 +226,10 @@ async fn download_inner(
     let sig_url = format!("{base}/{artifact}.sig");
     let checksums_url = format!("{base}/checksums.txt");
 
-    let client = reqwest::Client::builder()
-        .user_agent("cognia-desktop")
-        .build()
-        .context("build http client")?;
+    let builder = reqwest::Client::builder().user_agent("cognia-desktop");
+    let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, &artifact_url)
+        .map_err(|error| anyhow!(error.to_string()))?;
+    let client = builder.build().context("build http client")?;
 
     emit_progress(app, "downloading", Some(0.0), "Downloading cognia CLI…");
     let artifact_bytes = fetch_bytes(&client, &artifact_url)

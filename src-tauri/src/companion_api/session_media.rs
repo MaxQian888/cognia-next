@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     extract::{Path, Query, State},
     http::{header, HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use serde::Deserialize;
 
@@ -32,28 +32,73 @@ fn valid_request(session_id: &str, hash: &str, variant: &str) -> bool {
         && matches!(variant, "thumbnail" | "canonical" | "original")
 }
 
+fn media_error(
+    status: StatusCode,
+    code: &'static str,
+    message: &'static str,
+    retryable: bool,
+) -> Response {
+    super::api::public_error_response(status, code, message, retryable, serde_json::json!({}))
+}
+
 pub async fn session_media_handler(
     Path((session_id, hash)): Path<(String, String)>,
     Query(query): Query<MediaQuery>,
     State(state): State<SharedState>,
 ) -> Response {
     if !valid_request(&session_id, &hash, &query.variant) {
-        return StatusCode::BAD_REQUEST.into_response();
+        return media_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_media_request",
+            "session, hash, or variant is invalid",
+            false,
+        );
     }
     let Some(data_plane) = DataPlane::pick(&state) else {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        return media_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "media_service_unavailable",
+            "the session media service is unavailable",
+            true,
+        );
     };
     let media = match data_plane
         .session_media(session_id, hash, query.variant)
         .await
     {
         Ok(media) => media,
-        Err(error) if error == "MEDIA_NOT_FOUND" => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) if error == "INVALID_PARAMS" => return StatusCode::BAD_REQUEST.into_response(),
-        Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        Err(error) if error == "MEDIA_NOT_FOUND" => {
+            return media_error(
+                StatusCode::NOT_FOUND,
+                "media_not_found",
+                "the requested session media does not exist",
+                false,
+            )
+        }
+        Err(error) if error == "INVALID_PARAMS" => {
+            return media_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_media_request",
+                "session, hash, or variant is invalid",
+                false,
+            )
+        }
+        Err(_) => {
+            return media_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "media_service_unavailable",
+                "the session media service is unavailable",
+                true,
+            )
+        }
     };
     if media.bytes.len() > MAX_MEDIA_BYTES {
-        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        return media_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "media_too_large",
+            "the requested session media exceeds the response limit",
+            false,
+        );
     }
 
     let mut response = Response::new(Body::from(media.bytes));
@@ -87,5 +132,17 @@ mod tests {
         assert!(!valid_request("s1", "short", "canonical"));
         assert!(!valid_request("s1", &"A".repeat(64), "canonical"));
         assert!(!valid_request("s1", &"a".repeat(64), "other"));
+    }
+
+    #[tokio::test]
+    async fn media_errors_use_the_canonical_public_envelope() {
+        let response = media_error(StatusCode::NOT_FOUND, "media_not_found", "missing", false);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let body: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON error");
+        assert_eq!(body["error"]["code"], "media_not_found");
+        assert_eq!(body["error"]["retryable"], false);
+        assert!(body["error"]["requestId"].as_str().is_some());
     }
 }

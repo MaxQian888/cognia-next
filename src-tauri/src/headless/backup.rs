@@ -199,6 +199,7 @@ impl S3Config {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(300))
+            .no_proxy()
             .build()
             .map_err(|error| format!("build S3 client: {error}"))?;
         let mut request = client

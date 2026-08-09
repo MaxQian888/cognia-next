@@ -122,12 +122,6 @@ impl SessionKey {
     }
 }
 
-/// One mirrored JSONL line. `payload` is the entry verbatim.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredEntry {
-    pub payload: Value,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionListRow {
@@ -279,6 +273,7 @@ impl SessionStore {
     }
 
     /// In-memory store for tests. Same schema, no retention timer.
+    #[cfg(test)]
     pub fn in_memory() -> Result<Arc<Self>, String> {
         let conn = Connection::open_in_memory().map_err(|e| format!("sessionStore: open: {e}"))?;
         conn.execute_batch(SCHEMA_SQL)
@@ -871,10 +866,6 @@ impl SessionStore {
             .map_err(|e| format!("sessionStore: backup: {e}"))?;
         restrict_permissions(dest);
         Ok(())
-    }
-
-    pub fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
     }
 
     /// Row counts per table — for the settings diagnostics panel.

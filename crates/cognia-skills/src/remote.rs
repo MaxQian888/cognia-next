@@ -24,11 +24,12 @@ fn validate_scheme(url: &str) -> Result<(), String> {
 #[tauri::command]
 pub async fn skills_fetch_remote_md(url: String) -> Result<String, String> {
     validate_scheme(&url)?;
-    let client = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(TIMEOUT_SECS))
-        .user_agent("cognia-next-skills/0.1")
-        .build()
-        .map_err(|e| format!("http client: {}", e))?;
+        .user_agent("cognia-next-skills/0.1");
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, &url)
+        .map_err(|error| error.to_string())?;
+    let client = builder.build().map_err(|e| format!("http client: {}", e))?;
     let resp = client
         .get(&url)
         .send()
@@ -75,11 +76,12 @@ pub struct RemoteGetResponse {
 #[tauri::command]
 pub async fn skills_fetch_remote_json(req: RemoteGetRequest) -> Result<RemoteGetResponse, String> {
     validate_scheme(&req.url)?;
-    let client = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(TIMEOUT_SECS))
-        .user_agent("cognia-next-skills/0.1")
-        .build()
-        .map_err(|e| format!("http client: {}", e))?;
+        .user_agent("cognia-next-skills/0.1");
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, &req.url)
+        .map_err(|error| error.to_string())?;
+    let client = builder.build().map_err(|e| format!("http client: {}", e))?;
     let mut builder = client.get(&req.url).header(
         reqwest::header::ACCEPT,
         req.accept.as_deref().unwrap_or("application/json"),

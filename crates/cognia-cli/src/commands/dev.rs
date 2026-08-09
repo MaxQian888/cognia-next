@@ -395,7 +395,7 @@ fn reload_bundle(
     }
     let response: DevReloadResponse = post_json(
         endpoint,
-        "/api/v1/dev/plugins/reload",
+        "/api/dev/plugins/reload",
         &json!({ "bundle_path": bundle.to_string_lossy(), "plugin_id": id }),
     )
     .context("reload endpoint POST failed")?;

@@ -1,0 +1,388 @@
+//! Exact browser-origin policy shared by HTTP preflights and WS upgrades.
+
+use std::collections::BTreeSet;
+
+use axum::{
+    extract::{Request, State},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
+
+const ALLOWED_ORIGINS_ENV: &str = "COGNIA_ALLOWED_WEB_ORIGINS";
+const ALLOW_PRIVATE_NETWORK_ENV: &str = "COGNIA_ALLOW_PRIVATE_NETWORK";
+const ALLOWED_METHODS: &str = "GET, POST, PUT, DELETE, OPTIONS";
+const ALLOWED_HEADERS: &str = "authorization, dpop, content-type, accept, idempotency-key";
+const VARY: &str = "Origin, Access-Control-Request-Method, Access-Control-Request-Headers";
+
+#[derive(Clone, Debug, Default)]
+pub struct WebOriginPolicy {
+    allowed_origins: BTreeSet<String>,
+    allow_private_network: bool,
+}
+
+impl WebOriginPolicy {
+    pub fn from_env() -> Self {
+        Self::from_values(
+            std::env::var(ALLOWED_ORIGINS_ENV).ok().as_deref(),
+            std::env::var(ALLOW_PRIVATE_NETWORK_ENV).ok().as_deref(),
+        )
+    }
+
+    fn from_values(origins: Option<&str>, allow_private_network: Option<&str>) -> Self {
+        let allowed_origins = origins
+            .into_iter()
+            .flat_map(|raw| raw.split(','))
+            .filter_map(normalize_allowed_origin)
+            .collect();
+        let allow_private_network = allow_private_network.is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        });
+        Self {
+            allowed_origins,
+            allow_private_network,
+        }
+    }
+
+    fn evaluate(&self, headers: &HeaderMap) -> OriginDecision {
+        let Some(origin) = headers
+            .get(header::ORIGIN)
+            .and_then(|value| value.to_str().ok())
+        else {
+            return OriginDecision::Native;
+        };
+        if request_origin(headers).as_deref() == Some(origin) {
+            return OriginDecision::SameOrigin;
+        }
+        if self.allowed_origins.contains(origin) {
+            return OriginDecision::AllowedCrossOrigin(origin.to_string());
+        }
+        OriginDecision::Denied
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum OriginDecision {
+    Native,
+    SameOrigin,
+    AllowedCrossOrigin(String),
+    Denied,
+}
+
+pub async fn enforce(
+    State(policy): State<WebOriginPolicy>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let decision = policy.evaluate(request.headers());
+    if decision == OriginDecision::Denied {
+        return super::api::public_error_response(
+            StatusCode::FORBIDDEN,
+            "web_origin_forbidden",
+            "the browser Origin is not allowed for this Host",
+            false,
+            serde_json::json!({}),
+        );
+    }
+
+    let is_preflight = request.method() == Method::OPTIONS
+        && request
+            .headers()
+            .contains_key("access-control-request-method");
+    if is_preflight {
+        if !preflight_is_valid(request.headers()) {
+            return super::api::public_error_response(
+                StatusCode::FORBIDDEN,
+                "cors_preflight_forbidden",
+                "the requested browser method or headers are not allowed",
+                false,
+                serde_json::json!({}),
+            );
+        }
+        let asks_private_network = request
+            .headers()
+            .get("access-control-request-private-network")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+        if asks_private_network
+            && (!policy.allow_private_network
+                || !matches!(decision, OriginDecision::AllowedCrossOrigin(_)))
+        {
+            return super::api::public_error_response(
+                StatusCode::FORBIDDEN,
+                "private_network_access_forbidden",
+                "Private Network Access is not enabled for this Origin",
+                false,
+                serde_json::json!({}),
+            );
+        }
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        apply_cors_headers(response.headers_mut(), &decision);
+        response.headers_mut().insert(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static(ALLOWED_METHODS),
+        );
+        response.headers_mut().insert(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static(ALLOWED_HEADERS),
+        );
+        response.headers_mut().insert(
+            header::ACCESS_CONTROL_MAX_AGE,
+            HeaderValue::from_static("600"),
+        );
+        if asks_private_network {
+            response.headers_mut().insert(
+                "access-control-allow-private-network",
+                HeaderValue::from_static("true"),
+            );
+        }
+        return response;
+    }
+
+    let mut response = next.run(request).await;
+    apply_cors_headers(response.headers_mut(), &decision);
+    response
+}
+
+fn normalize_allowed_origin(raw: &str) -> Option<String> {
+    let value = raw.trim().trim_end_matches('/');
+    let url = url::Url::parse(value).ok()?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn request_origin(headers: &HeaderMap) -> Option<String> {
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("https");
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get(header::HOST))?
+        .to_str()
+        .ok()?;
+    Some(format!("{scheme}://{host}"))
+}
+
+fn preflight_is_valid(headers: &HeaderMap) -> bool {
+    let method = headers
+        .get("access-control-request-method")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    if !matches!(method.as_str(), "GET" | "POST" | "PUT" | "DELETE") {
+        return false;
+    }
+    let allowed = ALLOWED_HEADERS.split(", ").collect::<BTreeSet<_>>();
+    headers
+        .get("access-control-request-headers")
+        .and_then(|value| value.to_str().ok())
+        .map(|raw| {
+            raw.split(',')
+                .map(|value| value.trim().to_ascii_lowercase())
+                .all(|value| allowed.contains(value.as_str()))
+        })
+        .unwrap_or(true)
+}
+
+fn apply_cors_headers(headers: &mut HeaderMap, decision: &OriginDecision) {
+    headers.insert(header::VARY, HeaderValue::from_static(VARY));
+    if let OriginDecision::AllowedCrossOrigin(origin) = decision {
+        if let Ok(value) = HeaderValue::from_str(origin) {
+            headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, routing::get, Router};
+    use tower::ServiceExt as _;
+
+    fn headers(origin: Option<&str>, host: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_str(host).unwrap());
+        if let Some(origin) = origin {
+            headers.insert(header::ORIGIN, HeaderValue::from_str(origin).unwrap());
+        }
+        headers
+    }
+
+    #[test]
+    fn defaults_allow_same_origin_and_native_but_deny_cross_origin() {
+        let policy = WebOriginPolicy::default();
+        assert_eq!(
+            policy.evaluate(&headers(None, "brain.example")),
+            OriginDecision::Native
+        );
+        assert_eq!(
+            policy.evaluate(&headers(Some("https://brain.example"), "brain.example")),
+            OriginDecision::SameOrigin
+        );
+        assert_eq!(
+            policy.evaluate(&headers(Some("https://web.example"), "brain.example")),
+            OriginDecision::Denied
+        );
+    }
+
+    #[test]
+    fn allowlist_accepts_only_exact_https_origins() {
+        let policy = WebOriginPolicy::from_values(
+            Some("https://web.example, http://insecure.example, https://bad.example/path"),
+            None,
+        );
+        assert_eq!(
+            policy.evaluate(&headers(Some("https://web.example"), "brain.example")),
+            OriginDecision::AllowedCrossOrigin("https://web.example".into())
+        );
+        assert_eq!(
+            policy.evaluate(&headers(Some("https://web.example.evil"), "brain.example")),
+            OriginDecision::Denied
+        );
+    }
+
+    #[test]
+    fn pna_is_disabled_unless_explicitly_enabled() {
+        assert!(
+            !WebOriginPolicy::from_values(Some("https://web.example"), None).allow_private_network
+        );
+        assert!(
+            WebOriginPolicy::from_values(Some("https://web.example"), Some("true"))
+                .allow_private_network
+        );
+    }
+
+    #[test]
+    fn preflight_rejects_unlisted_methods_and_headers() {
+        let mut valid = HeaderMap::new();
+        valid.insert(
+            "access-control-request-method",
+            HeaderValue::from_static("POST"),
+        );
+        valid.insert(
+            "access-control-request-headers",
+            HeaderValue::from_static("content-type, dpop, authorization"),
+        );
+        assert!(preflight_is_valid(&valid));
+        valid.insert(
+            "access-control-request-headers",
+            HeaderValue::from_static("x-unsafe"),
+        );
+        assert!(!preflight_is_valid(&valid));
+    }
+
+    fn test_router(policy: WebOriginPolicy) -> Router {
+        Router::new()
+            .route(
+                "/ws/events",
+                get(|| async { StatusCode::SWITCHING_PROTOCOLS }),
+            )
+            .layer(axum::middleware::from_fn_with_state(policy, enforce))
+    }
+
+    #[tokio::test]
+    async fn preflight_echoes_only_the_exact_allowed_origin_without_credentials() {
+        let response = test_router(WebOriginPolicy::from_values(
+            Some("https://web.example"),
+            Some("false"),
+        ))
+        .oneshot(
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/ws/events")
+                .header(header::HOST, "brain.example")
+                .header(header::ORIGIN, "https://web.example")
+                .header("access-control-request-method", "GET")
+                .header("access-control-request-headers", "authorization, dpop")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "https://web.example"
+        );
+        assert!(!response
+            .headers()
+            .contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));
+        assert_eq!(response.headers()[header::VARY], VARY);
+    }
+
+    #[tokio::test]
+    async fn browser_ws_origin_is_checked_but_originless_native_is_allowed() {
+        let router = test_router(WebOriginPolicy::default());
+        let denied = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/ws/events")
+                    .header(header::HOST, "brain.example")
+                    .header(header::ORIGIN, "https://evil.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        let native = router
+            .oneshot(
+                Request::builder()
+                    .uri("/ws/events")
+                    .header(header::HOST, "brain.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(native.status(), StatusCode::SWITCHING_PROTOCOLS);
+    }
+
+    #[tokio::test]
+    async fn pna_requires_both_an_allowlisted_origin_and_explicit_opt_in() {
+        for (enabled, expected) in [
+            ("false", StatusCode::FORBIDDEN),
+            ("true", StatusCode::NO_CONTENT),
+        ] {
+            let response = test_router(WebOriginPolicy::from_values(
+                Some("https://web.example"),
+                Some(enabled),
+            ))
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/ws/events")
+                    .header(header::HOST, "192.168.1.20")
+                    .header(header::ORIGIN, "https://web.example")
+                    .header("access-control-request-method", "GET")
+                    .header("access-control-request-private-network", "true")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status(), expected);
+            assert_eq!(
+                response
+                    .headers()
+                    .get("access-control-allow-private-network")
+                    .is_some(),
+                enabled == "true"
+            );
+        }
+    }
+}

@@ -2,7 +2,7 @@
 //! desktop webview (Phase 2 of the mobile completeness plan, mirrors
 //! [`super::sync_bridge`]).
 //!
-//! The phone hits `POST /api/v1/_rpc/message_update`, `_rpc/message_delete`,
+//! The phone hits `POST /api/_rpc/message_update`, `_rpc/message_delete`,
 //! or `_rpc/session_list` against the desktop's Rust server, but the
 //! authoritative Dexie store lives in the WebView. So when the Rust handler
 //! runs, it has to ask the WebView "apply this mutation / give me this
@@ -37,7 +37,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::bridge_transport::BridgeTransport;
+use super::bridge_transport::{BridgeRequestGuard, BridgeTransport};
 
 /// Serialize a typed bridge payload and emit it, cleaning up the pending slot
 /// on either serialization or transport failure. Shared by all five methods.
@@ -230,7 +230,7 @@ impl DesktopMessagesBridge {
         updates: Value,
         timeout: Duration,
     ) -> Result<Value, String> {
-        let (request_id, rx) = self.register();
+        let (request_id, rx, request_guard) = self.register(transport)?;
         let payload = MessageUpdateRequest {
             request_id: request_id.clone(),
             kind: "update",
@@ -239,7 +239,8 @@ impl DesktopMessagesBridge {
             updates,
         };
         emit_or_cleanup(&self, transport, &request_id, UPDATE_EVENT, payload)?;
-        self.await_response(request_id, rx, timeout).await
+        self.await_response(request_id, rx, timeout, request_guard)
+            .await
     }
 
     /// Run a `message_delete` round-trip through the bridge.
@@ -250,7 +251,7 @@ impl DesktopMessagesBridge {
         message_id: String,
         timeout: Duration,
     ) -> Result<Value, String> {
-        let (request_id, rx) = self.register();
+        let (request_id, rx, request_guard) = self.register(transport)?;
         let payload = MessageDeleteRequest {
             request_id: request_id.clone(),
             kind: "delete",
@@ -258,7 +259,8 @@ impl DesktopMessagesBridge {
             message_id,
         };
         emit_or_cleanup(&self, transport, &request_id, DELETE_EVENT, payload)?;
-        self.await_response(request_id, rx, timeout).await
+        self.await_response(request_id, rx, timeout, request_guard)
+            .await
     }
 
     /// Run a `session_list` round-trip through the bridge.
@@ -270,7 +272,7 @@ impl DesktopMessagesBridge {
         before: Option<i64>,
         timeout: Duration,
     ) -> Result<Value, String> {
-        let (request_id, rx) = self.register();
+        let (request_id, rx, request_guard) = self.register(transport)?;
         let payload = SessionListRequest {
             request_id: request_id.clone(),
             kind: "session_list",
@@ -279,7 +281,8 @@ impl DesktopMessagesBridge {
             before,
         };
         emit_or_cleanup(&self, transport, &request_id, LIST_EVENT, payload)?;
-        self.await_response(request_id, rx, timeout).await
+        self.await_response(request_id, rx, timeout, request_guard)
+            .await
     }
 
     /// Run a `message_get_by_session` round-trip through the bridge (Phase A1).
@@ -291,7 +294,7 @@ impl DesktopMessagesBridge {
         offset: Option<u32>,
         timeout: Duration,
     ) -> Result<Value, String> {
-        let (request_id, rx) = self.register();
+        let (request_id, rx, request_guard) = self.register(transport)?;
         let payload = GetMessagesRequest {
             request_id: request_id.clone(),
             kind: "message_get_by_session",
@@ -300,7 +303,8 @@ impl DesktopMessagesBridge {
             offset,
         };
         emit_or_cleanup(&self, transport, &request_id, GET_BY_SESSION_EVENT, payload)?;
-        self.await_response(request_id, rx, timeout).await
+        self.await_response(request_id, rx, timeout, request_guard)
+            .await
     }
 
     /// Run a `message_send` round-trip through the bridge (Phase A2).
@@ -312,7 +316,7 @@ impl DesktopMessagesBridge {
         role: Option<String>,
         timeout: Duration,
     ) -> Result<Value, String> {
-        let (request_id, rx) = self.register();
+        let (request_id, rx, request_guard) = self.register(transport)?;
         let payload = SendMessageRequest {
             request_id: request_id.clone(),
             kind: "message_send",
@@ -321,7 +325,8 @@ impl DesktopMessagesBridge {
             role,
         };
         emit_or_cleanup(&self, transport, &request_id, SEND_EVENT, payload)?;
-        self.await_response(request_id, rx, timeout).await
+        self.await_response(request_id, rx, timeout, request_guard)
+            .await
     }
 
     pub async fn transcript_capabilities(
@@ -329,7 +334,7 @@ impl DesktopMessagesBridge {
         transport: &dyn BridgeTransport,
         timeout: Duration,
     ) -> Result<Value, String> {
-        let (request_id, rx) = self.register();
+        let (request_id, rx, request_guard) = self.register(transport)?;
         let payload = TranscriptCapabilitiesRequest {
             request_id: request_id.clone(),
             kind: "transcript_capabilities",
@@ -341,7 +346,8 @@ impl DesktopMessagesBridge {
             TRANSCRIPT_CAPABILITIES_EVENT,
             payload,
         )?;
-        self.await_response(request_id, rx, timeout).await
+        self.await_response(request_id, rx, timeout, request_guard)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -354,7 +360,7 @@ impl DesktopMessagesBridge {
         limit: Option<u32>,
         timeout: Duration,
     ) -> Result<Value, String> {
-        let (request_id, rx) = self.register();
+        let (request_id, rx, request_guard) = self.register(transport)?;
         let payload = SessionTimelineRequest {
             request_id: request_id.clone(),
             kind: "session_timeline",
@@ -370,7 +376,8 @@ impl DesktopMessagesBridge {
             SESSION_TIMELINE_EVENT,
             payload,
         )?;
-        self.await_response(request_id, rx, timeout).await
+        self.await_response(request_id, rx, timeout, request_guard)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -385,7 +392,7 @@ impl DesktopMessagesBridge {
         limit: Option<u32>,
         timeout: Duration,
     ) -> Result<Value, String> {
-        let (request_id, rx) = self.register();
+        let (request_id, rx, request_guard) = self.register(transport)?;
         let payload = SessionTurnMessagesRequest {
             request_id: request_id.clone(),
             kind: "session_turn_messages",
@@ -403,7 +410,8 @@ impl DesktopMessagesBridge {
             SESSION_TURN_MESSAGES_EVENT,
             payload,
         )?;
-        self.await_response(request_id, rx, timeout).await
+        self.await_response(request_id, rx, timeout, request_guard)
+            .await
     }
 
     pub async fn session_media(
@@ -414,6 +422,7 @@ impl DesktopMessagesBridge {
         variant: String,
         timeout: Duration,
     ) -> Result<MediaBridgeResponse, String> {
+        let mut request_guard = transport.reserve_request()?;
         let request_id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
         self.pending_media.lock().insert(request_id.clone(), tx);
@@ -432,21 +441,42 @@ impl DesktopMessagesBridge {
             self.pending_media.lock().remove(&request_id);
             return Err(error);
         }
-        match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err("desktop media responder dropped".to_string()),
-            Err(_) => {
+        tokio::select! {
+            biased;
+            () = request_guard.disconnected() => {
                 self.pending_media.lock().remove(&request_id);
-                Err("desktop media request timed out".to_string())
-            }
+                Err("brain bridge disconnected".to_string())
+            },
+            result = tokio::time::timeout(timeout, rx) => match result {
+                Ok(Ok(result)) => result,
+                Ok(Err(_)) => {
+                    self.pending_media.lock().remove(&request_id);
+                    Err("desktop media responder dropped".to_string())
+                }
+                Err(_) => {
+                    self.pending_media.lock().remove(&request_id);
+                    Err("desktop media request timed out".to_string())
+                }
+            },
         }
     }
 
-    fn register(&self) -> (String, oneshot::Receiver<Result<Value, String>>) {
+    fn register(
+        &self,
+        transport: &dyn BridgeTransport,
+    ) -> Result<
+        (
+            String,
+            oneshot::Receiver<Result<Value, String>>,
+            BridgeRequestGuard,
+        ),
+        String,
+    > {
+        let request_guard = transport.reserve_request()?;
         let request_id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel::<Result<Value, String>>();
         self.pending.lock().insert(request_id.clone(), tx);
-        (request_id, rx)
+        Ok((request_id, rx, request_guard))
     }
 
     async fn await_response(
@@ -454,21 +484,29 @@ impl DesktopMessagesBridge {
         request_id: String,
         rx: oneshot::Receiver<Result<Value, String>>,
         timeout: Duration,
+        mut request_guard: BridgeRequestGuard,
     ) -> Result<Value, String> {
-        match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(Ok(value))) => Ok(value),
-            Ok(Ok(Err(err))) => Err(err),
-            Ok(Err(_recv_err)) => {
+        tokio::select! {
+            biased;
+            () = request_guard.disconnected() => {
                 self.pending.lock().remove(&request_id);
-                Err("desktop-message-response sender dropped before responding".to_string())
-            }
-            Err(_) => {
-                self.pending.lock().remove(&request_id);
-                Err(format!(
-                    "desktop-message request timed out after {} ms",
-                    timeout.as_millis()
-                ))
-            }
+                Err("brain bridge disconnected".to_string())
+            },
+            result = tokio::time::timeout(timeout, rx) => match result {
+                Ok(Ok(Ok(value))) => Ok(value),
+                Ok(Ok(Err(err))) => Err(err),
+                Ok(Err(_recv_err)) => {
+                    self.pending.lock().remove(&request_id);
+                    Err("desktop-message-response sender dropped before responding".to_string())
+                }
+                Err(_) => {
+                    self.pending.lock().remove(&request_id);
+                    Err(format!(
+                        "desktop-message request timed out after {} ms",
+                        timeout.as_millis()
+                    ))
+                }
+            },
         }
     }
 
@@ -707,8 +745,9 @@ mod tests {
     #[tokio::test]
     async fn register_grows_pending_count() {
         let bridge = DesktopMessagesBridge::new();
-        let (_id1, _rx1) = bridge.register();
-        let (_id2, _rx2) = bridge.register();
+        let transport = RecordingBridgeTransport::new();
+        let (_id1, _rx1, _guard1) = bridge.register(transport.as_ref()).unwrap();
+        let (_id2, _rx2, _guard2) = bridge.register(transport.as_ref()).unwrap();
         assert_eq!(bridge.pending_count(), 2);
     }
 }

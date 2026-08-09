@@ -3,7 +3,7 @@
 //! OpenCode loads plugins from `~/.config/opencode/plugin/` at startup and
 //! passes each a bound SDK `client` plus documented lifecycle hooks. We ship a
 //! single plugin, `cognia-fleet.js`, that:
-//!   - forwards normalized session activity to the fleet `/api/v1/fleet/hook`
+//!   - forwards normalized session activity to the fleet `/api/fleet/hook`
 //!     endpoint (`session-active` / `session-idle`, agent `opencode`), and
 //!   - implements the documented `permission.ask` hook as a long-poll to the
 //!     SAME endpoint (`PermissionRequest`, `wait` mode) and sets
@@ -70,7 +70,7 @@ async function post(cfg, body, timeoutMs) {{
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {{
-    const res = await fetch(`https://127.0.0.1:${{cfg.port}}/api/v1/fleet/hook`, {{
+    const res = await fetch(`https://127.0.0.1:${{cfg.port}}/api/fleet/hook`, {{
       method: "POST",
       headers: {{ "Content-Type": "application/json", "X-Cognia-Fleet-Token": cfg.token }},
       body: JSON.stringify(body),
@@ -101,7 +101,7 @@ async function pollCommands(cfg, sessionIds) {{
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 25000)
   try {{
-    const res = await fetch(`https://127.0.0.1:${{cfg.port}}/api/v1/fleet/opencode/commands`, {{
+    const res = await fetch(`https://127.0.0.1:${{cfg.port}}/api/fleet/opencode/commands`, {{
       method: "POST",
       headers: {{ "Content-Type": "application/json", "X-Cognia-Fleet-Token": cfg.token }},
       body: JSON.stringify({{ session_ids: sessionIds }}),
@@ -120,7 +120,7 @@ async function pollCommands(cfg, sessionIds) {{
 async function ackCommands(cfg, commandIds) {{
   if (!commandIds.length) return
   try {{
-    await fetch(`https://127.0.0.1:${{cfg.port}}/api/v1/fleet/opencode/commands/ack`, {{
+    await fetch(`https://127.0.0.1:${{cfg.port}}/api/fleet/opencode/commands/ack`, {{
       method: "POST",
       headers: {{ "Content-Type": "application/json", "X-Cognia-Fleet-Token": cfg.token }},
       body: JSON.stringify({{ command_ids: commandIds }}),
@@ -368,12 +368,12 @@ mod tests {
         assert!(src.contains("\"session-active\""));
         assert!(src.contains("\"session-idle\""));
         assert!(src.contains("\"PermissionRequest\""));
-        assert!(src.contains("/api/v1/fleet/hook"));
+        assert!(src.contains("/api/fleet/hook"));
         // Fail-open + timeout ladder (25s wait < nothing here, matches Rust 20s).
         assert!(src.contains("output.status = decision.status"));
         // Send-message reverse channel: command poll + client execution.
-        assert!(src.contains("/api/v1/fleet/opencode/commands"));
-        assert!(src.contains("/api/v1/fleet/opencode/commands/ack"));
+        assert!(src.contains("/api/fleet/opencode/commands"));
+        assert!(src.contains("/api/fleet/opencode/commands/ack"));
         assert!(src.contains("ackCommands"));
         assert!(src.contains("createOpencodeClient as createV2Client"));
         assert!(src.contains("client.session.promptAsync"));

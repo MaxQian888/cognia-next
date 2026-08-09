@@ -10,7 +10,7 @@
 //! A headless `cognia-server` has no renderer, no Dexie, and no equivalent
 //! command — so nothing ever populated the list and it stayed empty for the
 //! process lifetime. Every CONTROL-tier RPC (`fs_write`, `git_commit`,
-//! `git_push`, session steering) was therefore unreachable with a device JWT on
+//! `git_push`, session steering) was therefore unreachable with a paired device on
 //! exactly the host type ADR-0082 exists to drive: you could pair a desktop to a
 //! cloud server, see the capability boundary documented in the UI, and have no
 //! way anywhere to grant it.

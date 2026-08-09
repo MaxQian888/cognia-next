@@ -1100,9 +1100,11 @@ fn guard_network_request(
     }
 }
 
-fn network_http_client() -> std::result::Result<reqwest::Client, PluginApiError> {
-    reqwest::Client::builder()
-        .user_agent("cognia-plugin-network/0.1")
+fn network_http_client(url: &str) -> std::result::Result<reqwest::Client, PluginApiError> {
+    let builder = reqwest::Client::builder().user_agent("cognia-plugin-network/0.1");
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, url)
+        .map_err(|error| PluginApiError::internal(error.to_string()))?;
+    builder
         .build()
         .map_err(|e| PluginApiError::internal(format!("network: http client init: {e}")))
 }
@@ -1169,7 +1171,7 @@ async fn handle_network(
             guard_network_request(state, plugin_id, &url, "GET")?;
             resolve_scoped(state, plugin_id, &dest_rel)?;
 
-            let client = network_http_client()?;
+            let client = network_http_client(&url)?;
             let mut req = client.get(&url);
             for (k, v) in payload_headers(payload) {
                 req = req.header(k, v);
@@ -1247,7 +1249,7 @@ async fn handle_network(
             let method = reqwest::Method::from_bytes(method_str.as_bytes()).map_err(|_| {
                 PluginApiError::invalid(format!("network:upload: bad method {method_str}"))
             })?;
-            let client = network_http_client()?;
+            let client = network_http_client(&url)?;
             let mut req = client.request(method, &url);
             for (k, v) in payload_headers(payload) {
                 req = req.header(k, v);

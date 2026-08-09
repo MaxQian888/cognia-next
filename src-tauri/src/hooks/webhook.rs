@@ -65,10 +65,16 @@ pub async fn run_webhook_handler(
         .unwrap_or(DEFAULT_TIMEOUT_SECS)
         .min(HARD_TIMEOUT_CAP_SECS);
 
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
-        .build()
-    {
+    let builder = reqwest::Client::builder().timeout(Duration::from_secs(timeout_secs));
+    let (builder, _) = match crate::proxy_config::apply_reqwest_policy(builder, url) {
+        Ok(policy) => policy,
+        Err(error) => {
+            return HookOutcome::InternalError {
+                reason: error.to_string(),
+            };
+        }
+    };
+    let client = match builder.build() {
         Ok(c) => c,
         Err(e) => {
             return HookOutcome::InternalError {

@@ -51,9 +51,10 @@ impl MilvusBackend {
             let scheme = if ssl { "https" } else { "http" };
             format!("{scheme}://{}", address.trim_end_matches('/'))
         };
+        let client = build_client(&base, Some(headers))?;
         Ok(Self {
             base_url: base,
-            client: build_client(Some(headers))?,
+            client,
             db_name: "default".into(),
         })
     }

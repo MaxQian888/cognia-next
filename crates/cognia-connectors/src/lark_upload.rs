@@ -27,13 +27,9 @@ const LARK_API_BASE: &str = "https://open.feishu.cn/open-apis";
 /// as `http_client::http_request`. Kept private so callers can't accidentally
 /// build a bare client and miss the proxy semantics.
 fn build_client(target_url: &str) -> Result<reqwest::Client, String> {
-    let proxy_cfg = proxy_config::current();
-    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(60));
-    if proxy_cfg.is_active() && !proxy_cfg.should_bypass(target_url) {
-        if let Some(proxy) = proxy_cfg.build_reqwest_proxy() {
-            builder = builder.proxy(proxy);
-        }
-    }
+    let builder = reqwest::Client::builder().timeout(Duration::from_secs(60));
+    let (builder, _) = proxy_config::apply_reqwest_policy(builder, target_url)
+        .map_err(|error| error.to_string())?;
     builder
         .build()
         .map_err(|e| format!("reqwest build failed: {e}"))

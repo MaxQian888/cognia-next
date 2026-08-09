@@ -1069,6 +1069,8 @@ mod tests {
 
         let host = RecordingSidecarHost::with_script(script);
         let state = SidecarState::new();
+        crate::proxy_config::apply_current(Default::default())
+            .expect("test sidecar must start with an explicit direct proxy policy");
 
         claude_send_with_host(
             host.clone(),

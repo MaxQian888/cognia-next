@@ -1,8 +1,7 @@
 # ADR-0067 follow-up — OpenAI-compatible local API gateway (chat/responses/
 # embeddings surface, API-key store, keyed rate limiting, execute/translate
 # pipeline) extracted from app_lib's `gateway/` module. Re-aliased as
-# `crate::gateway`. Reuses cognia-remote-control's allowlist + fixed-window
-# rate-limiter primitives.
+# `crate::gateway`. Reuses cognia-net's inbound policy primitives.
 [package]
 name = "cognia-gateway"
 version = "0.1.0"
@@ -26,7 +25,7 @@ tauri-host = ["dep:tauri"]
 
 [dependencies]
 cognia-secrets = { path = "../cognia-secrets" }
-cognia-remote-control = { path = "../cognia-remote-control" }
+cognia-net = { path = "../cognia-net" }
 cognia-instrument = { path = "../cognia-instrument" }
 tauri = { version = "=2.11.1", optional = true }
 serde = { version = "1.0", features = ["derive"] }

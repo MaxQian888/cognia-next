@@ -11,6 +11,7 @@ pub(crate) mod dev;
 pub(crate) mod diagnostic_common;
 pub(crate) mod doctor;
 pub(crate) mod embed_version;
+pub(crate) mod host;
 pub(crate) mod import;
 pub(crate) mod info;
 pub(crate) mod install;

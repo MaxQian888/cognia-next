@@ -158,14 +158,14 @@ mod tests {
 
     #[test]
     fn shared_manifest_is_complete_and_validated() {
-        assert_eq!(commands().len(), 1026);
+        assert_eq!(commands().len(), 1028);
         assert_eq!(command_names().len(), commands().len());
         assert_eq!(DESCRIPTORS.len(), commands().len());
     }
 
     #[test]
     fn service_commands_are_internal_only() {
-        let command = descriptor("keyring_secret_get").expect("descriptor");
+        let command = descriptor("secret_store_get").expect("descriptor");
         assert_eq!(command.target, CommandTarget::Service);
         assert_eq!(command.transports, vec![CommandTransport::Internal]);
     }

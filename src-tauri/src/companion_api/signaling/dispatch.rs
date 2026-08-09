@@ -1,10 +1,10 @@
-//! DataChannel ↔ `rpc::dispatch` + `EventBus` bridge. ADR-0021.
+//! DataChannel ↔ `remote_execution` + `EventBus` bridge. ADR-0021.
 //!
 //! Once a `PeerSession`'s data channel is open, this module's task owns
 //! the bidirectional message pump:
 //!
 //! - **Inbound** (mobile → desktop): JSON envelope `{ id, method, params }`
-//!   gets routed through the existing `companion_api::rpc::dispatch`
+//!   gets routed through the canonical `companion_api::remote_execution`
 //!   allowlist. The response `{ id, ok, result | error }` is sent back
 //!   over the same data channel.
 //! - **Outbound** (desktop → mobile): the dispatcher subscribes to the
@@ -24,8 +24,12 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::peer::PeerSession;
-use crate::companion_api::command_manifest::{self, CommandIdempotency};
-use crate::companion_api::SharedState;
+use crate::companion_api::{
+    middleware::DeviceContext,
+    remote_execution::{self, ExecutionOutcome, ExecutionRequest, ExecutionTransport},
+    security_store::security_store,
+    SharedState,
+};
 
 /// Inbound DataChannel frame shape (mobile → desktop). Mirror of
 /// `lib/tauri/transport-rtc.ts:RtcMessage`.
@@ -36,9 +40,8 @@ pub struct InboundRpc {
     #[serde(default)]
     pub params: Value,
     /// Optional idempotency key (UUID) supplied by mutating callers. The
-    /// dispatcher passes it through to the shared idempotency cache —
-    /// see `companion_api::rpc::rpc_handler` for the matching behaviour
-    /// on the HTTP path.
+    /// adapter passes it through to the durable ledger in
+    /// `companion_api::remote_execution`, matching the HTTP path.
     #[serde(default, rename = "idempotencyKey")]
     pub idempotency_key: Option<String>,
     #[serde(rename = "protocolVersion")]
@@ -196,7 +199,9 @@ async fn run(
                                         Some(since),
                                         crate::companion_api::signaling::envelope_v2::now_ms(),
                                     ) {
-                                        SubscribeResult::Ok { receiver, replay } => {
+        SubscribeResult::Ok {
+            receiver, replay, ..
+        } => {
                                             event_rx = receiver;
                                             for frame in replay {
                                                 if !frame.visible_to(&device_id) {
@@ -319,42 +324,11 @@ fn protocol_version_reject(version: u8, request_id: &str) -> Option<OutboundFram
     }))
 }
 
-fn idempotency_contract_reject(
-    method: &str,
-    idempotency_key: Option<&str>,
-    request_id: &str,
-) -> Option<OutboundFrame> {
-    let descriptor = command_manifest::descriptor(method)?;
-    let error = match descriptor.idempotency {
-        CommandIdempotency::Required if idempotency_key.is_none_or(|key| key.trim().is_empty()) => {
-            Some((
-                "idempotency_required",
-                "this command requires a non-empty idempotency key",
-            ))
-        }
-        CommandIdempotency::Forbidden if idempotency_key.is_some() => Some((
-            "idempotency_forbidden",
-            "this command does not accept an idempotency key",
-        )),
-        _ => None,
-    }?;
-
-    Some(OutboundFrame::Response(ResponseFrame {
-        id: request_id.to_string(),
-        ok: false,
-        result: None,
-        error: Some(ErrorBody {
-            code: error.0.into(),
-            message: error.1.into(),
-        }),
-    }))
-}
-
 async fn handle_inbound(
     peer: &PeerSession,
     bytes: Vec<u8>,
     state: &SharedState,
-    host: Option<&crate::companion_api::dispatch_host::DispatchHost>,
+    _host: Option<&crate::companion_api::dispatch_host::DispatchHost>,
     device_id: &str,
 ) -> Result<(), String> {
     log::debug!(
@@ -394,116 +368,49 @@ async fn handle_inbound(
         return send_outbound(peer, &frame).await.map_err(|e| e.to_string());
     }
 
-    if let Some(frame) = rate_limit_reject(&state.rate_limiter, device_id, &request_id) {
-        return send_outbound(peer, &frame).await.map_err(|e| e.to_string());
-    }
-
-    if let Some(frame) =
-        idempotency_contract_reject(&rpc.method, rpc.idempotency_key.as_deref(), &request_id)
-    {
-        return send_outbound(peer, &frame).await.map_err(|e| e.to_string());
-    }
-
-    // Atomically reserve the write in the same ledger used by HTTPS.
-    if let Some(key) = rpc.idempotency_key.as_deref() {
-        let decision = state
-            .idempotency
-            .begin(device_id, &rpc.method, key, &rpc.params)
-            .map_err(|error| error.to_string())?;
-        let immediate = match decision {
-            crate::companion_api::idempotency::IdempotencyDecision::Execute => None,
-            crate::companion_api::idempotency::IdempotencyDecision::Cached(cached) => {
-                Some(OutboundFrame::Response(ResponseFrame {
-                    id: request_id.clone(),
-                    ok: true,
-                    result: Some(cached),
-                    error: None,
-                }))
-            }
-            crate::companion_api::idempotency::IdempotencyDecision::Conflict => {
-                Some(OutboundFrame::Response(ResponseFrame {
-                    id: request_id.clone(),
-                    ok: false,
-                    result: None,
-                    error: Some(ErrorBody {
-                        code: "idempotency_conflict".into(),
-                        message: "the idempotency key was already used with different parameters"
-                            .into(),
-                    }),
-                }))
-            }
-            crate::companion_api::idempotency::IdempotencyDecision::Indeterminate => {
-                Some(OutboundFrame::Response(ResponseFrame {
-                    id: request_id.clone(),
-                    ok: false,
-                    result: None,
-                    error: Some(ErrorBody {
-                        code: "idempotency_indeterminate".into(),
-                        message: "the prior execution has no final result and will not be replayed"
-                            .into(),
-                    }),
-                }))
-            }
-        };
-        if let Some(outbound) = immediate {
-            return send_outbound(peer, &outbound)
-                .await
-                .map_err(|error| error.to_string());
-        }
-    }
-
-    // No host resolved (bare test state / harness peer). Mirror the HTTP
-    // path's contract verbatim — `rpc::rpc_handler` maps the same condition to
-    // `service_unavailable("app_handle not available (test mode)")` — so a
-    // client sees one behaviour regardless of which transport it used.
-    let Some(host) = host else {
-        let frame = OutboundFrame::Response(ResponseFrame {
-            id: request_id,
-            ok: false,
-            result: None,
-            error: Some(ErrorBody {
-                code: "service_unavailable".into(),
-                message: "app_handle not available (test mode)".into(),
-            }),
-        });
-        return send_outbound(peer, &frame).await.map_err(|e| e.to_string());
+    let tenant_id = security_store()
+        .ok_or_else(|| "security store unavailable".to_string())?
+        .active_device_tenant(device_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "registered device principal unavailable".to_string())?;
+    let principal = DeviceContext {
+        device_id: device_id.to_string(),
+        account_id: tenant_id,
+        scope: "device".to_string(),
+        granted_scopes: Vec::new(),
+        authorization_capabilities: None,
     };
-
-    // Route through the existing dispatch table. `scope: None` — the
-    // DataChannel is always device-scoped, so service-only (RCE-grade)
-    // commands are unreachable over WebRTC by construction.
-    let result = crate::companion_api::rpc::dispatch(
-        &rpc.method,
+    let mut execution_request = ExecutionRequest::new(
+        rpc.method,
         rpc.params,
-        state,
-        host,
-        device_id,
-        None,
-        None,
-    )
-    .await;
-    let outbound = match result {
-        Ok(value) => {
-            if let Some(key) = rpc.idempotency_key.as_deref() {
-                state
-                    .idempotency
-                    .complete(device_id, &rpc.method, key, &value)
-                    .map_err(|error| error.to_string())?;
-            }
+        principal,
+        ExecutionTransport::WebRtc,
+        rpc.idempotency_key,
+    );
+    execution_request.request_id = request_id.clone();
+
+    let outbound = match remote_execution::execute(state, execution_request).await {
+        Ok(ExecutionOutcome::Completed { result, .. }) => OutboundFrame::Response(ResponseFrame {
+            id: request_id,
+            ok: true,
+            result: Some(result),
+            error: None,
+        }),
+        Ok(ExecutionOutcome::Accepted { operation_id, .. }) => {
             OutboundFrame::Response(ResponseFrame {
                 id: request_id,
                 ok: true,
-                result: Some(value),
+                result: Some(json!({ "operationId": operation_id, "status": "running" })),
                 error: None,
             })
         }
-        Err((_status, axum::Json(err))) => OutboundFrame::Response(ResponseFrame {
+        Err(error) => OutboundFrame::Response(ResponseFrame {
             id: request_id,
             ok: false,
             result: None,
             error: Some(ErrorBody {
-                code: err.code,
-                message: err.message,
+                code: error.code,
+                message: error.message,
             }),
         }),
     };
@@ -540,7 +447,7 @@ async fn handle_binary_resource(
     state: &SharedState,
     device_id: &str,
 ) -> Result<(), String> {
-    if request.protocol_version != RTC_PROTOCOL_VERSION {
+    if request.kind != "binary-resource" || request.protocol_version != RTC_PROTOCOL_VERSION {
         return send_binary_resource_error(peer, request.id, "unsupported_protocol").await;
     }
     if uuid::Uuid::parse_str(&request.id).is_err()
@@ -632,30 +539,6 @@ fn revocation_reject(
         }))
     } else {
         None
-    }
-}
-
-fn rate_limit_reject(
-    limiter: &crate::companion_api::rate_limit::RateLimiter,
-    device_id: &str,
-    request_id: &str,
-) -> Option<OutboundFrame> {
-    match limiter.check(device_id) {
-        crate::companion_api::rate_limit::RateLimitDecision::Accept => None,
-        crate::companion_api::rate_limit::RateLimitDecision::Reject { retry_after } => {
-            Some(OutboundFrame::Response(ResponseFrame {
-                id: request_id.to_string(),
-                ok: false,
-                result: None,
-                error: Some(ErrorBody {
-                    code: "rate_limited".into(),
-                    message: format!(
-                        "too many requests; retry after {} seconds",
-                        retry_after.as_secs()
-                    ),
-                }),
-            }))
-        }
     }
 }
 
@@ -796,41 +679,6 @@ mod tests {
         let rpc: InboundRpc = serde_json::from_slice(raw).unwrap();
         assert_eq!(rpc.idempotency_key.as_deref(), Some("uuid"));
         assert_eq!(rpc.protocol_version, 2);
-    }
-
-    #[test]
-    fn required_idempotency_is_enforced_before_dispatch() {
-        let frame = idempotency_contract_reject("claude_send", None, "r1")
-            .expect("mutating command without a key must be refused");
-        let text = serde_json::to_string(&frame).unwrap();
-        assert!(text.contains(r#""id":"r1""#));
-        assert!(text.contains(r#""code":"idempotency_required""#));
-
-        assert!(idempotency_contract_reject("claude_send", Some("uuid"), "r1").is_none());
-    }
-
-    #[test]
-    fn an_empty_required_idempotency_key_is_refused() {
-        let frame = idempotency_contract_reject("claude_send", Some("  "), "r1")
-            .expect("blank keys cannot provide replay protection");
-        let text = serde_json::to_string(&frame).unwrap();
-        assert!(text.contains(r#""code":"idempotency_required""#));
-    }
-
-    #[test]
-    fn data_channel_rate_limit_matches_the_http_device_bucket() {
-        let limiter = crate::companion_api::rate_limit::RateLimiter::new(
-            crate::companion_api::rate_limit::RateLimitConfig {
-                capacity: 1.0,
-                refill_per_sec: 0.001,
-            },
-        );
-        assert!(rate_limit_reject(&limiter, "dev-1", "req-1").is_none());
-        let frame = rate_limit_reject(&limiter, "dev-1", "req-2")
-            .expect("second request must exhaust the shared device bucket");
-        let text = serde_json::to_string(&frame).unwrap();
-        assert!(text.contains(r#""code":"rate_limited""#));
-        assert!(text.contains(r#""id":"req-2""#));
     }
 
     // ── Revocation parity on the DataChannel path (P1-1 / C3) ──────────────

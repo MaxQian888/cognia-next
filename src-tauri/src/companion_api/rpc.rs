@@ -1,9 +1,9 @@
-//! RPC dispatch for `POST /api/v1/_rpc/:name`.
+//! RPC dispatch for `POST /internal/_rpc/:name`.
 //!
 //! # Request shape
 //!
 //! ```text
-//! POST /api/v1/_rpc/<command_name>
+//! POST /internal/_rpc/<command_name>
 //! Authorization: Bearer <device-jwt>
 //! Idempotency-Key: <optional-uuid>          ← skipped for read-only commands
 //! Content-Type: application/json
@@ -40,11 +40,13 @@
 
 use std::collections::HashSet;
 
+#[cfg(test)]
 use axum::{
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
-    Extension, Json,
+    http::HeaderMap,
+    Extension,
 };
+use axum::{http::StatusCode, Json};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -92,7 +94,7 @@ fn remote_context_error(code: &'static str) -> (StatusCode, Json<RpcError>) {
 // ---------------------------------------------------------------------------
 
 /// Headless emitter: publishes into the companion EventBus so every
-/// `/ws/v1/events` subscriber (the brain's acp-client, phones) receives the
+/// `/ws/events` subscriber (the brain's acp-client, phones) receives the
 /// frozen payloads. Lives app-side (ADR-0067): the extracted external-agent
 /// crate defines the `AgentEventEmitter` seam, and this is the one impl that
 /// needs the companion EventBus.
@@ -158,12 +160,18 @@ impl RpcError {
     }
 
     fn internal(detail: String) -> (StatusCode, Json<Self>) {
+        if detail.starts_with("brain bridge disconnected")
+            || detail.starts_with("brain bridge overloaded")
+        {
+            return Self::service_unavailable(detail);
+        }
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(Self::new("internal_error", detail)),
         )
     }
 
+    #[cfg(test)]
     fn idempotency_conflict() -> (StatusCode, Json<Self>) {
         (
             StatusCode::CONFLICT,
@@ -174,6 +182,7 @@ impl RpcError {
         )
     }
 
+    #[cfg(test)]
     fn idempotency_indeterminate() -> (StatusCode, Json<Self>) {
         (
             StatusCode::CONFLICT,
@@ -199,6 +208,7 @@ impl RpcError {
     /// Wave 3.3 — 429 Too Many Requests with the wait time embedded in
     /// the message (`retry_after_seconds=N`). The flat envelope keeps
     /// the contract simple; phones can parse the integer.
+    #[cfg(test)]
     fn rate_limited(retry_after_secs: u64) -> (StatusCode, Json<Self>) {
         (
             StatusCode::TOO_MANY_REQUESTS,
@@ -227,15 +237,14 @@ impl RpcError {
 fn terminal_rpc_authorization(
     device_id: &str,
     host_remote_access_enabled: bool,
+    has_terminal_capability: bool,
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
     if !host_remote_access_enabled {
         return Err(RpcError::forbidden(
             "remote terminal access is disabled on this host",
         ));
     }
-    if device_id.trim().is_empty()
-        || !super::control_allow_list::terminal_global().is_allowed(device_id)
-    {
+    if device_id.trim().is_empty() || !has_terminal_capability {
         return Err(RpcError::forbidden(
             "remote terminal permission is required for this device",
         ));
@@ -249,6 +258,7 @@ async fn ensure_terminal_rpc_authorized(
     terminal_rpc_authorization(
         device_id,
         crate::terminal_host_service::terminal_remote_access_enabled().await,
+        canonical_device_has_capability(device_id, "terminal.open"),
     )
 }
 
@@ -310,15 +320,25 @@ const KNOWN_COMMANDS: &[&str] = &[
     "mcp_server_restart",
     "read_agent_config",
     "write_agent_config",
-    // Generic encrypted secret-store facade for the headless brain. These
-    // mirror the desktop Tauri keyring commands but are SERVICE_ONLY below.
+    // Generic encrypted secret-store facade for the headless brain. The
+    // keyring names are deprecated compatibility aliases.
+    "secret_store_get",
+    "secret_store_set",
+    "secret_store_delete",
     "keyring_secret_get",
     "keyring_secret_set",
     "keyring_secret_clear",
+    "ocr_extract_native",
+    "ocr_list_native_backends",
+    "ocr_list_available_backends",
+    "ocr_model_status",
+    "ocr_download_model",
+    "ocr_cancel_model_download",
     "sync_pull",
     "sync_list_tables",
     "register_push_token",
     "revoke_push_token",
+    "remote_notification_publish",
     "message_update",
     "message_delete",
     "session_list",
@@ -354,7 +374,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "external_agent_update",
     // ADR-0059 R11 — headless external-agent execution plane. Service-scope
     // only (SERVICE_ONLY_COMMANDS) + SpawnPolicy allowlist + audit trail;
-    // a device JWT can never reach these.
+    // a public device principal can never reach these.
     "spawn_external_agent",
     "send_to_external_agent",
     "kill_external_agent",
@@ -364,17 +384,27 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
+    "connectors_runtime_lease_acquire",
+    "connectors_runtime_lease_renew",
+    "connectors_runtime_lease_release",
     // Marketplace Integration ingress uses the same host-owned workflow
     // router and encrypted spool on desktop and headless deployments.
     "integration_ingress_register",
     "integration_ingress_unregister",
     "integration_ingress_get_url",
     "integration_ingress_poll",
-    // Catalog status/search are pure reads over the active SQLite revision.
-    "provider_catalog_status",
-    "provider_catalog_search",
     "integration_ingress_ack",
     "integration_ingress_nack",
+    "integration_ingress_deadletters",
+    "integration_ingress_deadletter",
+    "integration_ingress_requeue",
+    // Host-owned Issue Loop workspace operations. These carry repository
+    // credentials and can write to GitHub, so only the co-located brain may
+    // dispatch them on headless hosts.
+    "github_workspace_clone",
+    "github_workspace_commit_and_push",
+    "github_workspace_remove",
+    "github_workspace_stat",
     // ADR-0090 Phase 1 — Provider Profile Store admin plane (service scope;
     // redacted docs only, secrets never transit these arms).
     "provider_profiles_list",
@@ -451,6 +481,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // Resolve a host computer-use consent prompt from a remote device.
     // Calls the automation ConsentBroker directly (not via writes-bridge).
     "automation_consent_respond",
+    "automation_consent_pending",
     // Read-only capability probe — lets a paired device learn whether it holds
     // the remote-control capability without attempting (and 403-ing on) a
     // gated RPC. NOT a CONTROL_COMMAND: every paired device may query its own
@@ -640,6 +671,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "plugin_api_invoke",
     "plugin_api_batch_invoke",
     "plugin_get_capabilities",
+    "plugin_set_status",
     "plugin_set_shell_allowlist",
     "plugin_set_network_allowlist",
     "plugin_python_initialize",
@@ -790,8 +822,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_session_ensure",
     "browser_session_get",
     "browser_capability",
+    "browser_runtime_status",
     "browser_session_close",
-    "browser_stream_ticket_issue",
     "browser_navigate",
     "browser_snapshot",
     "browser_act",
@@ -825,7 +857,7 @@ const KNOWN_COMMANDS: &[&str] = &[
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
 /// `spec_parity` test (Wave 3.6) to assert that every command in this
-/// list has a matching `/api/v1/_rpc/<name>` path in the OpenAPI spec.
+/// list has a matching `/internal/_rpc/<name>` path in the OpenAPI spec.
 #[allow(dead_code)] // referenced from `spec_parity::tests` only.
 pub fn known_commands() -> &'static [&'static str] {
     KNOWN_COMMANDS
@@ -836,6 +868,7 @@ pub fn known_commands() -> &'static [&'static str] {
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
     "browser_capability",
+    "browser_runtime_status",
     "browser_session_get",
     "browser_snapshot",
     "browser_read_console",
@@ -860,6 +893,11 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "mcp_server_status",
     "read_agent_config",
     "keyring_secret_get",
+    "secret_store_get",
+    "ocr_list_native_backends",
+    "ocr_list_available_backends",
+    "ocr_model_status",
+    "automation_consent_pending",
     // Sync-down (M4.7) is structurally idempotent: same `(table, since)`
     // returns the same delta. Skip the cache to avoid stalling phone clients
     // behind a 60-second TTL when the desktop has fresh writes.
@@ -902,6 +940,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // whenever a webhook is accepted or acknowledged.
     "integration_ingress_get_url",
     "integration_ingress_poll",
+    "integration_ingress_deadletters",
+    "integration_ingress_deadletter",
     // Read-only remote-control capability probe (drives the mobile
     // computer-use consent sheet). Pure read of the process-global allow list.
     "companion_can_control",
@@ -1074,6 +1114,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "agent_task_comment",
     "agent_task_move",
     "automation_consent_respond",
+    "automation_consent_pending",
     // Destructive character mutation — gated for consistency with the other
     // delete surfaces below (Wave 4.1 policy: every remote delete is gated).
     "character_delete",
@@ -1253,6 +1294,7 @@ const CONTROL_COMMANDS: &[&str] = &[
 /// legacy policy arrays are retained temporarily only for parity assertions.
 static KNOWN_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
     once_cell::sync::Lazy::new(|| known_commands().iter().copied().collect());
+#[cfg(test)]
 static READ_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
     once_cell::sync::Lazy::new(|| {
         super::command_manifest::commands()
@@ -1289,7 +1331,6 @@ fn is_control_command(name: &str) -> bool {
 
 fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
     !is_control_command(name)
-        || scope == Some("device")
         || (scope == Some("service")
             && matches!(
                 name,
@@ -1304,14 +1345,44 @@ fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bo
                     | "lsp_host_ensure"
                     | "lsp_host_request"
             ))
-        || super::control_allow_list::global().is_allowed(device_id)
+        || canonical_device_capability(device_id, name)
+}
+
+fn canonical_device_capability(device_id: &str, command: &str) -> bool {
+    let Some(descriptor) = super::command_manifest::descriptor(command) else {
+        return false;
+    };
+    canonical_device_has_capability(device_id, &descriptor.capability)
+}
+
+fn canonical_device_has_capability(device_id: &str, capability: &str) -> bool {
+    if device_id.trim().is_empty() {
+        return false;
+    }
+    let Some(store) = super::security_store::security_store() else {
+        return false;
+    };
+    let Ok(Some(tenant_id)) = store.active_device_tenant(device_id) else {
+        return false;
+    };
+    store
+        .has_capability(&tenant_id, device_id, capability)
+        .unwrap_or(false)
 }
 
 /// Revalidate the paired-device control grant on non-RPC streams such as the
 /// managed IDE relay. Revocation therefore closes authority immediately rather
 /// than only when a new code-server session is requested.
 pub(crate) fn device_can_control(device_id: &str) -> bool {
-    super::control_allow_list::global().is_allowed(device_id)
+    let Some(store) = super::security_store::security_store() else {
+        return false;
+    };
+    let Ok(Some(tenant_id)) = store.active_device_tenant(device_id) else {
+        return false;
+    };
+    store
+        .has_capability(&tenant_id, device_id, "workspace.write")
+        .unwrap_or(false)
 }
 
 /// Commands whose TS dispatch arm needs the authenticated caller's device id
@@ -1348,13 +1419,28 @@ fn inject_caller_device_id(name: &str, mut args: Value, device_id: &str) -> Valu
 /// Project the authenticated caller's current grants into the host manifest
 /// request. The client cannot self-assert these values: any supplied field is
 /// overwritten from the server-side allow list before the TS bridge sees it.
-fn inject_caller_device_grants(name: &str, mut args: Value, device_id: &str) -> Value {
+fn inject_caller_device_grants(
+    name: &str,
+    mut args: Value,
+    device_id: &str,
+    account_id: Option<&str>,
+) -> Value {
     if name == "host_feature_manifest" {
         if let Value::Object(map) = &mut args {
-            let mut grants = vec![Value::String("host.observe".to_string())];
-            if super::control_allow_list::agent_control_global().is_allowed(device_id) {
-                grants.push(Value::String("agent.run".to_string()));
-            }
+            let grants = account_id
+                .and_then(|tenant_id| {
+                    super::security_store::security_store().map(|store| (tenant_id, store))
+                })
+                .and_then(|(tenant_id, store)| {
+                    store
+                        .capability_snapshot(tenant_id, device_id)
+                        .ok()
+                        .flatten()
+                })
+                .unwrap_or_default()
+                .into_iter()
+                .map(Value::String)
+                .collect();
             map.insert("callerDeviceGrants".to_string(), Value::Array(grants));
         }
     }
@@ -1362,7 +1448,7 @@ fn inject_caller_device_grants(name: &str, mut args: Value, device_id: &str) -> 
 }
 
 /// RCE-grade commands that ONLY the headless brain's service token may call
-/// (ADR-0059 W4/D6). A device JWT presenting one of these is rejected with
+/// (ADR-0059 W4/D6). A public device principal presenting one is rejected with
 /// 403. The external-agent arms are remote code execution by construction —
 /// every decision is also written to the audit log. R12 adds the
 /// `connectors_*` management arms.
@@ -1372,12 +1458,22 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
+    "connectors_runtime_lease_acquire",
+    "connectors_runtime_lease_renew",
+    "connectors_runtime_lease_release",
     "integration_ingress_register",
     "integration_ingress_unregister",
     "integration_ingress_get_url",
     "integration_ingress_poll",
     "integration_ingress_ack",
     "integration_ingress_nack",
+    "integration_ingress_deadletters",
+    "integration_ingress_deadletter",
+    "integration_ingress_requeue",
+    "github_workspace_clone",
+    "github_workspace_commit_and_push",
+    "github_workspace_remove",
+    "github_workspace_stat",
     // ADR-0059 T-A5 — the connector command plane carries credentials and
     // arbitrary outbound HTTP; only the brain's service token may touch it.
     "connectors_health",
@@ -1400,9 +1496,19 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "connectors_lark_upload_image",
     // The brain may persist non-connector secrets (backup auto-key, WebDAV,
     // future runtime credentials) in the already-installed server store.
+    "secret_store_get",
+    "secret_store_set",
+    "secret_store_delete",
     "keyring_secret_get",
     "keyring_secret_set",
     "keyring_secret_clear",
+    "ocr_extract_native",
+    "ocr_list_native_backends",
+    "ocr_list_available_backends",
+    "ocr_model_status",
+    "ocr_download_model",
+    "ocr_cancel_model_download",
+    "remote_notification_publish",
     // Plugin guest execution is an internal brain↔front-door channel. Keeping
     // it service-only prevents a paired device from invoking arbitrary plugin
     // exports even when it has remote package-management permission.
@@ -1417,6 +1523,7 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "plugin_deactivate_js",
     "plugin_stop_js",
     "plugin_js_status",
+    "plugin_set_status",
     "plugin_set_shell_allowlist",
     "plugin_set_network_allowlist",
     "plugin_python_initialize",
@@ -1493,7 +1600,7 @@ fn is_service_only_command(name: &str) -> bool {
 /// process. A user enabling "remote control" to let their phone approve a
 /// prompt should not thereby be handing out process execution, so the grant is
 /// a separate, separately-labelled one — see
-/// [`super::control_allow_list::agent_control_global`].
+/// the command manifest and the device's current SecurityStore snapshot.
 ///
 /// The safety floor does not move: every spawn still has to clear the
 /// `SpawnPolicy` preset allowlist (bare binary from a fixed list, cwd under the
@@ -1525,18 +1632,10 @@ fn is_agent_control_authorized(name: &str, device_id: &str, scope: Option<&str>)
     if !is_agent_control_command(name) {
         return true;
     }
-    if scope == Some("device") || scope == Some("service") {
+    if scope == Some("service") {
         return true;
     }
-    // An unauthenticated or malformed context carries an empty `device_id`, and
-    // the grant store refuses to store one (`device_grants::grant`) — but only
-    // the store did. A list that somehow held `""` would match every such
-    // context here, so the caller-side check is repeated rather than assumed.
-    // `ws_terminal.rs` guards its own path the same way.
-    if device_id.trim().is_empty() {
-        return false;
-    }
-    super::control_allow_list::agent_control_global().is_allowed(device_id)
+    canonical_device_capability(device_id, name)
 }
 
 const AGENT_SCHEDULE_TASK_TYPES: &[&str] = &[
@@ -1596,11 +1695,10 @@ fn payload_agent_control_authorized(
     if !scheduled_task_requires_agent_control(name, args) {
         return true;
     }
-    if scope == Some("device") || scope == Some("service") {
+    if scope == Some("service") {
         return true;
     }
-    !device_id.trim().is_empty()
-        && super::control_allow_list::agent_control_global().is_allowed(device_id)
+    canonical_device_has_capability(device_id, "process.spawn")
 }
 
 /// Shared refusal for the agent-control gate. One string for both the HTTP
@@ -1654,14 +1752,18 @@ pub fn control_commands() -> &'static [&'static str] {
 /// cannot be called without a real handle. This pure helper lets the
 /// `{ allowed }` logic be asserted directly.
 fn can_control_response(device_id: &str) -> Value {
-    serde_json::json!({ "allowed": super::control_allow_list::global().is_allowed(device_id) })
+    can_control_response_value(device_can_control(device_id))
+}
+
+fn can_control_response_value(allowed: bool) -> Value {
+    serde_json::json!({ "allowed": allowed })
 }
 
 /// Read-only response body for `companion_endpoints` — the set of addresses
 /// this desktop is currently reachable on.
 ///
 /// The QR pair payload carries exactly one `baseUrl` (tunnel takes priority
-/// over LAN — see [`super::commands::companion_issue_pair_jwt`]), which leaves
+/// over LAN — see [`super::commands::companion_create_owner_invitation`]), which leaves
 /// every paired client with a single-channel view of a multi-channel host:
 ///
 ///   * paired on the LAN → never learns the tunnel URL, so leaving the network
@@ -1696,7 +1798,7 @@ fn endpoints_response(
 /// `None` when the server is loopback-bound / the host has no routable
 /// interface.
 ///
-/// Mirrors the LAN branch of [`super::commands::companion_issue_pair_jwt`]:
+/// Mirrors the LAN branch of [`super::commands::companion_create_owner_invitation`]:
 /// same `detect_lan_ip` probe, same HTTPS scheme (M2.9 self-signed
 /// termination). `bind_mode` is only consultable through the Tauri-managed
 /// `CompanionServerState`; a headless `cognia-server` always binds `0.0.0.0`
@@ -1764,7 +1866,7 @@ fn validate_app_settings_update(args: &Value) -> Result<(), (StatusCode, Json<Rp
 // Axum handler
 // ---------------------------------------------------------------------------
 
-/// Axum handler for `POST /api/v1/_rpc/:name`.
+/// Axum handler for `POST /internal/_rpc/:name`.
 ///
 /// Steps:
 /// 1. Pull [`DeviceContext`] injected by the JWT middleware.
@@ -1773,6 +1875,7 @@ fn validate_app_settings_update(args: &Value) -> Result<(), (StatusCode, Json<Rp
 /// 3. If a cache hit exists, return the cached body immediately.
 /// 4. Dispatch to the allowlist match in [`dispatch`].
 /// 5. On success, write the response body into the cache (non-read-only only).
+#[cfg(test)]
 pub async fn rpc_handler(
     Path(name): Path<String>,
     Extension(ctx): Extension<DeviceContext>,
@@ -1799,12 +1902,6 @@ pub async fn rpc_handler(
     // `dispatch` directly, bypassing this handler — stays gated too. Failing
     // here means an unauthorized device never burns a rate-limit token or
     // touches the sidecar.
-    if !is_control_authorized(&name, &ctx.device_id, Some(ctx.scope.as_str())) {
-        return Err(RpcError::forbidden(
-            "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
-        ));
-    }
-
     // Service-scope gate (ADR-0059 W4): RCE-grade commands are reachable only
     // with the headless brain's `"service"` token, never a device JWT. No-op
     // until R11/R12 populate SERVICE_ONLY_COMMANDS; the `signaling::dispatch`
@@ -1817,13 +1914,6 @@ pub async fn rpc_handler(
 
     // Agent-control gate. Mirrored at the top of `dispatch` for the WebRTC
     // path, exactly like the two gates above.
-    if !is_agent_control_authorized(&name, &ctx.device_id, Some(ctx.scope.as_str())) {
-        return Err(refuse_agent_control(&name, &ctx.device_id, Some(ctx.scope.as_str())).await);
-    }
-    if !payload_agent_control_authorized(&name, &args, &ctx.device_id, Some(ctx.scope.as_str())) {
-        return Err(refuse_agent_control(&name, &ctx.device_id, Some(ctx.scope.as_str())).await);
-    }
-
     // Wave 3.3 — paired devices are rate-limited per device. The headless
     // service principal is loopback-only and performs a large deterministic
     // bootstrap burst, so charging it against a 10-request device bucket
@@ -2029,6 +2119,27 @@ fn optional<T: DeserializeOwned>(
     }
 }
 
+fn authorize_workspace_root(
+    host: &crate::companion_api::dispatch_host::DispatchHost,
+    requested: String,
+) -> Result<String, (StatusCode, Json<RpcError>)> {
+    if let Some(services) = host.headless() {
+        return services
+            .spawn_policy
+            .validate_workspace_root(&requested)
+            .map_err(|error| RpcError::forbidden(format!("workspace root denied: {error}")));
+    }
+    if !crate::files::is_remote_workspace_path_allowed(&requested) {
+        return Err(RpcError::forbidden(
+            "workspace root is not registered by the active desktop project",
+        ));
+    }
+    std::path::Path::new(&requested)
+        .canonicalize()
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|error| RpcError::malformed(format!("workspace root does not resolve: {error}")))
+}
+
 fn authorize_sensitive_resource(
     requested: bool,
     device_id: &str,
@@ -2037,7 +2148,7 @@ fn authorize_sensitive_resource(
     if !requested {
         return Ok(false);
     }
-    if scope == Some("service") || super::control_allow_list::global().is_allowed(device_id) {
+    if scope == Some("service") || canonical_device_has_capability(device_id, "workspace.write") {
         return Ok(true);
     }
     Err(RpcError::forbidden(
@@ -2232,12 +2343,7 @@ async fn external_bridge_start_for_host(
                     crate::headless::resolve_mcp_sidecar_path()
                         .to_string_lossy()
                         .into_owned(),
-                    Some(
-                        services
-                            .mcp_automation()
-                            .await
-                            .map_err(RpcError::internal)?,
-                    ),
+                    None,
                     Some(headless_orchestration_event_sink()),
                 )
                 .await
@@ -2365,11 +2471,6 @@ pub(super) async fn dispatch(
     // the WebRTC `signaling::dispatch` path (both funnel through here), so the
     // elevated capability is enforced regardless of transport. Baseline chat
     // and read-only sync are not in `CONTROL_COMMANDS`, so they pass through.
-    if !is_control_authorized(name, device_id, scope) {
-        return Err(RpcError::forbidden(
-            "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
-        ));
-    }
     if STEP_UP_COMMANDS.contains(&name) && scope != Some("service") {
         let admin_lease = args
             .get("adminLease")
@@ -2391,13 +2492,6 @@ pub(super) async fn dispatch(
     // Agent-control gate, mirrored from `rpc_handler`. The WebRTC path passes
     // `scope: None`, so a DataChannel caller needs the same explicit grant an
     // HTTP one does — the transport must not be a way around it.
-    if !is_agent_control_authorized(name, device_id, scope) {
-        return Err(refuse_agent_control(name, device_id, scope).await);
-    }
-    if !payload_agent_control_authorized(name, &args, device_id, scope) {
-        return Err(refuse_agent_control(name, device_id, scope).await);
-    }
-
     // Allowlist gate. The HTTP `rpc_handler` already rejects unknown names
     // before reaching here, but the WebRTC `signaling::dispatch` path calls
     // `dispatch` directly without that check — enforcing it here keeps the two
@@ -2745,10 +2839,10 @@ pub(super) async fn dispatch(
 
         // ── Generic server secret store ──────────────────────────────────────
 
-        "keyring_secret_get" => {
+        "secret_store_get" | "keyring_secret_get" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let input: crate::keyring_secrets::KeyringInput = required(&args, "input")?;
+            let input: crate::keyring_secrets::SecretStoreInput = required(&args, "input")?;
             let value = tokio::task::spawn_blocking(move || {
                 crate::keyring_secrets::get(&input.namespace, &input.key)
             })
@@ -2758,14 +2852,14 @@ pub(super) async fn dispatch(
             to_json(value)
         }
 
-        "keyring_secret_set" => {
+        "secret_store_set" | "keyring_secret_set" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let input: crate::keyring_secrets::KeyringInput = required(&args, "input")?;
+            let input: crate::keyring_secrets::SecretStoreInput = required(&args, "input")?;
             let value = input
                 .value
                 .clone()
-                .ok_or_else(|| RpcError::malformed("keyring_secret_set.input.value is required".into()))?;
+                .ok_or_else(|| RpcError::malformed(format!("{name}.input.value is required")))?;
             tokio::task::spawn_blocking(move || {
                 crate::keyring_secrets::set(&input.namespace, &input.key, &value)
             })
@@ -2775,10 +2869,10 @@ pub(super) async fn dispatch(
             Ok(Value::Null)
         }
 
-        "keyring_secret_clear" => {
+        "secret_store_delete" | "keyring_secret_clear" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let input: crate::keyring_secrets::KeyringInput = required(&args, "input")?;
+            let input: crate::keyring_secrets::SecretStoreInput = required(&args, "input")?;
             tokio::task::spawn_blocking(move || {
                 crate::keyring_secrets::clear(&input.namespace, &input.key)
             })
@@ -2786,6 +2880,110 @@ pub(super) async fn dispatch(
             .map_err(|error| RpcError::internal(error.to_string()))?
             .map_err(RpcError::internal)?;
             Ok(Value::Null)
+        }
+
+        // ── Native OCR service plane ────────────────────────────────────────
+
+        "ocr_list_native_backends" => {
+            let ids = if let Some(services) = host.headless() {
+                services
+                    .ocr_registry()
+                    .await
+                    .list_ids()
+                    .await
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            } else {
+                let app = host.tauri_app(name)?;
+                let registry: tauri::State<'_, crate::ocr::NativeOcrRegistry> = app.state();
+                registry
+                    .list_ids()
+                    .await
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            };
+            to_json(ids)
+        }
+
+        "ocr_list_available_backends" => {
+            let ids = if let Some(services) = host.headless() {
+                services
+                    .ocr_registry()
+                    .await
+                    .available_ids()
+                    .await
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            } else {
+                let app = host.tauri_app(name)?;
+                let registry: tauri::State<'_, crate::ocr::NativeOcrRegistry> = app.state();
+                registry
+                    .available_ids()
+                    .await
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            };
+            to_json(ids)
+        }
+
+        "ocr_extract_native" => {
+            let payload: crate::ocr::NativeOcrInvokePayload = required(&args, "payload")?;
+            let result = if let Some(services) = host.headless() {
+                services.ocr_registry().await.dispatch(&payload).await
+            } else {
+                let app = host.tauri_app(name)?;
+                let registry: tauri::State<'_, crate::ocr::NativeOcrRegistry> = app.state();
+                registry.dispatch(&payload).await
+            }
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+            to_json(result)
+        }
+
+        "ocr_model_status" => {
+            let backend: String = required(&args, "backend")?;
+            let variant: Option<String> = optional(&args, "variant")?;
+            crate::ocr::native::ocr_model_status(backend, variant)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+
+        "ocr_download_model" => {
+            let backend: String = required(&args, "backend")?;
+            let variant: Option<String> = optional(&args, "variant")?;
+            let request_id: Option<String> = match optional(&args, "requestId")? {
+                Some(value) => Some(value),
+                None => optional(&args, "request_id")?,
+            };
+            let result = if let Some(services) = host.headless() {
+                let event_bus = std::sync::Arc::clone(&services.event_bus);
+                crate::ocr::native::ocr_download_model_with_emitter(
+                    backend,
+                    variant,
+                    request_id,
+                    std::sync::Arc::new(move |event| {
+                        if let Ok(payload) = serde_json::to_value(event) {
+                            event_bus.publish("ocr://download-progress".to_string(), payload);
+                        }
+                    }),
+                )
+                .await
+            } else {
+                let app = host.tauri_app(name)?;
+                crate::ocr::native::ocr_download_model(app.clone(), backend, variant, request_id)
+                    .await
+            }
+            .map_err(RpcError::internal)?;
+            to_json(result)
+        }
+
+        "ocr_cancel_model_download" => {
+            let request_id: String = required_aliased(&args, "request_id", "requestId")?;
+            to_json(crate::ocr::native::ocr_cancel_model_download(request_id))
         }
 
         // ── Skills ────────────────────────────────────────────────────────────
@@ -3165,12 +3363,7 @@ pub(super) async fn dispatch(
                         crate::headless::resolve_mcp_sidecar_path()
                             .to_string_lossy()
                             .into_owned(),
-                        Some(
-                            services
-                                .mcp_automation()
-                                .await
-                                .map_err(RpcError::internal)?,
-                        ),
+                        None,
                         Some(headless_orchestration_event_sink()),
                     )
                     .await
@@ -3239,6 +3432,57 @@ pub(super) async fn dispatch(
             Ok(Value::Null)
         }
 
+        "remote_notification_publish" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let title: String = required(&args, "title")?;
+            let body: String = required(&args, "body")?;
+            let level: Option<String> = optional(&args, "level")?;
+            let level = level.unwrap_or_else(|| "info".into());
+            if title.trim().is_empty() || title.len() > 160 || title.chars().any(char::is_control) {
+                return Err(RpcError::malformed(
+                    "remote_notification_publish.title must be 1..160 printable bytes".into(),
+                ));
+            }
+            if body.trim().is_empty() || body.len() > 2_000 {
+                return Err(RpcError::malformed(
+                    "remote_notification_publish.body must be 1..2000 bytes".into(),
+                ));
+            }
+            if !matches!(level.as_str(), "info" | "success" | "warning" | "error") {
+                return Err(RpcError::malformed(
+                    "remote_notification_publish.level is invalid".into(),
+                ));
+            }
+            let href: Option<String> = optional(&args, "href")?;
+            if href.as_deref().is_some_and(|value| {
+                !value.starts_with('/') || value.starts_with("//") || value.len() > 512
+            }) {
+                return Err(RpcError::malformed(
+                    "remote_notification_publish.href must be an app-relative path".into(),
+                ));
+            }
+            let id: Option<String> = optional(&args, "id")?;
+            let id = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+            if id.trim().is_empty() || id.len() > 128 || id.chars().any(char::is_control) {
+                return Err(RpcError::malformed(
+                    "remote_notification_publish.id must be 1..128 printable bytes".into(),
+                ));
+            }
+            state.event_bus.publish(
+                "notification://remote".to_string(),
+                json!({
+                    "id": id,
+                    "title": title,
+                    "body": body,
+                    "level": level,
+                    "href": href,
+                    "createdAt": chrono::Utc::now().timestamp_millis(),
+                }),
+            );
+            Ok(json!({ "id": id }))
+        }
+
         "sync_list_tables" => {
             // Wave 3.5 introspection — surface every registered Dexie
             // table the phone is allowed to mirror. Used by the mobile
@@ -3261,7 +3505,7 @@ pub(super) async fn dispatch(
             let table: String = required(&args, "table")?;
             let since: i64 = optional::<i64>(&args, "since")?.unwrap_or(0);
             let account_id = account_id.ok_or_else(|| {
-                RpcError::forbidden("sync_pull requires an account-bound device JWT")
+        RpcError::forbidden("sync_pull requires an account-bound device principal")
             })?;
             // Wave 3.5 — table allowlist now lives on the declarative
             // `SyncTableRegistry` (`sync_registry.rs`) so plugins can
@@ -3561,7 +3805,7 @@ pub(super) async fn dispatch(
             // caller device. Injected server-side (overwriting any
             // client-sent value) so a device can never spoof another's id.
             let args = inject_caller_device_id(name, args, device_id);
-            let args = inject_caller_device_grants(name, args, device_id);
+            let args = inject_caller_device_grants(name, args, device_id, account_id);
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
             let transport = super::ws_bridge::resolve_bridge_transport(state)
@@ -3749,10 +3993,48 @@ pub(super) async fn dispatch(
             Ok(serde_json::json!({ "adapters": adapters }))
         }
 
+        "connectors_runtime_lease_acquire" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let owner_id: String = required_aliased(&args, "owner_id", "ownerId")?;
+            let ttl_ms: u64 = required_aliased(&args, "ttl_ms", "ttlMs")?;
+            let acquired = services
+                .connectors
+                .acquire_runtime_lease(&owner_id, ttl_ms)
+                .map_err(RpcError::validation_failed)?;
+            Ok(Value::Bool(acquired))
+        }
+
+        "connectors_runtime_lease_renew" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let owner_id: String = required_aliased(&args, "owner_id", "ownerId")?;
+            let ttl_ms: u64 = required_aliased(&args, "ttl_ms", "ttlMs")?;
+            let renewed = services
+                .connectors
+                .renew_runtime_lease(&owner_id, ttl_ms)
+                .map_err(RpcError::validation_failed)?;
+            Ok(Value::Bool(renewed))
+        }
+
+        "connectors_runtime_lease_release" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let owner_id: String = required_aliased(&args, "owner_id", "ownerId")?;
+            let released = services
+                .connectors
+                .release_runtime_lease(&owner_id)
+                .map_err(RpcError::validation_failed)?;
+            Ok(Value::Bool(released))
+        }
+
         // ── Marketplace Integration ingress + encrypted spool ───────────────
         // Both hosts execute the same scheduling-crate command bodies. The
         // service-token gate above keeps webhook material and route secrets
-        // inaccessible to paired-device JWTs.
+        // inaccessible to paired-device principals.
         "integration_ingress_register" => {
             let input: crate::workflow::triggers::webhook_router::IntegrationIngressEntry =
                 required(&args, "input")?;
@@ -3836,6 +4118,110 @@ pub(super) async fn dispatch(
             }
             .map_err(RpcError::internal)?;
             to_json(result)
+        }
+
+        "integration_ingress_deadletters" => {
+            let limit: Option<usize> = optional(&args, "limit")?;
+            let result = match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    let workflow = app.state::<crate::workflow::WorkflowState>();
+                    crate::workflow::commands::integration_ingress_deadletters_for_state(
+                        workflow.inner(),
+                        limit,
+                    )
+                }
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    crate::workflow::commands::integration_ingress_deadletters_for_state(
+                        services.workflow.as_ref(),
+                        limit,
+                    )
+                }
+            }
+            .map_err(RpcError::internal)?;
+            to_json(result)
+        }
+
+        "integration_ingress_deadletter" => {
+            let route_id: String = required_aliased(&args, "route_id", "routeId")?;
+            let delivery_id: String =
+                required_aliased(&args, "delivery_id", "deliveryId")?;
+            let result = match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    let workflow = app.state::<crate::workflow::WorkflowState>();
+                    crate::workflow::commands::integration_ingress_deadletter_for_state(
+                        workflow.inner(),
+                        route_id,
+                        delivery_id,
+                    )
+                }
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    crate::workflow::commands::integration_ingress_deadletter_for_state(
+                        services.workflow.as_ref(),
+                        route_id,
+                        delivery_id,
+                    )
+                }
+            }
+            .map_err(RpcError::internal)?;
+            to_json(result)
+        }
+
+        "integration_ingress_requeue" => {
+            let route_id: String = required_aliased(&args, "route_id", "routeId")?;
+            let delivery_id: String =
+                required_aliased(&args, "delivery_id", "deliveryId")?;
+            let result = match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    let workflow = app.state::<crate::workflow::WorkflowState>();
+                    crate::workflow::commands::integration_ingress_requeue_for_state(
+                        workflow.inner(),
+                        route_id,
+                        delivery_id,
+                    )
+                }
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    crate::workflow::commands::integration_ingress_requeue_for_state(
+                        services.workflow.as_ref(),
+                        route_id,
+                        delivery_id,
+                    )
+                }
+            }
+            .map_err(RpcError::internal)?;
+            to_json(result)
+        }
+
+        "github_workspace_clone" => {
+            let command_args: crate::github::workspace::CloneArgs = required(&args, "args")?;
+            crate::github::workspace::github_workspace_clone(command_args)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+
+        "github_workspace_commit_and_push" => {
+            let command_args: crate::github::workspace::CommitAndPushArgs =
+                required(&args, "args")?;
+            crate::github::workspace::github_workspace_commit_and_push(command_args)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+
+        "github_workspace_remove" => {
+            let path: String = required(&args, "path")?;
+            crate::github::workspace::github_workspace_remove(path)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+
+        "github_workspace_stat" => {
+            let path: String = required(&args, "path")?;
+            crate::github::workspace::github_workspace_stat(path)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
         }
 
         "integration_ingress_ack" | "integration_ingress_nack" => {
@@ -4241,12 +4627,15 @@ pub(super) async fn dispatch(
 
         // Remote Session Control — resolve a host computer-use HITL consent
         // prompt from a remote device. The prompt streams to the phone over
-        // `/ws/v1/events` as the `automation:consent-request` frame; the phone
+        // `/ws/events` as the `automation:consent-request` frame; the phone
         // renders it and calls this to allow/deny. First-responder wins —
         // `ConsentBroker::resolve` removes the pending oneshot, so a duplicate
         // (desktop overlay + phone) is harmless. Distinct HITL channel from
         // `claude_approve` (which resolves Claude SDK tool-use prompts).
         "automation_consent_respond" => {
+            if host.headless().is_some() {
+                return Err(RpcError::headless_unsupported(name));
+            }
             let respond_args: crate::automation::commands::ConsentRespondArgs =
                 serde_json::from_value(args).map_err(|e| {
                     RpcError::malformed(format!("automation_consent_respond args: {e}"))
@@ -4254,10 +4643,24 @@ pub(super) async fn dispatch(
             let app = host.tauri_app(name)?;
             let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
                 app.state();
-            crate::automation::commands::automation_consent_respond(automation_state, respond_args)
-                .await
-                .map(|_| Value::Null)
-                .map_err(RpcError::internal)
+            crate::automation::commands::automation_consent_respond(
+                automation_state,
+                respond_args,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+
+        "automation_consent_pending" => {
+            if host.headless().is_some() {
+                return Err(RpcError::headless_unsupported(name));
+            }
+            let app = host.tauri_app(name)?;
+            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
+                app.state();
+            let pending = automation_state.consent.pending_requests();
+            to_json(pending)
         }
 
         // Remote Session Control — read-only capability probe. A paired device
@@ -4925,7 +5328,7 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::internal)
         }
         "fs_search_workspace" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let query: String = optional(&args, "query")?.unwrap_or_default();
             let limit: Option<usize> = optional(&args, "limit")?;
             tokio::task::spawn_blocking(move || {
@@ -4937,7 +5340,7 @@ pub(super) async fn dispatch(
             .and_then(to_json)
         }
         "fs_search_content_workspace" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let query: String = optional(&args, "query")?.unwrap_or_default();
             let is_regex: Option<bool> = optional(&args, "isRegex")?;
             let case_sensitive: Option<bool> = optional(&args, "caseSensitive")?;
@@ -4957,7 +5360,7 @@ pub(super) async fn dispatch(
             .and_then(to_json)
         }
         "fs_read_workspace_file" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
             let max_bytes: Option<usize> = optional(&args, "maxBytes")?;
             tokio::task::spawn_blocking(move || {
@@ -4969,7 +5372,7 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
         }
         "fs_write_workspace_file" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
             let content: String = required(&args, "content")?;
             tokio::task::spawn_blocking(move || {
@@ -5324,7 +5727,7 @@ pub(super) async fn dispatch(
         // mkdir / delete / rename / copy (CONTROL-gated writes). All use the
         // `root` + `relPath` sandbox shape of the read/write variants above.
         "fs_list_workspace_dir" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: Option<String> = optional(&args, "relPath")?;
             let include_ignored: Option<bool> = optional(&args, "includeIgnored")?;
             tokio::task::spawn_blocking(move || {
@@ -5336,7 +5739,7 @@ pub(super) async fn dispatch(
             .and_then(to_json)
         }
         "fs_stat_workspace_file" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
             tokio::task::spawn_blocking(move || {
                 crate::files::fs_stat_workspace_file(root, rel_path)
@@ -5347,7 +5750,7 @@ pub(super) async fn dispatch(
             .and_then(to_json)
         }
         "fs_create_workspace_dir" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
             tokio::task::spawn_blocking(move || {
                 crate::files::fs_create_workspace_dir(root, rel_path)
@@ -5358,7 +5761,7 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
         }
         "fs_delete_workspace_entry" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
             let recursive: Option<bool> = optional(&args, "recursive")?;
             tokio::task::spawn_blocking(move || {
@@ -5370,7 +5773,7 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
         }
         "fs_rename_workspace_entry" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let from_rel_path: String = required(&args, "fromRelPath")?;
             let to_rel_path: String = required(&args, "toRelPath")?;
             tokio::task::spawn_blocking(move || {
@@ -5382,7 +5785,7 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
         }
         "fs_copy_workspace_entry" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let from_rel_path: String = required(&args, "fromRelPath")?;
             let to_rel_path: String = required(&args, "toRelPath")?;
             let recursive: Option<bool> = optional(&args, "recursive")?;
@@ -5791,6 +6194,25 @@ pub(super) async fn dispatch(
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
 
+        "plugin_set_status" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_runtime = std::sync::Arc::clone(&services.plugin_runtime);
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let status: String = required(&args, "status")?;
+            tokio::task::spawn_blocking(move || {
+                crate::plugin_api::lifecycle::plugin_set_status_for_state(
+                    plugin_runtime.as_ref(),
+                    plugin_id,
+                    status,
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(|error| RpcError::internal(error.to_string()))
+        }
         "plugin_permission_grant" => {
             let services = host
                 .headless()
@@ -6183,7 +6605,7 @@ pub(super) async fn dispatch(
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let profile =
                 optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
                     .unwrap_or_default();
@@ -6201,7 +6623,7 @@ pub(super) async fn dispatch(
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             services
                 .code_server
                 .status(&root, device_id)
@@ -6216,7 +6638,7 @@ pub(super) async fn dispatch(
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             to_json(services.code_server.stop(&root).await)
         }
         "codeserver_stop_all" => {
@@ -6272,7 +6694,7 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::service_unavailable)
         }
         "codeserver_broker_validate_paths" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let paths: Vec<String> = required(&args, "paths")?;
             tokio::task::spawn_blocking(move || {
                 paths
@@ -6294,7 +6716,7 @@ pub(super) async fn dispatch(
             .map_err(RpcError::service_unavailable)
         }
         "codeserver_broker_respond" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let generation: u64 = required(&args, "generation")?;
             let id: Value = required(&args, "id")?;
             let result: Option<Value> = optional(&args, "result")?;
@@ -6306,7 +6728,7 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::service_unavailable)
         }
         "codeserver_broker_notify" => {
-            let root: String = required(&args, "root")?;
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let generation: u64 = required(&args, "generation")?;
             let params: Value = required(&args, "params")?;
             crate::codeserver::agent_channel::global()
@@ -6743,8 +7165,7 @@ pub(super) async fn dispatch(
 mod tests {
     use super::*;
     use crate::companion_api::{
-        deny_list::DenyList, idempotency::IdempotencyCache, jwt::issue_device_jwt,
-        redemption_lru::RedemptionLru, CompanionState,
+        deny_list::DenyList, idempotency::IdempotencyCache, jwt::issue_device_jwt, CompanionState,
     };
     use axum::{
         body::Body,
@@ -6755,6 +7176,29 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
     use tower::ServiceExt as _;
+
+    #[test]
+    fn known_commands_are_unique() {
+        let unique: std::collections::HashSet<_> = KNOWN_COMMANDS.iter().copied().collect();
+        assert_eq!(unique.len(), KNOWN_COMMANDS.len());
+    }
+
+    #[test]
+    fn bridge_transport_failures_keep_the_public_retryable_error_contract() {
+        for detail in [
+            "brain bridge disconnected",
+            "brain bridge overloaded: in-flight limit reached",
+        ] {
+            let (status, Json(error)) = RpcError::internal(detail.to_string());
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(error.code, "service_unavailable");
+            assert_eq!(error.message, detail);
+        }
+
+        let (status, Json(error)) = RpcError::internal("brain rejected the request".to_string());
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.code, "internal_error");
+    }
 
     /// Moved here from external_agent::exec_backend when the crate was
     /// extracted (ADR-0067): the round trip needs the companion EventBus,
@@ -6816,8 +7260,6 @@ mod tests {
         use crate::companion_api::event_bus::EventBus;
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -6838,7 +7280,7 @@ mod tests {
         use axum::{middleware::from_fn_with_state, routing::post};
 
         Router::new()
-            .route("/api/v1/_rpc/{name}", post(rpc_handler))
+            .route("/internal/_rpc/{name}", post(rpc_handler))
             .layer(from_fn_with_state(
                 state.clone(),
                 middleware::require_device_jwt,
@@ -6866,7 +7308,7 @@ mod tests {
     ) -> axum::response::Response {
         let mut builder = Request::builder()
             .method("POST")
-            .uri(format!("/api/v1/_rpc/{name}"))
+            .uri(format!("/internal/_rpc/{name}"))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json");
 
@@ -6895,63 +7337,21 @@ mod tests {
 
     // ── Remote Session Control gate ───────────────────────────────────────────
 
-    #[tokio::test]
-    async fn control_command_forbidden_when_device_not_allowed() {
-        // Unique device id so the process-global allow list (shared across
-        // parallel tests) can't be left in an allowed state by another test.
-        let device = "dev-gate-denied-001";
-        super::super::control_allow_list::global().disallow(device);
-
-        let state = test_state();
-        let router = build_router(state);
-        let jwt = device_jwt(device);
-        let resp = rpc_post(
-            router,
-            "session_attach",
-            json!({ "sessionId": "s1" }),
-            &jwt,
-            None,
-        )
-        .await;
-        assert_eq!(resp.status().as_u16(), 403);
-        let body = body_json(resp).await;
-        assert_eq!(body["code"], "remote_control_forbidden");
-    }
-
-    #[tokio::test]
-    async fn control_command_passes_gate_when_device_allowed() {
-        let device = "dev-gate-allowed-001";
-        super::super::control_allow_list::global().allow(device.to_string());
-
-        let state = test_state(); // app_handle None → 503 once past the gate
-        let router = build_router(state);
-        let jwt = device_jwt(device);
-        let resp = rpc_post(
-            router,
-            "session_attach",
-            json!({ "sessionId": "s1" }),
-            &jwt,
-            None,
-        )
-        .await;
-        // Past the capability gate: not 403. In test mode the missing
-        // app_handle yields 503 — the point is the gate let it through.
-        assert_ne!(resp.status().as_u16(), 403);
-        super::super::control_allow_list::global().disallow(device);
+    #[test]
+    fn an_unregistered_device_has_no_canonical_control_capability() {
+        assert!(!canonical_device_capability(
+            "unregistered-control-device",
+            "session_attach"
+        ));
     }
 
     #[test]
-    fn can_control_response_reflects_allow_list() {
-        // Unique device id — the allow list is process-global and shared
-        // across parallel tests.
-        let device = "dev-cancontrol-helper-001";
-        super::super::control_allow_list::global().disallow(device);
-        assert_eq!(can_control_response(device), json!({ "allowed": false }));
-
-        super::super::control_allow_list::global().allow(device.to_string());
-        assert_eq!(can_control_response(device), json!({ "allowed": true }));
-
-        super::super::control_allow_list::global().disallow(device);
+    fn can_control_response_serializes_the_canonical_capability_decision() {
+        assert_eq!(
+            can_control_response_value(false),
+            json!({ "allowed": false })
+        );
+        assert_eq!(can_control_response_value(true), json!({ "allowed": true }));
     }
 
     #[test]
@@ -7100,23 +7500,15 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn fleet_permission_respond_is_forbidden_without_the_grant() {
-        let device = "dev-fleet-gate-denied-001";
-        super::super::control_allow_list::global().disallow(device);
-        let state = test_state();
-        let router = build_router(state);
-        let jwt = device_jwt(device);
-        let resp = rpc_post(
-            router,
-            "fleet_permission_respond",
-            json!({ "requestId": "r", "behavior": "allow" }),
-            &jwt,
-            None,
-        )
-        .await;
-        assert_eq!(resp.status().as_u16(), 403);
-        assert_eq!(body_json(resp).await["code"], "remote_control_forbidden");
+    #[test]
+    fn fleet_permission_respond_uses_the_manifest_capability() {
+        let descriptor = super::super::command_manifest::descriptor("fleet_permission_respond")
+            .expect("registered command");
+        assert!(!descriptor.capability.is_empty());
+        assert!(!canonical_device_has_capability(
+            "unregistered-fleet-device",
+            &descriptor.capability
+        ));
     }
 
     #[tokio::test]
@@ -7173,7 +7565,7 @@ mod tests {
         let router = build_router(state);
         let req = Request::builder()
             .method("POST")
-            .uri("/api/v1/_rpc/claude_sidecar_status")
+            .uri("/internal/_rpc/claude_sidecar_status")
             .header("Content-Type", "application/json")
             .body(Body::from(b"{}".to_vec()))
             .unwrap();
@@ -7189,6 +7581,7 @@ mod tests {
             account_id: ACCOUNT_ID.to_string(),
             scope: "service".to_string(),
             granted_scopes: Vec::new(),
+            authorization_capabilities: None,
         };
 
         for request_index in 0..25 {
@@ -7236,6 +7629,28 @@ mod tests {
         super::super::dispatch_host::DispatchHost::Headless(
             crate::headless::HeadlessServices::stub_for_tests(),
         )
+    }
+
+    #[tokio::test]
+    async fn headless_dispatch_rejects_desktop_automation_consent_commands() {
+        let state = test_state();
+        let host = headless_host();
+
+        for command in ["automation_consent_pending", "automation_consent_respond"] {
+            let error = dispatch(
+                command,
+                json!({}),
+                &state,
+                &host,
+                "dev1",
+                Some(ACCOUNT_ID),
+                Some("service"),
+            )
+            .await
+            .expect_err("headless hosts must not expose OS automation consent");
+            assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(error.1 .0.code, "headless_unsupported");
+        }
     }
 
     /// Data-plane arms work on a headless host: `session_list` served from
@@ -7340,17 +7755,13 @@ mod tests {
     }
 
     #[test]
-    fn terminal_rpc_requires_host_enablement_and_an_independent_device_grant() {
-        let acl = super::super::control_allow_list::terminal_global();
-        acl.clear();
+    fn terminal_rpc_requires_host_enablement_and_the_canonical_device_capability() {
         let device = "terminal-rpc-device";
 
-        assert!(terminal_rpc_authorization(device, true).is_err());
-        acl.allow(device.to_string());
-        assert!(terminal_rpc_authorization(device, false).is_err());
-        assert!(terminal_rpc_authorization(device, true).is_ok());
-
-        acl.clear();
+        assert!(terminal_rpc_authorization(device, true, false).is_err());
+        assert!(terminal_rpc_authorization(device, false, true).is_err());
+        assert!(terminal_rpc_authorization(device, true, true).is_ok());
+        assert!(terminal_rpc_authorization("", true, true).is_err());
     }
 
     /// The claude arms are host-generic after R7: `claude_sidecar_status` on
@@ -7416,93 +7827,22 @@ mod tests {
 
     // ── External-agent arms: scope + policy + audit (ADR-0059 R11) ──────────
 
-    /// An UNGRANTED device JWT must never reach the RCE-grade arms — the HTTP
-    /// handler rejects with 403 before dispatch. Denial is the default: these
-    /// commands used to be service-token-only, and relaxing them to "grantable"
-    /// must not relax them to "reachable".
-    #[tokio::test]
-    async fn ungranted_device_cannot_reach_the_external_agent_arms() {
-        // The allow lists are process-global and `seed_allow_lists` REPLACES
-        // them, so without this guard a concurrent `device_grants` test can
-        // reseed underneath and this gate passes for the wrong reason.
+    #[test]
+    fn legacy_allow_list_projection_does_not_confer_agent_control() {
         let _guard = super::super::control_allow_list::test_guard();
-        super::super::control_allow_list::agent_control_global().clear();
-        let state = test_state();
-        let router = build_router(state);
-        let jwt = device_jwt("phone-1");
-        for name in AGENT_CONTROL_COMMANDS {
-            let resp = rpc_post(router.clone(), name, json!({}), &jwt, None).await;
-            assert_eq!(resp.status().as_u16(), 403, "{name} must be grant-gated");
-        }
-    }
-
-    /// The grant is what R4 was blocked on: a paired desktop only ever gets a
-    /// *device* JWT, so while these arms were service-token-only there was no
-    /// credential anywhere that could reach them.
-    #[tokio::test]
-    async fn a_granted_device_gets_past_the_agent_control_gate() {
-        let _guard = super::super::control_allow_list::test_guard();
-        let acl = super::super::control_allow_list::agent_control_global();
-        acl.clear();
-        acl.allow("phone-granted".to_string());
-        let state = test_state();
-        let router = build_router(state);
-        let jwt = device_jwt("phone-granted");
-
-        let resp = rpc_post(router, "get_external_agent_status", json!({}), &jwt, None).await;
-        // Past the gate. What it hits next is the headless-services check —
-        // any status but 403 proves authorization no longer rejects it.
-        assert_ne!(resp.status().as_u16(), 403);
-        acl.clear();
-    }
-
-    /// Remote control and agent control are separate grants on purpose: letting
-    /// a phone approve prompts must not also let it start processes.
-    #[tokio::test]
-    async fn the_remote_control_grant_does_not_confer_agent_control() {
-        let _guard = super::super::control_allow_list::test_guard();
-        super::super::control_allow_list::agent_control_global().clear();
-        let control = super::super::control_allow_list::global();
-        control.allow("phone-control-only".to_string());
-        let state = test_state();
-        let router = build_router(state);
-        let jwt = device_jwt("phone-control-only");
-
-        let resp = rpc_post(router, "spawn_external_agent", json!({}), &jwt, None).await;
-        assert_eq!(resp.status().as_u16(), 403);
-        control.disallow("phone-control-only");
-    }
-
-    /// The grant's contract is that every start AND every refusal is audited
-    /// with the device that asked. The `SpawnPolicy` denials inside the spawn
-    /// arm were, but this gate returned 403 before reaching any of them — so an
-    /// ungranted device probing the execution plane was the one denial that left
-    /// no trace at all.
-    #[tokio::test]
-    async fn an_ungranted_device_has_its_refusal_audited() {
-        let _acl_guard = super::super::control_allow_list::test_guard();
-        let _audit_guard = super::super::audit::test_guard();
-        super::super::control_allow_list::agent_control_global().clear();
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let path = tmp.path().join("audit.log");
-        super::super::audit::install_at_for_testing(Some(path.clone()));
-
-        let state = test_state();
-        let router = build_router(state);
-        let jwt = device_jwt("phone-ungranted");
-        let resp = rpc_post(router, "spawn_external_agent", json!({}), &jwt, None).await;
-        assert_eq!(resp.status().as_u16(), 403);
-
-        let log = std::fs::read_to_string(&path).expect("audit log written on refusal");
-        let entry: serde_json::Value =
-            serde_json::from_str(log.lines().next().expect("one line")).expect("json line");
-        assert_eq!(entry["kind"], "external_agent_authorize");
-        assert_eq!(entry["decision"], "deny");
-        // The device that asked is the whole point of the record.
-        assert_eq!(entry["device_id"], "phone-ungranted");
-        assert_eq!(entry["command"], "spawn_external_agent");
-
-        super::super::audit::install_at_for_testing(None);
+        let device = "legacy-agent-projection-only";
+        super::super::control_allow_list::agent_control_global().allow(device.to_string());
+        assert!(!is_agent_control_authorized(
+            "spawn_external_agent",
+            device,
+            Some("device")
+        ));
+        assert!(is_agent_control_authorized(
+            "spawn_external_agent",
+            "brain-local",
+            Some("service")
+        ));
+        super::super::control_allow_list::agent_control_global().disallow(device);
     }
 
     /// The agent arms must not have leaked into the remote-control tier while
@@ -7555,26 +7895,6 @@ mod tests {
             "scheduled_task_list",
             &json!({ "filter": { "types": ["workflow", "backup"] } })
         ));
-    }
-
-    /// The mirrored in-dispatch gate covers the WebRTC path (`scope: None`), so
-    /// the DataChannel cannot be used to skip the grant the HTTP path enforces.
-    #[tokio::test]
-    async fn dispatch_without_a_grant_rejects_the_agent_arms() {
-        super::super::control_allow_list::agent_control_global().clear();
-        let state = test_state();
-        let err = dispatch(
-            "spawn_external_agent",
-            json!({}),
-            &state,
-            &headless_host(),
-            "dev1",
-            Some(ACCOUNT_ID),
-            None, // the DataChannel path
-        )
-        .await
-        .expect_err("ungranted device-scoped channel must be rejected");
-        assert_eq!(err.0, StatusCode::FORBIDDEN);
     }
 
     #[test]
@@ -7832,6 +8152,9 @@ mod tests {
             "connectors_register",
             "connectors_unregister",
             "connectors_list_adapters",
+            "connectors_runtime_lease_acquire",
+            "connectors_runtime_lease_renew",
+            "connectors_runtime_lease_release",
             // ADR-0059 T-A5 — connector command plane.
             "connectors_health",
             "connectors_keyring_set",
@@ -7955,6 +8278,126 @@ mod tests {
         assert_eq!(listed["adapters"].as_array().unwrap().len(), 0);
     }
 
+    #[tokio::test]
+    async fn connector_runtime_lease_arms_enforce_one_headless_owner() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+
+        let acquire = |owner_id: &'static str| {
+            dispatch(
+                "connectors_runtime_lease_acquire",
+                json!({ "ownerId": owner_id, "ttlMs": 15_000 }),
+                &state,
+                &host,
+                "brain-local",
+                Some(ACCOUNT_ID),
+                Some("service"),
+            )
+        };
+
+        assert_eq!(
+            acquire("brain-a").await.expect("first acquire"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            acquire("brain-b").await.expect("contended acquire"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            dispatch(
+                "connectors_runtime_lease_renew",
+                json!({ "ownerId": "brain-a", "ttlMs": 15_000 }),
+                &state,
+                &host,
+                "brain-local",
+                Some(ACCOUNT_ID),
+                Some("service"),
+            )
+            .await
+            .expect("renew"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            dispatch(
+                "connectors_runtime_lease_release",
+                json!({ "ownerId": "brain-a" }),
+                &state,
+                &host,
+                "brain-local",
+                Some(ACCOUNT_ID),
+                Some("service"),
+            )
+            .await
+            .expect("release"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            acquire("brain-b").await.expect("acquire after release"),
+            Value::Bool(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn connector_runtime_lease_rejects_invalid_input_as_validation_failed() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(services);
+
+        let (status, Json(error)) = dispatch(
+            "connectors_runtime_lease_acquire",
+            json!({ "ownerId": "brain-a", "ttlMs": 1 }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("invalid TTL must be rejected");
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "validation_failed");
+    }
+
+    #[tokio::test]
+    async fn github_workspace_housekeeping_arms_reach_the_headless_host() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+        let root = tempfile::TempDir::new().expect("temporary workspace root");
+        let workspace = root.path().join("issue-worktree");
+        std::fs::create_dir(&workspace).expect("workspace");
+        let path = workspace.to_string_lossy().into_owned();
+
+        let stat = dispatch(
+            "github_workspace_stat",
+            json!({ "path": path }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("stat through headless dispatch");
+        assert_eq!(stat["exists"], true);
+
+        let removed = dispatch(
+            "github_workspace_remove",
+            json!({ "path": workspace.to_string_lossy() }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("remove through headless dispatch");
+        assert_eq!(removed, Value::Bool(true));
+        assert!(!workspace.exists());
+    }
+
     // ── Connector command plane arms (ADR-0059 T-A5) ─────────────────────────
 
     /// Keyring set → list → get → delete through the dispatch arms, mixing
@@ -8017,10 +8460,10 @@ mod tests {
         assert_eq!(got, Value::Null);
     }
 
-    /// The headless brain's generic secret facade is service-only and delegates
-    /// to the same installed `cognia-secrets` backend as desktop keyring calls.
+    /// The headless brain's canonical secret-store facade is service-only.
+    /// Deprecated keyring aliases delegate to the same encrypted backend.
     #[tokio::test]
-    async fn generic_keyring_arms_round_trip_for_the_headless_brain() {
+    async fn secret_store_arms_and_keyring_aliases_share_the_headless_backend() {
         let state = test_state();
         let host = headless_host();
 
@@ -8040,7 +8483,7 @@ mod tests {
         }
 
         call!(
-            "keyring_secret_set",
+            "secret_store_set",
             json!({ "input": { "namespace": "backup", "key": "encryption.key.v1", "value": "backup-secret" } }),
         )
         .expect("set");
@@ -8052,16 +8495,130 @@ mod tests {
         assert_eq!(got, json!("backup-secret"));
 
         call!(
-            "keyring_secret_clear",
+            "secret_store_delete",
             json!({ "input": { "namespace": "backup", "key": "encryption.key.v1" } }),
         )
         .expect("clear");
         let got = call!(
-            "keyring_secret_get",
+            "secret_store_get",
             json!({ "input": { "namespace": "backup", "key": "encryption.key.v1" } }),
         )
         .expect("get after clear");
         assert_eq!(got, Value::Null);
+    }
+
+    #[tokio::test]
+    async fn ocr_service_arms_use_the_headless_registry() {
+        let state = test_state();
+        let host = headless_host();
+        let list = dispatch(
+            "ocr_list_native_backends",
+            json!({}),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("list backends");
+        assert!(list.as_array().is_some_and(|items| !items.is_empty()));
+
+        let available = dispatch(
+            "ocr_list_available_backends",
+            json!({}),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("list available backends");
+        assert!(available.is_array());
+
+        let status = dispatch(
+            "ocr_model_status",
+            json!({ "backend": "tesseract" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("model status");
+        assert_eq!(status["installed"], false);
+        assert!(status["reason"].as_str().is_some());
+
+        let error = dispatch(
+            "ocr_extract_native",
+            json!({
+                "payload": {
+                    "backend": "does-not-exist",
+                    "bytes": [],
+                    "mime_type": "image/png",
+                    "languages": [],
+                    "model_variant": null
+                }
+            }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("unknown backend must fail");
+        assert!(error.1 .0.message.contains("Unsupported backend tag"));
+    }
+
+    #[tokio::test]
+    async fn remote_notification_protocol_is_bounded_and_event_bus_backed() {
+        let state = test_state();
+        let host = headless_host();
+        let result = dispatch(
+            "remote_notification_publish",
+            json!({
+                "id": "notification-1",
+                "title": "Workflow finished",
+                "body": "The remote run is ready for review.",
+                "level": "success",
+                "href": "/workflows/runs/run-1"
+            }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("publish notification");
+        assert_eq!(result["id"], "notification-1");
+        match state.event_bus.subscribe(Some(0), 0) {
+            crate::companion_api::event_bus::SubscribeResult::Ok { replay, .. } => {
+                let event = replay
+                    .iter()
+                    .find(|event| event.event_type == "notification://remote")
+                    .expect("notification event");
+                assert_eq!(event.payload["level"], "success");
+                assert_eq!(event.payload["href"], "/workflows/runs/run-1");
+            }
+            _ => panic!("subscribe failed"),
+        }
+
+        let error = dispatch(
+            "remote_notification_publish",
+            json!({ "title": "Open", "body": "Unsafe", "href": "https://evil.example" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("external href must fail");
+        assert!(error.1 .0.message.contains("app-relative"));
     }
 
     #[tokio::test]
@@ -8254,6 +8811,25 @@ mod tests {
         assert!(services
             .plugin_runtime
             .network_host_allowed("demo", "api.example.com"));
+
+        dispatch(
+            "plugin_set_status",
+            json!({ "pluginId": "demo", "status": "enabled" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("set plugin status");
+        assert!(crate::plugin_api::lifecycle::plugin_get_all_for_state(
+            services.plugin_runtime.as_ref()
+        )
+        .await
+        .expect("runtime snapshot")
+        .iter()
+        .any(|snapshot| snapshot.plugin_id == "demo" && snapshot.status == "enabled"));
 
         dispatch(
             "plugin_permission_revoke",
@@ -8831,8 +9407,6 @@ rl.on("line", (line) => {
 
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: cache,
@@ -8879,8 +9453,6 @@ rl.on("line", (line) => {
 
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: cache,
@@ -8922,8 +9494,6 @@ rl.on("line", (line) => {
         ));
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::clone(&cache),
@@ -8984,8 +9554,6 @@ rl.on("line", (line) => {
 
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: cache,
@@ -9352,8 +9920,6 @@ rl.on("line", (line) => {
         ));
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::clone(&cache),
@@ -9443,33 +10009,15 @@ rl.on("line", (line) => {
     }
 
     #[test]
-    fn host_feature_manifest_grants_are_least_privilege_by_default() {
-        let _guard = super::super::control_allow_list::test_guard();
-        let agent_control = super::super::control_allow_list::agent_control_global();
-        agent_control.disallow("dev-observer");
-
+    fn host_feature_manifest_rejects_client_reported_grants_without_an_authority_snapshot() {
         let out = inject_caller_device_grants(
             "host_feature_manifest",
             json!({ "callerDeviceGrants": ["agent.run"] }),
             "dev-observer",
+            None,
         );
 
-        assert_eq!(out["callerDeviceGrants"], json!(["host.observe"]));
-    }
-
-    #[test]
-    fn host_feature_manifest_includes_agent_run_only_for_granted_device() {
-        let _guard = super::super::control_allow_list::test_guard();
-        let agent_control = super::super::control_allow_list::agent_control_global();
-        agent_control.allow("dev-agent".to_string());
-
-        let out = inject_caller_device_grants("host_feature_manifest", json!({}), "dev-agent");
-
-        assert_eq!(
-            out["callerDeviceGrants"],
-            json!(["host.observe", "agent.run"])
-        );
-        agent_control.disallow("dev-agent");
+        assert_eq!(out["callerDeviceGrants"], json!([]));
     }
 
     #[test]
@@ -9478,8 +10026,29 @@ rl.on("line", (line) => {
             "character_upsert",
             json!({ "callerDeviceGrants": ["spoofed"] }),
             "dev-real",
+            None,
         );
         assert_eq!(out["callerDeviceGrants"], json!(["spoofed"]));
+    }
+
+    #[test]
+    fn headless_workspace_roots_are_bound_to_the_server_policy() {
+        let host = headless_host();
+        let workspace = std::env::temp_dir()
+            .join(format!("cognia-test-workspaces-{}", std::process::id()))
+            .join("file-protocol-project");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let authorized = authorize_workspace_root(&host, workspace.to_string_lossy().into_owned())
+            .expect("workspace root");
+        assert_eq!(
+            std::path::Path::new(&authorized).canonicalize().unwrap(),
+            workspace.canonicalize().unwrap()
+        );
+        let outside = std::env::temp_dir().join("cognia-file-protocol-outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let error = authorize_workspace_root(&host, outside.to_string_lossy().into_owned())
+            .expect_err("outside root must fail");
+        assert_eq!(error.0, StatusCode::FORBIDDEN);
     }
 
     #[test]
@@ -9515,14 +10084,27 @@ rl.on("line", (line) => {
 
     #[test]
     fn hashed_command_sets_mirror_their_arrays() {
-        // The hot-path O(1) sets are derived from the `&[&str]` arrays. Equal
-        // lengths prove the derivation is wired *and* that no array carries a
-        // duplicate command name (a dup would silently shrink the set).
-        assert_eq!(KNOWN_COMMANDS_SET.len(), KNOWN_COMMANDS.len());
-        assert_eq!(READ_ONLY_COMMANDS_SET.len(), READ_ONLY_COMMANDS.len());
+        // Command existence comes from the generated protocol manifest. The
+        // legacy classification arrays may be strict subsets while migration
+        // continues, but every name they retain must resolve canonically.
+        assert_eq!(
+            KNOWN_COMMANDS.iter().copied().collect::<HashSet<_>>().len(),
+            KNOWN_COMMANDS.len()
+        );
+        assert_eq!(
+            READ_ONLY_COMMANDS
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>()
+                .len(),
+            READ_ONLY_COMMANDS.len()
+        );
         assert_eq!(CONTROL_COMMANDS_SET.len(), CONTROL_COMMANDS.len());
         for c in KNOWN_COMMANDS {
             assert!(KNOWN_COMMANDS_SET.contains(c));
+        }
+        for c in READ_ONLY_COMMANDS {
+            assert!(READ_ONLY_COMMANDS_SET.contains(c));
         }
     }
 
@@ -9949,8 +10531,6 @@ rl.on("line", (line) => {
         ));
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::clone(&cache),
@@ -10004,8 +10584,6 @@ rl.on("line", (line) => {
         ));
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::clone(&cache),

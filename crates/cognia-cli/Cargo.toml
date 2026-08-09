@@ -26,7 +26,7 @@ wasmparser = "0.221"
 # Used by status/install/uninstall/list/reload/dev to talk to a running
 # cognia desktop's CLI bridge. Plain HTTP because the bridge binds to
 # 127.0.0.1 only — see src-tauri/src/cli_bridge/.
-ureq = { version = "2", default-features = false, features = ["json"] }
+ureq = { version = "2", default-features = false, features = ["json", "native-tls"] }
 # `cognia acp` stdio↔WS bridge to the companion API's ACP endpoint. Sync
 # (blocking) client keeps tokio out of the binary, matching the ureq choice.
 tungstenite = { version = "0.26", features = ["native-tls"] }
@@ -61,8 +61,11 @@ ctrlc = "3"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cognia-observability = { path = "../cognia-observability" }
 uuid = { version = "1", features = ["v4"] }
+url = "2"
+jsonschema = { version = "0.29.1", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
+openssl = "0.10"
 # Tiny in-process mock HTTP server for cmd_install / cmd_uninstall tests.
 tiny_http = "0.12"

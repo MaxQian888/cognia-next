@@ -31,7 +31,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::bridge_transport::BridgeTransport;
+use super::bridge_transport::{BridgeRequestGuard, BridgeTransport};
 
 const REQUEST_EVENT: &str = "companion://desktop-write-request";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -77,6 +77,7 @@ impl DesktopWritesBridge {
         payload: Value,
         timeout: Duration,
     ) -> Result<Value, String> {
+        let request_guard = transport.reserve_request()?;
         let (request_id, rx) = self.register();
         let event_payload = DesktopWriteRequest {
             request_id: request_id.clone(),
@@ -94,7 +95,8 @@ impl DesktopWritesBridge {
             self.pending.lock().remove(&request_id);
             return Err(err);
         }
-        self.await_response(request_id, rx, timeout).await
+        self.await_response(request_id, rx, timeout, request_guard)
+            .await
     }
 
     fn register(&self) -> (String, oneshot::Receiver<Result<Value, String>>) {
@@ -109,20 +111,30 @@ impl DesktopWritesBridge {
         request_id: String,
         rx: oneshot::Receiver<Result<Value, String>>,
         timeout: Duration,
+        mut request_guard: BridgeRequestGuard,
     ) -> Result<Value, String> {
-        match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(Ok(value))) => Ok(value),
-            Ok(Ok(Err(err))) => Err(err),
-            Ok(Err(_recv_err)) => {
+        let outcome = tokio::select! {
+            biased;
+            _ = request_guard.disconnected() => None,
+            outcome = tokio::time::timeout(timeout, rx) => Some(outcome),
+        };
+        match outcome {
+            Some(Ok(Ok(Ok(value)))) => Ok(value),
+            Some(Ok(Ok(Err(err)))) => Err(err),
+            Some(Ok(Err(_recv_err))) => {
                 self.pending.lock().remove(&request_id);
                 Err("desktop-write-response sender dropped before responding".to_string())
             }
-            Err(_) => {
+            Some(Err(_)) => {
                 self.pending.lock().remove(&request_id);
                 Err(format!(
                     "desktop-write request timed out after {} ms",
                     timeout.as_millis()
                 ))
+            }
+            None => {
+                self.pending.lock().remove(&request_id);
+                Err("brain bridge disconnected".to_string())
             }
         }
     }

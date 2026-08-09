@@ -241,6 +241,85 @@ pub fn integration_ingress_nack_for_state(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+pub async fn integration_ingress_deadletters(
+    state: State<'_, WorkflowState>,
+    limit: Option<usize>,
+) -> Result<Vec<super::integration_spool::SpoolDeadLetter>, String> {
+    let spool = state.integration_spool.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        spool
+            .deadletters(limit.unwrap_or(100).min(500))
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+pub fn integration_ingress_deadletters_for_state(
+    state: &WorkflowState,
+    limit: Option<usize>,
+) -> Result<Vec<super::integration_spool::SpoolDeadLetter>, String> {
+    state
+        .integration_spool
+        .deadletters(limit.unwrap_or(100).min(500))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn integration_ingress_deadletter(
+    state: State<'_, WorkflowState>,
+    route_id: String,
+    delivery_id: String,
+) -> Result<Option<super::integration_spool::SpoolDelivery>, String> {
+    let spool = state.integration_spool.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        spool
+            .deadletter(&route_id, &delivery_id)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+pub fn integration_ingress_deadletter_for_state(
+    state: &WorkflowState,
+    route_id: String,
+    delivery_id: String,
+) -> Result<Option<super::integration_spool::SpoolDelivery>, String> {
+    state
+        .integration_spool
+        .deadletter(&route_id, &delivery_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn integration_ingress_requeue(
+    state: State<'_, WorkflowState>,
+    route_id: String,
+    delivery_id: String,
+) -> Result<bool, String> {
+    let spool = state.integration_spool.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        spool
+            .requeue(&route_id, &delivery_id)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+pub fn integration_ingress_requeue_for_state(
+    state: &WorkflowState,
+    route_id: String,
+    delivery_id: String,
+) -> Result<bool, String> {
+    state
+        .integration_spool
+        .requeue(&route_id, &delivery_id)
+        .map_err(|error| error.to_string())
+}
+
 /// `workflow_persist_run_state` — upsert the SQLite mirror. Called from the
 /// orchestrator after every step transition.
 #[tauri::command]

@@ -13,7 +13,7 @@
 //!
 //! - [`envelope_v2`] — ECDSA/ECDH/AES-GCM signaling protocol.
 //! - [`peer`] — `webrtc-rs` `RTCPeerConnection` wrapper.
-//! - [`dispatch`] — DataChannel ↔ `rpc::dispatch` + `EventBus` bridge.
+//! - [`dispatch`] — DataChannel ↔ `remote_execution` + `EventBus` bridge.
 //! - [`client`] — long-lived WSS client (one task per paired device).
 
 pub mod client;
@@ -129,10 +129,15 @@ struct Binding {
 
 impl SignalingHub {
     pub fn new() -> Arc<Self> {
+        let signaling_url = std::env::var("COGNIA_SIGNALING_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| DEFAULT_SIGNALING_URL.to_string());
         Arc::new(Self {
             inner: Mutex::new(HubInner {
                 enabled: true,
-                signaling_url: DEFAULT_SIGNALING_URL.to_string(),
+                signaling_url,
                 ice_servers: default_ice_servers(),
                 clients: HashMap::new(),
                 bound: None,

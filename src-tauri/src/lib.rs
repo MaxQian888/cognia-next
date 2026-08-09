@@ -94,15 +94,14 @@ mod project_environment;
 /// renderer's Dexie v121 tables).
 pub mod provider_profiles;
 mod proxy_config;
+pub use cognia_net::proxy_config::{
+    apply_current as apply_current_proxy_config, clear_inherited_proxy_environment,
+};
 mod recorder_window;
 /// ADR-0102 §4 — diagnostics-first safe mode. Owns `RecoveryStateV1`, its
 /// atomic persistence and the typed IPC the renderer's boot gate reads.
 pub mod recovery;
-// ADR-0067 follow-up — extracted to `crates/cognia-remote-control`;
-// re-aliased so `crate::remote_control::…` (gateway, generate_handler!)
-// resolves unchanged.
 pub use cognia_automation::sandbox;
-pub use cognia_remote_control as remote_control;
 // ADR-0067 Phase 6 — scheduler/workflow/timing extracted to the
 // cognia-scheduling cluster; re-aliased so all three module paths resolve.
 pub use cognia_scheduling::scheduler;
@@ -262,6 +261,9 @@ impl cognia_vector::CredentialStore for KeyringVectorCredentialStore {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(desktop)]
+    proxy_config::install_uninitialized_proxy_environment();
+
     // ADR-0067 Phase 4 — install the vector credential store before any command
     // (or the managed VectorRegistry) can touch provider credentials.
     vector::install_credential_store(Box::new(KeyringVectorCredentialStore));
@@ -463,7 +465,6 @@ pub fn run() {
         .manage(connectors::commands::ConnectorsServer(std::sync::Arc::new(
             tokio::sync::Mutex::new(None),
         )))
-        .manage(remote_control::RemoteControlState::new())
         .manage(gateway::GatewayState::new())
         .manage(mcp_server::McpServerState::new())
         .manage(companion_api::CompanionServerState::with_data_dir(
@@ -680,7 +681,6 @@ pub fn run() {
             subscription::volcengine::subscription_volcengine_usage,
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,
-            subscription::commands::claude_proxy_env_for_session,
             // ADR-0028 — sandbox dispatch + health probe. Phase 4.5
             // plugin consumes sandbox_exec via plugin_tool_exec → renderer
             // → Tauri.
@@ -912,6 +912,9 @@ pub fn run() {
             keyring_secrets::keyring_secret_get,
             keyring_secrets::keyring_secret_set,
             keyring_secrets::keyring_secret_clear,
+            keyring_secrets::secret_store_get,
+            keyring_secrets::secret_store_set,
+            keyring_secrets::secret_store_delete,
             turn_provision::turn_provision,
             telemetry::telemetry_secret_set,
             telemetry::telemetry_secret_has,
@@ -929,6 +932,7 @@ pub fn run() {
             cli_bridge::download::download_cognia_cli,
             tts::edge::tts_edge_synthesize,
             tts::proxy::tts_proxy_fetch,
+            tts::proxy::tts_proxy_cancel,
             tts::realtime::tts_realtime_synthesize,
             tts::realtime::tts_realtime_cancel,
             tts::live::voice_live_client_secret,
@@ -1049,7 +1053,7 @@ pub fn run() {
             companion_api::commands::companion_server_start,
             companion_api::commands::companion_server_stop,
             companion_api::commands::companion_server_status,
-            companion_api::commands::companion_issue_pair_jwt,
+            companion_api::commands::companion_create_owner_invitation,
             companion_api::commands::companion_seed_deny_list,
             companion_api::commands::companion_revoke_device,
             companion_api::commands::companion_unrevoke_device,
@@ -1089,12 +1093,13 @@ pub fn run() {
             companion_api::commands::companion_push_clear_apns,
             companion_api::commands::companion_push_status,
             companion_api::commands::companion_test_local_reachability,
-            proxy_config::commands::proxy_set,
+            proxy_config::commands::proxy_apply,
             proxy_config::commands::proxy_get_active,
             proxy_config::commands::proxy_detect,
             proxy_config::commands::proxy_identify_clash,
             proxy_config::commands::proxy_test,
             proxy_config::commands::proxy_http_request,
+            proxy_config::commands::proxy_http_cancel,
             ollama::ollama_pull_model_stream,
             connectors::commands::connectors_register_adapter,
             connectors::commands::connectors_unregister_adapter,
@@ -1131,15 +1136,6 @@ pub fn run() {
             connectors::commands::connectors_lark_upload_file,
             connectors::commands::connectors_lark_upload_image,
             connectors::commands::connectors_onebot_probe,
-            remote_control::commands::remote_control_get_status,
-            remote_control::commands::remote_control_start,
-            remote_control::commands::remote_control_stop,
-            remote_control::commands::remote_control_get_token,
-            remote_control::commands::remote_control_rotate_token,
-            remote_control::commands::remote_control_update_config,
-            remote_control::commands::remote_control_set_signing_secret,
-            remote_control::commands::remote_control_get_signing_secret,
-            remote_control::commands::remote_control_query_response,
             gateway::commands::gateway_get_status,
             gateway::commands::gateway_get_config,
             gateway::commands::gateway_update_config,
@@ -1171,6 +1167,9 @@ pub fn run() {
             workflow::commands::integration_ingress_poll,
             workflow::commands::integration_ingress_ack,
             workflow::commands::integration_ingress_nack,
+            workflow::commands::integration_ingress_deadletters,
+            workflow::commands::integration_ingress_deadletter,
+            workflow::commands::integration_ingress_requeue,
             plugin_api::scan::plugin_scan_directory,
             plugin_api::cli_exec::plugin_cli_exec,
             plugin_api::python::commands::plugin_python_initialize,
@@ -1500,8 +1499,12 @@ pub fn run() {
             git::commands::git_watch_stop,
             ocr::native::ocr_extract_native,
             ocr::native::ocr_list_native_backends,
+            ocr::native::ocr_list_available_backends,
             ocr::native::ocr_model_status,
             ocr::native::ocr_download_model,
+            ocr::native::ocr_cancel_model_download,
+            ocr::native::ocr_http_fetch,
+            ocr::native::ocr_http_cancel,
             ocr::msix::ocr_msix_status,
             // Native document parsing (liteparse / PDFium) — feature-gated;
             // the default build answers `unsupported` and TS falls back.
@@ -1925,24 +1928,6 @@ pub fn run() {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     a2ui_bridge::spawn(app).await;
-                });
-            }
-
-            // Remote-control inbound listener auto-start. Per ADR-0005, only
-            // starts when `inbound.enabled` is persisted true AND the OS
-            // keyring still has a token — `RemoteControlState::new()` already
-            // clears `enabled` to false when the token is missing, so this
-            // spawn is a safe no-op on a fresh install.
-            {
-                let app = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let rc_state = app.state::<remote_control::RemoteControlState>();
-                    if rc_state.config().inbound.enabled {
-                        match rc_state.start(app.clone()).await {
-                            Ok(()) => log::info!("remote-control inbound listener started"),
-                            Err(e) => log::warn!("remote-control auto-start skipped: {e}"),
-                        }
-                    }
                 });
             }
 

@@ -29,13 +29,6 @@ pub fn configure_path(path: PathBuf) {
     let _ = STORE_PATH.set(path);
 }
 
-/// Replace the global with a caller-supplied store. Test-only: the real path is
-/// resolved from the app data dir, which a unit test has no handle to.
-#[cfg(test)]
-pub fn set_store_for_tests(store: Arc<SessionStore>) {
-    let _ = STORE.set(store);
-}
-
 fn store() -> Result<Arc<SessionStore>, String> {
     if let Some(existing) = STORE.get() {
         return Ok(Arc::clone(existing));

@@ -139,7 +139,7 @@ fn fingerprint_from_pem(cert_pem: &str) -> Result<String, TlsError> {
 }
 
 /// Compute the pairing fingerprint directly from a TLS peer certificate. Used
-/// by the desktop Pro IDE relay before it sends a device JWT upstream.
+/// by the desktop Pro IDE relay before it sends a DPoP-bound access token upstream.
 pub(crate) fn spki_fingerprint_from_der(der: &[u8]) -> Result<String, TlsError> {
     let spki = extract_spki(der)?;
     let mut hasher = Sha256::new();

@@ -2225,6 +2225,8 @@ mod tests {
 
         let patch = service.get_patch_set("run-hunks").unwrap().unwrap();
         assert_eq!(patch.files[0].hunks.len(), 2);
+        assert_eq!(patch.files[0].hunks[0].additions, 1);
+        assert_eq!(patch.files[0].hunks[0].deletions, 1);
         let first_hunk = patch.files[0].hunks[0].id.clone();
         let outcome = service
             .apply_patch_set(
@@ -2240,6 +2242,10 @@ mod tests {
         assert!(applied.contains("agent line 2\n"));
         assert!(applied.contains("line 22\n"));
         assert!(!applied.contains("agent line 22\n"));
+        let applied_patch = service.get_patch_set("run-hunks").unwrap().unwrap();
+        assert!(applied_patch.applied_selection_known);
+        assert_eq!(applied_patch.applied_selection.len(), 1);
+        assert_eq!(applied_patch.applied_selection[0].hunk_ids.len(), 1);
     }
 
     #[test]

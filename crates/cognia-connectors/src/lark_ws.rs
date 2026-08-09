@@ -222,13 +222,9 @@ struct ClientConfig {
 }
 
 async fn fetch_endpoint(app_id: &str, app_secret: &str) -> Result<(String, ClientConfig), String> {
-    let proxy_cfg = proxy_config::current();
-    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(30));
-    if proxy_cfg.is_active() && !proxy_cfg.should_bypass(ENDPOINT_URL) {
-        if let Some(proxy) = proxy_cfg.build_reqwest_proxy() {
-            builder = builder.proxy(proxy);
-        }
-    }
+    let builder = reqwest::Client::builder().timeout(Duration::from_secs(30));
+    let (builder, _) = proxy_config::apply_reqwest_policy(builder, ENDPOINT_URL)
+        .map_err(|error| error.to_string())?;
     let client = builder
         .build()
         .map_err(|e| format!("reqwest build failed: {e}"))?;
@@ -372,9 +368,11 @@ async fn connect_and_run(
         .as_str()
         .into_client_request()
         .map_err(|e| format!("invalid WS URL: {e}"))?;
-    let proxy_cfg = proxy_config::current();
-    let use_proxy =
-        proxy_cfg.is_active() && proxy_cfg.proxy_websockets && !proxy_cfg.should_bypass(&url);
+    let proxy_cfg = proxy_config::current().map_err(|error| error.to_string())?;
+    let route = proxy_cfg
+        .websocket_route_for(&url)
+        .map_err(|error| error.to_string())?;
+    let use_proxy = matches!(route, proxy_config::ProxyRouteSummary::Proxy { .. });
     let parsed = url::Url::parse(&url).map_err(|e| format!("invalid WS URL: {e}"))?;
     let host = parsed.host_str().ok_or("WS URL missing host")?.to_string();
     let secure = parsed.scheme() == "wss";

@@ -1,6 +1,6 @@
 //! Public health / discovery endpoint.
 //!
-//! `GET /api/v1/healthz` is the unauthenticated diagnostic mobile clients
+//! `GET /healthz` is the unauthenticated diagnostic mobile clients
 //! use to:
 //!   1. confirm the server is reachable at all (vs "wrong port", "TLS
 //!      rejected", "fingerprint mismatch"),
@@ -55,7 +55,8 @@ pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMa
         .and_then(|value| value.to_str().ok());
     let revision_ready = config_revision_matches(expected_revision, actual_revision.as_deref());
     let mut checks = json!({
-        "draining": accepting_writes,
+        "draining": !accepting_writes,
+        "acceptingWrites": accepting_writes,
         "storage": true,
         "brain": true,
         "sidecar": true,
@@ -74,7 +75,8 @@ pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMa
         let gateway_ready = !gateway_required || services.gateway.status().running;
         ready &= storage_ready && brain_ready && sidecar_ready && gateway_ready;
         checks = json!({
-            "draining": accepting_writes,
+            "draining": !accepting_writes,
+            "acceptingWrites": accepting_writes,
             "storage": storage_ready,
             "brain": brain_ready,
             "sidecar": sidecar_ready,
@@ -102,7 +104,7 @@ fn config_revision_matches(expected: Option<&str>, actual: Option<&str>) -> bool
     expected.is_none_or(|expected| actual == Some(expected))
 }
 
-/// `GET /api/v1/healthz` handler.
+/// `GET /healthz` handler.
 ///
 /// On a headless `cognia-server` (ADR-0059 R8) the payload additionally
 /// carries `brain` and `sidecar` supervision blocks so orchestrators and the
@@ -178,9 +180,8 @@ mod tests {
     use crate::companion_api::{
         deny_list::DenyList, desktop_messages_bridge::DesktopMessagesBridge,
         desktop_writes_bridge::DesktopWritesBridge, event_bus::EventBus,
-        idempotency::IdempotencyCache, pair_code_lru::PairCodeLru, push::PushTokenRegistry,
-        rate_limit::RateLimiter, redemption_lru::RedemptionLru, sync_bridge::SyncBridge,
-        sync_registry::SyncTableRegistry, CompanionState, SharedState,
+        idempotency::IdempotencyCache, push::PushTokenRegistry, rate_limit::RateLimiter,
+        sync_bridge::SyncBridge, sync_registry::SyncTableRegistry, CompanionState, SharedState,
     };
     use axum::{body::Body, http::Request, routing::get, Router};
     use parking_lot::RwLock;
@@ -192,8 +193,6 @@ mod tests {
     fn test_state() -> SharedState {
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -209,9 +208,9 @@ mod tests {
 
     fn build_router(state: SharedState) -> Router {
         Router::new()
-            .route("/api/v1/healthz", get(healthz_handler))
-            .route("/api/v1/livez", get(livez_handler))
-            .route("/api/v1/readyz", get(readyz_handler))
+            .route("/healthz", get(healthz_handler))
+            .route("/livez", get(livez_handler))
+            .route("/readyz", get(readyz_handler))
             .with_state(state)
     }
 
@@ -267,7 +266,7 @@ mod tests {
         let router = build_router(test_state());
         let req = Request::builder()
             .method("GET")
-            .uri("/api/v1/healthz")
+            .uri("/healthz")
             .body(Body::empty())
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
@@ -295,7 +294,7 @@ mod tests {
         let router = build_router(test_state());
         let req = Request::builder()
             .method("GET")
-            .uri("/api/v1/healthz")
+            .uri("/healthz")
             .body(Body::empty())
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
@@ -312,7 +311,7 @@ mod tests {
         let router = build_router(test_state());
         let req = Request::builder()
             .method("GET")
-            .uri("/api/v1/healthz")
+            .uri("/healthz")
             .body(Body::empty())
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
@@ -335,7 +334,7 @@ mod tests {
         let router = build_router(test_state());
         let req = Request::builder()
             .method("GET")
-            .uri("/api/v1/healthz")
+            .uri("/healthz")
             .body(Body::empty())
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
@@ -349,7 +348,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/livez")
+                    .uri("/livez")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -362,13 +361,32 @@ mod tests {
         let ready = router
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/readyz")
+                    .uri("/readyz")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(ready.status(), StatusCode::OK);
-        assert_eq!(body_json(ready).await["status"], "ready");
+        let ready_body = body_json(ready).await;
+        assert_eq!(ready_body["status"], "ready");
+        assert_eq!(ready_body["checks"]["draining"], false);
+        assert_eq!(ready_body["checks"]["acceptingWrites"], true);
+
+        crate::companion_api::server::set_draining_for_test(true);
+        let draining = build_router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/readyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(draining.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let draining_body = body_json(draining).await;
+        assert_eq!(draining_body["checks"]["draining"], true);
+        assert_eq!(draining_body["checks"]["acceptingWrites"], false);
+        crate::companion_api::server::set_draining_for_test(false);
     }
 }

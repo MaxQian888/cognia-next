@@ -27,6 +27,8 @@ pub enum SpoolError {
     Serde(#[from] serde_json::Error),
     #[error("integration ingress spool is full")]
     Full,
+    #[error("integration ingress spool body is unavailable")]
+    Corrupt,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +39,16 @@ pub struct SpoolDelivery {
     pub event_type: Option<String>,
     pub headers: std::collections::BTreeMap<String, String>,
     pub body: String,
+    pub received_at: String,
+    pub attempts: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpoolDeadLetter {
+    pub route_id: String,
+    pub delivery_id: String,
+    pub event_type: Option<String>,
     pub received_at: String,
     pub attempts: u8,
 }
@@ -237,6 +249,107 @@ impl IntegrationSpool {
         )?;
         Ok(())
     }
+
+    pub fn deadletters(&self, limit: usize) -> Result<Vec<SpoolDeadLetter>, SpoolError> {
+        let conn = self.conn()?.lock();
+        let mut statement = conn.prepare(
+            r#"
+            SELECT route_id, delivery_id, event_type, received_at, attempts
+            FROM integration_ingress_spool
+            WHERE status = 'deadlettered'
+            ORDER BY received_at DESC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = statement.query_map(params![limit as i64], |row| {
+            Ok(SpoolDeadLetter {
+                route_id: row.get(0)?,
+                delivery_id: row.get(1)?,
+                event_type: row.get(2)?,
+                received_at: row.get(3)?,
+                attempts: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn deadletter(
+        &self,
+        route_id: &str,
+        delivery_id: &str,
+    ) -> Result<Option<SpoolDelivery>, SpoolError> {
+        let conn = self.conn()?.lock();
+        let row = conn
+            .query_row(
+                r#"
+                SELECT event_type, headers_json, secret_key, received_at, attempts
+                FROM integration_ingress_spool
+                WHERE route_id = ?1 AND delivery_id = ?2 AND status = 'deadlettered'
+                "#,
+                params![route_id, delivery_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, u8>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((event_type, headers_json, secret_key, received_at, attempts)) = row else {
+            return Ok(None);
+        };
+        let Some(body) =
+            keyring_secrets::get(SECRET_NAMESPACE, &secret_key).map_err(SpoolError::Secret)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(SpoolDelivery {
+            route_id: route_id.to_string(),
+            delivery_id: delivery_id.to_string(),
+            event_type,
+            headers: serde_json::from_str(&headers_json)?,
+            body,
+            received_at,
+            attempts,
+        }))
+    }
+
+    pub fn requeue(&self, route_id: &str, delivery_id: &str) -> Result<bool, SpoolError> {
+        let secret_key = {
+            let conn = self.conn()?.lock();
+            conn.query_row(
+                r#"
+                SELECT secret_key FROM integration_ingress_spool
+                WHERE route_id = ?1 AND delivery_id = ?2 AND status = 'deadlettered'
+                "#,
+                params![route_id, delivery_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+        };
+        let Some(secret_key) = secret_key else {
+            return Ok(false);
+        };
+        if keyring_secrets::get(SECRET_NAMESPACE, &secret_key)
+            .map_err(SpoolError::Secret)?
+            .is_none()
+        {
+            return Err(SpoolError::Corrupt);
+        }
+        let conn = self.conn()?.lock();
+        let changed = conn.execute(
+            r#"
+            UPDATE integration_ingress_spool
+            SET status = 'queued', attempts = 0, next_attempt_at = NULL
+            WHERE route_id = ?1 AND delivery_id = ?2 AND status = 'deadlettered'
+            "#,
+            params![route_id, delivery_id],
+        )?;
+        Ok(changed > 0)
+    }
 }
 
 fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -299,5 +412,68 @@ mod tests {
         assert!(spool.pending(10).unwrap().is_empty());
         spool.ack("route-1", "delivery-1").unwrap();
         assert!(spool.pending(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn lists_details_and_requeues_deadletters() {
+        let spool = IntegrationSpool::open_in_memory();
+        let mut deadletter = delivery();
+        deadletter.route_id = "route-deadletter".into();
+        deadletter.delivery_id = "delivery-deadletter".into();
+        spool.enqueue(&deadletter).unwrap();
+        for _ in 0..5 {
+            spool
+                .nack("route-deadletter", "delivery-deadletter")
+                .unwrap();
+        }
+
+        assert_eq!(
+            spool.deadletters(10).unwrap(),
+            vec![SpoolDeadLetter {
+                route_id: "route-deadletter".into(),
+                delivery_id: "delivery-deadletter".into(),
+                event_type: Some("issue.created".into()),
+                received_at: "2026-07-28T00:00:00.000Z".into(),
+                attempts: 5,
+            }]
+        );
+        let detail = spool
+            .deadletter("route-deadletter", "delivery-deadletter")
+            .unwrap()
+            .expect("detail");
+        assert_eq!(detail.body, r#"{"id":"1"}"#);
+        assert_eq!(
+            detail.headers.get("x-delivery-id").map(String::as_str),
+            Some("delivery-1")
+        );
+        assert!(spool
+            .requeue("route-deadletter", "delivery-deadletter")
+            .unwrap());
+        assert!(spool.deadletters(10).unwrap().is_empty());
+        assert_eq!(spool.pending(10).unwrap().len(), 1);
+        assert!(!spool.requeue("route-1", "missing").unwrap());
+    }
+
+    #[test]
+    fn refuses_to_requeue_when_encrypted_body_is_missing() {
+        let spool = IntegrationSpool::open_in_memory();
+        let mut row = delivery();
+        row.route_id = "route-corrupt".into();
+        row.delivery_id = "delivery-corrupt".into();
+        spool.enqueue(&row).unwrap();
+        for _ in 0..5 {
+            spool.nack(&row.route_id, &row.delivery_id).unwrap();
+        }
+        keyring_secrets::clear(
+            SECRET_NAMESPACE,
+            &secret_key(&row.route_id, &row.delivery_id),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            spool.requeue(&row.route_id, &row.delivery_id),
+            Err(SpoolError::Corrupt)
+        ));
+        assert_eq!(spool.deadletters(10).unwrap().len(), 1);
     }
 }

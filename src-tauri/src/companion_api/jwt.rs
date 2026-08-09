@@ -1,14 +1,6 @@
-//! HS256 JWT helpers for the companion API.
-//!
-//! # Scopes
-//!
-//! - `"pair"` — 5-minute TTL, single-use.  Carries a `jti` (UUIDv4) so the
-//!   redemption LRU can enforce single-use semantics.  Issued by the desktop
-//!   when the user displays the QR code; consumed by the phone on first scan.
-//!
-//! - `"device"` — 90-day TTL.  Contains `device_id` so every authenticated
-//!   request can be attributed to a specific paired device without a database
-//!   look-up in the hot path.  Issued at the end of the pair exchange.
+//! HS256 JWT helpers retained for loopback service principals and transitional
+//! internal device callers. Public Companion pairing uses ES256 device keys,
+//! one-time Owner invitations, and short-lived access tokens from [`super::api`].
 //!
 //! # Error handling
 //!
@@ -17,14 +9,11 @@
 
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/// 5 minutes in seconds.
-const PAIR_TTL_SECS: i64 = 5 * 60;
 /// 90 days in seconds.
 const DEVICE_TTL_SECS: i64 = 90 * 24 * 3600;
 /// 24 hours in seconds — the headless brain's service token (ADR-0059 W4).
@@ -44,15 +33,12 @@ pub const SERVICE_DEVICE_ID: &str = "brain-local";
 /// Claims carried in every companion JWT.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Claims {
-    /// `"pair"` or `"device"`.
+    /// `"device"` or `"service"`.
     pub scope: String,
     /// Issued-at (seconds since Unix epoch).
     pub iat: i64,
     /// Expiry (seconds since Unix epoch).
     pub exp: i64,
-    /// JWT ID — present on pair tokens for single-use tracking.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub jti: Option<String>,
     /// Device UUID — present on device tokens for attribution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
@@ -81,32 +67,10 @@ pub enum JwtError {
 // Public functions
 // ---------------------------------------------------------------------------
 
-/// Issue a short-lived pair JWT signed with `secret`.
-///
-/// The token carries `scope = "pair"` and a freshly generated `jti`.
-pub fn issue_pair_jwt(secret: &[u8], account_id: &str) -> Result<(String, i64), JwtError> {
-    validate_account_id(account_id)?;
-    let now = now_secs();
-    let exp = now + PAIR_TTL_SECS;
-    let claims = Claims {
-        scope: "pair".to_string(),
-        iat: now,
-        exp,
-        jti: Some(Uuid::new_v4().to_string()),
-        device_id: None,
-        account_id: Some(account_id.to_string()),
-    };
-    let token = encode(
-        &Header::new(Algorithm::HS256),
-        &claims,
-        &EncodingKey::from_secret(secret),
-    )?;
-    Ok((token, exp))
-}
-
-/// Issue a long-lived device JWT signed with `secret`.
-///
-/// The token carries `scope = "device"` and the supplied `device_id`.
+/// Mint the retired device-token shape for legacy middleware regression tests.
+/// Production device authentication is cgnp3 + P-256 DPoP and has no issuer
+/// for this credential type.
+#[cfg(test)]
 pub fn issue_device_jwt(
     secret: &[u8],
     device_id: &str,
@@ -118,7 +82,6 @@ pub fn issue_device_jwt(
         scope: "device".to_string(),
         iat: now,
         exp: now + DEVICE_TTL_SECS,
-        jti: None,
         device_id: Some(device_id.to_string()),
         account_id: Some(account_id.to_string()),
     };
@@ -144,7 +107,6 @@ pub fn issue_service_jwt(secret: &[u8], account_id: &str) -> Result<(String, i64
         scope: "service".to_string(),
         iat: now,
         exp,
-        jti: None,
         device_id: Some(SERVICE_DEVICE_ID.to_string()),
         account_id: Some(account_id.to_string()),
     };
@@ -184,7 +146,7 @@ pub fn verify(secret: &[u8], token: &str, expected_scope: &str) -> Result<Claims
 
 /// Verify a JWT for a specific local account.
 ///
-/// This wraps [`verify`] so legacy scope/expiry/signature failures keep their
+/// This wraps [`verify`] so scope, expiry, and signature failures keep their
 /// existing error shape while account mismatches become explicit.
 pub fn verify_for_account(
     secret: &[u8],
@@ -242,26 +204,14 @@ mod tests {
     const ACCOUNT_ID: &str = "local_acct_a";
 
     #[test]
-    fn issue_and_verify_pair_jwt() {
-        let (token, exp) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair");
-        assert!(exp > now_secs());
-        let claims = verify_for_account(SECRET, &token, "pair", ACCOUNT_ID).expect("verify pair");
-        assert_eq!(claims.scope, "pair");
-        assert_eq!(claims.account_id.as_deref(), Some(ACCOUNT_ID));
-        assert!(claims.jti.is_some());
-        assert!(claims.device_id.is_none());
-    }
-
-    #[test]
     fn issue_and_verify_device_jwt() {
-        let device_id = Uuid::new_v4().to_string();
+        let device_id = uuid::Uuid::new_v4().to_string();
         let token = issue_device_jwt(SECRET, &device_id, ACCOUNT_ID).expect("issue device");
         let claims =
             verify_for_account(SECRET, &token, "device", ACCOUNT_ID).expect("verify device");
         assert_eq!(claims.scope, "device");
         assert_eq!(claims.device_id.as_deref(), Some(device_id.as_str()));
         assert_eq!(claims.account_id.as_deref(), Some(ACCOUNT_ID));
-        assert!(claims.jti.is_none());
     }
 
     #[test]
@@ -273,7 +223,6 @@ mod tests {
         assert_eq!(claims.scope, "service");
         assert_eq!(claims.device_id.as_deref(), Some(SERVICE_DEVICE_ID));
         assert_eq!(claims.account_id.as_deref(), Some(ACCOUNT_ID));
-        assert!(claims.jti.is_none());
         // A service token is not a device token.
         assert!(verify(SECRET, &token, "device").is_err());
     }
@@ -289,16 +238,16 @@ mod tests {
 
     #[test]
     fn wrong_scope_returns_error() {
-        let (token, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair");
-        let err = verify(SECRET, &token, "device").unwrap_err();
+        let token = issue_device_jwt(SECRET, "dev-id", ACCOUNT_ID).expect("issue device");
+        let err = verify(SECRET, &token, "service").unwrap_err();
         assert!(matches!(&err, JwtError::WrongScope { expected, actual }
-                if expected == "device" && actual == "pair"));
+                if expected == "service" && actual == "device"));
     }
 
     #[test]
     fn wrong_account_returns_error() {
-        let (token, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair");
-        let err = verify_for_account(SECRET, &token, "pair", "local_acct_b").unwrap_err();
+        let token = issue_device_jwt(SECRET, "dev-id", ACCOUNT_ID).expect("issue device");
+        let err = verify_for_account(SECRET, &token, "device", "local_acct_b").unwrap_err();
         assert!(matches!(&err, JwtError::WrongAccount { expected, actual }
                 if expected == "local_acct_b" && actual.as_deref() == Some(ACCOUNT_ID)));
     }
@@ -306,9 +255,6 @@ mod tests {
     #[test]
     fn invalid_account_id_is_rejected_before_signing() {
         for bad in ["", "short", "_acct_a", "acct space", "acct/slash"] {
-            let pair_err = issue_pair_jwt(SECRET, bad).unwrap_err();
-            assert!(matches!(pair_err, JwtError::InvalidAccountId(_)));
-
             let device_err = issue_device_jwt(SECRET, "dev-id", bad).unwrap_err();
             assert!(matches!(device_err, JwtError::InvalidAccountId(_)));
         }
@@ -316,8 +262,8 @@ mod tests {
 
     #[test]
     fn wrong_secret_returns_error() {
-        let (token, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair");
-        let err = verify(b"different-secret-32-bytes-______", &token, "pair").unwrap_err();
+        let token = issue_device_jwt(SECRET, "dev-id", ACCOUNT_ID).expect("issue device");
+        let err = verify(b"different-secret-32-bytes-______", &token, "device").unwrap_err();
         assert!(matches!(err, JwtError::Invalid(_)));
     }
 
@@ -326,11 +272,10 @@ mod tests {
         // Build a token with exp in the past.
         let now = now_secs();
         let claims = Claims {
-            scope: "pair".to_string(),
+            scope: "device".to_string(),
             iat: now - 400,
             exp: now - 300, // expired 5 minutes ago
-            jti: Some("test-jti".to_string()),
-            device_id: None,
+            device_id: Some("dev-id".to_string()),
             account_id: Some(ACCOUNT_ID.to_string()),
         };
         let token = encode(
@@ -340,23 +285,14 @@ mod tests {
         )
         .expect("encode");
 
-        let err = verify(SECRET, &token, "pair").unwrap_err();
+        let err = verify(SECRET, &token, "device").unwrap_err();
         assert!(matches!(err, JwtError::Invalid(_)));
     }
 
     #[test]
     fn malformed_token_returns_error() {
-        let err = verify(SECRET, "not.a.jwt", "pair").unwrap_err();
+        let err = verify(SECRET, "not.a.jwt", "device").unwrap_err();
         assert!(matches!(err, JwtError::Invalid(_)));
-    }
-
-    #[test]
-    fn pair_jwt_exp_is_within_five_minutes() {
-        let before = now_secs();
-        let (_, exp) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue");
-        let after = now_secs();
-        assert!(exp >= before + PAIR_TTL_SECS);
-        assert!(exp <= after + PAIR_TTL_SECS);
     }
 
     #[test]

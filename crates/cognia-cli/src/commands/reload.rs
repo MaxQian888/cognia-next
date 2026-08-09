@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::engine::bridge_client::{load_endpoint, post_json, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
-const RELOAD_PATH: &str = "/api/v1/dev/plugins/reload";
+const RELOAD_PATH: &str = "/api/dev/plugins/reload";
 
 #[derive(Debug, Deserialize)]
 struct ReloadResponse {
@@ -287,7 +287,7 @@ mod tests {
         let server_thread = std::thread::spawn(move || {
             if let Ok(mut req) = server.recv() {
                 assert_eq!(req.method(), &tiny_http::Method::Post);
-                assert_eq!(req.url(), "/api/v1/dev/plugins/reload");
+                assert_eq!(req.url(), "/api/dev/plugins/reload");
                 let mut body = String::new();
                 let _ = std::io::Read::read_to_string(req.as_reader(), &mut body);
                 *captured_clone.lock() = Some(serde_json::from_str(&body).unwrap());
@@ -344,7 +344,7 @@ mod tests {
         let server_thread = std::thread::spawn(move || {
             if let Ok(mut req) = server.recv() {
                 assert_eq!(req.method(), &tiny_http::Method::Post);
-                assert_eq!(req.url(), "/api/v1/dev/plugins/reload");
+                assert_eq!(req.url(), "/api/dev/plugins/reload");
                 let mut body = String::new();
                 let _ = std::io::Read::read_to_string(req.as_reader(), &mut body);
                 *captured_clone.lock() = Some(serde_json::from_str(&body).unwrap());

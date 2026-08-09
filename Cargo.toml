@@ -51,7 +51,6 @@ members = [
   # ADR-0067 follow-up — remaining subsystem leaves.
   "crates/cognia-skills",
   "crates/cognia-tts",
-  "crates/cognia-remote-control",
   "crates/cognia-gateway",
   "crates/cognia-ccswitch",
   "crates/cognia-mcp-server",

@@ -1,4 +1,4 @@
-# cognia — plugin author CLI
+# cognia — author and Headless operator CLI
 
 Companion CLI for cognia plugins (WASM Component Model, frontend TypeScript, Python, hybrid, and VS Code-extension bundles). Shipped with the cognia desktop app as a separate Rust crate so plugin authors can install it independently of the GUI (`cargo install --path crates/cognia-cli`).
 
@@ -38,8 +38,66 @@ cargo install --locked cognia-cli
 | `cognia plugin dev [--path .] [--reload-url URL] [--once] [--json]`                                                                                                                         | Watch the crate, rebuild + hot-reload on changes; `--once` builds/reloads once and exits, with optional JSON for CI/editor smoke checks.            |
 | `cognia plugin embed-version <wasm> <ver> [--out wasm] [--json]`                                                                                                                            | Manually inject the api-version custom section (normally automatic during `build`).                                                                 |
 | `cognia acp`                                                                                                                                                                                | Bridge newline-delimited ACP JSON-RPC on stdin/stdout to the running cognia companion WebSocket endpoint.                                           |
+| `cognia host categories [--format json\|table]`                                                                                                                                             | Summarize the stable Headless command domains, risk/operation counts, and matching embedded skills.                                                 |
+| `cognia host resources [--category CATEGORY] [--format json\|table]`                                                                                                                        | Browse stable resource groups within a domain before selecting an exact RPC.                                                                        |
+| `cognia host commands [filters]`                                                                                                                                                            | Browse the embedded loopback Headless RPC catalog without connecting to a server.                                                                   |
+| `cognia host schema <command>`                                                                                                                                                              | Inspect the concrete input schema and opaque-output marker for one Headless RPC.                                                                    |
+| `cognia host call <command> [--data JSON\|-\|@FILE] [--dry-run]`                                                                                                                            | Validate and invoke one named Headless RPC with durable idempotency and risk confirmation.                                                          |
+| `cognia host doctor [--offline]`                                                                                                                                                            | Diagnose Headless URL, TLS, data-directory, credential, readiness, and safe-RPC access.                                                             |
+| `cognia host events [--since SEQ] [--event TYPE]`                                                                                                                                           | Stream replayable Headless events as NDJSON.                                                                                                        |
+| `cognia host skills list\|read`                                                                                                                                                             | Read the agent-safe command-selection and confirmation guidance embedded in the binary.                                                             |
+| `cognia host skills install --scope user\|project`                                                                                                                                          | Install every embedded skill into the standard `.agents/skills` discovery location with conflict-safe managed upgrades.                             |
 | `cognia release-key [--json]`                                                                                                                                                               | Inspect the embedded public key and policy used to verify downloaded `cognia` CLI release artifacts.                                                |
 | `cognia release-verify <artifact> --checksums <checksums.txt> [--artifact-name NAME] [--signature PATH] [--json]`                                                                           | Offline-verify a downloaded CLI release artifact against `checksums.txt` and the embedded release key policy.                                       |
+
+## Headless host usage
+
+`cognia host` is a same-host operator and agent interface for `cognia-server`; it is not a
+remote-device API. Service credentials are accepted by the server only from loopback. In Compose
+or Kubernetes, run the CLI inside the server container or Pod:
+
+```bash
+docker compose exec cognia-server cognia host doctor
+kubectl exec <pod> -- cognia host commands --query session
+cognia host categories
+cognia host resources --category development
+cognia host commands --resource git --operation read
+cognia host skills install --scope project
+cognia host skills read cognia-host-development
+cognia host skills read cognia-host-safe-git
+cognia host schema session_list
+cognia host call session_list --data '{"limit":20,"offset":0}'
+```
+
+The CLI reads `COGNIA_SERVICE_TOKEN` when supplied; otherwise it invokes a colocated
+`cognia-server issue-service-token` and keeps the 24-hour token in memory. High- and critical-risk
+commands require a terminal confirmation or a user-approved global `--yes`. Agents must never add
+`--yes` without that confirmation. `cognia host categories` maps every RPC into one of nine stable
+domains; `cognia host resources` exposes generated resource groups such as `git`, `files`,
+`task-workspaces`, and `provider-catalog`. Use `commands --resource <id>` to narrow discovery without
+guessing an RPC name. Run `cognia host skills list --kind core|domain|workflow` for the full skill
+inventory and `cognia host skills read cognia-host` for the shared safety/output contract. The six
+workflow skills cover read-only observation, safe Git, agent incidents, backup recovery, extension
+rollout, and connector delivery.
+
+### Installing Agent Skills
+
+`cognia host skills install` is offline and requires an explicit scope. `--scope user` installs all
+16 skills under `$HOME/.agents/skills`; `--scope project` uses `.agents/skills` at the nearest Git
+worktree root, or the current directory when it is not inside Git. Codex, Gemini CLI, OpenCode, and
+other Agent Skills clients can discover that shared layout. Refresh the client's skill inventory or
+restart its session after installation.
+
+The installer records `.cognia-host-manifest.json` with the CLI bundle version and SHA-256 hash of
+every managed file. Re-running it leaves identical files alone, upgrades files that still match the
+previous manifest, and removes retired unmodified files. It preflights the complete bundle before
+writing: a modified file, an untracked file inside a managed Cognia skill, a corrupt manifest, or a
+symlinked `.agents`, skills root, or managed destination returns `skill_install_conflict` without
+writing anything. Fully written Cognia temporary files that match the current bundle are recovered
+on the next successful retry, and the manifest is replaced last; other temporary content conflicts
+instead of being deleted. Preserve intentional edits elsewhere, restore the reported paths from
+`cognia host skills read`, or move all Cognia-managed skill directories and the manifest aside before
+retrying. The installer never overwrites user edits and has no force mode.
 
 ## Querying the authoring contract
 
@@ -178,7 +236,7 @@ The bridge accepts only loopback connections (`127.0.0.1`) and gates every reque
 
 ## ACP editor bridge
 
-`cognia acp` is a top-level utility for editors and ACP clients, not a `cognia plugin` subcommand. Configure an editor with `{"command": "cognia", "args": ["acp"]}`. The command resolves a running companion endpoint from `COGNIA_ACP_URL` + `COGNIA_ACP_TOKEN` or, when those are absent, from the desktop CLI bridge token broker. It keeps stdout reserved for newline-delimited ACP JSON-RPC frames; connection status goes to stderr and is suppressed by `--quiet`.
+`cognia acp` is a top-level utility for editors and ACP clients, not a `cognia plugin` subcommand. Configure an editor with `{"command": "cognia", "args": ["acp"]}`. The command resolves a running companion endpoint from `COGNIA_ACP_URL` + `COGNIA_ACP_TICKET` or, when those are absent, from the desktop CLI bridge ticket broker. It keeps stdout reserved for newline-delimited ACP JSON-RPC frames; connection status goes to stderr and is suppressed by `--quiet`.
 
 ## Verifying CLI release artifacts
 

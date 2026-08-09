@@ -41,8 +41,7 @@ use serde_json::{json, Value};
 use tokio::sync::{oneshot, watch};
 use tower_http::limit::RequestBodyLimitLayer;
 
-use cognia_remote_control::allowlist::ParsedAllowlist;
-use cognia_remote_control::rate_limit::FixedWindowRateLimiter;
+use cognia_net::inbound_policy::{FixedWindowRateLimiter, ParsedAllowlist};
 
 use super::api_keys::{self, GatewayApiKey};
 use super::concurrency::{ConcurrencyLimiter, InFlightGuard, InFlightTracker, Slot};

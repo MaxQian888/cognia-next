@@ -511,6 +511,7 @@ fn spawn_code_server(
 async fn wait_healthy(port: u16, budget: Duration) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
+        .no_proxy()
         .build()
         .map_err(|error| format!("build code-server health client: {error}"))?;
     let deadline = Instant::now() + budget;
@@ -833,7 +834,16 @@ async fn relay_http(port: u16, tail: &str, request: Request) -> Response {
     let method = request.method().clone();
     let headers = filtered_headers(request.headers());
     let stream = request.into_body().into_data_stream();
-    let client = reqwest::Client::new();
+    let client = match reqwest::Client::builder().no_proxy().build() {
+        Ok(client) => client,
+        Err(error) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("build loopback relay client: {error}"),
+            )
+                .into_response();
+        }
+    };
     let mut upstream = client
         .request(method, url)
         .body(reqwest::Body::wrap_stream(stream));

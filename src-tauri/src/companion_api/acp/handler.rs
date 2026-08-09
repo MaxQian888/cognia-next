@@ -1,4 +1,4 @@
-//! ACP server WebSocket handler — `GET /ws/v1/acp`.
+//! ACP server WebSocket handler — `GET /ws/acp`.
 //!
 //! Speaks the Agent Client Protocol (agentclientprotocol.com, JSON-RPC 2.0,
 //! one message per WS text frame) and translates it onto the companion RPC
@@ -8,9 +8,9 @@
 //! |---------------------------------|-------------------------------------------|
 //! | `initialize`                    | static capabilities                        |
 //! | `session/new`                   | mint UUID, stash cwd                       |
-//! | `session/prompt`                | `rpc::dispatch("claude_send", …)`; the     |
+//! | `session/prompt`                | `remote_execution("claude_send", …)`; the |
 //! |                                 | JSON-RPC result is deferred to turn end    |
-//! | `session/cancel` (notification) | `rpc::dispatch("claude_interrupt", …)`     |
+//! | `session/cancel` (notification) | `remote_execution("claude_interrupt", …)` |
 //! | `session/load`                  | resume via the global resume index         |
 //! | `session/request_permission` ⟵  | sidecar `permission_request` events; the   |
 //! |   client response               | response maps to `claude_approve`          |
@@ -21,23 +21,27 @@
 //! desktop Tauri app and on the headless `cognia-server`.
 //!
 //! Heartbeats use RFC 6455 ping frames (NOT the `{"type":"ping"}` JSON of
-//! `/ws/v1/events`) — every text frame on this socket must be a JSON-RPC
+//! `/ws/events`) — every text frame on this socket must be a JSON-RPC
 //! message or clients would choke on non-protocol frames.
 
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
+    http::StatusCode,
     response::Response,
 };
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Component, Path};
 use tokio::time::{interval, Duration, Instant};
 
 use super::super::{
-    dispatch_host::DispatchHost, event_bus::SubscribeResult, middleware::DeviceContext, rpc,
+    event_bus::SubscribeResult,
+    middleware::DeviceContext,
+    remote_execution::{self, ExecutionOutcome, ExecutionRequest, ExecutionTransport},
     SharedState,
 };
 use super::registry::{
@@ -88,40 +92,85 @@ fn normalize_workspace_path(path: &str) -> Result<String, &'static str> {
     Ok(normalized)
 }
 
-/// Axum handler for `GET /ws/v1/acp`. Mounted inside the protected block, so
-/// `require_device_jwt` has already verified the token; the [`DeviceContext`]
-/// is read off the request extensions *before* the upgrade consumes them
-/// (extensions do not survive into the upgrade closure).
+#[derive(Deserialize)]
+pub struct AcpTicketQuery {
+    ticket: String,
+}
+
+/// Axum handler for `GET /ws/acp`. The upgrade redeems the same durable,
+/// path-bound, single-use socket-ticket authority as the event, terminal, and
+/// browser channels; no bearer credential enters the WebSocket URL.
 pub async fn acp_handler(
+    Query(query): Query<AcpTicketQuery>,
     ws: WebSocketUpgrade,
     State(state): State<SharedState>,
-    request: axum::extract::Request,
 ) -> Response {
-    let ctx = request.extensions().get::<DeviceContext>().cloned();
-    let (device_id, account_id, scope) = match ctx {
-        // The JWT `scope` is an authentication kind ("device"/"oidc"), not a
-        // workspace partition. Until the transport carries an explicit
-        // workspace identity, use the stable paired-device identity so one
-        // account's devices cannot see each other's local path catalog.
-        Some(ctx) => {
-            let workspace_scope = format!("device:{}", ctx.device_id);
-            (ctx.device_id, Some(ctx.account_id), Some(workspace_scope))
-        }
-        None => (String::new(), None, None),
+    let Some(store) = super::super::security_store::security_store() else {
+        return super::super::api::public_error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "security_store_unavailable",
+            "the security database is unavailable",
+            true,
+            json!({}),
+        );
     };
+    let identity =
+        match store.redeem_socket_ticket(&query.ticket, "/ws/acp", "acp", unix_time_secs()) {
+            Ok(identity) => identity,
+            Err(_) => {
+                return super::super::api::public_error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "invalid_socket_ticket",
+                    "the ACP socket ticket is invalid, expired, or already used",
+                    false,
+                    json!({}),
+                );
+            }
+        };
+    let capabilities = match store.capability_snapshot(&identity.tenant_id, &identity.device_id) {
+        Ok(Some(capabilities)) => capabilities,
+        Ok(None) => {
+            return super::super::api::public_error_response(
+                StatusCode::UNAUTHORIZED,
+                "device_unavailable",
+                "the ACP principal is unknown or revoked",
+                false,
+                json!({}),
+            );
+        }
+        Err(_) => {
+            return super::super::api::public_error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "security_store_unavailable",
+                "the security database is unavailable",
+                true,
+                json!({}),
+            );
+        }
+    };
+    let workspace_scope = format!("device:{}", identity.device_id);
 
     ws.max_message_size(MAX_WS_FRAME_BYTES)
         .max_frame_size(MAX_WS_FRAME_BYTES)
-        .on_upgrade(move |socket| handle_acp_socket(socket, state, device_id, account_id, scope))
+        .on_upgrade(move |socket| {
+            handle_acp_socket(
+                socket,
+                state,
+                identity.device_id,
+                Some(identity.tenant_id),
+                Some(workspace_scope),
+                Some(capabilities),
+            )
+        })
 }
 
 /// Everything one ACP connection needs to service requests.
 struct AcpConnection {
     state: SharedState,
-    host: Option<DispatchHost>,
     device_id: String,
     account_id: Option<String>,
     scope: Option<String>,
+    authorization_capabilities: Option<Vec<String>>,
     sessions: ConnectionSessions,
     initialized: bool,
     /// Next id for server→client requests (`session/request_permission`).
@@ -137,14 +186,14 @@ impl AcpConnection {
         device_id: String,
         account_id: Option<String>,
         scope: Option<String>,
+        authorization_capabilities: Option<Vec<String>>,
     ) -> Self {
-        let host = DispatchHost::from_state(&state);
         Self {
             state,
-            host,
             device_id,
             account_id,
             scope,
+            authorization_capabilities,
             sessions: ConnectionSessions::new(),
             initialized: false,
             next_out_id: 1,
@@ -155,20 +204,38 @@ impl AcpConnection {
     /// Run one companion RPC through the shared dispatch surface, flattening
     /// the error into a plain message string.
     async fn dispatch(&self, name: &str, args: Value) -> Result<Value, String> {
-        let Some(host) = self.host.as_ref() else {
-            return Err("no dispatch host available (test mode)".to_string());
+        self.dispatch_with_request_id(name, args, None).await
+    }
+
+    async fn dispatch_with_request_id(
+        &self,
+        name: &str,
+        args: Value,
+        wire_request_id: Option<&Value>,
+    ) -> Result<Value, String> {
+        let principal = DeviceContext {
+            device_id: self.device_id.clone(),
+            account_id: self.account_id.clone().unwrap_or_default(),
+            scope: "device".to_string(),
+            granted_scopes: Vec::new(),
+            authorization_capabilities: self.authorization_capabilities.clone(),
         };
-        rpc::dispatch(
+        let idempotency_key =
+            remote_execution::protocol_idempotency_key(name, &principal, "acp", wire_request_id);
+        let request = ExecutionRequest::new(
             name,
             args,
-            &self.state,
-            host,
-            &self.device_id,
-            self.account_id.as_deref(),
-            self.scope.as_deref(),
-        )
-        .await
-        .map_err(|(_status, err)| err.0.message)
+            principal,
+            ExecutionTransport::WebSocket,
+            idempotency_key,
+        );
+        match remote_execution::execute(&self.state, request).await {
+            Ok(ExecutionOutcome::Completed { result, .. }) => Ok(result),
+            Ok(ExecutionOutcome::Accepted { operation_id, .. }) => {
+                Ok(json!({ "operationId": operation_id, "status": "running" }))
+            }
+            Err(error) => Err(error.message),
+        }
     }
 
     /// Handle one inbound JSON-RPC message; returns the outbound messages to
@@ -852,7 +919,10 @@ impl AcpConnection {
             "prompt": send_content,
             "options": Value::Object(options),
         });
-        if let Err(message) = self.dispatch("claude_send", args).await {
+        if let Err(message) = self
+            .dispatch_with_request_id("claude_send", args, Some(id))
+            .await
+        {
             return vec![types::rpc_error(
                 id,
                 rpc_error_code::INTERNAL_ERROR,
@@ -1129,6 +1199,7 @@ async fn handle_acp_socket(
     device_id: String,
     account_id: Option<String>,
     scope: Option<String>,
+    authorization_capabilities: Option<Vec<String>>,
 ) {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1141,7 +1212,13 @@ async fn handle_acp_socket(
         SubscribeResult::ResyncRequired => return, // unreachable with since=None
     };
 
-    let mut conn = AcpConnection::new(state, device_id, account_id, scope);
+    let mut conn = AcpConnection::new(
+        state,
+        device_id,
+        account_id,
+        scope,
+        authorization_capabilities,
+    );
 
     let mut hb_ticker = interval(Duration::from_secs(HEARTBEAT_SECS));
     hb_ticker.tick().await; // consume the immediate first tick
@@ -1223,6 +1300,13 @@ async fn handle_acp_socket(
     }
 }
 
+fn unix_time_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
 async fn send_json(socket: &mut WebSocket, value: &Value) -> Result<(), ()> {
     let text = serde_json::to_string(value).map_err(|_| ())?;
     socket
@@ -1239,8 +1323,7 @@ async fn send_json(socket: &mut WebSocket, value: &Value) -> Result<(), ()> {
 mod tests {
     use super::*;
     use crate::companion_api::{
-        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
-        pair_code_lru::PairCodeLru, redemption_lru::RedemptionLru, CompanionState,
+        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache, CompanionState,
     };
     use parking_lot::RwLock;
     use std::sync::Arc;
@@ -1248,8 +1331,6 @@ mod tests {
     fn test_state() -> SharedState {
         Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -1271,6 +1352,7 @@ mod tests {
             "dev-1".to_string(),
             None,
             Some("device".into()),
+            Some(vec!["agent.run".into()]),
         )
     }
 
@@ -1280,6 +1362,7 @@ mod tests {
             format!("device-{account_id}"),
             Some(account_id.to_string()),
             Some(workspace.to_string()),
+            Some(vec!["agent.run".into()]),
         )
     }
 

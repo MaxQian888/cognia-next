@@ -371,17 +371,14 @@ mod tests {
     use crate::companion_api::{
         deny_list::DenyList, desktop_messages_bridge::DesktopMessagesBridge,
         desktop_writes_bridge::DesktopWritesBridge, event_bus::EventBus,
-        idempotency::IdempotencyCache, pair_code_lru::PairCodeLru, push::PushTokenRegistry,
-        rate_limit::RateLimiter, redemption_lru::RedemptionLru, sync_bridge::SyncBridge,
-        sync_registry::SyncTableRegistry, CompanionState,
+        idempotency::IdempotencyCache, push::PushTokenRegistry, rate_limit::RateLimiter,
+        sync_bridge::SyncBridge, sync_registry::SyncTableRegistry, CompanionState,
     };
     use parking_lot::RwLock;
 
     fn test_state() -> SharedState {
         Arc::new(CompanionState {
             secret: RwLock::new(b"test-secret-32-bytes-exactly____".to_vec()),
-            redemption_lru: RedemptionLru::new(),
-            pair_code_lru: Arc::new(PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),

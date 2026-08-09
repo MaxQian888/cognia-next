@@ -72,6 +72,9 @@
 //!     Offline-verify a CLI release artifact against checksums.txt and, once
 //!     provisioned, the embedded Ed25519 release key.
 //!
+//!   cognia host categories|resources|commands|schema|call|doctor|events|skills
+//!     Discover and safely invoke the loopback-only Headless service API.
+//!
 //! Global flags (apply to every subcommand):
 //!
 //!   --color [auto|always|never]   Color mode (default: auto).
@@ -126,6 +129,22 @@ fn main() -> eyre::Result<()> {
     let result: Result<()> = match cli.command {
         TopCommand::Plugin { command } => dispatch_plugin(command, &mut ui),
         TopCommand::Pack { command } => dispatch_pack(command, &mut ui),
+        TopCommand::Host {
+            server_url,
+            data_dir,
+            ca_cert,
+            server_bin,
+            command,
+        } => commands::host::run(
+            command,
+            commands::host::HostConfig {
+                server_url,
+                data_dir,
+                ca_cert,
+                server_bin,
+            },
+            &mut ui,
+        ),
         TopCommand::Acp => {
             ui.verbose("running acp");
             commands::acp::run(&ui)
@@ -172,6 +191,9 @@ fn main() -> eyre::Result<()> {
         }
         if err.is::<JsonFailureExit>() {
             std::process::exit(JSON_FAILURE_EXIT_CODE);
+        }
+        if let Some(exit) = err.downcast_ref::<commands::host::HostExit>() {
+            std::process::exit(exit.code);
         }
         return Err(anyhow_to_eyre(err));
     }

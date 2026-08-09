@@ -11,8 +11,8 @@ use serde_json::json;
 use crate::engine::bridge_client::{get_json, load_endpoint, post_json, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
-const PATH: &str = "/api/v1/dev/plugins/uninstall";
-const LIST_PATH: &str = "/api/v1/dev/plugins/installed";
+const PATH: &str = "/api/dev/plugins/uninstall";
+const LIST_PATH: &str = "/api/dev/plugins/installed";
 
 #[derive(Debug, Deserialize)]
 struct UninstallResponse {

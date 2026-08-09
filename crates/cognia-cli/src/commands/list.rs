@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::engine::bridge_client::{get_json, load_endpoint, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
-const LIST_PATH: &str = "/api/v1/dev/plugins/installed";
+const LIST_PATH: &str = "/api/dev/plugins/installed";
 
 #[derive(Debug, Deserialize)]
 struct ListInstalledResponse {
@@ -138,7 +138,7 @@ mod tests {
         let server_thread = std::thread::spawn(move || {
             if let Ok(req) = server.recv() {
                 assert_eq!(req.method(), &tiny_http::Method::Get);
-                assert_eq!(req.url(), "/api/v1/dev/plugins/installed");
+                assert_eq!(req.url(), "/api/dev/plugins/installed");
                 let token = req
                     .headers()
                     .iter()
@@ -196,7 +196,7 @@ mod tests {
             ok: false,
             action: "list",
             stage: "bridge",
-            error: "GET http://127.0.0.1:7891/api/v1/dev/plugins/installed -> HTTP 500".into(),
+            error: "GET http://127.0.0.1:7891/api/dev/plugins/installed -> HTTP 500".into(),
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["schemaVersion"], 1);

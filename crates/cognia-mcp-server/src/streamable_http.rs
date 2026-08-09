@@ -1,10 +1,4 @@
-//! Streamable-HTTP (and legacy SSE-alias) transport for the External Bridge
-//! MCP endpoint.
-//!
-//! The legacy `POST /mcp` path is a strictly sequential one-line-in /
-//! one-line-out round-trip behind a single mutex — it cannot carry
-//! server→client notifications, batched responses, or the per-session
-//! semantics newer MCP clients (Cursor, recent Claude Code) prefer.
+//! Streamable-HTTP transport for the External Bridge MCP endpoint.
 //!
 //! This module implements the modern streamable-HTTP transport:
 //!
@@ -19,8 +13,10 @@
 //!
 //! Each session owns ONE Node sidecar with an independent reader task that
 //! broadcasts every emitted line, so both the POST-response path and the GET
-//! channel observe responses + notifications. Bearer auth and the body-size
-//! limit are inherited from the router-level layers in `http_server.rs`.
+//! channel observe responses + notifications. Admission is capped at 128
+//! active sessions; excess initialize requests fail explicitly with 503.
+//! Bearer auth and the body-size limit are inherited from the router-level
+//! layers in `http_server.rs`.
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -42,7 +38,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin};
-use tokio::sync::{broadcast, Mutex as AsyncMutex};
+use tokio::sync::{broadcast, Mutex as AsyncMutex, OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
 
 use super::http_server::{stamp_client_authorization, AppState, ClientAuthorization};
@@ -52,8 +48,18 @@ use super::sidecar::{spawn_streaming_node, SidecarLines};
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Default idle TTL after which a session is reaped.
 pub(crate) const DEFAULT_IDLE_TTL: Duration = Duration::from_secs(300);
+/// Hard admission limit for active MCP sessions.
+const MAX_ACTIVE_SESSIONS: usize = 128;
 /// Header that carries the session id (MCP streamable-HTTP spec).
 const SESSION_HEADER: &str = "mcp-session-id";
+
+#[derive(Debug, thiserror::Error)]
+enum SessionCreateError {
+    #[error("MCP session capacity exceeded (maximum {max_sessions} active sessions)")]
+    Overloaded { max_sessions: usize },
+    #[error("{0}")]
+    Spawn(String),
+}
 
 /// How a session's sidecar child is launched. Production spawns the real Node
 /// bridge; tests use an inline echo process.
@@ -74,6 +80,9 @@ pub(crate) struct StreamSession {
     tx: broadcast::Sender<String>,
     last_seen: Mutex<Instant>,
     client_id: String,
+    /// Admission permit held until every in-flight user of the session drops
+    /// its `Arc`, not merely until the registry entry is removed.
+    _capacity_permit: OwnedSemaphorePermit,
     /// Kept alive so `kill_on_drop` terminates the child when the session is
     /// removed from the registry.
     _child: Child,
@@ -104,14 +113,22 @@ pub struct SessionRegistry {
     sessions: Mutex<HashMap<String, Arc<StreamSession>>>,
     spawner: Spawner,
     idle_ttl: Duration,
+    capacity: Arc<Semaphore>,
+    max_sessions: usize,
 }
 
 impl SessionRegistry {
     pub(crate) fn new(spawner: Spawner, idle_ttl: Duration) -> Self {
+        Self::with_capacity(spawner, idle_ttl, MAX_ACTIVE_SESSIONS)
+    }
+
+    pub(crate) fn with_capacity(spawner: Spawner, idle_ttl: Duration, max_sessions: usize) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             spawner,
             idle_ttl,
+            capacity: Arc::new(Semaphore::new(max_sessions)),
+            max_sessions,
         }
     }
 
@@ -168,7 +185,12 @@ impl SessionRegistry {
     async fn create_session(
         &self,
         client_id: String,
-    ) -> Result<(String, Arc<StreamSession>), String> {
+    ) -> Result<(String, Arc<StreamSession>), SessionCreateError> {
+        let capacity_permit = Arc::clone(&self.capacity)
+            .try_acquire_owned()
+            .map_err(|_| SessionCreateError::Overloaded {
+                max_sessions: self.max_sessions,
+            })?;
         let (child, stdin, lines) = match &self.spawner {
             Spawner::Node {
                 sidecar_path,
@@ -176,11 +198,11 @@ impl SessionRegistry {
                 extra_env,
             } => spawn_streaming_node(sidecar_path, settings_json, extra_env)
                 .await
-                .map_err(|e| e.to_string())?,
+                .map_err(|e| SessionCreateError::Spawn(e.to_string()))?,
             #[cfg(test)]
             Spawner::Echo => super::sidecar::spawn_streaming_echo()
                 .await
-                .map_err(|()| "node not available".to_string())?,
+                .map_err(|()| SessionCreateError::Spawn("node not available".to_string()))?,
         };
 
         let (tx, _rx) = broadcast::channel::<String>(256);
@@ -191,6 +213,7 @@ impl SessionRegistry {
             tx,
             last_seen: Mutex::new(Instant::now()),
             client_id,
+            _capacity_permit: capacity_permit,
             _child: child,
         });
         let id = uuid::Uuid::new_v4().to_string();
@@ -228,7 +251,7 @@ fn spawn_reader(mut lines: SidecarLines, tx: broadcast::Sender<String>) {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// `POST /mcp/stream` (and the `/mcp/sse` back-compat alias).
+/// `POST /mcp/stream`.
 pub(crate) async fn post_handler(
     State(state): State<AppState>,
     Extension(authorization): Extension<ClientAuthorization>,
@@ -282,8 +305,11 @@ pub(crate) async fn post_handler(
                 .await
             {
                 Ok((sid, s)) => (s, sid, true),
-                Err(e) => {
-                    return error_body(StatusCode::BAD_GATEWAY, &format!("session spawn: {e}"))
+                Err(error @ SessionCreateError::Overloaded { .. }) => {
+                    return error_body(StatusCode::SERVICE_UNAVAILABLE, &error.to_string())
+                }
+                Err(SessionCreateError::Spawn(error)) => {
+                    return error_body(StatusCode::BAD_GATEWAY, &format!("session spawn: {error}"))
                 }
             }
         }
@@ -596,6 +622,37 @@ mod tests {
 
         assert_eq!(reg.close_all(), 2);
         assert_eq!(reg.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn session_capacity_rejects_overload_and_recovers_after_delete() {
+        let Ok(()) = node_available().await else {
+            return;
+        };
+        let reg = Arc::new(SessionRegistry::with_capacity(
+            Spawner::Echo,
+            DEFAULT_IDLE_TTL,
+            1,
+        ));
+        let (first_id, first) = reg
+            .create_session("client-a".into())
+            .await
+            .expect("first session");
+
+        let overloaded = match reg.create_session("client-b".into()).await {
+            Ok(_) => panic!("second session must be rejected at capacity"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            overloaded,
+            SessionCreateError::Overloaded { max_sessions: 1 }
+        ));
+
+        assert!(reg.remove(&first_id, "client-a"));
+        drop(first);
+        reg.create_session("client-b".into())
+            .await
+            .expect("capacity is released when a session is deleted");
     }
 
     /// Probe whether `node` is on PATH (the echo spawner needs it).

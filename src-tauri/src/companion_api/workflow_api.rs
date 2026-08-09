@@ -642,6 +642,7 @@ mod tests {
                 .iter()
                 .map(|scope| scope.to_string())
                 .collect(),
+            authorization_capabilities: None,
         }
     }
 

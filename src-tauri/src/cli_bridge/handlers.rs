@@ -68,7 +68,7 @@ pub struct HandoffMessage {
     pub content: String,
 }
 
-/// Wire shape for `POST /api/v1/dev/sessions/handoff` — a CLI session
+/// Wire shape for `POST /api/dev/sessions/handoff` — a CLI session
 /// transcript the desktop should materialise + open. The handler never
 /// touches Dexie itself (that's a renderer concern); it emits the payload
 /// on `cli-bridge:session-handoff` and the TS listener imports + opens it.
@@ -141,7 +141,7 @@ async fn renderer_roundtrip(
     }
 }
 
-/// `POST /api/v1/dev/twin/context` — build the twin runtime context for a
+/// `POST /api/dev/twin/context` — build the twin runtime context for a
 /// message (renderer runs `tryBuildTwinDeps` → `applyTwinContext`). The
 /// renderer handler returns REDACTED prompt segments only — raw chunk
 /// content never crosses this boundary.
@@ -152,7 +152,7 @@ pub async fn twin_context(
     renderer_roundtrip(&state, "twin_context_get", payload).await
 }
 
-/// `POST /api/v1/dev/teams/list` — project the renderer's AgentTeam store.
+/// `POST /api/dev/teams/list` — project the renderer's AgentTeam store.
 pub async fn teams_list(
     State(state): State<SharedState>,
     Json(payload): Json<serde_json::Value>,
@@ -160,7 +160,7 @@ pub async fn teams_list(
     renderer_roundtrip(&state, "agent_team_list", payload).await
 }
 
-/// `POST /api/v1/dev/teams/run` — fire-and-forget start of a team run.
+/// `POST /api/dev/teams/run` — fire-and-forget start of a team run.
 pub async fn teams_run(
     State(state): State<SharedState>,
     Json(payload): Json<serde_json::Value>,
@@ -168,7 +168,7 @@ pub async fn teams_run(
     renderer_roundtrip(&state, "agent_team_run", payload).await
 }
 
-/// `POST /api/v1/dev/teams/run-status` — newest run row + events since a
+/// `POST /api/dev/teams/run-status` — newest run row + events since a
 /// cursor, projected without step payloads (PII posture).
 pub async fn teams_run_status(
     State(state): State<SharedState>,
@@ -177,7 +177,7 @@ pub async fn teams_run_status(
     renderer_roundtrip(&state, "agent_team_run_status", payload).await
 }
 
-/// Wire shape for `GET /api/v1/dev/plugins/installed` — a privacy-safe
+/// Wire shape for `GET /api/dev/plugins/installed` — a privacy-safe
 /// subset of [`PluginRuntimeSnapshot`]. Only the fields the CLI needs
 /// for a preflight install collision check are exposed; runtime_state
 /// (which may carry per-plugin secrets) is **never** sent.
@@ -197,7 +197,7 @@ struct ListInstalledResponse {
     plugins: Vec<InstalledPluginInfo>,
 }
 
-/// `GET /api/v1/dev/plugins/installed` — list currently-loaded plugins.
+/// `GET /api/dev/plugins/installed` — list currently-loaded plugins.
 ///
 /// Used by `cognia plugin install` for the same-id preflight prompt; also
 /// surfaced for future scripting use. **Never** returns `runtime_state`
@@ -443,7 +443,7 @@ fn build_handoff_event(req: &SessionHandoffRequest) -> serde_json::Value {
     })
 }
 
-/// `POST /api/v1/dev/sessions/handoff` — receive a CLI session transcript and
+/// `POST /api/dev/sessions/handoff` — receive a CLI session transcript and
 /// emit it for the renderer to import + open. Synchronous + best-effort: the
 /// renderer owns the Dexie write (`importHandoffSession`) and navigation.
 pub async fn handoff(
@@ -719,7 +719,7 @@ fn extract_zip_into(bytes: &[u8], target_dir: &Path) -> anyhow::Result<()> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ACP token broker
+// ACP socket-ticket broker
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Synthetic device identity minted for the `cognia acp` stdio bridge. One
@@ -727,38 +727,32 @@ fn extract_zip_into(bytes: &[u8], target_dir: &Path) -> anyhow::Result<()> {
 /// clean and lets the deny list revoke the whole surface in one entry.
 const ACP_DEVICE_ID: &str = "acp-cli";
 
-/// Account id stamped into ACP bridge tokens. Purely local (the companion
+/// Account id stamped into ACP bridge tickets. Purely local (the companion
 /// JWT layer only validates the format), but stable so audit lines and
 /// `whoami` output are recognizable.
 const ACP_ACCOUNT_ID: &str = "local_acct_acp";
 
 /// Build the broker response payload from resolved inputs. Split from the
-/// axum handler so the token/URL contract is unit-testable without a Tauri
+/// axum handler so the ticket/URL contract is unit-testable without a Tauri
 /// app handle.
-fn build_acp_token_payload(
-    port: u16,
-    secret: &[u8],
-    tls_fingerprint: &str,
-) -> anyhow::Result<serde_json::Value> {
-    let token = crate::companion_api::jwt::issue_device_jwt(secret, ACP_DEVICE_ID, ACP_ACCOUNT_ID)
-        .map_err(|e| anyhow::anyhow!("issue ACP device JWT: {e}"))?;
-    Ok(json!({
+fn build_acp_ticket_payload(port: u16, ticket: &str, tls_fingerprint: &str) -> serde_json::Value {
+    json!({
         "ok": true,
-        "wsUrl": format!("wss://127.0.0.1:{port}/ws/v1/acp"),
-        "token": token,
+        "wsUrl": format!("wss://127.0.0.1:{port}/ws/acp"),
+        "ticket": ticket,
         "tlsFingerprint": tls_fingerprint,
-    }))
+    })
 }
 
-/// `POST /api/v1/dev/acp/token` — mint a device-scope JWT for the
+/// `POST /api/dev/acp/ticket` — mint a single-use canonical socket ticket for the
 /// `cognia acp` stdio↔WS bridge and point it at the companion API's
-/// `/ws/v1/acp` endpoint.
+/// `/ws/acp` endpoint.
 ///
 /// Trust model: identical to plugin install — loopback origin + per-launch
-/// dev token (enforced by the router middleware). The minted JWT carries the
-/// baseline device scope only; the elevated control/service RPC arms stay
-/// out of reach of an ACP client.
-pub async fn acp_token(State(state): State<SharedState>) -> Response {
+/// dev token (enforced by the router middleware). The durable principal has
+/// only the canonical `agent.run` capability and stays hidden from the paired
+/// device inventory.
+pub async fn acp_ticket(State(state): State<SharedState>) -> Response {
     let Some(server_state) = state
         .app_handle
         .try_state::<crate::companion_api::CompanionServerState>()
@@ -774,19 +768,35 @@ pub async fn acp_token(State(state): State<SharedState>) -> Response {
             "companion API server is not running — start it from Settings → Companion",
         );
     };
-    let secret = match crate::companion_api::secret::load_or_generate() {
-        Ok(secret) => secret,
-        Err(e) => {
-            return err_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("load companion signing secret: {e}"),
-            );
-        }
+    let Some(store) = crate::companion_api::security_store::security_store() else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "companion security store is unavailable",
+        );
     };
-    match build_acp_token_payload(port, &secret, &crate::companion_api::tls_fingerprint()) {
-        Ok(payload) => Json(payload).into_response(),
-        Err(e) => err_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    let now = Utc::now().timestamp();
+    if let Err(error) = store.ensure_service_principal(
+        ACP_ACCOUNT_ID,
+        ACP_DEVICE_ID,
+        "Cognia ACP CLI",
+        &["agent.run"],
+        now,
+    ) {
+        return err_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
     }
+    let ticket =
+        match store.issue_socket_ticket(ACP_ACCOUNT_ID, ACP_DEVICE_ID, "/ws/acp", "acp", now, 60) {
+            Ok(ticket) => ticket,
+            Err(error) => {
+                return err_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+            }
+        };
+    Json(build_acp_ticket_payload(
+        port,
+        &ticket,
+        &crate::companion_api::tls_fingerprint(),
+    ))
+    .into_response()
 }
 
 fn err_response(status: StatusCode, message: &str) -> Response {
@@ -805,39 +815,20 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    const TEST_SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
-
     #[test]
-    fn acp_token_payload_mints_verifiable_device_jwt() {
-        let payload = build_acp_token_payload(7890, TEST_SECRET, "AA:BB").unwrap();
+    fn acp_ticket_payload_uses_single_use_ticket_shape() {
+        let payload = build_acp_ticket_payload(7890, "ticket-a", "AA:BB");
         assert_eq!(payload["ok"], true);
-        assert_eq!(payload["wsUrl"], "wss://127.0.0.1:7890/ws/v1/acp");
+        assert_eq!(payload["wsUrl"], "wss://127.0.0.1:7890/ws/acp");
         assert_eq!(payload["tlsFingerprint"], "AA:BB");
-
-        let token = payload["token"].as_str().unwrap();
-        let claims =
-            crate::companion_api::jwt::verify(TEST_SECRET, token, "device").expect("verify");
-        assert_eq!(claims.scope, "device");
-        assert_eq!(claims.device_id.as_deref(), Some(ACP_DEVICE_ID));
-        assert_eq!(claims.account_id.as_deref(), Some(ACP_ACCOUNT_ID));
+        assert_eq!(payload["ticket"], "ticket-a");
+        assert!(payload.get("token").is_none());
     }
 
     #[test]
-    fn acp_token_payload_rejects_wrong_secret() {
-        let payload = build_acp_token_payload(7890, TEST_SECRET, "").unwrap();
-        let token = payload["token"].as_str().unwrap();
-        assert!(crate::companion_api::jwt::verify(
-            b"another-secret-32-bytes-exactly_",
-            token,
-            "device"
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn acp_token_payload_uses_bound_port() {
-        let payload = build_acp_token_payload(43210, TEST_SECRET, "").unwrap();
-        assert_eq!(payload["wsUrl"], "wss://127.0.0.1:43210/ws/v1/acp");
+    fn acp_ticket_payload_uses_bound_port() {
+        let payload = build_acp_ticket_payload(43210, "ticket-a", "");
+        assert_eq!(payload["wsUrl"], "wss://127.0.0.1:43210/ws/acp");
     }
 
     fn make_test_bundle(manifest: &str, files: &[(&str, &[u8])]) -> Vec<u8> {

@@ -53,50 +53,47 @@ pub async fn spawn(state: SharedState) -> Result<(u16, watch::Sender<()>)> {
 }
 
 pub fn build_router(state: SharedState) -> Router {
-    // NOTE: the `/api/v1/dev/*` prefix is a stable wire path shared with the
+    // NOTE: the `/api/dev/*` prefix is a stable wire path shared with the
     // `cognia-agent` CLI (see `cli/src/handoff/client.ts`) — it is NOT a
     // debug/dev-build gate. This bridge is started unconditionally in release
     // too (`mod.rs::init`); only the *dev-build binary discovery* is
     // debug-gated. Do not rename these routes without a coordinated CLI change,
     // or already-installed CLIs stop reaching the desktop.
     Router::new()
-        .route("/api/v1/dev/health", get(handlers::health))
+        .route("/api/dev/health", get(handlers::health))
         // ── Read endpoints ──────────────────────────────────────────────
         // `installed` returns the list of currently-loaded plugins so the
         // `cognia plugin install` CLI can preflight a same-id collision
         // and prompt the author before clobbering an existing version.
         // Snapshot subset — never exposes runtime_state (may carry
         // sensitive per-plugin secrets); see handlers::list_installed.
-        .route(
-            "/api/v1/dev/plugins/installed",
-            get(handlers::list_installed),
-        )
+        .route("/api/dev/plugins/installed", get(handlers::list_installed))
         // ── Write endpoints ─────────────────────────────────────────────
-        .route("/api/v1/dev/plugins/install", post(handlers::install))
+        .route("/api/dev/plugins/install", post(handlers::install))
         .route(
-            "/api/v1/dev/plugins/install-directory",
+            "/api/dev/plugins/install-directory",
             post(handlers::install_directory),
         )
-        .route("/api/v1/dev/plugins/uninstall", post(handlers::uninstall))
-        .route("/api/v1/dev/plugins/reload", post(handlers::reload))
-        // ── ACP bridge token broker ─────────────────────────────────────
-        // Mints a device-scope companion JWT for the `cognia acp` stdio↔WS
+        .route("/api/dev/plugins/uninstall", post(handlers::uninstall))
+        .route("/api/dev/plugins/reload", post(handlers::reload))
+        // ── ACP bridge ticket broker ─────────────────────────────────────
+        // Mints a single-use Companion socket ticket for the `cognia acp` stdio↔WS
         // bridge (same loopback + dev-token trust model as plugin install).
-        .route("/api/v1/dev/acp/token", post(handlers::acp_token))
+        .route("/api/dev/acp/ticket", post(handlers::acp_ticket))
         // ── Session handoff (standalone agent CLI → desktop) ────────────
         // The CLI POSTs a session transcript; we emit it on
         // `cli-bridge:session-handoff` for the renderer to import + open.
-        .route("/api/v1/dev/sessions/handoff", post(handlers::handoff))
+        .route("/api/dev/sessions/handoff", post(handlers::handoff))
         // ── Renderer-backed routes (twin context / agent teams) ─────────
         // These round-trip through the WebView via the renderer bridge —
         // twin retrieval reads Dexie + the vector store, and AgentTeam
         // definitions live in the renderer's Zustand store, so the Rust
         // side cannot answer them directly.
-        .route("/api/v1/dev/twin/context", post(handlers::twin_context))
-        .route("/api/v1/dev/teams/list", post(handlers::teams_list))
-        .route("/api/v1/dev/teams/run", post(handlers::teams_run))
+        .route("/api/dev/twin/context", post(handlers::twin_context))
+        .route("/api/dev/teams/list", post(handlers::teams_list))
+        .route("/api/dev/teams/run", post(handlers::teams_run))
         .route(
-            "/api/v1/dev/teams/run-status",
+            "/api/dev/teams/run-status",
             post(handlers::teams_run_status),
         )
         .layer(from_fn_with_state(state.clone(), auth_middleware))
@@ -162,18 +159,18 @@ mod tests {
     use super::*;
 
     const DOCUMENTED_DEV_ROUTES: [&str; 12] = [
-        "/api/v1/dev/health",
-        "/api/v1/dev/plugins/installed",
-        "/api/v1/dev/plugins/install",
-        "/api/v1/dev/plugins/install-directory",
-        "/api/v1/dev/plugins/uninstall",
-        "/api/v1/dev/plugins/reload",
-        "/api/v1/dev/acp/token",
-        "/api/v1/dev/sessions/handoff",
-        "/api/v1/dev/twin/context",
-        "/api/v1/dev/teams/list",
-        "/api/v1/dev/teams/run",
-        "/api/v1/dev/teams/run-status",
+        "/api/dev/health",
+        "/api/dev/plugins/installed",
+        "/api/dev/plugins/install",
+        "/api/dev/plugins/install-directory",
+        "/api/dev/plugins/uninstall",
+        "/api/dev/plugins/reload",
+        "/api/dev/acp/ticket",
+        "/api/dev/sessions/handoff",
+        "/api/dev/twin/context",
+        "/api/dev/teams/list",
+        "/api/dev/teams/run",
+        "/api/dev/teams/run-status",
     ];
 
     #[test]

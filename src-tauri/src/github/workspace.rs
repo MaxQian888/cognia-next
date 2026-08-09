@@ -28,6 +28,9 @@ const DEFAULT_BASE_DIR: &str = "cognia-github-worktrees";
 pub struct CloneArgs {
     pub repo_full_name: String,
     pub branch: String,
+    /// Existing branch cloned before creating `branch`. When omitted the
+    /// target branch itself is cloned for backwards compatibility.
+    pub base_branch: Option<String>,
     /// PAT or installation token. Embedded into the clone URL; never logged.
     pub token: String,
     /// Override the directory the worktree is allocated under. Tests inject
@@ -47,6 +50,11 @@ pub struct CloneResult {
 #[serde(rename_all = "camelCase")]
 pub struct CommitAndPushArgs {
     pub workspace_path: String,
+    /// Canonical GitHub owner/repository identity captured by the host before
+    /// the agent receives the worktree. Never derive the push target from the
+    /// agent-mutable local git configuration.
+    pub repo_full_name: String,
+    pub base_branch: Option<String>,
     /// Branch checked out in the workspace (used as the push refspec when
     /// `remote_branch` is omitted).
     pub branch: String,
@@ -96,8 +104,9 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
     // agent runs, including instructions injected through an issue body (which
     // is attacker-controlled: anyone can file an issue). The credential is
     // instead supplied per-invocation via `git_auth_env` below.
-    let remote = format!("https://github.com/{}.git", args.repo_full_name);
+    let remote = canonical_github_remote(&args.repo_full_name)?;
 
+    let clone_branch = args.base_branch.as_deref().unwrap_or(&args.branch);
     let mut command = Command::new("git");
     command
         .args([
@@ -105,7 +114,7 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
             &remote,
             &path_str,
             "--branch",
-            &args.branch,
+            clone_branch,
             "--depth",
             "20",
         ])
@@ -119,8 +128,13 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
     if !output.status.success() {
         // Redact the token before surfacing stderr — git embeds the remote URL
         // in its error messages and we don't want it ending up in renderer logs.
-        let stderr = redact_token(&String::from_utf8_lossy(&output.stderr), &args.token);
+        let stderr =
+            redact_git_credentials(&String::from_utf8_lossy(&output.stderr), Some(&args.token));
         return Err(format!("git clone failed: {stderr}"));
+    }
+
+    if clone_branch != args.branch {
+        run_git_silent(&path, ["checkout", "-b", &args.branch]).await?;
     }
 
     Ok(CloneResult {
@@ -135,27 +149,69 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
 /// workflow node already pattern-matches against).
 #[tauri::command]
 pub async fn github_workspace_commit_and_push(args: CommitAndPushArgs) -> Result<String, String> {
-    let workspace = PathBuf::from(&args.workspace_path);
-    let workspace_str = workspace.to_string_lossy().into_owned();
+    let agent_workspace = PathBuf::from(&args.workspace_path);
+    let push_branch = args.remote_branch.as_deref().unwrap_or(&args.branch);
+    let base_branch = args.base_branch.as_deref().unwrap_or(&args.branch);
+    let remote = canonical_github_remote(&args.repo_full_name)?;
+    let staging = tempfile::Builder::new()
+        .prefix("cognia-github-push-")
+        .tempdir()
+        .map_err(|e| format!("create trusted push workspace: {e}"))?;
+    let staging_path = staging.path().to_path_buf();
+    let staging_str = staging_path.to_string_lossy().into_owned();
 
-    let status = run_git_capture(&workspace, ["status", "--porcelain"]).await?;
+    let mut clone = Command::new("git");
+    clone.args([
+        "clone",
+        &remote,
+        &staging_str,
+        "--branch",
+        base_branch,
+        "--depth",
+        "20",
+    ]);
+    if let Some(token) = args.token.as_deref() {
+        apply_git_auth_env(&mut clone, token);
+    } else {
+        apply_git_isolation_env(&mut clone);
+    }
+    let output = clone
+        .output()
+        .await
+        .map_err(|e| format!("trusted git clone spawn: {e}"))?;
+    if !output.status.success() {
+        let stderr = redact_git_credentials(
+            &String::from_utf8_lossy(&output.stderr),
+            args.token.as_deref(),
+        );
+        return Err(format!("trusted git clone failed: {stderr}"));
+    }
+
+    if base_branch != args.branch {
+        run_git_silent(&staging_path, ["checkout", "-b", &args.branch]).await?;
+    }
+    let source = agent_workspace.clone();
+    let destination = staging_path.clone();
+    tokio::task::spawn_blocking(move || mirror_worktree(&source, &destination))
+        .await
+        .map_err(|e| format!("mirror worktree task: {e}"))??;
+
+    let status = run_git_capture(&staging_path, ["status", "--porcelain"]).await?;
     if status.trim().is_empty() {
         return Err("commitAndPush: no changes to commit".to_string());
     }
+    run_git_silent(&staging_path, ["add", "."]).await?;
+    run_git_silent(&staging_path, ["commit", "-m", &args.message]).await?;
 
-    run_git_silent(&workspace, ["add", "."]).await?;
-    run_git_silent(&workspace, ["commit", "-m", &args.message]).await?;
-
-    let push_branch = args.remote_branch.as_deref().unwrap_or(&args.branch);
+    let refspec = format!("HEAD:refs/heads/{push_branch}");
     run_git_silent_auth(
-        &workspace,
-        ["push", "origin", push_branch, "--set-upstream"],
+        &staging_path,
+        ["push", &remote, &refspec],
         args.token.as_deref(),
     )
     .await?;
 
-    let head = run_git_capture(&workspace, ["rev-parse", "HEAD"]).await?;
-    let _ = workspace_str; // suppress unused-warning when feature-flagged off
+    let head = run_git_capture(&staging_path, ["rev-parse", "HEAD"]).await?;
     Ok(head.trim().to_string())
 }
 
@@ -233,6 +289,24 @@ fn unix_millis_now() -> i64 {
         .unwrap_or(0)
 }
 
+fn canonical_github_remote(repo_full_name: &str) -> Result<String, String> {
+    let mut segments = repo_full_name.split('/');
+    let owner = segments.next().unwrap_or_default();
+    let repo = segments.next().unwrap_or_default();
+    let valid_segment = |segment: &str| {
+        !segment.is_empty()
+            && segment != "."
+            && segment != ".."
+            && segment
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    };
+    if !valid_segment(owner) || !valid_segment(repo) || segments.next().is_some() {
+        return Err("invalid GitHub repository identity".to_string());
+    }
+    Ok(format!("https://github.com/{owner}/{repo}.git"))
+}
+
 /// Replace every literal occurrence of the token with `<redacted>` so callers
 /// can safely surface git's stderr to renderer logs / audit trails.
 fn redact_token(text: &str, token: &str) -> String {
@@ -242,6 +316,80 @@ fn redact_token(text: &str, token: &str) -> String {
     text.replace(token, "<redacted>")
 }
 
+fn redact_git_credentials(text: &str, token: Option<&str>) -> String {
+    let Some(token) = token.filter(|value| !value.is_empty()) else {
+        return text.to_string();
+    };
+    use base64::Engine as _;
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
+    redact_token(&redact_token(text, token), &basic)
+}
+
+fn mirror_worktree(source: &Path, destination: &Path) -> Result<(), String> {
+    if !source.is_dir() || !destination.join(".git").is_dir() {
+        return Err("trusted worktree mirror requires source and git destination".to_string());
+    }
+    for entry in std::fs::read_dir(destination).map_err(|e| format!("read staging: {e}"))? {
+        let entry = entry.map_err(|e| format!("read staging entry: {e}"))?;
+        if entry.file_name() != ".git" {
+            remove_entry(&entry.path())?;
+        }
+    }
+    for entry in std::fs::read_dir(source).map_err(|e| format!("read agent worktree: {e}"))? {
+        let entry = entry.map_err(|e| format!("read agent worktree entry: {e}"))?;
+        if entry.file_name() != ".git" {
+            copy_entry(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_entry(path: &Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|e| format!("inspect staging: {e}"))?;
+    if metadata.is_dir() {
+        std::fs::remove_dir_all(path).map_err(|e| format!("remove staging directory: {e}"))
+    } else {
+        std::fs::remove_file(path).map_err(|e| format!("remove staging file: {e}"))
+    }
+}
+
+fn copy_entry(source: &Path, destination: &Path) -> Result<(), String> {
+    if source.file_name().is_some_and(|name| name == ".git") {
+        return Err("nested git metadata is not allowed in the agent worktree".to_string());
+    }
+    let metadata = std::fs::symlink_metadata(source)
+        .map_err(|e| format!("inspect agent worktree entry: {e}"))?;
+    if metadata.file_type().is_symlink() {
+        let target =
+            std::fs::read_link(source).map_err(|e| format!("read worktree symlink: {e}"))?;
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(target, destination)
+                .map_err(|e| format!("copy worktree symlink: {e}"))?;
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        return Err("worktree symlinks are not supported on this platform".to_string());
+    }
+    if metadata.is_dir() {
+        std::fs::create_dir(destination).map_err(|e| format!("create staging directory: {e}"))?;
+        for entry in
+            std::fs::read_dir(source).map_err(|e| format!("read worktree directory: {e}"))?
+        {
+            let entry = entry.map_err(|e| format!("read worktree child: {e}"))?;
+            copy_entry(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    if metadata.is_file() {
+        std::fs::copy(source, destination).map_err(|e| format!("copy worktree file: {e}"))?;
+        std::fs::set_permissions(destination, metadata.permissions())
+            .map_err(|e| format!("set worktree file permissions: {e}"))?;
+        return Ok(());
+    }
+    Err("worktree contains an unsupported special file".to_string())
+}
+
 /// Supply the GitHub credential to a single `git` invocation without ever
 /// writing it to disk or putting it on the command line.
 ///
@@ -249,19 +397,33 @@ fn redact_token(text: &str, token: &str) -> String {
 /// it applies only to this child process, so nothing lands in
 /// `<workspace>/.git/config` (which an agent working in the clone can read) and
 /// nothing lands in argv (which any process listing can read).
+fn apply_git_isolation_env(command: &mut Command) {
+    command
+        // Host-owned git operations must never execute hooks installed by an
+        // issue-controlled agent in the worktree.
+        .env("GIT_CONFIG_COUNT", "3")
+        .env("GIT_CONFIG_KEY_0", "core.hooksPath")
+        .env("GIT_CONFIG_VALUE_0", "/dev/null")
+        .env("GIT_CONFIG_KEY_1", "user.name")
+        .env("GIT_CONFIG_VALUE_1", "Cognia")
+        .env("GIT_CONFIG_KEY_2", "user.email")
+        .env("GIT_CONFIG_VALUE_2", "noreply@cognia.app")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0");
+}
+
 fn apply_git_auth_env(command: &mut Command, token: &str) {
     use base64::Engine as _;
     let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
+    apply_git_isolation_env(command);
     command
-        .env("GIT_CONFIG_COUNT", "1")
-        .env("GIT_CONFIG_KEY_0", "http.extraheader")
+        .env("GIT_CONFIG_COUNT", "4")
+        .env("GIT_CONFIG_KEY_3", "http.https://github.com/.extraheader")
         .env(
-            "GIT_CONFIG_VALUE_0",
+            "GIT_CONFIG_VALUE_3",
             format!("Authorization: Basic {basic}"),
-        )
-        // Never let git fall back to an interactive credential prompt: in a
-        // headless workflow that would hang the run instead of failing it.
-        .env("GIT_TERMINAL_PROMPT", "0");
+        );
 }
 
 async fn run_git_silent<I, S>(cwd: &Path, args: I) -> Result<(), String>
@@ -281,13 +443,15 @@ where
     command.current_dir(cwd).args(args);
     if let Some(token) = token {
         apply_git_auth_env(&mut command, token);
+    } else {
+        apply_git_isolation_env(&mut command);
     }
     let output = command
         .output()
         .await
         .map_err(|e| format!("git spawn: {e}"))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let stderr = redact_git_credentials(&String::from_utf8_lossy(&output.stderr), token);
         return Err(format!("git failed: {}", stderr.trim()));
     }
     Ok(())
@@ -298,9 +462,10 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
-    let output = Command::new("git")
-        .current_dir(cwd)
-        .args(args)
+    let mut command = Command::new("git");
+    command.current_dir(cwd).args(args);
+    apply_git_isolation_env(&mut command);
+    let output = command
         .output()
         .await
         .map_err(|e| format!("git spawn: {e}"))?;
@@ -353,6 +518,31 @@ mod tests {
         assert_eq!(redact_token(text, ""), text);
     }
 
+    #[test]
+    fn credential_redaction_removes_raw_and_basic_forms() {
+        use base64::Engine as _;
+        let token = "ghs_SECRET";
+        let basic =
+            base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
+        let cleaned = redact_git_credentials(
+            &format!("token={token} Authorization: Basic {basic}"),
+            Some(token),
+        );
+        assert!(!cleaned.contains(token));
+        assert!(!cleaned.contains(&basic));
+    }
+
+    #[test]
+    fn canonical_remote_rejects_non_repository_input() {
+        assert_eq!(
+            canonical_github_remote("octocat/hello-world").unwrap(),
+            "https://github.com/octocat/hello-world.git"
+        );
+        for value in ["octocat", "octocat/repo/extra", "../repo", "octocat/repo?x"] {
+            assert!(canonical_github_remote(value).is_err(), "accepted {value}");
+        }
+    }
+
     #[tokio::test]
     async fn remove_returns_true_for_missing_path() {
         let tmp = TempDir::new().unwrap();
@@ -400,15 +590,6 @@ mod tests {
         assert!(s.mtime.is_none());
     }
 
-    fn git_on_path() -> bool {
-        std::process::Command::new("git")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok()
-    }
-
     #[test]
     fn git_auth_env_carries_the_credential_out_of_band() {
         // The credential must travel in the child's ENV, never in argv (visible
@@ -436,10 +617,10 @@ mod tests {
                 ))
             })
             .collect();
-        assert_eq!(envs.get("GIT_CONFIG_COUNT").map(String::as_str), Some("1"));
+        assert_eq!(envs.get("GIT_CONFIG_COUNT").map(String::as_str), Some("4"));
         assert_eq!(
-            envs.get("GIT_CONFIG_KEY_0").map(String::as_str),
-            Some("http.extraheader")
+            envs.get("GIT_CONFIG_KEY_3").map(String::as_str),
+            Some("http.https://github.com/.extraheader")
         );
         // base64("x-access-token:ghs_SECRET")
         let expected = {
@@ -447,8 +628,16 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode("x-access-token:ghs_SECRET")
         };
         assert_eq!(
-            envs.get("GIT_CONFIG_VALUE_0").map(String::as_str),
+            envs.get("GIT_CONFIG_VALUE_3").map(String::as_str),
             Some(format!("Authorization: Basic {expected}").as_str())
+        );
+        assert_eq!(
+            envs.get("GIT_CONFIG_KEY_0").map(String::as_str),
+            Some("core.hooksPath")
+        );
+        assert_eq!(
+            envs.get("GIT_CONFIG_VALUE_0").map(String::as_str),
+            Some("/dev/null")
         );
         // A headless run must fail rather than block on a credential prompt.
         assert_eq!(
@@ -457,57 +646,38 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn commit_and_push_rejects_when_no_changes() {
-        // Skip the test if `git` isn't on PATH — environment-conditional so the
-        // suite still passes on minimal CI images without a git install.
-        if !git_on_path() {
-            return;
-        }
-        let tmp = TempDir::new().unwrap();
-        let repo = tmp.path();
-        // Initialize a repo with one committed file so HEAD exists and the
-        // working tree is clean.
-        let init = std::process::Command::new("git")
-            .args(["init", "-q", "-b", "main"])
-            .current_dir(repo)
-            .status()
-            .unwrap();
-        assert!(init.success(), "git init failed");
-        std::process::Command::new("git")
-            .args(["config", "user.email", "test@example.com"])
-            .current_dir(repo)
-            .status()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["config", "user.name", "Test"])
-            .current_dir(repo)
-            .status()
-            .unwrap();
-        fs::write(repo.join("README"), b"hi").unwrap();
-        std::process::Command::new("git")
-            .args(["add", "."])
-            .current_dir(repo)
-            .status()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["commit", "-q", "-m", "init"])
-            .current_dir(repo)
-            .status()
-            .unwrap();
+    #[test]
+    fn trusted_mirror_excludes_agent_git_configuration() {
+        let source = TempDir::new().unwrap();
+        let destination = TempDir::new().unwrap();
+        fs::create_dir(source.path().join(".git")).unwrap();
+        fs::write(
+            source.path().join(".git/config"),
+            b"[extensions]\nworktreeConfig=true\n[credential]\nhelper=evil\n[http]\nproxy=evil",
+        )
+        .unwrap();
+        fs::write(
+            source.path().join(".git/config.worktree"),
+            b"[url \"https://attacker.invalid/\"]\ninsteadOf=https://github.com/",
+        )
+        .unwrap();
+        fs::create_dir(destination.path().join(".git")).unwrap();
+        fs::write(destination.path().join(".git/config"), b"trusted").unwrap();
+        fs::write(destination.path().join("deleted.txt"), b"old").unwrap();
+        fs::create_dir(source.path().join("src")).unwrap();
+        fs::write(source.path().join("src/lib.rs"), b"changed").unwrap();
 
-        let err = github_workspace_commit_and_push(CommitAndPushArgs {
-            workspace_path: repo.to_string_lossy().into_owned(),
-            branch: "main".into(),
-            message: "noop".into(),
-            remote_branch: None,
-            token: None,
-        })
-        .await
-        .expect_err("should error on clean tree");
-        assert!(
-            err.contains("no changes to commit"),
-            "unexpected error: {err}"
+        mirror_worktree(source.path(), destination.path()).unwrap();
+
+        assert_eq!(
+            fs::read(destination.path().join(".git/config")).unwrap(),
+            b"trusted"
         );
+        assert!(!destination.path().join(".git/config.worktree").exists());
+        assert_eq!(
+            fs::read(destination.path().join("src/lib.rs")).unwrap(),
+            b"changed"
+        );
+        assert!(!destination.path().join("deleted.txt").exists());
     }
 }

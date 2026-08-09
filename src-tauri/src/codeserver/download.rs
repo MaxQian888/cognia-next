@@ -436,10 +436,10 @@ async fn stream_to_file(
     dest: &Path,
     cancel: Option<Arc<DownloadCancel>>,
 ) -> Result<String> {
-    let client = reqwest::Client::builder()
-        .user_agent("cognia-desktop")
-        .build()
-        .context("build http client")?;
+    let builder = reqwest::Client::builder().user_agent("cognia-desktop");
+    let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, url)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let client = builder.build().context("build http client")?;
 
     // Bound to a `let` rather than passed inline: the future is held across a
     // `select!` below, so the closure must outlive the statement that built it.

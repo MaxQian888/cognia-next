@@ -17,10 +17,12 @@
 //!      `KNOWN_PORTS` order, then port) so the UI is stable run-to-run.
 
 use std::collections::{HashMap, HashSet};
+#[cfg(test)]
 use std::net::SocketAddr;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
@@ -32,6 +34,13 @@ pub enum CandidateKind {
     Http,
     Socks5,
     Clash,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VerificationProtocol {
+    HttpConnect,
+    Socks5Connect,
 }
 
 /// How a candidate was discovered. Drives the evidence subtitle in the
@@ -74,6 +83,8 @@ pub struct ProxyCandidate {
     /// guarded by an API secret, so no version string is available.
     #[serde(rename = "controllerSecured", skip_serializing_if = "Option::is_none")]
     pub controller_secured: Option<bool>,
+    pub verified: bool,
+    pub verification: VerificationProtocol,
 }
 
 const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -100,6 +111,7 @@ pub const KNOWN_PORTS: &[(u16, CandidateKind, &str)] = &[
 
 /// TCP-connect probe for a single host:port. Returns true when the connect
 /// completes within the timeout window.
+#[cfg(test)]
 async fn port_open(host: &str, port: u16) -> bool {
     let addr = match format!("{host}:{port}").parse::<SocketAddr>() {
         Ok(a) => a,
@@ -109,6 +121,99 @@ async fn port_open(host: &str, port: u16) -> bool {
         timeout(PROBE_TIMEOUT, TcpStream::connect(addr)).await,
         Ok(Ok(_))
     )
+}
+
+async fn verify_proxy_candidate(host: &str, port: u16, kind: CandidateKind) -> bool {
+    timeout(PROBE_TIMEOUT, async move {
+        let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.ok()?;
+        let target_port = target.local_addr().ok()?.port();
+        let verified = match kind {
+            CandidateKind::Http | CandidateKind::Clash => {
+                verify_http_connect(host, port, target_port).await
+            }
+            CandidateKind::Socks5 => verify_socks5_connect(host, port, target_port).await,
+        };
+        if !verified {
+            return None;
+        }
+        target.accept().await.ok().map(|_| ())
+    })
+    .await
+    .is_ok_and(|result| result.is_some())
+}
+
+async fn verify_http_connect(host: &str, port: u16, target_port: u16) -> bool {
+    let Ok(mut stream) = TcpStream::connect((host, port)).await else {
+        return false;
+    };
+    let request = format!(
+        "CONNECT 127.0.0.1:{target_port} HTTP/1.1\r\nHost: 127.0.0.1:{target_port}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).await.is_err() {
+        return false;
+    }
+    let mut response = Vec::with_capacity(256);
+    let mut chunk = [0_u8; 128];
+    loop {
+        let Ok(read) = stream.read(&mut chunk).await else {
+            return false;
+        };
+        if read == 0 {
+            return false;
+        }
+        response.extend_from_slice(&chunk[..read]);
+        if response.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+        if response.len() > 16 * 1024 {
+            return false;
+        }
+    }
+    let status = String::from_utf8_lossy(&response)
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or_default();
+    (200..300).contains(&status)
+}
+
+async fn verify_socks5_connect(host: &str, port: u16, target_port: u16) -> bool {
+    let Ok(mut stream) = TcpStream::connect((host, port)).await else {
+        return false;
+    };
+    if stream.write_all(&[0x05, 0x01, 0x00]).await.is_err() {
+        return false;
+    }
+    let mut method = [0_u8; 2];
+    if stream.read_exact(&mut method).await.is_err() || method != [0x05, 0x00] {
+        return false;
+    }
+    let domain = b"localhost";
+    let mut request = vec![0x05, 0x01, 0x00, 0x03, domain.len() as u8];
+    request.extend_from_slice(domain);
+    request.extend_from_slice(&target_port.to_be_bytes());
+    if stream.write_all(&request).await.is_err() {
+        return false;
+    }
+    let mut prefix = [0_u8; 4];
+    if stream.read_exact(&mut prefix).await.is_err() || prefix[0] != 0x05 || prefix[1] != 0x00 {
+        return false;
+    }
+    let remaining = match prefix[3] {
+        0x01 => 4 + 2,
+        0x04 => 16 + 2,
+        0x03 => {
+            let mut length = [0_u8; 1];
+            if stream.read_exact(&mut length).await.is_err() {
+                return false;
+            }
+            usize::from(length[0]) + 2
+        }
+        _ => return false,
+    };
+    let mut address = vec![0_u8; remaining];
+    stream.read_exact(&mut address).await.is_ok()
 }
 
 /// Outcome of probing a Clash-style controller's `/version` endpoint.
@@ -364,6 +469,11 @@ fn assemble_candidates(
                 client_name: ev.client.map(|id| clients::client_def(id).name.to_string()),
                 source: Some(ev.source),
                 controller_secured,
+                verified: true,
+                verification: match ev.kind {
+                    CandidateKind::Http | CandidateKind::Clash => VerificationProtocol::HttpConnect,
+                    CandidateKind::Socks5 => VerificationProtocol::Socks5Connect,
+                },
             }
         })
         .collect()
@@ -378,9 +488,15 @@ pub async fn probe_all() -> Vec<ProxyCandidate> {
 
     let mut ports: Vec<u16> = evidence.keys().copied().collect();
     ports.sort_unstable();
-    let port_probes = ports
-        .iter()
-        .map(|port| async move { (*port, port_open("127.0.0.1", *port).await) });
+    let port_probes = ports.iter().map(|port| {
+        let kind = evidence[port].kind;
+        async move {
+            (
+                *port,
+                verify_proxy_candidate("127.0.0.1", *port, kind).await,
+            )
+        }
+    });
 
     let endpoints = controller_endpoints(&discovered);
     let controller_probes = endpoints.iter().map(|(host, port)| async move {
@@ -436,6 +552,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verification_rejects_an_ordinary_http_service() {
+        let port =
+            serve_once("HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").await;
+        assert!(!verify_proxy_candidate("127.0.0.1", port, CandidateKind::Http).await);
+    }
+
+    #[tokio::test]
+    async fn verification_rejects_proxy_auth_and_fake_socks() {
+        let http_port =
+            serve_once("HTTP/1.1 407 Proxy Authentication Required\r\ncontent-length: 0\r\n\r\n")
+                .await;
+        assert!(!verify_proxy_candidate("127.0.0.1", http_port, CandidateKind::Http).await);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socks_port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut greeting = [0_u8; 3];
+                let _ = socket.read_exact(&mut greeting).await;
+                let _ = socket.write_all(&[0x05, 0xff]).await;
+            }
+        });
+        assert!(!verify_proxy_candidate("127.0.0.1", socks_port, CandidateKind::Socks5).await);
+    }
+
+    #[tokio::test]
+    async fn verification_accepts_a_real_http_connect_proxy() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut request = Vec::new();
+                let mut chunk = [0_u8; 256];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let Ok(read) = socket.read(&mut chunk).await else {
+                        return;
+                    };
+                    if read == 0 {
+                        return;
+                    }
+                    request.extend_from_slice(&chunk[..read]);
+                }
+                let line = String::from_utf8_lossy(&request)
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                let Some(authority) = line.split_whitespace().nth(1) else {
+                    return;
+                };
+                if TcpStream::connect(authority).await.is_ok() {
+                    let _ = socket
+                        .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                        .await;
+                }
+            }
+        });
+        assert!(verify_proxy_candidate("127.0.0.1", proxy_port, CandidateKind::Http).await);
+    }
+
+    #[tokio::test]
+    async fn verification_accepts_socks5_with_proxy_side_domain_resolution() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut greeting = [0_u8; 3];
+                if socket.read_exact(&mut greeting).await.is_err() || greeting != [5, 1, 0] {
+                    return;
+                }
+                if socket.write_all(&[5, 0]).await.is_err() {
+                    return;
+                }
+                let mut prefix = [0_u8; 5];
+                if socket.read_exact(&mut prefix).await.is_err() || prefix[..4] != [5, 1, 0, 3] {
+                    return;
+                }
+                let mut domain_and_port = vec![0_u8; usize::from(prefix[4]) + 2];
+                if socket.read_exact(&mut domain_and_port).await.is_err() {
+                    return;
+                }
+                let domain = String::from_utf8_lossy(&domain_and_port[..domain_and_port.len() - 2]);
+                let port = u16::from_be_bytes([
+                    domain_and_port[domain_and_port.len() - 2],
+                    domain_and_port[domain_and_port.len() - 1],
+                ]);
+                if TcpStream::connect((domain.as_ref(), port)).await.is_ok() {
+                    let _ = socket.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).await;
+                }
+            }
+        });
+        assert!(verify_proxy_candidate("127.0.0.1", proxy_port, CandidateKind::Socks5).await);
+    }
+
+    #[tokio::test]
     async fn identify_clash_returns_none_when_api_down() {
         // Real test environment should never have Clash on 9090. If this
         // accidentally passes against a real Clash, the version string is
@@ -454,6 +665,7 @@ mod tests {
             assert_eq!(c.host, "127.0.0.1");
             assert!(c.port > 0);
             assert!(!c.label.is_empty());
+            assert!(c.verified);
         }
     }
 

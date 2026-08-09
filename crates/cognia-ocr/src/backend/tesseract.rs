@@ -209,6 +209,7 @@ mod tests {
             bytes,
             mime_type: mime_type.to_string(),
             languages: languages.into_iter().map(str::to_string).collect(),
+            model_variant: None,
         }
     }
 

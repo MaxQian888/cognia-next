@@ -122,18 +122,11 @@ pub async fn http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, St
     }
 
     let timeout = req.timeout_duration();
-    let proxy_cfg = proxy_config::current();
-    let mut builder = Client::builder()
+    let builder = Client::builder()
         .timeout(timeout)
         .danger_accept_invalid_certs(req.accept_invalid_certificates());
-    // Only attach the proxy when active AND the target isn't on the bypass
-    // list — otherwise localhost dev servers would round-trip through the
-    // user's external proxy.
-    if proxy_cfg.is_active() && !proxy_cfg.should_bypass(&req.url) {
-        if let Some(proxy) = proxy_cfg.build_reqwest_proxy() {
-            builder = builder.proxy(proxy);
-        }
-    }
+    let (builder, _) =
+        proxy_config::apply_reqwest_policy(builder, &req.url).map_err(|error| error.to_string())?;
     let client = builder
         .build()
         .map_err(|e| format!("reqwest build failed: {e}"))?;

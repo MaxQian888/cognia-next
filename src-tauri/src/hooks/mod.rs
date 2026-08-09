@@ -11,7 +11,7 @@ pub mod types;
 pub mod webhook;
 
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 pub use types::{HookDecision, HookEvent, HookEventPayload, HookGroup, HookHandler, HookOutcome};
 
@@ -124,24 +124,6 @@ async fn run_handler(handler: HookHandler, payload_json: &str) -> HookOutcome {
             reason: "unsupported handler type".to_string(),
         },
     }
-}
-
-/// Convenience wrapper for the prompt-scoped event. Returns the merged decision
-/// so the caller can treat `block` as a hard error and `additional_context`
-/// as a prompt prefix.
-pub async fn run_user_prompt_submit(
-    settings: &EffectiveSettings,
-    session_id: &str,
-    cwd: Option<&str>,
-    prompt_text: &str,
-) -> HookDecision {
-    let payload = HookEventPayload {
-        hook_event_name: "UserPromptSubmit".to_string(),
-        session_id: session_id.to_string(),
-        cwd: cwd.map(String::from),
-        fields: json!({ "prompt": prompt_text }),
-    };
-    run_event(&settings.merged, HookEvent::UserPromptSubmit, "", &payload).await
 }
 
 // PreToolUse execution moved into the sidecar (`dispatch/agent-hooks.mjs`) as an

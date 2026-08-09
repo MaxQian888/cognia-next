@@ -7,15 +7,11 @@ license = "AGPL-3.0-or-later"
 publish = false
 repository = "https://github.com/MaxQian888/cognia-next"
 edition = "2021"
-# 1.89.0 floor — driven by transitive deps in the workspace Cargo.lock
-# (`metrique 0.1.25` is the highest). `clap_lex 1.1.0` needs 1.85
-# (edition2024) and `oar-ocr` (gated by `ocr-paddle`) needs 1.84.1; the
-# workspace toolchain pin in `rust-toolchain.toml` reflects the floor.
-rust-version = "1.89.0"
-# NOTE: the workspace toolchain pin (`rust-toolchain.toml`) lives at 1.93.0
-# to match the lockfile resolver context. `rust-version` here documents the
-# minimum any consumer needs to build this crate — 1.89.0 is the floor from
-# transitive deps; bumping the pin doesn't change this MSRV claim.
+# Rust 1.95 is required by oar-ocr 0.9.x, which is now part of the standard
+# desktop build through the default `ocr-paddle` feature.
+rust-version = "1.95"
+# PP-OCRv6 ships through oar-ocr 0.9.x, whose supported toolchain floor is
+# Rust 1.95. Keep this crate and rust-toolchain.toml aligned.
 default-run = "cognia-next"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -113,7 +109,6 @@ cognia-skills = { path = "../crates/cognia-skills" }
 cognia-tts = { path = "../crates/cognia-tts" }
 # ADR-0067 follow-up — remote-control LAN API. Re-aliased as
 # `crate::remote_control`.
-cognia-remote-control = { path = "../crates/cognia-remote-control" }
 # ADR-0067 follow-up — local OpenAI-compatible gateway. Re-aliased as
 # `crate::gateway`.
 cognia-gateway = { path = "../crates/cognia-gateway" }
@@ -536,11 +531,11 @@ wiremock = "0.6"
 # (~200 LOC), no transitive deps. Only needed in test builds.
 urlencoding = "2"
 
-# ADR-0024 — OCR backend opt-in features. The default build ships
-# placeholder backends so the dispatch table compiles everywhere; each
-# feature flag links a real binding for one platform.
+# ADR-0024 — standard desktop builds include PaddleOCR; other native OCR
+# bindings remain explicit opt-ins. Placeholder registrations keep the
+# dispatch table dense without making an unavailable backend routable.
 [features]
-default = []
+default = ["ocr-paddle"]
 # ADR-0021 — compiles the `cognia-webrtc-peer` harness binary. Off by default
 # so the extra bin never enters normal builds; enabled only by `pnpm webrtc:pair`.
 webrtc-harness = []
@@ -564,7 +559,7 @@ ocr-windows = ["cognia-ocr/ocr-windows"]
 # in-process whenever the target is macOS.
 # Pure-Rust OCR via `ocrs` + RTen. Models downloaded on first use.
 ocr-ocrs = ["cognia-ocr/ocr-ocrs"]
-# PaddleOCR PP-OCRv5 via `oar-ocr` + ONNX Runtime (ships an onnxruntime DLL).
+# PaddleOCR PP-OCRv6 via `oar-ocr` + ONNX Runtime (ships an onnxruntime DLL).
 ocr-paddle = ["cognia-ocr/ocr-paddle"]
 # ADR-0059 R13 — ExecBackend::Container for per-workspace runner containers
 # (T2 topology). Off desktop builds: only the headless `cognia-server` image

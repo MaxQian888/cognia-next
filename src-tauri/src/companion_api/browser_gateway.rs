@@ -1,21 +1,15 @@
-//! Public browser gateway state and `/ws/v1/browser/{sessionId}` transport.
+//! Public browser gateway state and `/ws/browser/{sessionId}` transport.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Extension, Path, Query};
+use axum::extract::{Path, Query};
 use axum::response::IntoResponse;
-use axum::Json;
-use base64::Engine as _;
 use parking_lot::Mutex;
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, watch};
-
-use super::DeviceContext;
 
 #[cfg(feature = "workspace-runtime-exec")]
 use crate::external_agent::workspace_runtime_backend::{
@@ -24,7 +18,6 @@ use crate::external_agent::workspace_runtime_backend::{
     WORKSPACE_RUNTIME_URL_TEMPLATE_ENV,
 };
 
-const TICKET_TTL_MS: i64 = 60_000;
 const AGENT_LEASE_MS: i64 = 15_000;
 const HUMAN_IDLE_MS: i64 = 30_000;
 const HUMAN_RECONNECT_GRACE_MS: i64 = 5_000;
@@ -93,6 +86,22 @@ pub struct BrowserCapabilities {
     pub persistent_profile: bool,
 }
 
+/// Structured remote-browser process status. `healthy` is true only after a
+/// live workspace-runtime health request; compile flags and environment
+/// presence alone never count as runtime health.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserRuntimeStatus {
+    pub compiled: bool,
+    pub enabled: bool,
+    pub configured: bool,
+    pub healthy: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct EnsureBrowserSession {
     pub account_id: String,
@@ -119,21 +128,6 @@ impl BrowserGatewayError {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StreamTicket {
-    pub ticket: String,
-    pub expires_at: i64,
-}
-
-#[derive(Clone)]
-struct TicketBinding {
-    account_id: String,
-    device_id: String,
-    session_id: String,
-    expires_at: i64,
-}
-
 struct LeaseState {
     epoch: u64,
     controller: BrowserController,
@@ -143,6 +137,7 @@ struct LeaseState {
 
 struct BrowserSessionRecord {
     account_id: String,
+    device_id: String,
     summary: BrowserSessionSummary,
     viewers: usize,
     frame_tx: watch::Sender<Option<Arc<Vec<u8>>>>,
@@ -168,7 +163,6 @@ pub struct BrowserGateway {
     sessions: Mutex<HashMap<String, BrowserSessionRecord>>,
     session_ids_by_chat: Mutex<HashMap<String, String>>,
     profile_owners: Mutex<HashMap<String, String>>,
-    tickets: Mutex<HashMap<[u8; 32], TicketBinding>>,
     leases: Mutex<HashMap<String, LeaseState>>,
 }
 
@@ -180,7 +174,6 @@ impl BrowserGateway {
             sessions: Mutex::new(HashMap::new()),
             session_ids_by_chat: Mutex::new(HashMap::new()),
             profile_owners: Mutex::new(HashMap::new()),
-            tickets: Mutex::new(HashMap::new()),
             leases: Mutex::new(HashMap::new()),
         }
     }
@@ -213,12 +206,18 @@ impl BrowserGateway {
                 .sessions
                 .lock()
                 .get(&id)
-                .map(|record| record.summary.clone());
-            if let Some(summary) = existing {
+                .map(|record| (record.device_id.clone(), record.summary.clone()));
+            if let Some((device_id, summary)) = existing {
                 if matches!(
                     summary.state.as_str(),
                     "creating" | "ready" | "recovering" | "closing"
                 ) {
+                    if device_id != input.device_id {
+                        return Err(BrowserGatewayError::new(
+                            "browser_session_forbidden",
+                            "browser session belongs to another device",
+                        ));
+                    }
                     return Ok(summary);
                 }
                 self.remove_session_locked(&id);
@@ -283,6 +282,7 @@ impl BrowserGateway {
             id.clone(),
             BrowserSessionRecord {
                 account_id: input.account_id.clone(),
+                device_id: input.device_id,
                 summary: summary.clone(),
                 viewers: 0,
                 frame_tx,
@@ -373,9 +373,10 @@ impl BrowserGateway {
     pub fn close_session(
         &self,
         account_id: &str,
+        device_id: &str,
         session_id: &str,
     ) -> Result<(), BrowserGatewayError> {
-        self.session_for_account(account_id, session_id)?;
+        self.session_for_principal(account_id, device_id, session_id)?;
         self.remove_session(session_id).ok_or_else(|| {
             BrowserGatewayError::new("browser_session_not_found", "browser session not found")
         })?;
@@ -441,6 +442,25 @@ impl BrowserGateway {
         Ok(record.summary.clone())
     }
 
+    pub fn session_for_principal(
+        &self,
+        account_id: &str,
+        device_id: &str,
+        session_id: &str,
+    ) -> Result<BrowserSessionSummary, BrowserGatewayError> {
+        let sessions = self.sessions.lock();
+        let record = sessions.get(session_id).ok_or_else(|| {
+            BrowserGatewayError::new("browser_session_not_found", "browser session not found")
+        })?;
+        if record.account_id != account_id || record.device_id != device_id {
+            return Err(BrowserGatewayError::new(
+                "browser_session_forbidden",
+                "browser session belongs to another principal",
+            ));
+        }
+        Ok(record.summary.clone())
+    }
+
     #[cfg(feature = "workspace-runtime-exec")]
     fn has_session(&self, session_id: &str) -> bool {
         self.sessions.lock().contains_key(session_id)
@@ -452,82 +472,6 @@ impl BrowserGateway {
             .lock()
             .get(session_id)
             .is_some_and(|record| !matches!(record.summary.state.as_str(), "closed" | "failed"))
-    }
-
-    pub fn issue_ticket(
-        &self,
-        account_id: &str,
-        device_id: &str,
-        session_id: &str,
-    ) -> Result<StreamTicket, BrowserGatewayError> {
-        self.session_for_account(account_id, session_id)?;
-        let mut raw = [0u8; 32];
-        rand::rngs::OsRng.fill_bytes(&mut raw);
-        let ticket = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
-        let expires_at = (self.now)() + TICKET_TTL_MS;
-        self.tickets.lock().insert(
-            Sha256::digest(ticket.as_bytes()).into(),
-            TicketBinding {
-                account_id: account_id.to_string(),
-                device_id: device_id.to_string(),
-                session_id: session_id.to_string(),
-                expires_at,
-            },
-        );
-        Ok(StreamTicket { ticket, expires_at })
-    }
-
-    pub fn consume_ticket(
-        &self,
-        ticket: &str,
-        account_id: &str,
-        device_id: &str,
-        session_id: &str,
-    ) -> Result<(), BrowserGatewayError> {
-        let binding = self.take_ticket(ticket)?;
-        if binding.account_id != account_id
-            || binding.device_id != device_id
-            || binding.session_id != session_id
-        {
-            return Err(BrowserGatewayError::new(
-                "browser_ticket_binding_mismatch",
-                "stream ticket binding mismatch",
-            ));
-        }
-        self.ensure_ticket_fresh(&binding)
-    }
-
-    fn consume_for_stream(
-        &self,
-        ticket: &str,
-        session_id: &str,
-    ) -> Result<TicketBinding, BrowserGatewayError> {
-        let binding = self.take_ticket(ticket)?;
-        if binding.session_id != session_id {
-            return Err(BrowserGatewayError::new(
-                "browser_ticket_binding_mismatch",
-                "stream ticket session mismatch",
-            ));
-        }
-        self.ensure_ticket_fresh(&binding)?;
-        Ok(binding)
-    }
-
-    fn take_ticket(&self, ticket: &str) -> Result<TicketBinding, BrowserGatewayError> {
-        let digest: [u8; 32] = Sha256::digest(ticket.as_bytes()).into();
-        self.tickets.lock().remove(&digest).ok_or_else(|| {
-            BrowserGatewayError::new("browser_ticket_invalid", "stream ticket is invalid")
-        })
-    }
-
-    fn ensure_ticket_fresh(&self, binding: &TicketBinding) -> Result<(), BrowserGatewayError> {
-        if (self.now)() > binding.expires_at {
-            return Err(BrowserGatewayError::new(
-                "browser_ticket_expired",
-                "stream ticket expired",
-            ));
-        }
-        Ok(())
     }
 
     pub fn acquire_agent_lease(
@@ -751,10 +695,10 @@ pub fn gateway() -> &'static BrowserGateway {
 
 pub const BROWSER_RPC_COMMANDS: &[&str] = &[
     "browser_capability",
+    "browser_runtime_status",
     "browser_session_ensure",
     "browser_session_get",
     "browser_session_close",
-    "browser_stream_ticket_issue",
     "browser_navigate",
     "browser_snapshot",
     "browser_act",
@@ -794,7 +738,7 @@ struct WorkspaceRuntimeBrowserControl {
 
 #[cfg(feature = "workspace-runtime-exec")]
 impl WorkspaceRuntimeBrowserControl {
-    async fn endpoint(
+    async fn located_endpoint(
         &self,
         workspace_id: &str,
     ) -> Result<WorkspaceRuntimeEndpoint, BrowserGatewayError> {
@@ -806,21 +750,37 @@ impl WorkspaceRuntimeBrowserControl {
             .locate(workspace_id)
             .await
             .map_err(|error| BrowserGatewayError::new("browser_runtime_unavailable", error))?;
+        self.endpoints
+            .lock()
+            .insert(workspace_id.to_string(), endpoint.clone());
+        Ok(endpoint)
+    }
+
+    async fn probe(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceRuntimeEndpoint, BrowserGatewayError> {
+        let endpoint = self.located_endpoint(workspace_id).await?;
         if !self
             .client
             .healthy(&endpoint)
             .await
             .map_err(|error| BrowserGatewayError::new("browser_runtime_unavailable", error))?
         {
+            self.endpoints.lock().remove(workspace_id);
             return Err(BrowserGatewayError::new(
                 "browser_runtime_unhealthy",
                 "workspace runtime health probe failed",
             ));
         }
-        self.endpoints
-            .lock()
-            .insert(workspace_id.to_string(), endpoint.clone());
         Ok(endpoint)
+    }
+
+    async fn endpoint(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceRuntimeEndpoint, BrowserGatewayError> {
+        self.probe(workspace_id).await
     }
 
     async fn call(
@@ -984,6 +944,61 @@ pub fn install_workspace_runtime_control_from_env() -> Result<bool, String> {
     Ok(true)
 }
 
+#[cfg(feature = "workspace-runtime-exec")]
+pub async fn browser_runtime_status(workspace_id: Option<&str>) -> BrowserRuntimeStatus {
+    let enabled = std::env::var("COGNIA_REMOTE_BROWSER_ENABLED")
+        .ok()
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+    let configured = std::env::var(WORKSPACE_RUNTIME_URL_TEMPLATE_ENV)
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty())
+        && std::env::var(WORKSPACE_RUNTIME_SECRET_DIR_ENV)
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty());
+    let base = BrowserRuntimeStatus {
+        compiled: true,
+        enabled,
+        configured,
+        healthy: false,
+        workspace_id: workspace_id.map(str::to_string),
+        reason: None,
+    };
+    if !enabled {
+        return BrowserRuntimeStatus {
+            reason: Some("COGNIA_REMOTE_BROWSER_ENABLED is not true".into()),
+            ..base
+        };
+    }
+    if !configured {
+        return BrowserRuntimeStatus {
+            reason: Some("workspace runtime URL template or secret directory is missing".into()),
+            ..base
+        };
+    }
+    let Some(control) = RUNTIME_CONTROL.get() else {
+        return BrowserRuntimeStatus {
+            reason: Some("workspace runtime browser control is not initialized".into()),
+            ..base
+        };
+    };
+    let Some(workspace_id) = workspace_id.filter(|value| !value.trim().is_empty()) else {
+        return BrowserRuntimeStatus {
+            reason: Some("workspaceId is required for a dynamic health probe".into()),
+            ..base
+        };
+    };
+    match control.probe(workspace_id).await {
+        Ok(_) => BrowserRuntimeStatus {
+            healthy: true,
+            ..base
+        },
+        Err(error) => BrowserRuntimeStatus {
+            reason: Some(format!("{}: {}", error.code, error.message)),
+            ..base
+        },
+    }
+}
+
 #[cfg(not(feature = "workspace-runtime-exec"))]
 pub fn install_workspace_runtime_control_from_env() -> Result<bool, String> {
     if std::env::var("COGNIA_REMOTE_BROWSER_ENABLED")
@@ -995,6 +1010,21 @@ pub fn install_workspace_runtime_control_from_env() -> Result<bool, String> {
         );
     }
     Ok(false)
+}
+
+#[cfg(not(feature = "workspace-runtime-exec"))]
+pub async fn browser_runtime_status(workspace_id: Option<&str>) -> BrowserRuntimeStatus {
+    let enabled = std::env::var("COGNIA_REMOTE_BROWSER_ENABLED")
+        .ok()
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+    BrowserRuntimeStatus {
+        compiled: false,
+        enabled,
+        configured: false,
+        healthy: false,
+        workspace_id: workspace_id.map(str::to_string),
+        reason: Some("workspace-runtime-exec is not compiled".into()),
+    }
 }
 
 #[cfg(feature = "workspace-runtime-exec")]
@@ -1015,6 +1045,12 @@ pub async fn dispatch_browser_rpc(
     account_id: &str,
     device_id: &str,
 ) -> Result<Value, BrowserGatewayError> {
+    if name == "browser_runtime_status" {
+        let workspace_id = args.get("workspaceId").and_then(Value::as_str);
+        return serde_json::to_value(browser_runtime_status(workspace_id).await).map_err(|error| {
+            BrowserGatewayError::new("browser_status_serialize", error.to_string())
+        });
+    }
     let control = RUNTIME_CONTROL.get().ok_or_else(|| {
         BrowserGatewayError::new(
             "browser_disabled",
@@ -1026,7 +1062,7 @@ pub async fn dispatch_browser_rpc(
             return Ok(json!({ "capabilities": [] }));
         }
         let workspace_id = required_string(&args, "workspaceId")?;
-        control.endpoint(&workspace_id).await?;
+        control.probe(&workspace_id).await?;
         return Ok(json!({
             "capabilities": ["browser"],
             "backend": "remote-chromium",
@@ -1120,15 +1156,15 @@ pub async fn dispatch_browser_rpc(
     }
 
     let session_id = required_string(&args, "browserSessionId")?;
-    let summary = gateway().session_for_account(account_id, &session_id)?;
+    let summary = gateway().session_for_principal(account_id, device_id, &session_id)?;
     gateway().touch_session(&session_id);
     if name == "browser_session_get" {
-        return serde_json::to_value(gateway().session_for_account(account_id, &session_id)?)
-            .map_err(|error| BrowserGatewayError::new("browser_runtime_error", error.to_string()));
-    }
-    if name == "browser_stream_ticket_issue" {
-        return serde_json::to_value(gateway().issue_ticket(account_id, device_id, &session_id)?)
-            .map_err(|error| BrowserGatewayError::new("browser_runtime_error", error.to_string()));
+        return serde_json::to_value(gateway().session_for_principal(
+            account_id,
+            device_id,
+            &session_id,
+        )?)
+        .map_err(|error| BrowserGatewayError::new("browser_runtime_error", error.to_string()));
     }
     if name == "browser_session_close" {
         let runtime_close = control
@@ -1138,7 +1174,7 @@ pub async fn dispatch_browser_rpc(
                 json!({ "sessionId": session_id }),
             )
             .await;
-        gateway().close_session(account_id, &session_id)?;
+        gateway().close_session(account_id, device_id, &session_id)?;
         runtime_close?;
         return Ok(json!({ "closed": true }));
     }
@@ -1223,34 +1259,21 @@ pub async fn dispatch_browser_rpc(
 
 #[cfg(not(feature = "workspace-runtime-exec"))]
 pub async fn dispatch_browser_rpc(
-    _name: &str,
-    _args: Value,
+    name: &str,
+    args: Value,
     _account_id: &str,
     _device_id: &str,
 ) -> Result<Value, BrowserGatewayError> {
+    if name == "browser_runtime_status" {
+        let workspace_id = args.get("workspaceId").and_then(Value::as_str);
+        return serde_json::to_value(browser_runtime_status(workspace_id).await).map_err(|error| {
+            BrowserGatewayError::new("browser_status_serialize", error.to_string())
+        });
+    }
     Err(BrowserGatewayError::new(
         "browser_disabled",
         "remote browser support is not compiled",
     ))
-}
-
-#[derive(Deserialize)]
-pub struct TicketRequest {
-    #[serde(rename = "sessionId")]
-    session_id: String,
-}
-
-pub async fn issue_ticket_handler(
-    Extension(ctx): Extension<DeviceContext>,
-    Json(request): Json<TicketRequest>,
-) -> impl IntoResponse {
-    match gateway().issue_ticket(&ctx.account_id, &ctx.device_id, &request.session_id) {
-        Ok(ticket) => (axum::http::StatusCode::OK, Json(json!(ticket))),
-        Err(error) => (
-            axum::http::StatusCode::FORBIDDEN,
-            Json(json!({ "code": error.code, "message": error.message })),
-        ),
-    }
 }
 
 #[derive(Deserialize)]
@@ -1263,16 +1286,48 @@ pub async fn browser_ws_handler(
     Query(query): Query<StreamQuery>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    match gateway().consume_for_stream(&query.ticket, &session_id) {
-        Ok(binding) => ws
-            .on_upgrade(move |socket| handle_browser_socket(socket, session_id, binding.device_id))
+    let path = format!("/ws/browser/{session_id}");
+    let Some(store) = super::security_store::security_store() else {
+        return super::api::public_error_response(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "security_store_unavailable",
+            "the security database is unavailable",
+            true,
+            json!({}),
+        );
+    };
+    let identity =
+        match store.redeem_socket_ticket(&query.ticket, &path, "browser", unix_time_secs()) {
+            Ok(identity) => identity,
+            Err(_) => {
+                return super::api::public_error_response(
+                    axum::http::StatusCode::UNAUTHORIZED,
+                    "invalid_socket_ticket",
+                    "the browser socket ticket is invalid, expired, or already used",
+                    false,
+                    json!({}),
+                );
+            }
+        };
+    match gateway().session_for_principal(&identity.tenant_id, &identity.device_id, &session_id) {
+        Ok(_) => ws
+            .on_upgrade(move |socket| handle_browser_socket(socket, session_id, identity.device_id))
             .into_response(),
-        Err(error) => (
+        Err(error) => super::api::public_error_response(
             axum::http::StatusCode::UNAUTHORIZED,
-            Json(json!({ "code": error.code, "message": error.message })),
-        )
-            .into_response(),
+            error.code,
+            error.message,
+            false,
+            json!({}),
+        ),
     }
+}
+
+fn unix_time_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 async fn handle_browser_socket(mut socket: WebSocket, session_id: String, device_id: String) {
@@ -1553,14 +1608,14 @@ mod tests {
         let gateway = Arc::new(gateway);
         let barrier = Arc::new(Barrier::new(8));
         let handles = (0..8)
-            .map(|index| {
+            .map(|_| {
                 let gateway = Arc::clone(&gateway);
                 let barrier = Arc::clone(&barrier);
                 std::thread::spawn(move || {
                     barrier.wait();
                     gateway.ensure_session(EnsureBrowserSession {
                         account_id: "acct-1".into(),
-                        device_id: format!("device-{index}"),
+                        device_id: "device-shared".into(),
                         chat_session_id: "chat-shared".into(),
                         parent_chat_session_id: None,
                         workspace_id: "workspace-1".into(),
@@ -1581,8 +1636,8 @@ mod tests {
     }
 
     #[test]
-    fn stream_ticket_is_bound_short_lived_and_single_use() {
-        let (gateway, now) = fixture();
+    fn browser_session_is_bound_to_its_creating_principal() {
+        let (gateway, _) = fixture();
         let session = gateway
             .ensure_session(EnsureBrowserSession {
                 account_id: "acct-1".into(),
@@ -1594,38 +1649,29 @@ mod tests {
                 profile_id: None,
             })
             .expect("session");
-        let ticket = gateway
-            .issue_ticket("acct-1", "device-1", &session.id)
-            .expect("ticket");
-
         assert!(gateway
-            .consume_ticket(&ticket.ticket, "acct-1", "device-1", &session.id)
+            .session_for_principal("acct-1", "device-1", &session.id)
             .is_ok());
         assert_eq!(
             gateway
-                .consume_ticket(&ticket.ticket, "acct-1", "device-1", &session.id)
+                .session_for_principal("acct-2", "device-1", &session.id)
                 .unwrap_err()
                 .code,
-            "browser_ticket_invalid"
+            "browser_session_forbidden"
         );
-
-        let expired = gateway
-            .issue_ticket("acct-1", "device-1", &session.id)
-            .expect("ticket");
-        now.store(61_001, Ordering::Relaxed);
         assert_eq!(
             gateway
-                .consume_ticket(&expired.ticket, "acct-1", "device-1", &session.id)
+                .session_for_principal("acct-1", "device-2", &session.id)
                 .unwrap_err()
                 .code,
-            "browser_ticket_expired"
+            "browser_session_forbidden"
         );
     }
 
     #[test]
-    fn ticket_rejects_cross_account_device_and_session_replay() {
+    fn active_session_cannot_be_reused_by_another_device() {
         let (gateway, _) = fixture();
-        let one = gateway
+        let session = gateway
             .ensure_session(EnsureBrowserSession {
                 account_id: "acct-1".into(),
                 device_id: "device-1".into(),
@@ -1636,34 +1682,24 @@ mod tests {
                 profile_id: None,
             })
             .unwrap();
-        let two = gateway
-            .ensure_session(EnsureBrowserSession {
-                chat_session_id: "chat-2".into(),
-                ..EnsureBrowserSession {
-                    account_id: "acct-1".into(),
-                    device_id: "device-1".into(),
-                    chat_session_id: "unused".into(),
-                    parent_chat_session_id: None,
-                    workspace_id: "workspace-1".into(),
-                    backend: BrowserBackend::RemoteChromium,
-                    profile_id: None,
-                }
-            })
-            .unwrap();
-        for (account, device, session) in [
-            ("acct-2", "device-1", one.id.as_str()),
-            ("acct-1", "device-2", one.id.as_str()),
-            ("acct-1", "device-1", two.id.as_str()),
-        ] {
-            let ticket = gateway.issue_ticket("acct-1", "device-1", &one.id).unwrap();
-            assert_eq!(
-                gateway
-                    .consume_ticket(&ticket.ticket, account, device, session)
-                    .unwrap_err()
-                    .code,
-                "browser_ticket_binding_mismatch"
-            );
-        }
+        let reused = gateway.ensure_session(EnsureBrowserSession {
+            account_id: "acct-1".into(),
+            device_id: "device-2".into(),
+            chat_session_id: "chat-1".into(),
+            parent_chat_session_id: None,
+            workspace_id: "workspace-1".into(),
+            backend: BrowserBackend::RemoteChromium,
+            profile_id: None,
+        });
+
+        assert_eq!(reused.unwrap_err().code, "browser_session_forbidden");
+        assert_eq!(
+            gateway
+                .session_for_principal("acct-1", "device-1", &session.id)
+                .unwrap()
+                .id,
+            session.id
+        );
     }
 
     #[test]
@@ -1799,5 +1835,17 @@ mod tests {
             })
             .unwrap();
         assert_ne!(replacement.id, session.id);
+    }
+
+    #[tokio::test]
+    async fn runtime_status_never_claims_health_without_a_live_probe() {
+        let status = browser_runtime_status(Some("workspace-status-test")).await;
+        assert_eq!(status.compiled, cfg!(feature = "workspace-runtime-exec"));
+        assert!(!status.healthy);
+        assert_eq!(
+            status.workspace_id.as_deref(),
+            Some("workspace-status-test")
+        );
+        assert!(status.reason.is_some());
     }
 }

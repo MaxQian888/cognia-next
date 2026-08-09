@@ -2,18 +2,18 @@
 //!
 //! ACP clients (Zed, Neovim, JetBrains) speak the Agent Client Protocol to a
 //! child process over stdin/stdout (newline-delimited JSON-RPC). cognia's ACP
-//! server lives on the companion API as a WebSocket (`/ws/v1/acp`, one
+//! server lives on the companion API as a WebSocket (`/ws/acp`, one
 //! JSON-RPC message per text frame). This subcommand is the shim between the
 //! two: editors configure `{"command": "cognia", "args": ["acp"]}` and get a
 //! full cognia agent.
 //!
 //! # Connection resolution
 //!
-//! 1. `COGNIA_ACP_URL` + `COGNIA_ACP_TOKEN` env vars, when both non-empty —
+//! 1. `COGNIA_ACP_URL` + `COGNIA_ACP_TICKET` env vars, when both non-empty —
 //!    headless / manual override.
 //! 2. Otherwise: discover the running desktop via the CLI bridge
-//!    (`cli-endpoint.json`), then `POST /api/v1/dev/acp/token` to mint a
-//!    device-scope JWT and learn the `wss://` URL.
+//!    (`cli-endpoint.json`), then `POST /api/dev/acp/ticket` to mint a
+//!    single-use socket ticket and learn the `wss://` URL.
 //!
 //! # TLS
 //!
@@ -41,14 +41,14 @@ use crate::ui::RuntimeUi;
 /// checking the stdin channel again.
 const READ_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-/// Broker response from `POST /api/v1/dev/acp/token`.
+/// Broker response from `POST /api/dev/acp/ticket`.
 #[derive(Debug, Deserialize)]
-struct AcpTokenResponse {
+struct AcpTicketResponse {
     ok: bool,
     #[serde(default, rename = "wsUrl")]
     ws_url: String,
     #[serde(default)]
-    token: String,
+    ticket: String,
     #[serde(default)]
     error: Option<String>,
 }
@@ -57,52 +57,50 @@ struct AcpTokenResponse {
 #[derive(Debug, PartialEq)]
 pub(crate) struct ConnectionTarget {
     pub ws_url: String,
-    pub token: String,
+    pub ticket: String,
 }
 
-/// Resolve the WS URL + token: env override first, broker second.
+/// Resolve the WS URL + ticket: env override first, broker second.
 pub(crate) fn resolve_target() -> Result<ConnectionTarget> {
     let env_url = std::env::var("COGNIA_ACP_URL")
         .ok()
         .filter(|s| !s.is_empty());
-    let env_token = std::env::var("COGNIA_ACP_TOKEN")
+    let env_ticket = std::env::var("COGNIA_ACP_TICKET")
         .ok()
         .filter(|s| !s.is_empty());
-    match (env_url, env_token) {
-        (Some(ws_url), Some(token)) => return Ok(ConnectionTarget { ws_url, token }),
+    match (env_url, env_ticket) {
+        (Some(ws_url), Some(ticket)) => return Ok(ConnectionTarget { ws_url, ticket }),
         (Some(_), None) => {
-            bail!("COGNIA_ACP_URL is set but COGNIA_ACP_TOKEN is missing — set both, or neither")
+            bail!("COGNIA_ACP_URL is set but COGNIA_ACP_TICKET is missing — set both, or neither")
         }
         (None, Some(_)) => {
-            bail!("COGNIA_ACP_TOKEN is set but COGNIA_ACP_URL is missing — set both, or neither")
+            bail!("COGNIA_ACP_TICKET is set but COGNIA_ACP_URL is missing — set both, or neither")
         }
         _ => {}
     }
 
     let endpoint = bridge_client::load_endpoint()?;
-    let response: AcpTokenResponse =
-        bridge_client::post_json(&endpoint, "/api/v1/dev/acp/token", &serde_json::json!({}))?;
+    let response: AcpTicketResponse =
+        bridge_client::post_json(&endpoint, "/api/dev/acp/ticket", &serde_json::json!({}))?;
     if !response.ok {
         bail!(
-            "ACP token broker refused: {}",
+            "ACP ticket broker refused: {}",
             response.error.unwrap_or_else(|| "unknown error".into())
         );
     }
-    if response.ws_url.is_empty() || response.token.is_empty() {
-        bail!("ACP token broker returned an incomplete response — update the cognia desktop app");
+    if response.ws_url.is_empty() || response.ticket.is_empty() {
+        bail!("ACP ticket broker returned an incomplete response — update the cognia desktop app");
     }
     Ok(ConnectionTarget {
         ws_url: response.ws_url,
-        token: response.token,
+        ticket: response.ticket,
     })
 }
 
-/// Append the `?token=` query parameter (the companion JWT middleware accepts
-/// tokens via query string on WS upgrades, where headers are awkward for
-/// some clients).
-pub(crate) fn url_with_token(ws_url: &str, token: &str) -> String {
+/// Append the canonical single-use `?ticket=` query parameter.
+pub(crate) fn url_with_ticket(ws_url: &str, ticket: &str) -> String {
     let sep = if ws_url.contains('?') { '&' } else { '?' };
-    format!("{ws_url}{sep}token={token}")
+    format!("{ws_url}{sep}ticket={ticket}")
 }
 
 /// Parse `host:port` out of a `ws://` / `wss://` URL. Returns
@@ -180,7 +178,7 @@ pub fn run(ui: &RuntimeUi) -> Result<()> {
         .set_read_timeout(Some(READ_POLL_INTERVAL))
         .context("set socket read timeout")?;
 
-    let request = url_with_token(&target.ws_url, &target.token)
+    let request = url_with_ticket(&target.ws_url, &target.ticket)
         .into_client_request()
         .context("build WS upgrade request")?;
 
@@ -298,29 +296,29 @@ mod tests {
     // ── URL helpers ─────────────────────────────────────────────────────
 
     #[test]
-    fn url_with_token_appends_query() {
+    fn url_with_ticket_appends_query() {
         assert_eq!(
-            url_with_token("wss://127.0.0.1:7890/ws/v1/acp", "abc"),
-            "wss://127.0.0.1:7890/ws/v1/acp?token=abc"
+            url_with_ticket("wss://127.0.0.1:7890/ws/acp", "abc"),
+            "wss://127.0.0.1:7890/ws/acp?ticket=abc"
         );
         assert_eq!(
-            url_with_token("wss://127.0.0.1:7890/ws/v1/acp?x=1", "abc"),
-            "wss://127.0.0.1:7890/ws/v1/acp?x=1&token=abc"
+            url_with_ticket("wss://127.0.0.1:7890/ws/acp?x=1", "abc"),
+            "wss://127.0.0.1:7890/ws/acp?x=1&ticket=abc"
         );
     }
 
     #[test]
     fn parse_ws_host_handles_schemes_and_defaults() {
         assert_eq!(
-            parse_ws_host("wss://127.0.0.1:7890/ws/v1/acp").unwrap(),
+            parse_ws_host("wss://127.0.0.1:7890/ws/acp").unwrap(),
             ("127.0.0.1".to_string(), 7890, true)
         );
         assert_eq!(
-            parse_ws_host("ws://[::1]:7890/ws/v1/acp").unwrap(),
+            parse_ws_host("ws://[::1]:7890/ws/acp").unwrap(),
             ("::1".to_string(), 7890, false)
         );
         assert_eq!(
-            parse_ws_host("wss://[::1]/ws/v1/acp").unwrap(),
+            parse_ws_host("wss://[::1]/ws/acp").unwrap(),
             ("::1".to_string(), 443, true)
         );
         assert_eq!(
@@ -333,7 +331,7 @@ mod tests {
         );
         assert!(parse_ws_host("https://x").is_err());
         assert!(parse_ws_host("wss://:123").is_err());
-        assert!(parse_ws_host("wss://[::1]junk/ws/v1/acp").is_err());
+        assert!(parse_ws_host("wss://[::1]junk/ws/acp").is_err());
         assert!(parse_ws_host("wss://h:notaport/x").is_err());
     }
 
@@ -361,7 +359,7 @@ mod tests {
             "empty env vars should not bypass broker-issued loopback checks"
         );
 
-        std::env::set_var("COGNIA_ACP_URL", "wss://example.com/ws/v1/acp");
+        std::env::set_var("COGNIA_ACP_URL", "wss://example.com/ws/acp");
         assert!(has_explicit_acp_url_override());
 
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
@@ -377,44 +375,44 @@ mod tests {
     fn resolve_target_prefers_env_override() {
         let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
-        let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
-        std::env::set_var("COGNIA_ACP_URL", "wss://127.0.0.1:1/ws/v1/acp");
-        std::env::set_var("COGNIA_ACP_TOKEN", "tok");
+        let prior_ticket = std::env::var_os("COGNIA_ACP_TICKET");
+        std::env::set_var("COGNIA_ACP_URL", "wss://127.0.0.1:1/ws/acp");
+        std::env::set_var("COGNIA_ACP_TICKET", "tok");
         let target = resolve_target().unwrap();
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
-        crate::shared::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::shared::test_env::restore("COGNIA_ACP_TICKET", prior_ticket);
         assert_eq!(
             target,
             ConnectionTarget {
-                ws_url: "wss://127.0.0.1:1/ws/v1/acp".into(),
-                token: "tok".into(),
+                ws_url: "wss://127.0.0.1:1/ws/acp".into(),
+                ticket: "tok".into(),
             }
         );
     }
 
     #[test]
-    fn resolve_target_rejects_url_without_token() {
+    fn resolve_target_rejects_url_without_ticket() {
         let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
-        let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
-        std::env::set_var("COGNIA_ACP_URL", "wss://127.0.0.1:1/ws/v1/acp");
-        std::env::remove_var("COGNIA_ACP_TOKEN");
+        let prior_ticket = std::env::var_os("COGNIA_ACP_TICKET");
+        std::env::set_var("COGNIA_ACP_URL", "wss://127.0.0.1:1/ws/acp");
+        std::env::remove_var("COGNIA_ACP_TICKET");
         let err = resolve_target().unwrap_err();
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
-        crate::shared::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
-        assert!(err.to_string().contains("COGNIA_ACP_TOKEN"));
+        crate::shared::test_env::restore("COGNIA_ACP_TICKET", prior_ticket);
+        assert!(err.to_string().contains("COGNIA_ACP_TICKET"));
     }
 
     #[test]
-    fn resolve_target_rejects_token_without_url() {
+    fn resolve_target_rejects_ticket_without_url() {
         let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
-        let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
+        let prior_ticket = std::env::var_os("COGNIA_ACP_TICKET");
         std::env::remove_var("COGNIA_ACP_URL");
-        std::env::set_var("COGNIA_ACP_TOKEN", "tok");
+        std::env::set_var("COGNIA_ACP_TICKET", "tok");
         let err = resolve_target().unwrap_err();
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
-        crate::shared::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::shared::test_env::restore("COGNIA_ACP_TICKET", prior_ticket);
         assert!(err.to_string().contains("COGNIA_ACP_URL"));
     }
 
@@ -422,20 +420,20 @@ mod tests {
     fn resolve_target_uses_broker_via_cli_bridge() {
         let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
-        let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
+        let prior_ticket = std::env::var_os("COGNIA_ACP_TICKET");
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
         let server_thread = std::thread::spawn(move || {
             if let Ok(mut req) = server.recv() {
-                assert_eq!(req.url(), "/api/v1/dev/acp/token");
+                assert_eq!(req.url(), "/api/dev/acp/ticket");
                 let mut body = String::new();
                 let _ = req.as_reader().read_to_string(&mut body);
                 let response = tiny_http::Response::from_string(
                     json!({
                         "ok": true,
-                        "wsUrl": "wss://127.0.0.1:7890/ws/v1/acp",
-                        "token": "jwt-abc",
+                        "wsUrl": "wss://127.0.0.1:7890/ws/acp",
+                        "ticket": "jwt-abc",
                         "tlsFingerprint": "AA",
                     })
                     .to_string(),
@@ -457,26 +455,26 @@ mod tests {
         std::io::Write::write_all(&mut tmp, payload.as_bytes()).unwrap();
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
         std::env::remove_var("COGNIA_ACP_URL");
-        std::env::remove_var("COGNIA_ACP_TOKEN");
+        std::env::remove_var("COGNIA_ACP_TICKET");
 
         let target = resolve_target().unwrap();
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
-        crate::shared::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::shared::test_env::restore("COGNIA_ACP_TICKET", prior_ticket);
         crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let _ = server_thread.join();
 
-        assert_eq!(target.ws_url, "wss://127.0.0.1:7890/ws/v1/acp");
-        assert_eq!(target.token, "jwt-abc");
+        assert_eq!(target.ws_url, "wss://127.0.0.1:7890/ws/acp");
+        assert_eq!(target.ticket, "jwt-abc");
     }
 
     #[test]
     fn resolve_target_surfaces_broker_refusal() {
         let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
-        let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
+        let prior_ticket = std::env::var_os("COGNIA_ACP_TICKET");
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         std::env::remove_var("COGNIA_ACP_URL");
-        std::env::remove_var("COGNIA_ACP_TOKEN");
+        std::env::remove_var("COGNIA_ACP_TICKET");
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
         let server_thread = std::thread::spawn(move || {
@@ -504,7 +502,7 @@ mod tests {
 
         let err = resolve_target().unwrap_err();
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
-        crate::shared::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::shared::test_env::restore("COGNIA_ACP_TICKET", prior_ticket);
         crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let _ = server_thread.join();
         assert!(err.to_string().contains("not running"), "got: {err}");

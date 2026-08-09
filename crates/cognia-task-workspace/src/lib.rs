@@ -4,8 +4,11 @@
 //! install the same service and expose it through their existing command and
 //! Companion transport surfaces.
 
+mod bundle;
 mod ledger;
+mod registry;
 mod resource;
+mod sensitive;
 mod service;
 mod snapshot;
 mod store;
@@ -14,9 +17,23 @@ mod transfer;
 mod types;
 mod watcher;
 
+pub use bundle::{
+    execute_bundle_apply, plan_bundle_apply, plan_bundle_composition, ApplyStep, BundleApplier,
+    BundleApplyPlan, BundleError, PhysicalLeaseGroup, RootRequest,
+};
+pub use registry::{
+    compose_lock_reason, parse_lock_reason, plan_directory_reclaim, plan_reconcile,
+    plan_snapshot_expiration, validate_state_transition, DirectoryReclaimCandidate,
+    DirectoryReclaimReason, ImportedWorkspaceHint, ReconcileOutcome, RegistryError,
+    SnapshotExpirationCandidate, SnapshotExpirationReason, WorkspaceRegistry,
+};
 pub use resource::{
     is_sensitive_resource, read_text_resource, ResourceEncoding, ResourceRead,
     DEFAULT_TEXT_PREVIEW_BYTES, MAX_EDITOR_BYTES,
+};
+pub use sensitive::{
+    decide_access, validate_include_pattern, IncludePatternError, SensitiveAuditEntry,
+    SensitiveDecision, SensitiveGrant, SensitiveGrantStore,
 };
 pub use service::{ServiceConfig, TaskWorkspaceService};
 pub use transfer::{
@@ -28,7 +45,9 @@ pub use types::{
     PruneOutcome, ResourceCaptureClass, ResourceChange, ResourceEvent, ResourceEventCounts,
     ResourceEventEvidence, ResourceKind, ResourceTimelineCompleteness, ResourceTrackingPolicy,
     RunState, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
-    TaskWorkspaceState,
+    TaskWorkspaceState, WorkspaceBaseKind, WorkspaceBaseSpec, WorkspaceBundle,
+    WorkspaceBundleOutcome, WorkspaceLifecyclePolicy, WorkspaceOwnerType, WorkspaceRecord,
+    WorkspaceRootLease, WorkspaceRootRole, WorkspaceState,
 };
 pub use watcher::{
     ResourceEventChange, ResourceEventKind, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,

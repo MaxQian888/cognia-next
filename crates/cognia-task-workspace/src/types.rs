@@ -277,6 +277,12 @@ pub struct PatchHunk {
     pub header: String,
     pub forward_patch_hash: String,
     pub inverse_patch_hash: String,
+    /// Added/deleted source lines in this hunk. Persisted as metrics only so
+    /// consumers can measure a partial apply without retaining patch text.
+    #[serde(default)]
+    pub additions: u32,
+    #[serde(default)]
+    pub deletions: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -318,6 +324,13 @@ pub struct PatchSet {
     pub applied_revision: Option<u64>,
     pub files: Vec<PatchFile>,
     pub applied_files: Vec<AppliedFile>,
+    /// Exact file/hunk selection used by the successful apply. An empty
+    /// selection means every file. `applied_selection_known` distinguishes
+    /// that from patch rows written before this field existed.
+    #[serde(default)]
+    pub applied_selection: Vec<PatchSelection>,
+    #[serde(default)]
+    pub applied_selection_known: bool,
     #[serde(default = "default_true")]
     pub reversible: bool,
     pub created_at: i64,
@@ -356,6 +369,275 @@ pub struct PruneOutcome {
     pub removed_task_ids: Vec<String>,
     pub removed_blob_count: u64,
     pub reclaimed_bytes: u64,
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0111 Managed Workspace Registry types
+// ---------------------------------------------------------------------------
+//
+// These types are additive — the existing Task Workspace surface stays intact.
+// The Registry (see `registry.rs`) is the single owner of managed workspace
+// lifecycle; `bundle.rs` composes them into a multi-root atomic apply unit.
+//
+// Fields are named to match the ADR-0111 record layout so wire encodings stay
+// stable across Rust/TS boundaries.
+
+/// Who created this managed workspace. Ownership determines whether the
+/// Registry may prune or unlock the workspace during reconciliation.
+///
+/// `Imported` is reserved for worktrees discovered on disk that the Registry
+/// cannot verify as its own — those rows never participate in auto-prune.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceOwnerType {
+    User,
+    Imported,
+    Session,
+    Team,
+    Scheduled,
+}
+
+/// Managed workspace lifecycle state. Transitions outside the Registry's
+/// controlled paths are rejected fail-closed.
+///
+/// Legal transitions (all others error):
+///
+/// - `Provisioning → Active | Removing`
+/// - `Active → Archived | Conflict | Removing`
+/// - `Archived → Restorable | Removing`
+/// - `Restorable → Active | Removing`
+/// - `Conflict → Active | Removing`   (via `ConflictResolution`)
+/// - `Removing → Removed`
+///
+/// `Removed` is terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceState {
+    Provisioning,
+    Active,
+    Archived,
+    Conflict,
+    Restorable,
+    Removing,
+    Removed,
+}
+
+impl WorkspaceState {
+    /// Returns `true` iff a workspace in this state may be automatically
+    /// reclaimed by directory/snapshot retention.
+    ///
+    /// The ADR-0111 ineligibility list is the source of truth; this helper is
+    /// the enforcement point everywhere retention runs.
+    pub fn is_prunable(self) -> bool {
+        matches!(self, WorkspaceState::Archived | WorkspaceState::Restorable)
+    }
+}
+
+/// The base ref a managed workspace was materialized against.
+///
+/// Interactive worktrees default to `WorkingState` (dirty local content is
+/// carried into the isolated root). Background and scheduled Git tasks
+/// default to `RemoteDefault` and refresh `origin/HEAD` at fire time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum WorkspaceBaseSpec {
+    /// Snapshot of the current working tree, including uncommitted edits.
+    WorkingState,
+    /// The current HEAD of the local branch.
+    LocalHead,
+    /// `origin/HEAD` (or the configured default branch), refreshed at
+    /// acquisition.
+    RemoteDefault,
+    /// A specific git ref (branch, tag, commit).
+    #[serde(rename_all = "camelCase")]
+    GitRef { git_ref: String },
+    /// A pull request head that the Registry will fetch.
+    #[serde(rename_all = "camelCase")]
+    PullRequest {
+        provider: String,
+        repo: String,
+        number: u64,
+    },
+}
+
+impl WorkspaceBaseSpec {
+    /// Encode the spec as a `(kind, ref)` pair for storage.
+    ///
+    /// `ref` is optional: it carries the git ref name for `GitRef` and a
+    /// synthetic `<provider>#<repo>#<number>` for `PullRequest`. The other
+    /// variants encode as `(kind, None)`.
+    pub fn to_storage(&self) -> (WorkspaceBaseKind, Option<String>) {
+        match self {
+            WorkspaceBaseSpec::WorkingState => (WorkspaceBaseKind::WorkingState, None),
+            WorkspaceBaseSpec::LocalHead => (WorkspaceBaseKind::LocalHead, None),
+            WorkspaceBaseSpec::RemoteDefault => (WorkspaceBaseKind::RemoteDefault, None),
+            WorkspaceBaseSpec::GitRef { git_ref } => {
+                (WorkspaceBaseKind::GitRef, Some(git_ref.clone()))
+            }
+            WorkspaceBaseSpec::PullRequest {
+                provider,
+                repo,
+                number,
+            } => (
+                WorkspaceBaseKind::PullRequest,
+                Some(format!("{provider}#{repo}#{number}")),
+            ),
+        }
+    }
+
+    /// Rebuild a spec from its stored `(kind, ref)` pair.
+    ///
+    /// Returns an error if `ref` is missing when required by `kind`, or if a
+    /// `PullRequest` marker fails to parse. This is the load-side inverse of
+    /// `to_storage`.
+    pub fn from_storage(kind: WorkspaceBaseKind, base_ref: Option<&str>) -> Result<Self, String> {
+        match kind {
+            WorkspaceBaseKind::WorkingState => Ok(WorkspaceBaseSpec::WorkingState),
+            WorkspaceBaseKind::LocalHead => Ok(WorkspaceBaseSpec::LocalHead),
+            WorkspaceBaseKind::RemoteDefault => Ok(WorkspaceBaseSpec::RemoteDefault),
+            WorkspaceBaseKind::GitRef => base_ref
+                .map(|value| WorkspaceBaseSpec::GitRef {
+                    git_ref: value.to_string(),
+                })
+                .ok_or_else(|| "gitRef base spec is missing its ref".to_string()),
+            WorkspaceBaseKind::PullRequest => {
+                let value = base_ref
+                    .ok_or_else(|| "pullRequest base spec is missing its marker".to_string())?;
+                let mut parts = value.splitn(3, '#');
+                let provider = parts
+                    .next()
+                    .ok_or_else(|| "pullRequest marker missing provider".to_string())?;
+                let repo = parts
+                    .next()
+                    .ok_or_else(|| "pullRequest marker missing repo".to_string())?;
+                let number = parts
+                    .next()
+                    .ok_or_else(|| "pullRequest marker missing number".to_string())?
+                    .parse::<u64>()
+                    .map_err(|error| format!("pullRequest marker number: {error}"))?;
+                Ok(WorkspaceBaseSpec::PullRequest {
+                    provider: provider.to_string(),
+                    repo: repo.to_string(),
+                    number,
+                })
+            }
+        }
+    }
+}
+
+/// Storage-side discriminant for `WorkspaceBaseSpec`. Kept as its own enum so
+/// SQLite rows encode a stable short string independent of the JSON shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceBaseKind {
+    WorkingState,
+    LocalHead,
+    RemoteDefault,
+    GitRef,
+    PullRequest,
+}
+
+/// One row in the Registry. Combines ownership, lifecycle, and the physical
+/// isolation location.
+///
+/// `execution_root` is the on-disk path handed to executors. For Git
+/// workspaces it is the worktree path; for `Shadow` it is the materialized
+/// scratch directory. Trust is a separate axis and is not encoded here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRecord {
+    pub workspace_id: String,
+    pub owner_type: WorkspaceOwnerType,
+    pub owner_ref: Option<String>,
+    pub state: WorkspaceState,
+    pub source_root: String,
+    pub git_common_dir: Option<String>,
+    pub base: WorkspaceBaseSpec,
+    pub head: Option<String>,
+    pub branch: Option<String>,
+    pub isolation_kind: IsolationKind,
+    pub execution_root: String,
+    pub snapshot_task_id: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub last_used_at: i64,
+    pub locked_by: Option<String>,
+    pub pinned: bool,
+    pub created_at: i64,
+}
+
+/// The role a logical root plays inside a Bundle.
+///
+/// Exactly one lease must be `Primary`; the rest are `Additional` (forwarded
+/// as `additionalDirectories` when the executor spawns).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceRootRole {
+    Primary,
+    Additional,
+}
+
+/// One logical root inside a Bundle, resolved to its physical execution
+/// location.
+///
+/// `alias_path` is the path executors see. Multiple leases may point at the
+/// same physical worktree when they share a Git common dir — the Bundle
+/// composer collapses roots by `git_common_dir` before creating worktrees.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRootLease {
+    pub bundle_id: String,
+    pub workspace_id: String,
+    pub logical_root_id: String,
+    pub role: WorkspaceRootRole,
+    pub alias_path: String,
+}
+
+/// A collection of `WorkspaceRootLease`s acquired atomically for one execution.
+///
+/// The Registry acquires a Bundle in one call; on failure it rolls back every
+/// lease it already provisioned. See `bundle.rs` for the acquisition and
+/// atomic-apply implementations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBundle {
+    pub bundle_id: String,
+    pub owner_type: WorkspaceOwnerType,
+    pub owner_ref: Option<String>,
+    pub leases: Vec<WorkspaceRootLease>,
+    pub created_at: i64,
+}
+
+/// Outcome of a `WorkspaceBundle` apply. On compensation failure the bundle
+/// ends up in `state = Conflict` and `conflicts` is non-empty.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBundleOutcome {
+    pub bundle_id: String,
+    pub applied: Vec<String>,
+    pub rolled_back: Vec<String>,
+    pub conflicts: Vec<PatchConflict>,
+    pub state: WorkspaceState,
+}
+
+/// Retention policy inputs. All three knobs are user-adjustable in settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceLifecyclePolicy {
+    pub active_directory_cap: u32,
+    pub snapshot_retention_days: u32,
+    pub blob_budget_bytes: u64,
+}
+
+impl Default for WorkspaceLifecyclePolicy {
+    /// ADR-0111 defaults: 15 active directories, 30-day snapshot retention,
+    /// 1 GiB blob budget.
+    fn default() -> Self {
+        Self {
+            active_directory_cap: 15,
+            snapshot_retention_days: 30,
+            blob_budget_bytes: 1 << 30,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -400,5 +682,63 @@ mod tests {
         let decoded: ResourceChange = serde_json::from_value(value).unwrap();
         assert_eq!(decoded.capture_class, ResourceCaptureClass::Source);
         assert!(decoded.content_captured);
+    }
+
+    #[test]
+    fn base_spec_round_trips_through_storage_encoding() {
+        for spec in [
+            WorkspaceBaseSpec::WorkingState,
+            WorkspaceBaseSpec::LocalHead,
+            WorkspaceBaseSpec::RemoteDefault,
+            WorkspaceBaseSpec::GitRef {
+                git_ref: "refs/heads/main".into(),
+            },
+            WorkspaceBaseSpec::PullRequest {
+                provider: "github".into(),
+                repo: "acme/app".into(),
+                number: 42,
+            },
+        ] {
+            let (kind, base_ref) = spec.to_storage();
+            let decoded = WorkspaceBaseSpec::from_storage(kind, base_ref.as_deref()).unwrap();
+            assert_eq!(spec, decoded, "spec {spec:?} did not round-trip");
+        }
+    }
+
+    #[test]
+    fn base_spec_rejects_missing_git_ref() {
+        let error = WorkspaceBaseSpec::from_storage(WorkspaceBaseKind::GitRef, None)
+            .expect_err("must reject missing ref");
+        assert!(error.contains("gitRef"));
+    }
+
+    #[test]
+    fn base_spec_rejects_malformed_pull_request_marker() {
+        let error = WorkspaceBaseSpec::from_storage(WorkspaceBaseKind::PullRequest, Some("bad"))
+            .expect_err("must reject malformed marker");
+        assert!(error.contains("pullRequest"));
+    }
+
+    #[test]
+    fn only_archived_and_restorable_are_prunable() {
+        for state in [
+            WorkspaceState::Provisioning,
+            WorkspaceState::Active,
+            WorkspaceState::Conflict,
+            WorkspaceState::Removing,
+            WorkspaceState::Removed,
+        ] {
+            assert!(!state.is_prunable(), "{state:?} must be protected");
+        }
+        assert!(WorkspaceState::Archived.is_prunable());
+        assert!(WorkspaceState::Restorable.is_prunable());
+    }
+
+    #[test]
+    fn lifecycle_policy_defaults_match_adr_0111() {
+        let policy = WorkspaceLifecyclePolicy::default();
+        assert_eq!(policy.active_directory_cap, 15);
+        assert_eq!(policy.snapshot_retention_days, 30);
+        assert_eq!(policy.blob_budget_bytes, 1 << 30);
     }
 }

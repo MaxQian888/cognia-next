@@ -12,14 +12,14 @@
 //!
 //! # Endpoints
 //!
-//! - `POST /api/v1/dev/plugins/install`   — install a `.zip` bundle from disk
-//! - `POST /api/v1/dev/plugins/install-directory`
+//! - `POST /api/dev/plugins/install`   — install a `.zip` bundle from disk
+//! - `POST /api/dev/plugins/install-directory`
 //!                                          — install an unpacked plugin dir
-//! - `POST /api/v1/dev/plugins/uninstall` — remove a plugin by id
-//! - `POST /api/v1/dev/plugins/reload`    — re-install (if bundle/source dir
+//! - `POST /api/dev/plugins/uninstall` — remove a plugin by id
+//! - `POST /api/dev/plugins/reload`    — re-install (if bundle/source dir
 //!                                          path given) or emit a hot-reload event
-//! - `GET  /api/v1/dev/health`            — liveness probe
-//! - `POST /api/v1/dev/acp/token`         — mint a device-scope companion JWT
+//! - `GET  /api/dev/health`            — liveness probe
+//! - `POST /api/dev/acp/ticket`         — mint a single-use Companion socket ticket
 //!                                          for the `cognia acp` stdio bridge
 //!
 //! # Discovery

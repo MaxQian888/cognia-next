@@ -396,13 +396,13 @@ fn acp_quiet_suppresses_connection_status_without_polluting_protocol_stdout() {
             }
         }
     });
-    let ws_url = format!("ws://127.0.0.1:{port}/ws/v1/acp");
+    let ws_url = format!("ws://127.0.0.1:{port}/ws/acp");
 
     let (code, stdout, stderr) = run_cognia_with_env(
         &["--quiet", "acp"],
         &[
             ("COGNIA_ACP_URL", ws_url.as_str()),
-            ("COGNIA_ACP_TOKEN", "tok"),
+            ("COGNIA_ACP_TICKET", "tok"),
         ],
     );
     let _ = server_thread.join();
@@ -1888,7 +1888,7 @@ fn plugin_list_json_http_failure_emits_bridge_error_payload_without_human_noise(
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Get);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/installed");
+            assert_eq!(req.url(), "/api/dev/plugins/installed");
             let response =
                 tiny_http::Response::from_string("bridge unavailable").with_status_code(500);
             let _ = req.respond(response);
@@ -1966,7 +1966,7 @@ fn plugin_list_json_success_uses_consistent_envelope_without_human_noise() {
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Get);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/installed");
+            assert_eq!(req.url(), "/api/dev/plugins/installed");
             let body = r#"{"ok":true,"plugins":[{"pluginId":"demo","version":"1.2.3","status":"installed","installPath":"C:/plugins/demo"}]}"#;
             let response = tiny_http::Response::from_string(body).with_header(
                 tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
@@ -2191,7 +2191,7 @@ fn plugin_dev_once_json_bridge_rejection_emits_payload_without_human_noise() {
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(mut req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/reload");
+            assert_eq!(req.url(), "/api/dev/plugins/reload");
             let body = read_request_body(&mut req);
             assert_eq!(body["plugin_id"], "dev-once-rejected");
             assert!(
@@ -2356,12 +2356,12 @@ fn plugin_install_json_emits_schema_payload_for_directory_install() {
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Get);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/installed");
+            assert_eq!(req.url(), "/api/dev/plugins/installed");
             let _ = req.respond(json_response(r#"{"ok":true,"plugins":[]}"#));
         }
         if let Ok(Some(mut req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/install-directory");
+            assert_eq!(req.url(), "/api/dev/plugins/install-directory");
             let body = read_request_body(&mut req);
             assert_eq!(
                 body["source_dir"],
@@ -2416,7 +2416,7 @@ fn plugin_install_json_keeps_local_preflight_warnings_in_payload() {
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(mut req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/install-directory");
+            assert_eq!(req.url(), "/api/dev/plugins/install-directory");
             let body = read_request_body(&mut req);
             assert_eq!(
                 body["source_dir"],
@@ -2492,12 +2492,12 @@ fn plugin_install_json_failure_emits_bridge_error_payload_without_human_noise() 
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Get);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/installed");
+            assert_eq!(req.url(), "/api/dev/plugins/installed");
             let _ = req.respond(json_response(r#"{"ok":true,"plugins":[]}"#));
         }
         if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/install-directory");
+            assert_eq!(req.url(), "/api/dev/plugins/install-directory");
             let _ = req.respond(json_response(
                 r#"{"ok":false,"error":"manifest invalid: missing contribution"}"#,
             ));
@@ -2550,12 +2550,12 @@ fn plugin_install_json_http_failure_emits_bridge_error_payload_without_human_noi
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Get);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/installed");
+            assert_eq!(req.url(), "/api/dev/plugins/installed");
             let _ = req.respond(json_response(r#"{"ok":true,"plugins":[]}"#));
         }
         if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/install-directory");
+            assert_eq!(req.url(), "/api/dev/plugins/install-directory");
             let response =
                 tiny_http::Response::from_string("bridge write failed").with_status_code(500);
             let _ = req.respond(response);
@@ -2694,7 +2694,7 @@ fn plugin_install_json_replace_prompt_abort_emits_confirm_payload_without_human_
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Get);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/installed");
+            assert_eq!(req.url(), "/api/dev/plugins/installed");
             let _ = req.respond(json_response(
                 r#"{"ok":true,"plugins":[{"pluginId":"json-install-confirm","version":"0.0.1","status":"installed","installPath":"/p"}]}"#,
             ));
@@ -2753,7 +2753,7 @@ fn plugin_uninstall_json_emits_schema_payload() {
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(mut req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/uninstall");
+            assert_eq!(req.url(), "/api/dev/plugins/uninstall");
             let body = read_request_body(&mut req);
             assert_eq!(body["plugin_id"], "json-uninstall");
             assert_eq!(body["purge_data"], false);
@@ -2788,7 +2788,7 @@ fn plugin_uninstall_json_failure_emits_bridge_error_payload_without_human_noise(
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(mut req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/uninstall");
+            assert_eq!(req.url(), "/api/dev/plugins/uninstall");
             let body = read_request_body(&mut req);
             assert_eq!(body["plugin_id"], "missing-plugin");
             assert_eq!(body["purge_data"], false);
@@ -2831,7 +2831,7 @@ fn plugin_uninstall_json_http_failure_emits_bridge_error_payload_without_human_n
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(mut req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/uninstall");
+            assert_eq!(req.url(), "/api/dev/plugins/uninstall");
             let body = read_request_body(&mut req);
             assert_eq!(body["plugin_id"], "json-uninstall-http-failure");
             assert_eq!(body["purge_data"], false);
@@ -2956,7 +2956,7 @@ fn plugin_uninstall_json_purge_prompt_abort_emits_confirm_payload_without_human_
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Get);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/installed");
+            assert_eq!(req.url(), "/api/dev/plugins/installed");
             let _ = req.respond(json_response(
                 r#"{"ok":true,"plugins":[{"pluginId":"json-uninstall-confirm","version":"1.0.0","status":"installed","installPath":"/p"}]}"#,
             ));
@@ -3017,7 +3017,7 @@ fn plugin_reload_json_emits_schema_payload_for_path_alias() {
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(mut req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/reload");
+            assert_eq!(req.url(), "/api/dev/plugins/reload");
             let body = read_request_body(&mut req);
             assert_eq!(
                 body["source_dir"],
@@ -3067,7 +3067,7 @@ fn plugin_reload_json_failure_emits_bridge_error_payload_without_human_noise() {
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(mut req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/reload");
+            assert_eq!(req.url(), "/api/dev/plugins/reload");
             let body = read_request_body(&mut req);
             assert_eq!(body["plugin_id"], "missing-plugin");
             let _ = req.respond(json_response(
@@ -3118,7 +3118,7 @@ fn plugin_reload_json_http_failure_emits_bridge_error_payload_without_human_nois
     let server_thread = std::thread::spawn(move || {
         if let Ok(Some(mut req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
-            assert_eq!(req.url(), "/api/v1/dev/plugins/reload");
+            assert_eq!(req.url(), "/api/dev/plugins/reload");
             let body = read_request_body(&mut req);
             assert_eq!(body["plugin_id"], "json-reload-http-failure");
             let response =

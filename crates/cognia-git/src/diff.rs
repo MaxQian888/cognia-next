@@ -11,7 +11,9 @@
 use git2::{Commit, Diff, DiffFormat, DiffHunk, DiffOptions, Repository, Tree};
 
 use super::error::{GitError, Result};
-use super::read::{head_blob_text, index_blob_text, open_repo, workdir_text};
+use super::read::{
+    head_blob_text, index_blob_text, open_repo, validate_repo_relative_path, workdir_text,
+};
 use super::types::{GitDiff, GitDiffLine, GitFileChange, GitFileStatus, GitHunk, GitStatusGroup};
 
 const CONTEXT_LINES: u32 = 3;
@@ -127,6 +129,7 @@ pub fn file_diff(repo_path: &str, path: &str, staged: bool) -> Result<GitDiff> {
 }
 
 fn file_diff_for(repo: &Repository, path: &str, staged: bool) -> Result<GitDiff> {
+    validate_repo_relative_path(path)?;
     let (old_content, new_content, diff) = if staged {
         let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         let mut opts = base_opts(path);
@@ -144,7 +147,7 @@ fn file_diff_for(repo: &Repository, path: &str, staged: bool) -> Result<GitDiff>
         let diff = repo.diff_index_to_workdir(None, Some(&mut opts))?;
         (
             index_blob_text(repo, path).unwrap_or_default(),
-            workdir_text(repo, path).unwrap_or_default(),
+            workdir_text(repo, path)?.unwrap_or_default(),
             diff,
         )
     };
@@ -169,6 +172,7 @@ fn file_diff_for(repo: &Repository, path: &str, staged: bool) -> Result<GitDiff>
 
 /// Diff of `path` in `sha` against its first parent (for the Timeline view).
 pub fn commit_file_diff(repo_path: &str, sha: &str, path: &str) -> Result<GitDiff> {
+    validate_repo_relative_path(path)?;
     let repo = open_repo(repo_path)?;
     let commit = resolve_commit(&repo, sha)?;
     let new_tree = commit.tree()?;
@@ -279,6 +283,7 @@ pub fn diff_refs_files(repo_path: &str, base: &str, target: &str) -> Result<Vec<
 
 /// Diff of one `path` between `base...target` (merge-base vs target).
 pub fn diff_refs_file(repo_path: &str, base: &str, target: &str, path: &str) -> Result<GitDiff> {
+    validate_repo_relative_path(path)?;
     let repo = open_repo(repo_path)?;
     let (old_tree, new_tree) = merge_base_trees(&repo, base, target)?;
     let mut opts = base_opts(path);
@@ -426,6 +431,23 @@ mod tests {
         let files = commit_files(&tmp.path().to_string_lossy(), &oid.to_string()).unwrap();
         assert!(files.iter().any(|f| f.path == "b.txt"));
         let _ = repo;
+    }
+
+    #[test]
+    fn working_tree_diff_rejects_an_absolute_path_outside_the_repository() {
+        let (tmp, _repo) = init_committed();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret.txt");
+        fs::write(&secret, "do not expose\n").unwrap();
+
+        let error = file_diff(
+            &tmp.path().to_string_lossy(),
+            &secret.to_string_lossy(),
+            false,
+        )
+        .expect_err("absolute paths must not be readable through the git seam");
+
+        assert!(matches!(error, GitError::InvalidArgument(_)));
     }
 
     #[test]

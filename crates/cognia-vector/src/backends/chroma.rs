@@ -33,7 +33,7 @@ impl ChromaBackend {
         }
         Ok(Self {
             base_url: url.trim_end_matches('/').to_string(),
-            client: build_client(Some(headers))?,
+            client: build_client(&url, Some(headers))?,
         })
     }
 

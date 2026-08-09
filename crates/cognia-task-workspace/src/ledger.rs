@@ -79,6 +79,8 @@ pub fn build_patch_set(
         applied_revision: None,
         files,
         applied_files: Vec::new(),
+        applied_selection: Vec::new(),
+        applied_selection_known: false,
         reversible: true,
         created_at: now,
     })
@@ -158,6 +160,8 @@ pub fn apply(
                 .is_some_and(|entry| detect_binary(&entry.bytes)),
         })
         .collect();
+    patch.applied_selection = selection.to_vec();
+    patch.applied_selection_known = true;
     patch.state = PatchState::Applied;
     patch.applied_revision = Some(options.revision);
     Ok(ApplyOutcome {
@@ -333,6 +337,8 @@ pub fn force_apply(
                 .is_some_and(|entry| detect_binary(&entry.bytes)),
         })
         .collect();
+    patch.applied_selection = selection.to_vec();
+    patch.applied_selection_known = true;
     patch.state = PatchState::Applied;
     patch.applied_revision = Some(options.revision);
     Ok(ApplyOutcome {
@@ -371,6 +377,8 @@ pub fn keep_current(patch: &mut PatchSet, revision: u64) -> Result<ApplyOutcome,
     }
     patch.state = PatchState::Reverted;
     patch.applied_files.clear();
+    patch.applied_selection.clear();
+    patch.applied_selection_known = true;
     Ok(ApplyOutcome {
         state: PatchState::Reverted,
         revision,
@@ -535,9 +543,8 @@ fn build_hunks(
         return Err(format!("forward/inverse hunk mismatch for {}", change.path));
     }
     let mut hunks = Vec::with_capacity(forward.len());
-    for (index, ((header, forward), (_, inverse))) in
-        forward.into_iter().zip(inverse.into_iter()).enumerate()
-    {
+    for (index, ((header, forward), (_, inverse))) in forward.into_iter().zip(inverse).enumerate() {
+        let (additions, deletions) = patch_line_counts(&forward);
         let forward_hash = hash(forward.as_bytes());
         let inverse_hash = hash(inverse.as_bytes());
         store.put_blob(&forward_hash, forward.as_bytes(), now)?;
@@ -547,9 +554,27 @@ fn build_hunks(
             header,
             forward_patch_hash: forward_hash,
             inverse_patch_hash: inverse_hash,
+            additions,
+            deletions,
         });
     }
     Ok(hunks)
+}
+
+fn patch_line_counts(patch: &str) -> (u32, u32) {
+    let mut additions = 0;
+    let mut deletions = 0;
+    for line in patch.lines() {
+        if line.starts_with("+++") || line.starts_with("---") {
+            continue;
+        }
+        if line.starts_with('+') {
+            additions += 1;
+        } else if line.starts_with('-') {
+            deletions += 1;
+        }
+    }
+    (additions, deletions)
 }
 
 fn unified_diff(
@@ -719,10 +744,10 @@ fn merge_entry(
         (Some(current), Some(base), Some(desired)) if same_payload(&current, &base) => {
             Ok(MergeResult::Ready(Some(desired)))
         }
-        (Some(current), Some(base), Some(desired)) if same_payload(&current, &desired) => {
+        (Some(current), Some(_), Some(desired)) if same_payload(&current, &desired) => {
             Ok(MergeResult::Ready(Some(current)))
         }
-        (Some(current), Some(base), Some(desired)) if binary => Ok(MergeResult::Conflict(
+        (Some(_), Some(_), Some(_)) if binary => Ok(MergeResult::Conflict(
             "binary or symbolic-link resource changed on both sides".into(),
         )),
         (Some(current), Some(base), Some(desired)) if current.bytes.starts_with(&base.bytes) => {

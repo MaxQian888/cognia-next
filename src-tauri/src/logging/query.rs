@@ -2,8 +2,7 @@
 //! runtime-neutral observability query contract shared with the CLI.
 
 pub use cognia_observability::log_query::{
-    list_log_dir, query_log_dir, NativeLogFile, NativeLogFileInfo, NativeLogQuery,
-    NativeLogQueryResult, DEFAULT_LIMIT, MAX_LIMIT, MAX_SCAN_BYTES,
+    list_log_dir, query_log_dir, NativeLogFileInfo, NativeLogQuery, NativeLogQueryResult,
 };
 
 use crate::logging::native_bootstrap;
@@ -22,7 +21,9 @@ pub fn list_native_log_files() -> Result<Vec<NativeLogFileInfo>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use cognia_observability::log_query::{
+        NativeLogFile, DEFAULT_LIMIT, MAX_LIMIT, MAX_SCAN_BYTES,
+    };
 
     #[test]
     fn compatibility_adapter_preserves_bounded_query_contract() {

@@ -90,7 +90,7 @@ pub fn load_endpoint() -> Result<EndpointFile> {
 /// the parsed JSON response (or an error if status != 2xx).
 ///
 /// Used by `cognia plugin install` to preflight a same-id collision via
-/// `GET /api/v1/dev/plugins/installed`.
+/// `GET /api/dev/plugins/installed`.
 pub fn get_json<R: for<'de> Deserialize<'de>>(endpoint: &EndpointFile, path: &str) -> Result<R> {
     let url = format!("{}{}", endpoint.base_url.trim_end_matches('/'), path);
     let agent = ureq::Agent::new();
@@ -129,7 +129,7 @@ struct HealthResponse {
 /// Probe the bridge liveness endpoint. This is intentionally stricter than
 /// "HTTP 200 means reachable": the bridge contract is `{"ok": true}`.
 pub fn probe_health(endpoint: &EndpointFile) -> Result<()> {
-    let response: HealthResponse = get_json(endpoint, "/api/v1/dev/health")?;
+    let response: HealthResponse = get_json(endpoint, "/api/dev/health")?;
     if !response.ok {
         bail!("health probe returned ok=false");
     }
@@ -287,7 +287,7 @@ mod tests {
         };
         let resp: serde_json::Value = post_json(
             &endpoint,
-            "/api/v1/dev/plugins/install",
+            "/api/dev/plugins/install",
             &json!({"bundle_path": "x"}),
         )
         .unwrap();
@@ -307,7 +307,7 @@ mod tests {
         let server_thread = std::thread::spawn(move || {
             if let Ok(req) = server.recv() {
                 assert_eq!(req.method(), &tiny_http::Method::Get);
-                assert_eq!(req.url(), "/api/v1/dev/health");
+                assert_eq!(req.url(), "/api/dev/health");
                 let token = req
                     .headers()
                     .iter()
@@ -347,7 +347,7 @@ mod tests {
         };
         let err = post_json::<serde_json::Value>(
             &endpoint,
-            "/api/v1/dev/plugins/install",
+            "/api/dev/plugins/install",
             &json!({"bundle_path": "x"}),
         )
         .unwrap_err();
@@ -380,7 +380,7 @@ mod tests {
         };
         let err = post_json::<serde_json::Value>(
             &endpoint,
-            "/api/v1/dev/plugins/install",
+            "/api/dev/plugins/install",
             &json!({"bundle_path": "x"}),
         )
         .unwrap_err();

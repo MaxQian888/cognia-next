@@ -199,6 +199,7 @@ mod tests {
             bytes,
             mime_type: "image/png".to_string(),
             languages,
+            model_variant: None,
         }
     }
 

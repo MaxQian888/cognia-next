@@ -25,6 +25,7 @@ const KNOWN_PROVIDERS: &[&str] = &[
     "deepgram",
     "xiaomi",
     "mistral",
+    "local-openai-compatible",
     "xai",
 ];
 

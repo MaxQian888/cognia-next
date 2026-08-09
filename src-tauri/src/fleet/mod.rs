@@ -2,7 +2,7 @@
 //!
 //! External Claude Code / Codex / OpenCode processes report lifecycle events
 //! through tiny generated hook scripts (see [`install`]) that POST to the
-//! companion API's `/api/v1/fleet/*` routes ([`routes`], mounted from
+//! companion API's `/api/fleet/*` routes ([`routes`], mounted from
 //! `companion_api::server::build_router`). Events fold into the in-memory
 //! [`registry::FleetRegistry`] and every change is emitted to the island
 //! overlay webview as a full `fleet://update` snapshot (perf-sampler pattern).
@@ -166,7 +166,7 @@ pub struct FleetRuntime {
     /// awaits the answer; `fleet_question_respond` builds and fires it.
     question_pending: Mutex<HashMap<String, PendingQuestionPoll>>,
     /// Outbound send-message commands for OpenCode sessions, drained by the
-    /// plugin's command poll (`/api/v1/fleet/opencode/commands`).
+    /// plugin's command poll (`/api/fleet/opencode/commands`).
     opencode_commands: Mutex<Vec<OpencodeCommand>>,
     /// JSON outbox path installed when fleet monitoring starts. Commands are
     /// restored before a fresh ingress token is published.
