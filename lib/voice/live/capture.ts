@@ -77,6 +77,8 @@ export interface MicCaptureOptions {
   onFrame(frame: CaptureFrame): void
   /** Reports a fatal capture error; the session should surface and stop. */
   onError?(error: Error): void
+  /** Stream acquired during permission preflight, before any token is minted. */
+  initialStream?: MediaStreamLike
 
   // ── Seams (tests inject; production uses the real APIs) ──────────────
   audioContextFactory?(options: { sampleRate: number }): CaptureContextLike
@@ -104,6 +106,14 @@ function defaultGetUserMedia(constraints: unknown): Promise<MediaStreamLike> {
   ).navigator?.mediaDevices
   if (!media) throw new Error("microphone capture is not available in this environment")
   return media.getUserMedia(constraints)
+}
+
+/** Acquire and retain the selected microphone before contacting a provider. */
+export function preflightMicrophone(
+  deviceId?: string,
+  getUserMedia: (constraints: unknown) => Promise<MediaStreamLike> = defaultGetUserMedia
+): Promise<MediaStreamLike> {
+  return getUserMedia(buildAudioConstraints(deviceId))
 }
 
 function defaultCreateWorkletNode(context: CaptureContextLike, name: string): WorkletNodeLike {
@@ -185,6 +195,7 @@ export class MicCapture {
       sampleRate,
       frameSamples,
       deviceId,
+      initialStream,
       audioContextFactory = defaultAudioContextFactory,
       getUserMedia = defaultGetUserMedia,
       createWorkletNode = defaultCreateWorkletNode,
@@ -195,7 +206,8 @@ export class MicCapture {
     // Acquire the microphone first: the permission prompt can take many
     // seconds, and an ephemeral session token minted before it would burn most
     // of its ~60s lifetime waiting for the user.
-    const stream = await getUserMedia(buildAudioConstraints(deviceId))
+    const stream = initialStream ?? (await getUserMedia(buildAudioConstraints(deviceId)))
+    this.options.initialStream = undefined
 
     let context: CaptureContextLike | null = null
     try {

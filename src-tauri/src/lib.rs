@@ -943,7 +943,6 @@ pub fn run() {
             tts::proxy::tts_proxy_cancel,
             tts::realtime::tts_realtime_synthesize,
             tts::realtime::tts_realtime_cancel,
-            tts::live::voice_live_client_secret,
             external_agent::commands::spawn_external_agent,
             external_agent::commands::send_to_external_agent,
             external_agent::commands::kill_external_agent,

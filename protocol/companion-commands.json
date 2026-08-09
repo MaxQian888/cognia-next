@@ -12122,18 +12122,6 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
-      "name": "voice_live_client_secret",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
       "name": "wallpaper_delete",
       "target": "client",
       "operation": "side-effect",

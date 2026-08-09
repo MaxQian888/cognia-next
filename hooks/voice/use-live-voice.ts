@@ -47,3 +47,14 @@ export function useLiveVoiceState(controller: LiveVoiceController | null): LiveV
     IDLE_SNAPSHOT
   )
 }
+
+const ZERO_LEVEL_SNAPSHOT = (): number => 0
+
+/** Subscribe to the controller's throttled meter without re-rendering transcript state. */
+export function useLiveVoiceInputLevel(controller: LiveVoiceController | null): number {
+  return useSyncExternalStore(
+    controller?.subscribeInputLevel ?? NO_OP_SUBSCRIBE,
+    controller?.getInputLevelSnapshot ?? ZERO_LEVEL_SNAPSHOT,
+    ZERO_LEVEL_SNAPSHOT
+  )
+}

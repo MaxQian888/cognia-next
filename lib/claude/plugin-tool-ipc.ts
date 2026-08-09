@@ -77,6 +77,8 @@ export interface PluginToolExecRequest {
   toolUseId: string
   name: string
   args: Record<string, unknown>
+  /** Cooperative cancellation for direct renderer callers such as live voice. */
+  abortSignal?: AbortSignal
   remoteExecutionContext?: RemoteExecutionContext
 }
 
@@ -466,6 +468,7 @@ export async function handlePluginToolExec(
     toolUseId: request.toolUseId,
   }
   try {
+    request.abortSignal?.throwIfAborted()
     // ── Promoted web built-ins — web_search / web_fetch ────────────────────
     // Resolved BEFORE the plugin registry so the first-class built-in
     // supersedes any duplicate the web-tools plugin still registers. Always
@@ -563,6 +566,7 @@ export async function handlePluginToolExec(
         const context: PluginToolContext = {
           sessionId: request.sessionId,
           config: resolverOverride.getPluginConfig?.(tool.pluginId) ?? {},
+          signal: request.abortSignal,
         }
         const result = await tool.execute(request.args, context)
         return { ...baseResponse, result: assertSafePluginToolResult(result) }
@@ -578,6 +582,7 @@ export async function handlePluginToolExec(
       const resolved = await resolvePluginToolByName(request.name)
       if (resolved) {
         const { result } = await invokePluginTool(resolved.pluginId, request.name, request.args, {
+          signal: request.abortSignal,
           sessionId: request.sessionId,
           reason: `chat:plugin_tool_exec:${request.name}`,
         })

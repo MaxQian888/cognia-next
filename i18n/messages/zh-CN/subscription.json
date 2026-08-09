@@ -126,8 +126,10 @@
     "accountList": {
       "active": "当前激活",
       "addAccount": "添加账号",
+      "accountAdded": "账号已添加。",
       "cancel": "取消",
       "confirm": "保存",
+      "credentialsUpdated": "凭据已更新。",
       "empty": "暂无账号。先添加一个再使用此服务商。",
       "expiryStale": "访问令牌已过期——下次使用时自动刷新",
       "expiryValid": "令牌有效期至 {at}",
@@ -384,6 +386,7 @@
     "done": "登录成功。",
     "errors": {
       "codeMalformed": "输入里找不到 code。请粘贴 code 或完整回调 URL。",
+      "discoveredCredentialInvalid": "发现的 Claude 凭据不完整或无效。",
       "flowStateMissing": "OAuth 流程状态丢失，请重新登录。",
       "stateMismatch": "OAuth state 不匹配——可能是 CSRF。请重新登录。"
     },

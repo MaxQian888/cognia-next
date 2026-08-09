@@ -23,7 +23,8 @@
 
 import type { UIMessage } from "ai"
 
-import type { LiveVoiceTurn } from "../realtime-session"
+import type { LiveVoiceTurn } from "./reducer"
+import type { RealtimeToolRecord } from "./tool-runtime"
 import type { LiveVoiceMessageMetadata, PreparedRealtimeSession } from "./types"
 
 /** Identifies the provider/model/region a turn was spoken to. */
@@ -34,9 +35,14 @@ export type LiveVoiceTurnProvenance = Pick<
 
 export interface LiveVoiceTurnsToMessagesOptions {
   turns: readonly LiveVoiceTurn[]
+  toolRecords?: readonly RealtimeToolRecord[]
   provenance: LiveVoiceTurnProvenance
   /** Wall clock for the first turn; later turns are spaced 1ms apart. */
   startedAt: number
+  /** @internal Stable session-relative offsets reserved by the incremental writer. */
+  createdAtOffsets?: readonly number[]
+  /** @internal Stable offset for the aggregate tool lifecycle message. */
+  toolCreatedAtOffset?: number
 }
 
 /**
@@ -82,7 +88,7 @@ export function liveVoiceTurnsToMessages(
     if (!text) return
     // Ordering has to be stable and strictly increasing: `listMessages` sorts
     // by createdAt, and a whole voice session lands within the same millisecond.
-    const createdAt = options.startedAt + index
+    const createdAt = options.startedAt + (options.createdAtOffsets?.[index] ?? index)
 
     messages.push({
       id: liveVoiceMessageId(sessionId, turn.id),
@@ -91,6 +97,28 @@ export function liveVoiceTurnsToMessages(
       metadata: metadataFor(sessionId, options.provenance, createdAt),
     } as UIMessage)
   })
+
+  if (options.toolRecords?.length) {
+    messages.push({
+      id: liveVoiceMessageId(sessionId, "tools"),
+      role: "assistant",
+      parts: options.toolRecords.map((record) => ({
+        type: "dynamic-tool",
+        toolCallId: record.callId,
+        toolName: record.name,
+        state: "output-available",
+        // Deliberately omit provider arguments and result bodies. The history
+        // records lifecycle and timing without creating a new sensitive-data sink.
+        input: {},
+        output: { status: record.status, durationMs: record.durationMs },
+      })),
+      metadata: metadataFor(
+        sessionId,
+        options.provenance,
+        options.startedAt + (options.toolCreatedAtOffset ?? options.turns.length)
+      ),
+    } as UIMessage)
+  }
 
   return messages
 }
@@ -144,4 +172,94 @@ export async function persistLiveVoiceTurns(
 
   await persist(options.sessionId, [...byId.values()])
   return voiceMessages.length
+}
+
+export type LiveVoiceTurnPersisterOptions = Omit<
+  PersistLiveVoiceTurnsOptions,
+  "turns" | "toolRecords" | "existing" | "createdAtOffsets" | "toolCreatedAtOffset"
+>
+
+/** Serial, incremental writer for finalized turns in one live session. */
+export class LiveVoiceTurnPersister {
+  private readonly persistedTurnIds = new Set<string>()
+  private readonly pendingTurnIds = new Set<string>()
+  private persistedToolSignature = JSON.stringify([])
+  private readonly pendingToolSignatures = new Set<string>()
+  private readonly turnOffsetById = new Map<string, number>()
+  private toolCreatedAtOffset: number | undefined
+  private nextCreatedAtOffset = 0
+  private tail: Promise<void> = Promise.resolve()
+
+  constructor(private readonly options: LiveVoiceTurnPersisterOptions) {}
+
+  append(
+    turns: readonly LiveVoiceTurn[],
+    toolRecords: readonly RealtimeToolRecord[] = []
+  ): Promise<void> {
+    const freshTurns = turns.filter((turn) => {
+      if (!this.turnOffsetById.has(turn.id)) {
+        this.turnOffsetById.set(turn.id, this.nextCreatedAtOffset++)
+      }
+      if (this.persistedTurnIds.has(turn.id) || this.pendingTurnIds.has(turn.id)) return false
+      this.pendingTurnIds.add(turn.id)
+      return true
+    })
+    const nextToolSignature = JSON.stringify(
+      toolRecords.map(({ callId, status, durationMs }) => [callId, status, durationMs])
+    )
+    const toolsChanged =
+      nextToolSignature !== this.persistedToolSignature &&
+      !this.pendingToolSignatures.has(nextToolSignature)
+    if (toolsChanged) {
+      this.pendingToolSignatures.add(nextToolSignature)
+      this.toolCreatedAtOffset ??= this.nextCreatedAtOffset++
+    }
+    if (freshTurns.length === 0 && !toolsChanged) return this.tail
+
+    // The runtime owns a mutable record array. Snapshot it now so a later tool
+    // completion cannot change the payload while this write waits its turn.
+    const toolSnapshot = toolRecords.map((record) => ({ ...record }))
+    const operation = this.tail.then(async () => {
+      await persistLiveVoiceTurns({
+        ...this.options,
+        turns: freshTurns,
+        createdAtOffsets: freshTurns.map((turn) => this.turnOffsetById.get(turn.id) ?? 0),
+        ...(toolsChanged ? { toolRecords: toolSnapshot } : {}),
+        ...(toolsChanged ? { toolCreatedAtOffset: this.toolCreatedAtOffset } : {}),
+      })
+    })
+    void operation.then(
+      () => {
+        for (const turn of freshTurns) {
+          this.pendingTurnIds.delete(turn.id)
+          this.persistedTurnIds.add(turn.id)
+        }
+        if (toolsChanged) {
+          this.pendingToolSignatures.delete(nextToolSignature)
+          this.persistedToolSignature = nextToolSignature
+        }
+      },
+      () => {
+        for (const turn of freshTurns) this.pendingTurnIds.delete(turn.id)
+        if (toolsChanged) this.pendingToolSignatures.delete(nextToolSignature)
+      }
+    )
+    // A failed write is observable to its caller but cannot poison later
+    // writes; flush() can therefore retry any ids released above.
+    this.tail = operation.catch(() => undefined)
+    return operation
+  }
+
+  flush(
+    turns: readonly LiveVoiceTurn[],
+    toolRecords: readonly RealtimeToolRecord[] = []
+  ): Promise<void> {
+    return this.tail.then(() => this.append(turns, toolRecords))
+  }
+}
+
+export function createLiveVoiceTurnPersister(
+  options: LiveVoiceTurnPersisterOptions
+): LiveVoiceTurnPersister {
+  return new LiveVoiceTurnPersister(options)
 }

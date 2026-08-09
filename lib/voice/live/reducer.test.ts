@@ -1,6 +1,8 @@
 import type { Experimental_RealtimeModelV4ServerEvent as RealtimeServerEvent } from "@ai-sdk/provider"
 
 import {
+  assertLiveVoicePayloadPiiSafe,
+  classifyLiveVoiceError,
   createInitialLiveVoiceState,
   reduceLiveVoiceServerEvent,
   type LiveVoiceState,
@@ -220,6 +222,29 @@ describe("assistant transcripts", () => {
 })
 
 describe("errors", () => {
+  it.each([
+    ["NotAllowedError", "permission denied", "device-permission", false],
+    ["Error", "HTTP 401 unauthorized", "authentication", false],
+    ["Error", "429 rate limit", "rate-limit", true],
+    ["Error", "connection timed out", "connection-timeout", true],
+    ["Error", "network ECONNRESET", "network", true],
+    ["Error", "Realtime connection was lost", "network", true],
+    ["Error", "live voice connection closed before readiness", "network", true],
+    ["Error", "session expired", "session-expired", true],
+  ])("classifies %s / %s as %s", (name, message, code, retryable) => {
+    const error = new Error(message)
+    error.name = name
+    expect(classifyLiveVoiceError(error)).toMatchObject({ code, retryable })
+  })
+
+  it("fails closed when a structured outbound payload contains PII", () => {
+    expect(() =>
+      assertLiveVoicePayloadPiiSafe({
+        tools: [{ name: "lookup", description: "Send results to bob@example.com" }],
+      })
+    ).toThrow(/PII redaction gate/)
+  })
+
   it("records the provider message", () => {
     const state = fold(event({ type: "error", message: "rate limited", code: "429" }))
 

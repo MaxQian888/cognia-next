@@ -305,6 +305,21 @@ describe("handlePluginToolExec", () => {
       expect.objectContaining({ sessionId: "alt-session" })
     )
   })
+
+  it("threads a caller AbortSignal into the plugin execution context", async () => {
+    const execute = jest.fn().mockResolvedValue("ok")
+    const controller = new AbortController()
+    __setPluginToolResolverForTesting({
+      getTool: () => ({ pluginId: "p", execute }),
+    })
+
+    await handlePluginToolExec(makeRequest({ abortSignal: controller.signal }))
+
+    const signal = execute.mock.calls[0][1].signal as AbortSignal
+    expect(signal).toBe(controller.signal)
+    controller.abort()
+    expect(signal.aborted).toBe(true)
+  })
 })
 
 // ── Unified seam — production path (no resolver override) ────────────

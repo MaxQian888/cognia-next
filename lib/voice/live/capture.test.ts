@@ -155,6 +155,17 @@ describe("buildAudioConstraints", () => {
 })
 
 describe("MicCapture.start", () => {
+  it("reuses a permission-preflight stream instead of requesting a second microphone", async () => {
+    const initialStream = new FakeStream()
+    const h = harness({ initialStream })
+
+    await h.capture.start()
+
+    expect(h.getUserMedia).not.toHaveBeenCalled()
+    await h.capture.dispose()
+    expect(initialStream.tracks[0].stopped).toBe(true)
+  })
+
   it("wires source → worklet and starts running", async () => {
     const h = harness()
 

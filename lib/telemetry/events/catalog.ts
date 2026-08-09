@@ -21,6 +21,20 @@ export interface TelemetryEventCatalog {
     errorType?: string
     durationMs?: number
   }
+  "voice.connection.ready": { provider: string; durationMs: number }
+  "voice.first-audio": { provider: string; eouToAudioMs: number }
+  "voice.interrupted": { provider: string; playedMs: number }
+  "voice.reconnect": {
+    provider: string
+    attempt: number
+    outcome: "started" | "succeeded" | "failed"
+  }
+  "voice.tool.completed": {
+    provider: string
+    status: string
+    durationMs: number
+  }
+  "voice.error": { provider: string; code: string }
   "workflow.run.started": { runId: string; trigger: string }
   "workflow.run.completed": { runId: string; durationMs?: number }
   "workflow.run.failed": { runId: string; durationMs?: number; errorCode?: string }
@@ -89,6 +103,12 @@ export const TELEMETRY_EVENT_CATALOG: Readonly<
   "chat.message.sent": { category: "chat" },
   "chat.turn.completed": { category: "chat" },
   "chat.turn.failed": { category: "chat" },
+  "voice.connection.ready": { category: "chat" },
+  "voice.first-audio": { category: "chat" },
+  "voice.interrupted": { category: "chat" },
+  "voice.reconnect": { category: "chat" },
+  "voice.tool.completed": { category: "chat" },
+  "voice.error": { category: "chat" },
   "workflow.run.started": { category: "workflow" },
   "workflow.run.completed": { category: "workflow" },
   "workflow.run.failed": { category: "workflow" },

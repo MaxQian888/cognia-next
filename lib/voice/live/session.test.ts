@@ -2,6 +2,7 @@ import type { Experimental_RealtimeModelV4 } from "@ai-sdk/provider"
 
 import type { LiveVoiceDeployment, LiveVoiceSettings } from "./types"
 import {
+  buildLiveVoiceSessionConfig,
   explainLiveVoiceUnavailability,
   LiveVoiceMintFailedError,
   LiveVoiceUnavailableError,
@@ -174,6 +175,41 @@ describe("selectLiveVoiceCandidates — dial details", () => {
   })
 })
 
+describe("buildLiveVoiceSessionConfig", () => {
+  it("enables Gemini resumption and sliding-window compression", () => {
+    const [candidate] = selectLiveVoiceCandidates(
+      settings({ deployments: [deployment({ provider: "google" })] }),
+      selectDeps()
+    )
+
+    expect(buildLiveVoiceSessionConfig({ candidate, resumptionHandle: "handle-1" })).toMatchObject({
+      turnDetection: { type: "server-vad" },
+      providerOptions: {
+        sessionResumption: { handle: "handle-1" },
+        contextWindowCompression: {
+          triggerTokens: 25_600,
+          slidingWindow: { targetTokens: 12_800 },
+        },
+      },
+    })
+  })
+
+  it("uses semantic VAD only for OpenAI", () => {
+    const [openai] = selectLiveVoiceCandidates(settings(), selectDeps())
+    const [xai] = selectLiveVoiceCandidates(
+      settings({ deployments: [deployment({ provider: "xai" })] }),
+      selectDeps()
+    )
+
+    expect(buildLiveVoiceSessionConfig({ candidate: openai }).turnDetection).toEqual({
+      type: "semantic-vad",
+    })
+    expect(buildLiveVoiceSessionConfig({ candidate: xai }).turnDetection).toEqual({
+      type: "server-vad",
+    })
+  })
+})
+
 describe("selectLiveVoiceCandidates — ordering and limits", () => {
   const three = settings({
     deployments: [
@@ -304,8 +340,16 @@ describe("resolveLiveVoiceSession", () => {
       {
         provider: "openai",
         modelId: "gpt-realtime-2.1",
-        voice: "marin",
-        instructions: "persona",
+        sessionConfig: {
+          instructions: "persona",
+          voice: "marin",
+          outputModalities: ["audio"],
+          inputAudioFormat: { type: "audio/pcm", rate: 24_000 },
+          outputAudioFormat: { type: "audio/pcm", rate: 24_000 },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+          turnDetection: { type: "semantic-vad" },
+        },
         apiKey: "sk-user",
         expiresAfterSeconds: 60,
       },

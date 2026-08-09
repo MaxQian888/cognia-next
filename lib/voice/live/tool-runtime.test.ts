@@ -2,12 +2,15 @@ import type { Experimental_RealtimeModelV4ClientEvent as RealtimeClientEvent } f
 
 const requestRealtimeToolApproval = jest.fn()
 const realtimeToolWillPrompt = jest.fn(() => false)
+const cancelRealtimeToolApproval = jest.fn()
 
 jest.mock("./approval", () => ({
   requestRealtimeToolApproval: (...args: Parameters<typeof requestRealtimeToolApproval>) =>
     requestRealtimeToolApproval(...args),
   realtimeToolWillPrompt: (...args: Parameters<typeof realtimeToolWillPrompt>) =>
     realtimeToolWillPrompt(...args),
+  cancelRealtimeToolApproval: (...args: Parameters<typeof cancelRealtimeToolApproval>) =>
+    cancelRealtimeToolApproval(...args),
 }))
 
 import { createLiveVoiceAudioGate } from "./audio-gate"
@@ -117,6 +120,7 @@ describe("RealtimeToolRuntime", () => {
       callId: "c1",
       name: "search",
       args: { q: "hi" },
+      signal: expect.any(AbortSignal),
     })
     expect(sent[0]).toEqual({
       type: "conversation-item-create",
@@ -127,6 +131,16 @@ describe("RealtimeToolRuntime", () => {
         output: '{"ok":true}',
       },
     })
+  })
+
+  it("executes a duplicated call id only once", async () => {
+    const { runtime, sent, execute } = makeRuntime()
+    const call = { callId: "c1", name: "search", arguments: '{"q":"hi"}' }
+
+    await Promise.all([runtime.handleToolCall(call), runtime.handleToolCall(call)])
+
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(sent.filter((event) => event.type === "conversation-item-create")).toHaveLength(1)
   })
 
   it("carries the tool name, which Google needs to route the response", async () => {
@@ -311,5 +325,50 @@ describe("RealtimeToolRuntime", () => {
     runtime.reset()
 
     expect(runtime.pending).toBe(0)
+    expect(cancelRealtimeToolApproval).toHaveBeenCalledWith("s1", "c1")
+    expect(runtime.records).toEqual([
+      expect.objectContaining({ callId: "c1", name: "search", status: "cancelled" }),
+    ])
+  })
+
+  it("invalidates one provider-cancelled call and drops its late result", async () => {
+    let releaseExecute: (value: RealtimeToolExecutionResult) => void = () => {}
+    let observedSignal: AbortSignal | undefined
+    const execute = jest.fn(
+      (request: { signal: AbortSignal }) =>
+        new Promise<RealtimeToolExecutionResult>((resolve) => {
+          observedSignal = request.signal
+          releaseExecute = resolve
+        })
+    )
+    const { runtime, sent } = makeRuntime(execute as unknown as jest.Mock)
+    const pending = runtime.handleToolCall({ callId: "c1", name: "search", arguments: "{}" })
+    await Promise.resolve()
+
+    runtime.cancel("c1")
+    expect(observedSignal?.aborted).toBe(true)
+    releaseExecute({ result: "too late" })
+    await pending
+
+    expect(cancelRealtimeToolApproval).toHaveBeenCalledWith("s1", "c1")
+    expect(runtime.pending).toBe(0)
+    expect(runtime.records).toEqual([
+      expect.objectContaining({ callId: "c1", name: "search", status: "cancelled" }),
+    ])
+    expect(sent).toEqual([])
+  })
+
+  it("records completed, rejected and failed lifecycle outcomes", async () => {
+    const { runtime } = makeRuntime()
+    await runtime.handleToolCall({ callId: "ok", name: "search", arguments: "{}" })
+    requestRealtimeToolApproval.mockResolvedValueOnce({ approved: false, reason: "user" })
+    await runtime.handleToolCall({ callId: "no", name: "write", arguments: "{}" })
+    await runtime.handleToolCall({ callId: "bad", name: "broken", arguments: "{" })
+
+    expect(runtime.records.map(({ callId, status }) => [callId, status])).toEqual([
+      ["ok", "completed"],
+      ["no", "rejected"],
+      ["bad", "failed"],
+    ])
   })
 })

@@ -54,11 +54,15 @@ describe("task workspace client", () => {
       agentId: "built-in",
       agentKind: "in-app",
       workspaceRoot: "/repo",
+      base: { kind: "gitRef", gitRef: "origin/dev" },
     })
 
     expect(run?.executionRoot).toBe("/isolated")
     expect(call).toHaveBeenNthCalledWith(1, "task_workspace_begin", {
-      input: expect.objectContaining({ workspaceRoot: "/repo" }),
+      input: expect.objectContaining({
+        workspaceRoot: "/repo",
+        base: { kind: "gitRef", gitRef: "origin/dev" },
+      }),
     })
     expect(call).toHaveBeenCalledTimes(1)
   })

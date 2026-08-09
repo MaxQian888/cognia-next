@@ -25,7 +25,7 @@
 
 import type { Experimental_RealtimeModelV4ClientEvent as RealtimeClientEvent } from "@ai-sdk/provider"
 
-import { screenLiveVoiceText } from "../realtime-session"
+import { screenLiveVoiceText } from "./reducer"
 
 /** Structural view of a stored/UI message — only what the seed needs. */
 export interface LiveVoiceContextMessage {

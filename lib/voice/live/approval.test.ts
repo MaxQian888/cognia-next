@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import {
+  cancelRealtimeToolApproval,
   grantRealtimeToolAlwaysAllow,
   isRealtimeToolApprovalRequestId,
   REALTIME_TOOL_APPROVAL_PREFIX,
@@ -176,6 +177,34 @@ describe("requestRealtimeToolApproval", () => {
     resolveApproval("s1", `${REALTIME_TOOL_APPROVAL_PREFIX}call_1`, { decision: "allow" })
 
     await expect(pending).resolves.toEqual({ approved: true, reason: "user" })
+  })
+})
+
+describe("cancelRealtimeToolApproval", () => {
+  it("denies the pending registry waiter and clears its approval card", async () => {
+    const pending = requestRealtimeToolApproval({
+      sessionId: "s1",
+      callId: "call_1",
+      toolName: "search_notes",
+      args: {},
+      policy: {},
+    })
+    await flush()
+
+    cancelRealtimeToolApproval("s1", "call_1")
+
+    await expect(pending).resolves.toEqual({ approved: false, reason: "user" })
+    await flush()
+    expect(clearApproval).toHaveBeenCalledWith(`${REALTIME_TOOL_APPROVAL_PREFIX}call_1`, "s1")
+  })
+
+  it("survives a chat store that was already torn down", async () => {
+    clearApproval.mockImplementation(() => {
+      throw new Error("session removed")
+    })
+
+    expect(() => cancelRealtimeToolApproval("missing", "late-call")).not.toThrow()
+    await flush()
   })
 })
 

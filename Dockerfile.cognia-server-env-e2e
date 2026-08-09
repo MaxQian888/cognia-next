@@ -1,2 +1,5 @@
 FROM cognia-server:ci-full
+COPY --from=brain-cli /cli.mjs /app/brain/cli.mjs
+COPY --from=brain-sidecar /claude-host.mjs /app/brain/sidecar/claude-host.mjs
+COPY --from=webclone-modules / /app/brain/sidecar/node_modules
 ENV COGNIA_SIDECAR_SCRIPT=/app/brain/sidecar/claude-host.mjs

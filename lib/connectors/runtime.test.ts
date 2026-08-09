@@ -984,6 +984,7 @@ describe("installRuntime — ai-run (PII embed gate covers the fallback legs)", 
             id: "mem_1",
             type: "semantic",
             status: "active",
+            scope: "global",
             text: "the user prefers runtime hello messages",
             source: "user",
             createdAt: Date.now(),
@@ -1039,6 +1040,10 @@ describe("installRuntime — ai-run (PII embed gate covers the fallback legs)", 
   it("memory retriever embeds inbound text only when the PII gate passes (non-twin character)", async () => {
     // Non-twin characters never precompute a turn embedding, so before the fix
     // the memory retriever embedded inbound text ungated on EVERY turn.
+    await getDb().settings.put({
+      id: "singleton",
+      memory: { enabled: true, useMemory: true },
+    } as never)
     await getDb().characters.put({ id: "char_abc", name: "Plain" } as never)
     const clean = memoryDepsWithEmbedSpy()
     tryBuildMemoryDepsImpl = jest.fn(async () => clean.deps)

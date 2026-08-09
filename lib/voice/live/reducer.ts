@@ -3,9 +3,7 @@
  *
  * Consumes the AI SDK's normalized `RealtimeModelV4ServerEvent` union, so every
  * vendor's dotted wire names (`response.output_audio_transcript.delta` and
- * friends) have already been mapped by the adapter. The legacy
- * `reduceLiveVoiceEvent` in `../realtime-session` does the same job against
- * OpenAI's raw shape and retires with the WebRTC path.
+ * friends) have already been mapped by the adapter.
  *
  * Two invariants this file must keep:
  *
@@ -25,16 +23,107 @@
  */
 
 import type { Experimental_RealtimeModelV4ServerEvent as RealtimeServerEvent } from "@ai-sdk/provider"
-
+import { hasNoLeakingPii, hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 import {
-  createInitialLiveVoiceState,
-  screenLiveVoiceText,
-  type LiveVoiceState,
-  type LiveVoiceTurn,
-} from "../realtime-session"
+  classifyProviderErrorInfo,
+  isTransientErrorClass,
+} from "@cognia/provider-routing/error-classifier"
 
-export { createInitialLiveVoiceState }
-export type { LiveVoiceState, LiveVoiceTurn }
+export type LiveVoicePhase =
+  | "idle"
+  | "connecting"
+  | "reconnecting"
+  | "listening"
+  | "speaking"
+  | "thinking"
+  | "responding"
+  | "error"
+
+export type LiveVoiceErrorCode =
+  | "device-permission"
+  | "device-unavailable"
+  | "authentication"
+  | "rate-limit"
+  | "connection-timeout"
+  | "network"
+  | "session-expired"
+  | "provider-error"
+
+export interface LiveVoiceErrorInfo {
+  code: LiveVoiceErrorCode
+  message: string
+  retryable: boolean
+}
+
+export interface LiveVoiceTurn {
+  id: string
+  role: "user" | "assistant"
+  text: string
+}
+
+export interface LiveVoiceState {
+  phase: LiveVoicePhase
+  turns: LiveVoiceTurn[]
+  assistantDraft: string
+  muted: boolean
+  error?: string
+  errorInfo?: LiveVoiceErrorInfo
+  reconnect?: { attempt: number; maxAttempts: number }
+}
+
+export function createInitialLiveVoiceState(): LiveVoiceState {
+  return { phase: "idle", turns: [], assistantDraft: "", muted: false }
+}
+
+/** Fail-closed PII boundary shared by every live-voice text path. */
+export function screenLiveVoiceText(text: string): string | null {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+  if (hasNoLeakingPii(trimmed)) return trimmed
+  const redacted = redactText(trimmed).redacted.trim()
+  return redacted && hasNoLeakingPii(redacted) ? redacted : null
+}
+
+/** Fail closed at structured outbound boundaries, including nested tool metadata. */
+export function assertLiveVoicePayloadPiiSafe(payload: unknown): void {
+  if (!hasNoLeakingPiiDeep(payload)) {
+    throw new Error("live voice payload was rejected by the PII redaction gate")
+  }
+}
+
+/** Normalize browser, transport and provider failures into stable UI codes. */
+export function classifyLiveVoiceError(error: Error): LiveVoiceErrorInfo {
+  const message = error.message || error.name || "Realtime voice session failed"
+  if (
+    error.name === "NotAllowedError" ||
+    /permission|notallowed|microphone.{0,12}denied|denied.{0,12}microphone/i.test(message)
+  ) {
+    return { code: "device-permission", message, retryable: false }
+  }
+  if (error.name === "NotFoundError" || error.name === "OverconstrainedError") {
+    return { code: "device-unavailable", message, retryable: true }
+  }
+  if (/session.{0,12}(expired|closed)|token.{0,12}expired/i.test(message)) {
+    return { code: "session-expired", message, retryable: true }
+  }
+  if (/connection (?:was )?(?:lost|closed)|websocket|network|offline|ECONNRESET/i.test(message)) {
+    return { code: "network", message, retryable: true }
+  }
+  const { errorClass } = classifyProviderErrorInfo(message)
+  if (errorClass === "auth") {
+    return { code: "authentication", message, retryable: false }
+  }
+  if (errorClass === "rate-limit") {
+    return { code: "rate-limit", message, retryable: true }
+  }
+  if (errorClass === "timeout") {
+    return { code: "connection-timeout", message, retryable: true }
+  }
+  if (errorClass === "network" || errorClass === "server-error") {
+    return { code: "network", message, retryable: isTransientErrorClass(errorClass) }
+  }
+  return { code: "provider-error", message, retryable: false }
+}
 
 function upsertTurn(turns: LiveVoiceTurn[], next: LiveVoiceTurn): LiveVoiceTurn[] {
   const index = turns.findIndex((turn) => turn.id === next.id)
@@ -59,7 +148,13 @@ export function reduceLiveVoiceServerEvent(
     case "session-updated":
       return state.phase === "listening" && !state.error
         ? state
-        : { ...state, phase: "listening", error: undefined }
+        : {
+            ...state,
+            phase: "listening",
+            error: undefined,
+            errorInfo: undefined,
+            reconnect: undefined,
+          }
 
     case "speech-started":
       // The user started talking. Barge-in: whatever the assistant was part-way
@@ -109,12 +204,17 @@ export function reduceLiveVoiceServerEvent(
       }
     }
 
-    case "error":
+    case "error": {
+      const errorInfo = classifyLiveVoiceError(
+        new Error(event.message || "Realtime voice session failed")
+      )
       return {
         ...state,
         phase: "error",
-        error: event.message || "Realtime voice session failed",
+        error: errorInfo.message,
+        errorInfo,
       }
+    }
 
     default:
       // audio-delta, audio-done, output-item-*, content-part-*, audio-committed,

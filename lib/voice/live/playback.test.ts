@@ -163,6 +163,23 @@ describe("LiveVoicePlayback barge-in", () => {
 })
 
 describe("LiveVoicePlayback lifecycle", () => {
+  it("reports only after an ended turn has fully drained", () => {
+    const context = new FakeContext()
+    const onEnded = jest.fn()
+    const playback = createLiveVoicePlayback({
+      sampleRate: 24_000,
+      audioContextFactory: () => context,
+      onEnded,
+    })
+    playback.enqueueBase64(delta(2400))
+
+    playback.endTurn()
+    expect(onEnded).not.toHaveBeenCalled()
+    context.sources[0].onended?.()
+
+    expect(onEnded).toHaveBeenCalledTimes(1)
+  })
+
   it("survives many turns on one context", () => {
     const h = harness()
 

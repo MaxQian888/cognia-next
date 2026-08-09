@@ -101,6 +101,14 @@ describe("LiveVoiceCard — providers", () => {
     expect(screen.getByLabelText("providers.xai")).toBeInTheDocument()
   })
 
+  it("does not offer a new CN configuration while no CN provider is implemented", () => {
+    render(<LiveVoiceCard />)
+
+    fireEvent.click(screen.getByLabelText("region"))
+
+    expect(screen.queryByText("regionCn")).not.toBeInTheDocument()
+  })
+
   it("says so plainly when the region has no usable provider yet", () => {
     // CN providers are all relay-backed and land with the Phase 2 relay; an
     // empty list with no explanation reads as a broken screen.

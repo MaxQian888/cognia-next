@@ -340,8 +340,9 @@ async function resolveMcpServerDefinitions(
 /** Resolve keyring-backed values before projecting an SDK-compatible map. */
 export async function buildMcpServerMapResolved(
   servers: McpServer[],
-  resolveConfig: (config: McpServer["config"]) => Promise<Record<string, unknown>> =
-    resolveMcpSecrets
+  resolveConfig: (
+    config: McpServer["config"]
+  ) => Promise<Record<string, unknown>> = resolveMcpSecrets
 ): Promise<Record<string, Record<string, unknown>>> {
   return buildMcpServerMap(await resolveMcpServerDefinitions(servers, resolveConfig))
 }

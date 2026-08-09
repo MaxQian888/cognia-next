@@ -1744,6 +1744,56 @@
       "outputTyped": true
     },
     {
+      "name": "browser_drag",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "browser_drag (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceRef": {
+            "type": "string",
+            "minLength": 1
+          },
+          "targetRef": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "browserSessionId",
+          "sourceRef",
+          "targetRef"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+      },
+      "outputTyped": true
+    },
+    {
       "name": "browser_evaluate",
       "category": "development",
       "resource": "browser",
@@ -1965,6 +2015,53 @@
       "outputTyped": true
     },
     {
+      "name": "browser_handle_dialog",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "browser_handle_dialog (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "accept": {
+            "type": "boolean"
+          },
+          "promptText": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "browserSessionId",
+          "accept"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+      },
+      "outputTyped": true
+    },
+    {
       "name": "browser_navigate",
       "category": "development",
       "resource": "browser",
@@ -1992,6 +2089,50 @@
         "required": [
           "browserSessionId",
           "url"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "browser_new_page",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "browser_new_page (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "browserSessionId"
         ],
         "additionalProperties": false
       },
@@ -2271,6 +2412,24 @@
           "browserSessionId": {
             "type": "string",
             "minLength": 1
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "viewport",
+                  "fullPage",
+                  "element"
+                ]
+              },
+              "ref": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
           }
         },
         "required": [
@@ -21281,5 +21440,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "8efe2165da24866683057a6e89ae8e786342a41bf428a6780cf174c71aa681c9"
+  "catalogHash": "5415dd40764603f4e5bece864f67b7f9fc8fedefc086e5468357fb2205aaabef"
 }

@@ -69,6 +69,45 @@ const SESSION = { token: "ek_secret", url: "wss://provider.example/realtime" }
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe("connect", () => {
+  it("resolves only after the socket is open", async () => {
+    const h = harness()
+    let settled = false
+
+    const connecting = h.transport.connect(SESSION).then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    h.socket.onopen?.({})
+    await connecting
+
+    expect(settled).toBe(true)
+  })
+
+  it("rejects and closes a connection that exceeds its timeout", async () => {
+    jest.useFakeTimers()
+    const h = harness()
+
+    const connecting = h.transport.connect(SESSION, { timeoutMs: 50 })
+    await jest.advanceTimersByTimeAsync(50)
+
+    await expect(connecting).rejects.toThrow("timed out")
+    expect(h.socket.closed).toEqual({ code: 4000, reason: "connection timeout" })
+    jest.useRealTimers()
+  })
+
+  it("can be cancelled while the handshake is pending", async () => {
+    const h = harness()
+    const abort = new AbortController()
+
+    const connecting = h.transport.connect(SESSION, { signal: abort.signal })
+    abort.abort()
+
+    await expect(connecting).rejects.toThrow("cancelled")
+    expect(h.socket.closed).toEqual({ code: 4000, reason: "connection cancelled" })
+  })
+
   it("dials the URL and subprotocols the adapter chose", () => {
     const h = harness()
 
@@ -347,6 +386,8 @@ describe("close", () => {
     h.socket.receive(JSON.stringify({ type: "session-created" }))
 
     expect(h.events).toHaveLength(0)
+    expect(h.socket.onclose).toBeNull()
+    expect(h.closes).toHaveLength(0)
   })
 
   it("does not report an error for a close we initiated", () => {

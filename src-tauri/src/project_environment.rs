@@ -86,12 +86,6 @@ fn effective_policy(
     host: ExecutionHost,
 ) -> EffectiveEnvironmentPolicy {
     let policy = policy.unwrap_or_default();
-    let require_sandbox = host == ExecutionHost::Cloud
-        || policy.require_sandbox.unwrap_or(false)
-        || policy
-            .required_runtime_capabilities
-            .iter()
-            .any(|capability| capability == "sandbox");
     let mode = policy.network.unwrap_or_else(|| {
         if !policy.allowed_domains.is_empty() {
             EnvironmentNetworkMode::Allowlist
@@ -101,6 +95,14 @@ fn effective_policy(
             EnvironmentNetworkMode::On
         }
     });
+    let require_sandbox = host == ExecutionHost::Cloud
+        || policy.require_sandbox.unwrap_or(false)
+        || mode != EnvironmentNetworkMode::On
+        || !policy.allowed_domains.is_empty()
+        || policy
+            .required_runtime_capabilities
+            .iter()
+            .any(|capability| capability == "sandbox");
     let network = match mode {
         EnvironmentNetworkMode::Off => EnvironmentNetworkPolicy::Off,
         EnvironmentNetworkMode::Allowlist if policy.allowed_domains.is_empty() => {
@@ -202,7 +204,11 @@ async fn execute_on_host(
 
     let effective = effective_policy(policy, host);
     let mut result = if !effective.require_sandbox {
-        shell_exec_with_env(script, cwd, timeout_secs, environment)?
+        tokio::task::spawn_blocking(move || {
+            shell_exec_with_env(script, cwd, timeout_secs, environment)
+        })
+        .await
+        .map_err(|error| format!("project environment worker failed: {error}"))??
     } else {
         let cwd = PathBuf::from(cwd);
         let timeout = timeout_secs
@@ -327,6 +333,36 @@ mod tests {
         assert!(policy.require_sandbox);
         assert_eq!(
             policy.network,
+            EnvironmentNetworkPolicy::Allowlist {
+                hosts: vec!["api.example.com".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn local_network_restrictions_always_require_the_sandbox() {
+        let network_off = effective_policy(
+            Some(EnvironmentPolicy {
+                network: Some(EnvironmentNetworkMode::Off),
+                require_sandbox: Some(false),
+                ..EnvironmentPolicy::default()
+            }),
+            ExecutionHost::Local,
+        );
+        assert!(network_off.require_sandbox);
+        assert_eq!(network_off.network, EnvironmentNetworkPolicy::Off);
+
+        let allowlist = effective_policy(
+            Some(EnvironmentPolicy {
+                allowed_domains: vec!["api.example.com".into()],
+                require_sandbox: Some(false),
+                ..EnvironmentPolicy::default()
+            }),
+            ExecutionHost::Local,
+        );
+        assert!(allowlist.require_sandbox);
+        assert_eq!(
+            allowlist.network,
             EnvironmentNetworkPolicy::Allowlist {
                 hosts: vec!["api.example.com".into()]
             }

@@ -21,6 +21,7 @@ describe("withTaskWorkspaceRun", () => {
       {
         enabled: true,
         workspaceRoot: "/repo",
+        base: { kind: "gitRef", gitRef: "origin/dev" },
         sessionId: "session-1",
         runId: "execution-1",
         turnId: "turn-1",

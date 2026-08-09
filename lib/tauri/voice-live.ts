@@ -2,9 +2,7 @@
  * Typed IPC wrapper for the live-voice host proxy.
  *
  * `lib/tauri` is the sole authoritative seam for Rust calls — business code
- * imports named wrappers from here, never `invoke` directly. (The legacy
- * `lib/voice/realtime-session.ts` reaches for `@tauri-apps/api/core` itself;
- * that path retires with the WebRTC session.)
+ * imports named wrappers from here, never `invoke` directly.
  *
  * Why a proxy rather than a `mint_token`-shaped command: the three official
  * providers each mint realtime session tokens differently (OpenAI and xAI POST

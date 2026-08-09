@@ -290,6 +290,46 @@ describe("ensureCliDb", () => {
     }
   })
 
+  it("prepares a dynamic schema before validating a production table snapshot", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-dynamic-schema-"))
+    const tableDir = path.join(home, "db.json.tables")
+    fs.mkdirSync(tableDir, { recursive: true })
+    const goals = new FakeTable("goals", [{ id: "seed" }])
+    const db: DbLike = { verno: 82, tables: [goals], name: "CogniaDB" }
+    fs.writeFileSync(
+      path.join(tableDir, "manifest.json"),
+      JSON.stringify({
+        snapshotFormat: 3,
+        dbs: { CogniaDB: { version: 83, tables: ["goals"] } },
+      })
+    )
+    fs.writeFileSync(
+      path.join(tableDir, "CogniaDB--goals.json"),
+      JSON.stringify([{ id: "restored" }])
+    )
+    const prepareDynamicSchema = jest.fn(async () => {
+      db.verno = 83
+    })
+
+    try {
+      await ensureCliDb({
+        home,
+        getDatabase: () => db,
+        installGlobals: async () => {},
+        whenReady: async () => {},
+        prepareDynamicSchema,
+      })
+
+      expect(prepareDynamicSchema).toHaveBeenCalledWith([expect.objectContaining({ db })], {
+        CogniaDB: 83,
+      })
+      expect(goals.rows).toEqual([{ id: "restored" }])
+    } finally {
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("atomically replaces the snapshot and keeps one backup generation", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-atomic-"))
     const file = path.join(home, "db.json")

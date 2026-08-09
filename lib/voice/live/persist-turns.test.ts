@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai"
 
 import {
+  createLiveVoiceTurnPersister,
   liveVoiceMessageId,
   liveVoiceTurnsToMessages,
   persistLiveVoiceTurns,
@@ -119,6 +120,131 @@ describe("liveVoiceTurnsToMessages", () => {
     })
 
     expect(first.parts).toEqual([{ type: "text", text: "what is the weather" }])
+  })
+
+  it("stores terminal tool lifecycle records without arguments or provider output", () => {
+    const messages = liveVoiceTurnsToMessages("s1", {
+      turns: TURNS,
+      provenance: PROVENANCE,
+      startedAt: 1_000,
+      toolRecords: [
+        { callId: "call-1", name: "search", status: "completed", durationMs: 42 },
+        { callId: "call-2", name: "write", status: "rejected", durationMs: 8 },
+      ],
+    })
+
+    expect(messages.at(-1)?.parts).toEqual([
+      {
+        type: "dynamic-tool",
+        toolCallId: "call-1",
+        toolName: "search",
+        state: "output-available",
+        input: {},
+        output: { status: "completed", durationMs: 42 },
+      },
+      {
+        type: "dynamic-tool",
+        toolCallId: "call-2",
+        toolName: "write",
+        state: "output-available",
+        input: {},
+        output: { status: "rejected", durationMs: 8 },
+      },
+    ])
+  })
+})
+
+describe("LiveVoiceTurnPersister", () => {
+  it("serializes incremental writes and ignores a turn id already queued", async () => {
+    let releaseFirst: (() => void) | undefined
+    const persist = jest
+      .fn<Promise<void>, [string, UIMessage[]]>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseFirst = resolve
+          })
+      )
+      .mockResolvedValue(undefined)
+    const loadExisting = jest.fn().mockResolvedValue([])
+    const persister = createLiveVoiceTurnPersister({
+      sessionId: "s1",
+      provenance: PROVENANCE,
+      startedAt: 1_000,
+      persist,
+      loadExisting,
+    })
+
+    const first = persister.append([TURNS[0]])
+    const duplicate = persister.append([TURNS[0]])
+    const second = persister.append([TURNS[1]])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(persist).toHaveBeenCalledTimes(1)
+
+    releaseFirst?.()
+    await Promise.all([first, duplicate, second])
+
+    expect(persist).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps timestamps increasing across separate incremental writes", async () => {
+    const persist = jest.fn<Promise<void>, [string, UIMessage[]]>().mockResolvedValue(undefined)
+    const persister = createLiveVoiceTurnPersister({
+      sessionId: "s1",
+      provenance: PROVENANCE,
+      startedAt: 1_000,
+      persist,
+      loadExisting: jest.fn().mockResolvedValue([]),
+    })
+
+    await persister.append([TURNS[0]])
+    await persister.append(TURNS)
+
+    const firstMessages = persist.mock.calls[0][1]
+    const secondMessages = persist.mock.calls[1][1]
+    expect(metaOf(firstMessages.at(-1) as UIMessage).createdAt).toBe(1_000)
+    expect(metaOf(secondMessages.at(-1) as UIMessage).createdAt).toBe(1_001)
+  })
+
+  it("orders tool history between turns and keeps its timestamp stable on updates", async () => {
+    const persist = jest.fn<Promise<void>, [string, UIMessage[]]>().mockResolvedValue(undefined)
+    const persister = createLiveVoiceTurnPersister({
+      sessionId: "s1",
+      provenance: PROVENANCE,
+      startedAt: 1_000,
+      persist,
+      loadExisting: jest.fn().mockResolvedValue([]),
+    })
+    const tool = { callId: "call-1", name: "search", status: "completed" as const, durationMs: 5 }
+
+    await persister.append([TURNS[0]])
+    await persister.append([TURNS[0]], [tool])
+    await persister.append(TURNS, [tool])
+    await persister.append(TURNS, [{ ...tool, durationMs: 8 }])
+
+    expect(metaOf(persist.mock.calls[0][1].at(-1) as UIMessage).createdAt).toBe(1_000)
+    expect(metaOf(persist.mock.calls[1][1].at(-1) as UIMessage).createdAt).toBe(1_001)
+    expect(metaOf(persist.mock.calls[2][1].at(-1) as UIMessage).createdAt).toBe(1_002)
+    expect(metaOf(persist.mock.calls[3][1].at(-1) as UIMessage).createdAt).toBe(1_001)
+  })
+
+  it("retries a failed incremental write when the session flushes", async () => {
+    const persist = jest
+      .fn<Promise<void>, [string, UIMessage[]]>()
+      .mockRejectedValueOnce(new Error("dexie unavailable"))
+      .mockResolvedValue(undefined)
+    const persister = createLiveVoiceTurnPersister({
+      sessionId: "s1",
+      provenance: PROVENANCE,
+      startedAt: 1_000,
+      persist,
+      loadExisting: jest.fn().mockResolvedValue([]),
+    })
+
+    await expect(persister.append([TURNS[0]])).rejects.toThrow("dexie unavailable")
+    await expect(persister.flush([TURNS[0]])).resolves.toBeUndefined()
+
+    expect(persist).toHaveBeenCalledTimes(2)
   })
 })
 

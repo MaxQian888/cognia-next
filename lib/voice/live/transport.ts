@@ -54,6 +54,13 @@ export interface LiveVoiceTransportOptions {
   createWebSocket?(url: string, protocols?: string[]): WebSocketLike
 }
 
+export interface LiveVoiceConnectOptions {
+  /** Maximum time allowed for the WebSocket handshake. */
+  timeoutMs?: number
+  /** Cancels a handshake without surfacing it as an unexpected transport error. */
+  signal?: AbortSignal
+}
+
 function defaultCreateWebSocket(url: string, protocols?: string[]): WebSocketLike {
   const Ctor = (globalThis as { WebSocket?: new (u: string, p?: string[]) => WebSocketLike })
     .WebSocket
@@ -65,6 +72,13 @@ export class LiveVoiceTransport {
   private socket: WebSocketLike | null = null
   private sendTail: Promise<void> = Promise.resolve()
   private closing = false
+  private pendingConnect: {
+    resolve(): void
+    reject(error: Error): void
+    timer: ReturnType<typeof setTimeout> | null
+    signal?: AbortSignal
+    onAbort?: () => void
+  } | null = null
 
   constructor(private readonly options: LiveVoiceTransportOptions) {}
 
@@ -77,23 +91,75 @@ export class LiveVoiceTransport {
    * adapter decides how they map onto the actual socket URL and subprotocols
    * (OpenAI authenticates via subprotocol, xAI via a query parameter).
    */
-  connect(session: { token: string; url: string }): void {
+  connect(
+    session: { token: string; url: string },
+    options: LiveVoiceConnectOptions = {}
+  ): Promise<void> {
     if (this.socket) throw new Error("live voice transport is already connected")
+    if (options.signal?.aborted) {
+      return Promise.reject(new Error("live voice connection was cancelled"))
+    }
     this.closing = false
 
     const { adapter, createWebSocket = defaultCreateWebSocket } = this.options
     const config = adapter.getWebSocketConfig({ token: session.token, url: session.url })
     const socket = createWebSocket(config.url, config.protocols)
 
-    socket.onopen = () => this.options.onOpen?.()
-    socket.onerror = () => this.fail(new Error("live voice socket error"))
+    const connected = new Promise<void>((resolve, reject) => {
+      const pending = {
+        resolve,
+        reject,
+        timer: null as ReturnType<typeof setTimeout> | null,
+        signal: options.signal,
+        onAbort: undefined as (() => void) | undefined,
+      }
+      this.pendingConnect = pending
+
+      if (options.timeoutMs && options.timeoutMs > 0) {
+        pending.timer = setTimeout(() => {
+          this.cancelPendingConnect(
+            new Error(`live voice connection timed out after ${options.timeoutMs}ms`),
+            "connection timeout"
+          )
+        }, options.timeoutMs)
+      }
+      if (options.signal) {
+        pending.onAbort = () => {
+          this.cancelPendingConnect(
+            new Error("live voice connection was cancelled"),
+            "connection cancelled"
+          )
+        }
+        options.signal.addEventListener("abort", pending.onAbort, { once: true })
+      }
+    })
+
+    socket.onopen = () => {
+      this.settlePendingConnect()
+      this.options.onOpen?.()
+    }
+    socket.onerror = () => {
+      const error = new Error("live voice socket error")
+      this.rejectPendingConnect(error)
+      this.fail(error)
+    }
     socket.onclose = (event) => {
       this.socket = null
+      this.rejectPendingConnect(
+        new Error(
+          `live voice connection closed before readiness${event?.code ? ` (${event.code})` : ""}`
+        )
+      )
       this.options.onClose?.({ code: event?.code, reason: event?.reason })
     }
     socket.onmessage = (event) => this.handleMessage(event.data)
 
     this.socket = socket
+    // Some fire-and-forget callers observe lifecycle through callbacks. Mark
+    // the promise handled for them while preserving rejection for callers that
+    // await it (the controller does, so candidate fallback remains reliable).
+    void connected.catch(() => undefined)
+    return connected
   }
 
   /**
@@ -120,12 +186,14 @@ export class LiveVoiceTransport {
   /** Close the socket. Safe to call when already closed. */
   close(code?: number, reason?: string): void {
     this.closing = true
+    this.rejectPendingConnect(new Error("live voice connection was cancelled"))
     const socket = this.socket
     this.socket = null
     if (!socket) return
     socket.onmessage = null
     socket.onopen = null
     socket.onerror = null
+    socket.onclose = null
     try {
       socket.close(code, reason)
     } catch {
@@ -165,6 +233,41 @@ export class LiveVoiceTransport {
     // A close we initiated is not an error worth surfacing.
     if (this.closing) return
     this.options.onError?.(error)
+  }
+
+  private clearPendingConnect(): typeof this.pendingConnect {
+    const pending = this.pendingConnect
+    if (!pending) return null
+    this.pendingConnect = null
+    if (pending.timer) clearTimeout(pending.timer)
+    if (pending.signal && pending.onAbort) {
+      pending.signal.removeEventListener("abort", pending.onAbort)
+    }
+    return pending
+  }
+
+  private settlePendingConnect(): void {
+    this.clearPendingConnect()?.resolve()
+  }
+
+  private rejectPendingConnect(error: Error): void {
+    this.clearPendingConnect()?.reject(error)
+  }
+
+  private cancelPendingConnect(error: Error, reason: string): void {
+    const socket = this.socket
+    this.socket = null
+    this.rejectPendingConnect(error)
+    if (!socket) return
+    socket.onopen = null
+    socket.onerror = null
+    socket.onmessage = null
+    socket.onclose = null
+    try {
+      socket.close(4000, reason)
+    } catch {
+      // The rejection above is the observable cancellation result.
+    }
   }
 }
 

@@ -281,6 +281,10 @@ RUN groupadd --system --gid 10001 cognia \
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
 COPY --from=builder /work/target/release/cognia /usr/local/bin/cognia
 COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
+# Webclone's Babel analyzer intentionally uses createRequire because Babel 8's
+# ESM visitor types do not match its compatibility adapter. The sidecar bundle
+# therefore needs this pure-JS runtime closure beside claude-host.mjs.
+COPY --from=brain-builder /work/sidecar/webclone/node_modules /app/brain/sidecar/node_modules
 COPY --from=brain-builder /work/sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix /opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
 COPY --from=codeserver-preload /opt/cognia/code-server /opt/cognia/code-server
 COPY --from=plugin-node-runtime /usr/local/bin/node /opt/cognia/plugin-node/bin/node

@@ -123,9 +123,7 @@ describe("createMcpServer", () => {
       disallowedTools: ["browser_run_code_unsafe"],
     })
     expect(server.disallowedTools).toEqual(["browser_run_code_unsafe"])
-    expect((await getMcpServer(server.id))?.disallowedTools).toEqual([
-      "browser_run_code_unsafe",
-    ])
+    expect((await getMcpServer(server.id))?.disallowedTools).toEqual(["browser_run_code_unsafe"])
   })
 
   it("listMcpServersByPlugin returns only that plugin's rows", async () => {

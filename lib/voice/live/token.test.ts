@@ -1,19 +1,30 @@
 import { HOST_INJECTED_API_KEY } from "./proxy-fetch"
-import { mintLiveToken, type MintLiveTokenDeps } from "./token"
+import { mintLiveToken, type MintLiveTokenDeps, type MintLiveTokenRequest } from "./token"
 
 // Arrow-deferred so the hoisted `jest.mock` factory never touches this const
 // before its initializer runs (the repo's documented TDZ trap).
 const mockScreen = jest.fn<string | null, [string]>()
 
-jest.mock("../realtime-session", () => ({
+jest.mock("./reducer", () => ({
+  ...jest.requireActual<typeof import("./reducer")>("./reducer"),
   screenLiveVoiceText: (text: string) => mockScreen(text),
 }))
 
 const BASE = {
   provider: "openai",
   modelId: "gpt-realtime-2.1",
-  voice: "marin",
-} as const
+  sessionConfig: {
+    instructions: "",
+    voice: "marin",
+    outputModalities: ["audio"],
+    inputAudioFormat: { type: "audio/pcm", rate: 24_000 },
+    outputAudioFormat: { type: "audio/pcm", rate: 24_000 },
+    inputAudioTranscription: {},
+    outputAudioTranscription: {},
+    turnDetection: { type: "semantic-vad" },
+    tools: [{ type: "function", name: "search_notes", parameters: {} }],
+  },
+} satisfies MintLiveTokenRequest
 
 /** A stand-in for the host-relaying fetch, so no IPC seam is touched. */
 const hostFetch = jest.fn() as unknown as typeof fetch
@@ -56,7 +67,7 @@ describe("mintLiveToken — desktop (Tauri)", () => {
       adapter: createAdapter.adapter,
       // Post-gate text, so the controller's session-update repeats exactly
       // what was minted instead of re-screening the raw persona.
-      instructions: "",
+      sessionConfig: BASE.sessionConfig,
     })
   })
 
@@ -103,7 +114,7 @@ describe("mintLiveToken — web BYOK", () => {
       url: "wss://api.openai.com/v1/realtime",
       expiresAt: 99,
       adapter: createAdapter.adapter,
-      instructions: "",
+      sessionConfig: BASE.sessionConfig,
     })
   })
 
@@ -130,13 +141,17 @@ describe("mintLiveToken — web BYOK", () => {
     const createAdapter = jest.fn().mockResolvedValue({ doCreateClientSecret })
 
     await mintLiveToken(
-      { ...BASE, instructions: "persona", expiresAfterSeconds: 60 },
+      {
+        ...BASE,
+        sessionConfig: { ...BASE.sessionConfig, instructions: "persona" },
+        expiresAfterSeconds: 60,
+      },
       deps({ createAdapter })
     )
 
     expect(doCreateClientSecret).toHaveBeenCalledWith({
       expiresAfterSeconds: 60,
-      sessionConfig: { instructions: "safe", voice: "marin" },
+      sessionConfig: { ...BASE.sessionConfig, instructions: "safe" },
     })
   })
 
@@ -159,15 +174,43 @@ describe("mintLiveToken — web BYOK", () => {
 })
 
 describe("mintLiveToken — PII gate", () => {
+  it("rejects PII nested in tool metadata before building the adapter", async () => {
+    const createAdapter = adapterReturning({ token: "t", url: "wss://x" })
+
+    await expect(
+      mintLiveToken(
+        {
+          ...BASE,
+          sessionConfig: {
+            ...BASE.sessionConfig,
+            tools: [
+              {
+                type: "function",
+                name: "search_notes",
+                description: "Send matches to bob@example.com",
+                parameters: {},
+              },
+            ],
+          },
+        },
+        deps({ createAdapter })
+      )
+    ).rejects.toThrow(/PII redaction gate/)
+    expect(createAdapter).not.toHaveBeenCalled()
+  })
+
   it("skips the gate for empty instructions and sends an empty string", async () => {
     const doCreateClientSecret = jest.fn().mockResolvedValue({ token: "t", url: "wss://x" })
     const createAdapter = jest.fn().mockResolvedValue({ doCreateClientSecret })
 
-    await mintLiveToken({ ...BASE, instructions: "   " }, deps({ createAdapter }))
+    await mintLiveToken(
+      { ...BASE, sessionConfig: { ...BASE.sessionConfig, instructions: "   " } },
+      deps({ createAdapter })
+    )
 
     expect(mockScreen).not.toHaveBeenCalled()
     expect(doCreateClientSecret).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionConfig: { instructions: "", voice: "marin" } })
+      expect.objectContaining({ sessionConfig: { ...BASE.sessionConfig, instructions: "" } })
     )
   })
 
@@ -175,7 +218,10 @@ describe("mintLiveToken — PII gate", () => {
     mockScreen.mockReturnValue("screened persona")
     const createAdapter = adapterReturning({ token: "t", url: "wss://x" })
 
-    await mintLiveToken({ ...BASE, instructions: "  raw persona  " }, deps({ createAdapter }))
+    await mintLiveToken(
+      { ...BASE, sessionConfig: { ...BASE.sessionConfig, instructions: "  raw persona  " } },
+      deps({ createAdapter })
+    )
 
     expect(mockScreen).toHaveBeenCalledWith("raw persona")
   })
@@ -185,7 +231,10 @@ describe("mintLiveToken — PII gate", () => {
     const createAdapter = adapterReturning({ token: "t", url: "wss://x" })
 
     await expect(
-      mintLiveToken({ ...BASE, instructions: "leak me" }, deps({ createAdapter }))
+      mintLiveToken(
+        { ...BASE, sessionConfig: { ...BASE.sessionConfig, instructions: "leak me" } },
+        deps({ createAdapter })
+      )
     ).rejects.toThrow(/PII redaction gate/)
     expect(createAdapter).not.toHaveBeenCalled()
   })
@@ -196,7 +245,7 @@ describe("mintLiveToken — PII gate", () => {
 
     await expect(
       mintLiveToken(
-        { ...BASE, instructions: "leak me" },
+        { ...BASE, sessionConfig: { ...BASE.sessionConfig, instructions: "leak me" } },
         deps({ isTauri: () => true, createAdapter })
       )
     ).rejects.toThrow(/PII redaction gate/)

@@ -30,6 +30,7 @@ import {
   DEFAULT_APPROVAL_TTL_MS,
   grantSessionBypass,
   hasSessionBypass,
+  resolveApproval,
 } from "@/lib/connectors/hitl/approval-registry"
 import { resolvePermissionDetailed, type Ruleset } from "@/lib/claude/permissions/ruleset"
 import { setToolRule } from "@/lib/claude/permissions/ruleset-edit"
@@ -103,6 +104,22 @@ export interface RealtimeToolApprovalRequest {
   policy: RealtimeToolPolicy
   /** Defaults to the registry's 10-minute auto-deny. */
   ttlMs?: number
+}
+
+/** Cancel a pending card immediately when its voice session is no longer valid. */
+export function cancelRealtimeToolApproval(sessionId: string, callId: string): void {
+  const requestId = `${REALTIME_TOOL_APPROVAL_PREFIX}${callId}`
+  resolveApproval(sessionId, requestId, {
+    decision: "deny",
+    message: "voice session ended",
+  })
+  void import("@/stores/chat/chat-store").then(({ useChatStore }) => {
+    try {
+      useChatStore.getState().clearApproval(requestId, sessionId)
+    } catch {
+      // The chat session may already have been removed.
+    }
+  })
 }
 
 export type RealtimeApprovalReason =

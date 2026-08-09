@@ -69,8 +69,40 @@ describe("buildLiveVoiceRuntimeBindings", () => {
       callId: "c1",
       name: "search_notes",
       args: {},
+      signal: new AbortController().signal,
     })
     expect(d.executeTool).toHaveBeenCalled()
+  })
+
+  it("does not advertise host built-ins that cannot honour provider cancellation", async () => {
+    const bindings = await buildLiveVoiceRuntimeBindings(
+      options({
+        deps: deps({
+          buildPluginToolsManifest: jest.fn(async () => [
+            {
+              name: "ask_user",
+              description: "ask",
+              jsonSchema: {},
+              pluginId: "cognia-ask-user",
+            },
+            {
+              name: "terminal_dock_write",
+              description: "write",
+              jsonSchema: {},
+              pluginId: "cognia:builtin:terminal-dock",
+            },
+            {
+              name: "search_notes",
+              description: "search",
+              jsonSchema: {},
+              pluginId: "notes",
+            },
+          ]),
+        }),
+      })
+    )
+
+    expect(bindings.tools?.map((tool) => tool.name)).toEqual(["search_notes"])
   })
 
   it("carries the permission policy through untouched", async () => {

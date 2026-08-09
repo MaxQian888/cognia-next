@@ -38,6 +38,7 @@ import type { Experimental_RealtimeModelV4ClientEvent as RealtimeClientEvent } f
 
 import type { LiveVoiceAudioGate } from "./audio-gate"
 import {
+  cancelRealtimeToolApproval,
   realtimeToolWillPrompt,
   requestRealtimeToolApproval,
   type RealtimeToolPolicy,
@@ -56,6 +57,8 @@ export interface RealtimeToolExecutionRequest {
   callId: string
   name: string
   args: Record<string, unknown>
+  /** Cooperative cancellation; executors must check it before committing side effects. */
+  signal: AbortSignal
 }
 
 export interface RealtimeToolExecutionResult {
@@ -72,6 +75,17 @@ export interface RealtimeToolRuntimeOptions {
   /** Runs the tool. Must not throw — mirrors `handlePluginToolExec`. */
   execute(request: RealtimeToolExecutionRequest): Promise<RealtimeToolExecutionResult>
   onError?(error: Error): void
+  onRecord?(record: RealtimeToolRecord): void
+  now?(): number
+}
+
+export type RealtimeToolStatus = "completed" | "rejected" | "failed" | "cancelled"
+
+export interface RealtimeToolRecord {
+  callId: string
+  name: string
+  status: RealtimeToolStatus
+  durationMs: number
 }
 
 /** Sent back when the user declines, so the model stops waiting on the call. */
@@ -80,12 +94,22 @@ export const REALTIME_TOOL_DENIED_ERROR = "denied by user"
 export class RealtimeToolRuntime {
   private epoch = 0
   private inFlight = 0
+  private readonly seenCallIds = new Set<string>()
+  private readonly pendingCalls = new Map<
+    string,
+    { name: string; startedAt: number; abortController: AbortController }
+  >()
+  private readonly lifecycleRecords: RealtimeToolRecord[] = []
 
   constructor(private readonly options: RealtimeToolRuntimeOptions) {}
 
   /** Calls still awaiting approval or execution. Exposed for assertions. */
   get pending(): number {
     return this.inFlight
+  }
+
+  get records(): readonly RealtimeToolRecord[] {
+    return this.lifecycleRecords
   }
 
   /**
@@ -95,12 +119,47 @@ export class RealtimeToolRuntime {
    */
   reset(): void {
     this.epoch += 1
+    const now = (this.options.now ?? Date.now)()
+    for (const [callId, pending] of this.pendingCalls) {
+      pending.abortController.abort(new Error("live voice tool call was cancelled"))
+      cancelRealtimeToolApproval(this.options.sessionId, callId)
+      this.record({
+        callId,
+        name: pending.name,
+        status: "cancelled",
+        durationMs: Math.max(0, now - pending.startedAt),
+      })
+    }
+    this.pendingCalls.clear()
     this.inFlight = 0
+  }
+
+  /** Invalidate one provider-cancelled call without disturbing its siblings. */
+  cancel(callId: string): void {
+    const pending = this.pendingCalls.get(callId)
+    if (!pending) return
+    pending.abortController.abort(new Error("provider cancelled the live voice tool call"))
+    cancelRealtimeToolApproval(this.options.sessionId, callId)
+    this.pendingCalls.delete(callId)
+    this.inFlight = Math.max(0, this.inFlight - 1)
+    this.record({
+      callId,
+      name: pending.name,
+      status: "cancelled",
+      durationMs: Math.max(0, (this.options.now ?? Date.now)() - pending.startedAt),
+    })
   }
 
   /** Handle one `function-call-arguments-done`. Never rejects. */
   async handleToolCall(call: RealtimeToolCall): Promise<void> {
+    if (this.seenCallIds.has(call.callId)) return
+    this.seenCallIds.add(call.callId)
     const epoch = this.epoch
+    this.pendingCalls.set(call.callId, {
+      name: call.name,
+      startedAt: (this.options.now ?? Date.now)(),
+      abortController: new AbortController(),
+    })
     this.inFlight += 1
 
     let outcome: RealtimeToolExecutionResult
@@ -122,6 +181,8 @@ export class RealtimeToolRuntime {
 
     const parsed = parseToolArguments(call.arguments)
     if ("error" in parsed) return { error: parsed.error }
+    const signal = this.pendingCalls.get(call.callId)?.abortController.signal
+    if (!signal) return { error: "tool call is no longer active" }
 
     // Only hold the microphone when a dialog is actually going up. Muting
     // around a tool that auto-allows would cut the user off mid-sentence for
@@ -144,6 +205,7 @@ export class RealtimeToolRuntime {
         callId: call.callId,
         name: call.name,
         args: parsed.args,
+        signal,
       })
     } finally {
       release?.()
@@ -157,9 +219,22 @@ export class RealtimeToolRuntime {
   ): void {
     // The session this call belonged to is gone. Sending a callId the current
     // session never issued is fatal on most providers.
-    if (epoch !== this.epoch) return
+    if (epoch !== this.epoch || !this.pendingCalls.has(call.callId)) return
 
     this.inFlight = Math.max(0, this.inFlight - 1)
+    const pending = this.pendingCalls.get(call.callId)
+    this.pendingCalls.delete(call.callId)
+    this.record({
+      callId: call.callId,
+      name: call.name,
+      status:
+        outcome.error === REALTIME_TOOL_DENIED_ERROR
+          ? "rejected"
+          : outcome.error !== undefined
+            ? "failed"
+            : "completed",
+      durationMs: pending ? Math.max(0, (this.options.now ?? Date.now)() - pending.startedAt) : 0,
+    })
 
     this.options.send({
       type: "conversation-item-create",
@@ -176,6 +251,11 @@ export class RealtimeToolRuntime {
     if (this.inFlight === 0) {
       this.options.send({ type: "response-create" })
     }
+  }
+
+  private record(record: RealtimeToolRecord): void {
+    this.lifecycleRecords.push(record)
+    this.options.onRecord?.(record)
   }
 }
 

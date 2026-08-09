@@ -139,7 +139,11 @@ export function LiveVoiceCard() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="global">{t("regionGlobal")}</SelectItem>
-                <SelectItem value="cn">{t("regionCn")}</SelectItem>
+                {liveVoice.region === "cn" && (
+                  <SelectItem disabled value="cn">
+                    {t("regionCn")}
+                  </SelectItem>
+                )}
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">{t("regionHint")}</p>

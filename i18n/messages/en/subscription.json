@@ -126,8 +126,10 @@
     "accountList": {
       "active": "Active",
       "addAccount": "Add account",
+      "accountAdded": "Account added.",
       "cancel": "Cancel",
       "confirm": "Save",
+      "credentialsUpdated": "Credentials updated.",
       "empty": "No accounts yet. Add one to start using this provider.",
       "expiryStale": "Access token expired — refreshes on next use",
       "expiryValid": "Token valid until {at}",
@@ -384,6 +386,7 @@
     "done": "Signed in.",
     "errors": {
       "codeMalformed": "Couldn't find a code in that input. Paste either the code or the full callback URL.",
+      "discoveredCredentialInvalid": "The discovered Claude credential is incomplete or invalid.",
       "flowStateMissing": "Lost the OAuth flow state — please restart the sign-in.",
       "stateMismatch": "OAuth state mismatch — possible CSRF. Restart the sign-in."
     },

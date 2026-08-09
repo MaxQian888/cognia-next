@@ -5033,6 +5033,17 @@
           "description": "Talk naturally, interrupt at any time, and keep the conversation moving hands-free.",
           "end": "End live voice",
           "errors": {
+            "codes": {
+              "authentication": "The provider rejected your credentials. Check the configured API key.",
+              "connectionTimeout": "The live voice provider did not become ready in time.",
+              "devicePermission": "Microphone access is blocked. Allow access, then try again.",
+              "deviceUnavailable": "The selected microphone is unavailable. Choose another device.",
+              "network": "The live voice connection was interrupted by the network.",
+              "provider": "The live voice provider ended the session unexpectedly.",
+              "rateLimit": "The live voice provider is busy or rate limited. Try again shortly.",
+              "sessionExpired": "The live voice session expired and could not be restored."
+            },
+            "deviceSwitchFailed": "Could not switch microphones. The previous microphone is still active.",
             "disabled": "Live voice is turned off. Enable it in Settings → Speech.",
             "mintFailed": "Could not start a session with any live voice provider. Check your API key and network, then try again.",
             "noDeployments": "No live voice provider is set up yet. Add one in Settings → Speech.",
@@ -5040,16 +5051,22 @@
             "sessionFailed": "The live voice connection was interrupted. End the session and try again.",
             "startFailed": "Could not start live voice. Check your provider key and microphone access."
           },
+          "inputLevel": "Microphone input level",
           "mute": "Mute microphone",
+          "noMicrophone": "No microphone found.",
           "phases": {
             "connecting": "Connecting…",
             "error": "Connection error",
             "idle": "Ready",
             "listening": "Listening…",
+            "reconnecting": "Reconnecting…",
             "responding": "Speaking…",
             "speaking": "You’re speaking",
             "thinking": "Thinking…"
           },
+          "reconnectProgress": "Reconnect attempt {attempt} of {maxAttempts}",
+          "retry": "Try again",
+          "selectMicrophone": "Switch microphone",
           "startLive": "Start live voice",
           "title": "Live voice",
           "unmute": "Unmute microphone"
@@ -11561,6 +11578,8 @@
       "config": "Config",
       "copyValue": "Copy value",
       "createTitle": "Add MCP server",
+      "disallowedTools": "Disallowed tools",
+      "disallowedToolsHint": "One bare MCP tool name per line. Changing this list requires a new trust review.",
       "editTitle": "Edit MCP server",
       "enabled": "Enabled",
       "env": "Environment variables",
@@ -11580,6 +11599,7 @@
       "name": "Name",
       "placeholderArgs": "-y\n@modelcontextprotocol/server-filesystem\n/Users/me/work",
       "placeholderCommand": "npx",
+      "placeholderDisallowedTools": "browser_run_code_unsafe",
       "placeholderEnvKey": "MY_TOKEN",
       "placeholderEnvValue": "value",
       "placeholderHeaderKey": "Authorization",

@@ -53,6 +53,49 @@ export interface LiveVoiceRuntimeBindings {
   droppedTools: DroppedTool[]
 }
 
+// These names are routed around invokePluginTool by plugin-tool-ipc. Their
+// host runners do not share one cancellation contract, so advertising them in
+// a Gemini session would let toolCallCancellation report success while a
+// dialog/task/terminal side effect kept running. Regular plugin tools receive
+// AbortSignal through PluginToolContext and remain eligible.
+const NON_CANCELLABLE_LIVE_VOICE_TOOLS = new Set([
+  "ask_user",
+  "web_search",
+  "web_fetch",
+  "read_active_editor",
+  "spawn_task",
+  "list_sessions",
+  "send_session_message",
+  "vector_search",
+  "vector_add_document",
+  "vector_delete_document",
+  "Skill",
+  "load_skill",
+  "load_skill_resource",
+  "SlashCommand",
+  "wf_run_workflow_typed",
+  "dispatch_agent",
+  "Task",
+  "team_send_message",
+  "team_publish_memory",
+  "team_read_memory",
+  "team_request_consensus",
+  "team_vote",
+  "team_delegate",
+  "team_list_members",
+  "task_add_comment",
+  "task_get",
+  "twin_knowledge_search",
+  "team_post_to_chat",
+  "team_propose_decision",
+])
+
+function liveVoiceToolIsCancellable(entry: PluginToolEntry): boolean {
+  return (
+    !NON_CANCELLABLE_LIVE_VOICE_TOOLS.has(entry.name) && !entry.name.startsWith("terminal_dock_")
+  )
+}
+
 /** Lazy defaults — none of these are reachable from a node-env test. */
 const defaultDeps: LiveVoiceRuntimeDeps = {
   listMessages: async (sessionId) => {
@@ -71,6 +114,7 @@ const defaultDeps: LiveVoiceRuntimeDeps = {
       toolUseId: request.callId,
       name: request.name,
       args: request.args,
+      abortSignal: request.signal,
     })
     return { result: response.result, error: response.error }
   },
@@ -94,7 +138,9 @@ export async function buildLiveVoiceRuntimeBindings(
   // session there is nowhere to attribute an approval card to.
   if (options.capabilities.supportsTools && options.sessionId) {
     try {
-      const mapping = mapRealtimeTools(await deps.buildPluginToolsManifest())
+      const manifest = await deps.buildPluginToolsManifest()
+      const cancellable = manifest.filter(liveVoiceToolIsCancellable)
+      const mapping = mapRealtimeTools(cancellable)
       bindings.droppedTools = mapping.dropped
       if (mapping.tools.length > 0) {
         bindings.tools = mapping.tools

@@ -572,6 +572,17 @@
         "description": "自然连续对话，随时插话打断，免手动保持交流。",
         "end": "结束实时语音",
         "errors": {
+          "codes": {
+            "authentication": "服务商拒绝了当前凭据，请检查已配置的 API 密钥。",
+            "connectionTimeout": "实时语音服务未能在规定时间内就绪。",
+            "devicePermission": "麦克风访问已被禁止，请开启权限后重试。",
+            "deviceUnavailable": "当前麦克风不可用，请选择其它设备。",
+            "network": "网络中断了实时语音连接。",
+            "provider": "实时语音服务意外结束了会话。",
+            "rateLimit": "实时语音服务繁忙或已限流，请稍后重试。",
+            "sessionExpired": "实时语音会话已过期，且无法恢复。"
+          },
+          "deviceSwitchFailed": "无法切换麦克风，已继续使用原来的设备。",
           "disabled": "实时语音已关闭。请在「设置 → 语音」中开启。",
           "mintFailed": "无法与任何实时语音服务商建立会话。请检查 API 密钥与网络后重试。",
           "noDeployments": "尚未配置实时语音服务商。请在「设置 → 语音」中添加。",
@@ -579,16 +590,22 @@
           "sessionFailed": "实时语音连接已中断，请结束会话后重试。",
           "startFailed": "无法启动实时语音。请检查服务商密钥与麦克风权限。"
         },
+        "inputLevel": "麦克风输入音量",
         "mute": "麦克风静音",
         "phases": {
           "connecting": "正在连接…",
           "error": "连接错误",
           "idle": "准备就绪",
           "listening": "正在聆听…",
+          "reconnecting": "正在重新连接…",
           "responding": "正在说话…",
           "speaking": "你正在说话",
           "thinking": "正在思考…"
         },
+        "noMicrophone": "未找到麦克风。",
+        "reconnectProgress": "正在进行第 {attempt}/{maxAttempts} 次重连",
+        "retry": "重新尝试",
+        "selectMicrophone": "切换麦克风",
         "startLive": "开始实时语音",
         "title": "实时语音",
         "unmute": "取消麦克风静音"

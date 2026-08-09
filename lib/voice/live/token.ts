@@ -19,22 +19,24 @@
  * path: they travel in the session config and end up on a third party's server.
  */
 
-import type { Experimental_RealtimeModelV4 } from "@ai-sdk/provider"
+import type {
+  Experimental_RealtimeModelV4,
+  Experimental_RealtimeModelV4SessionConfig as RealtimeSessionConfig,
+} from "@ai-sdk/provider"
 
 import { isTauri as detectTauri } from "@/lib/platform/detect"
 
-import { screenLiveVoiceText } from "../realtime-session"
 import { createLiveAdapter } from "./adapter-registry"
 import { createLiveVoiceFetch, HOST_INJECTED_API_KEY } from "./proxy-fetch"
+import { assertLiveVoicePayloadPiiSafe, screenLiveVoiceText } from "./reducer"
 import type { LiveVoiceProviderId } from "./types"
 
 export interface MintLiveTokenRequest {
   provider: LiveVoiceProviderId
   /** Model id, or the account-bound resource id for providers keyed that way. */
   modelId: string
-  /** Omit to let the provider pick — inventing a voice name fails the session. */
-  voice?: string
-  instructions?: string
+  /** Exact config that will be repeated in the socket session-update. */
+  sessionConfig: RealtimeSessionConfig
   /** BYOK credentials. Ignored on desktop, where the key stays in the keyring. */
   apiKey?: string
   baseURL?: string
@@ -57,12 +59,8 @@ export interface MintedLiveToken {
    * minting adapter and the parsing adapter is a silently wrong session.
    */
   adapter: Experimental_RealtimeModelV4
-  /**
-   * The instructions actually sent, after the PII gate. Returned so the
-   * session's `session-update` repeats the screened text rather than
-   * re-screening the raw persona — one gate pass, one result.
-   */
-  instructions: string
+  /** Exact post-PII-gate config accepted by the token endpoint. */
+  sessionConfig: RealtimeSessionConfig
 }
 
 /** Seams for tests; production callers pass nothing. */
@@ -88,7 +86,12 @@ export async function mintLiveToken(
     createFetch = createLiveVoiceFetch,
   } = deps
 
-  const instructions = screenInstructions(request.instructions)
+  const instructions = screenInstructions(request.sessionConfig.instructions)
+  const sessionConfig: RealtimeSessionConfig = {
+    ...request.sessionConfig,
+    instructions,
+  }
+  assertLiveVoicePayloadPiiSafe(sessionConfig)
   const hostInjectsKey = isTauri()
 
   const adapter = await createAdapter({
@@ -103,7 +106,7 @@ export async function mintLiveToken(
 
   const secret = await adapter.doCreateClientSecret({
     expiresAfterSeconds: request.expiresAfterSeconds,
-    sessionConfig: { instructions, ...(request.voice ? { voice: request.voice } : {}) },
+    sessionConfig,
   })
 
   if (!secret?.token || !secret.url) {
@@ -114,7 +117,7 @@ export async function mintLiveToken(
     url: secret.url,
     expiresAt: secret.expiresAt,
     adapter,
-    instructions,
+    sessionConfig,
   }
 }
 

@@ -12,18 +12,17 @@
  *   the reverse) is a compliance failure, not a degraded experience, so it is
  *   filtered at selection time rather than guarded at the call site.
  *
- * - **Fallback happens before the microphone opens.** Candidates are raced only
- *   during minting; a candidate that fails never receives audio, history or
- *   instructions. Once a session is minted, a later failure surfaces as an
- *   error rather than silently re-homing the conversation to another vendor.
- *
- * Rotating candidates on *connect* failure (as opposed to mint failure) needs
- * the controller to accept a candidate list and own the 10s per-candidate
- * timeout; that arrives with the Phase 4 routing work. Until then a mint
- * succeeds or the session does not start.
+ * - **Fallback happens before audio.** The caller may advance through this
+ *   ordered candidate list after either mint or readiness failure. Once the
+ *   retained microphone emits its first frame, the controller locks the
+ *   provider and recovery remains same-provider.
  */
 
-import type { Experimental_RealtimeModelV4 } from "@ai-sdk/provider"
+import type {
+  Experimental_RealtimeModelV4,
+  Experimental_RealtimeModelV4SessionConfig as RealtimeSessionConfig,
+  Experimental_RealtimeModelV4ToolDefinition as RealtimeToolDefinition,
+} from "@ai-sdk/provider"
 
 import { isTauri as detectTauri } from "@/lib/platform/detect"
 
@@ -51,6 +50,48 @@ export interface LiveVoiceCandidate {
   modelOrResource: string
   /** Omitted when the vendor should pick. */
   voice?: string
+}
+
+export interface BuildLiveVoiceSessionConfigOptions {
+  candidate: LiveVoiceCandidate
+  instructions?: string
+  tools?: RealtimeToolDefinition[]
+  /** Gemini-issued handle used only when resuming the same provider session. */
+  resumptionHandle?: string
+}
+
+/** Build the one config object shared by token minting and the socket update. */
+export function buildLiveVoiceSessionConfig({
+  candidate,
+  instructions,
+  tools,
+  resumptionHandle,
+}: BuildLiveVoiceSessionConfigOptions): RealtimeSessionConfig {
+  const { capabilities } = candidate
+  return {
+    ...(instructions ? { instructions } : {}),
+    ...(candidate.voice ? { voice: candidate.voice } : {}),
+    outputModalities: ["audio"],
+    inputAudioFormat: { type: "audio/pcm", rate: capabilities.inputSampleRate },
+    outputAudioFormat: { type: "audio/pcm", rate: capabilities.outputSampleRate },
+    ...(capabilities.supportsInputTranscript ? { inputAudioTranscription: {} } : {}),
+    ...(capabilities.supportsOutputTranscript ? { outputAudioTranscription: {} } : {}),
+    turnDetection: capabilities.supportsServerVad
+      ? { type: candidate.deployment.provider === "openai" ? "semantic-vad" : "server-vad" }
+      : null,
+    ...(capabilities.supportsTools && tools?.length ? { tools } : {}),
+    ...(candidate.deployment.provider === "google"
+      ? {
+          providerOptions: {
+            sessionResumption: resumptionHandle ? { handle: resumptionHandle } : {},
+            contextWindowCompression: {
+              triggerTokens: 25_600,
+              slidingWindow: { targetTokens: 12_800 },
+            },
+          },
+        }
+      : {}),
+  }
 }
 
 /** Why no session can be started. Drives the message the dialog shows. */
@@ -165,8 +206,8 @@ export function explainLiveVoiceUnavailability(
 export interface ResolvedLiveVoiceSession {
   session: PreparedRealtimeSession
   adapter: Experimental_RealtimeModelV4
-  /** Post-PII-gate text; pass straight to the controller, do not re-screen. */
-  instructions: string
+  /** Exact post-PII-gate config used to constrain token minting. */
+  sessionConfig: RealtimeSessionConfig
   /** Absent when the vendor should choose. */
   voice?: string
 }
@@ -175,6 +216,9 @@ export interface ResolveLiveVoiceSessionRequest {
   settings: LiveVoiceSettings | undefined
   /** Persona / system instructions. Screened by the PII gate during minting. */
   instructions?: string
+  tools?: RealtimeToolDefinition[]
+  /** Gemini native resumption handle. Never used across providers. */
+  resumptionHandle?: string
   /** BYOK keys by provider, for the web shell. Ignored on desktop. */
   apiKeys?: Partial<Record<LiveVoiceProviderId, string>>
   /** Requested secret lifetime; providers may clamp it. */
@@ -209,12 +253,17 @@ export async function resolveLiveVoiceSession(
   for (const candidate of candidates) {
     const { deployment, capabilities, modelOrResource, voice } = candidate
     try {
+      const sessionConfig = buildLiveVoiceSessionConfig({
+        candidate,
+        instructions: request.instructions,
+        tools: request.tools,
+        resumptionHandle: request.resumptionHandle,
+      })
       const minted = await mintToken(
         {
           provider: deployment.provider,
           modelId: modelOrResource,
-          ...(voice ? { voice } : {}),
-          instructions: request.instructions,
+          sessionConfig,
           apiKey: request.apiKeys?.[deployment.provider],
           expiresAfterSeconds: request.expiresAfterSeconds,
         },
@@ -233,7 +282,7 @@ export async function resolveLiveVoiceSession(
           capabilities,
         },
         adapter: minted.adapter,
-        instructions: minted.instructions,
+        sessionConfig: minted.sessionConfig ?? sessionConfig,
         ...(voice ? { voice } : {}),
       }
     } catch (cause) {

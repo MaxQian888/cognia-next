@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
@@ -11,7 +11,12 @@ import type { LiveVoiceState } from "@/lib/voice/live/reducer"
 const startMock = jest.fn()
 const stopMock = jest.fn()
 const muteMock = jest.fn()
+const setDeviceMock = jest.fn()
+const retryMock = jest.fn()
+const waitUntilReadyMock = jest.fn()
+const waitUntilFirstAudioFrameMock = jest.fn()
 const resolveSessionMock = jest.fn()
+const preflightMicrophoneMock = jest.fn()
 const toastErrorMock = jest.fn()
 const screenLiveVoiceTextMock = jest.fn((text: string) =>
   text.includes("@") ? "Email me at [EMAIL_1]" : text
@@ -21,8 +26,14 @@ const IDLE: LiveVoiceState = { phase: "idle", turns: [], assistantDraft: "", mut
 
 const buildBindingsMock = jest.fn()
 const persistTurnsMock = jest.fn()
+const persistAppendMock = jest.fn()
+const persistFlushMock = jest.fn()
+const saveSettingsMock = jest.fn()
 /** The chat session the composer is mounted in; `undefined` = scratch pane. */
 let currentSessionId: string | undefined = "chat-1"
+let currentDeployments = [{ id: "d1", provider: "openai", region: "global", enabled: true }]
+let currentSelectedMicId: string | undefined = "mic-1"
+let currentToolRecords: unknown[] = []
 
 /** Drives the controller's external store the way the real one does. */
 let currentState: LiveVoiceState = IDLE
@@ -36,14 +47,16 @@ function publish(next: Partial<LiveVoiceState>) {
 // `createInitialLiveVoiceState` too: `lib/voice/live/reducer` re-exports it from
 // here, so mocking only the screen function leaves the hook's idle snapshot
 // undefined and the suite fails at import time.
-jest.mock("@/lib/voice/realtime-session", () => ({
-  createInitialLiveVoiceState: () => ({
-    phase: "idle",
-    turns: [],
-    assistantDraft: "",
-    muted: false,
-  }),
-  screenLiveVoiceText: (text: string) => screenLiveVoiceTextMock(text),
+jest.mock("@/lib/voice/live/reducer", () => {
+  const actual = jest.requireActual("@/lib/voice/live/reducer")
+  return {
+    ...actual,
+    screenLiveVoiceText: (text: string) => screenLiveVoiceTextMock(text),
+  }
+})
+
+jest.mock("@/lib/voice/live/capture", () => ({
+  preflightMicrophone: (...args: unknown[]) => preflightMicrophoneMock(...args),
 }))
 
 jest.mock("@/lib/voice/live/controller", () => ({
@@ -55,9 +68,16 @@ jest.mock("@/lib/voice/live/controller", () => ({
       }
     },
     getSnapshot: () => currentState,
+    subscribeInputLevel: () => () => {},
+    getInputLevelSnapshot: () => 0.4,
+    getToolRecords: () => currentToolRecords,
     start: startMock,
+    waitUntilReady: waitUntilReadyMock,
+    waitUntilFirstAudioFrame: waitUntilFirstAudioFrameMock,
     stop: stopMock,
     setMuted: muteMock,
+    setDevice: setDeviceMock,
+    retry: retryMock,
   })),
 }))
 
@@ -84,6 +104,24 @@ jest.mock("@/lib/voice/live/runtime-bindings", () => ({
 
 jest.mock("@/lib/voice/live/persist-turns", () => ({
   persistLiveVoiceTurns: (...args: unknown[]) => persistTurnsMock(...args),
+  createLiveVoiceTurnPersister: (options: Record<string, unknown>) => ({
+    append: (turns: unknown, toolRecords: unknown) => {
+      persistAppendMock(turns, toolRecords)
+      return Promise.resolve()
+    },
+    flush: (turns: unknown, toolRecords: unknown) => {
+      persistFlushMock(turns, toolRecords)
+      if (
+        Array.isArray(turns) &&
+        turns.length === 0 &&
+        Array.isArray(toolRecords) &&
+        toolRecords.length === 0
+      ) {
+        return Promise.resolve()
+      }
+      return persistTurnsMock({ ...options, turns, toolRecords })
+    },
+  }),
 }))
 
 jest.mock("@/stores/settings", () => ({
@@ -91,11 +129,12 @@ jest.mock("@/stores/settings", () => ({
     selector: (state: {
       settings: Record<string, unknown>
       providerKeys: Record<string, string>
+      save: typeof saveSettingsMock
     }) => unknown
   ) =>
     selector({
       settings: {
-        selectedMicId: "mic-1",
+        selectedMicId: currentSelectedMicId,
         agentPermissions: { toolRules: { search_notes: "allow" } },
         alwaysAllowTools: ["web_search"],
         liveVoice: {
@@ -107,10 +146,11 @@ jest.mock("@/stores/settings", () => ({
           historyTurnLimit: 12,
           historyCharacterLimit: 16_000,
           instructions: "be brief",
-          deployments: [{ id: "d1", provider: "openai", region: "global", enabled: true }],
+          deployments: currentDeployments,
         },
       },
       providerKeys: { openai: "sk-user", xai: "xai-user" },
+      save: saveSettingsMock,
     }),
 }))
 
@@ -148,7 +188,7 @@ const RESOLVED = {
     capabilities: { inputSampleRate: 24_000, outputSampleRate: 24_000 },
   },
   adapter: { specificationVersion: "v4" },
-  instructions: "be brief",
+  sessionConfig: { instructions: "be brief", turnDetection: { type: "semantic-vad" } },
   voice: "marin",
 }
 
@@ -167,12 +207,84 @@ beforeEach(() => {
   startMock.mockResolvedValue(undefined)
   stopMock.mockResolvedValue(undefined)
   resolveSessionMock.mockResolvedValue(RESOLVED)
+  waitUntilReadyMock.mockResolvedValue(undefined)
+  waitUntilFirstAudioFrameMock.mockResolvedValue(undefined)
+  preflightMicrophoneMock.mockResolvedValue({
+    getTracks: () => [{ stop: jest.fn() }],
+    getAudioTracks: () => [{ enabled: true, stop: jest.fn() }],
+  })
+  saveSettingsMock.mockResolvedValue(undefined)
   currentSessionId = "chat-1"
+  currentSelectedMicId = "mic-1"
+  currentToolRecords = []
+  currentDeployments = [{ id: "d1", provider: "openai", region: "global", enabled: true }]
   buildBindingsMock.mockResolvedValue({ droppedTools: [] })
   persistTurnsMock.mockResolvedValue(0)
 })
 
 describe("LiveVoiceDialog — starting a session", () => {
+  it("settles microphone permission before minting a provider token", async () => {
+    const order: string[] = []
+    preflightMicrophoneMock.mockImplementationOnce(async () => {
+      order.push("microphone")
+      return { getTracks: () => [], getAudioTracks: () => [] }
+    })
+    resolveSessionMock.mockImplementationOnce(async () => {
+      order.push("mint")
+      return RESOLVED
+    })
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(screen.getByLabelText("startLive"))
+
+    expect(order).toEqual(["microphone", "mint"])
+  })
+
+  it("falls back after readiness failure while reusing the preflight microphone", async () => {
+    currentDeployments = [
+      { id: "d1", provider: "openai", region: "global", enabled: true },
+      { id: "d2", provider: "google", region: "global", enabled: true },
+    ]
+    const googleResolved = {
+      ...RESOLVED,
+      session: { ...RESOLVED.session, deploymentId: "d2", provider: "google" },
+      sessionConfig: { turnDetection: { type: "server-vad" } },
+    }
+    resolveSessionMock.mockResolvedValueOnce(RESOLVED).mockResolvedValueOnce(googleResolved)
+    waitUntilReadyMock.mockRejectedValueOnce(new Error("readiness timeout"))
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(screen.getByLabelText("startLive"))
+
+    expect(resolveSessionMock).toHaveBeenCalledTimes(2)
+    expect(startMock).toHaveBeenCalledTimes(2)
+    expect(preflightMicrophoneMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("falls back after readiness when the provider drops before the first audio frame", async () => {
+    currentDeployments = [
+      { id: "d1", provider: "openai", region: "global", enabled: true },
+      { id: "d2", provider: "google", region: "global", enabled: true },
+    ]
+    const googleResolved = {
+      ...RESOLVED,
+      session: { ...RESOLVED.session, deploymentId: "d2", provider: "google" },
+      sessionConfig: { turnDetection: { type: "server-vad" } },
+    }
+    resolveSessionMock.mockResolvedValueOnce(RESOLVED).mockResolvedValueOnce(googleResolved)
+    waitUntilFirstAudioFrameMock.mockRejectedValueOnce(new Error("connection lost"))
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(screen.getByLabelText("startLive"))
+
+    expect(resolveSessionMock).toHaveBeenCalledTimes(2)
+    expect(startMock).toHaveBeenCalledTimes(2)
+    expect(preflightMicrophoneMock).toHaveBeenCalledTimes(2)
+  })
+
   it("resolves a session from settings and opens the dialog", async () => {
     const user = userEvent.setup()
     renderDialog()
@@ -202,20 +314,23 @@ describe("LiveVoiceDialog — starting a session", () => {
     })
   })
 
-  it("hands the controller the screened instructions and the minting adapter", async () => {
+  it("hands the controller the exact minted config and minting adapter", async () => {
     const { createLiveVoiceController } = jest.requireMock("@/lib/voice/live/controller")
     const user = userEvent.setup()
     renderDialog()
 
     await user.click(screen.getByLabelText("startLive"))
 
-    expect(createLiveVoiceController).toHaveBeenCalledWith({
-      session: RESOLVED.session,
-      adapter: RESOLVED.adapter,
-      instructions: "be brief",
-      voice: "marin",
-      deviceId: "mic-1",
-    })
+    expect(createLiveVoiceController).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: RESOLVED.session,
+        adapter: RESOLVED.adapter,
+        sessionConfig: RESOLVED.sessionConfig,
+        deviceId: "mic-1",
+        initialStream: expect.any(Object),
+        connectTimeoutMs: 10_000,
+      })
+    )
   })
 
   it("ignores a re-entrant start while a session is live", async () => {
@@ -245,6 +360,57 @@ describe("LiveVoiceDialog — starting a session", () => {
 
     expect(resolveSessionMock).not.toHaveBeenCalled()
   })
+
+  it("cancels an in-flight start when the dialog closes", async () => {
+    currentDeployments = [
+      { id: "d1", provider: "openai", region: "global", enabled: true },
+      { id: "d2", provider: "google", region: "global", enabled: true },
+    ]
+    let releaseReady: (() => void) | undefined
+    waitUntilReadyMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        releaseReady = resolve
+      })
+    )
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(screen.getByLabelText("startLive"))
+    await waitFor(() => expect(startMock).toHaveBeenCalledTimes(1))
+    expect(screen.getByLabelText("selectMicrophone")).toBeDisabled()
+    await user.click(screen.getByLabelText("end"))
+    await act(async () => releaseReady?.())
+
+    await waitFor(() => expect(stopMock).toHaveBeenCalled())
+    expect(resolveSessionMock).toHaveBeenCalledTimes(1)
+    expect(startMock).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("stops a preflight stream that resolves after the dialog closes", async () => {
+    let releasePreflight: ((stream: unknown) => void) | undefined
+    const stop = jest.fn()
+    preflightMicrophoneMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releasePreflight = resolve
+      })
+    )
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(screen.getByLabelText("startLive"))
+    await user.click(screen.getByLabelText("end"))
+    await act(async () =>
+      releasePreflight?.({
+        getTracks: () => [{ stop }],
+        getAudioTracks: () => [{ enabled: true, stop }],
+      })
+    )
+
+    await waitFor(() => expect(stop).toHaveBeenCalled())
+    expect(resolveSessionMock).not.toHaveBeenCalled()
+    expect(startMock).not.toHaveBeenCalled()
+  })
 })
 
 describe("LiveVoiceDialog — start failures", () => {
@@ -270,7 +436,7 @@ describe("LiveVoiceDialog — start failures", () => {
 
     await user.click(screen.getByLabelText("startLive"))
 
-    expect(toastErrorMock).toHaveBeenCalledWith("errors.mintFailed")
+    expect(toastErrorMock).toHaveBeenCalledWith("errors.codes.provider")
   })
 
   it("lets the user close and retry after a failed start", async () => {
@@ -310,11 +476,184 @@ describe("LiveVoiceDialog — start failures", () => {
     await user.click(screen.getByLabelText("startLive"))
 
     expect(stopMock).toHaveBeenCalled()
-    expect(toastErrorMock).toHaveBeenCalledWith("errors.mintFailed")
+    expect(toastErrorMock).toHaveBeenCalledWith("errors.codes.devicePermission")
+  })
+
+  it("offers an in-place retry after a retryable initial failure", async () => {
+    resolveSessionMock.mockRejectedValueOnce(new Error("network down"))
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(screen.getByLabelText("startLive"))
+    await user.click(await screen.findByRole("button", { name: "retry" }))
+
+    expect(resolveSessionMock).toHaveBeenCalledTimes(2)
+    expect(startMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("releases the retained preflight stream when every candidate fails", async () => {
+    const stop = jest.fn()
+    preflightMicrophoneMock.mockResolvedValueOnce({
+      getTracks: () => [{ stop }],
+      getAudioTracks: () => [{ enabled: true, stop }],
+    })
+    resolveSessionMock.mockRejectedValue(new Error("network down"))
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(screen.getByLabelText("startLive"))
+
+    expect(stop).toHaveBeenCalled()
   })
 })
 
 describe("LiveVoiceDialog — live conversation", () => {
+  it("announces reconnect progress and offers manual retry after exhaustion", async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+
+    act(() => {
+      publish({ phase: "reconnecting", reconnect: { attempt: 2, maxAttempts: 3 } })
+    })
+    expect(screen.getByText("phases.reconnecting")).toBeInTheDocument()
+    expect(screen.getByText("reconnectProgress")).toBeInTheDocument()
+
+    act(() => {
+      publish({
+        phase: "error",
+        reconnect: undefined,
+        errorInfo: { code: "network", message: "offline", retryable: true },
+      })
+    })
+    await user.click(screen.getByRole("button", { name: "retry" }))
+    expect(retryMock).toHaveBeenCalled()
+  })
+
+  it("renders the independently throttled microphone level", async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+
+    expect(screen.getByRole("meter", { name: "inputLevel" })).toHaveAttribute("aria-valuenow", "40")
+  })
+
+  it("keeps the previous microphone when a hot switch fails", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        enumerateDevices: jest.fn().mockResolvedValue([
+          { deviceId: "mic-1", groupId: "g", kind: "audioinput", label: "Built-in Mic" },
+          { deviceId: "mic-2", groupId: "g", kind: "audioinput", label: "Studio Mic" },
+        ]),
+      },
+    })
+    setDeviceMock.mockRejectedValueOnce(new Error("device busy"))
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+
+    await user.click(screen.getByLabelText("selectMicrophone"))
+    await user.click(await screen.findByText("Studio Mic"))
+
+    expect(setDeviceMock).toHaveBeenCalledWith("mic-2")
+    expect(saveSettingsMock).not.toHaveBeenCalled()
+    expect(toastErrorMock).toHaveBeenCalledWith("errors.deviceSwitchFailed")
+  })
+
+  it("switches and persists a newly selected microphone", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        enumerateDevices: jest.fn().mockResolvedValue([
+          { deviceId: "mic-1", groupId: "g", kind: "audioinput", label: "Built-in Mic" },
+          { deviceId: "mic-2", groupId: "g", kind: "audioinput", label: "Studio Mic" },
+        ]),
+      },
+    })
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+
+    await user.click(screen.getByLabelText("selectMicrophone"))
+    await user.click(await screen.findByText("Studio Mic"))
+
+    expect(setDeviceMock).toHaveBeenCalledWith("mic-2")
+    expect(saveSettingsMock).toHaveBeenCalledWith({ selectedMicId: "mic-2" })
+  })
+
+  it("switches back to the previous microphone when saving the choice fails", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        enumerateDevices: jest.fn().mockResolvedValue([
+          { deviceId: "mic-1", groupId: "g", kind: "audioinput", label: "Built-in Mic" },
+          { deviceId: "mic-2", groupId: "g", kind: "audioinput", label: "Studio Mic" },
+        ]),
+      },
+    })
+    saveSettingsMock.mockRejectedValueOnce(new Error("settings unavailable"))
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+
+    await user.click(screen.getByLabelText("selectMicrophone"))
+    await user.click(await screen.findByText("Studio Mic"))
+
+    await waitFor(() => expect(setDeviceMock.mock.calls).toEqual([["mic-2"], ["mic-1"]]))
+    expect(toastErrorMock).toHaveBeenCalledWith("errors.deviceSwitchFailed")
+  })
+
+  it("keeps showing the live new microphone when rollback also fails", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        enumerateDevices: jest.fn().mockResolvedValue([
+          { deviceId: "mic-1", groupId: "g", kind: "audioinput", label: "Built-in Mic" },
+          { deviceId: "mic-2", groupId: "g", kind: "audioinput", label: "Studio Mic" },
+        ]),
+      },
+    })
+    setDeviceMock.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("old mic gone"))
+    saveSettingsMock.mockRejectedValueOnce(new Error("settings unavailable"))
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+
+    await user.click(screen.getByLabelText("selectMicrophone"))
+    await user.click(await screen.findByText("Studio Mic"))
+
+    await waitFor(() => expect(setDeviceMock).toHaveBeenCalledTimes(2))
+    expect(screen.getByLabelText("selectMicrophone")).toHaveTextContent("Studio Mic")
+    expect(toastErrorMock).toHaveBeenCalledWith("errors.deviceSwitchFailed")
+  })
+
+  it("syncs an externally changed microphone before applying another selection", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        enumerateDevices: jest.fn().mockResolvedValue([
+          { deviceId: "mic-1", groupId: "g", kind: "audioinput", label: "Built-in Mic" },
+          { deviceId: "mic-2", groupId: "g", kind: "audioinput", label: "Studio Mic" },
+        ]),
+      },
+    })
+    const user = userEvent.setup()
+    const view = renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+    currentSelectedMicId = "mic-2"
+    view.rerender(
+      <TooltipProvider>
+        <LiveVoiceDialog />
+      </TooltipProvider>
+    )
+
+    await user.click(screen.getByLabelText("selectMicrophone"))
+    await user.click(await screen.findByText("Built-in Mic"))
+
+    expect(setDeviceMock).toHaveBeenCalledWith("mic-1")
+  })
+
   it("maps live phases to Persona states and falls back after a render failure", async () => {
     const user = userEvent.setup()
     renderDialog()
@@ -392,10 +731,14 @@ describe("LiveVoiceDialog — live conversation", () => {
     await user.click(screen.getByLabelText("startLive"))
 
     act(() => {
-      publish({ phase: "error", error: "socket closed" })
+      publish({
+        phase: "error",
+        error: "socket closed",
+        errorInfo: { code: "network", message: "socket closed", retryable: true },
+      })
     })
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("errors.sessionFailed")
+    expect(await screen.findByRole("alert")).toHaveTextContent("errors.codes.network")
   })
 
   it("supports mute and ends the session when closed", async () => {
@@ -449,7 +792,10 @@ describe("LiveVoiceDialog — tools and context", () => {
     expect(buildBindingsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "chat-1",
-        capabilities: RESOLVED.session.capabilities,
+        capabilities: expect.objectContaining({
+          inputSampleRate: 24_000,
+          outputSampleRate: 24_000,
+        }),
         limits: { turnLimit: 12, characterLimit: 16_000 },
       })
     )
@@ -488,6 +834,28 @@ describe("LiveVoiceDialog — tools and context", () => {
       expect.objectContaining({ tools, toolExecution, contextTranscript: "User: who won" })
     )
   })
+
+  it("increments persistence when a tool record finishes without a new turn", async () => {
+    const { createLiveVoiceController } = jest.requireMock("@/lib/voice/live/controller")
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+    const record = {
+      callId: "call-1",
+      name: "search_notes",
+      status: "completed",
+      durationMs: 25,
+    }
+    const existingTurn = { id: "u1", role: "user" as const, text: "find it" }
+    currentState = { ...currentState, turns: [existingTurn] }
+    currentToolRecords = [record]
+
+    await act(async () => {
+      createLiveVoiceController.mock.calls[0][0].onToolRecord(record)
+    })
+
+    expect(persistAppendMock).toHaveBeenCalledWith([existingTurn], [record])
+  })
 })
 
 describe("LiveVoiceDialog — archiving the conversation", () => {
@@ -515,6 +883,16 @@ describe("LiveVoiceDialog — archiving the conversation", () => {
         },
       })
     )
+  })
+
+  it("queues each finalized turn before the session ends", async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+
+    act(() => publish({ turns: [TURNS[0]] }))
+
+    await waitFor(() => expect(persistAppendMock).toHaveBeenCalledWith([TURNS[0]], []))
   })
 
   it("reads the transcript before stopping, since stop resets the state", async () => {

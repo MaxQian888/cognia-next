@@ -607,7 +607,6 @@
         "virtual_display_probe",
         "virtual_display_release",
         "virtual_display_setup",
-        "voice_live_client_secret",
         "wallpaper_delete",
         "wallpaper_list",
         "wallpaper_read_data_url",

@@ -58,6 +58,11 @@ export interface EnsureCliDbOptions {
   writeSnapshot?: (path: string, data: string) => void
   /** Schedule a deferred flush; returns a cancel fn. Defaults to setTimeout. */
   schedule?: (fn: () => void | Promise<void>, ms: number) => () => void
+  /** Re-declare dynamic schemas before a production table snapshot is restored. */
+  prepareDynamicSchema?: (
+    sources: readonly SnapshotSource[],
+    snapshotVersions: Readonly<Record<string, number>>
+  ) => Promise<void>
 }
 
 export interface CliDbHandle {
@@ -360,6 +365,31 @@ function resolveSourcesFactory(opts: EnsureCliDbOptions): () => Promise<readonly
   }
 }
 
+async function prepareBuiltinPluginSchema(
+  sources: readonly SnapshotSource[],
+  snapshotVersions: Readonly<Record<string, number>>
+): Promise<void> {
+  const primary = sources[0]
+  if (!primary || (snapshotVersions[primary.name] ?? primary.db.verno) <= primary.db.verno) return
+
+  const [{ getBrowserBuiltinRegistry }, { restorePluginTables }] = await Promise.all([
+    import("@/lib/plugin/core/browser-builtin-registry"),
+    import("@/lib/plugin/dexie/bridge"),
+  ])
+  const manifestDexie = new Map(
+    getBrowserBuiltinRegistry()
+      .map((entry) => [entry.manifest.id, entry.manifest.dexie] as const)
+      .filter(
+        (entry): entry is readonly [string, NonNullable<(typeof entry)[1]>] =>
+          entry[1] !== undefined
+      )
+  )
+  if (manifestDexie.size === 0) return
+  await restorePluginTables(() => primary.db as unknown as import("dexie").default, manifestDexie, {
+    registerMissing: true,
+  })
+}
+
 function create(opts: EnsureCliDbOptions): CliDbHandle {
   const home = opts.home ?? resolveHome(process.env, os.homedir())
   const file = path.join(home, opts.fileName ?? "db.json")
@@ -370,6 +400,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   const read = opts.readSnapshot ?? ((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null))
   const write = opts.writeSnapshot ?? writeSnapshotAtomically
   const schedule = opts.schedule ?? defaultSchedule
+  const prepareDynamicSchema = opts.prepareDynamicSchema ?? prepareBuiltinPluginSchema
   // Production uses format v3: one file per database table. Injected snapshot
   // seams retain the format-v2 envelope so focused unit tests and embedders can
   // keep treating persistence as one opaque read/write operation.
@@ -391,6 +422,17 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
     // their `tables` are live before restore/serialize touch them, and so an
     // open failure surfaces here rather than inside the first debounced flush.
     for (const source of sources) await source.db.open?.()
+    if (useTableStore && fs.existsSync(manifestFile)) {
+      const manifest = parseTableStoreManifest(fs.readFileSync(manifestFile, "utf8"))
+      if (manifest) {
+        await prepareDynamicSchema(
+          sources,
+          Object.fromEntries(
+            Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.version])
+          )
+        )
+      }
+    }
     const restoredTableKeys =
       useTableStore && fs.existsSync(manifestFile)
         ? await restoreTableStore(sources, manifestFile, tableDirectory)

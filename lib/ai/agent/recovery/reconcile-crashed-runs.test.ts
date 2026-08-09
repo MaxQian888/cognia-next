@@ -3,7 +3,10 @@
  */
 import "fake-indexeddb/auto"
 
-import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
+import type {
+  AgentEventEnvelope,
+  AgentExecutionSendSpec,
+} from "@cognia/agent-config-types/agent-execution"
 import type { ExecutionRun } from "@/types/execution/run"
 
 const claimLease = jest.fn()
@@ -27,6 +30,7 @@ jest.mock("@/lib/db/execution-runs", () => ({
 }))
 
 import {
+  buildAgentRunRecoveryAnchor,
   parseAgentRunRecoveryAnchor,
   reconcileCrashedAgentRuns,
   resumeCrashedAgentRun,
@@ -249,6 +253,34 @@ describe("explicit crashed-run resume", () => {
         modelBindings: { ...anchor.modelBindings, fast: 42 },
       })
     ).toBeUndefined()
+  })
+
+  it("builds and validates the execution journal run id", () => {
+    const execution: AgentExecutionSendSpec = {
+      specVersion: 1,
+      executionFingerprint: "fp-1",
+      runtimeAdapter: "claude-agent-sdk",
+      executionKind: "agent",
+      route: { kind: "direct" },
+      modelBindings: { primary: "claude-sonnet-5" },
+      capabilities: { effective: ["streaming"], disabledOptional: [] },
+      identity: { runId: "identity-run-1", attemptId: "attempt-1" },
+      hostRef: "desktop-sidecar",
+    }
+
+    expect(
+      buildAgentRunRecoveryAnchor({
+        inboundJobId: "job-1",
+        sessionId: "session-1",
+        execution,
+        journalRunId: "journal-run-1",
+        candidateDeploymentIds: ["deployment-1"],
+      })
+    ).toMatchObject({
+      executionIdentityRunId: "identity-run-1",
+      executionJournalRunId: "journal-run-1",
+    })
+    expect(parseAgentRunRecoveryAnchor({ ...anchor, executionJournalRunId: 42 })).toBeUndefined()
   })
 
   it("releases the recovery lease when durable continuation throws", async () => {

@@ -29,6 +29,8 @@ export interface LiveVoicePlaybackOptions {
   audioContextFactory?: () => AudioContextLike
   /** Reports a delta that could not be decoded; playback continues. */
   onError?: (error: Error) => void
+  /** Fires only after the provider ended the turn and queued audio fully drained. */
+  onEnded?: () => void
 }
 
 export class LiveVoicePlayback {
@@ -42,6 +44,7 @@ export class LiveVoicePlayback {
       volume: options.volume,
       audioContextFactory: options.audioContextFactory,
       keepAlive: true,
+      onEnded: options.onEnded,
     })
   }
 

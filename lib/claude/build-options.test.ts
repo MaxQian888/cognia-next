@@ -36,8 +36,8 @@ jest.mock("@/lib/db/mcp-servers", () => ({
   listEnabledMcpServers: jest.fn(),
   buildMcpServerMap: jest.fn(),
   buildMcpServerMapResolved: jest.fn(),
-  buildMcpDisallowedToolNames: jest.requireActual("@/lib/db/mcp-servers")
-    .buildMcpDisallowedToolNames,
+  buildMcpDisallowedToolNames:
+    jest.requireActual("@/lib/db/mcp-servers").buildMcpDisallowedToolNames,
 }))
 
 jest.mock("@/lib/db/teams", () => ({

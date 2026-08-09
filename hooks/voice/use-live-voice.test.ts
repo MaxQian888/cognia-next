@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react"
 import type { LiveVoiceController } from "@/lib/voice/live/controller"
 import { createInitialLiveVoiceState, type LiveVoiceState } from "@/lib/voice/live/reducer"
 
-import { useLiveVoiceState } from "./use-live-voice"
+import { useLiveVoiceInputLevel, useLiveVoiceState } from "./use-live-voice"
 
 /** Minimal external store matching the controller's subscribe/getSnapshot pair. */
 function fakeController(initial: LiveVoiceState = createInitialLiveVoiceState()) {
@@ -155,5 +155,32 @@ describe("useLiveVoiceState", () => {
       expect(result.current.phase).toBe("idle")
       expect(store.listenerCount()).toBe(0)
     })
+  })
+})
+
+describe("useLiveVoiceInputLevel", () => {
+  it("subscribes to the independent throttled level store", () => {
+    const listeners = new Set<() => void>()
+    let level = 0.1
+    const controller = {
+      subscribeInputLevel: (listener: () => void) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      getInputLevelSnapshot: () => level,
+    } as unknown as LiveVoiceController
+    const { result } = renderHook(() => useLiveVoiceInputLevel(controller))
+
+    act(() => {
+      level = 0.7
+      for (const listener of listeners) listener()
+    })
+
+    expect(result.current).toBe(0.7)
+  })
+
+  it("returns zero without a controller", () => {
+    const { result } = renderHook(() => useLiveVoiceInputLevel(null))
+    expect(result.current).toBe(0)
   })
 })
