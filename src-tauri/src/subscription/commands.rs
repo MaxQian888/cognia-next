@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use tauri::{AppHandle, Manager, State};
 
 use crate::api_key::ApiKeyState;
-use crate::claude::sidecar::{kill_sidecar, SidecarState};
+use crate::claude::sidecar::{shutdown_sidecar, SidecarState};
 use crate::subscription::active::{self, ActiveAccountState, ActiveSnapshot};
 use crate::subscription::anthropic::AnthropicProvider;
 use crate::subscription::codex::CodexProvider;
@@ -19,6 +19,8 @@ use crate::subscription::opencode::OpencodeProvider;
 use crate::subscription::preset::ProviderPreset;
 use crate::subscription::provider::{ProviderId, SubscriptionProvider};
 use crate::subscription::vault::{self, Account, AccountSummary, ProviderVault};
+
+static SUBSCRIPTION_MUTATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 // ---------------------------------------------------------------------------
 // Provider dispatch helper. Cheap function-call indirection — easier than a
@@ -52,6 +54,12 @@ pub async fn subscription_init(
     active_state: State<'_, ActiveAccountState>,
     api_key_state: State<'_, ApiKeyState>,
 ) -> Result<Vec<MigrationOutcome>, String> {
+    // Initialization can run again after a local-account switch. Clear the
+    // previous user's projection before the first keyring read so missing,
+    // stale, or temporarily unreadable vaults fail closed instead of retaining
+    // credentials from the prior account.
+    active_state.clear_all().await;
+    api_key_state.set_oauth_bearer(None).await;
     let outcomes = migration::migrate_all_for_account(&local_account_id);
     for id in [
         ProviderId::Anthropic,
@@ -116,10 +124,134 @@ pub async fn subscription_save_account(
     provider: String,
     local_account_id: String,
     account: Account,
+    active_state: State<'_, ActiveAccountState>,
+    api_key_state: State<'_, ApiKeyState>,
+    sidecar_state: State<'_, SidecarState>,
+) -> Result<(), String> {
+    let id = validate_account_for_provider(&provider, &account)?;
+    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+
+    let mut vault =
+        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
+    let refreshes_active = upsert_account_preserving_active(&mut vault, account);
+    if refreshes_active && for_provider(id, |p| p.requires_sidecar_restart_on_active_switch()) {
+        shutdown_sidecar(sidecar_state.inner().clone()).await?;
+    }
+    vault::save_for_account(&local_account_id, id, &vault)?;
+
+    if refreshes_active {
+        apply_active_projection(id, &vault, &active_state, &api_key_state).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn subscription_delete_account(
+    provider: String,
+    local_account_id: String,
+    account_id: String,
+    replacement_account_id: Option<String>,
+    active_state: State<'_, ActiveAccountState>,
+    api_key_state: State<'_, ApiKeyState>,
+    sidecar_state: State<'_, SidecarState>,
+    watcher: State<'_, super::anthropic::credential::WatcherRegistry>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    // Reject a credential whose discriminator doesn't match the provider —
-    // saves the caller from a silent mismatch later.
+    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let mut vault = match vault::load_for_account(&local_account_id, id)? {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+    let changed_active = vault.active_account_id.as_deref() == Some(account_id.as_str());
+    let removed = remove_account_with_replacement(
+        &mut vault,
+        &account_id,
+        replacement_account_id.as_deref(),
+    )?;
+    if !removed {
+        return Ok(());
+    }
+    let clears_runtime = deletion_requires_runtime_clear(changed_active, &vault);
+    if clears_runtime && for_provider(id, |p| p.requires_sidecar_restart_on_active_switch()) {
+        shutdown_sidecar(sidecar_state.inner().clone()).await?;
+    }
+    vault::save_for_account(&local_account_id, id, &vault)?;
+
+    if clears_runtime {
+        apply_active_projection(id, &vault, &active_state, &api_key_state).await;
+    }
+    // ADR-0028 Phase 14 — stop the credential watcher so the deleted
+    // account's file watch doesn't leak forever.
+    if id == ProviderId::Anthropic {
+        if vault.accounts.is_empty() {
+            watcher.stop_all_for_local_account(&local_account_id);
+        } else {
+            watcher.stop_watching(&local_account_id, &account_id);
+        }
+    }
+    Ok(())
+}
+
+/// Clear every credential projection owned by the currently unlocked local
+/// account. The renderer awaits this command before completing a local lock or
+/// account switch, making that UI boundary a real runtime boundary as well.
+#[tauri::command]
+pub async fn subscription_clear_runtime(
+    local_account_id: String,
+    active_state: State<'_, ActiveAccountState>,
+    api_key_state: State<'_, ApiKeyState>,
+    sidecar_state: State<'_, SidecarState>,
+    watcher: State<'_, super::anthropic::credential::WatcherRegistry>,
+) -> Result<(), String> {
+    if local_account_id.trim().is_empty() {
+        return Err("local_account_id must not be empty".into());
+    }
+    shutdown_sidecar(sidecar_state.inner().clone()).await?;
+    active_state.clear_all().await;
+    api_key_state.set_oauth_bearer(None).await;
+    watcher.stop_all_for_local_account(&local_account_id);
+    Ok(())
+}
+
+/// Adopt OpenCode auth.json credentials entirely in the host process. Only a
+/// renderer-safe summary is returned; active replacements use the same strict
+/// sidecar/projection path as every other credential update.
+#[tauri::command]
+pub async fn opencode_adopt_discovered(
+    local_account_id: String,
+    sub_provider: String,
+    account_id: Option<String>,
+    active_state: State<'_, ActiveAccountState>,
+    api_key_state: State<'_, ApiKeyState>,
+    sidecar_state: State<'_, SidecarState>,
+) -> Result<AccountSummary, String> {
+    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let (vault, account) = super::opencode::commands::prepare_discovered_adoption(
+        local_account_id.clone(),
+        sub_provider,
+        account_id,
+    )?;
+    let mut vault = vault;
+    if vault.active_account_id.is_none() {
+        vault.active_account_id = Some(account.id.clone());
+    }
+    let refreshes_active = vault.active_account_id.as_deref() == Some(account.id.as_str());
+    if refreshes_active
+        && for_provider(ProviderId::Opencode, |provider| {
+            provider.requires_sidecar_restart_on_active_switch()
+        })
+    {
+        shutdown_sidecar(sidecar_state.inner().clone()).await?;
+    }
+    vault::save_for_account(&local_account_id, ProviderId::Opencode, &vault)?;
+    if refreshes_active {
+        apply_active_projection(ProviderId::Opencode, &vault, &active_state, &api_key_state).await;
+    }
+    Ok(AccountSummary::from_account(&account))
+}
+
+fn validate_account_for_provider(provider: &str, account: &Account) -> Result<ProviderId, String> {
+    let id = ProviderId::parse(provider)?;
     if account.credential.provider() != id {
         return Err(format!(
             "credential provider mismatch: account.credential is for {:?}, expected {:?}",
@@ -128,41 +260,47 @@ pub async fn subscription_save_account(
         ));
     }
     for_provider(id, |p| p.validate(&account.credential))?;
-
-    let mut vault =
-        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
-    vault.upsert_account(account);
-    vault::save_for_account(&local_account_id, id, &vault)
+    Ok(id)
 }
 
-#[tauri::command]
-pub async fn subscription_delete_account(
-    provider: String,
-    local_account_id: String,
-    account_id: String,
-    state: State<'_, ActiveAccountState>,
-    watcher: State<'_, super::anthropic::credential::WatcherRegistry>,
-) -> Result<(), String> {
-    let id = ProviderId::parse(&provider)?;
-    let mut vault = match vault::load_for_account(&local_account_id, id)? {
-        Some(v) => v,
-        None => return Ok(()),
-    };
-    let cleared_active = vault.active_account_id.as_deref() == Some(account_id.as_str());
-    vault.remove_account(&account_id);
-    vault::save_for_account(&local_account_id, id, &vault)?;
+fn upsert_account_preserving_active(vault: &mut ProviderVault, account: Account) -> bool {
+    let account_id = account.id.clone();
+    let should_activate = vault.active_account_id.is_none();
+    vault.upsert_account(account);
+    if should_activate {
+        vault.active_account_id = Some(account_id.clone());
+    }
+    vault.active_account_id.as_deref() == Some(account_id.as_str())
+}
 
-    if cleared_active {
-        // The active pointer is gone — drop the cache so the next sidecar
-        // spawn doesn't reuse a credential that no longer exists.
-        state.set(id, ActiveSnapshot::default()).await;
+fn remove_account_with_replacement(
+    vault: &mut ProviderVault,
+    account_id: &str,
+    replacement_account_id: Option<&str>,
+) -> Result<bool, String> {
+    if vault.find_account(account_id).is_none() {
+        return Ok(false);
     }
-    // ADR-0028 Phase 14 — stop the credential watcher so the deleted
-    // account's file watch doesn't leak forever.
-    if id == ProviderId::Anthropic {
-        watcher.stop_watching(&local_account_id, &account_id);
+    let deleting_active = vault.active_account_id.as_deref() == Some(account_id);
+    if deleting_active {
+        if let Some(replacement_id) = replacement_account_id {
+            if replacement_id == account_id || vault.find_account(replacement_id).is_none() {
+                return Err(format!(
+                    "replacement account {replacement_id:?} is not available in this provider vault"
+                ));
+            }
+        }
     }
-    Ok(())
+
+    let removed = vault.remove_account(account_id);
+    if deleting_active {
+        vault.active_account_id = replacement_account_id.map(str::to_owned);
+    }
+    Ok(removed)
+}
+
+fn deletion_requires_runtime_clear(changed_active: bool, vault: &ProviderVault) -> bool {
+    changed_active || vault.accounts.is_empty()
 }
 
 #[tauri::command]
@@ -173,6 +311,7 @@ pub async fn subscription_rename_account(
     label: Option<String>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
+    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
     let mut vault = vault::load_for_account(&local_account_id, id)?
         .ok_or_else(|| format!("no vault exists for provider {provider:?}"))?;
     let account = vault
@@ -220,8 +359,8 @@ fn build_active_projection(
 }
 
 /// Re-apply one provider's persisted active pointer to the in-process caches.
-/// No-op when the vault has no active pointer or the pointer is stale (the
-/// referenced account was deleted). Used by the boot rebuild in
+/// Clears the projection when the vault has no active pointer or the pointer
+/// is stale. Used by the boot rebuild in
 /// `subscription_init`; intentionally does NOT touch the sidecar — at boot
 /// nothing has spawned yet.
 async fn apply_active_projection(
@@ -231,6 +370,7 @@ async fn apply_active_projection(
     api_key_state: &ApiKeyState,
 ) {
     let Some(account_id) = vault.active_account_id.as_deref() else {
+        clear_active_projection(id, active_state, api_key_state).await;
         return;
     };
     let Some((snapshot, bearer)) = build_active_projection(id, vault, account_id) else {
@@ -238,6 +378,7 @@ async fn apply_active_projection(
             "subscription boot rebuild: active account {account_id:?} missing from {} vault; skipping",
             id.as_str()
         );
+        clear_active_projection(id, active_state, api_key_state).await;
         return;
     };
     active_state.set(id, snapshot).await;
@@ -275,6 +416,7 @@ pub async fn subscription_set_active(
     sidecar_state: State<'_, SidecarState>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
+    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
 
@@ -286,6 +428,9 @@ pub async fn subscription_set_active(
     };
 
     vault.active_account_id = account_id.clone();
+    if must_restart_sidecar {
+        shutdown_sidecar(sidecar_state.inner().clone()).await?;
+    }
     vault::save_for_account(&local_account_id, id, &vault)?;
     active_state.set(id, snapshot).await;
 
@@ -295,9 +440,6 @@ pub async fn subscription_set_active(
     // with the new env.
     if id == ProviderId::Anthropic {
         api_key_state.set_oauth_bearer(anthropic_bearer).await;
-        if must_restart_sidecar {
-            kill_sidecar(sidecar_state.inner().clone()).await;
-        }
     }
 
     Ok(())
@@ -307,22 +449,17 @@ pub async fn subscription_set_active(
 pub async fn subscription_get_active(
     provider: String,
     local_account_id: String,
-    state: State<'_, ActiveAccountState>,
 ) -> Result<ActiveSnapshot, String> {
     let id = ProviderId::parse(&provider)?;
     let Some(vault) = vault::load_for_account(&local_account_id, id)? else {
-        state.set(id, ActiveSnapshot::default()).await;
         return Ok(ActiveSnapshot::default());
     };
     let Some(account_id) = vault.active_account_id.as_deref() else {
-        state.set(id, ActiveSnapshot::default()).await;
         return Ok(ActiveSnapshot::default());
     };
     let Some((snapshot, _)) = build_active_projection(id, &vault, account_id) else {
-        state.set(id, ActiveSnapshot::default()).await;
         return Ok(ActiveSnapshot::default());
     };
-    state.set(id, snapshot.clone()).await;
     Ok(snapshot)
 }
 
@@ -356,6 +493,7 @@ pub async fn subscription_save_preset(
         return Err(format!("provider {provider:?} does not support presets"));
     }
     preset.validate()?;
+    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     vault.upsert_preset(preset);
@@ -372,6 +510,7 @@ pub async fn subscription_delete_preset(
     preset_id: String,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
+    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     vault.remove_preset(&preset_id);
@@ -387,6 +526,7 @@ pub async fn subscription_set_default_preset(
     preset_id: Option<String>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
+    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     if let Some(ref pid) = preset_id {
@@ -434,6 +574,7 @@ pub async fn subscription_set_preset(
     if preset.is_some() && !supports {
         return Err(format!("provider {provider:?} does not support presets"));
     }
+    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     match preset {
@@ -522,13 +663,9 @@ impl From<(String, String)> for EnvEntry {
 /// `proxy_config::proxy_http_request`: honour the configured proxy unless the
 /// target is on the bypass list.
 pub(crate) fn build_authed_get_client(url: &str) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30));
-    let cfg = crate::proxy_config::current();
-    if !cfg.should_bypass(url) {
-        if let Some(proxy) = cfg.build_reqwest_proxy() {
-            builder = builder.proxy(proxy);
-        }
-    }
+    let builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30));
+    let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, url)
+        .map_err(|error| error.to_string())?;
     builder
         .build()
         .map_err(|e| format!("http client build failed: {e}"))
@@ -646,7 +783,7 @@ pub async fn subscription_authed_get(
 // ADR-0028 — per-`query()` env injection. `claude_env_for_account` returns the
 // env tuple for an arbitrary accountId WITHOUT touching `ActiveAccountState`,
 // so the renderer can mix accounts per ChatSession without flipping the global
-// active pointer. `claude_proxy_env_for_session` returns the current process
+// active pointer. Proxy environment is installed by the Rust sidecar host
 // proxy env tuple; the `session_id` parameter is forward-compat for per-session
 // proxy overrides (deferred V2).
 // ---------------------------------------------------------------------------
@@ -664,32 +801,17 @@ pub fn claude_env_for_account(
         .path()
         .app_data_dir()
         .map_err(|e| format!("no app_data_dir: {e}"))?;
-    // ADR-0028 Phase 14 — start the OAuth-refresh watcher on first use
-    // for this account. Idempotent: subsequent calls are a no-op. The watcher
-    // must observe the SAME directory the CLI writes its `.credentials.json`
-    // to, so resolve it through the single authoritative path function.
-    if matches!(id, ProviderId::Anthropic) {
+    let entries = active::env_for_local_account(&app_data_dir, &local_account_id, id, &account_id)?;
+    // Start the OAuth-refresh watcher only after the account is validated.
+    // A stale explicit reference must fail without leaving a watcher behind.
+    if entries.is_some() && matches!(id, ProviderId::Anthropic) {
         let configdir =
             active::per_account_config_dir(&app_data_dir, &local_account_id, &account_id);
         if let Err(err) = state.ensure_watching(&local_account_id, &account_id, configdir) {
             log::warn!("anthropic credential watcher start failed: {err}");
         }
     }
-    active::env_for_local_account(&app_data_dir, &local_account_id, id, &account_id)
-        .map(|entries| entries.map(|items| items.into_iter().map(EnvEntry::from).collect()))
-}
-
-#[tauri::command]
-pub fn claude_proxy_env_for_session(_session_id: String) -> Result<Vec<EnvEntry>, String> {
-    // _session_id is forward-compat for per-session proxy overrides (ADR-0028
-    // open follow-up). V1 returns the process-level proxy as-is, identical to
-    // what `src-tauri/src/claude/sidecar.rs:163` already injects at sidecar
-    // spawn — but now also reachable per-`query()` from the renderer.
-    Ok(crate::proxy_config::current()
-        .env_vars()
-        .into_iter()
-        .map(EnvEntry::from)
-        .collect())
+    Ok(entries.map(|items| items.into_iter().map(EnvEntry::from).collect()))
 }
 
 #[cfg(test)]
@@ -735,8 +857,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn save_rejects_credential_provider_mismatch() {
+    fn save_test_account(account: Account) {
+        let mut provider_vault = ProviderVault::empty();
+        provider_vault.upsert_account(account);
+        vault::save_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic, &provider_vault).unwrap();
+    }
+
+    #[test]
+    fn save_rejects_credential_provider_mismatch() {
         use crate::subscription::vault::CodexCredentialData;
         let mut account = sample_anthropic_account();
         // Swap credential to a Codex one without changing the provider arg.
@@ -745,9 +873,7 @@ mod tests {
             auth_mode: "chatgpt".into(),
             ..Default::default()
         });
-        let err = subscription_save_account("anthropic".into(), LOCAL_ACCOUNT_ID.into(), account)
-            .await
-            .expect_err("should reject");
+        let err = validate_account_for_provider("anthropic", &account).expect_err("should reject");
         assert!(err.contains("provider mismatch"));
     }
 
@@ -780,6 +906,104 @@ mod tests {
         assert!(build_active_projection(ProviderId::Anthropic, &vault, "missing").is_none());
     }
 
+    #[test]
+    fn delete_active_account_selects_the_requested_replacement() {
+        let first = sample_anthropic_account();
+        let mut second = sample_anthropic_account();
+        second.id = "0193c2b0-0000-7000-8000-000000000099".into();
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(first.clone());
+        vault.upsert_account(second.clone());
+        vault.active_account_id = Some(first.id.clone());
+
+        let changed = remove_account_with_replacement(&mut vault, &first.id, Some(&second.id))
+            .expect("replacement exists");
+
+        assert!(changed);
+        assert!(vault.find_account(&first.id).is_none());
+        assert_eq!(vault.active_account_id.as_deref(), Some(second.id.as_str()));
+    }
+
+    #[test]
+    fn delete_active_account_rejects_a_missing_replacement_without_mutating() {
+        let account = sample_anthropic_account();
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(account.clone());
+        vault.active_account_id = Some(account.id.clone());
+
+        let error = remove_account_with_replacement(&mut vault, &account.id, Some("missing"))
+            .expect_err("replacement must be present");
+
+        assert!(error.contains("missing"));
+        assert!(vault.find_account(&account.id).is_some());
+        assert_eq!(
+            vault.active_account_id.as_deref(),
+            Some(account.id.as_str())
+        );
+    }
+
+    #[test]
+    fn delete_non_active_account_preserves_active_account() {
+        let active = sample_anthropic_account();
+        let mut inactive = sample_anthropic_account();
+        inactive.id = "0193c2b0-0000-7000-8000-000000000100".into();
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(active.clone());
+        vault.upsert_account(inactive.clone());
+        vault.active_account_id = Some(active.id.clone());
+
+        assert!(remove_account_with_replacement(&mut vault, &inactive.id, None).unwrap());
+        assert_eq!(vault.active_account_id.as_deref(), Some(active.id.as_str()));
+    }
+
+    #[test]
+    fn deleting_the_final_non_active_account_still_clears_runtime() {
+        let account = sample_anthropic_account();
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(account.clone());
+        assert!(remove_account_with_replacement(&mut vault, &account.id, None).unwrap());
+
+        assert!(deletion_requires_runtime_clear(false, &vault));
+    }
+
+    #[test]
+    fn same_id_replacement_rebuilds_the_active_projection() {
+        let mut account = sample_anthropic_account();
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(account.clone());
+        vault.active_account_id = Some(account.id.clone());
+
+        account.credential = match account.credential {
+            ProviderCredential::Anthropic(mut credential) => {
+                credential.access_token = "replacement-token".into();
+                ProviderCredential::Anthropic(credential)
+            }
+            _ => unreachable!(),
+        };
+        vault.upsert_account(account.clone());
+
+        let (snapshot, bearer) =
+            build_active_projection(ProviderId::Anthropic, &vault, &account.id).unwrap();
+        assert_eq!(
+            snapshot.active_account_id.as_deref(),
+            Some(account.id.as_str())
+        );
+        assert_eq!(bearer.as_deref(), Some("replacement-token"));
+    }
+
+    #[test]
+    fn saving_first_account_activates_it_without_overwriting_an_existing_choice() {
+        let first = sample_anthropic_account();
+        let mut vault = ProviderVault::empty();
+        assert!(upsert_account_preserving_active(&mut vault, first.clone()));
+        assert_eq!(vault.active_account_id.as_deref(), Some(first.id.as_str()));
+
+        let mut second = sample_anthropic_account();
+        second.id = "0193c2b0-0000-7000-8000-000000000101".into();
+        assert!(!upsert_account_preserving_active(&mut vault, second));
+        assert_eq!(vault.active_account_id.as_deref(), Some(first.id.as_str()));
+    }
+
     #[tokio::test]
     async fn apply_active_projection_rehydrates_states_from_vault() {
         // App restart scenario: the vault persists the active pointer but the
@@ -804,7 +1028,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_active_projection_noops_without_active_pointer() {
+    async fn apply_active_projection_clears_existing_state_without_active_pointer() {
         let account = sample_anthropic_account();
         let mut vault = ProviderVault::empty();
         vault.upsert_account(account);
@@ -812,6 +1036,18 @@ mod tests {
 
         let active_state = ActiveAccountState::new();
         let api_key_state = ApiKeyState::new();
+        active_state
+            .set(
+                ProviderId::Anthropic,
+                ActiveSnapshot {
+                    active_account_id: Some("previous-local-account".into()),
+                    env: vec![("CLAUDE_CODE_OAUTH_TOKEN".into(), "old-token".into())],
+                },
+            )
+            .await;
+        api_key_state
+            .set_oauth_bearer(Some("old-token".into()))
+            .await;
         apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state).await;
 
         assert!(active_state
@@ -823,15 +1059,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_active_projection_noops_on_stale_account_id() {
+    async fn apply_active_projection_clears_existing_state_on_stale_account_id() {
         // The persisted pointer references an account that no longer exists
         // (e.g. deleted on another machine before a sync) — must not panic
-        // and must leave the caches untouched.
+        // and must clear the previous local account's caches.
         let mut vault = ProviderVault::empty();
         vault.active_account_id = Some("gone".into());
 
         let active_state = ActiveAccountState::new();
         let api_key_state = ApiKeyState::new();
+        active_state
+            .set(
+                ProviderId::Anthropic,
+                ActiveSnapshot {
+                    active_account_id: Some("previous-local-account".into()),
+                    env: vec![("CLAUDE_CODE_OAUTH_TOKEN".into(), "old-token".into())],
+                },
+            )
+            .await;
+        api_key_state
+            .set_oauth_bearer(Some("old-token".into()))
+            .await;
         apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state).await;
 
         assert!(active_state
@@ -842,15 +1090,10 @@ mod tests {
         assert!(api_key_state.get_oauth_bearer().await.is_none());
     }
 
-    #[tokio::test]
-    async fn save_rejects_unknown_provider() {
-        let err = subscription_save_account(
-            "bogus".into(),
-            LOCAL_ACCOUNT_ID.into(),
-            sample_anthropic_account(),
-        )
-        .await
-        .expect_err("should reject");
+    #[test]
+    fn save_rejects_unknown_provider() {
+        let err = validate_account_for_provider("bogus", &sample_anthropic_account())
+            .expect_err("should reject");
         assert!(err.contains("bogus"));
     }
 
@@ -897,9 +1140,7 @@ mod tests {
         }
         let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
         let account = sample_anthropic_account();
-        subscription_save_account("anthropic".into(), LOCAL_ACCOUNT_ID.into(), account.clone())
-            .await
-            .unwrap();
+        save_test_account(account.clone());
         let got = subscription_list_accounts("anthropic".into(), LOCAL_ACCOUNT_ID.into())
             .await
             .unwrap();
@@ -919,9 +1160,7 @@ mod tests {
         let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic);
         let account = sample_anthropic_account();
         let aid = account.id.clone();
-        subscription_save_account("anthropic".into(), LOCAL_ACCOUNT_ID.into(), account)
-            .await
-            .unwrap();
+        save_test_account(account);
 
         subscription_rename_account(
             "anthropic".into(),

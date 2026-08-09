@@ -3,6 +3,7 @@
  */
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { Account } from "@/types/subscription"
 
 // next-intl is globally mocked against en.json in jest.setup.ts.
 
@@ -15,10 +16,9 @@ jest.mock("@/lib/subscription/anthropic/oauth", () => ({
     .extractAuthorizationCode,
 }))
 
-const adoptDiscoveredAuthMock = jest.fn()
-jest.mock("@/lib/subscription/anthropic/discovery", () => ({
-  ...jest.requireActual("@/lib/subscription/anthropic/discovery"),
-  adoptDiscoveredAuth: (...a: unknown[]) => adoptDiscoveredAuthMock(...a),
+const persistProviderAccountMock = jest.fn()
+jest.mock("@/lib/subscription/core/account-lifecycle", () => ({
+  persistProviderAccount: (...a: unknown[]) => persistProviderAccountMock(...a),
 }))
 
 type Discovered = {
@@ -62,10 +62,17 @@ function discovered(): NonNullable<Discovered> {
   }
 }
 
-function account() {
+function account(): Account {
   return {
     id: "acc-1",
-    credential: { provider: "anthropic", accessToken: "sk", storedAtMs: 0 },
+    credential: {
+      provider: "anthropic",
+      accessToken: "sk",
+      refreshToken: "",
+      expiresAtMs: 0,
+      mode: "subscription",
+      storedAtMs: 0,
+    },
     createdAtMs: 0,
     lastUsedAtMs: 0,
   }
@@ -98,28 +105,59 @@ describe("AnthropicAddAccountDialog", () => {
 
   it("adopts the discovered login and closes", async () => {
     discoveredResult = discovered()
-    adoptDiscoveredAuthMock.mockResolvedValueOnce(account())
+    savePkceMock.mockResolvedValueOnce(account())
+    persistProviderAccountMock.mockResolvedValueOnce(account())
     const onAdded = jest.fn()
     render(<AnthropicAddAccountDialog open onOpenChange={() => {}} onAdded={onAdded} />)
 
     await userEvent.click(screen.getByRole("button", { name: /adopt this login/i }))
 
     await waitFor(() => expect(onAdded).toHaveBeenCalled())
-    expect(adoptDiscoveredAuthMock).toHaveBeenCalledWith(
+    expect(savePkceMock).toHaveBeenCalledWith(
       expect.objectContaining({ accessToken: "sk-ant-oat01-test" }),
       null
     )
+    expect(persistProviderAccountMock).toHaveBeenCalledWith("anthropic", account())
   })
 
   it("surfaces an adopt failure and returns to the mode chooser", async () => {
     discoveredResult = discovered()
-    adoptDiscoveredAuthMock.mockRejectedValueOnce(new Error("vault sealed"))
+    savePkceMock.mockResolvedValueOnce(account())
+    persistProviderAccountMock.mockRejectedValueOnce(new Error("vault sealed"))
     render(<AnthropicAddAccountDialog open onOpenChange={() => {}} />)
 
     await userEvent.click(screen.getByRole("button", { name: /adopt this login/i }))
 
     expect(await screen.findByText(/vault sealed/)).toBeInTheDocument()
     expect(screen.getByRole("radio", { name: /reuse claude code login/i })).toBeInTheDocument()
+  })
+
+  it("replaces credentials without changing the existing account identity", async () => {
+    discoveredResult = discovered()
+    const existing = {
+      ...account(),
+      id: "existing-id",
+      label: "Personal",
+      presetId: "preset-1",
+      createdAtMs: 123,
+    }
+    persistProviderAccountMock.mockImplementation(async (_provider, next) => next)
+    render(<AnthropicAddAccountDialog open onOpenChange={() => {}} existingAccount={existing} />)
+
+    await userEvent.click(screen.getByRole("button", { name: /adopt this login/i }))
+
+    await waitFor(() =>
+      expect(persistProviderAccountMock).toHaveBeenCalledWith(
+        "anthropic",
+        expect.objectContaining({
+          id: "existing-id",
+          label: "Personal",
+          presetId: "preset-1",
+          createdAtMs: 123,
+        })
+      )
+    )
+    expect(savePkceMock).not.toHaveBeenCalled()
   })
 
   it("starts the PKCE flow when a non-reuse mode is chosen", async () => {

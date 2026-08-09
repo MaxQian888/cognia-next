@@ -24,7 +24,7 @@ import { ProviderQuotaPanel } from "./provider-quota-panel"
 
 import { useOpencodeDiscovery } from "@/lib/subscription/opencode/discovery"
 import { opencodeAdoptDiscovered } from "@/lib/subscription/core/transport"
-import { OPENCODE_WHITELIST } from "@/types/subscription"
+import { OPENCODE_WHITELIST, type Account } from "@/types/subscription"
 import { toast } from "@/components/ui/sonner"
 
 export function ProviderTabOpencode() {
@@ -32,14 +32,15 @@ export function ProviderTabOpencode() {
   const tDiscovery = useTranslations("subscription.opencode.discovery")
   const tZen = useTranslations("subscription.opencode.zen")
   const [addOpen, setAddOpen] = useState(false)
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [adopting, setAdopting] = useState<string | null>(null)
 
   const { discovered, loading, error, reload } = useOpencodeDiscovery()
 
-  const adopt = async (subProvider: string) => {
+  const adopt = async (subProvider: string, accountId: string | null = null) => {
     setAdopting(subProvider)
     try {
-      await opencodeAdoptDiscovered(subProvider)
+      await opencodeAdoptDiscovered(subProvider, accountId)
       toast.success(tDiscovery("adoptSuccess", { subProvider }))
     } catch (err) {
       toast.error(
@@ -65,9 +66,27 @@ export function ProviderTabOpencode() {
 
       <AccountList
         provider="opencode"
-        onAdd={() => setAddOpen(true)}
+        onAdd={() => {
+          setEditingAccount(null)
+          setAddOpen(true)
+        }}
+        onUpdate={(account) => {
+          if (account.credential.provider === "opencode-discovered") {
+            void adopt(account.credential.subProvider, account.id)
+            return
+          }
+          setEditingAccount(account)
+          setAddOpen(true)
+        }}
         secondaryAction={
-          <Button size="sm" variant="ghost" onClick={() => setAddOpen(true)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setEditingAccount(null)
+              setAddOpen(true)
+            }}
+          >
             {tZen("addKey")}
           </Button>
         }
@@ -161,7 +180,15 @@ export function ProviderTabOpencode() {
         </CardContent>
       </Card>
 
-      <OpencodeAddAccountDialog open={addOpen} onOpenChange={setAddOpen} />
+      <OpencodeAddAccountDialog
+        open={addOpen}
+        existingAccount={editingAccount ?? undefined}
+        onAdded={() => setEditingAccount(null)}
+        onOpenChange={(next) => {
+          setAddOpen(next)
+          if (!next) setEditingAccount(null)
+        }}
+      />
     </div>
   )
 }

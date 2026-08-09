@@ -49,6 +49,41 @@ fn parse_node_major(version_output: &str) -> Option<u32> {
     without_v.split('.').next()?.parse::<u32>().ok()
 }
 
+fn apply_managed_proxy_env(
+    cmd: &mut Command,
+    proxy_cfg: &crate::proxy_config::ProxyConfig,
+) -> Result<(), String> {
+    let env = proxy_cfg.env_vars();
+    if proxy_cfg.is_active() && env.is_empty() {
+        return Err("PROXY_INVALID_CONFIG: sidecar proxy environment is unavailable".to_string());
+    }
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    if proxy_cfg.is_active() {
+        // Frozen execution specs rebuild the Claude subprocess environment.
+        // This marker lets the sidecar distinguish host-managed proxy values
+        // from ambient shell variables without sending credentials through
+        // the renderer as a per-session env overlay.
+        cmd.env("COGNIA_MANAGED_NETWORK_PROXY", "1");
+        return Ok(());
+    }
+
+    // Explicit direct mode must not inherit stale parent/system proxy env.
+    for key in &[
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ] {
+        cmd.env_remove(key);
+    }
+    cmd.env_remove("COGNIA_MANAGED_NETWORK_PROXY");
+    Ok(())
+}
+
 /// Shared, mutable state. Cloned cheaply via `Arc`.
 #[derive(Clone, Default)]
 pub struct SidecarState {
@@ -358,6 +393,7 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    cognia_external_agent::proc_group::apply_process_group(&mut cmd);
 
     // Inject the host-resolved provider credentials (OAuth bearer → API key;
     // base URL orthogonal). See `host::inject_provider_env` for the precedence
@@ -378,25 +414,8 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
     // proxy as the rest of the app. The interceptor at
     // `sidecar/fetch-interceptor.mjs` reads HTTPS_PROXY at boot and wraps
     // the global undici dispatcher.
-    let proxy_cfg = crate::proxy_config::current();
-    for (k, v) in proxy_cfg.env_vars() {
-        cmd.env(k, v);
-    }
-    if !proxy_cfg.is_active() {
-        // Defensive: clear any inherited proxy env so the sidecar doesn't
-        // route through a stale parent-process value when the user just
-        // disabled the proxy.
-        for key in &[
-            "HTTP_PROXY",
-            "HTTPS_PROXY",
-            "http_proxy",
-            "https_proxy",
-            "NO_PROXY",
-            "no_proxy",
-        ] {
-            cmd.env_remove(key);
-        }
-    }
+    let proxy_cfg = crate::proxy_config::current().map_err(|error| error.to_string())?;
+    apply_managed_proxy_env(&mut cmd, &proxy_cfg)?;
 
     // On Windows, prevent a console window from popping up when the parent app
     // has no console (e.g. a release build). tokio::process::Command exposes
@@ -470,7 +489,6 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
                                     == Some("permission_request")
                                 {
                                     let host = Arc::clone(&host);
-                                    let state = state.clone();
                                     tokio::spawn(async move {
                                         handle_permission_request(host, value).await;
                                     });
@@ -719,21 +737,46 @@ fn report_sidecar_failure() {
 /// it is not charged against the recovery restart budget. The one caller that
 /// kills because of a *genuine* failure (the ready watchdog) reports that
 /// failure itself before calling this.
-pub async fn kill_sidecar(state: SidecarState) {
+pub async fn shutdown_sidecar(state: SidecarState) -> Result<(), String> {
     state.note_intentional_stop().await;
     // Closing stdin first lets the sidecar exit cleanly (its stdin EOF handler
-    // tears down active sessions). If that doesn't work, kill_on_drop handles
-    // the rest when we drop the Child below. stdin lives behind its own lock;
-    // take it before touching `inner` (stdin→inner order, never nested).
+    // tears down active sessions). stdin lives behind its own lock; take it
+    // before touching `inner` (stdin→inner order, never nested).
     state.stdin.lock().await.take();
-    let mut guard = state.inner.lock().await;
-    if let Some(mut child) = guard.child.take() {
-        if let Err(e) = child.start_kill() {
-            log::warn!("kill sidecar failed: {e}");
-        }
-        // Don't wait — the stdout reader task will observe EOF and clean up.
+    let child = {
+        let mut guard = state.inner.lock().await;
+        guard.ready = false;
+        guard.child.take()
+    };
+    let Some(mut child) = child else {
+        return Ok(());
+    };
+
+    // Give the stdin-EOF handler a bounded opportunity to close active SDK
+    // sessions and their descendants before escalating. A credential boundary
+    // must not report success while the old process is still alive.
+    match tokio::time::timeout(Duration::from_millis(750), child.wait()).await {
+        Ok(Ok(_)) => return Ok(()),
+        Ok(Err(error)) => return Err(format!("failed waiting for sidecar shutdown: {error}")),
+        Err(_) => {}
     }
-    guard.ready = false;
+
+    let pid = child.id();
+    cognia_external_agent::proc_group::kill_process_group(pid);
+    child
+        .start_kill()
+        .map_err(|error| format!("failed to kill sidecar: {error}"))?;
+    tokio::time::timeout(Duration::from_secs(3), child.wait())
+        .await
+        .map_err(|_| "timed out waiting for sidecar process to exit".to_string())?
+        .map_err(|error| format!("failed reaping sidecar process: {error}"))?;
+    Ok(())
+}
+
+pub async fn kill_sidecar(state: SidecarState) {
+    if let Err(error) = shutdown_sidecar(state).await {
+        log::warn!("sidecar shutdown failed: {error}");
+    }
 }
 
 #[cfg(test)]
@@ -762,6 +805,69 @@ mod tests {
         assert_eq!(parse_node_major(""), None);
         assert_eq!(parse_node_major("vX.Y.Z"), None);
         assert_eq!(parse_node_major("not a version"), None);
+    }
+
+    fn command_env(cmd: &Command, key: &str) -> Option<Option<String>> {
+        cmd.as_std()
+            .get_envs()
+            .find(|(name, _)| *name == std::ffi::OsStr::new(key))
+            .map(|(_, value)| value.map(|item| item.to_string_lossy().into_owned()))
+    }
+
+    #[test]
+    fn active_proxy_env_is_marked_as_host_managed() {
+        let mut cmd = Command::new("node");
+        let cfg = crate::proxy_config::ProxyConfig {
+            mode: crate::proxy_config::ProxyMode::Manual,
+            protocol: crate::proxy_config::ProxyProtocol::Http,
+            host: "127.0.0.1".to_string(),
+            port: 7890,
+            ..crate::proxy_config::ProxyConfig::default()
+        };
+
+        apply_managed_proxy_env(&mut cmd, &cfg).unwrap();
+
+        assert_eq!(
+            command_env(&cmd, "HTTPS_PROXY"),
+            Some(Some("http://127.0.0.1:7890".to_string()))
+        );
+        assert_eq!(
+            command_env(&cmd, "COGNIA_MANAGED_NETWORK_PROXY"),
+            Some(Some("1".to_string()))
+        );
+    }
+
+    #[test]
+    fn direct_proxy_policy_removes_inherited_proxy_env_and_marker() {
+        let mut cmd = Command::new("node");
+
+        apply_managed_proxy_env(&mut cmd, &crate::proxy_config::ProxyConfig::default()).unwrap();
+
+        assert_eq!(command_env(&cmd, "HTTPS_PROXY"), Some(None));
+        assert_eq!(
+            command_env(&cmd, "COGNIA_MANAGED_NETWORK_PROXY"),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn active_proxy_without_a_valid_environment_is_rejected() {
+        let mut cmd = Command::new("node");
+        let cfg = crate::proxy_config::ProxyConfig {
+            mode: crate::proxy_config::ProxyMode::Manual,
+            protocol: crate::proxy_config::ProxyProtocol::Http,
+            host: "127.0.0.1".to_string(),
+            port: 7890,
+            username: Some("alice".to_string()),
+            password: None,
+            ..crate::proxy_config::ProxyConfig::default()
+        };
+
+        assert_eq!(
+            apply_managed_proxy_env(&mut cmd, &cfg).unwrap_err(),
+            "PROXY_INVALID_CONFIG: sidecar proxy environment is unavailable"
+        );
+        assert_eq!(command_env(&cmd, "HTTPS_PROXY"), None);
     }
 
     // The pure backoff-table tests moved to `supervision_backoff.rs` with the
@@ -801,6 +907,30 @@ mod tests {
         // task for a child that is already dying will consume it.
         kill_sidecar(s.clone()).await;
         assert!(!s.note_exit(Instant::now()).await);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn strict_shutdown_waits_until_the_sidecar_is_reaped() {
+        let state = SidecarState::new();
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("sleep 30")
+            .stdin(Stdio::piped())
+            .kill_on_drop(true);
+        cognia_external_agent::proc_group::apply_process_group(&mut command);
+        let child = command.spawn().expect("spawn test sidecar");
+        let pid = child.id().expect("child pid");
+        state.inner.lock().await.child = Some(child);
+
+        shutdown_sidecar(state.clone())
+            .await
+            .expect("strict shutdown");
+
+        assert!(state.inner.lock().await.child.is_none());
+        let still_alive = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
+        assert!(!still_alive, "sidecar process {pid} must be reaped");
     }
 
     #[tokio::test]

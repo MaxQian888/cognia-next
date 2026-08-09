@@ -66,6 +66,7 @@ import type {
   Team,
   TeamMember,
 } from "@cognia/agent-config-types"
+import type { AgentExecutionIdentity } from "@cognia/agent-config-types/agent-execution"
 import type { Project } from "@/types"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { resolveMemoryConfig } from "@/types/memory/memory"
@@ -179,10 +180,11 @@ function buildProtocolAdapterSpec(
 
 async function resolveSubscriptionBackedSummaryCredentials(
   providerId: string,
-  resolved?: { apiKey?: string; baseURL?: string }
+  resolved?: { apiKey?: string; baseURL?: string },
+  accountId?: string | null
 ): Promise<SummaryCredentials | null> {
   if (isOpencodeChatProviderId(providerId) && !resolved?.apiKey) {
-    const vaultCred = await resolveOpencodeVaultCredential(providerId)
+    const vaultCred = await resolveOpencodeVaultCredential(providerId, accountId)
     if (!vaultCred) return null
     return {
       apiKey: vaultCred.apiKey,
@@ -191,7 +193,7 @@ async function resolveSubscriptionBackedSummaryCredentials(
   }
 
   if (isCodexChatProviderId(providerId)) {
-    const vaultCred = await resolveCodexVaultCredential(providerId)
+    const vaultCred = await resolveCodexVaultCredential(providerId, accountId)
     if (!vaultCred) return null
     if (!resolved?.apiKey) {
       return {
@@ -220,6 +222,7 @@ async function resolveSummaryProviderForCompaction(args: {
   summaryModel?: string
   appSettings: AppSettings
 }): Promise<SummaryProviderResolution | null> {
+  const accountId = resolveAccountId(args.providerId, null, null, args.appSettings)
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: args.appSettings.defaultProvider,
     providerSettings: args.appSettings.providerSettings as
@@ -239,10 +242,11 @@ async function resolveSummaryProviderForCompaction(args: {
   )
 
   if (r.kind === "resolved") {
-    const vaultCredentials = await resolveSubscriptionBackedSummaryCredentials(args.providerId, {
-      apiKey: r.apiKey,
-      baseURL: r.baseURL,
-    })
+    const vaultCredentials = await resolveSubscriptionBackedSummaryCredentials(
+      args.providerId,
+      { apiKey: r.apiKey, baseURL: r.baseURL },
+      accountId
+    )
     const credentials: SummaryCredentials = vaultCredentials ?? {
       apiKey: r.apiKey,
       baseURL: r.baseURL,
@@ -271,7 +275,11 @@ async function resolveSummaryProviderForCompaction(args: {
   if (r.nextAction === "enable_provider") return null
 
   if (isOpencodeChatProviderId(args.providerId) || isCodexChatProviderId(args.providerId)) {
-    const credentials = await resolveSubscriptionBackedSummaryCredentials(args.providerId)
+    const credentials = await resolveSubscriptionBackedSummaryCredentials(
+      args.providerId,
+      undefined,
+      accountId
+    )
     if (!credentials) return null
     const protocolAdapterSpec = await buildProtocolAdapterSpec("openai")
     return {
@@ -492,7 +500,7 @@ export interface BuildOptionsContext {
    *     demand. The CLI sets this so a session with many enabled skills doesn't
    *     pay their full token weight every turn. Desktop callers leave it absent.
    */
-  skillRenderMode?: "full" | "name"
+  skillRenderMode?: "full" | "name" | "hybrid"
   /**
    * Active `/goal` for this session (ADR-0019). When set AND
    * `activeGoal.status === "active"`, the resolver appends a
@@ -618,6 +626,8 @@ export interface BuildOptionsContext {
    * "workflow", team member sends "agent-team".
    */
   traceSurface?: SpanSurface
+  /** Final per-run identity supplied by durable execution owners before minting. */
+  executionIdentity?: Partial<AgentExecutionIdentity>
   /**
    * Pre-minted parent trace. When set (and `emitTrace`), `resolveSendOptions`
    * does NOT mint a new root span; it stamps these ids onto `SendOptions`
@@ -1004,10 +1014,22 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (session?.trialSkillId) {
     skills = await listSkillsByIds([session.trialSkillId])
   }
+  const explicitSkillIds = new Set(
+    session?.trialSkillId ? [session.trialSkillId] : (ctx.ephemeralSkillIds ?? [])
+  )
+  const explicitSkills = skills.filter((skill) => explicitSkillIds.has(skill.id))
+  const implicitSkills = skills.filter(
+    (skill) => !explicitSkillIds.has(skill.id) && skill.invocationPolicy !== "explicit"
+  )
+  // An explicit-only character skill is intentionally absent from both the
+  // catalog and the tool whitelist. An ephemeral attachment remains explicit.
+  skills = [...implicitSkills, ...explicitSkills]
   // Bump usage counters for the skills that actually made it into the prompt.
   // Fire-and-forget: a failed write here shouldn't block the send.
-  if (skills.length > 0) {
-    void recordSkillUsage(skills.map((s) => s.id)).catch(() => undefined)
+  const immediatelyInjectedSkills =
+    ctx.skillRenderMode === "hybrid" ? explicitSkills : ctx.skillRenderMode === "name" ? [] : skills
+  if (immediatelyInjectedSkills.length > 0) {
+    void recordSkillUsage(immediatelyInjectedSkills.map((s) => s.id)).catch(() => undefined)
   }
 
   // --- Agent Mode (built-in / custom / plugin) ----------------------------
@@ -1262,11 +1284,32 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  const accountId = resolveAccountId(
+    providerId,
+    session ?? null,
+    character ?? null,
+    appSettings ?? null
+  )
+  // Validate and resolve the selected account before provider-specific bridge
+  // credentials. This guarantees stale/mismatched explicit references surface
+  // as SubscriptionAccountResolutionError instead of a generic bridge error.
+  let accountEnv: Record<string, string>
+  let proxyEnv: Record<string, string>
+  if (ctx.preloadedEnv !== undefined) {
+    accountEnv = ctx.preloadedEnv ?? {}
+    proxyEnv = {}
+  } else {
+    ;[accountEnv, proxyEnv] = await Promise.all([
+      resolveAccountEnv(providerId, accountId),
+      resolveProxyEnv(session?.id ?? null),
+    ])
+  }
+
   if (model) opts.model = model
   if (providerId) {
     opts.provider = providerId
     if (appSettings) {
-      const attemptOptions = await resolveProviderAttemptOptions(providerId, appSettings)
+      const attemptOptions = await resolveProviderAttemptOptions(providerId, appSettings, accountId)
       opts.providerCredentials = attemptOptions.providerCredentials
       opts.protocolAdapterSpec = attemptOptions.protocolAdapterSpec
       opts.modelParams = attemptOptions.modelParams
@@ -1609,8 +1652,43 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // instead of every skill's full body — the agent pulls a skill's instructions
   // on demand via the caller's load tool. Absent / "full" keeps the legacy
   // whole-body append, so desktop behaviour is unchanged.
-  const skillSection =
-    ctx.skillRenderMode === "name" ? renderSkillsCatalog(skills) : renderSkillsSection(skills)
+  let skillSection = ""
+  if (ctx.skillRenderMode === "name") {
+    skillSection = renderSkillsCatalog(skills)
+  } else if (ctx.skillRenderMode === "hybrid") {
+    const [{ listResourcesForSkill }, runtime, tools] = await Promise.all([
+      import("@/lib/db/skill-resources"),
+      import("@/lib/skills/runtime-loader"),
+      import("@/lib/claude/skill-builtin-tools"),
+    ])
+    const resourcesById = new Map(
+      await Promise.all(
+        skills.map(async (skill) => [skill.id, await listResourcesForSkill(skill.id)] as const)
+      )
+    )
+    const explicitSection = explicitSkills
+      .map((skill) => runtime.renderSkillWithResources(skill, resourcesById.get(skill.id) ?? []))
+      .join("\n\n")
+    const catalogSection = renderSkillsCatalog(implicitSkills)
+    skillSection = [explicitSection, catalogSection].filter(Boolean).join("\n\n")
+    if (session?.id && skills.length > 0) {
+      runtime.registerSkillLoadContext(session.id, {
+        skills,
+        explicitSkillIds: explicitSkills.map((skill) => skill.id),
+      })
+      opts.pluginTools = [
+        ...(opts.pluginTools ?? []),
+        ...tools.buildProgressiveSkillManifestEntries(
+          skills,
+          [...resourcesById.values()].some((resources) => resources.length > 0)
+        ),
+      ]
+    } else if (session?.id) {
+      runtime.clearSkillLoadContext(session.id)
+    }
+  } else {
+    skillSection = renderSkillsSection(skills)
+  }
   // Substitute agent-mode prompt template variables ({{date}} / {{tools_list}} /
   // {{mode_name}} / …) the custom-mode editor advertises — without this the
   // literal `{{…}}` tokens are sent to the model verbatim.
@@ -2470,6 +2548,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       loggers.app.warn("failed to append spawn_task built-in tool", { error: String(err) })
     }
   }
+  if (appSettings?.selfInvokeTools?.sessionMessaging === true) {
+    try {
+      const { buildSessionPeerManifestEntries } =
+        await import("@/lib/claude/session-peer-builtin-tools")
+      opts.pluginTools = [...(opts.pluginTools ?? []), ...buildSessionPeerManifestEntries()]
+    } catch (err) {
+      loggers.app.warn("failed to append session messaging built-in tools", {
+        error: String(err),
+      })
+    }
+  }
   // Project-scoped vector memory (vector_search / vector_add_document /
   // vector_delete_document). Opt-in, and only manifested when the tools can
   // actually run: they need the native sqlite-vec store (desktop) AND a linked
@@ -2777,20 +2866,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.env = { ...(opts.env ?? {}), ...agentEnv }
   }
 
-  const accountId = resolveAccountId(session ?? null, character ?? null, appSettings ?? null)
-  let accountEnv: Record<string, string>
-  let proxyEnv: Record<string, string>
-  if (ctx.preloadedEnv !== undefined) {
-    // Standalone CLI path: env comes from config, not the desktop's Rust
-    // account/proxy resolvers (which require Tauri IPC). `null` means "no env".
-    accountEnv = ctx.preloadedEnv ?? {}
-    proxyEnv = {}
-  } else {
-    ;[accountEnv, proxyEnv] = await Promise.all([
-      resolveAccountEnv(providerId, accountId),
-      resolveProxyEnv(session?.id ?? null),
-    ])
-  }
+  // Standalone callers use their preloaded env; desktop callers resolved and
+  // validated account/proxy env before provider bridge credentials above.
   if (Object.keys(accountEnv).length > 0 || Object.keys(proxyEnv).length > 0) {
     opts.env = { ...(opts.env ?? {}), ...accountEnv, ...proxyEnv }
   }
@@ -3512,7 +3589,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         // provider id still drives the runtime mapping.
         policy: { executionKind: "agent" },
         legacy: { providerId: opts.provider, modelId: opts.model },
-        identity: session?.id ? { sessionId: session.id } : undefined,
+        identity:
+          session?.id || ctx.executionIdentity
+            ? { ...(session?.id ? { sessionId: session.id } : {}), ...ctx.executionIdentity }
+            : undefined,
       })
       // A gateway route is only real once a ticket exists: without one
       // `sendSpecFromResolved` degrades to `direct`, which is why the route

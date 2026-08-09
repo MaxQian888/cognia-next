@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 
 jest.mock("next-intl", () => ({
@@ -16,6 +16,9 @@ interface MockState {
   activeAccountId: string | null
 }
 let mockState: MockState
+
+const toastErrorMock = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => toastErrorMock(...args) } }))
 
 jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: (selector: (s: MockState) => unknown) => selector(mockState),
@@ -70,7 +73,8 @@ function acc(id: string, displayName: string): LocalAccountRecord {
 }
 
 beforeEach(() => {
-  mockState = { accounts: [], lock: jest.fn(), activeAccountId: null }
+  mockState = { accounts: [], lock: jest.fn().mockResolvedValue(undefined), activeAccountId: null }
+  toastErrorMock.mockReset()
 })
 
 describe("AccountBarButton", () => {
@@ -85,15 +89,41 @@ describe("AccountBarButton", () => {
     expect(screen.getByTestId("account-bar-button")).toHaveTextContent("A")
   })
 
-  it("locks the account on Lock click", () => {
-    mockState = { accounts: [acc("a1", "Ada")], lock: jest.fn(), activeAccountId: "a1" }
+  it("locks the account and closes the popover after runtime clearing succeeds", async () => {
+    mockState = {
+      accounts: [acc("a1", "Ada")],
+      lock: jest.fn().mockResolvedValue(undefined),
+      activeAccountId: "a1",
+    }
     render(<AccountBarButton />)
+    fireEvent.click(screen.getByTestId("account-bar-button"))
     fireEvent.click(screen.getByTestId("account-bar-lock"))
     expect(mockState.lock).toHaveBeenCalled()
+    await waitFor(() =>
+      expect(screen.getByTestId("account-popover")).toHaveAttribute("data-open", "false")
+    )
+  })
+
+  it("keeps the popover open and reports a runtime-clear failure", async () => {
+    mockState = {
+      accounts: [acc("a1", "Ada")],
+      lock: jest.fn().mockRejectedValue(new Error("runtime busy")),
+      activeAccountId: "a1",
+    }
+    render(<AccountBarButton />)
+    fireEvent.click(screen.getByTestId("account-bar-button"))
+    fireEvent.click(screen.getByTestId("account-bar-lock"))
+
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("runtime busy"))
+    expect(screen.getByTestId("account-popover")).toHaveAttribute("data-open", "true")
   })
 
   it("opens the manage dialog on Manage click", () => {
-    mockState = { accounts: [acc("a1", "Ada")], lock: jest.fn(), activeAccountId: "a1" }
+    mockState = {
+      accounts: [acc("a1", "Ada")],
+      lock: jest.fn().mockResolvedValue(undefined),
+      activeAccountId: "a1",
+    }
     render(<AccountBarButton />)
     expect(screen.queryByTestId("manage-dialog")).toBeNull()
     fireEvent.click(screen.getByTestId("account-bar-manage"))
@@ -101,7 +131,11 @@ describe("AccountBarButton", () => {
   })
 
   it("closes the account popover after switching runtime targets", () => {
-    mockState = { accounts: [acc("a1", "Ada")], lock: jest.fn(), activeAccountId: "a1" }
+    mockState = {
+      accounts: [acc("a1", "Ada")],
+      lock: jest.fn().mockResolvedValue(undefined),
+      activeAccountId: "a1",
+    }
     render(<AccountBarButton />)
     fireEvent.click(screen.getByTestId("account-bar-button"))
     expect(screen.getByTestId("account-popover")).toHaveAttribute("data-open", "true")

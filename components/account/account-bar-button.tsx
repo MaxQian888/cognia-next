@@ -13,6 +13,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { LockKeyholeIcon, SettingsIcon, UserRoundIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
@@ -67,8 +68,11 @@ export function AccountBarButton({ className }: { className?: string }) {
           <button
             type="button"
             onClick={() => {
-              lock()
-              setOpen(false)
+              void Promise.resolve(lock())
+                .then(() => setOpen(false))
+                .catch((cause) =>
+                  toast.error(cause instanceof Error ? cause.message : t("operationFailed"))
+                )
             }}
             data-testid="account-bar-lock"
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"

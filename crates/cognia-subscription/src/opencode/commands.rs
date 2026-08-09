@@ -4,7 +4,7 @@
 //
 //   * opencode_oauth_discover — read-only probe of the OpenCode CLI's
 //     auth.json, filtered to the whitelisted sub-providers.
-//   * opencode_save_zen_key — persist a pasted OpenCode managed-plan API key
+//   * opencode_save_zen_key — validate a pasted OpenCode managed-plan API key
 //     (Zen pay-per-request or Go flat-rate; `plan` param, default "zen") into
 //     the vault as a new `OpencodeZen` account. The full OAuth flow into
 //     opencode.ai is deferred (endpoints unverified); this is the bridge that
@@ -66,10 +66,7 @@ pub async fn opencode_save_zen_key(
         preset_id: None,
     };
 
-    let mut vault = vault::load_for_account(&local_account_id, ProviderId::Opencode)?
-        .unwrap_or_else(ProviderVault::empty);
-    vault.upsert_account(account.clone());
-    vault::save_for_account(&local_account_id, ProviderId::Opencode, &vault)?;
+    let _ = local_account_id;
     Ok(account)
 }
 
@@ -133,35 +130,58 @@ fn credential_for_adoption(
     })
 }
 
-/// Adopt one discovered auth.json entry into the vault (see module docs).
-#[tauri::command]
-pub async fn opencode_adopt_discovered(
+fn account_for_adoption(
+    existing: Option<&Account>,
+    credential: ProviderCredential,
+    default_label: Option<String>,
+    now_ms: i64,
+) -> Account {
+    Account {
+        id: existing
+            .map(|account| account.id.clone())
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+        label: existing
+            .and_then(|account| account.label.clone())
+            .or(default_label),
+        credential,
+        created_at_ms: existing
+            .map(|account| account.created_at_ms)
+            .unwrap_or(now_ms),
+        last_used_at_ms: now_ms,
+        preset_id: existing.and_then(|account| account.preset_id.clone()),
+    }
+}
+
+/// Build one discovered auth.json adoption host-side without persisting it.
+/// The Tauri host owns the atomic vault/projection update so no secret-bearing
+/// `Account` ever crosses the renderer boundary.
+pub fn prepare_discovered_adoption(
     local_account_id: String,
     sub_provider: String,
-) -> Result<Account, String> {
+    account_id: Option<String>,
+) -> Result<(ProviderVault, Account), String> {
     let discovered = discovery::discover_opencode_auth()?
         .ok_or_else(|| "OpenCode auth.json path could not be resolved".to_string())?;
     let now_ms = current_unix_ms();
     let credential = credential_for_adoption(&discovered, &sub_provider, now_ms)?;
 
-    let provider = OpencodeProvider;
-    provider.validate(&credential)?;
-    let label = provider.default_label(&credential);
-
-    let account = Account {
-        id: uuid::Uuid::now_v7().to_string(),
-        label,
-        credential,
-        created_at_ms: now_ms,
-        last_used_at_ms: now_ms,
-        preset_id: None,
-    };
-
     let mut vault = vault::load_for_account(&local_account_id, ProviderId::Opencode)?
         .unwrap_or_else(ProviderVault::empty);
+    let existing = account_id
+        .as_deref()
+        .and_then(|id| vault.find_account(id))
+        .cloned();
+    if account_id.is_some() && existing.is_none() {
+        return Err("OpenCode account selected for credential update no longer exists".into());
+    }
+
+    let provider = OpencodeProvider;
+    provider.validate(&credential)?;
+    let default_label = provider.default_label(&credential);
+    let account = account_for_adoption(existing.as_ref(), credential, default_label, now_ms);
+
     vault.upsert_account(account.clone());
-    vault::save_for_account(&local_account_id, ProviderId::Opencode, &vault)?;
-    Ok(account)
+    Ok((vault, account))
 }
 
 #[cfg(test)]
@@ -224,6 +244,63 @@ mod adoption_tests {
     }
 
     #[test]
+    fn credential_replacement_preserves_account_identity_and_metadata() {
+        let existing = Account {
+            id: "existing-id".into(),
+            label: Some("Work".into()),
+            credential: ProviderCredential::OpencodeZen(OpencodeZenData {
+                access_token: "old".into(),
+                base_url: None,
+                plan: Some("zen".into()),
+                stored_at_ms: 1,
+            }),
+            created_at_ms: 123,
+            last_used_at_ms: 456,
+            preset_id: Some("preset-1".into()),
+        };
+        let replacement = ProviderCredential::OpencodeZen(OpencodeZenData {
+            access_token: "new".into(),
+            base_url: None,
+            plan: Some("go".into()),
+            stored_at_ms: 999,
+        });
+
+        let updated = account_for_adoption(
+            Some(&existing),
+            replacement.clone(),
+            Some("ignored".into()),
+            999,
+        );
+
+        assert_eq!(updated.id, existing.id);
+        assert_eq!(updated.label, existing.label);
+        assert_eq!(updated.created_at_ms, existing.created_at_ms);
+        assert_eq!(updated.preset_id, existing.preset_id);
+        assert_eq!(updated.last_used_at_ms, 999);
+        assert_eq!(updated.credential, replacement);
+    }
+
+    #[test]
+    fn adopted_account_summary_never_serializes_the_discovered_secret() {
+        let account = account_for_adoption(
+            None,
+            ProviderCredential::OpencodeDiscovered(OpencodeDiscoveredData {
+                sub_provider: "anthropic".into(),
+                auth_json_path: "/tmp/auth.json".into(),
+                original_payload_json: r#"{"access":"secret-token"}"#.into(),
+                last_seen_at_ms: 10,
+            }),
+            Some("Discovered anthropic".into()),
+            10,
+        );
+
+        let serialized =
+            serde_json::to_string(&crate::vault::AccountSummary::from_account(&account)).unwrap();
+        assert!(!serialized.contains("secret-token"));
+        assert!(!serialized.contains("originalPayloadJson"));
+    }
+
+    #[test]
     fn non_managed_entries_snapshot_as_discovered() {
         let d = discovered(vec![
             ("anthropic", "api-key", r#"{"apiKey":"sk-ant"}"#),
@@ -275,10 +352,6 @@ mod tests {
 
     const LOCAL_ACCOUNT_ID: &str = "local-test";
 
-    fn keyring_available() -> bool {
-        std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
-    }
-
     #[tokio::test]
     async fn save_zen_rejects_empty_token() {
         let result =
@@ -314,10 +387,6 @@ mod tests {
 
     #[tokio::test]
     async fn save_go_plan_defaults_label_and_persists_plan() {
-        if !keyring_available() {
-            return;
-        }
-        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode);
         let account = opencode_save_zen_key(
             LOCAL_ACCOUNT_ID.into(),
             "sk-go".into(),
@@ -332,15 +401,10 @@ mod tests {
             ProviderCredential::OpencodeZen(z) => assert_eq!(z.effective_plan(), "go"),
             _ => panic!("wrong variant"),
         }
-        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode).unwrap();
     }
 
     #[tokio::test]
     async fn save_zen_trims_blank_base_url_to_none() {
-        if !keyring_available() {
-            return;
-        }
-        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode);
         let account = opencode_save_zen_key(
             LOCAL_ACCOUNT_ID.into(),
             "ozk-1".into(),
@@ -354,15 +418,10 @@ mod tests {
             ProviderCredential::OpencodeZen(z) => assert!(z.base_url.is_none()),
             _ => panic!("wrong variant"),
         }
-        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode).unwrap();
     }
 
     #[tokio::test]
-    async fn save_zen_persists_into_vault() {
-        if !keyring_available() {
-            return;
-        }
-        let _ = vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode);
+    async fn save_zen_constructs_a_validated_account_without_persisting() {
         let account = opencode_save_zen_key(
             LOCAL_ACCOUNT_ID.into(),
             "ozk-vault".into(),
@@ -373,13 +432,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(account.label.as_deref(), Some("Personal Zen"));
-
-        let v = vault::load_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode)
-            .unwrap()
-            .unwrap();
-        assert_eq!(v.accounts.len(), 1);
-        assert_eq!(v.accounts[0].id, account.id);
-
-        vault::clear_for_account(LOCAL_ACCOUNT_ID, ProviderId::Opencode).unwrap();
+        assert!(matches!(
+            account.credential,
+            ProviderCredential::OpencodeZen(_)
+        ));
     }
 }

@@ -18,6 +18,7 @@
 
 import { useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import {
   ExternalLinkIcon,
   Loader2Icon,
@@ -46,12 +47,12 @@ import {
   type OAuthFlowState,
 } from "@/lib/subscription/anthropic/oauth"
 import {
-  adoptDiscoveredAuth,
   discoveredToCredential,
   type DiscoveredAnthropicAuth,
 } from "@/lib/subscription/anthropic/discovery"
 import { useAnthropicDiscovery } from "@/lib/subscription/anthropic/hooks"
 import { anthropicOauthSavePkceResult } from "@/lib/subscription/core/transport"
+import { persistProviderAccount } from "@/lib/subscription/core/account-lifecycle"
 import type { Account, AnthropicAuthMode } from "@/types/subscription"
 import { openUrl } from "@/lib/native/opener"
 
@@ -63,6 +64,7 @@ export interface AnthropicAddAccountDialogProps {
   onAdded?: (account: Account) => void
   /** Default mode shown when the dialog opens. */
   initialMode?: AnthropicLoginMode
+  existingAccount?: Account
 }
 
 type Step = "choose-mode" | "awaiting-code" | "exchanging" | "done"
@@ -72,8 +74,10 @@ export function AnthropicAddAccountDialog({
   onOpenChange,
   onAdded,
   initialMode,
+  existingAccount,
 }: AnthropicAddAccountDialogProps) {
   const t = useTranslations("subscription")
+  const tAccountList = useTranslations("subscription.common.accountList")
 
   const { discovered, loading: discoveryLoading, reload: reloadDiscovery } = useAnthropicDiscovery()
 
@@ -157,8 +161,18 @@ export function AnthropicAddAccountDialog({
         code: extracted.code,
         flowState,
       })
-      const account = await anthropicOauthSavePkceResult(credential, null)
+      const account = existingAccount
+        ? await persistProviderAccount("anthropic", {
+            ...existingAccount,
+            credential: { provider: "anthropic", ...credential },
+            lastUsedAtMs: Date.now(),
+          })
+        : await persistProviderAccount(
+            "anthropic",
+            await anthropicOauthSavePkceResult(credential, null)
+          )
       setStep("done")
+      toast.success(tAccountList(existingAccount ? "credentialsUpdated" : "accountAdded"))
       onAdded?.(account)
       window.setTimeout(() => onOpenChange(false), 800)
     } catch (e) {
@@ -171,8 +185,20 @@ export function AnthropicAddAccountDialog({
     setError(null)
     setStep("exchanging")
     try {
-      const account = await adoptDiscoveredAuth(found, null)
+      const credential = discoveredToCredential(found)
+      if (!credential) throw new Error(t("login.errors.discoveredCredentialInvalid"))
+      const account = existingAccount
+        ? await persistProviderAccount("anthropic", {
+            ...existingAccount,
+            credential: { provider: "anthropic", ...credential },
+            lastUsedAtMs: Date.now(),
+          })
+        : await persistProviderAccount(
+            "anthropic",
+            await anthropicOauthSavePkceResult(credential, null)
+          )
       setStep("done")
+      toast.success(tAccountList(existingAccount ? "credentialsUpdated" : "accountAdded"))
       onAdded?.(account)
       window.setTimeout(() => onOpenChange(false), 800)
     } catch (e) {

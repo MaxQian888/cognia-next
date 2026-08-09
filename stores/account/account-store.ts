@@ -85,7 +85,7 @@ export interface AccountStoreState {
     accountId: string,
     options?: DeleteLocalAccountOptions
   ) => Promise<LocalAccountDeletionResult>
-  lock: () => void
+  lock: () => Promise<void>
   acknowledgeRecoveryKey: () => void
 }
 
@@ -98,6 +98,7 @@ export interface AccountStoreDependencies {
   prepareRuntimeTarget: (accountId: string) => Promise<RuntimeTargetRecord>
   prepareDatabase: () => Promise<unknown>
   removeRuntimeTargets: (accountId: string) => Promise<unknown>
+  clearSubscriptionRuntime: (localAccountId: string) => Promise<void>
 }
 
 export interface LocalAccountDeletionResult {
@@ -139,6 +140,14 @@ export function createAccountStore(
       return ensureActiveDatabaseReady()
     },
     removeRuntimeTargets: removeAccountRuntimeTargets,
+    clearSubscriptionRuntime: async (localAccountId) => {
+      if (!isTauri() && !isCapacitor()) {
+        const { hasWebCompanionTarget } = await import("@/lib/platform/web-companion")
+        if (!hasWebCompanionTarget()) return
+      }
+      const { clearSubscriptionRuntime } = await import("@/lib/subscription/core/transport")
+      await clearSubscriptionRuntime(localAccountId)
+    },
     ...dependencyOverrides,
   }
 
@@ -170,6 +179,10 @@ export function createAccountStore(
     }
 
     const activateUnlockedAccount = async (accountId: string): Promise<void> => {
+      const previousUnlockedAccountId = get().unlockedAccountId
+      if (previousUnlockedAccountId && previousUnlockedAccountId !== accountId) {
+        await dependencies.clearSubscriptionRuntime(previousUnlockedAccountId)
+      }
       await dependencies.registry.setActiveAccountId(accountId)
       const target = shouldUseBrowserVault()
         ? await dependencies.prepareRuntimeTarget(accountId)
@@ -451,6 +464,9 @@ export function createAccountStore(
         try {
           const wasActive = get().activeAccountId === accountId
           const replacementAccountId = options.replacementAccountId
+          if (wasActive && get().unlockedAccountId === accountId) {
+            await dependencies.clearSubscriptionRuntime(accountId)
+          }
           await dependencies.registry.deleteAccount(accountId, { replacementAccountId })
           await dependencies.dropAccountDatabase(accountId)
           let runtimeTargetsDeleted = false
@@ -501,16 +517,24 @@ export function createAccountStore(
         }
       },
 
-      lock: () => {
-        lockBrowserVault()
-        clearActiveRuntimeTargetContext()
-        clearAccountDatabaseSelection()
-        dependencies.clearAccountLocalState()
-        set((state) => ({
-          unlockedAccountId: null,
-          locked: computeLocked(state.accounts, state.activeAccountId, null),
-          error: null,
-        }))
+      lock: async () => {
+        const unlockedAccountId = get().unlockedAccountId
+        try {
+          if (unlockedAccountId) {
+            await dependencies.clearSubscriptionRuntime(unlockedAccountId)
+          }
+          lockBrowserVault()
+          clearActiveRuntimeTargetContext()
+          clearAccountDatabaseSelection()
+          dependencies.clearAccountLocalState()
+          set((state) => ({
+            unlockedAccountId: null,
+            locked: computeLocked(state.accounts, state.activeAccountId, null),
+            error: null,
+          }))
+        } catch (error) {
+          throw setFailure(error)
+        }
       },
 
       acknowledgeRecoveryKey: () => {

@@ -54,7 +54,7 @@ function fullAccount(credential: Record<string, unknown>, over: Record<string, u
 beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
-  getActiveAccountMock.mockResolvedValue({ activeAccountId: undefined })
+  getActiveAccountMock.mockResolvedValue({ activeAccountId: "acc-1", env: [] })
   listPresetsMock.mockResolvedValue([])
   getProviderPresetMock.mockResolvedValue(null)
   // Default: nothing to refresh (fresh / api_key) — the stored credential stands.
@@ -72,7 +72,7 @@ describe("resolveCodexVaultCredential", () => {
   })
 
   it("returns null when no codex account exists", async () => {
-    listAccountsMock.mockResolvedValue([])
+    getActiveAccountMock.mockResolvedValue({ activeAccountId: undefined, env: [] })
     expect(await resolveCodexVaultCredential("codex")).toBeNull()
   })
 
@@ -137,8 +137,20 @@ describe("resolveCodexVaultCredential", () => {
   })
 
   it("returns null on a transport error", async () => {
-    listAccountsMock.mockRejectedValue(new Error("ipc down"))
+    getActiveAccountMock.mockRejectedValue(new Error("ipc down"))
     expect(await resolveCodexVaultCredential("codex")).toBeNull()
+  })
+
+  it("uses an explicit account without consulting the active pointer", async () => {
+    getAccountMock.mockResolvedValue(
+      fullAccount({ authMode: "api_key", accessToken: "selected" }, { id: "selected-id" })
+    )
+
+    await expect(resolveCodexVaultCredential("codex", "selected-id")).resolves.toMatchObject({
+      apiKey: "selected",
+    })
+    expect(getAccountMock).toHaveBeenCalledWith("codex", "selected-id")
+    expect(getActiveAccountMock).not.toHaveBeenCalled()
   })
 
   it("hands the provider the REFRESHED bearer when the stored one is near expiry", async () => {

@@ -48,7 +48,7 @@ function fullAccount(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
-  getActiveAccountMock.mockResolvedValue({ env: [] })
+  getActiveAccountMock.mockResolvedValue({ activeAccountId: "acc-1", env: [] })
   listPresetsMock.mockResolvedValue([])
   getProviderPresetMock.mockResolvedValue(null)
 })
@@ -76,6 +76,7 @@ describe("resolveOpencodeVaultCredential", () => {
   })
 
   it("resolves a go account for opencode-go with the go default URL", async () => {
+    getActiveAccountMock.mockResolvedValue({ activeAccountId: "acc-go", env: [] })
     listAccountsMock.mockResolvedValue([
       summary(),
       summary({ id: "acc-go", plan: "go", lastUsedAtMs: 5 }),
@@ -111,21 +112,16 @@ describe("resolveOpencodeVaultCredential", () => {
     expect(getAccountMock).toHaveBeenCalledWith("opencode", "acc-old")
   })
 
-  it("falls back to most recently used when the active account's plan mismatches", async () => {
+  it("does not fall back to a recently used account when the active plan mismatches", async () => {
     listAccountsMock.mockResolvedValue([
       summary({ id: "acc-zen", plan: "zen" }),
       summary({ id: "acc-go-1", plan: "go", lastUsedAtMs: 2 }),
       summary({ id: "acc-go-2", plan: "go", lastUsedAtMs: 9 }),
     ])
     getActiveAccountMock.mockResolvedValue({ activeAccountId: "acc-zen", env: [] })
-    getAccountMock.mockResolvedValue(
-      fullAccount({
-        id: "acc-go-2",
-        credential: { provider: "opencode-zen", accessToken: "sk", plan: "go", storedAtMs: 0 },
-      })
-    )
-    await resolveOpencodeVaultCredential("opencode-go")
-    expect(getAccountMock).toHaveBeenCalledWith("opencode", "acc-go-2")
+    getAccountMock.mockResolvedValue(fullAccount({ id: "acc-zen" }))
+    await expect(resolveOpencodeVaultCredential("opencode-go")).resolves.toBeNull()
+    expect(getAccountMock).toHaveBeenCalledWith("opencode", "acc-zen")
   })
 
   it("honours an explicit per-account base URL override", async () => {
@@ -146,11 +142,30 @@ describe("resolveOpencodeVaultCredential", () => {
     })
   })
 
+  it("uses an explicit account without consulting the active pointer", async () => {
+    getAccountMock.mockResolvedValue(fullAccount({ id: "selected-id" }))
+
+    await expect(resolveOpencodeVaultCredential("opencode", "selected-id")).resolves.toMatchObject({
+      apiKey: "sk-zen",
+    })
+    expect(getAccountMock).toHaveBeenCalledWith("opencode", "selected-id")
+    expect(getActiveAccountMock).not.toHaveBeenCalled()
+  })
+
   it("skips discovery rows and blank tokens", async () => {
-    listAccountsMock.mockResolvedValue([summary({ variant: "opencode-discovered" })])
+    getAccountMock.mockResolvedValue(
+      fullAccount({
+        credential: {
+          provider: "opencode-discovered",
+          subProvider: "anthropic",
+          authJsonPath: "/tmp/auth.json",
+          originalPayloadJson: "{}",
+          lastSeenAtMs: 0,
+        },
+      })
+    )
     expect(await resolveOpencodeVaultCredential("opencode")).toBeNull()
 
-    listAccountsMock.mockResolvedValue([summary()])
     getAccountMock.mockResolvedValue(
       fullAccount({ credential: { provider: "opencode-zen", accessToken: "   ", storedAtMs: 0 } })
     )
@@ -158,10 +173,10 @@ describe("resolveOpencodeVaultCredential", () => {
   })
 
   it("returns null when no accounts exist or transport throws", async () => {
-    listAccountsMock.mockResolvedValue([])
+    getActiveAccountMock.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
     expect(await resolveOpencodeVaultCredential("opencode")).toBeNull()
 
-    listAccountsMock.mockRejectedValue(new Error("keyring locked"))
+    getActiveAccountMock.mockRejectedValueOnce(new Error("keyring locked"))
     expect(await resolveOpencodeVaultCredential("opencode")).toBeNull()
   })
 
@@ -212,10 +227,10 @@ describe("resolveOpencodeVaultCredential", () => {
     })
   })
 
-  it("tolerates getActiveAccount failure", async () => {
+  it("fails closed when the active pointer cannot be read", async () => {
     getActiveAccountMock.mockRejectedValue(new Error("nope"))
-    listAccountsMock.mockResolvedValue([summary()])
     getAccountMock.mockResolvedValue(fullAccount())
-    expect(await resolveOpencodeVaultCredential("opencode")).not.toBeNull()
+    expect(await resolveOpencodeVaultCredential("opencode")).toBeNull()
+    expect(getAccountMock).not.toHaveBeenCalled()
   })
 })

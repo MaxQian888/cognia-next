@@ -12,9 +12,9 @@
 import { useCallback, useEffect, useState } from "react"
 
 import { isTauri } from "@/lib/tauri"
+import { subscribeSubscriptionChanged } from "./subscription-events"
 
 import {
-  deleteAccount,
   deleteProviderPreset,
   getAccount,
   getActiveAccount,
@@ -27,6 +27,7 @@ import {
   setDefaultPreset,
   setProviderPreset,
 } from "./transport"
+import { deleteProviderAccount } from "./account-lifecycle"
 import type {
   Account,
   AccountSummary,
@@ -45,6 +46,9 @@ export interface UseAccountsResult {
   /** Currently active account id, or `null` when nothing is active. */
   activeAccountId: string | null
   loading: boolean
+  error: string | null
+  pendingAction: "activate" | "rename" | "delete" | null
+  pendingAccountId: string | null
   /** Re-read the vault from the keyring. */
   reload: () => Promise<void>
   /** Set or clear the active account; triggers sidecar restart for Anthropic. */
@@ -52,7 +56,7 @@ export interface UseAccountsResult {
   /** Rename an account; `null` clears the label. */
   rename: (accountId: string, label: string | null) => Promise<void>
   /** Delete an account; if active, clears the active pointer. */
-  remove: (accountId: string) => Promise<void>
+  remove: (accountId: string, replacementAccountId?: string | null) => Promise<void>
   /** Fetch the full Account (incl. credential) for editing flows. */
   fetchFull: (accountId: string) => Promise<Account | null>
 }
@@ -61,6 +65,9 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
   const [accounts, setAccounts] = useState<AccountSummary[]>([])
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [pendingAction, setPendingAction] = useState<UseAccountsResult["pendingAction"]>(null)
+  const [pendingAccountId, setPendingAccountId] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     if (!isTauri()) {
@@ -70,6 +77,7 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
       return
     }
     setLoading(true)
+    setError(null)
     try {
       const [list, snapshot] = await Promise.all([
         listAccounts(provider),
@@ -77,6 +85,9 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
       ])
       setAccounts(list)
       setActiveAccountId(snapshot.activeAccountId ?? null)
+    } catch (loadError) {
+      setError(errorMessage(loadError))
+      throw loadError
     } finally {
       setLoading(false)
     }
@@ -101,7 +112,10 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
         if (alive) {
           setAccounts(list)
           setActiveAccountId(snapshot.activeAccountId ?? null)
+          setError(null)
         }
+      } catch (loadError) {
+        if (alive) setError(errorMessage(loadError))
       } finally {
         if (alive) setLoading(false)
       }
@@ -111,33 +125,69 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
     }
   }, [provider])
 
+  useEffect(
+    () =>
+      subscribeSubscriptionChanged(() => {
+        void reload().catch(() => undefined)
+      }),
+    [reload]
+  )
+
+  const runAction = useCallback(
+    async <T>(
+      action: NonNullable<UseAccountsResult["pendingAction"]>,
+      accountId: string,
+      operation: () => Promise<T>
+    ): Promise<T> => {
+      setPendingAction(action)
+      setPendingAccountId(accountId)
+      setError(null)
+      try {
+        return await operation()
+      } catch (actionError) {
+        setError(errorMessage(actionError))
+        throw actionError
+      } finally {
+        setPendingAction(null)
+        setPendingAccountId(null)
+      }
+    },
+    []
+  )
+
   const setActive = useCallback(
     async (accountId: string | null) => {
-      await setActiveAccount(provider, accountId)
-      setActiveAccountId(accountId)
+      await runAction("activate", accountId ?? "", async () => {
+        await setActiveAccount(provider, accountId)
+        setActiveAccountId(accountId)
+      })
     },
-    [provider]
+    [provider, runAction]
   )
 
   const rename = useCallback(
     async (accountId: string, label: string | null) => {
-      await renameAccount(provider, accountId, label)
-      setAccounts((prev) =>
-        prev.map((a) => (a.id === accountId ? { ...a, label: label ?? undefined } : a))
-      )
+      await runAction("rename", accountId, async () => {
+        await renameAccount(provider, accountId, label)
+        setAccounts((prev) =>
+          prev.map((a) => (a.id === accountId ? { ...a, label: label ?? undefined } : a))
+        )
+      })
     },
-    [provider]
+    [provider, runAction]
   )
 
   const remove = useCallback(
-    async (accountId: string) => {
-      await deleteAccount(provider, accountId)
-      setAccounts((prev) => prev.filter((a) => a.id !== accountId))
-      if (activeAccountId === accountId) {
-        setActiveAccountId(null)
-      }
+    async (accountId: string, replacementAccountId: string | null = null) => {
+      await runAction("delete", accountId, async () => {
+        await deleteProviderAccount({ provider, accountId, replacementAccountId })
+        setAccounts((prev) => prev.filter((a) => a.id !== accountId))
+        if (activeAccountId === accountId) {
+          setActiveAccountId(replacementAccountId)
+        }
+      })
     },
-    [provider, activeAccountId]
+    [provider, activeAccountId, runAction]
   )
 
   const fetchFull = useCallback(
@@ -149,12 +199,19 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
     accounts,
     activeAccountId,
     loading,
+    error,
+    pendingAction,
+    pendingAccountId,
     reload,
     setActive,
     rename,
     remove,
     fetchFull,
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 // ---------------------------------------------------------------------------

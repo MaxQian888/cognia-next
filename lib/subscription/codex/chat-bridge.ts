@@ -2,7 +2,8 @@
 //
 // The "codex" built-in chat provider normally reads its API key from Settings →
 // Providers. When the user never configured one, `resolveSendOptions` falls back
-// here: the active (or most-recently-used) account in the Codex subscription
+// here: the explicitly selected/default account, or the active account when no
+// higher-precedence selection exists, in the Codex subscription
 // vault supplies the credential, so a reused ChatGPT-login or pasted API key is
 // immediately usable in chat — the same convenience the Anthropic/OpenCode paths
 // have.
@@ -19,7 +20,6 @@ import {
   getAccount,
   getActiveAccount,
   getProviderPreset,
-  listAccounts,
   listPresets,
 } from "@/lib/subscription/core/transport"
 import { isCodexCredentialFresh } from "./oauth"
@@ -29,7 +29,7 @@ import {
   CODEX_DEFAULT_API_BASE_URL,
   isCodexChatProviderId,
 } from "@/types/subscription"
-import type { Account, AccountSummary, ProviderPreset } from "@/types/subscription"
+import type { Account, ProviderPreset } from "@/types/subscription"
 
 export interface CodexVaultCredential {
   apiKey: string
@@ -46,18 +46,18 @@ export interface CodexVaultCredential {
  * fallback available".
  */
 export async function resolveCodexVaultCredential(
-  providerId: string
+  providerId: string,
+  selectedAccountId?: string | null
 ): Promise<CodexVaultCredential | null> {
   if (!isCodexChatProviderId(providerId)) return null
   if (!isTauri()) return null
   try {
-    const [summaries, active] = await Promise.all([
-      listAccounts("codex"),
-      getActiveAccount("codex").catch(() => null),
-    ])
-    const candidate = pickAccount(summaries, active?.activeAccountId)
-    if (!candidate) return null
-    const full = await getAccount("codex", candidate.id)
+    const accountId =
+      selectedAccountId === undefined
+        ? (await getActiveAccount("codex")).activeAccountId
+        : selectedAccountId || (await getActiveAccount("codex")).activeAccountId
+    if (!accountId) return null
+    const full = await getAccount("codex", accountId)
     if (!full || full.credential.provider !== "codex") return null
 
     // Renew a near-expiry ChatGPT bearer before handing it to the provider. The
@@ -77,7 +77,7 @@ export async function resolveCodexVaultCredential(
     // turn with no credential at all.
     const credential = isCodexCredentialFresh(full.credential)
       ? full.credential
-      : ((await refreshCodexAccountIfStale(candidate.id).catch(() => null)) ?? full.credential)
+      : ((await refreshCodexAccountIfStale(accountId).catch(() => null)) ?? full.credential)
     const apiKey = credential.accessToken?.trim()
     if (!apiKey) return null
 
@@ -122,16 +122,4 @@ async function resolvePresetFor(account: Account): Promise<ProviderPreset | null
   } catch {
     return null
   }
-}
-
-/**
- * Pick the vault account to draw the credential from: the active account wins,
- * then the most recently used. Only "codex"-variant accounts are considered.
- */
-function pickAccount(summaries: AccountSummary[], activeAccountId?: string): AccountSummary | null {
-  const matching = summaries.filter((s) => s.variant === "codex")
-  const active = activeAccountId ? matching.find((s) => s.id === activeAccountId) : undefined
-  if (active) return active
-  matching.sort((a, b) => (b.lastUsedAtMs ?? 0) - (a.lastUsedAtMs ?? 0))
-  return matching[0] ?? null
 }

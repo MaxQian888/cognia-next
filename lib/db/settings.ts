@@ -1,4 +1,8 @@
-import type { AppSettings, BuiltinToolsConfig } from "@cognia/agent-config-types"
+import type {
+  AppSettings,
+  BuiltinToolsConfig,
+  SubscriptionAccountProvider,
+} from "@cognia/agent-config-types"
 import {
   DEFAULT_BIOMETRIC_GUARD,
   DEFAULT_BUILTIN_TOOLS,
@@ -6,7 +10,7 @@ import {
   DEFAULT_UPDATE_SETTINGS,
   DEFAULT_USER_PROFILE,
 } from "@cognia/agent-config-types"
-import { DEFAULT_TTS_SETTINGS } from "@cognia/tts/types"
+import { DEFAULT_TTS_SETTINGS, normalizeTTSProvider } from "@cognia/tts/types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
@@ -110,6 +114,12 @@ export const DEFAULTS: AppSettings = {
   openaiSpeed: DEFAULT_TTS_SETTINGS.openaiSpeed,
   openaiInstructions: DEFAULT_TTS_SETTINGS.openaiInstructions,
   openaiResponseFormat: DEFAULT_TTS_SETTINGS.openaiResponseFormat,
+  localOpenaiBaseUrl: DEFAULT_TTS_SETTINGS.localOpenaiBaseUrl,
+  localOpenaiModel: DEFAULT_TTS_SETTINGS.localOpenaiModel,
+  localOpenaiVoice: DEFAULT_TTS_SETTINGS.localOpenaiVoice,
+  localOpenaiSpeed: DEFAULT_TTS_SETTINGS.localOpenaiSpeed,
+  localOpenaiResponseFormat: DEFAULT_TTS_SETTINGS.localOpenaiResponseFormat,
+  localOpenaiTimeoutMs: DEFAULT_TTS_SETTINGS.localOpenaiTimeoutMs,
   geminiVoice: DEFAULT_TTS_SETTINGS.geminiVoice,
   geminiModel: DEFAULT_TTS_SETTINGS.geminiModel,
   edgeVoice: DEFAULT_TTS_SETTINGS.edgeVoice,
@@ -242,6 +252,7 @@ export async function getSettings(): Promise<AppSettings> {
   return {
     ...DEFAULTS,
     ...row,
+    ttsProvider: normalizeTTSProvider(row.ttsProvider),
     // Nested objects need their own forward-compat merge — a v1 row that
     // shipped without `builtinTools.shellAdvanced` would otherwise drop the
     // default when we eventually add it.
@@ -426,10 +437,21 @@ export async function saveSettings(
   const next = saveQueue.then(() =>
     withDbReopenRetry(async () => {
       const current = await getSettings()
+      const migratedCurrent: AppSettings = {
+        ...current,
+        defaultAccountIds: current.defaultAccountIds ? { ...current.defaultAccountIds } : undefined,
+      }
+      migrateLegacyDefaultAccount(migratedCurrent)
       // Bump `updatedAt` on every write so the companion sync source can tell
       // when the singleton changed and re-emit it to paired phones (see
       // `lib/sync/desktop-sync-source.ts:readSettingsDelta`).
-      const merged: AppSettings = { ...current, ...patch, id: SINGLETON_ID, updatedAt: Date.now() }
+      const merged: AppSettings = {
+        ...migratedCurrent,
+        ...patch,
+        id: SINGLETON_ID,
+        updatedAt: Date.now(),
+      }
+      migrateLegacyDefaultAccount(merged)
       await getDb().settings.put(merged)
       // ADR-0090 Phase 1: keep the derived Provider Profile Store fresh.
       // Runs inside the serialized queue so derivations observe writes in
@@ -467,6 +489,32 @@ export async function saveSettings(
   // Promise via the `next` reference returned below.
   saveQueue = next.catch(() => undefined)
   return next
+}
+
+const SUBSCRIPTION_ACCOUNT_PROVIDERS = new Set<SubscriptionAccountProvider>([
+  "anthropic",
+  "codex",
+  "opencode",
+])
+
+function normalizeLegacySubscriptionProvider(
+  provider: AppSettings["defaultProvider"]
+): SubscriptionAccountProvider | null {
+  if (provider === "opencode-go") return "opencode"
+  return provider && SUBSCRIPTION_ACCOUNT_PROVIDERS.has(provider as SubscriptionAccountProvider)
+    ? (provider as SubscriptionAccountProvider)
+    : null
+}
+
+function migrateLegacyDefaultAccount(settings: AppSettings): void {
+  const provider = normalizeLegacySubscriptionProvider(settings.defaultProvider)
+  const legacyAccountId = settings.defaultAccountId
+  if (!legacyAccountId || !provider) return
+  settings.defaultAccountIds = {
+    ...settings.defaultAccountIds,
+    [provider]: settings.defaultAccountIds?.[provider] ?? legacyAccountId,
+  }
+  settings.defaultAccountId = undefined
 }
 
 export async function addAlwaysAllow(toolName: string): Promise<void> {

@@ -116,6 +116,7 @@ const mockClearAccountLocalState = jest.fn<void, []>()
 const mockPrepareRuntimeTarget = jest.fn()
 const mockPrepareDatabase = jest.fn<Promise<unknown>, []>()
 const mockRemoveRuntimeTargets = jest.fn<Promise<void>, [string]>()
+const mockClearSubscriptionRuntime = jest.fn<Promise<void>, [string]>()
 
 let createAccountStore: typeof import("./account-store").createAccountStore
 let selectActiveAccount: typeof import("./account-store").selectActiveAccount
@@ -154,6 +155,7 @@ function makeStore() {
     prepareRuntimeTarget: mockPrepareRuntimeTarget,
     prepareDatabase: mockPrepareDatabase,
     removeRuntimeTargets: mockRemoveRuntimeTargets,
+    clearSubscriptionRuntime: mockClearSubscriptionRuntime,
   }
   return createAccountStore(dependencies)
 }
@@ -209,6 +211,7 @@ beforeEach(() => {
   })
   mockPrepareDatabase.mockResolvedValue({ databaseName: "test", restoredPluginTables: [] })
   mockRemoveRuntimeTargets.mockResolvedValue()
+  mockClearSubscriptionRuntime.mockResolvedValue()
 })
 
 describe("account store load", () => {
@@ -326,7 +329,7 @@ describe("browser Vault lifecycle", () => {
     expect(mockUnlockBrowserVault).toHaveBeenCalledWith(browserAccount.id, "secret")
     expect(mockPrepareRuntimeTarget).toHaveBeenCalledWith(browserAccount.id)
 
-    store.getState().lock()
+    await store.getState().lock()
     expect(mockLockBrowserVault).toHaveBeenCalledTimes(1)
   })
 
@@ -596,6 +599,10 @@ describe("account store switching, locking, and lifecycle", () => {
     await store.getState().switchAccount("acct_beta", "beta-password")
 
     expect(mockVerifyPassword).toHaveBeenLastCalledWith("beta-password", beta.passwordVerifier)
+    expect(mockClearSubscriptionRuntime).toHaveBeenCalledWith("acct_alpha")
+    expect(mockClearSubscriptionRuntime.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetActiveAccountId.mock.invocationCallOrder.at(-1)!
+    )
     expect(mockSetActiveAccountId).toHaveBeenLastCalledWith("acct_beta")
     expect(mockActivateAccountDatabase).toHaveBeenLastCalledWith("acct_beta")
     expect(mockActivateAccountLocalState).toHaveBeenLastCalledWith("acct_beta")
@@ -660,12 +667,29 @@ describe("account store switching, locking, and lifecycle", () => {
     await store.getState().load()
     await store.getState().unlockAccount("acct_alpha", "secret")
 
-    store.getState().lock()
+    await store.getState().lock()
 
+    expect(mockClearSubscriptionRuntime).toHaveBeenCalledWith("acct_alpha")
     expect(mockClearAccountDatabaseSelection).toHaveBeenCalled()
     expect(mockClearAccountLocalState).toHaveBeenCalled()
     expect(store.getState().unlockedAccountId).toBeNull()
     expect(store.getState().locked).toBe(true)
+  })
+
+  it("keeps the local account unlocked when runtime clearing fails", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "secret")
+    mockClearSubscriptionRuntime.mockRejectedValueOnce(new Error("runtime clear failed"))
+
+    await expect(store.getState().lock()).rejects.toThrow(/runtime clear failed/)
+
+    expect(mockClearAccountDatabaseSelection).not.toHaveBeenCalled()
+    expect(store.getState().unlockedAccountId).toBe("acct_alpha")
+    expect(store.getState().locked).toBe(false)
   })
 
   it("renames accounts in registry and local state", async () => {
@@ -830,7 +854,7 @@ describe("account store switching, locking, and lifecycle", () => {
     await store.getState().load()
     await store.getState().unlockAccount("acct_alpha", "secret")
     await store.getState().deleteAccount("acct_beta")
-    store.getState().lock()
+    await store.getState().lock()
 
     expect(mockDropAccountDatabase).toHaveBeenCalledWith("acct_beta")
     expect(window.localStorage.getItem("cognia-account-acct_beta:panel")).toBeNull()
@@ -921,7 +945,7 @@ describe("account store dev auto-unlock", () => {
     const store = makeStore()
     await store.getState().load()
 
-    store.getState().lock()
+    await store.getState().lock()
 
     expect(store.getState().unlockedAccountId).toBeNull()
     expect(store.getState().locked).toBe(true)

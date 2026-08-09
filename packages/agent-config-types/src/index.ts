@@ -1934,7 +1934,7 @@ export interface ChatSession {
    * Per-session account override (ADR-0028). Picks which `ProviderVault::accounts[]`
    * entry supplies the OAuth / API key, `CLAUDE_CONFIG_DIR`, base URL, and proxy
    * for this conversation. Precedence chain: `session.accountId →
-   * character.accountIdOverride → settings.defaultAccountId →
+   * character.accountIdOverride → settings.defaultAccountIds[provider] →
    * ActiveAccountState.get(provider).active_account_id` (today's single-active
    * pointer is the final fallback). Undefined here = inherit from character or
    * the global active pointer, preserving today's behaviour for legacy rows.
@@ -2564,6 +2564,8 @@ export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = {
   historyCharacterLimit: 16_000,
   deployments: [],
 }
+
+export type SubscriptionAccountProvider = "anthropic" | "codex" | "opencode"
 
 export interface AppSettings {
   id: "singleton"
@@ -3944,12 +3946,19 @@ export interface AppSettings {
   /** Active default AI provider id (e.g. "openai", "anthropic", "google"). */
   defaultProvider?: string
   /**
+   * Provider-scoped default subscription accounts. These are lower priority
+   * than session and character overrides and higher priority than each
+   * provider vault's active pointer.
+   */
+  defaultAccountIds?: Partial<Record<SubscriptionAccountProvider, string>>
+  /**
    * Default account override (ADR-0028) for sessions / characters that do not
    * set their own `accountId` / `accountIdOverride`. Refers to a UUIDv7 in
    * `ProviderVault::accounts[]` for the provider matched by `defaultProvider`.
    * Undefined keeps today's behaviour exactly — the single global active pointer
    * (`ActiveAccountState`) remains the source of truth.
    */
+  /** @deprecated Migrated into {@link defaultAccountIds} on the next settings write. */
   defaultAccountId?: string
   /**
    * Pet subsystem preferences (v67). Undefined ⇒ defaults from
@@ -4825,7 +4834,7 @@ export interface Character {
    * Per-character account override (ADR-0028). Picks which `ProviderVault::accounts[]`
    * entry supplies credentials for every session bound to this character — unless
    * the session itself sets `ChatSession.accountId`, which wins. Undefined here
-   * falls through to `AppSettings.defaultAccountId` and then to the global
+   * falls through to `AppSettings.defaultAccountIds[provider]` and then to the global
    * `ActiveAccountState` pointer (today's behaviour).
    */
   accountIdOverride?: string

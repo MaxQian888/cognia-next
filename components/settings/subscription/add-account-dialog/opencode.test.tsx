@@ -3,6 +3,7 @@
  */
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { Account } from "@/types/subscription"
 
 // next-intl is globally mocked against en.json in jest.setup.ts.
 
@@ -11,9 +12,14 @@ jest.mock("@/lib/subscription/opencode/discovery", () => ({
   saveOpencodeZenKey: (...a: unknown[]) => saveOpencodeZenKeyMock(...a),
 }))
 
+const persistProviderAccountMock = jest.fn()
+jest.mock("@/lib/subscription/core/account-lifecycle", () => ({
+  persistProviderAccount: (...a: unknown[]) => persistProviderAccountMock(...a),
+}))
+
 import { OpencodeAddAccountDialog } from "./opencode"
 
-function account() {
+function account(): Account {
   return {
     id: "acc-1",
     credential: { provider: "opencode-zen", accessToken: "sk", storedAtMs: 0 },
@@ -22,7 +28,10 @@ function account() {
   }
 }
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  persistProviderAccountMock.mockImplementation(async (_provider, next) => next)
+})
 
 describe("OpencodeAddAccountDialog", () => {
   it("defaults to the zen plan and submits it", async () => {
@@ -74,5 +83,30 @@ describe("OpencodeAddAccountDialog", () => {
   it("disables save while the key field is empty", () => {
     render(<OpencodeAddAccountDialog open onOpenChange={() => {}} />)
     expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  it("updates credentials in place while preserving metadata", async () => {
+    const existing = {
+      ...account(),
+      id: "existing-id",
+      label: "Work",
+      presetId: "preset-1",
+      createdAtMs: 123,
+    }
+    render(<OpencodeAddAccountDialog open onOpenChange={() => {}} existingAccount={existing} />)
+
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-replacement")
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    expect(persistProviderAccountMock).toHaveBeenCalledWith(
+      "opencode",
+      expect.objectContaining({
+        id: "existing-id",
+        label: "Work",
+        presetId: "preset-1",
+        createdAtMs: 123,
+      })
+    )
+    expect(saveOpencodeZenKeyMock).not.toHaveBeenCalled()
   })
 })

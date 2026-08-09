@@ -1,5 +1,5 @@
 // ADR-0028 — per-`query()` env injection: resolve the env tuple for the
-// account that will serve this turn, plus the per-session proxy env.
+// account that will serve this turn.
 //
 // `resolveSendOptions` consumes both and merges them into `opts.env` ahead of
 // other env layers (e.g. `debugMode`). The dispatch chain on the sidecar side
@@ -11,26 +11,69 @@
 
 import { transport } from "@/lib/tauri"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
+import { getActiveAccount } from "@/lib/subscription/core/transport"
 import { useAccountStore } from "@/stores/account/account-store"
-import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
+import type {
+  AppSettings,
+  Character,
+  ChatSession,
+  SubscriptionAccountProvider,
+} from "@cognia/agent-config-types"
+
+export function subscriptionAccountProviderFor(
+  providerId: string
+): SubscriptionAccountProvider | null {
+  if (providerId === "anthropic" || providerId === "codex" || providerId === "opencode") {
+    return providerId
+  }
+  if (providerId === "opencode-go") return "opencode"
+  return null
+}
+
+export class SubscriptionAccountResolutionError extends Error {
+  override readonly name = "SubscriptionAccountResolutionError"
+
+  constructor(
+    readonly providerId: string,
+    readonly accountId: string,
+    message: string,
+    readonly cause?: unknown
+  ) {
+    super(message)
+  }
+}
 
 /**
  * Walk the ADR-0028 precedence chain to pick the accountId for this turn:
  *
  *   session.accountId
  *     ?? character.accountIdOverride
- *     ?? settings.defaultAccountId
+ *     ?? settings.defaultAccountIds[providerId]
  *     ?? null
  *
- * A `null` result tells the caller "fall through to the global active pointer"
- * — exactly today's single-account behaviour. Pure: no I/O.
+ * A `null` result tells the environment resolver to validate and use the
+ * provider's active pointer. Pure: no I/O.
  */
 export function resolveAccountId(
+  providerId: string,
   session: ChatSession | null | undefined,
   character: Character | null | undefined,
   settings: AppSettings | null | undefined
 ): string | null {
-  return session?.accountId ?? character?.accountIdOverride ?? settings?.defaultAccountId ?? null
+  if (session?.accountId) return session.accountId
+  if (character?.accountIdOverride) return character.accountIdOverride
+  const scopedProvider = subscriptionAccountProviderFor(providerId)
+  if (scopedProvider) {
+    const scopedDefault = settings?.defaultAccountIds?.[scopedProvider]
+    if (scopedDefault) return scopedDefault
+  }
+  if (
+    (settings?.defaultProvider === providerId || settings?.defaultProvider === scopedProvider) &&
+    settings.defaultAccountId
+  ) {
+    return settings.defaultAccountId
+  }
+  return null
 }
 
 /**
@@ -40,10 +83,10 @@ export function resolveAccountId(
  * `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_BASE_URL` / `ANTHROPIC_CUSTOM_HEADER_*`
  * pairs plus `CLAUDE_CONFIG_DIR`.
  *
- * Returns an empty record when:
- *   - `accountId` is null (caller fell through to the global active pointer);
- *   - the account_id is unknown to the vault;
- *   - the Tauri command throws (best-effort — never block a send on this).
+ * A missing or stale selection is a typed failure. This prevents a send from
+ * inheriting a bearer left in the sidecar process or another provider's active
+ * projection. Non-subscription providers and standalone mode do not use this
+ * account system and return an empty record.
  *
  * Callers merge this on top of `process.env` semantics (the sidecar does the
  * `{ ...process.env, ...env }` spread); duplicate keys make the account env
@@ -54,49 +97,73 @@ export async function resolveAccountEnv(
   accountId: string | null
 ): Promise<Record<string, string>> {
   if (isStandaloneChatMode()) return {}
-  if (!accountId) return {}
+  const scopedProvider = subscriptionAccountProviderFor(providerId)
+  if (!scopedProvider) return {}
   const localAccountId = useAccountStore.getState().unlockedAccountId
-  if (!localAccountId) return {}
+  if (!localAccountId) {
+    throw new SubscriptionAccountResolutionError(
+      providerId,
+      accountId ?? "",
+      "A local account must be unlocked before a provider account can be resolved."
+    )
+  }
+  if (!accountId) {
+    try {
+      const active = await getActiveAccount(scopedProvider)
+      if (!active.activeAccountId) {
+        throw new SubscriptionAccountResolutionError(
+          providerId,
+          "",
+          `No active ${providerId} account is available. Add or activate an account in Settings.`
+        )
+      }
+      return Object.fromEntries(active.env)
+    } catch (err) {
+      if (err instanceof SubscriptionAccountResolutionError) throw err
+      throw new SubscriptionAccountResolutionError(
+        providerId,
+        "",
+        `Could not resolve the active ${providerId} account.`,
+        err
+      )
+    }
+  }
   try {
     const entries = await transport.call<Array<{ key: string; value: string }> | null>(
       "claude_env_for_account",
       {
-        provider: providerId,
+        provider: scopedProvider,
         localAccountId,
         accountId,
       }
     )
-    if (!entries) return {}
+    if (!entries) {
+      throw new SubscriptionAccountResolutionError(
+        providerId,
+        accountId,
+        `Provider account ${accountId} is no longer available for ${providerId}.`
+      )
+    }
     return Object.fromEntries(entries.map(({ key, value }) => [key, value]))
   } catch (err) {
-    // Vault load failure or unknown provider — surface in logs but don't
-    // block the send. The next layer (ActiveAccountState defaults) still
-    // applies via the sidecar spawn env (`src-tauri/src/claude/sidecar.rs`).
+    if (err instanceof SubscriptionAccountResolutionError) throw err
     console.warn("resolveAccountEnv failed", err)
-    return {}
+    throw new SubscriptionAccountResolutionError(
+      providerId,
+      accountId,
+      `Could not resolve provider account ${accountId} for ${providerId}.`,
+      err
+    )
   }
 }
 
 /**
- * Fetch the per-session proxy env from the Rust `proxy_config` layer. The
- * `sessionId` parameter is forward-compat for deferred V2 per-session proxy
- * overrides — V1 always returns the process-level proxy (the same one
- * `src-tauri/src/claude/sidecar.rs:163` already injects at sidecar spawn).
- *
- * Returns an empty record when no proxy is configured.
+ * Compatibility shim for older callers. Proxy variables are now installed by
+ * the Rust host before the sidecar starts, so renderer/session data can never
+ * override the process-wide fail-closed policy.
  */
 export async function resolveProxyEnv(
-  sessionId: string | null | undefined
+  _sessionId: string | null | undefined
 ): Promise<Record<string, string>> {
-  if (isStandaloneChatMode()) return {}
-  try {
-    const entries = await transport.call<Array<{ key: string; value: string }>>(
-      "claude_proxy_env_for_session",
-      { sessionId: sessionId ?? "" }
-    )
-    return Object.fromEntries((entries ?? []).map(({ key, value }) => [key, value]))
-  } catch (err) {
-    console.warn("resolveProxyEnv failed", err)
-    return {}
-  }
+  return {}
 }

@@ -76,12 +76,13 @@ function settings(over: Partial<AppSettings> = {}): AppSettings {
 
 describe("resolveAccountId — precedence chain", () => {
   it("returns null when no layer sets it", () => {
-    expect(resolveAccountId(chatSession(), character(), settings())).toBeNull()
+    expect(resolveAccountId("anthropic", chatSession(), character(), settings())).toBeNull()
   })
 
   it("returns session.accountId when set", () => {
     expect(
       resolveAccountId(
+        "anthropic",
         chatSession({ accountId: "s-acct" }),
         character({ accountIdOverride: "c-acct" }),
         settings({ defaultAccountId: "app-acct" })
@@ -92,6 +93,7 @@ describe("resolveAccountId — precedence chain", () => {
   it("falls through to character.accountIdOverride when session is unset", () => {
     expect(
       resolveAccountId(
+        "anthropic",
         chatSession(),
         character({ accountIdOverride: "c-acct" }),
         settings({ defaultAccountId: "app-acct" })
@@ -99,15 +101,31 @@ describe("resolveAccountId — precedence chain", () => {
     ).toBe("c-acct")
   })
 
-  it("falls through to settings.defaultAccountId when both upper layers are unset", () => {
+  it("uses the default account scoped to the current provider", () => {
     expect(
-      resolveAccountId(chatSession(), character(), settings({ defaultAccountId: "app-acct" }))
-    ).toBe("app-acct")
+      resolveAccountId(
+        "codex",
+        chatSession(),
+        character(),
+        settings({ defaultAccountIds: { anthropic: "claude-acct", codex: "codex-acct" } })
+      )
+    ).toBe("codex-acct")
+  })
+
+  it("reads the legacy default only when defaultProvider matches", () => {
+    const legacy = settings({ defaultProvider: "anthropic", defaultAccountId: "legacy" })
+    expect(resolveAccountId("anthropic", chatSession(), character(), legacy)).toBe("legacy")
+    expect(resolveAccountId("codex", chatSession(), character(), legacy)).toBeNull()
+  })
+
+  it("treats the legacy OpenCode default as scoped for the Go runtime", () => {
+    const legacy = settings({ defaultProvider: "opencode", defaultAccountId: "legacy-go" })
+    expect(resolveAccountId("opencode-go", chatSession(), character(), legacy)).toBe("legacy-go")
   })
 
   it("tolerates null/undefined inputs", () => {
-    expect(resolveAccountId(null, null, null)).toBeNull()
-    expect(resolveAccountId(undefined, undefined, undefined)).toBeNull()
+    expect(resolveAccountId("anthropic", null, null, null)).toBeNull()
+    expect(resolveAccountId("anthropic", undefined, undefined, undefined)).toBeNull()
   })
 })
 
@@ -119,9 +137,33 @@ describe("resolveAccountEnv", () => {
     expect(mockCall).not.toHaveBeenCalled()
   })
 
-  it("returns {} when accountId is null without calling the transport", async () => {
-    const env = await resolveAccountEnv("anthropic", null)
-    expect(env).toEqual({})
+  it("uses the validated provider active account when no override/default is selected", async () => {
+    mockCall.mockResolvedValueOnce({
+      activeAccountId: "active-account",
+      env: [["CLAUDE_CODE_OAUTH_TOKEN", "active-token"]],
+    })
+
+    await expect(resolveAccountEnv("anthropic", null)).resolves.toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: "active-token",
+    })
+    expect(mockCall).toHaveBeenCalledWith("subscription_get_active", {
+      provider: "anthropic",
+      localAccountId: "local_acct_a",
+    })
+  })
+
+  it("fails actionably when the provider has no active account", async () => {
+    mockCall.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
+
+    await expect(resolveAccountEnv("anthropic", null)).rejects.toMatchObject({
+      name: "SubscriptionAccountResolutionError",
+      providerId: "anthropic",
+      accountId: "",
+    })
+  })
+
+  it("ignores account routing for non-subscription providers", async () => {
+    await expect(resolveAccountEnv("openai", null)).resolves.toEqual({})
     expect(mockCall).not.toHaveBeenCalled()
   })
 
@@ -144,73 +186,42 @@ describe("resolveAccountEnv", () => {
     })
   })
 
-  it("returns {} without calling Rust when no local account is unlocked", async () => {
+  it("rejects an explicit account when no local account is unlocked", async () => {
     unlockedAccountId = null
 
-    const env = await resolveAccountEnv("anthropic", "abc")
+    await expect(resolveAccountEnv("anthropic", "abc")).rejects.toMatchObject({
+      name: "SubscriptionAccountResolutionError",
+      accountId: "abc",
+    })
 
-    expect(env).toEqual({})
     expect(mockCall).not.toHaveBeenCalled()
   })
 
-  it("returns {} when transport returns null (unknown account)", async () => {
+  it("rejects an unknown explicit account instead of falling through", async () => {
     mockCall.mockResolvedValueOnce(null)
-    const env = await resolveAccountEnv("anthropic", "ghost")
-    expect(env).toEqual({})
+    await expect(resolveAccountEnv("anthropic", "ghost")).rejects.toMatchObject({
+      name: "SubscriptionAccountResolutionError",
+      providerId: "anthropic",
+      accountId: "ghost",
+    })
   })
 
-  it("returns {} on transport rejection — best-effort, never blocks send", async () => {
+  it("wraps vault failures instead of silently using a different credential", async () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
     mockCall.mockRejectedValueOnce(new Error("vault load failed"))
-    const env = await resolveAccountEnv("anthropic", "abc")
-    expect(env).toEqual({})
+    await expect(resolveAccountEnv("anthropic", "abc")).rejects.toMatchObject({
+      name: "SubscriptionAccountResolutionError",
+      cause: expect.any(Error),
+    })
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
   })
 })
 
 describe("resolveProxyEnv", () => {
-  it("does not call a host-only command in browser standalone mode", async () => {
-    standaloneRuntime = true
-
+  it("never lets renderer session data override the host proxy environment", async () => {
     await expect(resolveProxyEnv("session-x")).resolves.toEqual({})
+    await expect(resolveProxyEnv(undefined)).resolves.toEqual({})
     expect(mockCall).not.toHaveBeenCalled()
-  })
-
-  it("returns parsed pairs when proxy is active", async () => {
-    mockCall.mockResolvedValueOnce([
-      { key: "HTTPS_PROXY", value: "http://proxy:8080" },
-      { key: "HTTP_PROXY", value: "http://proxy:8080" },
-    ])
-    const env = await resolveProxyEnv("session-x")
-    expect(mockCall).toHaveBeenCalledWith("claude_proxy_env_for_session", {
-      sessionId: "session-x",
-    })
-    expect(env).toEqual({
-      HTTPS_PROXY: "http://proxy:8080",
-      HTTP_PROXY: "http://proxy:8080",
-    })
-  })
-
-  it("handles missing sessionId by passing empty string forward", async () => {
-    mockCall.mockResolvedValueOnce([])
-    await resolveProxyEnv(undefined)
-    expect(mockCall).toHaveBeenCalledWith("claude_proxy_env_for_session", {
-      sessionId: "",
-    })
-  })
-
-  it("returns {} when proxy is inactive (transport gives empty array)", async () => {
-    mockCall.mockResolvedValueOnce([])
-    const env = await resolveProxyEnv("session-x")
-    expect(env).toEqual({})
-  })
-
-  it("returns {} on transport rejection — best-effort", async () => {
-    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
-    mockCall.mockRejectedValueOnce(new Error("proxy_config crash"))
-    const env = await resolveProxyEnv("session-x")
-    expect(env).toEqual({})
-    warn.mockRestore()
   })
 })

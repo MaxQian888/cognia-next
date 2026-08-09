@@ -287,6 +287,23 @@ impl WatcherRegistry {
         }
     }
 
+    /// Stop every credential watcher owned by one local Cognia account while
+    /// preserving watchers for other local accounts. Used at the local-account
+    /// lock/switch boundary so a watcher cannot keep a previous user's vault
+    /// live after their database and UI state have been detached.
+    pub fn stop_all_for_local_account(&self, local_account_id: &str) {
+        let mut guard = self.inner.lock();
+        let keys = guard
+            .iter()
+            .filter_map(|(key, handle)| {
+                (handle.local_account_id == local_account_id).then(|| key.clone())
+            })
+            .collect::<Vec<_>>();
+        for key in keys {
+            guard.remove(&key);
+        }
+    }
+
     /// Diagnostic — how many watchers are alive right now.
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
@@ -397,6 +414,30 @@ mod tests {
         assert_eq!(got.refresh_token, "rt-snake");
         assert_eq!(got.access_token, "at-snake");
         assert_eq!(got.expires_at_ms, 42);
+    }
+
+    #[test]
+    fn stop_all_for_local_account_preserves_other_local_accounts() {
+        let local_a_one = tempfile::tempdir().unwrap();
+        let local_a_two = tempfile::tempdir().unwrap();
+        let local_b = tempfile::tempdir().unwrap();
+        let registry = WatcherRegistry::new();
+
+        registry
+            .ensure_watching("local-a", "account-1", local_a_one.path().to_path_buf())
+            .unwrap();
+        registry
+            .ensure_watching("local-a", "account-2", local_a_two.path().to_path_buf())
+            .unwrap();
+        registry
+            .ensure_watching("local-b", "account-1", local_b.path().to_path_buf())
+            .unwrap();
+
+        registry.stop_all_for_local_account("local-a");
+
+        assert_eq!(registry.len(), 1);
+        registry.stop_all_for_local_account("local-b");
+        assert!(registry.is_empty());
     }
 
     #[test]

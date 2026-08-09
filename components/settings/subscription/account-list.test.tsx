@@ -4,7 +4,7 @@
 
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { AccountSummary } from "@/types/subscription"
+import type { Account, AccountSummary } from "@/types/subscription"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -13,10 +13,18 @@ jest.mock("next-intl", () => ({
 const setActiveMock = jest.fn(async () => undefined)
 const renameMock = jest.fn(async () => undefined)
 const removeMock = jest.fn(async () => undefined)
-const state: { accounts: AccountSummary[]; activeAccountId: string | null; loading: boolean } = {
+const fetchFullMock = jest.fn<Promise<Account | null>, [string]>()
+const reloadMock = jest.fn(async () => undefined)
+const state: {
+  accounts: AccountSummary[]
+  activeAccountId: string | null
+  loading: boolean
+  error: string | null
+} = {
   accounts: [],
   activeAccountId: null,
   loading: false,
+  error: null,
 }
 const presets = { supported: false }
 
@@ -25,10 +33,26 @@ jest.mock("@/lib/subscription/core/hooks", () => ({
     accounts: state.accounts,
     activeAccountId: state.activeAccountId,
     loading: state.loading,
+    error: state.error,
+    pendingAction: null,
+    pendingAccountId: null,
+    reload: reloadMock,
     setActive: setActiveMock,
     rename: renameMock,
     remove: removeMock,
+    fetchFull: fetchFullMock,
   }),
+}))
+const inspectReferencesMock = jest.fn()
+const setProviderDefaultMock: jest.Mock = jest.fn(async () => undefined)
+jest.mock("@/lib/subscription/core/account-lifecycle", () => ({
+  inspectProviderAccountReferences: (...args: unknown[]) => inspectReferencesMock(...args),
+  setProviderDefaultAccount: (...args: unknown[]) => setProviderDefaultMock(...args),
+}))
+const settingsState: { defaultAccountIds?: Record<string, string> } = {}
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (selector: (state: { settings: typeof settingsState }) => unknown) =>
+    selector({ settings: settingsState }),
 }))
 jest.mock("./account-usage-chips", () => ({
   AccountUsageChips: () => null,
@@ -60,7 +84,16 @@ beforeEach(() => {
   state.accounts = []
   state.activeAccountId = null
   state.loading = false
+  state.error = null
+  settingsState.defaultAccountIds = undefined
   presets.supported = false
+  inspectReferencesMock.mockResolvedValue({
+    sessions: [],
+    characters: [],
+    isDefault: false,
+    isActive: false,
+  })
+  fetchFullMock.mockResolvedValue(null)
 })
 
 /** Render with a single account already staged, then open its actions menu. */
@@ -101,7 +134,9 @@ describe("AccountList", () => {
 
   it("renames an account and clears the label back to default when blank", async () => {
     state.accounts = [summary({ id: "a1", label: "One" })]
-    const user = await renderAndOpenMenu()
+    const user = userEvent.setup()
+    render(<AccountList provider="opencode" />)
+    await user.click(screen.getAllByRole("button")[1])
     await user.click(await screen.findByText("rename"))
     const input = await screen.findByDisplayValue("One")
     await user.clear(input)
@@ -127,7 +162,7 @@ describe("AccountList", () => {
     await user.click(screen.getByText("remove"))
     expect(await screen.findByText("removeDialogTitle")).toBeInTheDocument()
     await user.click(screen.getByText("removeConfirm"))
-    await waitFor(() => expect(removeMock).toHaveBeenCalledWith("z1"))
+    await waitFor(() => expect(removeMock).toHaveBeenCalledWith("z1", null))
   })
 
   it("unlinks a discovered account and clarifies the external file is kept", async () => {
@@ -138,7 +173,53 @@ describe("AccountList", () => {
     expect(await screen.findByText("unlinkDialogTitle")).toBeInTheDocument()
     expect(screen.getByText("unlinkDialogBody")).toBeInTheDocument()
     await user.click(screen.getByText("unlinkConfirm"))
-    await waitFor(() => expect(removeMock).toHaveBeenCalledWith("disc"))
+    await waitFor(() => expect(removeMock).toHaveBeenCalledWith("disc", null))
+  })
+
+  it("requires an explicit replacement for an active referenced account", async () => {
+    state.accounts = [summary({ id: "a1", label: "Old" }), summary({ id: "a2", label: "New" })]
+    state.activeAccountId = "a1"
+    inspectReferencesMock.mockResolvedValue({
+      sessions: [{ id: "s1", title: "Chat" }],
+      characters: [],
+      isDefault: true,
+      isActive: true,
+    })
+    const user = userEvent.setup()
+    render(<AccountList provider="opencode" />)
+    await user.click(screen.getAllByRole("button")[1])
+    await user.click(await screen.findByText("remove"))
+    await screen.findByText("referenceSummary")
+    expect(screen.getByText("activeReference")).toBeInTheDocument()
+    expect(screen.getByText("defaultReference")).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText("replacementLabel"), "a2")
+    await user.click(screen.getByText("removeConfirm"))
+    await waitFor(() => expect(removeMock).toHaveBeenCalledWith("a1", "a2"))
+  })
+
+  it("sets a provider-scoped default independently from active", async () => {
+    state.accounts = [summary({ id: "a1", label: "One" })]
+    const user = await renderAndOpenMenu()
+    await user.click(await screen.findByText("setDefault"))
+    await waitFor(() => expect(setProviderDefaultMock).toHaveBeenCalledWith("opencode", "a1"))
+  })
+
+  it("opens same-id credential update with the full account", async () => {
+    const full = {
+      id: "a1",
+      label: "One",
+      credential: { provider: "opencode-zen", accessToken: "secret", storedAtMs: 1 },
+      createdAtMs: 1,
+      lastUsedAtMs: 1,
+    } as Account
+    state.accounts = [summary({ id: "a1", label: "One" })]
+    fetchFullMock.mockResolvedValue(full)
+    const onUpdate = jest.fn()
+    const user = userEvent.setup()
+    render(<AccountList provider="opencode" onUpdate={onUpdate} />)
+    await user.click(screen.getAllByRole("button").at(-1)!)
+    await user.click(await screen.findByText("updateCredentials"))
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(full))
   })
 
   it("renames an account to a new label", async () => {

@@ -658,6 +658,7 @@ pub fn run() {
             // ADR-0025 — unified subscription module. Provider-agnostic CRUD,
             // active-pointer management, and provider preset persistence.
             subscription::commands::subscription_init,
+            subscription::commands::subscription_clear_runtime,
             subscription::commands::subscription_list_accounts,
             subscription::commands::subscription_get_account,
             subscription::commands::subscription_save_account,
@@ -695,7 +696,7 @@ pub fn run() {
             subscription::codex::commands::codex_oauth_revoke,
             subscription::opencode::commands::opencode_oauth_discover,
             subscription::opencode::commands::opencode_save_zen_key,
-            subscription::opencode::commands::opencode_adopt_discovered,
+            subscription::commands::opencode_adopt_discovered,
             claude_set_api_key,
             claude_set_provider_env,
             claude_set_oauth_bearer,

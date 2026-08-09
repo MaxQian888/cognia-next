@@ -28,6 +28,10 @@ jest.mock("@/lib/db/skills", () => ({
   activeEffectiveSkillIds: jest.requireActual("@/lib/db/skills").activeEffectiveSkillIds,
 }))
 
+jest.mock("@/lib/db/skill-resources", () => ({
+  listResourcesForSkill: jest.fn(),
+}))
+
 jest.mock("@/lib/db/mcp-servers", () => ({
   listEnabledMcpServers: jest.fn(),
   buildMcpServerMap: jest.fn(),
@@ -190,6 +194,7 @@ import {
   renderSkillsCatalog,
   renderSkillsSection,
 } from "@/lib/db/skills"
+import { listResourcesForSkill } from "@/lib/db/skill-resources"
 import { getTeam } from "@/lib/db/teams"
 import { selectSurfaceSkills } from "@/lib/skills/surface-activation"
 import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
@@ -232,6 +237,7 @@ const mListSkillsByIds = listSkillsByIds as jest.Mock
 const mRecordUsage = recordSkillUsage as jest.Mock
 const mRender = renderSkillsSection as jest.Mock
 const mRenderCatalog = renderSkillsCatalog as jest.Mock
+const mListSkillResources = listResourcesForSkill as jest.Mock
 const mListMcp = listEnabledMcpServers as jest.Mock
 const mBuildMap = buildMcpServerMapResolved as jest.Mock
 const mGetTeam = getTeam as jest.Mock
@@ -294,6 +300,8 @@ beforeEach(() => {
   mListSkillsByIds.mockResolvedValue([])
   mRecordUsage.mockResolvedValue(undefined)
   mRender.mockReturnValue("")
+  mRenderCatalog.mockReturnValue("")
+  mListSkillResources.mockResolvedValue([])
   mListMcp.mockResolvedValue([])
   mBuildMap.mockReturnValue({})
   mGetTeam.mockResolvedValue(undefined)
@@ -1137,7 +1145,7 @@ describe("resolveSendOptions — compaction config", () => {
         },
       } as unknown as AppSettings,
     })
-    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex", null)
     expect(opts.compaction?.summary).toEqual({
       model: "gpt-5.2-codex",
       protocol: "openai",
@@ -1174,7 +1182,7 @@ describe("resolveSendOptions — compaction config", () => {
         },
       } as unknown as AppSettings,
     })
-    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex", null)
     expect(opts.compaction?.summary?.credentials).toEqual({
       apiKey: "chatgpt-bearer",
       baseURL: "https://chatgpt.com/backend-api/codex",
@@ -1198,7 +1206,7 @@ describe("resolveSendOptions — compaction config", () => {
         },
       } as unknown as AppSettings,
     })
-    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go")
+    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go", null)
     expect(opts.compaction?.summary).toEqual({
       model: "kimi-k2.6",
       protocol: "openai",
@@ -1301,7 +1309,7 @@ describe("resolveSendOptions — opencode vault auto-fallback", () => {
         providerSettings: {},
       } as unknown as AppSettings,
     })
-    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go")
+    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go", null)
     expect(opts.providerCredentials).toEqual({
       apiKey: "sk-go-vault",
       baseURL: "https://opencode.ai/zen/go/v1",
@@ -1382,7 +1390,7 @@ describe("resolveSendOptions — codex vault auto-fallback", () => {
         providerSettings: {},
       } as unknown as AppSettings,
     })
-    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex", null)
     expect(opts.providerCredentials).toEqual({
       apiKey: "chatgpt-bearer",
       baseURL: "https://chatgpt.com/backend-api/codex",
@@ -1391,6 +1399,21 @@ describe("resolveSendOptions — codex vault auto-fallback", () => {
     })
     // Model backfilled from the built-in catalog default.
     expect(opts.model).toBe("gpt-5.6-sol")
+  })
+
+  it("uses the session/default resolver's selected Codex account", async () => {
+    mResolveAccountId.mockReturnValueOnce("selected-account")
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "selected-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+    })
+
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "codex" }),
+      appSettings: { defaultProvider: "codex", providerSettings: {} } as unknown as AppSettings,
+    })
+
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex", "selected-account")
   })
 
   it("api_key mode carries no special headers", async () => {
@@ -1702,6 +1725,86 @@ describe("resolveSendOptions — character + skills", () => {
     expect(opts.systemPrompt).not.toContain("FULL BODY")
     // allowedTools still unions (a skill's declared tools must stay granted).
     expect(opts.allowedTools).toEqual(expect.arrayContaining(["X"]))
+  })
+
+  it("hybrid mode injects ephemeral skills fully and catalogs implicit character skills", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["implicit"] })
+    mListSkills.mockResolvedValueOnce([
+      {
+        id: "implicit",
+        slug: "implicit-skill",
+        name: "Implicit",
+        description: "Catalog only",
+        content: "HIDDEN BODY",
+        allowedTools: ["Read"],
+      } as Skill,
+      {
+        id: "explicit",
+        slug: "explicit-skill",
+        name: "Explicit",
+        description: "Attached",
+        content: "FULL BODY",
+        allowedTools: ["WebSearch"],
+      } as Skill,
+    ])
+    mRenderCatalog.mockReturnValueOnce("CATALOG: implicit-skill")
+    mListSkillResources.mockImplementation(async (id: string) =>
+      id === "explicit"
+        ? [
+            {
+              id: "r1",
+              skillId: id,
+              kind: "reference",
+              name: "notes.md",
+              path: "references/notes.md",
+              content: "INLINE NOTES",
+              encoding: "utf-8",
+              inline: true,
+              size: 12,
+            },
+          ]
+        : []
+    )
+
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "session-hybrid" }),
+      ephemeralSkillIds: ["explicit"],
+      skillRenderMode: "hybrid",
+    })
+
+    expect(opts.systemPrompt).toContain("FULL BODY")
+    expect(opts.systemPrompt).toContain("INLINE NOTES")
+    expect(opts.systemPrompt).toContain("CATALOG: implicit-skill")
+    expect(opts.systemPrompt).not.toContain("HIDDEN BODY")
+    expect(toolNames(opts)).toEqual(expect.arrayContaining(["load_skill", "load_skill_resource"]))
+    expect(mRecordUsage).toHaveBeenCalledWith(["explicit"])
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["Read", "WebSearch"]))
+  })
+
+  it("hybrid mode excludes explicit-only character skills from catalog and allowed tools", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["manual"] })
+    mListSkills.mockResolvedValueOnce([
+      {
+        id: "manual",
+        slug: "manual-only",
+        name: "Manual",
+        content: "manual body",
+        invocationPolicy: "explicit",
+        allowedTools: ["Bash"],
+      } as Skill,
+    ])
+
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "session-hybrid" }),
+      skillRenderMode: "hybrid",
+    })
+
+    expect(mRenderCatalog).toHaveBeenCalledWith([])
+    expect(opts.systemPrompt ?? "").not.toContain("manual body")
+    expect(opts.allowedTools ?? []).not.toContain("Bash")
+    expect(toolNames(opts)).not.toContain("load_skill")
   })
 
   it("recordSkillUsage failures are swallowed and don't propagate", async () => {
@@ -4317,7 +4420,7 @@ describe("native Anthropic web tools (Tier C opt-in)", () => {
   })
 })
 
-describe("agent self-invocation tools (Skill / SlashCommand / spawn_task)", () => {
+describe("agent self-invocation tools (Skill / SlashCommand / spawn_task / session messaging)", () => {
   it("does not surface Skill / SlashCommand by default (opt-in)", async () => {
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
     expect(toolNames(opts)).not.toContain("Skill")
@@ -4356,6 +4459,24 @@ describe("agent self-invocation tools (Skill / SlashCommand / spawn_task)", () =
       appSettings: { selfInvokeTools: { spawnTask: true } } as AppSettings,
     })
     expect(toolNames(mobileOpts)).not.toContain("spawn_task")
+  })
+
+  it("appends independent-session discovery and messaging only when opted in", async () => {
+    const disabled = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      character: makeChar({ id: "c1" }),
+    })
+    expect(toolNames(disabled)).not.toContain("list_sessions")
+    expect(toolNames(disabled)).not.toContain("send_session_message")
+
+    const enabled = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { sessionMessaging: true } } as AppSettings,
+    })
+    expect(toolNames(enabled)).toEqual(
+      expect.arrayContaining(["list_sessions", "send_session_message"])
+    )
   })
 
   describe("project-scoped vector memory", () => {
@@ -5028,6 +5149,19 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
     // Legacy routing fields survive for rollback; no secret shapes in the spec.
     expect(opts.provider).toBeDefined()
     expect(JSON.stringify(execution)).not.toMatch(/sk-|api[_-]?key|bearer|token/i)
+  })
+
+  it("uses the durable caller's final run identity before fingerprinting", async () => {
+    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      executionIdentity: { runId: "execution:agent:session:message", attemptId: "recovery-2" },
+    })
+
+    expect(opts.execution?.identity).toEqual({
+      runId: "execution:agent:session:message",
+      attemptId: "recovery-2",
+    })
   })
 })
 

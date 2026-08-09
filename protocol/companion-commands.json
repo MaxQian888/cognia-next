@@ -10874,6 +10874,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "subscription_clear_runtime",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "subscription_delete_account",
       "target": "client",
       "operation": "side-effect",
