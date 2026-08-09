@@ -125,6 +125,7 @@ struct HostCatalogCommand {
     description: String,
     input_schema_source: String,
     input_schema: Value,
+    output_schema_source: Option<String>,
     output_schema: Option<Value>,
     output_typed: bool,
 }
@@ -644,6 +645,7 @@ fn run_schema(
             "inputSchema": command.input_schema,
             "inputSchemaSource": command.input_schema_source,
             "outputSchema": command.output_schema,
+            "outputSchemaSource": command.output_schema_source,
             "outputTyped": command.output_typed,
             "meta": {
                 "category": command.category,
@@ -666,6 +668,10 @@ fn run_schema(
             println!("  risk: {} ({})", command.risk, command.approval);
             println!("  capability: {}", command.capability);
             println!("  idempotency: {}", command.idempotency);
+            println!(
+                "  output contract: {}",
+                command.output_schema_source.as_deref().unwrap_or("untyped")
+            );
             println!(
                 "  output: {}",
                 if command.output_typed {
@@ -2084,7 +2090,9 @@ mod tests {
         let command = find_command(&catalog, "session_list").unwrap();
         assert_eq!(command.category, "sessions");
         assert_eq!(command.resource, "session");
-        assert!(!command.output_typed);
+        assert!(command.output_typed);
+        assert_eq!(command.output_schema_source.as_deref(), Some("contract"));
+        assert_eq!(command.output_schema.as_ref().unwrap()["type"], "object");
         assert_eq!(command.input_schema["type"], "object");
     }
 

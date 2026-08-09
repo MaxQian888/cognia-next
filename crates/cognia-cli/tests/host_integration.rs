@@ -121,7 +121,9 @@ fn command_discovery_and_schema_are_offline_json() {
     assert_eq!(code, Some(0), "stderr: {stderr}");
     let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["inputSchema"]["additionalProperties"], false);
-    assert_eq!(payload["outputTyped"], false);
+    assert_eq!(payload["outputTyped"], true);
+    assert_eq!(payload["outputSchemaSource"], "contract");
+    assert_eq!(payload["outputSchema"]["type"], "object");
     assert_eq!(payload["meta"]["resource"], "session");
 }
 
