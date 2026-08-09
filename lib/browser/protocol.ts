@@ -372,10 +372,11 @@ export interface SnapshotOptions {
 }
 
 /** Result of `browser_evaluate` — the page helper's value/error envelope. */
-export interface EvaluateResult {
+export interface EvaluateResult extends BrowserDialogState {
   ok: boolean
   value?: unknown
   error?: string
+  generation?: number
 }
 
 /** In-flight + completed request counters from the embedded page. */
@@ -394,8 +395,19 @@ export interface BrowserSnapshot {
   blockedDomains?: string[]
 }
 
+export interface BrowserDialog {
+  type: "alert" | "beforeunload" | "confirm" | "prompt"
+  message: string
+  defaultValue: string
+}
+
+export interface BrowserDialogState {
+  dialogPending?: boolean
+  dialog?: BrowserDialog
+}
+
 /** Result of a `browser_*` mutating action. `generation` is the live tree id. */
-export interface BrowserActionResult {
+export interface BrowserActionResult extends BrowserDialogState {
   ok: boolean
   error: string | null
   generation: number

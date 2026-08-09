@@ -702,6 +702,7 @@ pub const BROWSER_RPC_COMMANDS: &[&str] = &[
     "browser_navigate",
     "browser_snapshot",
     "browser_act",
+    "browser_drag",
     "browser_press_key",
     "browser_scroll",
     "browser_evaluate",
@@ -712,7 +713,9 @@ pub const BROWSER_RPC_COMMANDS: &[&str] = &[
     "browser_reload",
     "browser_stop",
     "browser_get_page",
+    "browser_handle_dialog",
     "browser_pages",
+    "browser_new_page",
     "browser_switch_page",
     "browser_close_page",
     "browser_wait_for",
@@ -1038,6 +1041,72 @@ fn required_string(args: &Value, key: &str) -> Result<String, BrowserGatewayErro
         })
 }
 
+#[cfg(any(feature = "workspace-runtime-exec", test))]
+fn browser_operation(
+    name: &str,
+    args: &Value,
+) -> Result<(&'static str, bool), BrowserGatewayError> {
+    match name {
+        "browser_navigate" => Ok(("browser.navigate", true)),
+        "browser_snapshot" => Ok(("browser.snapshot", false)),
+        "browser_act" => Ok(("browser.act", true)),
+        "browser_drag" => Ok(("browser.drag", true)),
+        "browser_press_key" => Ok(("browser.press-key", true)),
+        "browser_scroll" => Ok(("browser.scroll", true)),
+        "browser_evaluate" => Ok(("browser.evaluate", true)),
+        "browser_read_console" => Ok(("browser.console", false)),
+        "browser_read_network" => Ok(("browser.network", false)),
+        "browser_back" => Ok(("browser.back", true)),
+        "browser_forward" => Ok(("browser.forward", true)),
+        "browser_reload" => Ok(("browser.reload", true)),
+        "browser_stop" => Ok(("browser.stop", true)),
+        "browser_get_page" => Ok(("browser.page", false)),
+        "browser_handle_dialog" => Ok(("browser.dialog.handle", true)),
+        "browser_pages" => Ok(("browser.pages", false)),
+        "browser_new_page" => Ok(("browser.page.create", true)),
+        "browser_switch_page" => Ok(("browser.page.activate", true)),
+        "browser_close_page" => Ok(("browser.page.close", true)),
+        "browser_wait_for_load" => Ok(("browser.wait.load", false)),
+        "browser_screenshot" => Ok(("browser.screenshot", false)),
+        "browser_set_files" => Ok(("browser.files.set", true)),
+        "browser_downloads" => Ok(("browser.downloads", false)),
+        "browser_set_zoom" => Ok(("browser.set-zoom", true)),
+        "browser_find" => Ok(("browser.find", false)),
+        "browser_find_clear" => Ok(("browser.find.clear", false)),
+        "browser_wait_for" => {
+            let operation = if args.get("networkIdle").and_then(Value::as_bool) == Some(true) {
+                "browser.wait.network-idle"
+            } else if args.get("selector").is_some() {
+                "browser.wait.selector"
+            } else {
+                "browser.wait.text"
+            };
+            Ok((operation, false))
+        }
+        _ => Err(BrowserGatewayError::new(
+            "browser_command_unknown",
+            "unknown browser command",
+        )),
+    }
+}
+
+#[cfg(any(feature = "workspace-runtime-exec", test))]
+fn browser_operation_refreshes_pages(name: &str) -> bool {
+    matches!(
+        name,
+        "browser_navigate"
+            | "browser_act"
+            | "browser_drag"
+            | "browser_back"
+            | "browser_forward"
+            | "browser_reload"
+            | "browser_switch_page"
+            | "browser_close_page"
+            | "browser_new_page"
+            | "browser_handle_dialog"
+    )
+}
+
 #[cfg(feature = "workspace-runtime-exec")]
 pub async fn dispatch_browser_rpc(
     name: &str,
@@ -1184,63 +1253,14 @@ pub async fn dispatch_browser_rpc(
         object.insert("sessionId".into(), Value::String(session_id.clone()));
         object.remove("browserSessionId");
     }
-    let (operation, mutating) = match name {
-        "browser_navigate" => ("browser.navigate", true),
-        "browser_snapshot" => ("browser.snapshot", false),
-        "browser_act" => ("browser.act", true),
-        "browser_press_key" => ("browser.press-key", true),
-        "browser_scroll" => ("browser.scroll", true),
-        "browser_evaluate" => ("browser.evaluate", false),
-        "browser_read_console" => ("browser.console", false),
-        "browser_read_network" => ("browser.network", false),
-        "browser_back" => ("browser.back", true),
-        "browser_forward" => ("browser.forward", true),
-        "browser_reload" => ("browser.reload", true),
-        "browser_stop" => ("browser.stop", true),
-        "browser_get_page" => ("browser.page", false),
-        "browser_pages" => ("browser.pages", false),
-        "browser_switch_page" => ("browser.page.activate", true),
-        "browser_close_page" => ("browser.page.close", true),
-        "browser_wait_for_load" => ("browser.wait.load", false),
-        "browser_screenshot" => ("browser.screenshot", false),
-        "browser_set_files" => ("browser.files.set", true),
-        "browser_downloads" => ("browser.downloads", false),
-        "browser_set_zoom" => ("browser.set-zoom", true),
-        "browser_find" => ("browser.find", false),
-        "browser_find_clear" => ("browser.find.clear", false),
-        "browser_wait_for" => {
-            let operation = if args.get("networkIdle").and_then(Value::as_bool) == Some(true) {
-                "browser.wait.network-idle"
-            } else if args.get("selector").is_some() {
-                "browser.wait.selector"
-            } else {
-                "browser.wait.text"
-            };
-            (operation, false)
-        }
-        _ => {
-            return Err(BrowserGatewayError::new(
-                "browser_command_unknown",
-                "unknown browser command",
-            ))
-        }
-    };
+    let (operation, mutating) = browser_operation(name, &args)?;
     if mutating {
         gateway().acquire_agent_lease(&session_id, &format!("agent:{device_id}"))?;
     }
     let result = control
         .call(&summary.workspace_id, operation, payload)
         .await?;
-    if matches!(
-        name,
-        "browser_navigate"
-            | "browser_act"
-            | "browser_back"
-            | "browser_forward"
-            | "browser_reload"
-            | "browser_switch_page"
-            | "browser_close_page"
-    ) {
+    if browser_operation_refreshes_pages(name) {
         if let Ok(value) = control
             .call(
                 &summary.workspace_id,
@@ -1439,6 +1459,29 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Barrier;
+
+    #[test]
+    fn browser_rpc_catalog_includes_advanced_control_commands() {
+        for (command, operation) in [
+            ("browser_new_page", "browser.page.create"),
+            ("browser_drag", "browser.drag"),
+            ("browser_handle_dialog", "browser.dialog.handle"),
+        ] {
+            assert!(
+                is_browser_rpc(command),
+                "missing browser RPC command: {command}"
+            );
+            assert_eq!(
+                browser_operation(command, &Value::Null).unwrap(),
+                (operation, true)
+            );
+            assert!(browser_operation_refreshes_pages(command));
+        }
+        assert_eq!(
+            browser_operation("browser_evaluate", &Value::Null).unwrap(),
+            ("browser.evaluate", true)
+        );
+    }
 
     #[cfg(feature = "workspace-runtime-exec")]
     use std::sync::atomic::AtomicUsize;

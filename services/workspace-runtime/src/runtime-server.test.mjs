@@ -21,8 +21,11 @@ function serviceStub() {
     stop: async () => {},
     getPage: async () => ({ url: "about:blank", title: "" }),
     listPages: async () => [],
+    createPage: async (_sessionId, url) => ({ id: "page-2", url, title: "", active: true }),
     activatePage: async () => {},
     closePage: async () => {},
+    drag: async () => ({ ok: true, error: null, generation: 1 }),
+    handleDialog: async () => ({ ok: true, error: null, generation: 1 }),
     waitForText: async () => ({ ok: true, timedOut: false }),
     waitForSelector: async () => ({ ok: true, timedOut: false }),
     waitForNetworkIdle: async () => ({ ok: true, timedOut: false }),
@@ -50,16 +53,61 @@ function supervisorStub() {
   }
 }
 
-async function fixture(t) {
+async function fixture(t, browserService = serviceStub()) {
   const runtime = createRuntimeServer({
     secret: "x".repeat(32),
-    browserService: serviceStub(),
+    browserService,
     supervisor: supervisorStub(),
   })
   const address = await runtime.listen(0, "127.0.0.1")
   t.after(() => runtime.close())
   return `http://127.0.0.1:${address.port}`
 }
+
+test("dispatches new page, drag, dialog, and scoped screenshot operations", async (t) => {
+  const calls = []
+  const browser = serviceStub()
+  browser.createPage = async (...args) => {
+    calls.push(["createPage", ...args])
+    return { id: "page-2", url: args[1], title: "", active: true }
+  }
+  browser.drag = async (...args) => {
+    calls.push(["drag", ...args])
+    return { ok: true, error: null, generation: 1 }
+  }
+  browser.handleDialog = async (...args) => {
+    calls.push(["handleDialog", ...args])
+    return { ok: true, error: null, generation: 1 }
+  }
+  browser.screenshot = async (...args) => {
+    calls.push(["screenshot", ...args])
+    return { bytes: "", width: 1, height: 1, capturedAt: 0 }
+  }
+  const baseUrl = await fixture(t, browser)
+  const headers = {
+    authorization: `Bearer ${"x".repeat(32)}`,
+    "content-type": "application/json",
+  }
+  const control = (type, payload) =>
+    fetch(`${baseUrl}/v1/control`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ version: 1, type, payload }),
+    })
+  await control("browser.page.create", { sessionId: "session-1", url: "https://example.com" })
+  await control("browser.drag", { sessionId: "session-1", sourceRef: "a", targetRef: "b" })
+  await control("browser.dialog.handle", { sessionId: "session-1", accept: false })
+  await control("browser.screenshot", {
+    sessionId: "session-1",
+    options: { scope: "element", ref: "b" },
+  })
+  assert.deepEqual(calls, [
+    ["createPage", "session-1", "https://example.com"],
+    ["drag", "session-1", "a", "b"],
+    ["handleDialog", "session-1", { accept: false }],
+    ["screenshot", "session-1", { scope: "element", ref: "b" }],
+  ])
+})
 
 test("private runtime endpoints reject missing or wrong secrets", async (t) => {
   const baseUrl = await fixture(t)

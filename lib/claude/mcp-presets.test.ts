@@ -11,6 +11,17 @@ describe("MCP_PRESETS catalog", () => {
     expect(getPreset("github")).toBeDefined()
   })
 
+  it("registers the existing-browser Playwright extension preset with its safety default", () => {
+    expect(getPreset("playwright-existing-browser")).toMatchObject({
+      transport: "stdio",
+      config: {
+        command: "npx",
+        args: ["-y", "@playwright/mcp@latest", "--extension"],
+      },
+      defaultDisallowedTools: ["browser_run_code_unsafe"],
+    })
+  })
+
   it("each field with placement=arg-replace declares a token", () => {
     for (const preset of MCP_PRESETS) {
       for (const field of preset.fields) {

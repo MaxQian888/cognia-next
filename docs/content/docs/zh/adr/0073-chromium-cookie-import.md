@@ -121,3 +121,13 @@ App-Bound Encryption，本路径将失效；届时应重新审视本 ADR，而�
   整个 Cookie jar。
 - 用户会看到两道明确边界：Cognia 自身说明与 macOS 钥匙串授权。
 - Windows、Linux、Firefox 与控制用户真实浏览器仍不属于本决策。
+
+## 附录（2026-08-09）——真实浏览器控制改由独立 Seam 提供
+
+上面的最后一项后果现在仅在 Chrome 与 Edge 控制方面被修订。`playwright-existing-browser`
+MCP 预设可以连接用户通过 Microsoft 官方 Playwright 扩展明确选择的标签页，从而复用其中的
+实时登录态。它不会把 Cookie 导出或迁移到 Cognia，并且与内嵌 WebView 分别安装、授权、
+信任和断开连接。
+
+Cookie 导入仍然是内嵌 WKWebView 的支持桥梁，继续保持显式启用、仅限 macOS、元数据脱敏和
+钥匙串授权边界。本 ADR 仍不覆盖 Firefox、Safari、任意 Chromium 分支或自动会话迁移。

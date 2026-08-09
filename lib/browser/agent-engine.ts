@@ -17,6 +17,7 @@ import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities
 import {
   resolveTrustTier,
   type BrowserActionResult,
+  type BrowserDialogState,
   type BrowserSnapshot,
   type ConsoleEntry,
   type EvaluateResult,
@@ -26,7 +27,7 @@ import {
 } from "@/lib/browser/protocol"
 
 export interface BrowserEngine {
-  navigate(url: string): Promise<void>
+  navigate(url: string): Promise<void | BrowserMutationResult>
   snapshot(opts?: SnapshotOptions): Promise<BrowserSnapshot>
   act(
     reference: string,
@@ -41,22 +42,53 @@ export interface BrowserEngine {
   evaluate(expr: string): Promise<EvaluateResult>
   readConsole(): Promise<ConsoleEntry[]>
   readNetwork(): Promise<NetworkEntry[]>
-  back(): Promise<void>
-  forward(): Promise<void>
-  reload(): Promise<void>
-  stop(): Promise<void>
+  back(): Promise<void | BrowserMutationResult>
+  forward(): Promise<void | BrowserMutationResult>
+  reload(): Promise<void | BrowserMutationResult>
+  stop(): Promise<void | BrowserMutationResult>
   getPage(): Promise<{ url: string; title: string }>
   listPages(): Promise<BrowserPageSummary[]>
   activatePage(pageId: string): Promise<void>
   closePage(pageId: string): Promise<void>
-  setFiles(reference: string, paths: string[]): Promise<void>
+  createPage(url?: string): Promise<BrowserPageSummary | BrowserActionResult>
+  drag(sourceRef: string, targetRef: string): Promise<BrowserActionResult>
+  handleDialog(args: HandleDialogArgs): Promise<BrowserActionResult>
+  setFiles(reference: string, paths: string[]): Promise<void | BrowserMutationResult>
   downloads(): Promise<BrowserDownloadSummary[]>
   waitForText(text: string, opts?: WaitForOptions): Promise<WaitForResult>
   waitForSelector(selector: string, opts?: WaitForOptions): Promise<WaitForResult>
   waitForNetworkIdle(opts?: NetworkIdleOptions): Promise<WaitForResult>
   /** Wait for a just-triggered navigation to land (document loaded). */
   waitForLoad(opts?: WaitForLoadOptions): Promise<WaitForResult>
-  screenshot(): Promise<Screenshot>
+  screenshot(options?: ScreenshotOptions): Promise<Screenshot>
+  setZoom(zoom: number): Promise<BrowserZoomResult>
+  find(query: string, options?: FindOptions): Promise<{ matches: number; index: number }>
+  findClear(): Promise<void>
+}
+
+export interface BrowserMutationResult extends BrowserDialogState {
+  ok: boolean
+  error?: string | null
+  generation?: number
+}
+
+export interface BrowserZoomResult extends BrowserMutationResult {
+  zoom?: number
+}
+
+export interface HandleDialogArgs {
+  accept: boolean
+  promptText?: string
+}
+
+export interface FindOptions {
+  forward?: boolean
+  matchCase?: boolean
+}
+
+export interface ScreenshotOptions {
+  scope?: "viewport" | "fullPage" | "element"
+  ref?: string
 }
 
 export interface ScrollArgs {
@@ -203,6 +235,24 @@ export class EmbeddedEngine implements BrowserEngine {
     await this.stop()
     await this.navigate("about:blank")
   }
+  async createPage(_url?: string): Promise<BrowserPageSummary> {
+    throw new BrowserSessionError(
+      "browser_feature_unsupported",
+      "Creating pages is not supported by the embedded browser"
+    )
+  }
+  async drag(_sourceRef: string, _targetRef: string): Promise<BrowserActionResult> {
+    throw new BrowserSessionError(
+      "browser_feature_unsupported",
+      "Drag and drop is not supported by the embedded browser"
+    )
+  }
+  async handleDialog(_args: HandleDialogArgs): Promise<BrowserActionResult> {
+    throw new BrowserSessionError(
+      "browser_feature_unsupported",
+      "Native dialogs are not supported by the embedded browser"
+    )
+  }
   async setFiles(_reference: string, _paths: string[]): Promise<void> {
     throw new BrowserSessionError(
       "browser_feature_unsupported",
@@ -279,11 +329,30 @@ export class EmbeddedEngine implements BrowserEngine {
       await new Promise((resolve) => setTimeout(resolve, intervalMs))
     }
   }
-  screenshot(): Promise<Screenshot> {
+  screenshot(options: ScreenshotOptions = {}): Promise<Screenshot> {
+    if ((options.scope ?? "viewport") !== "viewport" || options.ref) {
+      return Promise.reject(
+        new BrowserSessionError(
+          "browser_feature_unsupported",
+          "Scoped screenshots are not supported by the embedded browser"
+        )
+      )
+    }
     const rect = getActivePaneRect()
     if (!rect) return Promise.reject(new Error("preview is not open"))
     emitAgentActivity("screenshot")
     return browserClient.embedCapture(rect)
+  }
+  async setZoom(zoom: number): Promise<{ ok: boolean; zoom: number }> {
+    const normalizedZoom = Number.isFinite(zoom) ? Math.min(5, Math.max(0.25, zoom)) : 1
+    await browserClient.embedSetZoom(normalizedZoom)
+    return { ok: true, zoom: normalizedZoom }
+  }
+  find(query: string, options?: FindOptions): Promise<{ matches: number; index: number }> {
+    return browserClient.embedFind(query, options)
+  }
+  findClear(): Promise<void> {
+    return browserClient.embedFindClear()
   }
 }
 

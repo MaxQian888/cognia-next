@@ -65,6 +65,30 @@ tree rather than from pixels.
 `OutputDetailLevel` (`"compact" | "standard" | "detailed" | "forensic"`) controls how much of a page a tool
 call returns — the lever that keeps a page snapshot from swamping a context window.
 
+## Existing Chrome and Edge tabs
+
+The Playwright plugin contributes two MCP presets. `playwright` starts an
+isolated browser. `playwright-existing-browser` starts
+`@playwright/mcp@latest --extension` and waits for the official Playwright
+extension to authorize selected Chrome or Edge tabs. Install the extension,
+add and trust the Existing Browser preset in **Settings → MCP Servers**, attach
+it to a character, then select the tabs in the extension. If either endpoint
+disconnects, start the MCP server again and repeat tab selection; Cognia does
+not store an approval-bypass token.
+
+This integration remains outside `BrowserEngine` and exposes upstream
+`mcp__...` tools rather than internal `browser_*` tools. It can reuse the
+selected profile's logged-in pages, but passwords, OTPs, and tokens still
+require user takeover. The preset blocks `browser_run_code_unsafe` by default,
+does not enable devtools, vision, or PDF capabilities, and treats page content
+as untrusted.
+
+Within the internal control surface, isolated Chromium supports new pages,
+native drag and dialog handling, and viewport, full-page, and element
+screenshots. The embedded WebView supports its existing double-click, focus,
+zoom, find, and batch-form operations; unsupported requests return
+`browser_feature_unsupported`.
+
 ## Where it lives
 
 ```

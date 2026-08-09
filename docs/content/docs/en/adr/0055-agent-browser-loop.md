@@ -227,3 +227,31 @@ Fixes for real-world public-site browsing and automation correctness:
 - **Address-bar https default.** `normalizePreviewUrl` defaults bare public
   hosts to `https://` (local/private hosts — loopback, RFC-1918, `.local` —
   keep `http://`), via the new `isLocalHostname` helper.
+
+## Addendum (2026-08-09) — existing-browser seam and control-surface closure
+
+The historical guidance that public-site automation always requires an isolated
+Playwright browser is now incomplete. Cognia also ships a
+`playwright-existing-browser` MCP preset, which starts
+`@playwright/mcp@latest --extension` and connects to Chrome or Edge tabs that
+the user selects through Microsoft's official Playwright extension. The
+extension retains the browser profile and login state, asks for selection and
+authorization on each connection, and may be reconnected after either side
+disconnects. Cognia does not persist a bypass token.
+
+This is an explicit MCP seam, not a third `BrowserEngine`: upstream owns the
+extension transport, browser authorization, and Manifest V3 lifecycle, while
+the internal `browser_*` namespace keeps its embedded and isolated Chromium
+engines. The existing-browser preset disables `browser_run_code_unsafe` by
+default; changing that server-level deny list invalidates the server's trust
+review.
+
+The internal control surface now exposes double click, focus, zoom, find,
+clear-find, new page, drag, dialog handling, batch form filling, and viewport,
+full-page, or element screenshots. `RemoteChromiumEngine` resolves
+snapshot-bound frame refs and invokes native Playwright element actions. Ref
+generation checks remain fail-closed. Dialog-producing actions enter a pending
+state until explicitly accepted or dismissed. `EmbeddedEngine` reuses the
+operations its WebView already supports and returns
+`browser_feature_unsupported` for new-page, native-dialog, drag, and non-viewport
+screenshot requests instead of simulating them.

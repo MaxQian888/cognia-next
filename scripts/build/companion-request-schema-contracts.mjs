@@ -299,10 +299,19 @@ const schemas = {
   browser_snapshot: browserSession.extend({
     options: z.object({ includeText: z.boolean().optional() }).optional(),
   }),
+  browser_new_page: browserSession.extend({ url: z.string().min(1).optional() }),
   browser_act: browserSession.extend({
     ref: z.string().min(1),
     action: z.string().min(1),
     args: z.record(z.string(), z.unknown()),
+  }),
+  browser_drag: browserSession.extend({
+    sourceRef: z.string().min(1),
+    targetRef: z.string().min(1),
+  }),
+  browser_handle_dialog: browserSession.extend({
+    accept: z.boolean(),
+    promptText: z.string().optional(),
   }),
   browser_press_key: browserSession.extend({
     key: z.string().min(1),
@@ -331,7 +340,14 @@ const schemas = {
     options: z.union([browserWaitOptions, browserNetworkIdleOptions]).optional(),
   }),
   browser_wait_for_load: browserSession.extend({ options: browserLoadOptions.optional() }),
-  browser_screenshot: browserSession,
+  browser_screenshot: browserSession.extend({
+    options: z
+      .object({
+        scope: z.enum(["viewport", "fullPage", "element"]).optional(),
+        ref: z.string().min(1).optional(),
+      })
+      .optional(),
+  }),
   browser_set_files: browserSession.extend({
     ref: z.string().min(1),
     paths: stringArray,

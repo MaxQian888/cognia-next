@@ -304,8 +304,8 @@ describe("buildMcpDisallowedToolNames", () => {
         },
       ])
     ).toEqual([
-      "mcp__playwright-existing-browser__browser_evaluate",
-      "mcp__playwright-existing-browser__browser_run_code_unsafe",
+      "mcp__Playwright-Existing-Browser__browser_evaluate",
+      "mcp__Playwright-Existing-Browser__browser_run_code_unsafe",
     ])
   })
 })

@@ -16,6 +16,9 @@ jest.mock("@/lib/browser/client", () => ({
     embedEvaluate: jest.fn(async () => ({ ok: true, value: "ok" })),
     embedNetworkState: jest.fn(async () => ({ pending: 0, completed: 0 })),
     embedCapture: jest.fn(async () => ({ bytes: "AAAA", width: 10, height: 10, capturedAt: 0 })),
+    embedSetZoom: jest.fn(async (zoom: number) => ({ ok: true, zoom })),
+    embedFind: jest.fn(async () => ({ matches: 2, index: 0 })),
+    embedFindClear: jest.fn(async () => {}),
   },
 }))
 
@@ -107,6 +110,35 @@ describe("EmbeddedEngine", () => {
     await expect(engine.downloads()).rejects.toMatchObject({
       code: "browser_feature_unsupported",
     })
+  })
+
+  it("reports remote-only page, drag, dialog, and scoped screenshots as unsupported", async () => {
+    const engine = new EmbeddedEngine()
+    await expect(engine.createPage("https://example.com")).rejects.toMatchObject({
+      code: "browser_feature_unsupported",
+    })
+    await expect(engine.drag("e1", "e2")).rejects.toMatchObject({
+      code: "browser_feature_unsupported",
+    })
+    await expect(engine.handleDialog({ accept: true })).rejects.toMatchObject({
+      code: "browser_feature_unsupported",
+    })
+    await expect(engine.screenshot({ scope: "fullPage" })).rejects.toMatchObject({
+      code: "browser_feature_unsupported",
+    })
+    await expect(engine.screenshot({ scope: "element", ref: "e1" })).rejects.toMatchObject({
+      code: "browser_feature_unsupported",
+    })
+  })
+
+  it("delegates zoom and find operations to the embedded browser client", async () => {
+    const engine = new EmbeddedEngine()
+    await expect(engine.setZoom(10)).resolves.toEqual({ ok: true, zoom: 5 })
+    await engine.find("hello", { matchCase: true })
+    await engine.findClear()
+    expect(mockClient.embedSetZoom).toHaveBeenCalledWith(5)
+    expect(mockClient.embedFind).toHaveBeenCalledWith("hello", { matchCase: true })
+    expect(mockClient.embedFindClear).toHaveBeenCalled()
   })
 
   it("act delegates to browserClient.embedAct", async () => {

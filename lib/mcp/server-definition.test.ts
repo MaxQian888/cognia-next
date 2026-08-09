@@ -56,6 +56,21 @@ describe("MCP server definitions", () => {
     expect(first).not.toContain("TOKEN")
   })
 
+  it("fingerprints normalized server-level deny rules", () => {
+    const base = fingerprintMcpDefinition(server({ disallowedTools: undefined }))
+    const empty = fingerprintMcpDefinition(server({ disallowedTools: [] }))
+    const denied = fingerprintMcpDefinition(
+      server({ disallowedTools: [" browser_run_code_unsafe ", "browser_evaluate"] })
+    )
+    const reordered = fingerprintMcpDefinition(
+      server({ disallowedTools: ["browser_evaluate", "browser_run_code_unsafe"] })
+    )
+
+    expect(empty).toBe(base)
+    expect(reordered).toBe(denied)
+    expect(denied).not.toBe(base)
+  })
+
   it("projects only redacted fields to mobile", () => {
     expect(
       toMcpServerSummary(

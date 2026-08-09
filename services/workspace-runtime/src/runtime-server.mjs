@@ -98,8 +98,16 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     "browser.stop": ({ sessionId }) => browser.stop(sessionId),
     "browser.page": ({ sessionId }) => browser.getPage(sessionId),
     "browser.pages": ({ sessionId }) => browser.listPages(sessionId),
+    "browser.page.create": ({ sessionId, url }) => browser.createPage(sessionId, url),
     "browser.page.activate": ({ sessionId, pageId }) => browser.activatePage(sessionId, pageId),
     "browser.page.close": ({ sessionId, pageId }) => browser.closePage(sessionId, pageId),
+    "browser.drag": ({ sessionId, sourceRef, targetRef }) =>
+      browser.drag(sessionId, sourceRef, targetRef),
+    "browser.dialog.handle": ({ sessionId, accept, promptText }) =>
+      browser.handleDialog(sessionId, {
+        accept,
+        ...(promptText === undefined ? {} : { promptText }),
+      }),
     "browser.wait.text": ({ sessionId, text, options }) =>
       browser.waitForText(sessionId, text, options),
     "browser.wait.selector": ({ sessionId, selector, options }) =>
@@ -107,7 +115,7 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     "browser.wait.network-idle": ({ sessionId, options }) =>
       browser.waitForNetworkIdle(sessionId, options),
     "browser.wait.load": ({ sessionId, options }) => browser.waitForLoad(sessionId, options),
-    "browser.screenshot": ({ sessionId }) => browser.screenshot(sessionId),
+    "browser.screenshot": ({ sessionId, options }) => browser.screenshot(sessionId, options),
     "browser.files.set": ({ sessionId, ref, paths }) => browser.setFiles(sessionId, ref, paths),
     "browser.downloads": ({ sessionId }) => browser.listDownloads(sessionId),
     "browser.set-zoom": ({ sessionId, zoom }) => browser.setZoom(sessionId, zoom),

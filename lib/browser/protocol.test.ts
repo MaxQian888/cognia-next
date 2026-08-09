@@ -1,5 +1,7 @@
 import {
   BROWSER_EVENTS,
+  type BrowserActionResult,
+  type BrowserDialog,
   type BrowserSelection,
   formatSelectionComment,
   formatSelectionsComment,
@@ -8,6 +10,25 @@ import {
   resolveTrustTier,
   screenshotToFile,
 } from "./protocol"
+
+describe("browser action dialog contract", () => {
+  it("carries recoverable dialog metadata on action results", () => {
+    const dialog: BrowserDialog = {
+      type: "prompt",
+      message: "Your name?",
+      defaultValue: "Ada",
+    }
+    const result: BrowserActionResult = {
+      ok: true,
+      error: null,
+      generation: 4,
+      dialogPending: true,
+      dialog,
+    }
+
+    expect(result).toMatchObject({ dialogPending: true, dialog })
+  })
+})
 
 const SELECTION: BrowserSelection = {
   paneId: "browser-pane",

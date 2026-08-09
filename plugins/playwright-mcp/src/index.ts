@@ -2,8 +2,9 @@
  * Playwright MCP plugin — contributes a Microsoft Playwright MCP server
  * preset to cognia-next's MCP gallery.
  *
- * Once enabled, "Playwright" appears in Settings → MCP Servers → Add
- * server gallery. The user picks it, the existing `applyPresetFields`
+ * Once enabled, isolated-browser and existing-browser presets appear in
+ * Settings → MCP Servers → Add server gallery. The user picks one, and the
+ * existing `applyPresetFields`
  * helper materialises a per-user `McpServer` row (no env vars required
  * for the headless default), and any character that attaches to it via
  * `character.mcpServerIds` gets the 40+ browser tools through both the
@@ -80,7 +81,7 @@ const definition: PluginDefinition = {
       onCommand: async (command: string) => {
         if (command !== "browser") return false
         ctx.ui?.showToast?.(
-          "Open Settings → MCP Servers, click Playwright in the gallery, then attach it to the current character via the chip list.",
+          "Open Settings → MCP Servers, choose Playwright or Playwright — Existing Browser, then attach it to the current character. Existing Browser also requires the official Playwright extension and per-connection tab approval.",
           "info"
         )
         return true

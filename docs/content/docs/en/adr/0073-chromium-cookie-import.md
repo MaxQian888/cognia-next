@@ -150,3 +150,17 @@ decryption boundary.
   authorization.
 - Windows, Linux, Firefox, and control of the user's real browser remain outside
   this decision.
+
+## Addendum (2026-08-09) — real-browser control is now a separate seam
+
+The final consequence above is superseded only for Chrome and Edge control.
+The `playwright-existing-browser` MCP preset can connect to tabs explicitly
+selected through Microsoft's official Playwright extension and therefore reuse
+their live login state. It does not export or migrate cookies into Cognia, and
+it remains separately installed, authorized, trusted, and disconnected from the
+embedded WebView.
+
+Cookie import remains the supported bridge for the embedded WKWebView. It is
+still opt-in, macOS-specific, metadata-redacted, and protected by Keychain
+authorization. This ADR does not cover Firefox, Safari, arbitrary Chromium
+forks, or automatic session migration.

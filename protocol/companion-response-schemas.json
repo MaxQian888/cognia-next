@@ -250,6 +250,9 @@
     "browser_act": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "browser_drag": {
+      "$ref": "#/$defs/LegacyResult"
+    },
     "browser_back": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -277,7 +280,13 @@
     "browser_get_page": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "browser_handle_dialog": {
+      "$ref": "#/$defs/LegacyResult"
+    },
     "browser_navigate": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_new_page": {
       "$ref": "#/$defs/LegacyResult"
     },
     "browser_pages": {

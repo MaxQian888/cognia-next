@@ -138,6 +138,11 @@ export class RemoteChromiumService {
       lastBlockedError: null,
       screencast: null,
       humanKeyboardInputOccurred: false,
+      pendingDialog: null,
+      pendingAction: null,
+      dialogWaiters: new Set(),
+      actionInFlight: false,
+      closing: false,
       createdAt,
       lastActivityAt: createdAt,
     }
@@ -145,6 +150,12 @@ export class RemoteChromiumService {
     await context.addInitScript(this.overlayScript)
     await context.route("**/*", async (route) => this.authorizeRoute(session, route))
     context.on("page", (page) => this.registerPage(session, page))
+    context.on("close", () => {
+      void this.handleConnectionClosed(session).catch(() => undefined)
+    })
+    browser?.on?.("disconnected", () => {
+      void this.handleConnectionClosed(session).catch(() => undefined)
+    })
     const firstPage = await context.newPage()
     this.registerPage(session, firstPage)
     return this.summary(id)
@@ -175,11 +186,29 @@ export class RemoteChromiumService {
     session.pages.set(pageId, record)
     session.activePageId = pageId
     page.on("close", () => {
+      void this.dismissPendingDialog(session, pageId).catch(() => undefined)
       session.pages.delete(pageId)
       this.invalidatePage(session.id, pageId)
       if (session.activePageId === pageId) {
         session.activePageId = session.pages.keys().next().value ?? null
       }
+    })
+    page.on("dialog", (dialog) => {
+      if (session.pendingDialog) {
+        void dialog.dismiss().catch(() => undefined)
+        return
+      }
+      const pending = {
+        dialog,
+        pageId,
+        metadata: {
+          type: dialog.type(),
+          message: dialog.message(),
+          defaultValue: dialog.defaultValue(),
+        },
+      }
+      session.pendingDialog = pending
+      for (const resolve of session.dialogWaiters) resolve(pending)
     })
     page.on("console", (message) => {
       const type = message.type()
@@ -242,6 +271,7 @@ export class RemoteChromiumService {
 
   async activatePage(sessionId, pageId) {
     const session = this.requireSession(sessionId)
+    this.assertNoPendingDialog(session)
     const record = session.pages.get(pageId)
     if (!record) throw new RemoteBrowserError("browser_page_not_found", "Page not found")
     await record.page.bringToFront()
@@ -250,31 +280,53 @@ export class RemoteChromiumService {
 
   async closePage(sessionId, pageId) {
     const session = this.requireSession(sessionId)
+    this.assertNoPendingDialog(session)
     const record = session.pages.get(pageId)
     if (!record) throw new RemoteBrowserError("browser_page_not_found", "Page not found")
     await record.page.close()
   }
 
+  async createPage(sessionId, url = "about:blank") {
+    const session = this.requireSession(sessionId)
+    if (session.pages.size >= this.maxPages) {
+      throw new RemoteBrowserError("browser_page_quota_exceeded", "Page quota exceeded")
+    }
+    if (url !== "about:blank") await session.policy.authorize(url, session.grants)
+    return this.runActionWithDialog(session, 0, async () => {
+      const page = await session.context.newPage()
+      const pageId = this.registerPage(session, page)
+      if (!pageId)
+        throw new RemoteBrowserError("browser_page_quota_exceeded", "Page quota exceeded")
+      if (url !== "about:blank") await page.goto(url, { waitUntil: "domcontentloaded" })
+      session.activePageId = pageId
+      const record = session.pages.get(pageId)
+      return pageSummary(record, pageId, pageId)
+    })
+  }
+
   async navigate(sessionId, url) {
     const session = this.requireSession(sessionId)
-    const { page } = this.activeRecord(session)
+    const { page, record } = this.activeRecord(session)
     const fromUrl = page.url()
     await session.policy.authorize(url, session.grants)
-    session.lastBlockedError = null
-    try {
-      await page.goto(url, { waitUntil: "domcontentloaded" })
-    } catch (error) {
-      if (session.lastBlockedError) throw session.lastBlockedError
-      throw error
-    }
-    try {
-      await session.policy.authorizeRedirect(fromUrl, page.url(), session.grants)
-    } catch (error) {
-      await page.evaluate(() => window.stop()).catch(() => undefined)
-      throw error
-    }
-    this.invalidatePage(session.id, session.activePageId)
-    await this.applyZoom(session)
+    return this.runActionWithDialog(session, record.generation, async () => {
+      session.lastBlockedError = null
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded" })
+      } catch (error) {
+        if (session.lastBlockedError) throw session.lastBlockedError
+        throw error
+      }
+      try {
+        await session.policy.authorizeRedirect(fromUrl, page.url(), session.grants)
+      } catch (error) {
+        await page.evaluate(() => window.stop()).catch(() => undefined)
+        throw error
+      }
+      this.invalidatePage(session.id, session.activePageId)
+      await this.applyZoom(session)
+      return { ok: true, error: null, generation: record.generation }
+    })
   }
 
   async snapshot(sessionId, options = {}) {
@@ -330,31 +382,114 @@ export class RemoteChromiumService {
 
   async act(sessionId, reference, action, args) {
     const session = this.requireSession(sessionId)
-    const { pageId, record } = this.activeRecord(session)
-    const target = this.references.get(reference)
-    if (
-      !target ||
-      target.sessionId !== sessionId ||
-      target.pageId !== pageId ||
-      target.generation !== record.generation
-    ) {
-      throw new RemoteBrowserError("browser_stale_ref", "Browser reference is stale")
-    }
-    const result = parseEnvelope(
-      await target.frame.evaluate(
-        ({ ref, actionName, actionArgs }) => window.__cogniaAct(ref, actionName, actionArgs),
-        { ref: target.nativeRef, actionName: action, actionArgs: args }
-      )
-    )
-    return { ...result, generation: record.generation }
+    const generation = this.activeRecord(session).record.generation
+    const modifiers = Array.isArray(args?.modifiers)
+      ? args.modifiers.map((modifier) => {
+          const value = String(modifier).toLowerCase()
+          if (value === "ctrl" || value === "control") return "Control"
+          if (value === "cmd" || value === "meta") return "Meta"
+          if (value === "alt" || value === "option") return "Alt"
+          if (value === "shift") return "Shift"
+          return String(modifier)
+        })
+      : []
+    const clickOptions = modifiers.length ? { modifiers } : undefined
+    return this.runActionWithDialog(session, generation, async () => {
+      const { element, dispose } = await this.resolveTarget(session, reference)
+      try {
+        if (
+          await element.evaluate((node) => {
+            const descriptor = [
+              node.getAttribute?.("type"),
+              node.getAttribute?.("name"),
+              node.id,
+              node.getAttribute?.("autocomplete"),
+              node.getAttribute?.("placeholder"),
+              node.getAttribute?.("aria-label"),
+            ].join(" ")
+            return /password|passcode|one[\s-]?time|otp|token|secret|verification[\s-]?code|密码|口令|验证码/i.test(
+              descriptor
+            )
+          })
+        ) {
+          throw new RemoteBrowserError(
+            "browser_human_input_required",
+            "Credential fields require human takeover"
+          )
+        }
+        if (action === "click") await element.click(clickOptions)
+        else if (action === "double_click") await element.dblclick(clickOptions)
+        else if (action === "hover") await element.hover()
+        else if (action === "focus") await element.focus()
+        else if (action === "fill") await element.fill(String(args?.text ?? ""))
+        else if (action === "type") await element.pressSequentially(String(args?.text ?? ""))
+        else if (action === "select") await element.selectOption(args?.value)
+        else if (action === "key") await element.press(String(args?.key ?? ""))
+        else if (action === "scroll") await element.scrollIntoViewIfNeeded()
+        else throw new RemoteBrowserError("browser_action_invalid", "Unsupported browser action")
+        return { ok: true, error: null, generation }
+      } finally {
+        await dispose()
+      }
+    })
   }
 
-  pressKey(sessionId, key, reference = "") {
+  async drag(sessionId, sourceRef, targetRef) {
+    const session = this.requireSession(sessionId)
+    const generation = this.activeRecord(session).record.generation
+    return this.runActionWithDialog(session, generation, async () => {
+      const source = await this.resolveTarget(session, sourceRef)
+      const target = await this.resolveTarget(session, targetRef)
+      if (source.generation !== target.generation) {
+        await Promise.allSettled([source.dispose(), target.dispose()])
+        throw new RemoteBrowserError("browser_stale_ref", "Browser reference is stale")
+      }
+      try {
+        await source.element.dragTo(target.element)
+        return { ok: true, error: null, generation: source.generation }
+      } finally {
+        await Promise.allSettled([source.dispose(), target.dispose()])
+      }
+    })
+  }
+
+  async handleDialog(sessionId, { accept, promptText } = {}) {
+    const session = this.requireSession(sessionId)
+    const pending = session.pendingDialog
+    if (!pending) {
+      throw new RemoteBrowserError("browser_dialog_not_found", "No browser dialog is pending")
+    }
+    const action = session.pendingAction
+    try {
+      if (accept) await pending.dialog.accept(promptText)
+      else await pending.dialog.dismiss()
+      let actionError = null
+      if (action) {
+        try {
+          await action
+        } catch (error) {
+          actionError = error instanceof Error ? error.message : String(error)
+        }
+      }
+      const record = session.pages.get(pending.pageId)
+      return {
+        ok: actionError === null,
+        error: actionError,
+        generation: record?.generation ?? 0,
+      }
+    } finally {
+      session.pendingDialog = null
+      session.pendingAction = null
+      session.actionInFlight = false
+    }
+  }
+
+  async pressKey(sessionId, key, reference = "") {
     if (reference) return this.act(sessionId, reference, "key", { key })
     const session = this.requireSession(sessionId)
     const { page, record } = this.activeRecord(session)
-    return page
-      .evaluate(() => {
+    return this.runActionWithDialog(session, record.generation, async () => {
+      const sensitive = await page.evaluate(() => {
         const element = document.activeElement
         if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
           return false
@@ -371,59 +506,56 @@ export class RemoteChromiumService {
           descriptor
         )
       })
-      .then(async (sensitive) => {
-        if (sensitive) {
-          throw new RemoteBrowserError(
-            "browser_human_input_required",
-            "Credential fields require human takeover"
-          )
-        }
-        await page.keyboard.press(key)
-        return { ok: true, error: null, generation: record.generation }
-      })
+      if (sensitive) {
+        throw new RemoteBrowserError(
+          "browser_human_input_required",
+          "Credential fields require human takeover"
+        )
+      }
+      await page.keyboard.press(key)
+      return { ok: true, error: null, generation: record.generation }
+    })
   }
 
   async scroll(sessionId, { reference = "", direction = "down", amount = 600 }) {
     if (reference) return this.act(sessionId, reference, "scroll", { direction, amount })
     const session = this.requireSession(sessionId)
     const { page, record } = this.activeRecord(session)
-    await page.evaluate(
-      ({ scrollDirection, scrollAmount }) => {
-        if (scrollDirection === "top") window.scrollTo({ top: 0 })
-        else if (scrollDirection === "bottom")
-          window.scrollTo({ top: document.documentElement.scrollHeight })
-        else {
-          const x =
-            scrollDirection === "left"
-              ? -scrollAmount
-              : scrollDirection === "right"
-                ? scrollAmount
-                : 0
-          const y =
-            scrollDirection === "up" ? -scrollAmount : scrollDirection === "down" ? scrollAmount : 0
-          window.scrollBy({ left: x, top: y })
-        }
-      },
-      { scrollDirection: direction, scrollAmount: amount }
-    )
-    return { ok: true, error: null, generation: record.generation }
+    const edgeDelta = 10_000_000
+    const x = direction === "left" ? -amount : direction === "right" ? amount : 0
+    const y =
+      direction === "top"
+        ? -edgeDelta
+        : direction === "bottom"
+          ? edgeDelta
+          : direction === "up"
+            ? -amount
+            : direction === "down"
+              ? amount
+              : 0
+    return this.runActionWithDialog(session, record.generation, async () => {
+      await page.mouse.wheel(x, y)
+      return { ok: true, error: null, generation: record.generation }
+    })
   }
 
   async evaluate(sessionId, expression) {
     const session = this.requireSession(sessionId)
-    const { page } = this.activeRecord(session)
+    const { page, record } = this.activeRecord(session)
     const hostname = new URL(page.url()).hostname
     if (!["localhost", "127.0.0.1", "::1"].includes(hostname)) {
       return { ok: false, error: "browser_evaluate is disabled on public origins" }
     }
-    try {
-      return {
-        ok: true,
-        value: await page.evaluate((source) => globalThis.eval(source), expression),
+    return this.runActionWithDialog(session, record.generation, async () => {
+      try {
+        return {
+          ok: true,
+          value: await page.evaluate((source) => globalThis.eval(source), expression),
+        }
+      } catch (error) {
+        return { ok: false, error: String(error) }
       }
-    } catch (error) {
-      return { ok: false, error: String(error) }
-    }
+    })
   }
 
   async getPage(sessionId) {
@@ -437,14 +569,16 @@ export class RemoteChromiumService {
   // session's factor after every navigate/history.
   async setZoom(sessionId, zoom) {
     const session = this.requireSession(sessionId)
-    const { page } = this.activeRecord(session)
+    const { page, record } = this.activeRecord(session)
     const numeric = Number(zoom)
     const factor = Number.isFinite(numeric) ? Math.min(5, Math.max(0.25, numeric)) : 1
-    session.zoom = factor
-    await page.evaluate((value) => {
-      document.documentElement.style.zoom = String(value)
-    }, factor)
-    return { ok: true, zoom: factor }
+    return this.runActionWithDialog(session, record.generation, async () => {
+      session.zoom = factor
+      await page.evaluate((value) => {
+        document.documentElement.style.zoom = String(value)
+      }, factor)
+      return { ok: true, zoom: factor }
+    })
   }
 
   async applyZoom(session) {
@@ -464,6 +598,7 @@ export class RemoteChromiumService {
   // localhost-gated `evaluate`), so it works on any origin the session allows.
   async find(sessionId, query, options = {}) {
     const session = this.requireSession(sessionId)
+    this.assertNoPendingDialog(session)
     const { page } = this.activeRecord(session)
     return page.evaluate((args) => window.__cogniaFind(args.query, args.options || {}), {
       query: String(query ?? ""),
@@ -473,6 +608,7 @@ export class RemoteChromiumService {
 
   async findClear(sessionId) {
     const session = this.requireSession(sessionId)
+    this.assertNoPendingDialog(session)
     const { page } = this.activeRecord(session)
     await page.evaluate(() => window.__cogniaFindClear())
     return { ok: true }
@@ -490,10 +626,13 @@ export class RemoteChromiumService {
 
   async history(sessionId, operation) {
     const session = this.requireSession(sessionId)
-    const { pageId, page } = this.activeRecord(session)
-    await page[operation]({ waitUntil: "domcontentloaded" })
-    this.invalidatePage(sessionId, pageId)
-    await this.applyZoom(session)
+    const { pageId, page, record } = this.activeRecord(session)
+    return this.runActionWithDialog(session, record.generation, async () => {
+      await page[operation]({ waitUntil: "domcontentloaded" })
+      this.invalidatePage(sessionId, pageId)
+      await this.applyZoom(session)
+      return { ok: true, error: null, generation: record.generation }
+    })
   }
 
   back(sessionId) {
@@ -510,7 +649,11 @@ export class RemoteChromiumService {
 
   async stop(sessionId) {
     const session = this.requireSession(sessionId)
-    await this.activeRecord(session).page.evaluate(() => window.stop())
+    const { page, record } = this.activeRecord(session)
+    return this.runActionWithDialog(session, record.generation, async () => {
+      await page.evaluate(() => window.stop())
+      return { ok: true, error: null, generation: record.generation }
+    })
   }
 
   async waitForText(sessionId, text, options = {}) {
@@ -555,11 +698,55 @@ export class RemoteChromiumService {
     }
   }
 
-  async screenshot(sessionId) {
+  async screenshot(sessionId, options = {}) {
     const session = this.requireSession(sessionId)
     const { page } = this.activeRecord(session)
-    const bytes = await page.screenshot({ type: "png" })
-    const viewport = page.viewportSize() ?? this.viewport
+    const scope = options.scope ?? (options.ref ? "element" : "viewport")
+    if (scope === "element") {
+      if (!options.ref) {
+        throw new RemoteBrowserError(
+          "browser_screenshot_ref_required",
+          "Element screenshot requires a ref"
+        )
+      }
+      const target = await this.resolveTarget(session, options.ref)
+      try {
+        const [bytes, box] = await Promise.all([
+          target.element.screenshot({ type: "png" }),
+          target.element.boundingBox(),
+        ])
+        if (!box)
+          throw new RemoteBrowserError("browser_element_not_visible", "Element is not visible")
+        return {
+          bytes: bytes.toString("base64"),
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+          capturedAt: Date.now(),
+          format: "png",
+        }
+      } finally {
+        await target.dispose()
+      }
+    }
+    const bytes = await page.screenshot({
+      type: "png",
+      ...(scope === "fullPage" ? { fullPage: true } : {}),
+    })
+    const viewport =
+      scope === "fullPage"
+        ? await page.evaluate(() => ({
+            width: Math.max(
+              document.documentElement.scrollWidth,
+              document.body?.scrollWidth ?? 0,
+              window.innerWidth
+            ),
+            height: Math.max(
+              document.documentElement.scrollHeight,
+              document.body?.scrollHeight ?? 0,
+              window.innerHeight
+            ),
+          }))
+        : (page.viewportSize() ?? this.viewport)
     return {
       bytes: bytes.toString("base64"),
       width: viewport.width,
@@ -572,25 +759,33 @@ export class RemoteChromiumService {
   async setFiles(sessionId, reference, relativePaths) {
     const session = this.requireSession(sessionId)
     const { pageId, record } = this.activeRecord(session)
-    const target = this.references.get(reference)
-    if (
-      !target ||
-      target.sessionId !== sessionId ||
-      target.pageId !== pageId ||
-      target.generation !== record.generation
-    ) {
-      throw new RemoteBrowserError("browser_stale_ref", "Browser reference is stale")
-    }
     const paths = await this.fileBridge.resolveUploads(relativePaths)
-    const handle = await target.frame.evaluateHandle(
-      (ref) => window.__cogniaOverlay.resolveRef(ref),
-      target.nativeRef
-    )
-    const element = handle.asElement()
-    if (!element)
-      throw new RemoteBrowserError("browser_invalid_file_target", "Ref is not an element")
-    await element.setInputFiles(paths)
-    await handle.dispose()
+    return this.runActionWithDialog(session, record.generation, async () => {
+      const target = this.references.get(reference)
+      if (
+        !target ||
+        target.sessionId !== sessionId ||
+        target.pageId !== pageId ||
+        target.generation !== record.generation
+      ) {
+        throw new RemoteBrowserError("browser_stale_ref", "Browser reference is stale")
+      }
+      const handle = await target.frame.evaluateHandle(
+        (ref) => window.__cogniaOverlay.resolveRef(ref),
+        target.nativeRef
+      )
+      const element = handle.asElement()
+      if (!element) {
+        await handle.dispose()
+        throw new RemoteBrowserError("browser_invalid_file_target", "Ref is not an element")
+      }
+      try {
+        await element.setInputFiles(paths)
+        return { ok: true, error: null, generation: record.generation }
+      } finally {
+        await handle.dispose()
+      }
+    })
   }
 
   listDownloads(sessionId) {
@@ -647,6 +842,7 @@ export class RemoteChromiumService {
 
   async dispatchInput(sessionId, input) {
     const session = this.requireSession(sessionId)
+    this.assertNoPendingDialog(session)
     const { page } = this.activeRecord(session)
     const cdp = await session.context.newCDPSession(page)
     try {
@@ -671,13 +867,27 @@ export class RemoteChromiumService {
 
   async closeSession(sessionId) {
     const session = this.requireSession(sessionId)
+    session.closing = true
     await this.stopScreencast(sessionId)
+    await this.dismissPendingDialog(session)
     this.invalidateSession(sessionId)
     await session.context.close()
     if (session.browser) await session.browser.close()
     await this.fileBridge.cleanupSession(sessionId)
     this.sessions.delete(sessionId)
     if (session.profileId && this.profileOwners.get(session.profileId) === sessionId) {
+      this.profileOwners.delete(session.profileId)
+    }
+  }
+
+  async handleConnectionClosed(session) {
+    if (session.closing || !this.sessions.has(session.id)) return
+    session.closing = true
+    await this.dismissPendingDialog(session)
+    this.invalidateSession(session.id)
+    await this.fileBridge.cleanupSession(session.id)
+    this.sessions.delete(session.id)
+    if (session.profileId && this.profileOwners.get(session.profileId) === session.id) {
       this.profileOwners.delete(session.profileId)
     }
   }
@@ -704,6 +914,95 @@ export class RemoteChromiumService {
     const record = pageId ? session.pages.get(pageId) : null
     if (!record) throw new RemoteBrowserError("browser_page_not_found", "No active page")
     return { pageId, record, page: record.page }
+  }
+
+  assertNoPendingDialog(session) {
+    if (session.pendingDialog) {
+      throw new RemoteBrowserError(
+        "browser_dialog_pending",
+        "Handle the pending browser dialog before performing another action"
+      )
+    }
+  }
+
+  async resolveTarget(session, reference) {
+    const { pageId, record } = this.activeRecord(session)
+    const target = this.references.get(reference)
+    if (
+      !target ||
+      target.sessionId !== session.id ||
+      target.pageId !== pageId ||
+      target.generation !== record.generation
+    ) {
+      throw new RemoteBrowserError("browser_stale_ref", "Browser reference is stale")
+    }
+    const handle = await target.frame.evaluateHandle(
+      (ref) => window.__cogniaOverlay.resolveRef(ref),
+      target.nativeRef
+    )
+    const element = handle.asElement()
+    if (!element) {
+      await handle.dispose()
+      throw new RemoteBrowserError("browser_invalid_target", "Browser ref is not an element")
+    }
+    return {
+      element,
+      generation: record.generation,
+      dispose: () => handle.dispose(),
+    }
+  }
+
+  async runActionWithDialog(session, generation, action) {
+    this.assertNoPendingDialog(session)
+    if (session.actionInFlight) {
+      throw new RemoteBrowserError(
+        "browser_action_in_progress",
+        "Another browser action is still in progress"
+      )
+    }
+    session.actionInFlight = true
+    let resolveDialog
+    const dialogPromise = new Promise((resolve) => {
+      resolveDialog = resolve
+    })
+    session.dialogWaiters.add(resolveDialog)
+    const actionPromise = Promise.resolve().then(action)
+    let keepActionInFlight = false
+    try {
+      const outcome = await Promise.race([
+        actionPromise.then((result) => ({ kind: "action", result })),
+        dialogPromise.then((pending) => ({ kind: "dialog", pending })),
+      ])
+      if (outcome.kind === "dialog") {
+        session.pendingAction = actionPromise
+        keepActionInFlight = true
+        void actionPromise.catch(() => undefined)
+        return {
+          ok: true,
+          error: null,
+          generation,
+          dialogPending: true,
+          dialog: outcome.pending.metadata,
+        }
+      }
+      return outcome.result
+    } finally {
+      session.dialogWaiters.delete(resolveDialog)
+      if (!keepActionInFlight) session.actionInFlight = false
+    }
+  }
+
+  async dismissPendingDialog(session, pageId) {
+    const pending = session.pendingDialog
+    if (!pending || (pageId && pending.pageId !== pageId)) return
+    try {
+      await pending.dialog.dismiss()
+      if (session.pendingAction) await Promise.allSettled([session.pendingAction])
+    } finally {
+      session.pendingDialog = null
+      session.pendingAction = null
+      session.actionInFlight = false
+    }
   }
 
   requireSession(sessionId) {

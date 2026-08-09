@@ -12,13 +12,24 @@ class FakeFrame {
   constructor(url = "http://localhost:3000/") {
     this._url = url
     this.snapshotGeneration = 0
+    this.resolvedRefs = []
+  }
+  async evaluateHandle(_fn, ref) {
+    this.resolvedRefs.push(ref)
+    return this.page.elements.get(ref) ?? new FakeElement(ref, this.page)
   }
   url() {
     return this._url
   }
   async evaluate(fn, argument) {
-    if (String(fn).includes("__cogniaFindClear")) return { ok: true }
-    if (String(fn).includes("__cogniaFind")) return { matches: 2, index: 0 }
+    if (String(fn).includes("__cogniaFindClear")) {
+      await this.page.triggerDialog("nextFindDialog")
+      return { ok: true }
+    }
+    if (String(fn).includes("__cogniaFind")) {
+      await this.page.triggerDialog("nextFindDialog")
+      return { matches: 2, index: 0 }
+    }
     if (argument?.includeText !== undefined) {
       this.snapshotGeneration += 1
       return JSON.stringify({
@@ -52,6 +63,93 @@ class FakeFrame {
   }
 }
 
+class FakeDialog {
+  constructor(type = "confirm", message = "Continue?", defaultValue = "") {
+    this._type = type
+    this._message = message
+    this._defaultValue = defaultValue
+    this.handled = new Promise((resolve) => {
+      this.resolveHandled = resolve
+    })
+  }
+  type() {
+    return this._type
+  }
+  message() {
+    return this._message
+  }
+  defaultValue() {
+    return this._defaultValue
+  }
+  async accept(text) {
+    this.accepted = text ?? true
+    this.resolveHandled()
+  }
+  async dismiss() {
+    this.dismissed = true
+    this.resolveHandled()
+  }
+}
+
+class FakeElement {
+  constructor(ref, page) {
+    this.ref = ref
+    this.page = page
+    this.calls = []
+  }
+  asElement() {
+    return this
+  }
+  async evaluate() {
+    return false
+  }
+  async dispose() {}
+  async click(options) {
+    this.calls.push(["click", options])
+    if (this.blockClick) await this.blockClick
+    if (this.nextDialog) {
+      const dialog = this.nextDialog
+      this.nextDialog = null
+      this.page.emit("dialog", dialog)
+      await dialog.handled
+    }
+  }
+  async dblclick(options) {
+    this.calls.push(["dblclick", options])
+  }
+  async hover() {
+    this.calls.push(["hover"])
+  }
+  async focus() {
+    this.calls.push(["focus"])
+  }
+  async fill(text) {
+    this.calls.push(["fill", text])
+  }
+  async pressSequentially(text) {
+    this.calls.push(["pressSequentially", text])
+  }
+  async selectOption(value) {
+    this.calls.push(["selectOption", value])
+  }
+  async press(key) {
+    this.calls.push(["press", key])
+  }
+  async scrollIntoViewIfNeeded() {
+    this.calls.push(["scrollIntoViewIfNeeded"])
+  }
+  async dragTo(target) {
+    this.calls.push(["dragTo", target.ref])
+  }
+  async screenshot() {
+    this.calls.push(["screenshot"])
+    return Buffer.from("element-png")
+  }
+  async boundingBox() {
+    return { x: 1, y: 2, width: 30, height: 40 }
+  }
+}
+
 class FakePage extends EventEmitter {
   constructor(url = "http://localhost:3000/") {
     super()
@@ -59,8 +157,27 @@ class FakePage extends EventEmitter {
     this._title = "App"
     this._closed = false
     this.mainFrame = new FakeFrame(url)
+    this.mainFrame.page = this
+    this.elements = new Map([
+      ["e1", new FakeElement("e1", this)],
+      ["e2", new FakeElement("e2", this)],
+    ])
     this.pressedKeys = []
-    this.keyboard = { press: async (key) => this.pressedKeys.push(key) }
+    this.wheelEvents = []
+    this.keyboard = {
+      press: async (key) => {
+        this.pressedKeys.push(key)
+        if (this.nextKeyDialog) {
+          const dialog = this.nextKeyDialog
+          this.nextKeyDialog = null
+          this.emit("dialog", dialog)
+          await dialog.handled
+        }
+      },
+    }
+    this.mouse = {
+      wheel: async (deltaX, deltaY) => this.wheelEvents.push([deltaX, deltaY]),
+    }
   }
   url() {
     return this._url
@@ -74,6 +191,10 @@ class FakePage extends EventEmitter {
   async goto(url) {
     this._url = url
     this.mainFrame._url = url
+    const dialog = await this.triggerDialog("nextNavigationDialog")
+    if (dialog?.dismissed && this.rejectNavigationOnDismiss) {
+      throw new Error("Navigation interrupted by beforeunload")
+    }
   }
   async bringToFront() {}
   async close() {
@@ -86,16 +207,37 @@ class FakePage extends EventEmitter {
   viewportSize() {
     return { width: 1280, height: 720 }
   }
-  screenshot() {
+  screenshot(options) {
+    this.screenshotOptions = options
     return Promise.resolve(Buffer.from("png"))
   }
   evaluate(fn, arg) {
     if (String(fn).includes("document.activeElement")) return Promise.resolve(false)
+    if (String(fn).includes("document.documentElement.scrollWidth")) {
+      return Promise.resolve({ width: 1440, height: 3000 })
+    }
+    if (String(fn).includes("globalThis.eval")) {
+      return this.triggerDialog("nextEvaluateDialog").then(() => ({ ok: true, value: "App" }))
+    }
     return this.mainFrame.evaluate(fn, arg)
   }
-  goBack() {}
-  goForward() {}
-  reload() {}
+  async triggerDialog(property) {
+    const dialog = this[property]
+    if (!dialog) return null
+    this[property] = null
+    this.emit("dialog", dialog)
+    await dialog.handled
+    return dialog
+  }
+  async goBack() {
+    await this.triggerDialog("nextNavigationDialog")
+  }
+  async goForward() {
+    await this.triggerDialog("nextNavigationDialog")
+  }
+  async reload() {
+    await this.triggerDialog("nextNavigationDialog")
+  }
   locator() {
     return { waitFor: async () => {} }
   }
@@ -127,6 +269,7 @@ class FakeContext extends EventEmitter {
   }
   async close() {
     this.closed = true
+    this.emit("close")
   }
   newCDPSession() {
     return Promise.resolve(new FakeCdp())
@@ -234,6 +377,41 @@ test("snapshot emits opaque refs, redacts credential fields, and expires old gen
   )
 })
 
+test("uses native Playwright element actions for opaque snapshot refs", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const snapshot = await service.snapshot("session-1")
+  const page = chromium.launches[0].context.pages[0]
+  const ref = snapshot.nodes[0].ref
+  await service.act("session-1", ref, "click", { modifiers: ["ctrl"] })
+  await service.act("session-1", ref, "double_click", {})
+  await service.act("session-1", ref, "focus", {})
+  await service.act("session-1", ref, "fill", { text: "Ada" })
+  assert.deepEqual(page.elements.get("e1").calls, [
+    ["click", { modifiers: ["Control"] }],
+    ["dblclick", undefined],
+    ["focus"],
+    ["fill", "Ada"],
+  ])
+})
+
+test("keeps cross-frame refs bound to the frame that produced them", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const page = chromium.launches[0].context.pages[0]
+  const childFrame = new FakeFrame("https://child.example.com/")
+  childFrame.page = page
+  page.frames = () => [page.mainFrame, childFrame]
+
+  const snapshot = await service.snapshot("session-1")
+  const childRef = snapshot.nodes.find((node) => node.frame)?.ref
+  assert(childRef)
+  await service.act("session-1", childRef, "focus", {})
+
+  assert.deepEqual(childFrame.resolvedRefs, ["e1"])
+  assert.deepEqual(page.mainFrame.resolvedRefs, [])
+})
+
 test("tracks popups as pages and keeps exactly one global active page", async (t) => {
   const { service, chromium } = await fixture(t)
   await service.createSession({ id: "session-1", grants: [] })
@@ -246,6 +424,161 @@ test("tracks popups as pages and keeps exactly one global active page", async (t
   assert.equal((await service.listPages("session-1"))[0].active, true)
   await service.closePage("session-1", pages[1].id)
   assert.equal((await service.listPages("session-1")).length, 1)
+})
+
+test("creates an active page and performs native drag-and-drop", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const created = await service.createPage("session-1", "https://app.example.com/new")
+  assert.equal(created.url, "https://app.example.com/new")
+  assert.equal(created.active, true)
+
+  const snapshot = await service.snapshot("session-1")
+  await service.drag("session-1", snapshot.nodes[0].ref, snapshot.nodes[0].ref)
+  const page = chromium.launches[0].context.pages.at(-1)
+  assert.deepEqual(page.elements.get("e1").calls, [["dragTo", "e1"]])
+})
+
+test("returns a pending dialog without hanging and resumes the native action after handling", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const snapshot = await service.snapshot("session-1")
+  const page = chromium.launches[0].context.pages[0]
+  const dialog = new FakeDialog("prompt", "Your name?", "Ada")
+  page.elements.get("e1").nextDialog = dialog
+
+  const action = await service.act("session-1", snapshot.nodes[0].ref, "click", {})
+  assert.deepEqual(action.dialog, {
+    type: "prompt",
+    message: "Your name?",
+    defaultValue: "Ada",
+  })
+  assert.equal(action.dialogPending, true)
+  await assert.rejects(
+    () => service.scroll("session-1", { direction: "down" }),
+    (error) => error.code === "browser_dialog_pending"
+  )
+  await assert.rejects(
+    () => service.evaluate("session-1", "document.title"),
+    (error) => error.code === "browser_dialog_pending"
+  )
+  await assert.rejects(
+    () => service.find("session-1", "hello"),
+    (error) => error.code === "browser_dialog_pending"
+  )
+  await assert.rejects(
+    () => service.findClear("session-1"),
+    (error) => error.code === "browser_dialog_pending"
+  )
+  await assert.rejects(
+    () => service.dispatchInput("session-1", { kind: "key", payload: {} }),
+    (error) => error.code === "browser_dialog_pending"
+  )
+  const handled = await service.handleDialog("session-1", { accept: true, promptText: "Grace" })
+  assert.equal(handled.ok, true)
+  assert.equal(dialog.accepted, "Grace")
+})
+
+test("rejects a concurrent dialog-aware action instead of racing pending ownership", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const snapshot = await service.snapshot("session-1")
+  const element = chromium.launches[0].context.pages[0].elements.get("e1")
+  let releaseClick
+  element.blockClick = new Promise((resolve) => {
+    releaseClick = resolve
+  })
+
+  const firstAction = service.act("session-1", snapshot.nodes[0].ref, "click", {})
+  await assert.rejects(
+    () => service.pressKey("session-1", "Enter"),
+    (error) => error.code === "browser_action_in_progress"
+  )
+  releaseClick()
+  assert.equal((await firstAction).ok, true)
+})
+
+test("returns dialog metadata immediately for navigation and resumes after dismissal", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const page = chromium.launches[0].context.pages[0]
+  const dialog = new FakeDialog("beforeunload", "Leave this page?")
+  page.nextNavigationDialog = dialog
+  page.rejectNavigationOnDismiss = true
+
+  const navigation = await service.navigate("session-1", "http://localhost:3000/next")
+  assert.equal(navigation.dialogPending, true)
+  assert.equal(navigation.dialog.type, "beforeunload")
+  const handled = await service.handleDialog("session-1", { accept: false })
+  assert.equal(dialog.dismissed, true)
+  assert.equal(handled.ok, false)
+  assert.equal(handled.error, "Navigation interrupted by beforeunload")
+})
+
+test("dismisses pending dialogs when the page closes", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const snapshot = await service.snapshot("session-1")
+  const page = chromium.launches[0].context.pages[0]
+  const dialog = new FakeDialog()
+  page.elements.get("e1").nextDialog = dialog
+
+  await service.act("session-1", snapshot.nodes[0].ref, "click", {})
+  await page.close()
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(dialog.dismissed, true)
+})
+
+test("returns dialog metadata for a page-level key action", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const page = chromium.launches[0].context.pages[0]
+  const dialog = new FakeDialog("alert", "Submitted")
+  page.nextKeyDialog = dialog
+
+  const result = await service.pressKey("session-1", "Enter")
+
+  assert.equal(result.dialogPending, true)
+  assert.deepEqual(result.dialog, {
+    type: "alert",
+    message: "Submitted",
+    defaultValue: "",
+  })
+  await service.handleDialog("session-1", { accept: false })
+})
+
+test("dismisses pending dialogs when the session closes", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const snapshot = await service.snapshot("session-1")
+  const page = chromium.launches[0].context.pages[0]
+  const dialog = new FakeDialog()
+  page.elements.get("e1").nextDialog = dialog
+
+  await service.act("session-1", snapshot.nodes[0].ref, "click", {})
+  await service.closeSession("session-1")
+
+  assert.equal(dialog.dismissed, true)
+})
+
+test("dismisses pending dialogs and drops the session when the connection closes", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const snapshot = await service.snapshot("session-1")
+  const page = chromium.launches[0].context.pages[0]
+  const dialog = new FakeDialog()
+  page.elements.get("e1").nextDialog = dialog
+
+  await service.act("session-1", snapshot.nodes[0].ref, "click", {})
+  chromium.launches[0].context.emit("close")
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(dialog.dismissed, true)
+  await assert.rejects(
+    () => service.listPages("session-1"),
+    (error) => error.code === "browser_session_not_found"
+  )
 })
 
 test("human takeover cancels the active page action without closing the session", async (t) => {
@@ -272,6 +605,25 @@ test("returns PNG screenshots in the host-neutral Screenshot contract", async (t
   })
 })
 
+test("supports full-page and ref-scoped screenshots", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const full = await service.screenshot("session-1", { scope: "fullPage" })
+  assert.equal(full.bytes, Buffer.from("png").toString("base64"))
+  assert.equal(full.width, 1440)
+  assert.equal(full.height, 3000)
+  assert.deepEqual(chromium.launches[0].context.pages[0].screenshotOptions, {
+    type: "png",
+    fullPage: true,
+  })
+
+  const snapshot = await service.snapshot("session-1")
+  const element = await service.screenshot("session-1", { ref: snapshot.nodes[0].ref })
+  assert.equal(element.bytes, Buffer.from("element-png").toString("base64"))
+  assert.equal(element.width, 30)
+  assert.equal(element.height, 40)
+})
+
 test("supports page-level key and scroll actions without an element ref", async (t) => {
   const { service, chromium } = await fixture(t)
   await service.createSession({ id: "session-1", grants: [] })
@@ -286,6 +638,7 @@ test("supports page-level key and scroll actions without an element ref", async 
     generation: 0,
   })
   assert.deepEqual(chromium.launches[0].context.pages[0].pressedKeys, ["Enter"])
+  assert.deepEqual(chromium.launches[0].context.pages[0].wheelEvents, [[0, 400]])
 })
 
 test("suppresses diagnostics after human keyboard input so credentials cannot enter logs", async (t) => {

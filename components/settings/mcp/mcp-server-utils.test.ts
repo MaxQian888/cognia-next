@@ -70,13 +70,24 @@ describe("summarizeServer", () => {
 })
 
 describe("cloneServerDraft", () => {
-  it("suffixes the name, deep-copies config, and carries appsEnabled", () => {
-    const original = srv({ appsEnabled: { "claude-code": true } })
+  it("deep-copies config, appsEnabled, and disallowed tools", () => {
+    const original = srv({
+      appsEnabled: { "claude-code": true },
+      disallowedTools: ["browser_run_code_unsafe"],
+    })
     const draft = cloneServerDraft(original)
     expect(draft.name).toBe("github copy")
     expect(draft.config).toEqual(original.config)
     expect(draft.config).not.toBe(original.config)
     expect(draft.appsEnabled).toEqual({ "claude-code": true })
+    expect(draft.disallowedTools).toEqual(["browser_run_code_unsafe"])
+
+    draft.disallowedTools!.push("browser_evaluate")
+    expect(original.disallowedTools).toEqual(["browser_run_code_unsafe"])
+  })
+
+  it("defaults missing disallowed tools to an empty list", () => {
+    expect(cloneServerDraft(srv({ disallowedTools: undefined })).disallowedTools).toEqual([])
   })
 })
 

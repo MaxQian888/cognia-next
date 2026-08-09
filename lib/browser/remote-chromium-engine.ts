@@ -12,8 +12,13 @@ import { transport } from "@/lib/tauri/transport-instance"
 
 import type {
   BrowserEngine,
+  BrowserMutationResult,
+  BrowserZoomResult,
+  FindOptions,
+  HandleDialogArgs,
   NetworkIdleOptions,
   ScrollArgs,
+  ScreenshotOptions,
   WaitForLoadOptions,
   WaitForOptions,
   WaitForResult,
@@ -27,7 +32,7 @@ export class RemoteChromiumEngine implements BrowserEngine {
     return transport.call<T>(name, { browserSessionId: this.browserSessionId, ...args })
   }
 
-  navigate(url: string): Promise<void> {
+  navigate(url: string): Promise<void | BrowserMutationResult> {
     return this.call("browser_navigate", { url })
   }
   snapshot(options?: SnapshotOptions): Promise<BrowserSnapshot> {
@@ -51,16 +56,16 @@ export class RemoteChromiumEngine implements BrowserEngine {
   readNetwork(): Promise<NetworkEntry[]> {
     return this.call("browser_read_network")
   }
-  back(): Promise<void> {
+  back(): Promise<void | BrowserMutationResult> {
     return this.call("browser_back")
   }
-  forward(): Promise<void> {
+  forward(): Promise<void | BrowserMutationResult> {
     return this.call("browser_forward")
   }
-  reload(): Promise<void> {
+  reload(): Promise<void | BrowserMutationResult> {
     return this.call("browser_reload")
   }
-  stop(): Promise<void> {
+  stop(): Promise<void | BrowserMutationResult> {
     return this.call("browser_stop")
   }
   getPage(): Promise<{ url: string; title: string }> {
@@ -75,7 +80,19 @@ export class RemoteChromiumEngine implements BrowserEngine {
   closePage(pageId: string): Promise<void> {
     return this.call("browser_close_page", { pageId })
   }
-  setFiles(ref: string, paths: string[]): Promise<void> {
+  createPage(url?: string): Promise<BrowserPageSummary | BrowserActionResult> {
+    return this.call("browser_new_page", { url })
+  }
+  drag(sourceRef: string, targetRef: string): Promise<BrowserActionResult> {
+    return this.call("browser_drag", { sourceRef, targetRef })
+  }
+  handleDialog(args: HandleDialogArgs): Promise<BrowserActionResult> {
+    return this.call("browser_handle_dialog", {
+      accept: args.accept,
+      ...(args.promptText !== undefined ? { promptText: args.promptText } : {}),
+    })
+  }
+  setFiles(ref: string, paths: string[]): Promise<void | BrowserMutationResult> {
     return this.call("browser_set_files", { ref, paths })
   }
   downloads(): Promise<BrowserDownloadSummary[]> {
@@ -93,16 +110,13 @@ export class RemoteChromiumEngine implements BrowserEngine {
   waitForLoad(options?: WaitForLoadOptions): Promise<WaitForResult> {
     return this.call("browser_wait_for_load", { options })
   }
-  screenshot(): Promise<Screenshot> {
-    return this.call("browser_screenshot")
+  screenshot(options?: ScreenshotOptions): Promise<Screenshot> {
+    return this.call("browser_screenshot", options ? { options } : {})
   }
-  setZoom(zoom: number): Promise<{ ok: boolean; zoom: number }> {
+  setZoom(zoom: number): Promise<BrowserZoomResult> {
     return this.call("browser_set_zoom", { zoom })
   }
-  find(
-    query: string,
-    options?: { forward?: boolean; matchCase?: boolean }
-  ): Promise<{ matches: number; index: number }> {
+  find(query: string, options?: FindOptions): Promise<{ matches: number; index: number }> {
     return this.call("browser_find", { query, options })
   }
   findClear(): Promise<void> {

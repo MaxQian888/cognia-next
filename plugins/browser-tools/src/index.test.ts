@@ -23,6 +23,12 @@ jest.mock("@/lib/browser/agent-engine", () => {
     listPages: jest.fn(async () => [{ id: "page-1", url: state.url, title: "t", active: true }]),
     activatePage: jest.fn(async () => {}),
     closePage: jest.fn(async () => {}),
+    createPage: jest.fn(async () => ({ id: "page-2", url: "", title: "", active: true })),
+    drag: jest.fn(async () => ({ ok: true, error: null, generation: 3 })),
+    handleDialog: jest.fn(async () => ({ ok: true, error: null, generation: 3 })),
+    setZoom: jest.fn(async (zoom: number) => ({ ok: true, zoom })),
+    find: jest.fn(async () => ({ matches: 2, index: 0 })),
+    findClear: jest.fn(async () => {}),
     setFiles: jest.fn(async () => {}),
     downloads: jest.fn(async () => []),
     back: jest.fn(async () => {}),
@@ -136,6 +142,14 @@ describe("browser-tools plugin", () => {
         "browser_fill_form",
         "browser_select",
         "browser_hover",
+        "browser_double_click",
+        "browser_focus",
+        "browser_new_page",
+        "browser_drag",
+        "browser_handle_dialog",
+        "browser_set_zoom",
+        "browser_find",
+        "browser_find_clear",
         "browser_read_console",
         "browser_read_network",
         "browser_get_page",
@@ -149,6 +163,32 @@ describe("browser-tools plugin", () => {
         "browser_downloads",
       ])
     )
+  })
+
+  it("publishes strict schemas for the completed control surface", async () => {
+    const registrations = await collectRegistrations()
+    expect(registrations.browser_double_click.definition.parametersSchema.required).toEqual(["ref"])
+    expect(registrations.browser_focus.definition.parametersSchema.required).toEqual(["ref"])
+    expect(registrations.browser_drag.definition.parametersSchema.required).toEqual([
+      "sourceRef",
+      "targetRef",
+    ])
+    expect(registrations.browser_handle_dialog.definition.parametersSchema.required).toEqual([
+      "accept",
+    ])
+    expect(
+      registrations.browser_screenshot.definition.parametersSchema.properties?.scope.enum
+    ).toEqual(["viewport", "fullPage", "element"])
+
+    const fillSchema = registrations.browser_fill_form.definition.parametersSchema as unknown as {
+      oneOf: Array<{ required: string[] }>
+      properties: {
+        fields: { minItems: number; items: { properties: { action: { enum: string[] } } } }
+      }
+    }
+    expect(fillSchema.oneOf).toEqual([{ required: ["ref", "text"] }, { required: ["fields"] }])
+    expect(fillSchema.properties.fields.minItems).toBe(1)
+    expect(fillSchema.properties.fields.items.properties.action.enum).toEqual(["fill", "select"])
   })
 
   it("exposes multi-page and file bridge operations without backend-specific names", async () => {
@@ -412,6 +452,26 @@ describe("browser-tools plugin", () => {
     expect(res.untrusted).toBe(true)
   })
 
+  it("returns navigation dialog metadata without waiting for a blocked snapshot", async () => {
+    engine.navigate.mockResolvedValueOnce({
+      ok: true,
+      error: null,
+      generation: 3,
+      dialogPending: true,
+      dialog: { type: "beforeunload", message: "Leave?", defaultValue: "" },
+    })
+    const tools = await collectTools()
+
+    const result = await tools.browser_navigate({ url: "http://localhost:3000/next" })
+
+    expect(result).toMatchObject({
+      dialogPending: true,
+      dialog: { type: "beforeunload", message: "Leave?" },
+    })
+    expect(engine.waitForLoad).not.toHaveBeenCalled()
+    expect(engine.snapshot).not.toHaveBeenCalled()
+  })
+
   it("browser_navigate to a PUBLIC url flags untrusted and steers to the Playwright MCP tools", async () => {
     const tools = await collectTools()
     const res = (await tools.browser_navigate({ url: "https://example.com/" })) as {
@@ -433,10 +493,139 @@ describe("browser-tools plugin", () => {
     expect(res.snapshot.generation).toBe(3)
   })
 
+  it("returns dialog metadata immediately without trying to snapshot the blocked page", async () => {
+    engine.act.mockResolvedValueOnce({
+      ok: true,
+      error: null,
+      generation: 3,
+      dialogPending: true,
+      dialog: { type: "confirm", message: "Continue?", defaultValue: "" },
+    })
+    const tools = await collectTools()
+
+    const result = await tools.browser_click({ ref: "e1" })
+
+    expect(result).toMatchObject({
+      dialogPending: true,
+      dialog: { type: "confirm", message: "Continue?" },
+    })
+    expect(engine.waitForLoad).not.toHaveBeenCalled()
+    expect(engine.snapshot).not.toHaveBeenCalled()
+  })
+
   it("browser_fill_form forwards the text arg", async () => {
     const tools = await collectTools()
     await tools.browser_fill_form({ ref: "e2", text: "hello" })
     expect(engine.act).toHaveBeenCalledWith("e2", "fill", { text: "hello" })
+  })
+
+  it("browser_fill_form validates then executes multiple fill/select fields", async () => {
+    const tools = await collectTools()
+    const result = (await tools.browser_fill_form({
+      fields: [
+        { ref: "e1", action: "fill", value: "Ada" },
+        { ref: "e2", action: "select", value: "admin" },
+      ],
+    })) as { ok: boolean; completed: number }
+    expect(engine.act).toHaveBeenNthCalledWith(1, "e1", "fill", { text: "Ada" })
+    expect(engine.act).toHaveBeenNthCalledWith(2, "e2", "select", { value: "admin" })
+    expect(result).toMatchObject({ ok: true, completed: 2 })
+  })
+
+  it("browser_fill_form rejects an invalid batch before changing any field", async () => {
+    const tools = await collectTools()
+    const result = await tools.browser_fill_form({
+      fields: [
+        { ref: "e1", action: "fill", value: "Ada" },
+        { ref: "", action: "fill", value: "bad" },
+      ],
+    })
+    expect(result).toMatchObject({ ok: false, completed: 0, failedIndex: 1 })
+    expect(engine.act).not.toHaveBeenCalled()
+  })
+
+  it("reports the completed count and failed index after a partial batch failure", async () => {
+    engine.act
+      .mockResolvedValueOnce({ ok: true, error: null, generation: 3 })
+      .mockResolvedValueOnce({ ok: false, error: "option missing", generation: 3 })
+    const tools = await collectTools()
+
+    const result = await tools.browser_fill_form({
+      fields: [
+        { ref: "e1", action: "fill", value: "Ada" },
+        { ref: "e2", action: "select", value: "missing" },
+        { ref: "e3", action: "fill", value: "not reached" },
+      ],
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      completed: 1,
+      failedIndex: 1,
+      error: "option missing",
+    })
+    expect(engine.act).toHaveBeenCalledTimes(2)
+  })
+
+  it("stops a batch immediately when a field action opens a dialog", async () => {
+    engine.act.mockResolvedValueOnce({
+      ok: true,
+      error: null,
+      generation: 3,
+      dialogPending: true,
+      dialog: { type: "alert", message: "Saved", defaultValue: "" },
+    })
+    const tools = await collectTools()
+
+    const result = await tools.browser_fill_form({
+      fields: [
+        { ref: "e1", action: "select", value: "admin" },
+        { ref: "e2", action: "fill", value: "Ada" },
+      ],
+    })
+
+    expect(result).toMatchObject({ completed: 0, dialogPending: true })
+    expect(engine.act).toHaveBeenCalledTimes(1)
+    expect(engine.snapshot).not.toHaveBeenCalled()
+  })
+
+  it("returns a fresh snapshot when a dismissed dialog makes the original action reject", async () => {
+    engine.handleDialog.mockResolvedValueOnce({
+      ok: false,
+      error: "Navigation interrupted by beforeunload",
+      generation: 3,
+    })
+    const tools = await collectTools()
+
+    const result = await tools.browser_handle_dialog({ accept: false })
+
+    expect(result).toMatchObject({
+      result: { ok: false, error: "Navigation interrupted by beforeunload" },
+      snapshot: { generation: 3 },
+    })
+  })
+
+  it("exposes advanced element and page controls", async () => {
+    const tools = await collectTools()
+    await tools.browser_double_click({ ref: "e1" })
+    await tools.browser_focus({ ref: "e2" })
+    await tools.browser_new_page({ url: "https://example.com" })
+    await tools.browser_drag({ sourceRef: "e1", targetRef: "e2" })
+    await tools.browser_handle_dialog({ accept: true, promptText: "ok" })
+    await tools.browser_set_zoom({ zoom: 1.25 })
+    await tools.browser_find({ query: "hello", matchCase: true })
+    await tools.browser_find_clear({})
+    expect(engine.act).toHaveBeenNthCalledWith(1, "e1", "double_click", {})
+    expect(engine.act).toHaveBeenNthCalledWith(2, "e2", "focus", {})
+    expect(engine.createPage).toHaveBeenCalledWith("https://example.com")
+    expect(engine.drag).toHaveBeenCalledWith("e1", "e2")
+    expect(engine.handleDialog).toHaveBeenCalledWith({ accept: true, promptText: "ok" })
+    expect(engine.setZoom).toHaveBeenCalledWith(1.25)
+    expect(engine.find).toHaveBeenCalledWith("hello", {
+      forward: undefined,
+      matchCase: true,
+    })
+    expect(engine.findClear).toHaveBeenCalled()
   })
 
   it("browser_read_console returns drained entries", async () => {
@@ -501,6 +690,29 @@ describe("browser-tools plugin", () => {
     const res = (await tools.browser_screenshot({})) as { ok: boolean; base64: string }
     expect(engine.screenshot).toHaveBeenCalled()
     expect(res).toMatchObject({ ok: true, base64: "AAAA", width: 10, height: 10 })
+  })
+
+  it("browser_screenshot forwards full-page and element scopes", async () => {
+    const tools = await collectTools()
+    await tools.browser_screenshot({ scope: "fullPage" })
+    await tools.browser_screenshot({ ref: "e4" })
+    expect(engine.screenshot).toHaveBeenNthCalledWith(1, { scope: "fullPage", ref: undefined })
+    expect(engine.screenshot).toHaveBeenNthCalledWith(2, { scope: "element", ref: "e4" })
+  })
+
+  it("browser_screenshot preserves a typed unsupported error code", async () => {
+    const tools = await collectTools()
+    engine.screenshot.mockRejectedValueOnce(
+      Object.assign(new Error("Scoped screenshots are not supported"), {
+        code: "browser_feature_unsupported",
+      })
+    )
+
+    await expect(tools.browser_screenshot({ ref: "e4" })).resolves.toMatchObject({
+      ok: false,
+      code: "browser_feature_unsupported",
+      error: "Scoped screenshots are not supported",
+    })
   })
 
   it("browser_screenshot returns ok:false when no preview is open", async () => {

@@ -313,7 +313,10 @@ export function buildMcpDisallowedToolNames(
 ): string[] {
   const denied = new Set<string>()
   for (const server of servers) {
-    const namespace = normalizeMcpNamespace(server.name)
+    // Claude SDK prefixes MCP tools with the exact key used in the server map.
+    // Preserve that runtime namespace; lower-casing here would make deny rules
+    // miss servers whose valid configured name contains upper-case letters.
+    const namespace = server.name.trim()
     for (const tool of normalizeDisallowedTools(server.disallowedTools ?? [])) {
       denied.add(`mcp__${namespace}__${tool}`)
     }

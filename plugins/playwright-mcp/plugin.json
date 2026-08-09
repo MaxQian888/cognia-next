@@ -2,7 +2,7 @@
   "id": "cognia-playwright-mcp",
   "name": "Playwright Browser",
   "version": "0.1.0",
-  "description": "Browser automation via Microsoft Playwright MCP \u2014 40+ DOM-driven tools for navigation, click, type, screenshot, and accessibility-tree extraction.",
+  "description": "Browser automation via Microsoft Playwright MCP, with presets for an isolated browser or selected Chrome/Edge tabs through the official extension.",
   "type": "frontend",
   "capabilities": ["mcp-server-preset", "commands"],
   "main": "src/index.ts",
@@ -32,7 +32,7 @@
     {
       "id": "browser",
       "name": "/browser",
-      "description": "Attach the Playwright MCP browser to the current character.",
+      "description": "Configure an isolated Playwright browser or connect selected Chrome/Edge tabs.",
       "icon": "Globe"
     }
   ]

@@ -64,6 +64,23 @@ Agent 对页面无障碍树快照中的一个带 ref 的节点。Agent 从这棵
 `OutputDetailLevel`（`"compact" | "standard" | "detailed" | "forensic"`）控制一次工具调用返回多少页面内容 ——
 这正是防止一次页面快照淹没上下文窗口的那个旋钮。
 
+## 连接现有 Chrome 与 Edge 标签页
+
+Playwright 插件提供两个 MCP 预设。`playwright` 启动隔离浏览器；
+`playwright-existing-browser` 启动 `@playwright/mcp@latest --extension`，等待官方 Playwright
+扩展授权用户选择的 Chrome 或 Edge 标签页。先安装扩展，再到 **设置 → MCP 服务器** 添加并
+信任 Existing Browser 预设，把它挂到角色上，然后在扩展中选择标签页。任一端断开后，重新
+启动 MCP 服务器并再次选择标签页即可；Cognia 不保存免审批 token。
+
+该接入保持在 `BrowserEngine` 之外，公开的是上游 `mcp__...` 工具，而不是内部 `browser_*`
+工具。它可以复用所选浏览器配置中的登录页面，但密码、OTP 与 token 仍须用户接管输入。
+预设默认屏蔽 `browser_run_code_unsafe`，不启用 devtools、vision 或 PDF capability，并继续把
+页面内容视为不可信。
+
+内部控制面中，隔离 Chromium 支持新页面、原生拖放与对话框处理，以及 viewport、整页与元素
+截图。内嵌 WebView 支持已有的双击、聚焦、缩放、查找与批量表单；不支持的请求会返回
+`browser_feature_unsupported`。
+
 ## 代码位置
 
 ```

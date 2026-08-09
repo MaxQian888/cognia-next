@@ -4598,6 +4598,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "browser_drag",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "browser_press_key",
       "target": "execution",
       "operation": "side-effect",
@@ -4718,6 +4730,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "browser_handle_dialog",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "browser_pages",
       "target": "execution",
       "operation": "read",
@@ -4725,6 +4749,18 @@
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "browser_new_page",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
       "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"

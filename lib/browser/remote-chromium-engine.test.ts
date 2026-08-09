@@ -72,4 +72,26 @@ describe("RemoteChromiumEngine", () => {
       ["browser_find_clear", { browserSessionId: "session-1" }],
     ])
   })
+
+  it("delegates new page, drag, dialog, and scoped screenshot operations", async () => {
+    call
+      .mockResolvedValueOnce({ id: "page-2", url: "https://example.com", title: "", active: true })
+      .mockResolvedValueOnce({ ok: true, error: null, generation: 2 })
+      .mockResolvedValueOnce({ ok: true, error: null, generation: 2 })
+      .mockResolvedValueOnce({ bytes: "AAAA", width: 10, height: 20 })
+    const engine = new RemoteChromiumEngine("session-1")
+    await engine.createPage("https://example.com")
+    await engine.drag("source", "target")
+    await engine.handleDialog({ accept: false })
+    await engine.screenshot({ scope: "element", ref: "target" })
+    expect(call.mock.calls).toEqual([
+      ["browser_new_page", { browserSessionId: "session-1", url: "https://example.com" }],
+      ["browser_drag", { browserSessionId: "session-1", sourceRef: "source", targetRef: "target" }],
+      ["browser_handle_dialog", { browserSessionId: "session-1", accept: false }],
+      [
+        "browser_screenshot",
+        { browserSessionId: "session-1", options: { scope: "element", ref: "target" } },
+      ],
+    ])
+  })
 })

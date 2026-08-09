@@ -105,3 +105,22 @@ agent tool call ──► plugins/browser-tools (registerTool ×N)
 - **Live-URL信任门控。** `browser_evaluate`（以及`browser_navigate`上的`untrusted`标志）现在解析了页面的**live**URL（`getPage()`）中的信任层，而非模型最后请求的URL——localhost页面重定向到公共源节点时会立即失去`trusted`。当当前的节点无法读取时，默认拒绝到最后已知的URL。
 - **加载稳定快照。**新`EmbeddedEngine.waitForLoad`（URL + `readyState`轮询，容忍中途评估失败）。`browser_navigate`等待目标文档;每个变异工具在其内联快照前都会稳定（3秒上限），因此点击触发导航返回所生成的页面;back/forward/reload增加250毫秒初始延迟，使旧文档的`complete`无法满足检查。
 - **地址栏 https default。** `normalizePreviewUrl`默认裸公共主机`https://`（local/private主机——回环、RFC-1918、`.local`——保持`http://`），通过新的`isLocalHostname`助手。
+
+## 附录（2026-08-09）——现有浏览器 Seam 与控制面补齐
+
+“公网自动化总是需要隔离的 Playwright 浏览器”这一历史指引已经不完整。Cognia 现在还提供
+`playwright-existing-browser` MCP 预设，运行 `@playwright/mcp@latest --extension`，通过
+Microsoft 官方 Playwright 扩展连接用户在 Chrome 或 Edge 中选择的标签页。连接会复用当前
+浏览器配置和登录态；每次连接仍由用户选择标签页并授权，任一端断开后都可以重新连接。
+Cognia 不持久化免授权 token。
+
+这是一条独立的 MCP Seam，而不是第三个 `BrowserEngine`：扩展传输、浏览器授权和 Manifest V3
+生命周期由上游维护；内部 `browser_*` 命名空间继续保留内嵌 WebView 与隔离 Chromium 两个
+引擎。现有浏览器预设默认禁用 `browser_run_code_unsafe`；修改该服务器级 deny list 会使既有
+信任审核失效并要求重新审核。
+
+内部控制面现在公开双击、聚焦、缩放、查找、清除查找、新页面、拖放、对话框处理、批量表单，
+以及 viewport、整页或元素截图。`RemoteChromiumEngine` 解析绑定快照与 frame 的 ref，再调用
+Playwright 原生元素动作；ref generation 检查仍然失败即关闭。触发对话框的动作会进入 pending
+状态，直至明确接受或拒绝。`EmbeddedEngine` 复用 WebView 已有能力；对新页面、原生对话框、
+拖放与非 viewport 截图返回 `browser_feature_unsupported`，不提供误导性的模拟实现。
