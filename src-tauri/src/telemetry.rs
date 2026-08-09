@@ -11,6 +11,88 @@ const GRAFANA_API_TOKEN_KEY: &str = "grafana-cloud-api-token";
 const LANGFUSE_SECRET_KEY: &str = "langfuse-secret-key";
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(15);
 
+fn resolve_otlp_trace_endpoint(specific: Option<&str>, base: Option<&str>) -> Option<String> {
+    specific
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            base.map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| format!("{}/v1/traces", value.trim_end_matches('/')))
+        })
+}
+
+fn parse_otlp_headers(value: &str) -> Result<HashMap<String, String>, String> {
+    let mut headers = HashMap::new();
+    for entry in value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        let (name, encoded_value) = entry
+            .split_once('=')
+            .ok_or_else(|| "OTEL_EXPORTER_OTLP_HEADERS entries must use name=value".to_string())?;
+        let name = name.trim().to_ascii_lowercase();
+        if name.is_empty()
+            || !name.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric()
+                    || matches!(
+                        byte,
+                        b'!' | b'#'
+                            | b'$'
+                            | b'%'
+                            | b'&'
+                            | b'\''
+                            | b'*'
+                            | b'+'
+                            | b'-'
+                            | b'.'
+                            | b'^'
+                            | b'_'
+                            | b'`'
+                            | b'|'
+                            | b'~'
+                    )
+            })
+        {
+            return Err("invalid OTLP header name".to_string());
+        }
+        let form = format!("value={}", encoded_value.trim());
+        let decoded = url::form_urlencoded::parse(form.as_bytes())
+            .find_map(|(key, value)| (key == "value").then(|| value.into_owned()))
+            .unwrap_or_default();
+        if decoded.contains(['\r', '\n']) {
+            return Err("invalid OTLP header value".to_string());
+        }
+        headers.insert(name, decoded);
+    }
+    Ok(headers)
+}
+
+pub(crate) fn validate_traceparent(value: &str) -> Option<String> {
+    let value = value.trim();
+    let mut parts = value.split('-');
+    let version = parts.next()?;
+    let trace_id = parts.next()?;
+    let parent_id = parts.next()?;
+    let flags = parts.next()?;
+    if parts.next().is_some()
+        || version != "00"
+        || trace_id.len() != 32
+        || parent_id.len() != 16
+        || flags.len() != 2
+        || ![version, trace_id, parent_id, flags]
+            .iter()
+            .all(|part| part.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        || trace_id.bytes().all(|byte| byte == b'0')
+        || parent_id.bytes().all(|byte| byte == b'0')
+    {
+        return None;
+    }
+    Some(value.to_ascii_lowercase())
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(
     rename_all = "camelCase",
@@ -224,9 +306,22 @@ mod native_otel {
     static OBSERVER_INSTALLED: OnceLock<()> = OnceLock::new();
 
     pub fn init_tracer() -> Result<SdkTracer, String> {
-        let endpoint = std::env::var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-            .map_err(|_| "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is not configured".to_string())?;
-        init_tracer_with(&endpoint, HashMap::new())
+        let traces_endpoint = std::env::var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").ok();
+        let base_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
+        let endpoint = super::resolve_otlp_trace_endpoint(
+            traces_endpoint.as_deref(),
+            base_endpoint.as_deref(),
+        )
+        .ok_or_else(|| {
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT is not configured"
+                .to_string()
+        })?;
+        let raw_headers = std::env::var("OTEL_EXPORTER_OTLP_TRACES_HEADERS")
+            .ok()
+            .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_HEADERS").ok())
+            .unwrap_or_default();
+        let headers = super::parse_otlp_headers(&raw_headers)?;
+        init_tracer_with(&endpoint, headers)
     }
 
     fn init_tracer_with(
@@ -317,6 +412,9 @@ mod native_otel {
 #[cfg(feature = "otel-export")]
 pub use native_otel::{configure_exporter, disable_exporter, init_tracer, set_parent};
 
+#[cfg(not(feature = "otel-export"))]
+pub fn set_parent(_span: &tracing::Span, _traceparent: Option<&str>) {}
+
 #[tauri::command]
 pub async fn telemetry_configure_sidecar(
     enabled: bool,
@@ -401,6 +499,32 @@ mod tests {
     fn rejects_non_http_endpoints_and_embedded_credentials() {
         assert!(validate_endpoint("file:///tmp/collector").is_err());
         assert!(validate_endpoint("https://user:pass@example.com/v1/traces").is_err());
+    }
+
+    #[test]
+    fn standard_otlp_trace_endpoint_prefers_signal_specific_configuration() {
+        assert_eq!(
+            resolve_otlp_trace_endpoint(
+                Some("https://collector.example/custom"),
+                Some("https://collector.example/base"),
+            )
+            .unwrap(),
+            "https://collector.example/custom"
+        );
+        assert_eq!(
+            resolve_otlp_trace_endpoint(None, Some("https://collector.example/base/")).unwrap(),
+            "https://collector.example/base/v1/traces"
+        );
+        assert!(resolve_otlp_trace_endpoint(None, None).is_none());
+    }
+
+    #[test]
+    fn standard_otlp_headers_decode_values_and_reject_line_breaks() {
+        let headers = parse_otlp_headers("authorization=Bearer%20token,x-tenant=tenant-a")
+            .expect("valid OTLP headers");
+        assert_eq!(headers.get("authorization").unwrap(), "Bearer token");
+        assert_eq!(headers.get("x-tenant").unwrap(), "tenant-a");
+        assert!(parse_otlp_headers("authorization=Bearer%0D%0Aleaked").is_err());
     }
 
     #[test]

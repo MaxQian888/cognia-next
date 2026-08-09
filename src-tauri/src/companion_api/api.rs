@@ -558,9 +558,13 @@ pub async fn rpc_handler(
     State(state): State<SharedState>,
     body: Result<Json<serde_json::Value>, JsonRejection>,
 ) -> Response {
+    let observation = super::metrics::RpcObservation::start(super::metrics::RpcPlane::Public);
     let args = match parse_public_json(body) {
         Ok(args) => args,
-        Err(error) => return error.into_response(),
+        Err(error) => {
+            observation.finish(super::metrics::RpcOutcome::Error { saturated: false });
+            return error.into_response();
+        }
     };
     let idempotency_key = headers
         .get("idempotency-key")
@@ -572,31 +576,56 @@ pub async fn rpc_handler(
         context,
         super::remote_execution::ExecutionTransport::Http,
         idempotency_key,
+    )
+    .with_traceparent(
+        headers
+            .get("traceparent")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
     );
     match super::remote_execution::execute(&state, request).await {
         Ok(super::remote_execution::ExecutionOutcome::Completed {
             request_id,
             operation_id,
             result,
-            replayed: _,
-        }) => (
-            StatusCode::OK,
-            Json(completed_rpc_response(request_id, operation_id, result)),
-        )
-            .into_response(),
+            replayed,
+        }) => {
+            if replayed {
+                super::metrics::record_operation(super::metrics::OperationOutcome::Replayed);
+            } else if operation_id.is_some() {
+                super::metrics::record_operation(super::metrics::OperationOutcome::Completed);
+            }
+            observation.finish(super::metrics::RpcOutcome::Completed);
+            (
+                StatusCode::OK,
+                Json(completed_rpc_response(request_id, operation_id, result)),
+            )
+                .into_response()
+        }
         Ok(super::remote_execution::ExecutionOutcome::Accepted {
             request_id,
             operation_id,
-        }) => (
-            StatusCode::ACCEPTED,
-            Json(json!({
-                "requestId": request_id,
-                "operationId": operation_id,
-                "status": "running",
-            })),
-        )
-            .into_response(),
-        Err(error) => execution_error_response(error),
+        }) => {
+            super::metrics::record_operation(super::metrics::OperationOutcome::Accepted);
+            observation.finish(super::metrics::RpcOutcome::Accepted);
+            (
+                StatusCode::ACCEPTED,
+                Json(json!({
+                    "requestId": request_id,
+                    "operationId": operation_id,
+                    "status": "running",
+                })),
+            )
+                .into_response()
+        }
+        Err(error) => {
+            let saturated = matches!(
+                error.status,
+                StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE
+            );
+            observation.finish(super::metrics::RpcOutcome::Error { saturated });
+            execution_error_response(error)
+        }
     }
 }
 
@@ -610,9 +639,11 @@ pub async fn internal_rpc_handler(
     State(state): State<SharedState>,
     body: Result<Json<Value>, JsonRejection>,
 ) -> Response {
+    let observation = super::metrics::RpcObservation::start(super::metrics::RpcPlane::Internal);
     let Json(args) = match body {
         Ok(body) => body,
         Err(rejection) => {
+            observation.finish(super::metrics::RpcOutcome::Error { saturated: false });
             return (
                 rejection.status(),
                 Json(json!({
@@ -620,7 +651,7 @@ pub async fn internal_rpc_handler(
                     "message": "the request body must be valid JSON for this endpoint",
                 })),
             )
-                .into_response()
+                .into_response();
         }
     };
     let idempotency_key = headers
@@ -633,27 +664,55 @@ pub async fn internal_rpc_handler(
         context,
         super::remote_execution::ExecutionTransport::Internal,
         idempotency_key,
+    )
+    .with_traceparent(
+        headers
+            .get("traceparent")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
     );
     match super::remote_execution::execute(&state, request).await {
-        Ok(super::remote_execution::ExecutionOutcome::Completed { result, .. }) => {
+        Ok(super::remote_execution::ExecutionOutcome::Completed {
+            operation_id,
+            result,
+            replayed,
+            ..
+        }) => {
+            if replayed {
+                super::metrics::record_operation(super::metrics::OperationOutcome::Replayed);
+            } else if operation_id.is_some() {
+                super::metrics::record_operation(super::metrics::OperationOutcome::Completed);
+            }
+            observation.finish(super::metrics::RpcOutcome::Completed);
             (StatusCode::OK, Json(result)).into_response()
         }
-        Ok(super::remote_execution::ExecutionOutcome::Accepted { operation_id, .. }) => (
-            StatusCode::ACCEPTED,
-            Json(json!({
-                "operationId": operation_id,
-                "status": "running",
-            })),
-        )
-            .into_response(),
-        Err(error) => (
-            error.status,
-            Json(json!({
-                "code": error.code,
-                "message": error.message,
-            })),
-        )
-            .into_response(),
+        Ok(super::remote_execution::ExecutionOutcome::Accepted { operation_id, .. }) => {
+            super::metrics::record_operation(super::metrics::OperationOutcome::Accepted);
+            observation.finish(super::metrics::RpcOutcome::Accepted);
+            (
+                StatusCode::ACCEPTED,
+                Json(json!({
+                    "operationId": operation_id,
+                    "status": "running",
+                })),
+            )
+                .into_response()
+        }
+        Err(error) => {
+            let saturated = matches!(
+                error.status,
+                StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE
+            );
+            observation.finish(super::metrics::RpcOutcome::Error { saturated });
+            (
+                error.status,
+                Json(json!({
+                    "code": error.code,
+                    "message": error.message,
+                })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -1835,6 +1894,15 @@ mod tests {
 
     #[tokio::test]
     async fn internal_rpc_adapter_uses_the_canonical_unknown_command_error() {
+        let metric = "cognia_rpc_requests_total{plane=\"internal\",outcome=\"error\"}";
+        let value = |text: &str| -> u64 {
+            text.lines()
+                .find(|line| line.starts_with(metric))
+                .and_then(|line| line.split_whitespace().nth(1))
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0)
+        };
+        let before = value(&super::super::metrics::render_prometheus());
         let response = internal_rpc_handler(
             Path("not_registered".into()),
             Extension(DeviceContext {
@@ -1852,6 +1920,8 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert_eq!(response_json(response).await["code"], "unknown_command");
+        let after = value(&super::super::metrics::render_prometheus());
+        assert!(after >= before + 1);
     }
 
     #[tokio::test]

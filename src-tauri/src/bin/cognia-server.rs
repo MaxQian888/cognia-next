@@ -343,6 +343,9 @@ fn init_logger() {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
+    if !app_lib::logging::tracing_setup::init() {
+        log::warn!("headless structured tracing subscriber was not installed");
+    }
     // Headless deployments do not consume desktop Dexie settings. Publish an
     // explicit direct policy so shared outbound clients disable ambient proxy
     // variables without binding to renderer initialization.

@@ -5,6 +5,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use tracing::Instrument as _;
 use uuid::Uuid;
 
 use super::{
@@ -33,6 +34,15 @@ impl ExecutionTransport {
             Self::Internal => CommandTransport::Internal,
         }
     }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::WebSocket => "websocket",
+            Self::WebRtc => "webrtc",
+            Self::Internal => "internal",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -44,6 +54,7 @@ pub struct ExecutionRequest {
     pub request_id: String,
     pub policy_id: Option<String>,
     pub idempotency_key: Option<String>,
+    pub traceparent: Option<String>,
 }
 
 impl ExecutionRequest {
@@ -67,7 +78,15 @@ impl ExecutionRequest {
             request_id: Uuid::new_v4().to_string(),
             policy_id,
             idempotency_key,
+            traceparent: None,
         }
+    }
+
+    pub fn with_traceparent(mut self, traceparent: Option<String>) -> Self {
+        self.traceparent = traceparent
+            .as_deref()
+            .and_then(crate::telemetry::validate_traceparent);
+        self
     }
 }
 
@@ -172,6 +191,49 @@ impl ExecutionError {
 /// protocol, construct an `ExecutionRequest`, and delegate all governance and
 /// dispatch behavior here.
 pub async fn execute(
+    state: &SharedState,
+    request: ExecutionRequest,
+) -> Result<ExecutionOutcome, ExecutionError> {
+    let target = super::command_manifest::descriptor(&request.command)
+        .map(|descriptor| format!("{:?}", descriptor.target).to_ascii_lowercase())
+        .unwrap_or_else(|| "unknown".to_string());
+    let span = tracing::info_span!(
+        "companion.rpc.execute",
+        rpc.command = %request.command,
+        rpc.target = %target,
+        rpc.transport = request.transport.label(),
+        rpc.outcome = tracing::field::Empty,
+        request.id = %request.request_id,
+        operation.id = tracing::field::Empty,
+    );
+    crate::telemetry::set_parent(&span, request.traceparent.as_deref());
+    let result = execute_inner(state, request).instrument(span.clone()).await;
+    match &result {
+        Ok(ExecutionOutcome::Completed {
+            operation_id,
+            replayed,
+            ..
+        }) => {
+            span.record(
+                "rpc.outcome",
+                if *replayed { "replayed" } else { "completed" },
+            );
+            if let Some(operation_id) = operation_id {
+                span.record("operation.id", operation_id.as_str());
+            }
+        }
+        Ok(ExecutionOutcome::Accepted { operation_id, .. }) => {
+            span.record("rpc.outcome", "accepted");
+            span.record("operation.id", operation_id.as_str());
+        }
+        Err(_) => {
+            span.record("rpc.outcome", "error");
+        }
+    }
+    result
+}
+
+async fn execute_inner(
     state: &SharedState,
     request: ExecutionRequest,
 ) -> Result<ExecutionOutcome, ExecutionError> {
@@ -836,6 +898,17 @@ mod tests {
             None,
         );
         assert_eq!(snake_case.policy_id.as_deref(), Some("policy-b"));
+    }
+
+    #[test]
+    fn execution_request_carries_only_valid_w3c_trace_context() {
+        let valid = format!("00-{}-{}-01", "a".repeat(32), "b".repeat(16));
+        let request = execution_request("service", None).with_traceparent(Some(valid.clone()));
+        assert_eq!(request.traceparent.as_deref(), Some(valid.as_str()));
+
+        let request = execution_request("service", None)
+            .with_traceparent(Some("not-a-traceparent".to_string()));
+        assert_eq!(request.traceparent, None);
     }
 
     #[test]

@@ -22,6 +22,149 @@ static DPOP_REJECTIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static DPOP_REPLAYS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static WS_CLIENTS_ACTIVE: AtomicI64 = AtomicI64::new(0);
 
+const RPC_DURATION_BUCKETS_SECONDS: [f64; 8] = [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 10.0];
+
+struct RpcPlaneMetrics {
+    completed: AtomicU64,
+    accepted: AtomicU64,
+    errors: AtomicU64,
+    saturated: AtomicU64,
+    in_flight: AtomicI64,
+    duration_buckets: [AtomicU64; RPC_DURATION_BUCKETS_SECONDS.len() + 1],
+    duration_count: AtomicU64,
+    duration_sum_micros: AtomicU64,
+}
+
+impl Default for RpcPlaneMetrics {
+    fn default() -> Self {
+        Self {
+            completed: AtomicU64::new(0),
+            accepted: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
+            saturated: AtomicU64::new(0),
+            in_flight: AtomicI64::new(0),
+            duration_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            duration_count: AtomicU64::new(0),
+            duration_sum_micros: AtomicU64::new(0),
+        }
+    }
+}
+
+static PUBLIC_RPC_METRICS: Lazy<RpcPlaneMetrics> = Lazy::new(RpcPlaneMetrics::default);
+static INTERNAL_RPC_METRICS: Lazy<RpcPlaneMetrics> = Lazy::new(RpcPlaneMetrics::default);
+static OPERATIONS_ACCEPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static OPERATIONS_COMPLETED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static OPERATIONS_REPLAYED_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RpcPlane {
+    Public,
+    Internal,
+}
+
+impl RpcPlane {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::Internal => "internal",
+        }
+    }
+
+    fn metrics(self) -> &'static RpcPlaneMetrics {
+        match self {
+            Self::Public => &PUBLIC_RPC_METRICS,
+            Self::Internal => &INTERNAL_RPC_METRICS,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RpcOutcome {
+    Completed,
+    Accepted,
+    Error { saturated: bool },
+}
+
+pub struct RpcObservation {
+    plane: RpcPlane,
+    started_at: Instant,
+    finished: bool,
+}
+
+impl RpcObservation {
+    pub fn start(plane: RpcPlane) -> Self {
+        plane.metrics().in_flight.fetch_add(1, Ordering::Relaxed);
+        Self {
+            plane,
+            started_at: Instant::now(),
+            finished: false,
+        }
+    }
+
+    pub fn finish(mut self, outcome: RpcOutcome) {
+        self.record(outcome);
+        self.finished = true;
+    }
+
+    fn record(&self, outcome: RpcOutcome) {
+        let metrics = self.plane.metrics();
+        metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+        match outcome {
+            RpcOutcome::Completed => {
+                metrics.completed.fetch_add(1, Ordering::Relaxed);
+            }
+            RpcOutcome::Accepted => {
+                metrics.accepted.fetch_add(1, Ordering::Relaxed);
+            }
+            RpcOutcome::Error { saturated } => {
+                metrics.errors.fetch_add(1, Ordering::Relaxed);
+                if saturated {
+                    metrics.saturated.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+        let elapsed = self.started_at.elapsed();
+        let elapsed_seconds = elapsed.as_secs_f64();
+        for (index, boundary) in RPC_DURATION_BUCKETS_SECONDS.iter().enumerate() {
+            if elapsed_seconds <= *boundary {
+                metrics.duration_buckets[index].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        metrics.duration_buckets[RPC_DURATION_BUCKETS_SECONDS.len()]
+            .fetch_add(1, Ordering::Relaxed);
+        metrics.duration_count.fetch_add(1, Ordering::Relaxed);
+        metrics.duration_sum_micros.fetch_add(
+            elapsed.as_micros().min(u64::MAX as u128) as u64,
+            Ordering::Relaxed,
+        );
+    }
+}
+
+impl Drop for RpcObservation {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.record(RpcOutcome::Error { saturated: false });
+            self.finished = true;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationOutcome {
+    Accepted,
+    Completed,
+    Replayed,
+}
+
+pub fn record_operation(outcome: OperationOutcome) {
+    let counter = match outcome {
+        OperationOutcome::Accepted => &OPERATIONS_ACCEPTED_TOTAL,
+        OperationOutcome::Completed => &OPERATIONS_COMPLETED_TOTAL,
+        OperationOutcome::Replayed => &OPERATIONS_REPLAYED_TOTAL,
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
 // ── Lark dual-entry counters (plan 2026-07-24 P6.2) ─────────────────────────
 // Bumped by the `/integrations/lark/*` handlers directly and by the brain via
 // the `lark_metrics_record` RPC arm (hardcoded name allowlist below — the
@@ -164,6 +307,69 @@ pub fn render_prometheus() -> String {
         "Open /ws/events client connections.",
         WS_CLIENTS_ACTIVE.load(Ordering::Relaxed).max(0),
     );
+
+    out.push_str("# HELP cognia_rpc_requests_total Canonical RPC requests by plane and outcome.\n");
+    out.push_str("# TYPE cognia_rpc_requests_total counter\n");
+    out.push_str(
+        "# HELP cognia_rpc_saturated_total RPC requests rejected by rate or capacity limits.\n",
+    );
+    out.push_str("# TYPE cognia_rpc_saturated_total counter\n");
+    out.push_str("# HELP cognia_rpc_in_flight RPC requests currently executing.\n");
+    out.push_str("# TYPE cognia_rpc_in_flight gauge\n");
+    out.push_str("# HELP cognia_rpc_duration_seconds Canonical RPC request latency.\n");
+    out.push_str("# TYPE cognia_rpc_duration_seconds histogram\n");
+    for plane in [RpcPlane::Public, RpcPlane::Internal] {
+        let label = plane.label();
+        let metrics = plane.metrics();
+        for (outcome, counter) in [
+            ("completed", &metrics.completed),
+            ("accepted", &metrics.accepted),
+            ("error", &metrics.errors),
+        ] {
+            out.push_str(&format!(
+                "cognia_rpc_requests_total{{plane=\"{label}\",outcome=\"{outcome}\"}} {}\n",
+                counter.load(Ordering::Relaxed)
+            ));
+        }
+        out.push_str(&format!(
+            "cognia_rpc_saturated_total{{plane=\"{label}\"}} {}\n",
+            metrics.saturated.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "cognia_rpc_in_flight{{plane=\"{label}\"}} {}\n",
+            metrics.in_flight.load(Ordering::Relaxed).max(0)
+        ));
+        for (index, boundary) in RPC_DURATION_BUCKETS_SECONDS.iter().enumerate() {
+            out.push_str(&format!(
+                "cognia_rpc_duration_seconds_bucket{{plane=\"{label}\",le=\"{boundary}\"}} {}\n",
+                metrics.duration_buckets[index].load(Ordering::Relaxed)
+            ));
+        }
+        out.push_str(&format!(
+            "cognia_rpc_duration_seconds_bucket{{plane=\"{label}\",le=\"+Inf\"}} {}\n",
+            metrics.duration_buckets[RPC_DURATION_BUCKETS_SECONDS.len()].load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "cognia_rpc_duration_seconds_sum{{plane=\"{label}\"}} {:.6}\n",
+            metrics.duration_sum_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0
+        ));
+        out.push_str(&format!(
+            "cognia_rpc_duration_seconds_count{{plane=\"{label}\"}} {}\n",
+            metrics.duration_count.load(Ordering::Relaxed)
+        ));
+    }
+    out.push_str("# HELP cognia_rpc_operations_total Durable operation lifecycle outcomes.\n");
+    out.push_str("# TYPE cognia_rpc_operations_total counter\n");
+    for (outcome, counter) in [
+        ("accepted", &OPERATIONS_ACCEPTED_TOTAL),
+        ("completed", &OPERATIONS_COMPLETED_TOTAL),
+        ("replayed", &OPERATIONS_REPLAYED_TOTAL),
+    ] {
+        out.push_str(&format!(
+            "cognia_rpc_operations_total{{outcome=\"{outcome}\"}} {}\n",
+            counter.load(Ordering::Relaxed)
+        ));
+    }
 
     // Lark dual-entry counters (plan 2026-07-24 P6.2).
     let lark_series: &[(&str, &AtomicU64, &str)] = &[
@@ -339,6 +545,42 @@ mod tests {
         assert!(value(&after, "cognia_dpop_replays_total") >= 1);
         assert!(value(&after, "cognia_dpop_rejections_total") >= 1);
         ws_client_disconnected();
+    }
+
+    #[test]
+    fn rpc_observations_publish_bounded_plane_outcome_and_latency_metrics() {
+        let before = render_prometheus();
+        RpcObservation::start(RpcPlane::Internal).finish(RpcOutcome::Completed);
+        RpcObservation::start(RpcPlane::Public).finish(RpcOutcome::Error { saturated: true });
+        let after = render_prometheus();
+
+        assert!(
+            after.contains("cognia_rpc_requests_total{plane=\"internal\",outcome=\"completed\"}")
+        );
+        assert!(after.contains("cognia_rpc_requests_total{plane=\"public\",outcome=\"error\"}"));
+        assert!(after.contains("cognia_rpc_saturated_total{plane=\"public\"}"));
+        assert!(
+            after.contains("cognia_rpc_duration_seconds_bucket{plane=\"internal\",le=\"+Inf\"}")
+        );
+        assert!(after.contains("cognia_rpc_in_flight{plane=\"internal\"} 0"));
+        assert!(!after.contains("command="));
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn durable_operation_metrics_distinguish_accept_complete_and_replay() {
+        let before = render_prometheus();
+        record_operation(OperationOutcome::Accepted);
+        record_operation(OperationOutcome::Completed);
+        record_operation(OperationOutcome::Replayed);
+        let after = render_prometheus();
+
+        for outcome in ["accepted", "completed", "replayed"] {
+            assert!(after.contains(&format!(
+                "cognia_rpc_operations_total{{outcome=\"{outcome}\"}}"
+            )));
+        }
+        assert_ne!(before, after);
     }
 
     #[test]
