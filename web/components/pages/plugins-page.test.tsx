@@ -24,6 +24,21 @@ describe("PluginsPage", () => {
     }
   })
 
+  it("shows how an extension becomes an installable Cognia plugin", () => {
+    render(<PluginsPage locale="en" />)
+    expect(
+      screen.getByRole("heading", { name: "From existing capability to installed extension." })
+    ).toBeInTheDocument()
+    for (const title of [
+      "Bring the source",
+      "Declare the contract",
+      "Contribute surfaces",
+      "Package and install",
+    ]) {
+      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument()
+    }
+  })
+
   it("numbers the authoring steps as an ordered list", () => {
     const { container } = render(<PluginsPage locale="en" />)
     const lists = [...container.querySelectorAll("ol")]

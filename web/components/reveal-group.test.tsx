@@ -133,6 +133,15 @@ describe("RevealGroup", () => {
     })
   })
 
+  it("marks animated items for the CSS reduced-motion safety net", () => {
+    render(
+      <RevealGroup>
+        <RevealItem>cell</RevealItem>
+      </RevealGroup>
+    )
+    expect(itemProps[0]["data-reveal-item"]).toBe("")
+  })
+
   it("mounts no motion component at all under reduced motion", () => {
     reduced = true
     const { container } = render(

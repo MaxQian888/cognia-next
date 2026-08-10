@@ -10,6 +10,7 @@ import type { UseCasePageCopy } from "@web/content/types"
 import type { Locale } from "@web/lib/locale"
 import { docsUrl } from "@web/lib/site"
 import { CapabilityGrid } from "./capability-grid"
+import { FeatureShowcase } from "./feature-showcase"
 import { PageHeader } from "./page-header"
 
 interface UseCasePageProps {
@@ -30,10 +31,11 @@ export function UseCasePage({ locale, variant }: UseCasePageProps) {
   const copy = getCopy(locale)
   const page: UseCasePageCopy = copy.useCases[variant]
   const route = `/use-cases/${variant}`
+  const docsOrigin = docsUrl()
 
   return (
     <SiteShell locale={locale} route={route}>
-      <PageHeader copy={page.header} common={copy.common} locale={locale} docsOrigin={docsUrl()} />
+      <PageHeader copy={page.header} common={copy.common} locale={locale} docsOrigin={docsOrigin} />
 
       <Section tone="paper">
         <p className="flex max-w-3xl items-start gap-3 border-l-2 border-hairline-strong pl-4 text-sm leading-relaxed text-muted">
@@ -100,6 +102,13 @@ export function UseCasePage({ locale, variant }: UseCasePageProps) {
         </Reveal>
       </Section>
 
+      <FeatureShowcase
+        copy={page.showcase}
+        learnMore={copy.common.learnMore}
+        locale={locale}
+        docsOrigin={docsOrigin}
+      />
+
       <Section tone="surface">
         <SectionHeading title={page.capabilities.title} subtitle={page.capabilities.subtitle} />
         <div className="mt-12">
@@ -108,7 +117,7 @@ export function UseCasePage({ locale, variant }: UseCasePageProps) {
             learnMore={copy.common.learnMore}
             locale={locale}
             tone="surface"
-            docsOrigin={docsUrl()}
+            docsOrigin={docsOrigin}
           />
         </div>
       </Section>

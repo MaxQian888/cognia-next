@@ -121,6 +121,7 @@ export function RevealItem({ children, className, as = "div" }: RevealItemProps)
 
   return (
     <Component
+      data-reveal-item=""
       className={className}
       variants={{
         hidden: { opacity: 0, y: 10 },

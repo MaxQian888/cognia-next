@@ -3,6 +3,7 @@ import { getCopy } from "@web/content"
 import type { Locale } from "@web/lib/locale"
 import { docsUrl } from "@web/lib/site"
 import { CapabilitySections } from "./capability-sections"
+import { FeatureShowcase } from "./feature-showcase"
 import { PageHeader } from "./page-header"
 
 /**
@@ -12,6 +13,7 @@ import { PageHeader } from "./page-header"
  */
 export function ProductPage({ locale }: { locale: Locale }) {
   const copy = getCopy(locale)
+  const docsOrigin = docsUrl()
   return (
     <SiteShell locale={locale} route="/product">
       <PageHeader
@@ -19,13 +21,19 @@ export function ProductPage({ locale }: { locale: Locale }) {
         common={copy.common}
         locale={locale}
         sections={copy.product.sections}
-        docsOrigin={docsUrl()}
+        docsOrigin={docsOrigin}
       />
       <CapabilitySections
         sections={copy.product.sections}
         learnMore={copy.common.learnMore}
         locale={locale}
-        docsOrigin={docsUrl()}
+        docsOrigin={docsOrigin}
+      />
+      <FeatureShowcase
+        copy={copy.product.showcase}
+        learnMore={copy.common.learnMore}
+        locale={locale}
+        docsOrigin={docsOrigin}
       />
     </SiteShell>
   )

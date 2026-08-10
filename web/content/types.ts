@@ -458,27 +458,58 @@ export interface CapabilitySection {
   entries: CapabilityEntry[]
 }
 
+export interface FeatureShowcaseItem {
+  key: string
+  title: string
+  body: string
+  detail: string
+  docsPath?: string
+}
+
+export interface FeatureShowcaseCopy {
+  title: string
+  subtitle: string
+  items: FeatureShowcaseItem[]
+}
+
+export interface SystemFlowStep {
+  key: string
+  label: string
+  body: string
+  docsPath?: string
+}
+
+export interface SystemFlowCopy {
+  title: string
+  subtitle: string
+  steps: SystemFlowStep[]
+}
+
 export interface ProductPageCopy {
   header: PageHeader
   /** Anchor ids must match the nav dropdown's targets. */
   sections: CapabilitySection[]
+  showcase: FeatureShowcaseCopy
 }
 
 export interface WorkflowsPageCopy {
   header: PageHeader
   sections: CapabilitySection[]
+  flow: SystemFlowCopy
   guarantees: { title: string; items: string[] }
 }
 
 export interface PluginsPageCopy {
   header: PageHeader
   sections: CapabilitySection[]
+  flow: SystemFlowCopy
   authoring: { title: string; body: string; steps: string[] }
 }
 
 export interface TrustPageCopy {
   header: PageHeader
   sections: CapabilitySection[]
+  flow: SystemFlowCopy
   evidence: {
     title: string
     subtitle: string
@@ -491,6 +522,7 @@ export interface TrustPageCopy {
 
 export interface DownloadPageCopy {
   header: PageHeader
+  showcase: FeatureShowcaseCopy
   buildFromSource: {
     title: string
     body: string
@@ -518,6 +550,7 @@ export interface UseCasePageCopy {
   provenance: string
   scriptTitle: string
   steps: UseCaseStep[]
+  showcase: FeatureShowcaseCopy
   capabilities: CapabilitySection
   /** These pages carry no visual today; they get the workbench stage. */
   stageAlt: string

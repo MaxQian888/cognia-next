@@ -52,7 +52,13 @@ export function Reveal({
 
   if (trigger === "mount") {
     return (
-      <motion.div className={className} initial={initial} animate={target} transition={transition}>
+      <motion.div
+        data-reveal=""
+        className={className}
+        initial={initial}
+        animate={target}
+        transition={transition}
+      >
         {children}
       </motion.div>
     )
@@ -60,6 +66,7 @@ export function Reveal({
 
   return (
     <motion.div
+      data-reveal=""
       className={className}
       initial={initial}
       whileInView={target}

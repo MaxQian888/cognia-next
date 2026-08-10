@@ -10,15 +10,11 @@ import { usePinnedProgress } from "@web/hooks/use-pinned-progress"
 import { useStepRail } from "@web/hooks/use-step-rail"
 import { DemoActivityList } from "./demo-activity-list"
 import { DemoFileTree } from "./demo-file-tree"
-import { DemoPointer } from "./demo-pointer"
-import { StageLens } from "./stage-lens"
 
 interface SignatureDemoProps {
   copy: SignatureCopy
   reconstruction: ReconstructionCopy
-  lensLabel?: string
   fileTreeLabel?: string
-  pointerLabel?: string
 }
 
 /** Index of the approval step — where autoplay stops and waits (spec §6.1). */
@@ -69,15 +65,11 @@ const TONE_CLASS: Record<StepTone, string> = {
 function StepPanel({
   step,
   reconstruction,
-  lensLabel,
   fileTreeLabel,
-  pointerLabel,
 }: {
   step: SignatureStep
   reconstruction: ReconstructionCopy
-  lensLabel?: string
   fileTreeLabel?: string
-  pointerLabel?: string
 }) {
   const artifact =
     step.artifact === "context" && fileTreeLabel ? (
@@ -89,7 +81,7 @@ function StepPanel({
     )
 
   return (
-    <div className="border-y border-on-stage-hairline bg-graphite">
+    <div className="signature-stage border-y border-on-stage-hairline bg-graphite">
       <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
         <div className="flex flex-col border-on-stage-hairline p-5 md:p-6 xl:border-r">
           <div className="flex items-center gap-2">
@@ -115,10 +107,7 @@ function StepPanel({
         </div>
 
         <div className="border-t border-on-stage-hairline p-5 md:p-6 xl:border-t-0">
-          <div className="relative min-w-0">
-            {lensLabel ? <StageLens ariaLabel={lensLabel}>{artifact}</StageLens> : artifact}
-            {pointerLabel ? <DemoPointer label={pointerLabel} /> : null}
-          </div>
+          <div className="relative min-w-0">{artifact}</div>
         </div>
       </div>
     </div>
@@ -147,13 +136,7 @@ function StepPanel({
  *    Spec §6.3 requires this to be the absence of the effect, not a fast
  *    version of it.
  */
-export function SignatureDemo({
-  copy,
-  reconstruction,
-  lensLabel,
-  fileTreeLabel,
-  pointerLabel,
-}: SignatureDemoProps) {
+export function SignatureDemo({ copy, reconstruction, fileTreeLabel }: SignatureDemoProps) {
   const reduced = useReducedMotion() ?? false
   const rail = useStepRail({
     total: copy.steps.length,
@@ -197,9 +180,7 @@ export function SignatureDemo({
               <StepPanel
                 step={step}
                 reconstruction={reconstruction}
-                lensLabel={lensLabel}
                 fileTreeLabel={fileTreeLabel}
-                pointerLabel={pointerLabel}
               />
             </li>
           ))}
@@ -211,21 +192,20 @@ export function SignatureDemo({
           // put. Only present once pinning is live, so an unpinned page — the
           // server render, a narrow viewport, reduced motion — is exactly as
           // tall as its content.
-          // 100dvh for the first step + 65dvh per subsequent step ≈ 425dvh total
-          // for 6 steps, down from 600vh. Shorter travel means less scrolling for
-          // the same number of steps, without making any step feel rushed.
+          // 100dvh for the first step + 45dvh per subsequent step ≈ 325dvh total
+          // for 6 steps. The panel still pins long enough to read each state,
+          // without stranding the reader inside several mostly empty screens.
           style={
-            pinned ? { height: `calc(100dvh + ${(copy.steps.length - 1) * 65}dvh)` } : undefined
+            pinned ? { height: `calc(100dvh + ${(copy.steps.length - 1) * 45}dvh)` } : undefined
           }
           className="mt-14"
         >
           <div
+            data-pinned-stage={pinned ? "" : undefined}
             className={`grid gap-8 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] lg:gap-10 ${
-              // `dvh`, not `vh`: on a browser whose chrome hides on scroll,
-              // `vh` is the *largest* viewport and the panel would be cropped
-              // by exactly the chrome's height for the whole scroll. `dvh`
-              // tracks the real one. The offset clears the 64px sticky nav.
-              pinned ? "sticky top-20 h-[calc(100dvh-5rem)] items-stretch pb-6" : ""
+              // Tall screens use the compact non-pinned mode. Laptop-height
+              // screens keep the scroll-led chapter, sized by its real content.
+              pinned ? "sticky top-20 items-start pb-6" : ""
             }`}
           >
             <div className={pinned ? "flex min-h-0 flex-col" : "lg:sticky lg:top-28 lg:self-start"}>
@@ -301,13 +281,12 @@ export function SignatureDemo({
                 {format(copy.stepOf, { current: activeIndex + 1, total: copy.steps.length })}
               </p>
 
-              {/* Pinned, the section owns the screen and the page heading above
-               * has scrolled away — so the one task the whole site follows
-               * (spec §9) is restated here, on the rail's floor, and stays in
-               * view for all six steps. It also gives the rail column something
-               * to fill the height with other than air. */}
+              {/* Pinned, the page heading above has scrolled away, so the one
+               * task the whole site follows (spec §9) is restated beside the
+               * controls. Keeping it in the control cluster avoids a tall,
+               * disconnected void between the step count and the task. */}
               {pinned ? (
-                <div className="mt-auto border-t border-hairline pt-6">
+                <div data-pinned-task-summary="" className="mt-8 border-t border-hairline pt-6">
                   <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-muted">
                     <Icon name="agents" size={14} />
                     {copy.taskLabel}
@@ -328,9 +307,7 @@ export function SignatureDemo({
               <StepPanel
                 step={active}
                 reconstruction={reconstruction}
-                lensLabel={lensLabel}
                 fileTreeLabel={fileTreeLabel}
-                pointerLabel={pointerLabel}
               />
             </div>
           </div>

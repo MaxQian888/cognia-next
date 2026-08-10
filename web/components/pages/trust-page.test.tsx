@@ -22,6 +22,21 @@ describe("TrustPage", () => {
     expect(within(table).getAllByRole("row")).toHaveLength(en.trust.evidence.rows.length + 1)
   })
 
+  it("traces a task through its data and action boundaries", () => {
+    render(<TrustPage locale="en" />)
+    expect(
+      screen.getByRole("heading", { name: "A task crosses named boundaries." })
+    ).toBeInTheDocument()
+    for (const title of [
+      "Local workspace",
+      "Selected runtime",
+      "Approval boundary",
+      "Durable record",
+    ]) {
+      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument()
+    }
+  })
+
   it("gives every claim a source that resolves somewhere", () => {
     render(<TrustPage locale="en" />)
     const table = screen.getByRole("table")

@@ -6,6 +6,7 @@ import type { Locale } from "@web/lib/locale"
 import { docsUrl } from "@web/lib/site"
 import { CapabilitySections } from "./capability-sections"
 import { PageHeader } from "./page-header"
+import { SystemFlow } from "./system-flow"
 
 /**
  * `/trust`.
@@ -31,6 +32,12 @@ export function TrustPage({ locale }: { locale: Locale }) {
       />
       <CapabilitySections
         sections={copy.trust.sections}
+        learnMore={copy.common.learnMore}
+        locale={locale}
+        docsOrigin={docsOrigin}
+      />
+      <SystemFlow
+        copy={copy.trust.flow}
         learnMore={copy.common.learnMore}
         locale={locale}
         docsOrigin={docsOrigin}

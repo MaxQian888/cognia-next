@@ -24,6 +24,14 @@ describe("WorkflowsPage", () => {
     }
   })
 
+  it("shows the full path from trigger to recorded run", () => {
+    render(<WorkflowsPage locale="en" />)
+    expect(screen.getByRole("heading", { name: "From event to evidence." })).toBeInTheDocument()
+    for (const title of ["Trigger", "Typed graph", "Controlled execution", "Run record"]) {
+      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument()
+    }
+  })
+
   it("puts the guarantees on the dark execution stage", () => {
     const { container } = render(<WorkflowsPage locale="en" />)
     const sections = [...container.querySelectorAll("section")]

@@ -50,6 +50,21 @@ describe("UseCasePage — development", () => {
     }
   })
 
+  it("shows the development systems behind the script", () => {
+    render(<UseCasePage locale="en" variant="development" />)
+    expect(
+      screen.getByRole("heading", { name: "Four systems keep the change reviewable." })
+    ).toBeInTheDocument()
+    for (const title of [
+      "Repository-aware context",
+      "Agent teams",
+      "Terminal evidence",
+      "Versioned artifacts",
+    ]) {
+      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument()
+    }
+  })
+
   it("routes the language switcher to the same use case", () => {
     render(<UseCasePage locale="en" variant="development" />)
     expect(screen.getAllByRole("link", { name: "中文" })[0]).toHaveAttribute(
@@ -72,6 +87,21 @@ describe("UseCasePage — research", () => {
     render(<UseCasePage locale="en" variant="research" />)
     for (const step of en.useCases.research.steps) {
       expect(screen.getByRole("heading", { name: step.title })).toBeInTheDocument()
+    }
+  })
+
+  it("shows the research systems behind the script", () => {
+    render(<UseCasePage locale="en" variant="research" />)
+    expect(
+      screen.getByRole("heading", { name: "From raw source to reusable knowledge." })
+    ).toBeInTheDocument()
+    for (const title of [
+      "Source-preserving capture",
+      "OCR and extraction",
+      "Searchable memory",
+      "Repeatable collection",
+    ]) {
+      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument()
     }
   })
 

@@ -756,6 +756,41 @@ export const zh: SiteCopy = {
         ],
       },
     ],
+    showcase: {
+      title: "可见工作台背后的系统。",
+      subtitle:
+        "对话只是入口。上下文、交互界面、外部会话与持久自动化，让工作在第一条回复之后继续向前。",
+      items: [
+        {
+          key: "context",
+          title: "上下文工作台",
+          body: "把项目文件、捕获资源、仓库说明与既有产物组合成任务真正可以使用的上下文，而不是默认塞进每一次提示词。",
+          detail: "文件 · 资源 · 仓库说明",
+          docsPath: "/docs/ui/context-workbench",
+        },
+        {
+          key: "surfaces",
+          title: "画布与交互应用",
+          body: "把模型输出变成可编辑产物、视觉画布与 A2UI 界面，状态和交互仍然留在任务记录中。",
+          detail: "Canvas · A2UI · 产物",
+          docsPath: "/docs/subsystems/a2ui",
+        },
+        {
+          key: "connections",
+          title: "连接后的收件箱",
+          body: "把 Slack、飞书、Discord、Telegram、Matrix 等适配器的会话带回同一个收件箱，并明确控制入站与出站策略。",
+          detail: "收件箱 · 适配器 · 分发规则",
+          docsPath: "/docs/subsystems/platform-connectors",
+        },
+        {
+          key: "automation",
+          title: "定时任务与持久目标",
+          body: "桌面应用最小化后仍可执行重复工作、保留运行历史，并让较长目标沿着可审阅的步骤持续推进。",
+          detail: "Scheduler · 目标 · 运行历史",
+          docsPath: "/docs/subsystems/scheduler",
+        },
+      ],
+    },
   },
 
   workflows: {
@@ -802,6 +837,36 @@ export const zh: SiteCopy = {
         ],
       },
     ],
+    flow: {
+      title: "从事件到证据。",
+      subtitle: "工作流不只是画布上的图。同一份类型化定义还承载触发方式、执行策略与可检查的结果。",
+      steps: [
+        {
+          key: "trigger",
+          label: "触发",
+          body: "手动、对话、定时、连接器或另一条工作流都能启动同一份定义，不必为入口复制流程。",
+          docsPath: "/docs/subsystems/visual-workflows/triggers-rust",
+        },
+        {
+          key: "graph",
+          label: "类型化图",
+          body: "节点声明输入与输出，让无效连接在运行前就可见，也让画布始终与保存的定义一致。",
+          docsPath: "/docs/subsystems/visual-workflows/data-model",
+        },
+        {
+          key: "execution",
+          label: "受控执行",
+          body: "运行时解析依赖、应用深度与环路限制，并让同一个执行上下文穿过所有可运行节点。",
+          docsPath: "/docs/subsystems/visual-workflows/runtime-execution",
+        },
+        {
+          key: "record",
+          label: "运行记录",
+          body: "输入、输出、耗时、错误与跳过的节点保留在同一条运行记录中，可在工作空间里检查与重试。",
+          docsPath: "/docs/subsystems/visual-workflows/ui-runs",
+        },
+      ],
+    },
     guarantees: {
       title: "执行器保证什么",
       items: [
@@ -876,6 +941,37 @@ export const zh: SiteCopy = {
         ],
       },
     ],
+    flow: {
+      title: "从已有能力到已安装扩展。",
+      subtitle:
+        "Skill、MCP server、CLI 或专门构建的 bundle，都可以进入同一套 manifest 生命周期，并且只暴露自己声明的部分。",
+      steps: [
+        {
+          key: "source",
+          label: "带来现有能力",
+          body: "从 SDK 开始，或适配已有 skill、MCP server 与 CLI。Impeccable 就沿这条路径成为可安装的设计审查 skill。",
+          docsPath: "/docs/subsystems/plugin-system/agent-sdk",
+        },
+        {
+          key: "contract",
+          label: "声明契约",
+          body: "manifest 写明激活事件、捆绑资源、贡献点，以及扩展可能请求的每一项 Cognia 能力。",
+          docsPath: "/docs/subsystems/plugin-system/contracts-and-registries",
+        },
+        {
+          key: "surfaces",
+          label: "贡献界面",
+          body: "通过宿主桥接注册 skills、工具、命令、面板、工作流节点、hooks 或 providers，无需修改应用本身。",
+          docsPath: "/docs/subsystems/plugin-system/bridges",
+        },
+        {
+          key: "package",
+          label: "打包并安装",
+          body: "构建带版本的压缩包、校验内容、本地安装，再由 Cognia 通过统一生命周期完成激活或移除。",
+          docsPath: "/docs/subsystems/plugin-system/packaging-and-lifecycle",
+        },
+      ],
+    },
     authoring: {
       title: "写一个",
       body: "插件 CLI 负责脚手架、构建与打包，并且可以把已有的 MCP server、skill 或 CLI 直接转成插件，不用写插件代码。",
@@ -944,6 +1040,37 @@ export const zh: SiteCopy = {
         ],
       },
     ],
+    flow: {
+      title: "一条任务会跨过几道明确边界。",
+      subtitle:
+        "真正有用的问题不是 AI 工作空间抽象地是否安全，而是数据住在哪里、什么会离开、哪个动作会等待、事后留下什么。",
+      steps: [
+        {
+          key: "local",
+          label: "本地工作空间",
+          body: "线程、设置、记忆、产物与项目状态都从桌面工作空间及其文档化的本地存储开始。",
+          docsPath: "/docs/data/storage",
+        },
+        {
+          key: "runtime",
+          label: "选定的运行时",
+          body: "只有一次调用需要的提示词与已附加上下文，才会发送到该任务所选择的本地或远程模型运行时。",
+          docsPath: "/docs/chat/provider-system",
+        },
+        {
+          key: "approval",
+          label: "审批边界",
+          body: "受门控的工具动作先说明自己的目标，并在改变外部状态之前停在边界处等待。",
+          docsPath: "/docs/subsystems/unified-agent-execution",
+        },
+        {
+          key: "record",
+          label: "持久记录",
+          body: "工具事件、Agent trace、错误与运行耗时都归属到任务，执行结束后仍可复查。",
+          docsPath: "/docs/subsystems/observability",
+        },
+      ],
+    },
     evidence: {
       title: "主张与来源",
       subtitle: "这张表里没有一行是手工维护的。每一行都指向该主张被读取的那件东西。",
@@ -985,6 +1112,41 @@ export const zh: SiteCopy = {
       title: "在你自己的机器上运行它。",
       subtitle: "Cognia 是一个桌面应用。当有版本发布时，下面的安装包来自公开源码的带签名构建。",
     },
+    showcase: {
+      title: "为什么工作台运行在你的机器上。",
+      subtitle:
+        "桌面外壳不是网页外面的一层包装。正是它让一条任务能够触及本地项目、原生服务、可迁移的数据与另一台经过认证的设备。",
+      items: [
+        {
+          key: "shell",
+          title: "原生桌面外壳",
+          body: "Tauri 宿主通过显式命令，把静态界面连接到负责文件、进程、自动化与平台集成的 Rust 服务。",
+          detail: "Tauri · Rust 服务 · 命令桥接",
+          docsPath: "/docs/core/runtime-and-tauri",
+        },
+        {
+          key: "project",
+          title: "就地使用项目工具",
+          body: "针对机器上已有的文件，直接使用集成终端、编辑器、源代码管理与项目说明。",
+          detail: "终端 · 编辑器 · 源代码管理",
+          docsPath: "/docs/subsystems/integrated-terminal",
+        },
+        {
+          key: "data",
+          title: "可迁移的本地数据",
+          body: "通过文档化的备份格式导出与还原会话、设置、记忆与产物，而不是被困在某个账号孤岛里。",
+          detail: "备份 · 还原 · 导出",
+          docsPath: "/docs/data/backup-and-data",
+        },
+        {
+          key: "companion",
+          title: "连接 Companion",
+          body: "通过同一套服务平面与显式连接控制，从经过认证的 Companion 设备访问正在运行的桌面工作空间。",
+          detail: "Companion · 认证 · 实时会话",
+          docsPath: "/docs/subsystems/companion-api",
+        },
+      ],
+    },
     buildFromSource: {
       title: "从源码构建",
       body: "桌面构建可以从仓库复现。发布流程走的就是这条路径。",
@@ -1019,6 +1181,40 @@ export const zh: SiteCopy = {
       stageAlt:
         "Cognia 工作台正在跑这条剧本：左边是承载任务的线程，右边的工作空间里是它产出的东西。",
       stageCaption: "同一个工作台，跑的就是本页这条剧本。",
+      showcase: {
+        title: "四套系统让改动始终可审阅。",
+        subtitle: "可见的剧本背后，是上下文选择、协同执行、本地验证，以及始终跟着仓库走的产物。",
+        items: [
+          {
+            key: "context",
+            title: "理解仓库的上下文",
+            body: "项目说明、选中的文件、diff 与捕获的参考资料组成显式上下文，Agent 动手前就能检查。",
+            detail: "说明 · 文件 · diff",
+            docsPath: "/docs/ui/context-workbench",
+          },
+          {
+            key: "teams",
+            title: "Agent 团队",
+            body: "把发布任务中边界明确的部分交给具名角色，lead 维护共享状态并综合最终结果。",
+            detail: "角色 · 委派 · 综合",
+            docsPath: "/docs/chat/agent-teams",
+          },
+          {
+            key: "terminal",
+            title: "终端证据",
+            body: "在本地运行仓库自己的检查，把命令输出留在它所验证的步骤与文件改动旁边。",
+            detail: "命令 · 输出 · 验证",
+            docsPath: "/docs/subsystems/integrated-terminal",
+          },
+          {
+            key: "artifacts",
+            title: "版本化产物",
+            body: "计划、发布说明、生成文件与 diff 在成为 commit 或导出物之前，都是可编辑的工作空间产物。",
+            detail: "计划 · 说明 · diff",
+            docsPath: "/docs/subsystems/artifacts-sandbox",
+          },
+        ],
+      },
       steps: [
         {
           rail: "上下文",
@@ -1095,6 +1291,41 @@ export const zh: SiteCopy = {
       stageAlt:
         "Cognia 工作台正在跑这条剧本：左边是承载任务的线程，右边的工作空间里是它产出的东西。",
       stageCaption: "同一个工作台，跑的就是本页这条剧本。",
+      showcase: {
+        title: "从原始资料到可复用知识。",
+        subtitle:
+          "Cognia 把原始材料、抽取结果、记忆与可重复的收集路径保持关联，而不是把它们压成一次回答。",
+        items: [
+          {
+            key: "capture",
+            title: "保留来源的捕获",
+            body: "把网页、文档与截图作为工作空间条目带进来，让来源始终留在派生文本与笔记旁边。",
+            detail: "来源 · 快照 · 可追溯性",
+            docsPath: "/docs/subsystems/knowledge-capture",
+          },
+          {
+            key: "ocr",
+            title: "OCR 与抽取",
+            body: "把图片与扫描页路由到本地或已配置的 OCR provider，并让识别文本继续关联原件。",
+            detail: "图片 · PDF · 识别文本",
+            docsPath: "/docs/subsystems/ocr",
+          },
+          {
+            key: "memory",
+            title: "可搜索记忆",
+            body: "把选中的发现提升为带来源的持久记忆，在后续任务真正相关时再检索出来。",
+            detail: "记忆 · 检索 · 来源",
+            docsPath: "/docs/subsystems/long-term-memory",
+          },
+          {
+            key: "repeat",
+            title: "可重复收集",
+            body: "把收集路径变成可视化工作流，设置定时运行，并检查每次结果，无需重搭研究步骤。",
+            detail: "工作流 · 定时 · 运行历史",
+            docsPath: "/docs/subsystems/visual-workflows",
+          },
+        ],
+      },
       steps: [
         {
           rail: "收集",

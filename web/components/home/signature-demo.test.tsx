@@ -171,23 +171,53 @@ describe("SignatureDemo when scroll-pinned", () => {
     window.matchMedia = originalMatchMedia
   })
 
-  it("gives the section travel to scroll through, one screen per step", () => {
+  it("keeps the pinned journey compact enough that each step does not strand a viewport", () => {
     const { container } = render(
       <SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />
     )
     const wrapper = container.querySelector<HTMLElement>("[style*='dvh']")
     expect(wrapper).toBeInTheDocument()
-    // 100dvh first step + 65dvh × (steps-1) subsequent steps
+    // 100dvh first step + 45dvh × (steps-1) subsequent steps
     const steps = en.home.signature.steps.length
-    const expectedDvh = 100 + (steps - 1) * 65 // 425 for 6 steps
+    const expectedDvh = 100 + (steps - 1) * 45 // 325 for 6 steps
     expect(wrapper?.style.height).toBe(`calc(${expectedDvh}dvh)`)
   })
 
-  it("does not stretch the dark product surface into an empty full-screen slab", () => {
+  it("lets the pinned stage follow its content instead of creating an empty slab", () => {
     const { container } = render(
       <SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />
     )
+    const stage = container.querySelector("#task [data-pinned-stage]")
+    expect(stage).not.toHaveClass("h-[min(46rem,calc(100dvh-5rem))]")
+    expect(stage).not.toHaveClass("h-[calc(100dvh-5rem)]")
     expect(container.querySelector("#task .bg-graphite")).not.toHaveClass("h-full")
+    expect(container.querySelector("#task .signature-stage")).toBeInTheDocument()
+  })
+
+  it("keeps the task summary with the controls instead of pinning it to the viewport floor", () => {
+    const { container } = render(
+      <SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />
+    )
+    const summary = container.querySelector("#task [data-pinned-task-summary]")
+    expect(summary).toHaveClass("mt-8")
+    expect(summary).not.toHaveClass("mt-auto")
+  })
+
+  it("does not mount cursor overlays inside the interactive artifact", () => {
+    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    expect(screen.queryByRole("region", { name: en.home.lensLabel })).toBeNull()
+  })
+
+  it("does not re-enable cursor overlays in the compact tall-screen layout", () => {
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia
+
+    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    expect(screen.queryByRole("region", { name: en.home.lensLabel })).toBeNull()
   })
 
   it("drops autoplay, because the reader is already driving", () => {
@@ -279,9 +309,7 @@ describe("SignatureDemo under reduced motion", () => {
       <SignatureDemo
         copy={en.home.signature}
         reconstruction={en.reconstruction}
-        lensLabel={en.home.lensLabel}
         fileTreeLabel={en.home.fileTreeLabel}
-        pointerLabel={en.reconstruction.workbench.agentLabel}
       />
     )
 

@@ -38,6 +38,21 @@ describe("DownloadPage with no published release", () => {
     }
   })
 
+  it("shows what the desktop shell adds beyond a browser tab", () => {
+    render(<DownloadPage locale="en" />)
+    expect(
+      screen.getByRole("heading", { name: "Why the workbench runs on your machine." })
+    ).toBeInTheDocument()
+    for (const title of [
+      "Native desktop shell",
+      "Project tools in place",
+      "Portable local data",
+      "Connected companion",
+    ]) {
+      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument()
+    }
+  })
+
   it("carries the page heading", () => {
     render(<DownloadPage locale="en" />)
     expect(

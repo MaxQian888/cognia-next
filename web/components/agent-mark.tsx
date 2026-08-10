@@ -25,10 +25,10 @@ interface AgentMarkProps {
 /**
  * A vendored brand mark for one interoperating agent.
  *
- * Drawn inline from extracted path data rather than loaded as an `<img>`,
+ * Drawn inline from extracted path data rather than loaded as an image element,
  * because the source marks are `fill="currentColor"` monochrome: inline they
  * inherit the surrounding token and stay legible in both the paper and the
- * graphite modes, where a bitmap or an `<img>`-loaded SVG would be stuck at one
+ * graphite modes, where a bitmap or an externally loaded SVG would be stuck at one
  * lightness and go invisible in the other.
  *
  * Always `aria-hidden`. The agent's name sits beside it as real text, so

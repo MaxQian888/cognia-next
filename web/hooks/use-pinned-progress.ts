@@ -5,6 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 /** Below this the section is never pinned. See {@link usePinnedProgress}. */
 export const PIN_MIN_WIDTH = 1024
 
+/** Above this height the full demo fits without scroll pinning. */
+export const PIN_MAX_HEIGHT = 900
+
 /**
  * How far the reader scrolls, in viewport heights, to advance one step.
  *
@@ -72,8 +75,8 @@ interface PinnedProgress {
   index: number
   /**
    * Whether pinning is live. `false` on the server, on the first client render,
-   * under reduced motion, and below {@link PIN_MIN_WIDTH} — so the caller can
-   * render its ordinary layout in every one of those cases.
+   * under reduced motion, and outside the desktop width/height window — so the
+   * caller can render its ordinary layout in every one of those cases.
    */
   pinned: boolean
   /** Scroll so `index` becomes the active step. Keeps the controls working. */
@@ -119,7 +122,9 @@ export function usePinnedProgress({ steps, enabled }: UsePinnedProgressOptions):
     if (!enabled) return
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
 
-    const query = window.matchMedia(`(min-width: ${PIN_MIN_WIDTH}px)`)
+    const query = window.matchMedia(
+      `(min-width: ${PIN_MIN_WIDTH}px) and (max-height: ${PIN_MAX_HEIGHT}px)`
+    )
     let frame = 0
 
     const measure = () => {

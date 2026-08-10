@@ -26,6 +26,16 @@ describe("ProductPage", () => {
     }
   })
 
+  it("shows the core systems behind the visible surfaces", () => {
+    render(<ProductPage locale="en" />)
+    expect(
+      screen.getByRole("heading", { level: 2, name: en.product.showcase.title })
+    ).toBeInTheDocument()
+    for (const item of en.product.showcase.items) {
+      expect(screen.getByRole("heading", { level: 3, name: item.title })).toBeInTheDocument()
+    }
+  })
+
   it("provides the anchors the navigation dropdown links to", () => {
     const { container } = render(<ProductPage locale="en" />)
     for (const item of en.nav.productMenu.items) {

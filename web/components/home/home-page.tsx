@@ -46,9 +46,7 @@ export function HomePage({ locale }: { locale: Locale }) {
       <SignatureDemo
         copy={copy.home.signature}
         reconstruction={copy.reconstruction}
-        lensLabel={copy.home.lensLabel}
         fileTreeLabel={copy.home.fileTreeLabel}
-        pointerLabel={copy.reconstruction.workbench.agentLabel}
       />
       <WorkbenchBento
         copy={copy.home.workbench}

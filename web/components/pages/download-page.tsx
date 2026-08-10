@@ -8,6 +8,7 @@ import { format, getCopy } from "@web/content"
 import { type Platform, formatDate, releaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
 import { RELEASES_URL, docsUrl } from "@web/lib/site"
+import { FeatureShowcase } from "./feature-showcase"
 import { PageHeader } from "./page-header"
 
 /**
@@ -21,6 +22,7 @@ import { PageHeader } from "./page-header"
  */
 export function DownloadPage({ locale }: { locale: Locale }) {
   const copy = getCopy(locale)
+  const docsOrigin = docsUrl()
   const state = releaseState(evidence, RELEASES_URL)
   const platforms: Array<{ key: Platform; label: string }> = [
     { key: "macos", label: copy.common.download.platformMacos },
@@ -34,11 +36,11 @@ export function DownloadPage({ locale }: { locale: Locale }) {
         copy={copy.download.header}
         common={copy.common}
         locale={locale}
-        docsOrigin={docsUrl()}
+        docsOrigin={docsOrigin}
       />
 
       <Section tone="paper">
-        <DownloadCta locale={locale} copy={copy.common} state={state} docsOrigin={docsUrl()} />
+        <DownloadCta locale={locale} copy={copy.common} state={state} docsOrigin={docsOrigin} />
 
         <div className="mt-6">
           <PlatformHint common={copy.common} copy={copy.download.platformHint} />
@@ -85,6 +87,13 @@ export function DownloadPage({ locale }: { locale: Locale }) {
           </div>
         ) : null}
       </Section>
+
+      <FeatureShowcase
+        copy={copy.download.showcase}
+        learnMore={copy.common.learnMore}
+        locale={locale}
+        docsOrigin={docsOrigin}
+      />
 
       <Section tone="surface">
         <SectionHeading

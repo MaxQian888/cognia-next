@@ -76,6 +76,11 @@ describe("Reveal", () => {
     expect(motionProps[0].animate).toBeUndefined()
   })
 
+  it("marks animated blocks for the CSS reduced-motion safety net", () => {
+    render(<Reveal>content</Reveal>)
+    expect(motionProps[0]["data-reveal"]).toBe("")
+  })
+
   it("still skips animation entirely under reduced motion when mounted", () => {
     reduced = true
     render(

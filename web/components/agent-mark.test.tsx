@@ -6,8 +6,8 @@ const KNOWN = Object.keys(manifest.icons)
 
 describe("AgentMark", () => {
   it("draws a vendored mark inline so it inherits the surrounding token", () => {
-    // Inline, not <img>: the source marks are currentColor monochrome, and an
-    // <img> would be stuck at one lightness and vanish in the other mode.
+    // Inline, not an image element: the source marks are currentColor
+    // monochrome, and an external image would be stuck at one lightness.
     const { container } = render(<AgentMark id={KNOWN[0]} />)
     const svg = container.querySelector("svg")
     expect(svg).toBeInTheDocument()

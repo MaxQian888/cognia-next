@@ -74,6 +74,16 @@
   --destructive: #f2837c;
 }
 
+/* The signature reconstruction follows the selected site theme. Its child
+ * artifacts use the execution-stage token vocabulary, so this local semantic
+ * remap keeps every nested row, label and border coherent in all three modes. */
+.signature-stage {
+  --graphite: var(--paper);
+  --on-stage: var(--ink);
+  --on-stage-muted: var(--muted);
+  --on-stage-hairline: var(--hairline);
+}
+
 @theme inline {
   --color-paper: var(--paper);
   --color-surface: var(--surface);
@@ -151,6 +161,15 @@
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
+    }
+
+    /* Motion's client hook can hydrate after the server has already emitted
+     * an initial hidden state. Keep reduced-motion content visible even in
+     * that handoff window; these attributes only mark reveal primitives. */
+    [data-reveal],
+    [data-reveal-item] {
+      opacity: 1 !important;
+      transform: none !important;
     }
   }
 

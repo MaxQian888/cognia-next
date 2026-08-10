@@ -57,7 +57,7 @@ export function ProductStage({
     return (
       <figure className={className}>
         <div className={`overflow-hidden rounded-stage border ${frame}`}>
-          {/* Raw <img> on purpose: `next.config.ts` sets `images.unoptimized`
+          {/* Raw image elements on purpose: `next.config.ts` sets `images.unoptimized`
            * because a static export has no image optimiser, so `next/image`
            * would add a wrapper and a client component for no benefit. Both
            * sources are pre-encoded PNG at their final size. */}

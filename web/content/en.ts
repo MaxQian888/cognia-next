@@ -796,6 +796,41 @@ export const en: SiteCopy = {
         ],
       },
     ],
+    showcase: {
+      title: "The systems behind the visible workbench.",
+      subtitle:
+        "Chat is only the entry point. Context, interactive surfaces, connected conversations, and durable automation keep the work moving after the first reply.",
+      items: [
+        {
+          key: "context",
+          title: "Context workbench",
+          body: "Assemble project files, captured resources, instructions, and prior artifacts into the exact context a task may use, without expanding every prompt by default.",
+          detail: "Files · resources · instructions",
+          docsPath: "/docs/ui/context-workbench",
+        },
+        {
+          key: "surfaces",
+          title: "Canvas and interactive apps",
+          body: "Turn model output into editable artifacts, visual canvases, and A2UI interfaces whose state and interactions remain part of the task record.",
+          detail: "Canvas · A2UI · artifacts",
+          docsPath: "/docs/subsystems/a2ui",
+        },
+        {
+          key: "connections",
+          title: "Connected inbox",
+          body: "Bring Slack, Lark, Discord, Telegram, Matrix, and other adapter conversations into one inbox with explicit inbound and outbound policies.",
+          detail: "Inbox · adapters · dispatch rules",
+          docsPath: "/docs/subsystems/platform-connectors",
+        },
+        {
+          key: "automation",
+          title: "Schedules and durable goals",
+          body: "Run recurring work while the desktop app is minimized, retain its history, and let longer objectives continue through reviewable steps.",
+          detail: "Scheduler · goals · run history",
+          docsPath: "/docs/subsystems/scheduler",
+        },
+      ],
+    },
   },
 
   workflows: {
@@ -843,6 +878,37 @@ export const en: SiteCopy = {
         ],
       },
     ],
+    flow: {
+      title: "From event to evidence.",
+      subtitle:
+        "A workflow is more than the graph on the canvas. The same typed definition carries its trigger, execution policy, and inspectable result.",
+      steps: [
+        {
+          key: "trigger",
+          label: "Trigger",
+          body: "Start manually, from chat, on a schedule, through a connector, or from another workflow without changing the definition.",
+          docsPath: "/docs/subsystems/visual-workflows/triggers-rust",
+        },
+        {
+          key: "graph",
+          label: "Typed graph",
+          body: "Declared node inputs and outputs make invalid edges visible before a run begins and keep the canvas aligned with the saved definition.",
+          docsPath: "/docs/subsystems/visual-workflows/data-model",
+        },
+        {
+          key: "execution",
+          label: "Controlled execution",
+          body: "The runtime resolves dependencies, applies depth and cycle limits, and carries one execution context through every eligible node.",
+          docsPath: "/docs/subsystems/visual-workflows/runtime-execution",
+        },
+        {
+          key: "record",
+          label: "Run record",
+          body: "Inputs, outputs, timing, errors, and skipped nodes remain available as one run you can inspect and retry from the workspace.",
+          docsPath: "/docs/subsystems/visual-workflows/ui-runs",
+        },
+      ],
+    },
     guarantees: {
       title: "What the runner guarantees",
       items: [
@@ -917,6 +983,37 @@ export const en: SiteCopy = {
         ],
       },
     ],
+    flow: {
+      title: "From existing capability to installed extension.",
+      subtitle:
+        "A skill, MCP server, CLI, or purpose-built bundle can enter through the same manifest-driven lifecycle and surface only what it declares.",
+      steps: [
+        {
+          key: "source",
+          label: "Bring the source",
+          body: "Start from the SDK or adapt an existing skill, MCP server, or CLI. Impeccable follows this path as an installable design-review skill.",
+          docsPath: "/docs/subsystems/plugin-system/agent-sdk",
+        },
+        {
+          key: "contract",
+          label: "Declare the contract",
+          body: "The manifest names activation events, bundled resources, contribution points, and every Cognia capability the extension may request.",
+          docsPath: "/docs/subsystems/plugin-system/contracts-and-registries",
+        },
+        {
+          key: "surfaces",
+          label: "Contribute surfaces",
+          body: "Register skills, tools, commands, panels, workflow nodes, hooks, or providers through the host bridges instead of patching the application.",
+          docsPath: "/docs/subsystems/plugin-system/bridges",
+        },
+        {
+          key: "package",
+          label: "Package and install",
+          body: "Build a versioned archive, validate its contents, install it locally, and let Cognia activate or remove it through one lifecycle.",
+          docsPath: "/docs/subsystems/plugin-system/packaging-and-lifecycle",
+        },
+      ],
+    },
     authoring: {
       title: "Writing one",
       body: "The plugin CLI scaffolds, builds and packages a plugin, and can convert an existing MCP server, skill or CLI into one without writing plugin code.",
@@ -985,6 +1082,37 @@ export const en: SiteCopy = {
         ],
       },
     ],
+    flow: {
+      title: "A task crosses named boundaries.",
+      subtitle:
+        "The useful question is not whether an AI workspace is abstractly safe. It is where data lives, what leaves, which action waits, and what remains to inspect.",
+      steps: [
+        {
+          key: "local",
+          label: "Local workspace",
+          body: "Threads, settings, memory, artifacts, and project state begin in the desktop workspace and its documented local stores.",
+          docsPath: "/docs/data/storage",
+        },
+        {
+          key: "runtime",
+          label: "Selected runtime",
+          body: "Only the prompt and attached context needed for a call go to the local or remote model runtime selected for that task.",
+          docsPath: "/docs/chat/provider-system",
+        },
+        {
+          key: "approval",
+          label: "Approval boundary",
+          body: "A gated tool action describes its target and waits at the boundary before it changes external state.",
+          docsPath: "/docs/subsystems/unified-agent-execution",
+        },
+        {
+          key: "record",
+          label: "Durable record",
+          body: "Tool events, agent traces, errors, and run timing stay attributable to the task so behavior can be reviewed after execution.",
+          docsPath: "/docs/subsystems/observability",
+        },
+      ],
+    },
     evidence: {
       title: "Claim and source",
       subtitle:
@@ -1028,6 +1156,41 @@ export const en: SiteCopy = {
       subtitle:
         "Cognia is a desktop application. When a release is published, the installers below come from a signed build of the public source.",
     },
+    showcase: {
+      title: "Why the workbench runs on your machine.",
+      subtitle:
+        "The desktop shell is not packaging around a web page. It is what lets one task reach local projects, native services, portable data, and another authenticated device.",
+      items: [
+        {
+          key: "shell",
+          title: "Native desktop shell",
+          body: "A Tauri host connects the static interface to Rust services for files, processes, automation, and platform integration through explicit commands.",
+          detail: "Tauri · Rust services · command bridge",
+          docsPath: "/docs/core/runtime-and-tauri",
+        },
+        {
+          key: "project",
+          title: "Project tools in place",
+          body: "Use the integrated terminal, editor, source control, and project instructions against the files already on your machine.",
+          detail: "Terminal · editor · source control",
+          docsPath: "/docs/subsystems/integrated-terminal",
+        },
+        {
+          key: "data",
+          title: "Portable local data",
+          body: "Export and restore conversations, settings, memory, and artifacts through a documented backup format instead of depending on an account silo.",
+          detail: "Backup · restore · export",
+          docsPath: "/docs/data/backup-and-data",
+        },
+        {
+          key: "companion",
+          title: "Connected companion",
+          body: "Reach the running desktop workspace from an authenticated companion device through the same service plane and explicit connection controls.",
+          detail: "Companion · authentication · live session",
+          docsPath: "/docs/subsystems/companion-api",
+        },
+      ],
+    },
     buildFromSource: {
       title: "Build from source",
       body: "The desktop build is reproducible from the repository. This is the same path the release workflow takes.",
@@ -1066,6 +1229,41 @@ export const en: SiteCopy = {
       stageAlt:
         "The Cognia workbench running this script: the thread that carries the task on the left, and the workspace holding what it produced on the right.",
       stageCaption: "The same workbench, running the script on this page.",
+      showcase: {
+        title: "Four systems keep the change reviewable.",
+        subtitle:
+          "The visible script is backed by context selection, coordinated execution, local verification, and artifacts that stay with the repository.",
+        items: [
+          {
+            key: "context",
+            title: "Repository-aware context",
+            body: "Project instructions, selected files, diffs, and captured references become an explicit context set the agent can inspect before acting.",
+            detail: "Instructions · files · diff",
+            docsPath: "/docs/ui/context-workbench",
+          },
+          {
+            key: "teams",
+            title: "Agent teams",
+            body: "Delegate bounded parts of a release task to named roles while a lead keeps shared state and synthesizes the result.",
+            detail: "Roles · delegation · synthesis",
+            docsPath: "/docs/chat/agent-teams",
+          },
+          {
+            key: "terminal",
+            title: "Terminal evidence",
+            body: "Run the repository's own checks locally and retain command output beside the step and file change it verifies.",
+            detail: "Commands · output · verification",
+            docsPath: "/docs/subsystems/integrated-terminal",
+          },
+          {
+            key: "artifacts",
+            title: "Versioned artifacts",
+            body: "Plans, launch notes, generated files, and diffs remain editable workspace artifacts before they become commits or exports.",
+            detail: "Plans · notes · diffs",
+            docsPath: "/docs/subsystems/artifacts-sandbox",
+          },
+        ],
+      },
       steps: [
         {
           rail: "Context",
@@ -1143,6 +1341,41 @@ export const en: SiteCopy = {
       stageAlt:
         "The Cognia workbench running this script: the thread that carries the task on the left, and the workspace holding what it produced on the right.",
       stageCaption: "The same workbench, running the script on this page.",
+      showcase: {
+        title: "From raw source to reusable knowledge.",
+        subtitle:
+          "Cognia keeps the original material, the extraction, the memory, and the repeatable collection path connected instead of collapsing them into one answer.",
+        items: [
+          {
+            key: "capture",
+            title: "Source-preserving capture",
+            body: "Bring in pages, documents, and screenshots as workspace items while retaining the origin next to derived text and notes.",
+            detail: "Source · snapshot · provenance",
+            docsPath: "/docs/subsystems/knowledge-capture",
+          },
+          {
+            key: "ocr",
+            title: "OCR and extraction",
+            body: "Route images and scanned pages through local or configured OCR providers and keep recognized text attached to its source.",
+            detail: "Images · PDFs · recognized text",
+            docsPath: "/docs/subsystems/ocr",
+          },
+          {
+            key: "memory",
+            title: "Searchable memory",
+            body: "Promote selected findings into durable memory with provenance, then retrieve them when a later task makes them relevant.",
+            detail: "Memory · retrieval · provenance",
+            docsPath: "/docs/subsystems/long-term-memory",
+          },
+          {
+            key: "repeat",
+            title: "Repeatable collection",
+            body: "Turn the collection path into a visual workflow, schedule it, and inspect each run without rebuilding the research procedure.",
+            detail: "Workflow · schedule · run history",
+            docsPath: "/docs/subsystems/visual-workflows",
+          },
+        ],
+      },
       steps: [
         {
           rail: "Collect",
