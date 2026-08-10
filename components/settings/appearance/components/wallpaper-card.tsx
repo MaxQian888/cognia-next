@@ -62,13 +62,14 @@ export function WallpaperCard({
 
   return (
     <div className="group relative">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={onActivate}
         aria-label={ariaLabel ?? wallpaper.name}
         aria-pressed={active}
         className={cn(
-          "relative aspect-video w-full overflow-hidden rounded-lg border-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "relative h-auto aspect-video w-full overflow-hidden rounded-lg border-2 p-0 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           active ? "border-primary" : "border-transparent hover:border-border"
         )}
       >
@@ -92,7 +93,7 @@ export function WallpaperCard({
             <CheckIcon className="size-3" />
           </span>
         )}
-      </button>
+      </Button>
       <div className="mt-1 flex items-center justify-between gap-1 text-[11px]">
         <span className="truncate text-muted-foreground" title={wallpaper.name}>
           {wallpaper.name}

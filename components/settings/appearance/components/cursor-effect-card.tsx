@@ -14,6 +14,7 @@
 import { useTranslations } from "next-intl"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { SettingSliderRow } from "@/components/settings/appearance/components/setting-slider-row"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -61,18 +62,20 @@ export function CursorEffectCard({ effect, onChange }: CursorEffectCardProps) {
           data-testid="cursor-effect-kinds"
         >
           {CURSOR_EFFECT_KINDS.map((kind) => (
-            <button
+            <Button
               key={kind}
               type="button"
+              variant="outline"
+              size="sm"
               aria-pressed={effect.kind === kind}
               onClick={() => patch({ kind: kind as CursorEffectKind })}
               className={cn(
-                "rounded-md border px-2 py-2 text-[11px] transition-colors",
+                "h-auto px-2 py-2 text-[11px] font-normal",
                 effect.kind === kind ? "border-primary bg-primary/5" : "hover:bg-accent/40"
               )}
             >
               {t(`kinds.${kind}`)}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

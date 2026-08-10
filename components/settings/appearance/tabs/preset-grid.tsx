@@ -116,9 +116,10 @@ export function PresetGrid({
               active && "border-primary bg-primary/5"
             )}
           >
-            <button
+            <Button
               type="button"
-              className="flex w-full flex-col gap-1 text-left focus-visible:outline-none"
+              variant="ghost"
+              className="h-auto w-full flex-col items-start gap-1 whitespace-normal p-0 text-left font-normal hover:bg-transparent"
               onClick={() => onSelect(item)}
               aria-pressed={active}
             >
@@ -151,7 +152,7 @@ export function PresetGrid({
                   {sourceLabel}
                 </Badge>
               </div>
-            </button>
+            </Button>
 
             <div className="absolute right-1 top-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
               <DropdownMenu>

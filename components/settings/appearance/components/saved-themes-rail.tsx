@@ -111,10 +111,11 @@ function ThemeItem({
       data-active={active || undefined}
       data-editing={editing || undefined}
     >
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={onSelect}
-        className="flex flex-1 min-w-0 items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+        className="h-auto min-w-0 flex-1 justify-start gap-2 whitespace-normal rounded p-0 text-left font-normal hover:bg-transparent"
         aria-pressed={editing}
       >
         <span
@@ -135,7 +136,7 @@ function ThemeItem({
             data-testid={`saved-theme-${theme.id}-active`}
           />
         )}
-      </button>
+      </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button

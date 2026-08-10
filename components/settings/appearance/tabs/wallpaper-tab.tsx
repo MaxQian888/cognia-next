@@ -401,9 +401,11 @@ export function WallpaperTab() {
             {SCOPE_CARDS.map((card) => {
               const active = background.scope === card.scope
               return (
-                <button
+                <Button
                   key={card.scope}
                   type="button"
+                  variant="outline"
+                  size="sm"
                   role="radio"
                   aria-checked={active}
                   aria-label={t(card.labelKey)}
@@ -423,7 +425,7 @@ export function WallpaperTab() {
                 >
                   <ScopeMockup highlight={card.highlight} className="h-4 w-7 shrink-0" />
                   {t(card.labelKey)}
-                </button>
+                </Button>
               )
             })}
           </div>
@@ -538,19 +540,20 @@ function AddTile({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="ghost"
           aria-label={ariaLabel}
           data-testid={testId}
           className={cn(
-            "flex aspect-video flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed",
+            "h-auto aspect-video flex-col items-center justify-center gap-1 whitespace-normal rounded-lg border-2 border-dashed",
             "text-muted-foreground transition hover:border-primary hover:text-foreground",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           )}
         >
           {icon}
           <span className="text-[11px]">{label}</span>
-        </button>
+        </Button>
       </PopoverTrigger>
       <PopoverContent className="w-80">{children}</PopoverContent>
     </Popover>

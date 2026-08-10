@@ -13,6 +13,7 @@
 
 import { CheckIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { Button } from "@/components/ui/button"
 import { CURSOR_PACK_FAMILIES, packsInFamily } from "@/lib/appearance/cursor/cursor-packs"
 import { buildCursorSvg } from "@/lib/appearance/cursor/cursor-art"
 import {
@@ -66,12 +67,13 @@ function PackCard({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={onSelect}
       aria-pressed={selected}
       className={cn(
-        "group relative flex flex-col items-center gap-1.5 rounded-md border p-3 transition-colors",
+        "group relative h-auto flex-col items-center gap-1.5 whitespace-normal rounded-md p-3 font-normal",
         selected ? "border-primary bg-primary/5" : "hover:bg-accent/40"
       )}
     >
@@ -84,7 +86,7 @@ function PackCard({
           data-testid="pack-selected"
         />
       ) : null}
-    </button>
+    </Button>
   )
 }
 
