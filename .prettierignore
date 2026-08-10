@@ -36,6 +36,9 @@ crates/cognia-cli/assets/host-command-catalog.json
 # desyncs the committed bundle from `i18n:build:check`; the codegen owns format.
 i18n/messages/en.json
 i18n/messages/zh-CN.json
+# The Support Agent corpus is compact generator output verified byte-for-byte
+# by `pnpm support:docs:check`; preserve the generator-owned representation.
+lib/support-agent/support-docs.generated.json
 # Helm chart templates — Go templating (`{{- include ... }}`) is not valid
 # YAML, so Prettier's YAML parser rejects the file outright. Helm owns them.
 services/diagnostic-server/deploy/helm/cognia-diagnostics/templates
