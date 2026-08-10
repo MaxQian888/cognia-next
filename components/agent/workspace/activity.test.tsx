@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { AgentTeamActivity } from "./activity"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { buildReport, buildTeam } from "@/lib/storybook/fixtures/agent-team"
@@ -42,6 +42,7 @@ describe("AgentTeamActivity", () => {
       </TooltipProvider>
     )
     expect(screen.getByTestId("activity-report")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "checkpoints.toggle" }))
     expect(screen.getByTestId("activity-report-timeline")).toBeInTheDocument()
   })
 
@@ -145,6 +146,7 @@ describe("AgentTeamActivity", () => {
         <AgentTeamActivity events={[]} report={report} />
       </TooltipProvider>
     )
+    fireEvent.click(screen.getByRole("button", { name: "checkpoints.toggle" }))
     expect(screen.getByTestId("activity-report-timeline").textContent).toContain("emptyCheckpoints")
   })
 })

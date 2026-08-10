@@ -212,10 +212,11 @@ function ScratchpadPanel({ teamSessionId }: { teamSessionId: string }) {
 
   return (
     <div className="border-y bg-muted/10">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setCollapsed(teamSessionId, !collapsed)}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+        className="h-auto w-full justify-start rounded-none px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:bg-transparent hover:text-foreground"
         aria-expanded={!collapsed}
       >
         {collapsed ? (
@@ -228,7 +229,7 @@ function ScratchpadPanel({ teamSessionId }: { teamSessionId: string }) {
         <span className="ml-auto font-normal normal-case text-muted-foreground">
           {draft.length > 0 ? t("charsCount", { count: draft.length }) : ""}
         </span>
-      </button>
+      </Button>
       {!collapsed && (
         <div className="px-3 pb-2">
           <Textarea
@@ -267,10 +268,11 @@ function MemberRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <li className="rounded-md hover:bg-accent">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={onMention}
-            className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm"
+            className="h-auto w-full justify-start gap-2 px-2 py-1.5 text-left text-sm font-normal"
             title={t("mentionTitle", { name: character.name })}
           >
             <AvatarBadge
@@ -292,7 +294,7 @@ function MemberRow({
             <span className="min-w-0 flex-1 truncate" style={{ color: avatarColor(character) }}>
               {character.name}
             </span>
-          </button>
+          </Button>
         </li>
       </ContextMenuTrigger>
       <ContextMenuContent>

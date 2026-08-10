@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { DEFAULT_PET_SOUND, type PetSoundSettings, type PetSettings } from "@/types/pet"
 import type { PetControlsProps } from "./pet-appearance-controls"
 
@@ -69,37 +70,37 @@ export function PetSoundControls({ pet, patch }: PetControlsProps) {
                 <Label htmlFor="pet-quiet-start" className="text-xs text-muted-foreground">
                   {t("sound.quietHours.start")}
                 </Label>
-                <select
+                <NativeSelect
                   id="pet-quiet-start"
-                  className="rounded-md border bg-background px-2 py-1 text-sm"
+                  size="sm"
                   value={quiet.start}
                   onChange={(e) =>
                     patchSound({ quietHours: { ...quiet, start: Number(e.target.value) } })
                   }
                 >
                   {HOURS.map((h) => (
-                    <option key={h} value={h}>
+                    <NativeSelectOption key={h} value={h}>
                       {fmtHour(h)}
-                    </option>
+                    </NativeSelectOption>
                   ))}
-                </select>
+                </NativeSelect>
                 <Label htmlFor="pet-quiet-end" className="text-xs text-muted-foreground">
                   {t("sound.quietHours.end")}
                 </Label>
-                <select
+                <NativeSelect
                   id="pet-quiet-end"
-                  className="rounded-md border bg-background px-2 py-1 text-sm"
+                  size="sm"
                   value={quiet.end}
                   onChange={(e) =>
                     patchSound({ quietHours: { ...quiet, end: Number(e.target.value) } })
                   }
                 >
                   {HOURS.map((h) => (
-                    <option key={h} value={h}>
+                    <NativeSelectOption key={h} value={h}>
                       {fmtHour(h)}
-                    </option>
+                    </NativeSelectOption>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
             )}
           </div>

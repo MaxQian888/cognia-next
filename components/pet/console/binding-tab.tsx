@@ -11,6 +11,7 @@ import { listPetModels } from "@/lib/db/pet-models"
 import { listPetSpritePacks } from "@/lib/db/pet-sprite-packs"
 import { ALL_PET_SPECIES } from "@/lib/pet/skins/species-traits"
 import { Button } from "@/components/ui/button"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { PetCharacterBinding, PetSkinSelection, PetSpecies } from "@/types/pet"
 
 function selectionValue(binding: PetCharacterBinding | undefined): string {
@@ -69,22 +70,24 @@ export function BindingTab() {
             className="flex flex-wrap items-center gap-2 rounded-lg border p-2"
           >
             <span className="min-w-32 flex-1 truncate text-sm">{c.name}</span>
-            <select
+            <NativeSelect
               aria-label={t("binding.speciesFor", { name: c.name })}
-              className="rounded-md border bg-background px-2 py-1 text-sm"
+              size="sm"
               value={binding?.species ?? ""}
               onChange={(e) => save(c.id, { species: (e.target.value || undefined) as PetSpecies })}
             >
-              <option value="">{t("binding.useGlobal")}</option>
+              <NativeSelectOption value="">{t("binding.useGlobal")}</NativeSelectOption>
               {ALL_PET_SPECIES.map((s) => (
-                <option key={s} value={s}>
+                <NativeSelectOption key={s} value={s}>
                   {t(`species.${s}`)}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
-            <select
+            </NativeSelect>
+            <NativeSelect
               aria-label={t("binding.skinFor", { name: c.name })}
-              className="max-w-52 rounded-md border bg-background px-2 py-1 text-sm"
+              size="sm"
+              wrapperClassName="max-w-52"
+              className="max-w-52"
               value={selectionValue(binding)}
               onChange={(event) =>
                 save(c.id, {
@@ -93,19 +96,19 @@ export function BindingTab() {
                 })
               }
             >
-              <option value="">{t("binding.inheritAppearance")}</option>
-              <option value="svg">{t("binding.useSvg")}</option>
+              <NativeSelectOption value="">{t("binding.inheritAppearance")}</NativeSelectOption>
+              <NativeSelectOption value="svg">{t("binding.useSvg")}</NativeSelectOption>
               {models.map((model) => (
-                <option key={model.id} value={`live2d:${model.id}`}>
+                <NativeSelectOption key={model.id} value={`live2d:${model.id}`}>
                   {t("binding.live2dOption", { name: model.name })}
-                </option>
+                </NativeSelectOption>
               ))}
               {packs.map((pack) => (
-                <option key={pack.id} value={`sprite-v2:${pack.id}`}>
+                <NativeSelectOption key={pack.id} value={`sprite-v2:${pack.id}`}>
                   {t("binding.spriteOption", { name: pack.displayName })}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
             {binding && (
               <Button size="sm" variant="ghost" onClick={() => void deletePetBinding(c.id)}>
                 {t("binding.clear")}

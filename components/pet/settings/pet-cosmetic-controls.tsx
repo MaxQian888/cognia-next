@@ -15,6 +15,7 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { cn } from "@/lib/utils"
 import { usePet } from "@/hooks/pet/use-pet"
 import { listPetInventory, patchPetProfile } from "@/lib/db/pet"
@@ -95,29 +96,33 @@ export function PetCosmeticControls({ skinId }: PetCosmeticControlsProps) {
         <div className="space-y-2">
           <Label>{t("palette")}</Label>
           <div className="flex flex-wrap gap-2" role="group" aria-label={t("palette")}>
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="icon-sm"
               aria-label={t("default")}
               aria-pressed={!cosmetic.palette}
               onClick={() => set({ palette: undefined })}
               className={cn(
-                "size-8 rounded-full border-2 bg-background text-xs text-muted-foreground",
+                "size-8 rounded-full border-2 text-xs text-muted-foreground",
                 !cosmetic.palette ? "border-primary" : "border-transparent"
               )}
             >
               ✕
-            </button>
+            </Button>
             {PALETTE_PRESETS.map((p) => (
-              <button
+              <Button
                 key={p.id}
                 type="button"
+                variant="outline"
+                size="icon-sm"
                 aria-label={t(`paletteOptions.${p.id}`)}
                 aria-pressed={activePalette === p.id}
                 data-palette={p.id}
                 onClick={() => set({ palette: p.palette })}
                 style={{ background: p.palette.primary }}
                 className={cn(
-                  "size-8 rounded-full border-2",
+                  "size-8 rounded-full border-2 p-0",
                   activePalette === p.id ? "border-primary" : "border-transparent"
                 )}
               />
@@ -192,19 +197,14 @@ function CosmeticSelect({
   return (
     <div className="flex items-center justify-between gap-4">
       <Label htmlFor={id}>{label}</Label>
-      <select
-        id={id}
-        className="rounded-md border bg-background px-2 py-1 text-sm"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">{defaultLabel}</option>
+      <NativeSelect id={id} size="sm" value={value} onChange={(e) => onChange(e.target.value)}>
+        <NativeSelectOption value="">{defaultLabel}</NativeSelectOption>
         {options.map((o) => (
-          <option key={o.value} value={o.value} disabled={o.disabled}>
+          <NativeSelectOption key={o.value} value={o.value} disabled={o.disabled}>
             {o.label}
-          </option>
+          </NativeSelectOption>
         ))}
-      </select>
+      </NativeSelect>
     </div>
   )
 }

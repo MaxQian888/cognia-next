@@ -43,4 +43,20 @@ describe("RecentTracesPanel", () => {
     fireEvent.click(screen.getByTestId("trace-row-t1"))
     expect(onSelect).toHaveBeenCalledWith("t1")
   })
+
+  it("supports keyboard selection without reacting to unrelated keys", () => {
+    const onSelect = jest.fn()
+    render(
+      <RecentTracesPanel panel={panelById("traces")!} traces={[trace()]} onSelectTrace={onSelect} />
+    )
+    const row = screen.getByTestId("trace-row-t1")
+
+    fireEvent.keyDown(row, { key: "ArrowDown" })
+    expect(onSelect).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(row, { key: "Enter" })
+    fireEvent.keyDown(row, { key: " " })
+    expect(onSelect).toHaveBeenNthCalledWith(1, "t1")
+    expect(onSelect).toHaveBeenNthCalledWith(2, "t1")
+  })
 })

@@ -3,12 +3,14 @@
 import { useTranslations } from "next-intl"
 import { motion } from "motion/react"
 import { STAGGER_CHILD, STAGGER_CONTAINER, useReducedMotionVariants } from "@/lib/ui/motion"
-import { ActivityIcon, HistoryIcon } from "lucide-react"
+import { ActivityIcon, ChevronDownIcon, HistoryIcon } from "lucide-react"
 
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { StatusBadge } from "@/components/status-badge"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import type {
   AgentTeam,
   AgentTeamEvent,
@@ -111,14 +113,17 @@ export function AgentTeamActivity({
           <ReportTaskline report={report} teammates={teammates} />
           <ReportTokenBurn report={report} />
           {team ? <ReportPluginSlot report={report} team={team} /> : null}
-          <details className="rounded-md border px-3 py-2">
-            <summary className="cursor-pointer text-xs font-medium">
-              {tReport("checkpoints.toggle")}
-            </summary>
-            <div className="pt-2">
+          <Collapsible className="group/collapsible rounded-md border px-3 py-2">
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" className="h-auto w-full justify-between px-0 py-1 text-xs">
+                {tReport("checkpoints.toggle")}
+                <ChevronDownIcon className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
               <ReportTimeline report={report} />
-            </div>
-          </details>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
       ) : null}
       {liveRows.length > 0 ? (

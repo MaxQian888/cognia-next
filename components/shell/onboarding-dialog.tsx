@@ -425,11 +425,12 @@ function ProviderCard({
   onClick,
 }: ProviderCardProps) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={onClick}
       data-testid={`onboarding-provider-${providerKey}`}
-      className="flex h-full flex-col gap-1 rounded-md border p-3 text-left transition-all motion-safe:hover:-translate-y-0.5 hover:border-primary/30 hover:bg-accent hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="h-full w-full flex-col items-stretch justify-start gap-1 whitespace-normal p-3 text-left font-normal motion-safe:hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md"
     >
       <div className="flex items-center gap-2">
         {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
@@ -437,7 +438,7 @@ function ProviderCard({
       </div>
       <p className="line-clamp-2 text-[11px] text-muted-foreground">{description}</p>
       <span className="mt-1 text-[11px] font-medium text-primary">{cta} →</span>
-    </button>
+    </Button>
   )
 }
 
@@ -470,10 +471,11 @@ function CharacterStep({
       >
         {characters.map((c) => (
           <motion.div key={c.id} variants={STAGGER_CHILD}>
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={() => onPick(c)}
-              className="flex h-full w-full items-start gap-2 rounded-md border p-2 text-left text-sm transition-all motion-safe:hover:-translate-y-0.5 hover:border-primary/30 hover:bg-accent hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-full w-full items-start justify-start gap-2 whitespace-normal p-2 text-left text-sm font-normal motion-safe:hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md"
             >
               <AvatarBadge subject={c} size={32} textClassName="text-sm" />
               <div className="min-w-0 flex-1">
@@ -482,7 +484,7 @@ function CharacterStep({
                   <p className="line-clamp-2 text-[11px] text-muted-foreground">{c.description}</p>
                 )}
               </div>
-            </button>
+            </Button>
           </motion.div>
         ))}
       </motion.div>

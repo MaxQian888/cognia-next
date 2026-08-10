@@ -46,8 +46,10 @@ jest.mock("@/lib/files/file-bridge", () => ({
 // next/dynamic; stub it so this test isolates the SkillDetail header/tabs.
 jest.mock("@/components/chat/markdown-renderer", () => ({
   __esModule: true,
-  MarkdownRenderer: ({ content }: { content: string }) => (
-    <div data-testid="markdown-renderer">{content}</div>
+  MarkdownRenderer: ({ content, rhythm }: { content: string; rhythm?: string }) => (
+    <div data-testid="markdown-renderer" data-rhythm={rhythm}>
+      {content}
+    </div>
   ),
 }))
 
@@ -81,6 +83,7 @@ jest.mock("./skill-sync-section", () => ({
 }))
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { SkillDetail } from "./skill-detail"
 import { useSkillsStore } from "@/stores/skills"
 import type { Skill } from "@cognia/agent-config-types"
@@ -135,6 +138,15 @@ describe("SkillDetail", () => {
     expect(screen.getByText("tabResources")).toBeInTheDocument()
     expect(screen.getByText("tabSecurity")).toBeInTheDocument()
     expect(screen.getByText("tabValidation")).toBeInTheDocument()
+  })
+
+  it("uses document rhythm for the standalone skill content", async () => {
+    render(<SkillDetail skill={skill} />)
+    await userEvent.click(screen.getByText("tabContent"))
+    expect(await screen.findByTestId("markdown-renderer")).toHaveAttribute(
+      "data-rhythm",
+      "document"
+    )
   })
 
   it("hides the update banner when the skill has no pending update", () => {

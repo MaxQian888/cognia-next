@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 let catalogDefinitions: Array<Record<string, unknown>> = []
 
@@ -67,5 +67,7 @@ describe("TemplateStudio", () => {
     })
 
     expect(screen.getByText("team.review@1.0.0")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "inspector.payload" }))
+    expect(screen.getByText("{}")).toBeInTheDocument()
   })
 })

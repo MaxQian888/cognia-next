@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import {
   Dialog,
   DialogClose,
@@ -214,35 +215,35 @@ export function BrowserCookieImportAction({
             <div className="grid gap-4">
               <label className="grid gap-1.5 text-sm">
                 <span>{t("browserLabel")}</span>
-                <select
+                <NativeSelect
                   value={browser}
                   onChange={(event) => selectBrowser(event.target.value as ChromiumBrowser)}
-                  className="h-9 rounded-md border bg-background px-3"
+                  wrapperClassName="w-full"
                 >
                   {browserOptions.map((option) => (
-                    <option
+                    <NativeSelectOption
                       key={option.browser}
                       value={option.browser}
                       disabled={option.profiles.length === 0}
                     >
                       {t(`browser.${option.browser}`)}
-                    </option>
+                    </NativeSelectOption>
                   ))}
-                </select>
+                </NativeSelect>
               </label>
               <label className="grid gap-1.5 text-sm">
                 <span>{t("profileLabel")}</span>
-                <select
+                <NativeSelect
                   value={profile}
                   onChange={(event) => setProfile(event.target.value)}
-                  className="h-9 rounded-md border bg-background px-3"
+                  wrapperClassName="w-full"
                 >
                   {profiles.map((candidate) => (
-                    <option key={candidate} value={candidate}>
+                    <NativeSelectOption key={candidate} value={candidate}>
                       {candidate}
-                    </option>
+                    </NativeSelectOption>
                   ))}
-                </select>
+                </NativeSelect>
               </label>
               <p className="text-xs text-muted-foreground">{t("keychainHint")}</p>
             </div>

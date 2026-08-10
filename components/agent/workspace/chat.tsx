@@ -6,6 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { STAGGER_CHILD, STAGGER_INTERVAL, mobileTransition } from "@/lib/ui/motion"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Conversation,
   ConversationContent,
@@ -219,9 +220,14 @@ const ChatMessageItem = memo(function ChatMessageItem({
             {errored && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" className="text-destructive" aria-label={t("errorReason")}>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-destructive"
+                    aria-label={t("errorReason")}
+                  >
                     <AlertCircleIcon className="size-3.5" />
-                  </button>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs text-xs">{t("errorGeneric")}</TooltipContent>
               </Tooltip>

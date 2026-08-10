@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { useCubismCoreAvailable } from "@/hooks/pet/use-active-live2d-model"
 import type { PetAnchor, PetMotionPreference, PetSettings, PetSkinId } from "@/types/pet"
 import { PetModelManager } from "@/components/settings/pet/pet-model-manager"
@@ -41,34 +42,34 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
     <>
       <div className="flex items-center justify-between gap-4">
         <Label htmlFor="pet-anchor">{t("anchor.label")}</Label>
-        <select
+        <NativeSelect
           id="pet-anchor"
-          className="rounded-md border bg-background px-2 py-1 text-sm"
+          size="sm"
           value={pet.anchor}
           onChange={(e) => patch({ anchor: e.target.value as PetAnchor })}
         >
           {ANCHORS.map((a) => (
-            <option key={a} value={a}>
+            <NativeSelectOption key={a} value={a}>
               {t(`anchor.options.${a}`)}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
+        </NativeSelect>
       </div>
 
       <div className="flex items-center justify-between gap-4">
         <Label htmlFor="pet-motion">{t("motion.label")}</Label>
-        <select
+        <NativeSelect
           id="pet-motion"
-          className="rounded-md border bg-background px-2 py-1 text-sm"
+          size="sm"
           value={pet.motion}
           onChange={(e) => patch({ motion: e.target.value as PetMotionPreference })}
         >
           {MOTIONS.map((m) => (
-            <option key={m} value={m}>
+            <NativeSelectOption key={m} value={m}>
               {t(`motion.options.${m}`)}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
+        </NativeSelect>
       </div>
 
       <div className="flex items-start justify-between gap-4">
@@ -86,18 +87,18 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-4">
           <Label htmlFor="pet-skin">{t("skin.label")}</Label>
-          <select
+          <NativeSelect
             id="pet-skin"
-            className="rounded-md border bg-background px-2 py-1 text-sm"
+            size="sm"
             value={skinId}
             onChange={(e) => patch({ skinId: e.target.value as PetSkinId })}
           >
             {SKINS.map((s) => (
-              <option key={s} value={s}>
+              <NativeSelectOption key={s} value={s}>
                 {t(`skin.options.${s}`)}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
+          </NativeSelect>
         </div>
         {skinId === "live2d" && coreReady === false && (
           <p className="text-sm text-destructive">{t("live2d.coreMissing")}</p>

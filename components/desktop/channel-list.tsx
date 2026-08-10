@@ -1329,9 +1329,11 @@ function GroupSection({
       >
         <div className="flex items-center gap-1 px-2 pb-1">
           <CollapsibleTrigger asChild>
-            <button
+            <Button
               type="button"
-              className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              variant="ghost"
+              size="xs"
+              className="h-auto min-w-0 flex-1 justify-start gap-1.5 p-0 text-left font-normal hover:bg-transparent"
               aria-label={name}
             >
               {collapsed ? (
@@ -1346,7 +1348,7 @@ function GroupSection({
                   <span className="ml-1 normal-case opacity-60">{sessions.length}</span>
                 ) : null}
               </span>
-            </button>
+            </Button>
           </CollapsibleTrigger>
         </div>
         <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
@@ -1453,46 +1455,55 @@ function FolderSectionHeader({
 
   return (
     <div className="group/folder flex items-center gap-1 px-2 pb-1">
-      <CollapsibleTrigger asChild>
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-          aria-label={folder.name}
-        >
+      {editing ? (
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
           {collapsed ? (
             <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
           ) : (
             <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
           )}
           <FolderIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
-          {editing ? (
-            <Input
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  commit()
-                } else if (e.key === "Escape") {
-                  e.preventDefault()
-                  setDraft(folder.name)
-                  setEditing(false)
-                }
-              }}
-              onBlur={commit}
-              className="h-5 px-1 py-0 text-[11px]"
-              aria-label={t("renameFolder")}
-            />
-          ) : (
+          <Input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                commit()
+              } else if (e.key === "Escape") {
+                e.preventDefault()
+                setDraft(folder.name)
+                setEditing(false)
+              }
+            }}
+            onBlur={commit}
+            className="h-5 px-1 py-0 text-[11px]"
+            aria-label={t("renameFolder")}
+          />
+        </div>
+      ) : (
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="h-auto min-w-0 flex-1 justify-start gap-1.5 p-0 text-left font-normal hover:bg-transparent"
+            aria-label={folder.name}
+          >
+            {collapsed ? (
+              <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
+            )}
+            <FolderIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
             <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {folder.name}
               {count > 0 ? <span className="ml-1 normal-case opacity-60">{count}</span> : null}
             </span>
-          )}
-        </button>
-      </CollapsibleTrigger>
+          </Button>
+        </CollapsibleTrigger>
+      )}
       {(onRename || onDelete) && !editing ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

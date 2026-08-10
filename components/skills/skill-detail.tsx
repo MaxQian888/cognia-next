@@ -430,5 +430,5 @@ function ContentSection({ skill }: { skill: Skill }) {
   // Reuse the chat MarkdownRenderer so the skill body gets Shiki syntax
   // highlighting, the same-line code toolbar (language + copy/download/wrap),
   // GFM tables, and math — instead of streamdown's plain fallback.
-  return <MarkdownRenderer content={`## ${skill.name}\n\n${skill.content}`} />
+  return <MarkdownRenderer content={`## ${skill.name}\n\n${skill.content}`} rhythm="document" />
 }

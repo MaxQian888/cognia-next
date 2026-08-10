@@ -167,7 +167,9 @@ test("renders members and clicking one fires onMention", async () => {
   const { container } = render(
     <MemberList teamSessionId="ts-1" teamId="t-1" onMention={onMention} />
   )
-  await user.click(screen.getByText("Alice"))
+  const aliceButton = screen.getByText("Alice").closest("button")
+  expect(aliceButton).toHaveAttribute("data-slot", "button")
+  await user.click(aliceButton!)
   expect(onMention).toHaveBeenCalledWith(sampleMembers[0])
   expect(logInfo).toHaveBeenCalledWith(
     "member-list mention",

@@ -12,6 +12,7 @@ import {
   PlusIcon,
   SearchIcon,
   UploadIcon,
+  ChevronDownIcon,
 } from "lucide-react"
 import { usePlatform } from "@/hooks/use-platform"
 import { useTemplateCatalog } from "@/hooks/use-template-catalog"
@@ -39,6 +40,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -651,12 +653,19 @@ function TemplateInspector({
             </Button>
           ) : null}
         </div>
-        <details>
-          <summary className="cursor-pointer font-medium">{t("inspector.payload")}</summary>
-          <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">
-            {JSON.stringify(definition.payload, null, 2)}
-          </pre>
-        </details>
+        <Collapsible className="group/collapsible">
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="h-auto w-full justify-between px-0 py-1">
+              {t("inspector.payload")}
+              <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">
+              {JSON.stringify(definition.payload, null, 2)}
+            </pre>
+          </CollapsibleContent>
+        </Collapsible>
       </CardContent>
     </Card>
   )

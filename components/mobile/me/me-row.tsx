@@ -30,6 +30,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item"
+import { Button } from "@/components/ui/button"
 
 export interface MeRowProps {
   /** Lucide icon component rendered in the leading slot. Optional. */
@@ -129,14 +130,14 @@ export function MeRow({
   if (onClick && !disabled) {
     return (
       <Item asChild size="sm" className={baseClass} data-testid={testid}>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={onClick}
           aria-label={ariaLabel ?? label}
-          className="w-full text-left"
+          className="h-auto w-full justify-start rounded-none p-0 text-left font-normal"
         >
           {inner}
-        </button>
+        </Button>
       </Item>
     )
   }

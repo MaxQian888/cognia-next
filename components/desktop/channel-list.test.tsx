@@ -1312,7 +1312,11 @@ test("renders a collapsible folder section for foldered sessions", async () => {
   expect(screen.getAllByText("Work").length).toBeGreaterThan(0)
   expect(screen.getByText("Inside work")).toBeInTheDocument()
   // Collapsing the folder hides its rows.
-  await user.click(screen.getByRole("button", { name: "Work" }))
+  const folderTrigger = screen.getByRole("button", { name: "Work" })
+  // Radix owns data-slot on an asChild trigger; the shadcn Button variant
+  // metadata remains available and proves the primitive is composed here.
+  expect(folderTrigger).toHaveAttribute("data-variant", "ghost")
+  await user.click(folderTrigger)
   expect(screen.queryByText("Inside work")).toBeNull()
 })
 
@@ -1387,6 +1391,34 @@ test("folder header menu deletes the folder after confirmation", async () => {
   if (!confirm) throw new Error("expected destructive confirm button")
   await user.click(confirm)
   expect(onDeleteFolder).toHaveBeenCalledWith("f1")
+})
+
+test("folder rename uses an input outside the collapsible button", async () => {
+  callQueue.push(characters, [], undefined)
+  const onRenameFolder = jest.fn()
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("in-folder", { title: "Inside", folderId: "f1" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={[workFolder]}
+      onAssignToFolder={jest.fn()}
+      onRenameFolder={onRenameFolder}
+    />
+  )
+
+  await user.click(screen.getByRole("button", { name: "folderActions" }))
+  await user.click(await screen.findByRole("menuitem", { name: "renameFolder" }))
+  const input = screen.getByRole("textbox", { name: "renameFolder" })
+  expect(input.closest("button")).toBeNull()
+  await user.clear(input)
+  await user.type(input, "Renamed{Enter}")
+  expect(onRenameFolder).toHaveBeenCalledWith("f1", "Renamed")
 })
 
 describe("interaction upgrades", () => {

@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -15,6 +17,7 @@ import {
 import { executeCdpCommand, grantCdpAccess, revokeCdpAccess } from "@/lib/browser/cdp-client"
 import { listCdpAuditEvents } from "@/lib/db/browser-cdp"
 import type { CdpAuditEvent, CdpCapability, CdpGrant } from "@/types/browser-developer"
+import { ChevronDownIcon } from "lucide-react"
 
 const CAPABILITIES: CdpCapability[] = ["dom", "runtime", "console", "network", "performance"]
 
@@ -120,9 +123,14 @@ export function BrowserCdpControls({
     })
 
   return (
-    <details className="border-b p-3" data-testid="browser-cdp-controls">
-      <summary className="cursor-pointer text-xs font-medium">{t("title")}</summary>
-      <div className="mt-2 space-y-3">
+    <Collapsible className="group/collapsible border-b p-3" data-testid="browser-cdp-controls">
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" className="h-auto w-full justify-between px-0 py-1 text-xs">
+          {t("title")}
+          <ChevronDownIcon className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-2 space-y-3">
         <p className="text-[10px] text-muted-foreground">{t("description")}</p>
         <p className="text-[10px] text-muted-foreground">{t("localOnly")}</p>
         <div className="space-y-1.5">
@@ -189,14 +197,14 @@ export function BrowserCdpControls({
           </div>
         )}
         {message && (
-          <p
-            role={message.kind === "error" ? "alert" : "status"}
-            className={
-              message.kind === "error" ? "text-xs text-destructive" : "text-xs text-emerald-600"
-            }
-          >
-            {message.text}
-          </p>
+          <Alert variant={message.kind === "error" ? "destructive" : "default"}>
+            <AlertDescription
+              role={message.kind === "error" ? "alert" : "status"}
+              className="text-xs"
+            >
+              {message.text}
+            </AlertDescription>
+          </Alert>
         )}
         <div className="space-y-1">
           <Label className="text-xs">{t("audit")}</Label>
@@ -213,7 +221,7 @@ export function BrowserCdpControls({
               ))
           )}
         </div>
-      </div>
-    </details>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }

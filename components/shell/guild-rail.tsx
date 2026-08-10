@@ -307,17 +307,17 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
                           isFeatureActive(item.route) && "bg-primary/10 text-foreground"
                         )}
                       >
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
                           onClick={() => openOverflowItem(item.route)}
                           data-testid={`guild-more-item-${item.id}`}
-                          className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-sm"
+                          className="h-auto min-w-0 flex-1 justify-start rounded px-2 py-1.5 font-normal"
                         >
                           <item.Icon className="size-4 shrink-0 text-muted-foreground" />
                           <span className="min-w-0 flex-1 truncate text-left">
                             {t(item.i18nKey)}
                           </span>
-                        </button>
+                        </Button>
                         <Button
                           type="button"
                           variant="ghost"
@@ -332,15 +332,15 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
                       </div>
                     ))}
                     <Separator className="my-1" />
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
                       onClick={openCustomize}
                       data-testid="guild-more-customize"
-                      className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+                      className="h-auto w-full justify-start rounded px-2 py-1.5 font-normal"
                     >
                       <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
                       <span className="flex-1 text-left">{t("customize.title")}</span>
-                    </button>
+                    </Button>
                   </div>
                 </PopoverContent>
               </Popover>

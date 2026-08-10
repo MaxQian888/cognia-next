@@ -140,7 +140,7 @@ beforeEach(reset)
 test("provider step renders all four sign-in cards", () => {
   render(<OnboardingDialog open={true} onOpenChange={jest.fn()} onPickCharacter={jest.fn()} />)
   expect(screen.getByText("step1Title")).toBeInTheDocument()
-  expect(screen.getByTestId("onboarding-provider-claude")).toBeInTheDocument()
+  expect(screen.getByTestId("onboarding-provider-claude")).toHaveAttribute("data-slot", "button")
   expect(screen.getByTestId("onboarding-provider-codex")).toBeInTheDocument()
   expect(screen.getByTestId("onboarding-provider-opencode")).toBeInTheDocument()
   expect(screen.getByTestId("onboarding-provider-apiKey")).toBeInTheDocument()

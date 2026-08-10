@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { getDb } from "@/lib/db/schema"
 import {
   controlDurableRuns,
@@ -178,91 +179,93 @@ export function AgentTeamCommandCenter(): React.ReactElement {
           placeholder={t("filters.search")}
           aria-label={t("filters.search")}
         />
-        <select
+        <NativeSelect
           value={status}
           onChange={(event) => setStatus(event.target.value as AgentTeamRunStatus | "all")}
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+          wrapperClassName="w-full"
           aria-label={t("filters.status")}
         >
-          <option value="all">{t("filters.allStatuses")}</option>
+          <NativeSelectOption value="all">{t("filters.allStatuses")}</NativeSelectOption>
           {Array.from(new Set(snapshot.runs.map((run) => run.status))).map((value) => (
-            <option key={value} value={value}>
+            <NativeSelectOption key={value} value={value}>
               {t(`status.${value}`)}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
-        <select
+        </NativeSelect>
+        <NativeSelect
           value={repository}
           onChange={(event) => setRepository(event.target.value)}
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+          wrapperClassName="w-full"
           aria-label={t("filters.repository")}
         >
-          <option value="all">{t("filters.allRepositories")}</option>
+          <NativeSelectOption value="all">{t("filters.allRepositories")}</NativeSelectOption>
           {repositories.map((value) => (
-            <option key={value} value={value}>
+            <NativeSelectOption key={value} value={value}>
               {value}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
-        <select
+        </NativeSelect>
+        <NativeSelect
           value={project}
           onChange={(event) => setProject(event.target.value)}
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+          wrapperClassName="w-full"
           aria-label={t("filters.project")}
         >
-          <option value="all">{t("filters.allProjects")}</option>
+          <NativeSelectOption value="all">{t("filters.allProjects")}</NativeSelectOption>
           {projects.map((value) => (
-            <option key={value} value={value}>
+            <NativeSelectOption key={value} value={value}>
               {value}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
-        <select
+        </NativeSelect>
+        <NativeSelect
           value={teamFilter}
           onChange={(event) => setTeamFilter(event.target.value)}
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+          wrapperClassName="w-full"
           aria-label={t("filters.team")}
         >
-          <option value="all">{t("filters.allTeams")}</option>
+          <NativeSelectOption value="all">{t("filters.allTeams")}</NativeSelectOption>
           {Object.values(teams).map((team) => (
-            <option key={team.id} value={team.id}>
+            <NativeSelectOption key={team.id} value={team.id}>
               {team.name}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
-        <select
+        </NativeSelect>
+        <NativeSelect
           value={runtime}
           onChange={(event) => setRuntime(event.target.value)}
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+          wrapperClassName="w-full"
           aria-label={t("filters.runtime")}
         >
-          <option value="all">{t("filters.allRuntimes")}</option>
-          <option value="legacy">legacy</option>
-          <option value="durable-v2">durable-v2</option>
-        </select>
-        <select
+          <NativeSelectOption value="all">{t("filters.allRuntimes")}</NativeSelectOption>
+          {/* i18n-exempt: runtime protocol identifier */}
+          <NativeSelectOption value="legacy">legacy</NativeSelectOption>
+          {/* i18n-exempt: runtime protocol identifier */}
+          <NativeSelectOption value="durable-v2">durable-v2</NativeSelectOption>
+        </NativeSelect>
+        <NativeSelect
           value={gate}
           onChange={(event) => setGate(event.target.value)}
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+          wrapperClassName="w-full"
           aria-label={t("filters.gate")}
         >
-          <option value="all">{t("filters.allGates")}</option>
-          <option value="pending">{t("filters.pendingGate")}</option>
-          <option value="clear">{t("filters.clearGate")}</option>
-        </select>
-        <select
+          <NativeSelectOption value="all">{t("filters.allGates")}</NativeSelectOption>
+          <NativeSelectOption value="pending">{t("filters.pendingGate")}</NativeSelectOption>
+          <NativeSelectOption value="clear">{t("filters.clearGate")}</NativeSelectOption>
+        </NativeSelect>
+        <NativeSelect
           value={failureClass}
           onChange={(event) => setFailureClass(event.target.value)}
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+          wrapperClassName="w-full"
           aria-label={t("filters.failureClass")}
         >
-          <option value="all">{t("filters.allFailures")}</option>
+          <NativeSelectOption value="all">{t("filters.allFailures")}</NativeSelectOption>
           {failureClasses.map((value) => (
-            <option key={value} value={value}>
+            <NativeSelectOption key={value} value={value}>
               {value}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
+        </NativeSelect>
       </div>
 
       <div className="flex flex-wrap gap-2" aria-label={t("bulkActions")}>

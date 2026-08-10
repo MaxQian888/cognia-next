@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl"
 import { LayersIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { SKILL_CATEGORIES, SKILL_SOURCES } from "@/lib/skills/categories"
 import { useSkillsStore } from "@/stores/skills"
 import type { SkillCategory, SkillSource } from "@cognia/agent-config-types"
@@ -41,11 +42,13 @@ export function SkillCategoryButtonList({
       <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {t("filter.byCategory")}
       </p>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         onClick={() => handleClick({ category: "all", source: "all" })}
         className={cn(
-          "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent",
+          "w-full justify-between px-2 text-xs font-normal",
           isAll && "bg-accent font-medium"
         )}
       >
@@ -54,24 +57,25 @@ export function SkillCategoryButtonList({
           {t("filter.all")}
         </span>
         <span className="text-[10px] text-muted-foreground">{total}</span>
-      </button>
+      </Button>
 
       <p className="mt-3 px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {t("filter.bySource")}
       </p>
       {SKILL_SOURCES.map((src) => (
-        <button
+        <Button
           key={src.id}
-          type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => handleClick({ source: src.id as SkillSource, category: "all" })}
           className={cn(
-            "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent",
+            "w-full justify-between px-2 text-xs font-normal",
             filters.source === src.id && filters.category === "all" && "bg-accent font-medium"
           )}
         >
           <span>{t(`source.${src.labelKey}` as never)}</span>
           <span className="text-[10px] text-muted-foreground">{countsBySource[src.id] ?? 0}</span>
-        </button>
+        </Button>
       ))}
 
       <p className="mt-3 px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -81,12 +85,13 @@ export function SkillCategoryButtonList({
         const Icon = cat.icon
         const active = filters.category === cat.id && filters.source === "all"
         return (
-          <button
+          <Button
             key={cat.id}
-            type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => handleClick({ category: cat.id as SkillCategory, source: "all" })}
             className={cn(
-              "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent",
+              "w-full justify-between px-2 text-xs font-normal",
               active && "bg-accent font-medium"
             )}
           >
@@ -97,7 +102,7 @@ export function SkillCategoryButtonList({
             <span className="text-[10px] text-muted-foreground">
               {countsByCategory[cat.id] ?? 0}
             </span>
-          </button>
+          </Button>
         )
       })}
     </div>

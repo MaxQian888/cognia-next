@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { Button } from "@/components/ui/button"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { destroyPetWindow, openPetWindow, setPetClickThrough } from "@/lib/tauri/pet-window"
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import { isLinuxPlatform } from "@/lib/tauri/os"
@@ -142,34 +143,34 @@ export function PetDesktopControls({ pet, patch }: PetControlsProps) {
 
           <div className="flex items-center justify-between gap-4">
             <Label htmlFor="pet-wander-frequency">{t("desktopPet.wander.frequency.label")}</Label>
-            <select
+            <NativeSelect
               id="pet-wander-frequency"
-              className="rounded-md border bg-background px-2 py-1 text-sm"
+              size="sm"
               value={wander.frequency}
               onChange={(e) => patchWander({ frequency: e.target.value as PetWanderFrequency })}
             >
               {WANDER_FREQUENCIES.map((f) => (
-                <option key={f} value={f}>
+                <NativeSelectOption key={f} value={f}>
                   {t(`desktopPet.wander.frequency.options.${f}`)}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
           <div className="flex items-center justify-between gap-4">
             <Label htmlFor="pet-wander-range">{t("desktopPet.wander.range.label")}</Label>
-            <select
+            <NativeSelect
               id="pet-wander-range"
-              className="rounded-md border bg-background px-2 py-1 text-sm"
+              size="sm"
               value={wander.range}
               onChange={(e) => patchWander({ range: e.target.value as PetWanderRange })}
             >
               {WANDER_RANGES.map((r) => (
-                <option key={r} value={r}>
+                <NativeSelectOption key={r} value={r}>
                   {t(`desktopPet.wander.range.options.${r}`)}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
           <div className="flex items-center justify-between gap-4">

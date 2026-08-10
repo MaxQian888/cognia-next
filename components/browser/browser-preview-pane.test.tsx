@@ -254,7 +254,7 @@ it("shows a localized error when the embedded WebView rejects an HTTPS proxy", (
   })
 
   expect(toast.error).toHaveBeenCalledWith(
-    "Embedded preview does not support HTTPS proxy endpoints. Use an HTTP or SOCKS5 proxy, or open the page in an external browser."
+    "HTTPS proxying is not supported in this browser preview."
   )
 })
 

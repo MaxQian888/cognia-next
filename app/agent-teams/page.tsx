@@ -466,14 +466,15 @@ export default function AgentTeamsListPage() {
                 className="h-8 pl-8 text-xs"
               />
               {search && (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={() => setSearch("")}
                   aria-label={t("clearSearch")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground"
                 >
                   <XIcon className="size-3" />
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -550,19 +551,16 @@ export default function AgentTeamsListPage() {
         <TabsContent value="templates" className="space-y-4 pt-4">
           <div className="flex flex-wrap gap-1.5">
             {TEMPLATE_CATEGORIES.map((cat) => (
-              <button
+              <Button
                 key={cat}
-                type="button"
+                size="sm"
+                variant={categoryFilter === cat ? "secondary" : "outline"}
                 onClick={() => setCategoryFilter(cat)}
-                className={
-                  "rounded-full border px-2.5 py-0.5 text-xs transition-colors " +
-                  (categoryFilter === cat
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border text-muted-foreground hover:bg-muted")
-                }
+                aria-pressed={categoryFilter === cat}
+                className="h-7 rounded-full px-2.5 text-xs"
               >
                 {cat === "all" ? t("allCategories") : tCat(cat)}
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -924,30 +922,22 @@ function CreateTeamDialog({
         </DialogHeader>
 
         <div className="flex gap-2">
-          <button
-            type="button"
+          <Button
+            variant={mode === "template" ? "secondary" : "outline"}
             onClick={() => setMode("template")}
-            className={
-              "flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors " +
-              (mode === "template"
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border text-muted-foreground hover:bg-muted")
-            }
+            aria-pressed={mode === "template"}
+            className="flex-1"
           >
             {t("createFromTemplate")}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant={mode === "scratch" ? "secondary" : "outline"}
             onClick={() => setMode("scratch")}
-            className={
-              "flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors " +
-              (mode === "scratch"
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border text-muted-foreground hover:bg-muted")
-            }
+            aria-pressed={mode === "scratch"}
+            className="flex-1"
           >
             {t("createFromScratch")}
-          </button>
+          </Button>
         </div>
 
         {mode === "template" ? (
@@ -958,12 +948,12 @@ function CreateTeamDialog({
               </p>
             ) : (
               templates.map((tpl) => (
-                <button
+                <Button
                   key={tpl.id}
-                  type="button"
+                  variant="outline"
                   disabled={saving}
                   onClick={() => void handlePickTemplate(tpl)}
-                  className="flex items-start gap-3 rounded-md border p-3 text-left transition-colors duration-150 hover:border-primary disabled:opacity-50"
+                  className="h-auto w-full items-start justify-start gap-3 p-3 text-left font-normal"
                 >
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium">
                     {tpl.name.charAt(0)}
@@ -972,7 +962,7 @@ function CreateTeamDialog({
                     <p className="text-sm font-medium">{tpl.name}</p>
                     <p className="line-clamp-2 text-xs text-muted-foreground">{tpl.description}</p>
                   </div>
-                </button>
+                </Button>
               ))
             )}
           </div>

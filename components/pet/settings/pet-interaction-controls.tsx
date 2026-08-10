@@ -10,7 +10,9 @@ import { PlusIcon, XIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { clearPetConversation } from "@/lib/db/pet-conversation"
 import {
   DEFAULT_PET_PROACTIVE,
@@ -73,20 +75,23 @@ export function PetInteractionControls({ pet, patch }: PetControlsProps) {
         {phrases.length > 0 && (
           <div className="flex flex-wrap gap-1.5" data-testid="pet-custom-bubbles">
             {phrases.map((phrase, i) => (
-              <span
+              <Badge
                 key={`${phrase}-${i}`}
-                className="inline-flex items-center gap-1 rounded-full border bg-muted/40 py-0.5 pl-2.5 pr-1 text-xs"
+                variant="outline"
+                className="gap-1 rounded-full py-0.5 pl-2.5 pr-1 text-xs font-normal"
               >
                 {phrase}
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-xs"
                   aria-label={t("customBubbles.remove", { phrase })}
-                  className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                  className="size-5 rounded-full p-0.5 text-muted-foreground"
                   onClick={() => removePhrase(i)}
                 >
                   <XIcon className="size-3" />
-                </button>
-              </span>
+                </Button>
+              </Badge>
             ))}
           </div>
         )}
@@ -172,18 +177,18 @@ export function PetInteractionControls({ pet, patch }: PetControlsProps) {
             <>
               <div className="flex items-center justify-between gap-4">
                 <Label htmlFor="pet-proactive-tier">{t("proactive.tier.label")}</Label>
-                <select
+                <NativeSelect
                   id="pet-proactive-tier"
-                  className="rounded-md border bg-background px-2 py-1 text-sm"
+                  size="sm"
                   value={proactive.tier}
                   onChange={(e) => patchProactive({ tier: e.target.value as PetProactiveTier })}
                 >
                   {PROACTIVE_TIERS.map((tier) => (
-                    <option key={tier} value={tier}>
+                    <NativeSelectOption key={tier} value={tier}>
                       {t(`proactive.tier.options.${tier}`)}
-                    </option>
+                    </NativeSelectOption>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
 
               <div className="flex items-center justify-between gap-4">

@@ -38,6 +38,7 @@ import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -636,18 +637,20 @@ export function BrowserPreviewPane({
   // not navigation chrome — it lives in the popover at every width rather than
   // spending 96px of the narrowest row.
   const detailControl = (
-    <select
+    <NativeSelect
       value={detailLevel}
       onChange={(event) => setDetailLevel(event.target.value as OutputDetailLevel)}
       aria-label={t("detail.label")}
-      className="h-7 w-full rounded-md border bg-background px-1 text-xs"
+      size="sm"
+      wrapperClassName="w-full"
+      className="h-7 text-xs"
     >
       {DETAIL_LEVELS.map((level) => (
-        <option key={level} value={level}>
+        <NativeSelectOption key={level} value={level}>
           {t(`detail.${level}`)}
-        </option>
+        </NativeSelectOption>
       ))}
-    </select>
+    </NativeSelect>
   )
 
   // Mark the trigger when a collapsed control is in a non-default state, so
@@ -926,34 +929,36 @@ export function BrowserPreviewPane({
                   )}
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1">
-                      <select
+                      <NativeSelect
                         value={annotationIntent}
                         onChange={(event) =>
                           setAnnotationIntent(event.target.value as BrowserAnnotationIntent)
                         }
                         aria-label={t("annotation.intent.label")}
-                        className="h-7 rounded-md border bg-background px-1 text-xs"
+                        size="sm"
+                        className="h-7 text-xs"
                       >
                         {(["fix", "change", "question", "approve"] as const).map((intent) => (
-                          <option key={intent} value={intent}>
+                          <NativeSelectOption key={intent} value={intent}>
                             {t(`annotation.intent.${intent}`)}
-                          </option>
+                          </NativeSelectOption>
                         ))}
-                      </select>
-                      <select
+                      </NativeSelect>
+                      <NativeSelect
                         value={annotationSeverity}
                         onChange={(event) =>
                           setAnnotationSeverity(event.target.value as BrowserAnnotationSeverity)
                         }
                         aria-label={t("annotation.severity.label")}
-                        className="h-7 rounded-md border bg-background px-1 text-xs"
+                        size="sm"
+                        className="h-7 text-xs"
                       >
                         {(["blocking", "important", "suggestion"] as const).map((severity) => (
-                          <option key={severity} value={severity}>
+                          <NativeSelectOption key={severity} value={severity}>
                             {t(`annotation.severity.${severity}`)}
-                          </option>
+                          </NativeSelectOption>
                         ))}
-                      </select>
+                      </NativeSelect>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Button
