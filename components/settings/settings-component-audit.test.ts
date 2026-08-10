@@ -35,10 +35,17 @@ describe("settings component primitives", () => {
         "components/settings/actions/settings-actions-menu.tsx",
         "components/settings/agent/custom-mode-settings.tsx",
         "components/settings/appearance/components/appearance-config-toolbar.tsx",
+        "components/settings/appearance/components/appearance-nav.tsx",
         "components/settings/appearance/components/color-token-row.tsx",
+        "components/settings/appearance/components/cursor-effect-card.tsx",
+        "components/settings/appearance/components/cursor-pack-grid.tsx",
+        "components/settings/appearance/components/saved-themes-rail.tsx",
         "components/settings/appearance/components/wallpaper-uploader.tsx",
+        "components/settings/appearance/components/wallpaper-card.tsx",
         "components/settings/appearance/tabs/custom-theme-tab.tsx",
+        "components/settings/appearance/tabs/preset-grid.tsx",
         "components/settings/appearance/tabs/theme-tab.tsx",
+        "components/settings/appearance/tabs/wallpaper-tab.tsx",
         "components/settings/characters-section.tsx",
         "components/settings/connections/tabs/labels-tab.tsx",
         "components/settings/pet/pet-model-manager.tsx",
@@ -60,6 +67,6 @@ describe("settings component primitives", () => {
         "components/settings/tray-panel/tray-panel-field-editor.tsx",
       ])
     )
-    expect(violations.length).toBeLessThanOrEqual(63)
+    expect(violations.length).toBeLessThanOrEqual(56)
   })
 })
