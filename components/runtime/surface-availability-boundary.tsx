@@ -6,6 +6,14 @@ import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, LockKeyholeIcon, WifiOffIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+} from "@/components/ui/empty"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import {
   getSurfaceContractForRoute,
@@ -29,15 +37,17 @@ export function SurfaceAvailabilityBoundary({ children }: { children: React.Reac
   }
   if (availability.state === "read-only") {
     return (
-      <>
-        <div
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <Alert
           role="status"
-          className="border-b border-border bg-muted/60 px-4 py-2 text-xs text-muted-foreground"
+          className="shrink-0 rounded-none border-x-0 border-t-0 bg-muted/60 py-2"
         >
-          {t("readOnly", { reason: t(`reasons.${availability.reason}`) })}
-        </div>
+          <AlertDescription className="text-xs">
+            {t("readOnly", { reason: t(`reasons.${availability.reason}`) })}
+          </AlertDescription>
+        </Alert>
         {children}
-      </>
+      </div>
     )
   }
 
@@ -51,16 +61,20 @@ export function SurfaceAvailabilityBoundary({ children }: { children: React.Reac
 
   return (
     <main className="flex min-h-[60vh] items-center justify-center p-6">
-      <section
+      <Empty
         aria-labelledby="surface-unavailable-title"
-        className="w-full max-w-lg rounded-xl border bg-card p-6 shadow-sm"
+        className="w-full max-w-lg rounded-none border-x-0 border-y py-8"
       >
-        <Icon aria-hidden className="mb-4 size-8 text-muted-foreground" />
-        <h1 id="surface-unavailable-title" className="text-lg font-semibold">
-          {t(`states.${availability.state}`)}
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">{t(`reasons.${availability.reason}`)}</p>
-        <div className="mt-5 flex flex-wrap gap-2">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <Icon aria-hidden />
+          </EmptyMedia>
+          <h1 id="surface-unavailable-title" className="text-lg font-semibold tracking-tight">
+            {t(`states.${availability.state}`)}
+          </h1>
+          <EmptyDescription>{t(`reasons.${availability.reason}`)}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent className="flex-row flex-wrap justify-center gap-2">
           {recovery && (
             <Button asChild>
               <Link href={recovery.href}>{t(recovery.label)}</Link>
@@ -69,8 +83,8 @@ export function SurfaceAvailabilityBoundary({ children }: { children: React.Reac
           <Button asChild variant="outline">
             <Link href="/">{t("backToChat")}</Link>
           </Button>
-        </div>
-      </section>
+        </EmptyContent>
+      </Empty>
     </main>
   )
 }
