@@ -12,7 +12,8 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -197,18 +198,21 @@ export function SkillDiscovery() {
       </div>
 
       {scan.status === "loading" && (
-        <Card className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
+        <div
+          className="flex items-center gap-2 border-y px-3 py-2 text-xs text-muted-foreground"
+          role="status"
+        >
           <Spinner className="size-3" />
           {t("scanning", { label: scan.label })}
-        </Card>
+        </div>
       )}
       {scan.status === "error" && (
-        <Card className="border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
-          {scan.message}
-        </Card>
+        <Alert variant="destructive" className="rounded-none border-x-0">
+          <AlertDescription className="text-xs">{scan.message}</AlertDescription>
+        </Alert>
       )}
       {scan.status === "loaded" && (
-        <Card className="p-0">
+        <section className="border-y">
           <div className="flex items-center justify-between border-b px-3 py-2 text-xs">
             <Label className="flex cursor-pointer items-center gap-2">
               <Checkbox
@@ -234,11 +238,13 @@ export function SkillDiscovery() {
             </p>
           ) : (
             <ScrollArea className="max-h-72">
-              <ul>
+              <ItemGroup>
                 {scan.results.map((row) => (
-                  <li
+                  <Item
                     key={row.dirName}
-                    className="flex items-center gap-2 border-b px-3 py-2 text-xs last:border-b-0"
+                    role="listitem"
+                    className="rounded-none border-b px-3 py-2 text-xs last:border-b-0"
+                    size="sm"
                   >
                     <Checkbox
                       checked={selected.has(row.dirName)}
@@ -249,18 +255,18 @@ export function SkillDiscovery() {
                         setSelected(next)
                       }}
                     />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{row.dirName}</p>
-                      <p className="truncate text-[10px] text-muted-foreground">
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="truncate text-xs">{row.dirName}</ItemTitle>
+                      <ItemDescription className="truncate text-[10px]">
                         {row.filePath} · {t("resourcesCount", { count: row.resources.length })}
-                      </p>
-                    </div>
-                  </li>
+                      </ItemDescription>
+                    </ItemContent>
+                  </Item>
                 ))}
-              </ul>
+              </ItemGroup>
             </ScrollArea>
           )}
-        </Card>
+        </section>
       )}
     </div>
   )

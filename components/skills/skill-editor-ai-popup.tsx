@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message"
 import {
   Dialog,
   DialogContent,
@@ -12,7 +12,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { SkillValidationError } from "@cognia/agent-config-types"
@@ -105,12 +104,16 @@ export function SkillEditorAiPopup({
         </div>
 
         {suggested !== null && (
-          <Card className="max-h-72 overflow-auto p-3">
+          <div className="max-h-72 overflow-auto border-y py-3">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t("diff")}
             </p>
-            <MarkdownRenderer content={suggested} rhythm="document" />
-          </Card>
+            <Message from="assistant">
+              <MessageContent>
+                <MessageResponse>{suggested}</MessageResponse>
+              </MessageContent>
+            </Message>
+          </div>
         )}
 
         <DialogFooter>

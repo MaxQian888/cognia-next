@@ -6,8 +6,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { DownloadIcon, PowerIcon, TagIcon, Trash2Icon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Separator } from "@/components/ui/separator"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "sonner"
 import { deleteSkill, listSkillsByIds, setSkillStatus, updateSkill } from "@/lib/db/skills"
@@ -147,12 +147,13 @@ export function SkillBatchActionsBar() {
           }
           className="pointer-events-none fixed bottom-4 left-1/2 z-30 -translate-x-1/2"
         >
-          <Card
-            className="pointer-events-auto flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-1.5 px-3 py-2 shadow-lg"
+          <div
+            role="toolbar"
+            className="pointer-events-auto flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-1.5 border bg-popover px-3 py-2 text-popover-foreground shadow-lg"
             data-testid="skill-batch-actions-bar"
           >
             <span className="text-xs font-medium">{tCommon("selectedCount", { count })}</span>
-            <span className="hidden h-4 w-px bg-border sm:inline-block" />
+            <Separator orientation="vertical" className="hidden h-4 sm:block" />
             <Button size="sm" variant="ghost" onClick={() => void handleEnable()}>
               <PowerIcon className="size-3.5 sm:mr-1.5" />
               <span className="hidden sm:inline">{t("enable")}</span>
@@ -193,16 +194,18 @@ export function SkillBatchActionsBar() {
                 {currentTags.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {currentTags.map((tag) => (
-                      <button
+                      <Button
                         key={tag}
                         type="button"
+                        size="xs"
+                        variant="outline"
                         onClick={() => void handleRemoveTag(tag)}
                         aria-label={tTags("removeAria", { tag })}
-                        className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
+                        className="h-6 rounded-full text-[10px] text-muted-foreground hover:text-destructive"
                       >
                         {tag}
                         <XIcon className="size-2.5" />
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 )}
@@ -221,7 +224,7 @@ export function SkillBatchActionsBar() {
               <Trash2Icon className="size-3.5 sm:mr-1.5" />
               <span className="hidden sm:inline">{t("delete")}</span>
             </Button>
-            <span className="hidden h-4 w-px bg-border sm:inline-block" />
+            <Separator orientation="vertical" className="hidden h-4 sm:block" />
             <Button
               size="icon"
               variant="ghost"
@@ -231,7 +234,7 @@ export function SkillBatchActionsBar() {
             >
               <XIcon className="size-3.5" />
             </Button>
-          </Card>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

@@ -6,11 +6,13 @@ import { AlertCircleIcon, SparklesIcon } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -223,11 +225,13 @@ export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAi
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {SKILL_CATEGORIES.map((cat) => (
-                <SelectItem key={cat.id} value={cat.id}>
-                  {tCommon(`category.${cat.labelKey}` as never)}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {SKILL_CATEGORIES.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.id}>
+                    {tCommon(`category.${cat.labelKey}` as never)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </Field>
@@ -242,8 +246,10 @@ export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAi
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="implicit">{t("invocationImplicit")}</SelectItem>
-              <SelectItem value="explicit">{t("invocationExplicit")}</SelectItem>
+              <SelectGroup>
+                <SelectItem value="implicit">{t("invocationImplicit")}</SelectItem>
+                <SelectItem value="explicit">{t("invocationExplicit")}</SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
         </Field>
@@ -378,17 +384,17 @@ export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAi
             transition={{ duration: reduce ? 0 : 0.18 }}
             className="overflow-hidden"
           >
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-              <p className="mb-1 flex items-center gap-1.5 font-medium">
-                <AlertCircleIcon className="size-3.5" />
-                {t("validation")}
-              </p>
-              <ul className="ml-5 list-disc space-y-0.5">
-                {validation.map((err, i) => (
-                  <li key={`${err.code}-${i}`}>{err.message}</li>
-                ))}
-              </ul>
-            </div>
+            <Alert variant="destructive" className="rounded-none border-x-0">
+              <AlertCircleIcon className="size-3.5" />
+              <AlertTitle>{t("validation")}</AlertTitle>
+              <AlertDescription>
+                <ul className="ml-4 list-disc text-xs">
+                  {validation.map((err, i) => (
+                    <li key={`${err.code}-${i}`}>{err.message}</li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
           </motion.div>
         )}
       </AnimatePresence>

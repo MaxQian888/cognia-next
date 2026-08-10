@@ -4,10 +4,12 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, LayoutGridIcon, ListIcon, SearchIcon, SparklesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -20,6 +22,14 @@ import type { Skill, SkillCategory, SkillSource } from "@cognia/agent-config-typ
 import type { SkillSortMode } from "@/stores/skills"
 import { cn } from "@/lib/utils"
 import { SkillListItem, type SkillListDisplay } from "./skill-list-item"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 
 interface Props {
   /** Filtered skills (the rows to render). */
@@ -104,14 +114,16 @@ export function SkillListPane({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all" className="text-xs">
-              {t("filter.all")} ({total})
-            </SelectItem>
-            {SKILL_SOURCES.map((src) => (
-              <SelectItem key={src.id} value={src.id} className="text-xs">
-                {t(`source.${src.labelKey}` as never)} ({countsBySource[src.id] ?? 0})
+            <SelectGroup>
+              <SelectItem value="all" className="text-xs">
+                {t("filter.all")} ({total})
               </SelectItem>
-            ))}
+              {SKILL_SOURCES.map((src) => (
+                <SelectItem key={src.id} value={src.id} className="text-xs">
+                  {t(`source.${src.labelKey}` as never)} ({countsBySource[src.id] ?? 0})
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
         <Select
@@ -122,14 +134,16 @@ export function SkillListPane({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all" className="text-xs">
-              {t("filter.all")} ({total})
-            </SelectItem>
-            {SKILL_CATEGORIES.map((cat) => (
-              <SelectItem key={cat.id} value={cat.id} className="text-xs">
-                {t(`category.${cat.labelKey}` as never)} ({countsByCategory[cat.id] ?? 0})
+            <SelectGroup>
+              <SelectItem value="all" className="text-xs">
+                {t("filter.all")} ({total})
               </SelectItem>
-            ))}
+              {SKILL_CATEGORIES.map((cat) => (
+                <SelectItem key={cat.id} value={cat.id} className="text-xs">
+                  {t(`category.${cat.labelKey}` as never)} ({countsByCategory[cat.id] ?? 0})
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
       </div>
@@ -144,18 +158,20 @@ export function SkillListPane({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="name" className="text-xs">
-              {t("filter.sortName")}
-            </SelectItem>
-            <SelectItem value="updated" className="text-xs">
-              {t("filter.sortUpdated")}
-            </SelectItem>
-            <SelectItem value="usage" className="text-xs">
-              {t("filter.sortUsage")}
-            </SelectItem>
+            <SelectGroup>
+              <SelectItem value="name" className="text-xs">
+                {t("filter.sortName")}
+              </SelectItem>
+              <SelectItem value="updated" className="text-xs">
+                {t("filter.sortUpdated")}
+              </SelectItem>
+              <SelectItem value="usage" className="text-xs">
+                {t("filter.sortUsage")}
+              </SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
-        <div className="flex shrink-0 items-center gap-0.5 rounded-md border p-0.5">
+        <ButtonGroup className="shrink-0">
           <Button
             type="button"
             size="icon"
@@ -180,12 +196,12 @@ export function SkillListPane({
           >
             <LayoutGridIcon className="size-3.5" />
           </Button>
-        </div>
+        </ButtonGroup>
       </div>
 
       {overBudget && (
         <div
-          className="flex shrink-0 items-center gap-2 border-b bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-400"
+          className="flex shrink-0 items-center gap-2 border-b bg-muted px-3 py-1.5 text-[11px] text-muted-foreground"
           role="status"
           data-testid="skill-budget-warning"
         >
@@ -202,27 +218,33 @@ export function SkillListPane({
       <div
         className={cn(
           "flex-1 overflow-y-auto",
-          prefs.viewMode === "grid" ? "grid grid-cols-1 gap-2 p-2 sm:grid-cols-2" : "p-1"
+          prefs.viewMode === "grid"
+            ? "grid auto-rows-max grid-cols-1 border-l sm:grid-cols-2"
+            : "divide-y"
         )}
         aria-label={t("panel.listAriaLabel")}
         data-testid="skill-list"
       >
         {skills.length === 0 ? (
-          <div
+          <Empty
             className={cn(
-              "flex flex-col items-center justify-center gap-3 py-16 text-center",
+              "rounded-none border-0 py-16",
               prefs.viewMode === "grid" && "sm:col-span-2"
             )}
           >
-            <SparklesIcon className="size-8 text-muted-foreground/50" />
-            <div>
-              <p className="text-sm font-medium">{t("panel.emptyTitle")}</p>
-              <p className="mt-1 px-4 text-xs text-muted-foreground">{t("panel.emptyHint")}</p>
-            </div>
-            <Button size="sm" onClick={onCreate}>
-              {t("panel.emptyAction")}
-            </Button>
-          </div>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <SparklesIcon />
+              </EmptyMedia>
+              <EmptyTitle className="text-sm">{t("panel.emptyTitle")}</EmptyTitle>
+              <EmptyDescription className="text-xs">{t("panel.emptyHint")}</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button size="sm" onClick={onCreate}>
+                {t("panel.emptyAction")}
+              </Button>
+            </EmptyContent>
+          </Empty>
         ) : (
           skills.map((sk) => (
             <SkillListItem

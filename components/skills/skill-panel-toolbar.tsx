@@ -34,6 +34,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -404,88 +405,94 @@ export function SkillPanelToolbar() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuItem onSelect={() => setTemplateOpen(true)} className="text-xs">
-            <LayoutTemplateIcon className="mr-2 size-3.5" />
-            <div className="flex flex-col gap-0.5">
-              <span>{tCommon("templates.fromTemplate")}</span>
-              <span className="text-[10px] text-muted-foreground">
-                {tCommon("templates.fromTemplateHint")}
-              </span>
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => void handleImportFromMarkdown()} className="text-xs">
-            <UploadIcon className="mr-2 size-3.5" />
-            <div className="flex flex-col gap-0.5">
-              <span>{t("importFromMarkdown")}</span>
-              <span className="text-[10px] text-muted-foreground">
-                {t("importFromMarkdownHint")}
-              </span>
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => void handleImportFromBundleZip()}
-            className="text-xs"
-            data-testid="skill-panel-toolbar-import-bundle-zip"
-          >
-            <PackageIcon className="mr-2 size-3.5" />
-            <div className="flex flex-col gap-0.5">
-              <span>{t("importFromBundle")}</span>
-              <span className="text-[10px] text-muted-foreground">{t("importFromBundleHint")}</span>
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => void handleImportFromBundleFolder()}
-            disabled={!isTauri()}
-            className="text-xs"
-            data-testid="skill-panel-toolbar-import-bundle-folder"
-          >
-            <FolderIcon className="mr-2 size-3.5" />
-            <div className="flex flex-col gap-0.5">
-              <span>{t("importFromBundleFolder")}</span>
-              <span className="text-[10px] text-muted-foreground">
-                {t("importFromBundleFolderHint")}
-              </span>
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => void handleImportFromClaudeCode()}
-            disabled={!isTauri()}
-            className="text-xs"
-          >
-            <SparklesIcon className="mr-2 size-3.5" />
-            <div className="flex flex-col gap-0.5">
-              <span>{t("importFromClaudeCode")}</span>
-              <span className="text-[10px] text-muted-foreground">
-                {t("importFromClaudeCodeHint")}
-              </span>
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => setDiscoveryOpen(true)}
-            disabled={!isTauri()}
-            className="text-xs"
-          >
-            <SearchIcon className="mr-2 size-3.5" />
-            <div className="flex flex-col gap-0.5">
-              <span>{tDiscovery("title")}</span>
-              <span className="text-[10px] text-muted-foreground">{tDiscovery("scanCustom")}</span>
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => setUrlInstallOpen(true)}
-            className="text-xs"
-            data-testid="skill-panel-toolbar-install-from-url"
-          >
-            <LinkIcon className="mr-2 size-3.5" />
-            <div className="flex flex-col gap-0.5">
-              <span>{t("installFromUrl")}</span>
-              <span className="text-[10px] text-muted-foreground">
-                {tCommon("marketplace.urlInstall.description")}
-              </span>
-            </div>
-          </DropdownMenuItem>
+          <DropdownMenuGroup>
+            <DropdownMenuItem onSelect={() => setTemplateOpen(true)} className="text-xs">
+              <LayoutTemplateIcon className="mr-2 size-3.5" />
+              <div className="flex flex-col gap-0.5">
+                <span>{tCommon("templates.fromTemplate")}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {tCommon("templates.fromTemplateHint")}
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void handleImportFromMarkdown()} className="text-xs">
+              <UploadIcon className="mr-2 size-3.5" />
+              <div className="flex flex-col gap-0.5">
+                <span>{t("importFromMarkdown")}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {t("importFromMarkdownHint")}
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => void handleImportFromBundleZip()}
+              className="text-xs"
+              data-testid="skill-panel-toolbar-import-bundle-zip"
+            >
+              <PackageIcon className="mr-2 size-3.5" />
+              <div className="flex flex-col gap-0.5">
+                <span>{t("importFromBundle")}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {t("importFromBundleHint")}
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => void handleImportFromBundleFolder()}
+              disabled={!isTauri()}
+              className="text-xs"
+              data-testid="skill-panel-toolbar-import-bundle-folder"
+            >
+              <FolderIcon className="mr-2 size-3.5" />
+              <div className="flex flex-col gap-0.5">
+                <span>{t("importFromBundleFolder")}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {t("importFromBundleFolderHint")}
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => void handleImportFromClaudeCode()}
+              disabled={!isTauri()}
+              className="text-xs"
+            >
+              <SparklesIcon className="mr-2 size-3.5" />
+              <div className="flex flex-col gap-0.5">
+                <span>{t("importFromClaudeCode")}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {t("importFromClaudeCodeHint")}
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => setDiscoveryOpen(true)}
+              disabled={!isTauri()}
+              className="text-xs"
+            >
+              <SearchIcon className="mr-2 size-3.5" />
+              <div className="flex flex-col gap-0.5">
+                <span>{tDiscovery("title")}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {tDiscovery("scanCustom")}
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => setUrlInstallOpen(true)}
+              className="text-xs"
+              data-testid="skill-panel-toolbar-install-from-url"
+            >
+              <LinkIcon className="mr-2 size-3.5" />
+              <div className="flex flex-col gap-0.5">
+                <span>{t("installFromUrl")}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {tCommon("marketplace.urlInstall.description")}
+                </span>
+              </div>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -525,44 +532,46 @@ export function SkillPanelToolbar() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuItem onSelect={() => void sync.push()} className="text-xs">
-            <RefreshCwIcon className="mr-2 size-3.5" />
-            {tSync("pushAll")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void sync.pull()} className="text-xs">
-            <RefreshCwIcon className="mr-2 size-3.5 -scale-x-100" />
-            {tSync("pullAll")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
-            {tSync("mirrorTargetsLabel")}
-          </DropdownMenuLabel>
-          <DropdownMenuCheckboxItem
-            checked={mirrorSettings.claude}
-            onCheckedChange={(v) => void setMirror({ claude: !!v })}
-            className="text-xs"
-            data-testid="skill-panel-toolbar-mirror-claude"
-          >
-            {tSync("mirrorClaude")}
-          </DropdownMenuCheckboxItem>
-          <DropdownMenuCheckboxItem
-            checked={mirrorSettings.codex}
-            onCheckedChange={(v) => void setMirror({ codex: !!v })}
-            className="text-xs"
-            data-testid="skill-panel-toolbar-mirror-codex"
-          >
-            {tSync("mirrorCodex")}
-          </DropdownMenuCheckboxItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => void handleEmptyTrash()}
-            disabled={!isTauri() || trashCount === 0 || busy}
-            className="text-xs"
-            data-testid="skill-panel-toolbar-empty-trash"
-          >
-            <FolderDownIcon className="mr-2 size-3.5" />
-            <span>{tSync("emptyTrash", { count: trashCount })}</span>
-          </DropdownMenuItem>
+          <DropdownMenuGroup>
+            <DropdownMenuItem onSelect={() => void sync.push()} className="text-xs">
+              <RefreshCwIcon className="mr-2 size-3.5" />
+              {tSync("pushAll")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void sync.pull()} className="text-xs">
+              <RefreshCwIcon className="mr-2 size-3.5 -scale-x-100" />
+              {tSync("pullAll")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              {tSync("mirrorTargetsLabel")}
+            </DropdownMenuLabel>
+            <DropdownMenuCheckboxItem
+              checked={mirrorSettings.claude}
+              onCheckedChange={(v) => void setMirror({ claude: !!v })}
+              className="text-xs"
+              data-testid="skill-panel-toolbar-mirror-claude"
+            >
+              {tSync("mirrorClaude")}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={mirrorSettings.codex}
+              onCheckedChange={(v) => void setMirror({ codex: !!v })}
+              className="text-xs"
+              data-testid="skill-panel-toolbar-mirror-codex"
+            >
+              {tSync("mirrorCodex")}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => void handleEmptyTrash()}
+              disabled={!isTauri() || trashCount === 0 || busy}
+              className="text-xs"
+              data-testid="skill-panel-toolbar-empty-trash"
+            >
+              <FolderDownIcon className="mr-2 size-3.5" />
+              <span>{tSync("emptyTrash", { count: trashCount })}</span>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -580,38 +589,40 @@ export function SkillPanelToolbar() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem
-            onSelect={() => void handleExportAll()}
-            disabled={busy}
-            className="text-xs"
-          >
-            <FolderDownIcon className="mr-2 size-3.5" />
-            {t("exportAll")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => void handleCheckUpdates()}
-            disabled={busy || updates.checking}
-            className="text-xs"
-          >
-            <ArrowUpCircleIcon className="mr-2 size-3.5" />
-            {updates.checking ? t("checkingUpdates") : t("checkUpdates")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => void sync.push()}
-            disabled={!isTauri() || sync.busy}
-            className="text-xs"
-          >
-            <RefreshCwIcon className="mr-2 size-3.5" />
-            {tSync("pushAll")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => void sync.pull()}
-            disabled={!isTauri() || sync.busy}
-            className="text-xs"
-          >
-            <RefreshCwIcon className="mr-2 size-3.5 -scale-x-100" />
-            {tSync("pullAll")}
-          </DropdownMenuItem>
+          <DropdownMenuGroup>
+            <DropdownMenuItem
+              onSelect={() => void handleExportAll()}
+              disabled={busy}
+              className="text-xs"
+            >
+              <FolderDownIcon className="mr-2 size-3.5" />
+              {t("exportAll")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => void handleCheckUpdates()}
+              disabled={busy || updates.checking}
+              className="text-xs"
+            >
+              <ArrowUpCircleIcon className="mr-2 size-3.5" />
+              {updates.checking ? t("checkingUpdates") : t("checkUpdates")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => void sync.push()}
+              disabled={!isTauri() || sync.busy}
+              className="text-xs"
+            >
+              <RefreshCwIcon className="mr-2 size-3.5" />
+              {tSync("pushAll")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => void sync.pull()}
+              disabled={!isTauri() || sync.busy}
+              className="text-xs"
+            >
+              <RefreshCwIcon className="mr-2 size-3.5 -scale-x-100" />
+              {tSync("pullAll")}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
 

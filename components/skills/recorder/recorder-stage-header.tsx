@@ -12,6 +12,7 @@
 import { useTranslations } from "next-intl"
 import { Check } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { STAGES, type RecorderStage } from "@/lib/skills/recording/state-machine"
 
@@ -40,13 +41,15 @@ export function RecorderStageHeader({ current, reached, onSelect }: Props) {
         const canSelect = isDone && Boolean(onSelect)
         return (
           <li key={stage} className="flex shrink-0 items-center gap-1">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="xs"
               disabled={!canSelect}
               onClick={canSelect ? () => onSelect?.(stage) : undefined}
               aria-current={isCurrent ? "step" : undefined}
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
+                "h-auto gap-1.5 px-2 py-1 text-xs",
                 isCurrent && "bg-accent text-accent-foreground font-medium",
                 !isCurrent && isDone && "text-muted-foreground hover:bg-accent/50",
                 !isCurrent && !isDone && "text-muted-foreground/50",
@@ -64,7 +67,7 @@ export function RecorderStageHeader({ current, reached, onSelect }: Props) {
                 {isDone ? <Check className="size-2.5" /> : index + 1}
               </span>
               {t(`stages.${stage}`)}
-            </button>
+            </Button>
             {index < STAGES.length - 1 ? (
               <span aria-hidden className="text-muted-foreground/30">
                 /

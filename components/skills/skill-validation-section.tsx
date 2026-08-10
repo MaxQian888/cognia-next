@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, CheckCircle2Icon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { SkillValidationError } from "@cognia/agent-config-types"
 
 interface Props {
@@ -17,20 +18,20 @@ export function SkillValidationSection({ errors }: Props) {
   const t = useTranslations("skills.validation")
   if (errors.length === 0) {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-dashed p-4 text-xs text-muted-foreground">
-        <CheckCircle2Icon className="size-4 text-emerald-500" />
-        {t("empty")}
-      </div>
+      <Alert className="rounded-none border-x-0">
+        <CheckCircle2Icon className="size-4 text-primary" />
+        <AlertDescription className="text-xs">{t("empty")}</AlertDescription>
+      </Alert>
     )
   }
   const grouped = groupByField(errors)
   return (
-    <div className="space-y-3">
+    <div className="divide-y border-y">
       {grouped.map(({ field, items }) => {
         const label = field === UNFIELDED_KEY ? t("unfielded") : field
         const isUnfielded = field === UNFIELDED_KEY
         return (
-          <div key={field} role="group" className="rounded-md border p-3">
+          <div key={field} role="group" className="py-3">
             <div className="mb-2 flex items-center gap-2 text-xs font-medium">
               <AlertTriangleIcon className="size-3.5 text-destructive" />
               <span className={isUnfielded ? undefined : "font-mono"}>{label}</span>

@@ -18,10 +18,7 @@ export function SkillUsageTrend() {
   }, [usageByDay, windowSize])
 
   return (
-    <div
-      data-testid="skill-usage-trend"
-      className="rounded-md border border-border/50 bg-card/80 p-4 backdrop-blur"
-    >
+    <section data-testid="skill-usage-trend" className="border-b p-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold">{t("title")}</h3>
         <ToggleGroup
@@ -60,6 +57,6 @@ export function SkillUsageTrend() {
           </LineChart>
         </ResponsiveContainer>
       </div>
-    </div>
+    </section>
   )
 }

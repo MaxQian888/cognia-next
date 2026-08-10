@@ -31,6 +31,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
@@ -141,22 +142,24 @@ export function StageSetup({
     <div className="space-y-6">
       <section className="space-y-2">
         <Label className="text-sm font-medium">{t("setup.scope")}</Label>
-        <div className="grid gap-2" role="radiogroup" aria-label={t("setup.scope")}>
+        <RadioGroup
+          value={scopeKind}
+          onValueChange={(value) => onScopeKindChange(value as ScopeKind)}
+          className="grid border-y"
+          aria-label={t("setup.scope")}
+        >
           {(["window", "application", "desktop"] as const).map((kind) => {
             const Icon = SCOPE_ICONS[kind]
             const selected = scopeKind === kind
             return (
-              <button
+              <Label
                 key={kind}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() => onScopeKindChange(kind)}
                 className={cn(
-                  "flex items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-                  selected ? "border-primary bg-accent/40" : "hover:bg-accent/20"
+                  "flex cursor-pointer items-start gap-3 border-b p-3 text-left transition-colors last:border-b-0",
+                  selected ? "bg-accent/40" : "hover:bg-accent/20"
                 )}
               >
+                <RadioGroupItem value={kind} className="mt-0.5" />
                 <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="space-y-0.5">
                   <span className="block text-sm">
@@ -174,10 +177,10 @@ export function StageSetup({
                     </span>
                   ) : null}
                 </span>
-              </button>
+              </Label>
             )
           })}
-        </div>
+        </RadioGroup>
         <p className="text-xs text-muted-foreground">{t("setup.scopeHint")}</p>
       </section>
 
@@ -217,9 +220,13 @@ export function StageSetup({
           ) : null}
 
           {targets && targets.length > 0 ? (
-            <div
-              className="max-h-56 space-y-1 overflow-y-auto rounded-lg border p-1"
-              role="radiogroup"
+            <RadioGroup
+              value={target ? String(target.windowId) : undefined}
+              onValueChange={(value) => {
+                const candidate = targets.find((item) => String(item.windowId) === value)
+                if (candidate) onTargetChange(candidate)
+              }}
+              className="max-h-56 gap-0 overflow-y-auto border-y"
               aria-label={t(
                 scopeKind === "window" ? "setup.targetWindow" : "setup.targetApplication"
               )}
@@ -227,32 +234,31 @@ export function StageSetup({
               {targets.map((candidate) => {
                 const selected = candidate.windowId === target?.windowId
                 return (
-                  <button
+                  <Label
                     key={candidate.windowId}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => onTargetChange(candidate)}
                     className={cn(
-                      "flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors",
+                      "flex w-full cursor-pointer items-start gap-2 border-b px-2 py-2 text-left transition-colors last:border-b-0",
                       selected ? "bg-accent" : "hover:bg-accent/40"
                     )}
                   >
-                    <span className="text-sm">{candidate.appName}</span>
-                    {scopeKind === "window" && candidate.title ? (
-                      <span className="w-full truncate text-xs text-muted-foreground">
-                        {candidate.title}
-                      </span>
-                    ) : null}
-                    {candidate.minimized ? (
-                      <span className="text-xs text-amber-600 dark:text-amber-500">
-                        {t("setup.targetMinimized")}
-                      </span>
-                    ) : null}
-                  </button>
+                    <RadioGroupItem value={String(candidate.windowId)} className="mt-0.5" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm">{candidate.appName}</span>
+                      {scopeKind === "window" && candidate.title ? (
+                        <span className="block w-full truncate text-xs text-muted-foreground">
+                          {candidate.title}
+                        </span>
+                      ) : null}
+                      {candidate.minimized ? (
+                        <span className="block text-xs text-destructive">
+                          {t("setup.targetMinimized")}
+                        </span>
+                      ) : null}
+                    </span>
+                  </Label>
                 )
               })}
-            </div>
+            </RadioGroup>
           ) : null}
 
           <p className="text-xs text-muted-foreground">

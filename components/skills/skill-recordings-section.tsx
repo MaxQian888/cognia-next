@@ -19,6 +19,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 
 import { Skeleton } from "@/components/ui/skeleton"
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty"
 import { isTauri } from "@/lib/tauri"
 import {
   deleteRecording,
@@ -80,16 +81,18 @@ export function SkillRecordingsSection({ skillId }: Props) {
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed p-6 text-center">
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
-      </div>
+      <Empty className="rounded-none border-y py-6">
+        <EmptyHeader>
+          <EmptyDescription>{t("empty")}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     )
   }
 
   return (
     <section className="space-y-3">
       <p className="text-xs text-muted-foreground">{t("immutable")}</p>
-      <ul className="space-y-2">
+      <ul className="divide-y border-y">
         {rows.map((row) => (
           <SkillRecordingRow
             key={row.id}

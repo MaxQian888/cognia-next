@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Card } from "@/components/ui/card"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
@@ -133,8 +132,8 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
         </DialogHeader>
 
         <div className="space-y-3">
-          <Card className="p-3">
-            <div className="mb-1 flex items-center justify-between gap-2">
+          <section className="border-y py-3">
+            <div className="mb-1 flex items-center justify-between gap-2 px-3">
               <p className="text-xs font-medium">
                 {t("stagedCount", { count: staging.drafts.length })}
               </p>
@@ -160,11 +159,11 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
               </div>
             </div>
             <ScrollArea className="h-40">
-              <div className="space-y-1.5">
+              <div className="divide-y">
                 {staging.drafts.map((d, i) => (
                   <div
                     key={`${d.name}-${i}`}
-                    className="flex items-center justify-between gap-2 rounded-sm bg-muted/30 px-2 py-1 text-xs"
+                    className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs"
                   >
                     <span className="truncate">{d.name}</span>
                     {d.tags && d.tags.length > 0 && (
@@ -181,14 +180,14 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
               </div>
             </ScrollArea>
             {staging.parseErrors.length > 0 && (
-              <p className="mt-2 text-[11px] text-destructive">
+              <p className="mt-2 px-3 text-[11px] text-destructive">
                 {t("parseErrorsLine", {
                   count: staging.parseErrors.length,
                   first: staging.parseErrors[0]?.error ?? "",
                 })}
               </p>
             )}
-          </Card>
+          </section>
 
           <div className="space-y-1.5">
             <Label className="text-xs">{t("strategyLabel")}</Label>

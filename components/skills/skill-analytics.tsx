@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
-import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
@@ -42,24 +42,25 @@ export function SkillAnalytics() {
 
   return (
     <ScrollArea className="flex-1">
-      <div className="space-y-4 p-3 sm:p-4">
+      <div className="flex flex-col">
         <motion.div
-          className="grid grid-cols-2 gap-3 md:grid-cols-4"
+          className="grid grid-cols-2 divide-x border-b md:grid-cols-4"
+          data-testid="skills-summary-strip"
           initial={reduce ? false : "initial"}
           animate="animate"
           variants={STAGGER_CONTAINER}
         >
           <motion.div variants={STAGGER_CHILD}>
-            <SummaryCard label={t("totalSkills")} value={data.totalSkills} />
+            <SummaryMetric label={t("totalSkills")} value={data.totalSkills} />
           </motion.div>
           <motion.div variants={STAGGER_CHILD}>
-            <SummaryCard label={t("totalEnabled")} value={data.totalEnabled} />
+            <SummaryMetric label={t("totalEnabled")} value={data.totalEnabled} />
           </motion.div>
           <motion.div variants={STAGGER_CHILD}>
-            <SummaryCard label={t("totalUsage")} value={data.totalUsage} />
+            <SummaryMetric label={t("totalUsage")} value={data.totalUsage} />
           </motion.div>
           <motion.div variants={STAGGER_CHILD}>
-            <SummaryCard
+            <SummaryMetric
               label={t("tokensEstimated")}
               value={data.estimatedTokens.toLocaleString()}
             />
@@ -68,7 +69,7 @@ export function SkillAnalytics() {
 
         <SkillUsageTrend />
 
-        <Card className="border-border/50 bg-card/80 p-4 backdrop-blur">
+        <section className="border-b p-4">
           <p className="mb-2 text-xs font-medium">{t("categoryUsageTitle")}</p>
           {categoryRows.length > 0 ? (
             <div className="h-56">
@@ -107,10 +108,10 @@ export function SkillAnalytics() {
           ) : (
             <p className="text-xs text-muted-foreground">{t("neverUsedEmpty")}</p>
           )}
-        </Card>
+        </section>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card className="border-border/50 bg-card/80 p-4 backdrop-blur">
+        <div className="grid border-b md:grid-cols-2 md:divide-x">
+          <section className="p-4">
             <p className="mb-2 text-xs font-medium">{t("mostUsedTitle")}</p>
             {data.mostUsed.length === 0 ? (
               <p className="text-xs text-muted-foreground">{t("neverUsedEmpty")}</p>
@@ -121,10 +122,11 @@ export function SkillAnalytics() {
                   const Icon = cat.icon
                   return (
                     <li key={skill.id}>
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
                         onClick={() => openDetail(skill.id)}
-                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent"
+                        className="h-auto w-full justify-start gap-2 rounded-none px-2 py-1.5 text-left text-xs"
                       >
                         <span
                           className={`flex h-6 w-6 shrink-0 items-center justify-center rounded ${cat.color}`}
@@ -135,15 +137,15 @@ export function SkillAnalytics() {
                         <Badge variant="outline" className="h-5 text-[10px]">
                           {skill.usageCount ?? 0}
                         </Badge>
-                      </button>
+                      </Button>
                     </li>
                   )
                 })}
               </ul>
             )}
-          </Card>
+          </section>
 
-          <Card className="border-border/50 bg-card/80 p-4 backdrop-blur">
+          <section className="border-t p-4 md:border-t-0">
             <p className="mb-2 text-xs font-medium">{t("recentUsageTitle")}</p>
             {data.recentlyUsed.length === 0 ? (
               <p className="text-xs text-muted-foreground">—</p>
@@ -151,57 +153,59 @@ export function SkillAnalytics() {
               <ul className="space-y-1.5">
                 {data.recentlyUsed.map((skill) => (
                   <li key={skill.id}>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
                       onClick={() => openDetail(skill.id)}
-                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent"
+                      className="h-auto w-full justify-start gap-2 rounded-none px-2 py-1.5 text-left text-xs"
                     >
                       <span className="min-w-0 flex-1 truncate">{skill.name}</span>
                       <span className="shrink-0 text-[10px] text-muted-foreground">
                         {skill.lastUsedAt ? new Date(skill.lastUsedAt).toLocaleString() : "—"}
                       </span>
-                    </button>
+                    </Button>
                   </li>
                 ))}
               </ul>
             )}
-          </Card>
+          </section>
         </div>
 
         {data.neverUsed.length > 0 && (
-          <Card className="border-border/50 bg-card/80 p-4 backdrop-blur">
+          <section className="border-b p-4">
             <p className="mb-2 text-xs font-medium">{t("neverUsedTitle")}</p>
             <ul className="grid gap-1 sm:grid-cols-2">
               {data.neverUsed.map((skill) => {
                 const src = getSourceMeta(skill.source)
                 return (
                   <li key={skill.id}>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
                       onClick={() => openDetail(skill.id)}
-                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-xs hover:bg-accent"
+                      className="h-auto w-full justify-start gap-2 rounded-none px-2 py-1 text-left text-xs"
                     >
                       <span className="min-w-0 flex-1 truncate">{skill.name}</span>
                       <Badge variant={src.badgeVariant} className="h-5 text-[10px]">
                         {tSrc(src.labelKey as never)}
                       </Badge>
-                    </button>
+                    </Button>
                   </li>
                 )
               })}
             </ul>
-          </Card>
+          </section>
         )}
       </div>
     </ScrollArea>
   )
 }
 
-function SummaryCard({ label, value }: { label: string; value: number | string }) {
+function SummaryMetric({ label, value }: { label: string; value: number | string }) {
   return (
-    <Card className="border-border/50 bg-card/80 p-3 backdrop-blur">
+    <div className="p-4">
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="mt-1 text-xl font-semibold tabular-nums">{value}</p>
-    </Card>
+    </div>
   )
 }

@@ -189,7 +189,7 @@ export function StageGenerate({
       ) : null}
 
       {tools ? (
-        <section className="space-y-2 rounded-lg border p-3">
+        <section className="flex flex-col gap-2 border-y py-3">
           <h3 className="text-sm font-medium">{t("generate.tools.title")}</h3>
           <p className="text-xs text-muted-foreground">{t("generate.tools.description")}</p>
           {tools.kept.length === 0 && tools.unknown.length === 0 ? (
@@ -205,7 +205,7 @@ export function StageGenerate({
             </div>
           ) : null}
           {tools.unknown.length > 0 ? (
-            <p className="text-xs text-amber-600 dark:text-amber-500">
+            <p className="text-xs text-destructive">
               {t("generate.tools.unknown", { count: tools.unknown.length })}
             </p>
           ) : null}

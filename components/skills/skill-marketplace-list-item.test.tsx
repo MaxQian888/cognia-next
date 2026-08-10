@@ -7,7 +7,8 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { SkillMarketplaceListItem } from "./skill-marketplace-list-item"
 import type { MarketplaceItem } from "@/lib/skills/marketplace-types"
 
@@ -29,12 +30,13 @@ describe("SkillMarketplaceListItem", () => {
     expect(screen.getByText('byAuthor:{"author":"alice"}')).toBeInTheDocument()
   })
 
-  it("invokes onSelect with the item when clicked", () => {
+  it("invokes onSelect with the item when clicked", async () => {
+    const user = userEvent.setup()
     const onSelect = jest.fn()
     render(
       <SkillMarketplaceListItem item={item} installed={false} active={false} onSelect={onSelect} />
     )
-    fireEvent.click(screen.getByText("X Skill"))
+    await user.click(screen.getByRole("button", { name: /X Skill/ }))
     expect(onSelect).toHaveBeenCalledWith(item)
   })
 
@@ -43,8 +45,8 @@ describe("SkillMarketplaceListItem", () => {
     expect(screen.getByLabelText("installed")).toBeInTheDocument()
   })
 
-  it("applies the active highlight", () => {
+  it("exposes the active item as current", () => {
     render(<SkillMarketplaceListItem item={item} installed={false} active onSelect={jest.fn()} />)
-    expect(screen.getByText("X Skill").closest("button")).toHaveClass("border-l-primary")
+    expect(screen.getByRole("button", { name: /X Skill/ })).toHaveAttribute("aria-current", "true")
   })
 })

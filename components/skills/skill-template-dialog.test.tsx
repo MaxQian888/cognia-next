@@ -6,7 +6,8 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { SkillTemplateDialog } from "./skill-template-dialog"
 import { useSkillsStore } from "@/stores/skills"
 import { SKILL_TEMPLATES } from "@/lib/skills/templates"
@@ -16,17 +17,19 @@ beforeEach(() => {
 })
 
 describe("SkillTemplateDialog", () => {
-  it("renders a card per template when open", () => {
+  it("renders an accessible list of template actions when open", () => {
     render(<SkillTemplateDialog open onOpenChange={jest.fn()} />)
     for (const tpl of SKILL_TEMPLATES) {
-      expect(screen.getByTestId(`skill-template-${tpl.id}`)).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: new RegExp(tpl.name) })).toBeInTheDocument()
     }
+    expect(screen.getAllByRole("listitem")).toHaveLength(SKILL_TEMPLATES.length)
   })
 
-  it("seeds the create editor and closes when a template is picked", () => {
+  it("seeds the create editor and closes when a template is picked", async () => {
+    const user = userEvent.setup()
     const onOpenChange = jest.fn()
     render(<SkillTemplateDialog open onOpenChange={onOpenChange} />)
-    fireEvent.click(screen.getByTestId("skill-template-code-review"))
+    await user.click(screen.getByRole("button", { name: /Code review/ }))
     const state = useSkillsStore.getState()
     expect(state.editorTarget).toEqual({ mode: "create" })
     expect(state.createSeed?.content).toContain("Code review")

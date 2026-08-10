@@ -17,6 +17,7 @@ import { useTranslations } from "next-intl"
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -115,16 +116,16 @@ export function ReviewStepDetail({
           aria-describedby={step.needsIntent ? "recorder-step-intent-hint" : undefined}
         />
         {step.needsIntent ? (
-          <p id="recorder-step-intent-hint" className="text-xs text-amber-600 dark:text-amber-500">
+          <p id="recorder-step-intent-hint" className="text-xs text-destructive">
             {t("review.needsIntentHint")}
           </p>
         ) : null}
       </div>
 
       {isSensitive ? (
-        <p className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
-          {t("review.sensitive")}
-        </p>
+        <Alert className="rounded-none border-x-0">
+          <AlertDescription className="text-xs">{t("review.sensitive")}</AlertDescription>
+        </Alert>
       ) : null}
 
       <div className="space-y-1.5">

@@ -67,7 +67,7 @@ export function StageSave({ onSave, onStartTrial, onConfirmTrial, onOpenEditor }
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-500" aria-hidden />
+            <CheckCircle2 className="size-4 text-primary" aria-hidden />
             <span className="text-sm" aria-live="polite">
               {t("save.saved", { name: draft?.name ?? "" })}
             </span>
@@ -78,7 +78,7 @@ export function StageSave({ onSave, onStartTrial, onConfirmTrial, onOpenEditor }
             {t("draft.openEditor")}
           </Button>
 
-          <section className="space-y-2 rounded-lg border p-3">
+          <section className="flex flex-col gap-2 border-y py-3">
             <p className="text-xs text-muted-foreground">{t("save.trial.description")}</p>
             {!trialSessionId ? (
               <Button size="sm" onClick={onStartTrial}>
@@ -89,7 +89,7 @@ export function StageSave({ onSave, onStartTrial, onConfirmTrial, onOpenEditor }
               <div className="space-y-2">
                 <p className="text-xs">{t("save.trial.opened")}</p>
                 {trialConfirmed ? (
-                  <p className="text-sm text-emerald-600 dark:text-emerald-500" aria-live="polite">
+                  <p className="text-sm text-primary" aria-live="polite">
                     {t("save.trial.enabled", { name: draft?.name ?? "" })}
                   </p>
                 ) : (

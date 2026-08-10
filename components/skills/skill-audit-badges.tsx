@@ -19,9 +19,9 @@ const RISK_VARIANT: Record<SkillsShRisk, "default" | "secondary" | "outline" | "
 }
 
 const RISK_DOT: Record<SkillsShRisk, string> = {
-  safe: "bg-emerald-500",
-  low: "bg-emerald-500",
-  medium: "bg-amber-500",
+  safe: "bg-primary",
+  low: "bg-primary",
+  medium: "bg-muted-foreground",
   high: "bg-destructive",
   critical: "bg-destructive",
   unknown: "bg-muted-foreground/40",

@@ -12,7 +12,8 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { Spinner } from "@/components/ui/spinner"
 import { skillsScanResources, skillsScanSecurity, type SkillScanIssue } from "@/lib/claude/ipc"
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
@@ -111,61 +112,65 @@ export function SkillSecurityScanner({ skill }: Props) {
       </div>
 
       {!desktop && (
-        <Card className="p-3 text-xs text-muted-foreground">{t("desktopOnlyHint")}</Card>
+        <Alert className="rounded-none border-x-0">
+          <AlertDescription className="text-xs">{t("desktopOnlyHint")}</AlertDescription>
+        </Alert>
       )}
 
       {error && (
-        <Card className="border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
-          {error}
-        </Card>
+        <Alert variant="destructive" className="rounded-none border-x-0">
+          <AlertDescription className="text-xs">{error}</AlertDescription>
+        </Alert>
       )}
 
       {desktop &&
         issues !== null &&
         (issues.length === 0 ? (
-          <Card className="flex items-center gap-2 p-3 text-xs">
-            <CheckCircle2Icon className="size-4 text-emerald-500" />
-            {t("noIssues")}
-          </Card>
+          <Alert className="rounded-none border-x-0">
+            <CheckCircle2Icon className="size-4 text-primary" />
+            <AlertDescription className="text-xs">{t("noIssues")}</AlertDescription>
+          </Alert>
         ) : (
-          <Card className="p-0">
+          <section className="border-y">
             <div className="border-b px-3 py-2 text-xs font-medium">
               {t("issuesTitle", { count: issues.length })}
             </div>
-            <ul className="divide-y">
+            <ItemGroup className="divide-y">
               {issues.map((issue, i) => {
                 const Icon = SEVERITY_ICON[issue.severity]
                 return (
-                  <li
+                  <Item
                     key={`${issue.kind}-${i}`}
-                    className="flex items-start gap-3 px-3 py-2 text-xs"
+                    role="listitem"
+                    className="items-start rounded-none px-3 py-2 text-xs"
+                    size="sm"
                   >
                     <Icon
                       className={
                         issue.severity === "high"
                           ? "size-4 shrink-0 text-destructive"
-                          : "size-4 shrink-0 text-amber-500"
+                          : "size-4 shrink-0 text-muted-foreground"
                       }
                     />
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium">
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="text-xs">
                         {issue.message}
                         {issue.line !== undefined && (
                           <span className="ml-1 font-mono text-[10px] text-muted-foreground">
                             :L{issue.line}
                           </span>
                         )}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">{issue.kind}</p>
-                    </div>
+                      </ItemTitle>
+                      <ItemDescription className="text-[10px]">{issue.kind}</ItemDescription>
+                    </ItemContent>
                     <Badge variant={SEVERITY_VARIANT[issue.severity]} className="h-5 text-[10px]">
                       {tSeverity(issue.severity)}
                     </Badge>
-                  </li>
+                  </Item>
                 )
               })}
-            </ul>
-          </Card>
+            </ItemGroup>
+          </section>
         ))}
     </div>
   )

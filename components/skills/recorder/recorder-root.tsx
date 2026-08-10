@@ -350,7 +350,7 @@ export function SkillRecorderRoot() {
           {stage === "review" ? (
             <div className="flex items-center gap-2">
               {unconfirmedVariables > 0 ? (
-                <span className="text-xs text-amber-600 dark:text-amber-500">
+                <span className="text-xs text-destructive">
                   {t("review.blockedByVariables", { count: unconfirmedVariables })}
                 </span>
               ) : null}

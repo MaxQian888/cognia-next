@@ -6,9 +6,13 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-jest.mock("@/components/chat/markdown-renderer", () => ({
-  MarkdownRenderer: ({ content }: { content: string }) => (
-    <div data-testid="markdown-renderer">{content}</div>
+jest.mock("@/components/ai-elements/message", () => ({
+  Message: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="ai-message">{children}</div>
+  ),
+  MessageContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  MessageResponse: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="message-response">{children}</div>
   ),
 }))
 
@@ -60,7 +64,8 @@ describe("SkillEditorAiPopup", () => {
     )
 
     fireEvent.click(screen.getByText("optimize"))
-    expect(await screen.findByTestId("markdown-renderer")).toHaveTextContent("$$x^2$$")
+    expect(await screen.findByTestId("ai-message")).toBeInTheDocument()
+    expect(screen.getByTestId("message-response")).toHaveTextContent("$$x^2$$")
     fireEvent.click(screen.getByText("accept"))
     expect(onAccept).toHaveBeenCalledWith("$$x^2$$")
   })

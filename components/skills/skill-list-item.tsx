@@ -4,6 +4,7 @@ import { memo } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, ArrowUpCircleIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import type { Skill } from "@cognia/agent-config-types"
@@ -156,34 +157,36 @@ export const SkillListItem = memo(function SkillListItem({
 
   if (grid) {
     return (
-      <div className="relative">
+      <div className="relative min-w-0 border-b border-r">
         <span className="absolute right-2 top-2 z-10">{selectCheckbox}</span>
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => onOpen(skill.id)}
+          aria-current={active ? "true" : undefined}
           className={cn(
-            "flex w-full flex-col gap-1.5 rounded-lg border text-left transition-colors",
+            "h-full w-full items-stretch justify-start whitespace-normal rounded-none border-l-2 border-l-transparent text-left",
             compact ? "p-2" : "p-3",
-            active
-              ? "border-primary bg-accent font-medium ring-1 ring-primary"
-              : "hover:bg-muted/50",
+            active ? "border-l-primary bg-accent font-medium" : "hover:bg-muted/50",
             status === "disabled" && "opacity-60"
           )}
         >
-          <span className="flex items-center gap-2 pr-6">
-            {iconBox}
-            <span className="min-w-0 flex-1 truncate text-sm">{skill.name}</span>
-          </span>
-          {display.showDescription && skill.description && (
-            <span className="line-clamp-2 text-[11px] font-normal text-muted-foreground">
-              {skill.description}
+          <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <span className="flex items-center gap-2 pr-6">
+              {iconBox}
+              <span className="min-w-0 flex-1 truncate text-sm">{skill.name}</span>
             </span>
-          )}
-          <span className="flex flex-wrap items-center gap-1">
-            {metaChips}
-            {statusBadges}
+            {display.showDescription && skill.description && (
+              <span className="line-clamp-2 text-[11px] font-normal text-muted-foreground">
+                {skill.description}
+              </span>
+            )}
+            <span className="flex flex-wrap items-center gap-1">
+              {metaChips}
+              {statusBadges}
+            </span>
           </span>
-        </button>
+        </Button>
       </div>
     )
   }
@@ -191,11 +194,13 @@ export const SkillListItem = memo(function SkillListItem({
   return (
     <div className="flex items-center gap-2 pl-2">
       {selectCheckbox}
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => onOpen(skill.id)}
+        aria-current={active ? "true" : undefined}
         className={cn(
-          "flex min-w-0 flex-1 items-center gap-2.5 rounded-lg border-l-2 border-l-transparent px-2.5 text-left transition-colors",
+          "h-auto min-w-0 flex-1 justify-start gap-2.5 whitespace-normal rounded-none border-l-2 border-l-transparent px-2.5 text-left",
           compact ? "py-1.5" : "py-2",
           active ? "border-l-primary bg-accent font-medium" : "hover:bg-muted/50",
           status === "disabled" && "opacity-60"
@@ -212,18 +217,22 @@ export const SkillListItem = memo(function SkillListItem({
           {metaChips}
         </span>
         <span className="flex shrink-0 items-center gap-1">{statusBadges}</span>
-      </button>
+      </Button>
     </div>
   )
 })
 
 function SyncDot({ skill }: { skill: Skill }) {
+  const t = useTranslations("skills.card")
+  const label = skill.lastSyncError
+    ? t("syncError")
+    : skill.syncFingerprint
+      ? t("syncCurrent")
+      : t("syncPending")
   const color = skill.lastSyncError
     ? "bg-destructive"
     : skill.syncFingerprint
-      ? "bg-emerald-500"
+      ? "bg-success"
       : "bg-muted"
-  return (
-    <span data-testid="skill-sync-dot" className={cn("size-2 rounded-full", color)} aria-hidden />
-  )
+  return <span role="img" aria-label={label} className={cn("size-2 rounded-full", color)} />
 }

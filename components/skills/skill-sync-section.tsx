@@ -6,6 +6,7 @@ import { useSkillSync } from "@/hooks/skills"
 import { isTauri } from "@/lib/tauri"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { Skill } from "@cognia/agent-config-types"
 
 type SyncStatus = "synced" | "outOfSync" | "error" | "never"
@@ -21,12 +22,9 @@ export function SkillSyncSection({ skill }: Props) {
 
   if (!tauriEnv) {
     return (
-      <div
-        data-testid="skill-sync-section"
-        className="rounded-md border border-dashed p-3 text-xs text-muted-foreground"
-      >
-        {t("desktopOnly")}
-      </div>
+      <Alert data-testid="skill-sync-section" className="rounded-none border-x-0">
+        <AlertDescription className="text-xs">{t("desktopOnly")}</AlertDescription>
+      </Alert>
     )
   }
 
@@ -39,7 +37,7 @@ export function SkillSyncSection({ skill }: Props) {
         : "outOfSync"
 
   return (
-    <div data-testid="skill-sync-section" className="rounded-md border p-3">
+    <section data-testid="skill-sync-section" className="border-y py-3">
       <div className="mb-2 flex items-center gap-2">
         <StatusPill status={status} label={t(`status.${status}`)} />
         {skill.lastSyncedAt && (
@@ -60,20 +58,20 @@ export function SkillSyncSection({ skill }: Props) {
         </div>
       </div>
       {skill.lastSyncError && <p className="text-xs text-destructive">{skill.lastSyncError}</p>}
-    </div>
+    </section>
   )
 }
 
 function StatusPill({ status, label }: { status: SyncStatus; label: string }) {
   const map = {
-    synced: { icon: CheckCircle2Icon, cls: "text-emerald-600 border-emerald-300" },
-    outOfSync: { icon: RefreshCwIcon, cls: "text-amber-600 border-amber-300" },
-    error: { icon: AlertCircleIcon, cls: "text-destructive border-destructive/40" },
-    never: { icon: CircleDashedIcon, cls: "text-muted-foreground" },
+    synced: { icon: CheckCircle2Icon, variant: "secondary" as const },
+    outOfSync: { icon: RefreshCwIcon, variant: "outline" as const },
+    error: { icon: AlertCircleIcon, variant: "destructive" as const },
+    never: { icon: CircleDashedIcon, variant: "outline" as const },
   }[status]
   const Icon = map.icon
   return (
-    <Badge variant="outline" className={`gap-1 ${map.cls}`}>
+    <Badge variant={map.variant} className="gap-1">
       <Icon className="size-3" />
       <span className="text-[10px]">{label}</span>
     </Badge>

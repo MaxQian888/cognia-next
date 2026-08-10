@@ -262,8 +262,7 @@ describe("SkillPanel", () => {
   it("renders header (with tabs slot), list pane and the empty detail pane for 'my-skills'", () => {
     render(<SkillPanel />)
     expect(screen.getByTestId("header")).toBeInTheDocument()
-    // Tabs render twice: once inside the header slot (lg+), once standalone (below lg).
-    expect(screen.getAllByTestId("tabs")).toHaveLength(2)
+    expect(screen.getAllByTestId("tabs")).toHaveLength(1)
     expect(screen.getByTestId("list-pane")).toBeInTheDocument()
     expect(screen.getByText("panel.selectSkillTitle")).toBeInTheDocument()
     expect(screen.queryByTestId("marketplace")).not.toBeInTheDocument()

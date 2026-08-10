@@ -3,6 +3,7 @@
 import { memo } from "react"
 import { useTranslations } from "next-intl"
 import { CheckIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { getCategoryMeta } from "@/lib/skills/categories"
 import type { MarketplaceItem } from "@/lib/skills/marketplace-types"
@@ -30,11 +31,13 @@ export const SkillMarketplaceListItem = memo(function SkillMarketplaceListItem({
   const Icon = cat.icon
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={() => onSelect(item)}
+      aria-current={active ? "true" : undefined}
       className={cn(
-        "flex w-full min-w-0 items-center gap-2.5 rounded-lg border-l-2 border-l-transparent px-2.5 py-2 text-left transition-colors min-h-11 md:min-h-0",
+        "min-h-11 h-auto w-full min-w-0 justify-start gap-2.5 whitespace-normal rounded-none border-l-2 border-l-transparent px-2.5 py-2 text-left md:min-h-0",
         active ? "border-l-primary bg-accent font-medium" : "hover:bg-muted/50"
       )}
     >
@@ -56,8 +59,8 @@ export const SkillMarketplaceListItem = memo(function SkillMarketplaceListItem({
         </span>
       </span>
       {installed && (
-        <CheckIcon className="size-3.5 shrink-0 text-emerald-500" aria-label={tMp("installed")} />
+        <CheckIcon className="size-3.5 shrink-0 text-primary" aria-label={tMp("installed")} />
       )}
-    </button>
+    </Button>
   )
 })

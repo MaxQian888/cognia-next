@@ -20,6 +20,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { AlertCircle, EyeOff, Image as ImageIcon, Undo2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Item } from "@/components/ui/item"
 import { cn } from "@/lib/utils"
 import type { RecordedStepView } from "@/lib/skills/recording/step-model"
 
@@ -81,7 +82,7 @@ export function ReviewTimeline({ steps, selectedSeq, onSelect, onToggleExclude }
               className="absolute inset-x-0 top-0"
               style={{ height: item.size, transform: `translateY(${item.start}px)` }}
             >
-              <div
+              <Item
                 role="option"
                 aria-selected={selected}
                 tabIndex={0}
@@ -93,10 +94,10 @@ export function ReviewTimeline({ steps, selectedSeq, onSelect, onToggleExclude }
                   }
                 }}
                 className={cn(
-                  "mx-1 flex h-[52px] cursor-pointer items-center gap-2 rounded-md border px-2 text-sm outline-none",
+                  "h-[52px] cursor-pointer gap-2 rounded-none border-l-2 px-2 py-0 text-sm",
                   selected
-                    ? "border-primary bg-accent/40"
-                    : "border-transparent hover:bg-accent/20",
+                    ? "border-l-primary bg-accent/40"
+                    : "border-l-transparent hover:bg-accent/20",
                   step.excluded && "opacity-50",
                   "focus-visible:ring-2 focus-visible:ring-ring"
                 )}
@@ -112,7 +113,7 @@ export function ReviewTimeline({ steps, selectedSeq, onSelect, onToggleExclude }
                   <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                     {step.manual ? t("review.manualBadge") : null}
                     {step.needsIntent ? (
-                      <span className="flex items-center gap-0.5 text-amber-600 dark:text-amber-500">
+                      <span className="flex items-center gap-0.5 text-destructive">
                         <AlertCircle className="size-3" aria-hidden />
                         {t("review.needsIntent")}
                       </span>
@@ -139,7 +140,7 @@ export function ReviewTimeline({ steps, selectedSeq, onSelect, onToggleExclude }
                     <EyeOff className="size-3.5" aria-hidden />
                   )}
                 </Button>
-              </div>
+              </Item>
             </div>
           )
         })}

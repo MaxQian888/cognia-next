@@ -131,7 +131,7 @@ export function StageRecording({ onPause, onResume, onUndo, onFinish, onHide }: 
         </Button>
       </div>
 
-      <div className="space-y-1 rounded-lg border p-3">
+      <div className="flex flex-col gap-1 border-y py-3">
         <Button size="sm" variant="ghost" onClick={onHide} className="px-2">
           {t("recording.hideSheet")}
         </Button>

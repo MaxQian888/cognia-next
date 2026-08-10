@@ -88,9 +88,6 @@ export function SkillPanel({ className }: Props) {
           filteredCount={view.filtered.length}
           tabsSlot={<SkillPanelTabs className="border-0" />}
         />
-        <div className="lg:hidden">
-          <SkillPanelTabs />
-        </div>
 
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <AnimatePresence mode="wait" initial={false}>
@@ -103,8 +100,11 @@ export function SkillPanel({ className }: Props) {
               className="flex flex-1 min-h-0 overflow-hidden"
             >
               {activeTab === "my-skills" && (
-                <div className="grid min-h-0 w-full flex-1 grid-cols-1 gap-3 p-3 sm:gap-4 sm:p-4 md:grid-cols-[320px_1fr]">
-                  <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+                <div
+                  className="grid min-h-0 w-full flex-1 grid-cols-1 border-y md:grid-cols-[320px_minmax(0,1fr)] md:divide-x"
+                  data-layout="master-detail"
+                >
+                  <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
                     <SkillListPane
                       skills={view.filtered}
                       total={view.all.length}
@@ -115,7 +115,7 @@ export function SkillPanel({ className }: Props) {
                     />
                   </div>
                   {!isMobile && (
-                    <div className="hidden min-h-0 flex-col overflow-hidden rounded-lg border md:flex">
+                    <div className="hidden min-h-0 min-w-0 flex-col overflow-hidden md:flex">
                       <MySkillsDetailPane />
                     </div>
                   )}

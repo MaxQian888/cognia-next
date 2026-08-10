@@ -97,11 +97,8 @@ describe("scope choice", () => {
   it("marks the current scope as checked", async () => {
     renderSetup({ scopeKind: "window" })
     await waitFor(() => expect(listTargets).toHaveBeenCalled())
-    const checked = screen
-      .getAllByRole("radio")
-      .filter((r) => r.getAttribute("aria-checked") === "true")
-    expect(checked).toHaveLength(1)
-    expect(checked[0]).toHaveTextContent("setup.scopeWindow")
+    const checked = screen.getByRole("radio", { name: /setup\.scopeWindow/ })
+    expect(checked).toHaveAttribute("aria-checked", "true")
   })
 
   it("says what whole-desktop capture means", () => {

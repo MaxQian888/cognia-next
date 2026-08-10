@@ -139,9 +139,12 @@ export function SkillMarketplace() {
   )
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 sm:gap-4 sm:p-4 md:grid-cols-[320px_1fr]">
+    <div
+      className="grid min-h-0 flex-1 grid-cols-1 border-y md:grid-cols-[320px_minmax(0,1fr)] md:divide-x"
+      data-layout="master-detail"
+    >
       {/* ── Left: search + views + source filter + item list ─────────── */}
-      <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
         <div className="flex shrink-0 items-center gap-2 border-b p-3">
           <div className="relative flex-1">
             <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -278,7 +281,7 @@ export function SkillMarketplace() {
 
       {/* ── Right: inline detail (desktop) ───────────────────────────── */}
       {!isMobile && (
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">{rightPane}</div>
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">{rightPane}</div>
       )}
 
       {/* ── Mobile detail Sheet ──────────────────────────────────────── */}

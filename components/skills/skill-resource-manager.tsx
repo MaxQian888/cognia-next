@@ -13,12 +13,14 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty"
+import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -28,6 +30,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -81,18 +84,20 @@ export function SkillResourceManager({ skillId }: Props) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => setCreating("script")}>
-              <TerminalIcon className="mr-2 size-3.5" />
-              {t("addScript")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setCreating("reference")}>
-              <FileTextIcon className="mr-2 size-3.5" />
-              {t("addReference")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setCreating("asset")}>
-              <ImageIcon className="mr-2 size-3.5" />
-              {t("addAsset")}
-            </DropdownMenuItem>
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={() => setCreating("script")}>
+                <TerminalIcon className="mr-2 size-3.5" />
+                {t("addScript")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setCreating("reference")}>
+                <FileTextIcon className="mr-2 size-3.5" />
+                {t("addReference")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setCreating("asset")}>
+                <ImageIcon className="mr-2 size-3.5" />
+                {t("addAsset")}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -113,15 +118,21 @@ export function SkillResourceManager({ skillId }: Props) {
       )}
 
       {resources === undefined ? (
-        <p className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-          {t("loading")}
-        </p>
+        <Empty className="rounded-none border-y py-6">
+          <EmptyHeader>
+            <EmptyDescription className="text-xs">{t("loading")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : resources.length === 0 && !creating ? (
-        <p className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-          {t("emptyState", { title: t("title") })}
-        </p>
+        <Empty className="rounded-none border-y py-6">
+          <EmptyHeader>
+            <EmptyDescription className="text-xs">
+              {t("emptyState", { title: t("title") })}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <div className="space-y-1.5">
+        <div className="divide-y border-y">
           {resources?.map((r) => (
             <ResourceRow
               key={r.id}
@@ -210,33 +221,35 @@ function ResourceRow({
   }
   const Icon = KIND_ICON[resource.kind]
   return (
-    <Card className="flex items-center gap-2 p-2">
+    <Item className="rounded-none px-2 py-2" size="sm">
       <Icon className="size-3.5 text-muted-foreground" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-medium">{resource.name}</p>
-        <p className="truncate text-[10px] text-muted-foreground">
+      <ItemContent className="min-w-0">
+        <ItemTitle className="truncate text-xs">{resource.name}</ItemTitle>
+        <ItemDescription className="truncate text-[10px]">
           {resource.path} · {humanSize(resource.size)}
-        </p>
-      </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7"
-        onClick={onEditStart}
-        aria-label={t("rename")}
-      >
-        <PencilIcon className="size-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7 text-destructive hover:text-destructive"
-        onClick={() => void onDelete()}
-        aria-label={t("delete")}
-      >
-        <Trash2Icon className="size-3.5" />
-      </Button>
-    </Card>
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          onClick={onEditStart}
+          aria-label={t("rename")}
+        >
+          <PencilIcon className="size-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 text-destructive hover:text-destructive"
+          onClick={() => void onDelete()}
+          aria-label={t("delete")}
+        >
+          <Trash2Icon className="size-3.5" />
+        </Button>
+      </ItemActions>
+    </Item>
   )
 }
 
@@ -264,7 +277,7 @@ function ResourceForm({
   const t = useTranslations("skills.resources")
   const [form, setForm] = useState<ResourceFormState>(initial)
   return (
-    <Card className="space-y-2 p-3">
+    <div className="flex flex-col gap-2 border-y py-3">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div className="space-y-1">
           <Label className="text-xs">{t("name")}</Label>
@@ -285,9 +298,11 @@ function ResourceForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="script">{t("kindScript")}</SelectItem>
-              <SelectItem value="reference">{t("kindReference")}</SelectItem>
-              <SelectItem value="asset">{t("kindAsset")}</SelectItem>
+              <SelectGroup>
+                <SelectItem value="script">{t("kindScript")}</SelectItem>
+                <SelectItem value="reference">{t("kindReference")}</SelectItem>
+                <SelectItem value="asset">{t("kindAsset")}</SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
@@ -339,7 +354,7 @@ function ResourceForm({
           {mode === "create" ? t("addGeneric") : t("save")}
         </Button>
       </div>
-    </Card>
+    </div>
   )
 }
 

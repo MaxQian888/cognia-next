@@ -13,6 +13,7 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { SkillListItem, DEFAULT_LIST_DISPLAY, type SkillListDisplay } from "./skill-list-item"
 import { useSkillsStore } from "@/stores/skills/skills-store"
 import type { Skill } from "@cognia/agent-config-types"
@@ -51,9 +52,10 @@ describe("SkillListItem", () => {
     expect(screen.getByText("Cite all sources inline.")).toBeInTheDocument()
   })
 
-  it("invokes onOpen when the row is clicked", () => {
+  it("invokes onOpen when the row is clicked", async () => {
+    const user = userEvent.setup()
     render(<SkillListItem skill={baseSkill} selected={false} active={false} {...handlers} />)
-    fireEvent.click(screen.getByText("Cite sources"))
+    await user.click(screen.getByRole("button", { name: /Cite sources/ }))
     expect(handlers.onOpen).toHaveBeenCalledWith("s1")
   })
 
@@ -74,8 +76,10 @@ describe("SkillListItem", () => {
 
   it("applies the active highlight to the row button", () => {
     render(<SkillListItem skill={baseSkill} selected={false} active={true} {...handlers} />)
-    const row = screen.getByText("Cite sources").closest("button")
-    expect(row).toHaveClass("border-l-primary")
+    expect(screen.getByRole("button", { name: /Cite sources/ })).toHaveAttribute(
+      "aria-current",
+      "true"
+    )
   })
 
   it("shows a disabled badge for disabled skills", () => {
@@ -90,12 +94,12 @@ describe("SkillListItem", () => {
     expect(screen.getByText("status.disabled")).toBeInTheDocument()
   })
 
-  it("shows the sync dot only in Tauri, colored by sync state", () => {
+  it("announces the current sync state in Tauri", () => {
     tauriRef.current = true
     const { rerender } = render(
       <SkillListItem skill={baseSkill} selected={false} active={false} {...handlers} />
     )
-    expect(screen.getByTestId("skill-sync-dot")).toHaveClass("bg-muted")
+    expect(screen.getByRole("img", { name: "syncPending" })).toBeInTheDocument()
     rerender(
       <SkillListItem
         skill={{ ...baseSkill, syncFingerprint: "fp" } as Skill}
@@ -104,7 +108,7 @@ describe("SkillListItem", () => {
         {...handlers}
       />
     )
-    expect(screen.getByTestId("skill-sync-dot")).toHaveClass("bg-emerald-500")
+    expect(screen.getByRole("img", { name: "syncCurrent" })).toBeInTheDocument()
     rerender(
       <SkillListItem
         skill={{ ...baseSkill, lastSyncError: "boom" } as Skill}
@@ -113,7 +117,7 @@ describe("SkillListItem", () => {
         {...handlers}
       />
     )
-    expect(screen.getByTestId("skill-sync-dot")).toHaveClass("bg-destructive")
+    expect(screen.getByRole("img", { name: "syncError" })).toBeInTheDocument()
   })
 
   it("shows the update badge when the store flags this skill", () => {
@@ -212,7 +216,7 @@ describe("SkillListItem", () => {
       expect(row).toHaveClass("py-1.5")
     })
 
-    it("renders a grid card variant with the active ring", () => {
+    it("exposes the active grid item as the current skill", () => {
       render(
         <SkillListItem
           skill={baseSkill}
@@ -222,14 +226,17 @@ describe("SkillListItem", () => {
           {...handlers}
         />
       )
-      const card = screen.getByText("Cite sources").closest("button")
-      expect(card).toHaveClass("ring-primary")
+      expect(screen.getByRole("button", { name: /Cite sources/ })).toHaveAttribute(
+        "aria-current",
+        "true"
+      )
       // Batch selection still works in grid mode.
       fireEvent.click(screen.getByLabelText('card.selectAria:{"name":"Cite sources"}'))
       expect(handlers.onToggleSelect).toHaveBeenCalledWith("s1")
     })
 
-    it("renders an inactive, compact, disabled grid card with a sync dot and opens on click", () => {
+    it("renders grid metadata and opens the selected skill", async () => {
+      const user = userEvent.setup()
       tauriRef.current = true
       render(
         <SkillListItem
@@ -245,14 +252,13 @@ describe("SkillListItem", () => {
           {...handlers}
         />
       )
-      const card = screen.getByText("Cite sources").closest("button")!
-      expect(card).toHaveClass("p-2") // compact grid padding
-      expect(card).toHaveClass("opacity-60") // disabled
-      expect(card).not.toHaveClass("ring-primary") // inactive → hover branch
-      expect(screen.getByTestId("skill-sync-dot")).toBeInTheDocument()
+      const tile = screen.getByRole("button", { name: /Cite sources/ })
+      expect(tile).not.toHaveAttribute("aria-current")
+      expect(screen.getByRole("img", { name: "syncPending" })).toBeInTheDocument()
       expect(screen.getByTestId("skill-source-badge")).toBeInTheDocument()
       expect(screen.getByTestId("skill-usage-count")).toHaveTextContent("4")
-      fireEvent.click(card)
+      expect(screen.getByText("status.disabled")).toBeInTheDocument()
+      await user.click(tile)
       expect(handlers.onOpen).toHaveBeenCalledWith("s1")
     })
   })

@@ -16,7 +16,17 @@ describe("SkillValidationPanel", () => {
   })
 
   it("renders empty state when the draft is valid", () => {
-    render(<SkillValidationPanel draft={{ name: "Good Name", content: "x" }} resources={[]} />)
+    render(
+      <SkillValidationPanel
+        draft={{
+          name: "Good Name",
+          slug: "good-name",
+          description: "Good description",
+          content: "x",
+        }}
+        resources={[]}
+      />
+    )
     expect(screen.getByText("empty")).toBeInTheDocument()
   })
 })

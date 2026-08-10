@@ -21,6 +21,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 import {
   insertManualStep,
@@ -124,10 +125,12 @@ export function StageReview({ containerWidth }: { containerWidth: number }) {
       </div>
 
       {steps.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-6 text-center">
-          <p className="text-sm font-medium">{t("review.emptyTitle")}</p>
-          <p className="text-xs text-muted-foreground">{t("review.emptyHint")}</p>
-        </div>
+        <Empty className="rounded-none border-y py-6">
+          <EmptyHeader>
+            <EmptyTitle className="text-sm">{t("review.emptyTitle")}</EmptyTitle>
+            <EmptyDescription className="text-xs">{t("review.emptyHint")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : canSplit ? (
         <div className="flex min-h-0 flex-1 gap-2">
           <div className="min-w-0 overflow-hidden" style={{ flexBasis: `${splitPercent}%` }}>

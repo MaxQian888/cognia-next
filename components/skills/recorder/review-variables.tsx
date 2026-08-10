@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -40,14 +41,12 @@ export function ReviewVariables({ variables, onConfirm }: Props) {
   const unconfirmed = variables.filter((v) => !v.confirmed).length
 
   return (
-    <section className="space-y-2 rounded-lg border p-3">
+    <section className="flex flex-col gap-2 border-y py-3">
       <header className="space-y-0.5">
         <h3 className="text-sm font-medium">{t("title")}</h3>
         <p className="text-xs text-muted-foreground">{t("description")}</p>
         {unconfirmed > 0 ? (
-          <p className="text-xs text-amber-600 dark:text-amber-500">
-            {t("unconfirmed", { count: unconfirmed })}
-          </p>
+          <p className="text-xs text-destructive">{t("unconfirmed", { count: unconfirmed })}</p>
         ) : null}
       </header>
 
@@ -68,9 +67,11 @@ export function ReviewVariables({ variables, onConfirm }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="variable">{t("kindVariable")}</SelectItem>
-                <SelectItem value="literal">{t("kindLiteral")}</SelectItem>
-                <SelectItem value="sensitive">{t("kindSensitive")}</SelectItem>
+                <SelectGroup>
+                  <SelectItem value="variable">{t("kindVariable")}</SelectItem>
+                  <SelectItem value="literal">{t("kindLiteral")}</SelectItem>
+                  <SelectItem value="sensitive">{t("kindSensitive")}</SelectItem>
+                </SelectGroup>
               </SelectContent>
             </Select>
 

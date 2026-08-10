@@ -41,7 +41,7 @@ export function SkillRecordingRow({ recording, bundlePresent, onDuplicate, onDel
   const generation = recording.generation
 
   return (
-    <li className="space-y-2 rounded-lg border p-3">
+    <li className="flex flex-col gap-2 px-1 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium">
           {t("versionLabel", { n: recording.versionNumber })}

@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl"
 import { FileCodeIcon, FileTextIcon, ImageIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { Skill, SkillResource, SkillResourceKind } from "@cognia/agent-config-types"
 
@@ -91,16 +92,17 @@ function TreeRow({
   onClick: () => void
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-muted",
+        "h-auto w-full justify-start gap-2 rounded-none px-2 py-1 text-left",
         active && "bg-muted font-medium"
       )}
     >
       {icon}
       <span className="truncate">{label}</span>
-    </button>
+    </Button>
   )
 }

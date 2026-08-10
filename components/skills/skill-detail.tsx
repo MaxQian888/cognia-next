@@ -21,6 +21,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -217,12 +218,14 @@ export function SkillDetail({ skill }: Props) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => void handleBundleExport()}>
-                  {tDetail("exportBundle")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={requestCompatibilityExport}>
-                  {tDetail("exportMarkdownCompatibility")}
-                </DropdownMenuItem>
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onSelect={() => void handleBundleExport()}>
+                    {tDetail("exportBundle")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={requestCompatibilityExport}>
+                    {tDetail("exportMarkdownCompatibility")}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
             <Button
@@ -392,11 +395,11 @@ export function SkillUpdateBanner({ skill }: { skill: Skill }) {
   }
   return (
     <div
-      className="flex items-center justify-between gap-3 rounded-lg border border-dashed bg-muted/30 px-3 py-2"
+      className="flex items-center justify-between gap-3 border-y bg-muted/30 px-3 py-2"
       data-testid="skill-update-banner"
     >
       <span className="flex items-center gap-1.5 text-xs">
-        <ArrowUpCircleIcon className="size-3.5 text-emerald-500" />
+        <ArrowUpCircleIcon className="size-3.5 text-primary" />
         {t("updateAvailable")}
       </span>
       <Button

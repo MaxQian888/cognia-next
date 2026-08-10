@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -55,14 +56,16 @@ export function SkillFilterSheet({ allTags }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all" className="text-xs">
-                  {t("filter.all")}
-                </SelectItem>
-                {SKILL_CATEGORIES.map((cat) => (
-                  <SelectItem key={cat.id} value={cat.id} className="text-xs">
-                    {t(`category.${cat.labelKey}` as never)}
+                <SelectGroup>
+                  <SelectItem value="all" className="text-xs">
+                    {t("filter.all")}
                   </SelectItem>
-                ))}
+                  {SKILL_CATEGORIES.map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id} className="text-xs">
+                      {t(`category.${cat.labelKey}` as never)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>
@@ -77,14 +80,16 @@ export function SkillFilterSheet({ allTags }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all" className="text-xs">
-                  {t("filter.all")}
-                </SelectItem>
-                {SKILL_SOURCES.map((src) => (
-                  <SelectItem key={src.id} value={src.id} className="text-xs">
-                    {t(`source.${src.labelKey}` as never)}
+                <SelectGroup>
+                  <SelectItem value="all" className="text-xs">
+                    {t("filter.all")}
                   </SelectItem>
-                ))}
+                  {SKILL_SOURCES.map((src) => (
+                    <SelectItem key={src.id} value={src.id} className="text-xs">
+                      {t(`source.${src.labelKey}` as never)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>
@@ -99,14 +104,16 @@ export function SkillFilterSheet({ allTags }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all" className="text-xs">
-                  {t("filter.all")}
-                </SelectItem>
-                {STATUS_OPTIONS.map((s) => (
-                  <SelectItem key={s} value={s} className="text-xs">
-                    {t(`status.${s}` as never)}
+                <SelectGroup>
+                  <SelectItem value="all" className="text-xs">
+                    {t("filter.all")}
                   </SelectItem>
-                ))}
+                  {STATUS_OPTIONS.map((s) => (
+                    <SelectItem key={s} value={s} className="text-xs">
+                      {t(`status.${s}` as never)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>
@@ -141,15 +148,17 @@ export function SkillFilterSheet({ allTags }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="name" className="text-xs">
-                  {t("filter.sortName")}
-                </SelectItem>
-                <SelectItem value="updated" className="text-xs">
-                  {t("filter.sortUpdated")}
-                </SelectItem>
-                <SelectItem value="usage" className="text-xs">
-                  {t("filter.sortUsage")}
-                </SelectItem>
+                <SelectGroup>
+                  <SelectItem value="name" className="text-xs">
+                    {t("filter.sortName")}
+                  </SelectItem>
+                  <SelectItem value="updated" className="text-xs">
+                    {t("filter.sortUpdated")}
+                  </SelectItem>
+                  <SelectItem value="usage" className="text-xs">
+                    {t("filter.sortUsage")}
+                  </SelectItem>
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>

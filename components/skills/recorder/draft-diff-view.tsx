@@ -42,7 +42,7 @@ export function DraftDiffView({ current, candidate, onAccept, onDiscard }: Props
 
   if (changed.length === 0) {
     return (
-      <section className="space-y-2 rounded-lg border p-3">
+      <section className="flex flex-col gap-2 border-y py-3">
         <p className="text-xs text-muted-foreground">{t("noChanges")}</p>
         <Button size="sm" variant="ghost" onClick={onDiscard}>
           {t("discard")}
@@ -57,7 +57,7 @@ export function DraftDiffView({ current, candidate, onAccept, onDiscard }: Props
     )
 
   return (
-    <section className="space-y-3 rounded-lg border p-3">
+    <section className="flex flex-col gap-3 border-y py-3">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-medium">{t("title")}</h3>
         <div className="flex gap-2">
@@ -78,13 +78,16 @@ export function DraftDiffView({ current, candidate, onAccept, onDiscard }: Props
         </div>
       </header>
 
-      <ul className="space-y-2">
+      <ul className="divide-y border-y">
         {changed.map((diff) => {
           const isAccepted = accepted.includes(diff.id)
           return (
             <li
               key={diff.id}
-              className={cn("rounded-md border p-2", isAccepted && "border-primary")}
+              className={cn(
+                "border-l-2 border-l-transparent py-2",
+                isAccepted && "border-l-primary"
+              )}
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-medium">

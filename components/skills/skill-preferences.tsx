@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -74,7 +75,9 @@ function SelectRow({
         <SelectTrigger className="h-7 w-36 shrink-0 text-xs" aria-label={ariaLabel}>
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>{children}</SelectContent>
+        <SelectContent>
+          <SelectGroup>{children}</SelectGroup>
+        </SelectContent>
       </Select>
     </div>
   )

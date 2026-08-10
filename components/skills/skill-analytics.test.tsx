@@ -28,7 +28,7 @@ jest.mock("@/hooks/skills", () => ({
 }))
 
 // recharts touches DOM measurements jsdom doesn't model; stub to a no-op
-// container so the cards render predictably. The ResponsiveContainer stub
+// container so the flat analytics sections render predictably. The ResponsiveContainer stub
 // records `initialDimension` so we can assert every chart is seeded with a
 // positive size (guards the width(-1)/height(-1) tab-switch mount flash).
 jest.mock("recharts", () => {
@@ -76,7 +76,7 @@ describe("SkillAnalytics", () => {
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument()
   })
 
-  it("renders the four summary cards with localized labels once data loads", () => {
+  it("renders the four summary metrics once data loads", () => {
     analyticsRef.current = { ...emptyAnalytics(), loading: false }
     render(<SkillAnalytics />)
     expect(screen.getByText("totalSkills")).toBeInTheDocument()
@@ -95,6 +95,7 @@ describe("SkillAnalytics", () => {
     render(<SkillAnalytics />)
     expect(screen.getByText("categoryUsageTitle")).toBeInTheDocument()
     expect(screen.getByText("mostUsedTitle")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Alpha/ })).toBeInTheDocument()
   })
 
   // Regression: every recharts container (category bar chart + the usage-trend
