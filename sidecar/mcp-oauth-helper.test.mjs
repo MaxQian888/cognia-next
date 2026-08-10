@@ -8,6 +8,8 @@ import {
   createEgressGuard,
   validateRemoteUrl,
   runFlow,
+  prepareHeadlessFlow,
+  completeHeadlessFlow,
 } from "./mcp-oauth-helper.mjs"
 
 test("parseCallback extracts code/state/error", () => {
@@ -246,4 +248,161 @@ test("runFlow reports a CSRF state mismatch", async () => {
   )
   assert.equal(out.result.ok, false)
   assert.match(out.result.message, /CSRF/)
+})
+
+test("prepareHeadlessFlow returns a resumable authorization URL and PKCE entry", async () => {
+  const fakeSdk = {
+    Client: class {
+      async connect(transport) {
+        await transport.provider.redirectToAuthorization(new URL("https://issuer.example/auth"))
+        transport.provider.saveCodeVerifier("pkce-verifier")
+        const error = new Error("unauthorized")
+        error.name = "UnauthorizedError"
+        throw error
+      }
+      async close() {}
+    },
+    StreamableHTTPClientTransport: class {
+      constructor(_url, options) {
+        this.provider = options.authProvider
+      }
+    },
+    SSEClientTransport: class {},
+  }
+  const out = await prepareHeadlessFlow(
+    {
+      server: { transport: "http", config: { url: "https://mcp.example/rpc" } },
+      entry: {},
+      redirectUrl: "http://localhost:3000/integrations/mcp/oauth/callback",
+      state: "a".repeat(64),
+    },
+    { sdk: fakeSdk }
+  )
+
+  assert.equal(out.result.status, "pending")
+  assert.equal(out.authorizationUrl, "https://issuer.example/auth")
+  assert.equal(out.entry.codeVerifier, "pkce-verifier")
+})
+
+test("completeHeadlessFlow exchanges the code with the persisted PKCE state", async () => {
+  let finishedWith
+  const fakeSdk = {
+    Client: class {
+      async connect() {}
+      async close() {}
+    },
+    StreamableHTTPClientTransport: class {
+      constructor(_url, options) {
+        this.finishAuth = async (code) => {
+          finishedWith = code
+          options.authProvider.saveTokens({ access_token: "token", expires_in: 60 })
+        }
+      }
+    },
+    SSEClientTransport: class {},
+  }
+  const out = await completeHeadlessFlow(
+    {
+      server: { transport: "http", config: { url: "https://mcp.example/rpc" } },
+      entry: { codeVerifier: "pkce-verifier" },
+      redirectUrl: "https://brain.example/integrations/mcp/oauth/callback",
+      state: "b".repeat(64),
+      code: "authorization-code",
+    },
+    { sdk: fakeSdk }
+  )
+
+  assert.equal(finishedWith, "authorization-code")
+  assert.equal(out.result.status, "authorized")
+  assert.equal(out.entry.tokens.access_token, "token")
+  assert.equal(out.entry.codeVerifier, undefined)
+})
+
+test("Headless stages reject malformed resumable inputs before loading the SDK", async () => {
+  const server = { transport: "http", config: { url: "https://mcp.example/rpc" } }
+  const invalidState = await prepareHeadlessFlow({
+    server,
+    entry: {},
+    redirectUrl: "https://brain.example/integrations/mcp/oauth/callback",
+    state: "short",
+  })
+  const invalidCode = await completeHeadlessFlow({
+    server,
+    entry: {},
+    redirectUrl: "https://brain.example/integrations/mcp/oauth/callback",
+    state: "c".repeat(64),
+    code: "",
+  })
+
+  assert.match(invalidState.result.message, /256-bit OAuth state/)
+  assert.match(invalidCode.result.message, /authorization code/)
+})
+
+test("prepareHeadlessFlow rejects unsupported transports and unsafe redirects", async () => {
+  const stdio = await prepareHeadlessFlow({
+    server: { transport: "stdio", config: {} },
+    entry: {},
+    redirectUrl: "https://brain.example/integrations/mcp/oauth/callback",
+    state: "d".repeat(64),
+  })
+  const unsafeRedirect = await prepareHeadlessFlow({
+    server: { transport: "http", config: { url: "https://mcp.example/rpc" } },
+    entry: {},
+    redirectUrl: "http://brain.example/integrations/mcp/oauth/callback",
+    state: "e".repeat(64),
+  })
+
+  assert.equal(stdio.result.status, "unsupported")
+  assert.match(unsafeRedirect.result.message, /redirect requires HTTPS/)
+})
+
+test("prepareHeadlessFlow reports non-auth failures and missing authorization URLs", async () => {
+  const server = { transport: "http", config: { url: "https://mcp.example/rpc" } }
+  const makeSdk = (error) => ({
+    Client: class {
+      async connect() {
+        throw error
+      }
+      async close() {}
+    },
+    StreamableHTTPClientTransport: class {},
+    SSEClientTransport: class {},
+  })
+  const input = {
+    server,
+    entry: {},
+    redirectUrl: "https://brain.example/integrations/mcp/oauth/callback",
+    state: "f".repeat(64),
+  }
+  const connectionFailure = await prepareHeadlessFlow(input, {
+    sdk: makeSdk(new Error("network down")),
+  })
+  const unauthorized = new Error("authorization required")
+  unauthorized.name = "UnauthorizedError"
+  const missingUrl = await prepareHeadlessFlow(input, { sdk: makeSdk(unauthorized) })
+
+  assert.match(connectionFailure.result.message, /connect failed: network down/)
+  assert.match(missingUrl.result.message, /no authorization URL/)
+})
+
+test("completeHeadlessFlow rejects transports without an authorization-code exchange", async () => {
+  const fakeSdk = {
+    Client: class {
+      async close() {}
+    },
+    StreamableHTTPClientTransport: class {},
+    SSEClientTransport: class {},
+  }
+  const out = await completeHeadlessFlow(
+    {
+      server: { transport: "http", config: { url: "https://mcp.example/rpc" } },
+      entry: { codeVerifier: "pkce-verifier" },
+      redirectUrl: "https://brain.example/integrations/mcp/oauth/callback",
+      state: "1".repeat(64),
+      code: "authorization-code",
+    },
+    { sdk: fakeSdk }
+  )
+
+  assert.match(out.result.message, /transport has no finishAuth/)
 })
