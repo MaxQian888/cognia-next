@@ -130,10 +130,7 @@ export function useBackgroundTwinWorker(): UseTwinWorkerStatus {
   useEffect(() => {
     let disposed = false
     let handle: ReturnType<typeof startJobWorker> | undefined
-    if (!settings.workerEnabled) {
-      setStatus({ active: false, reasonKey: "disabled" })
-      return
-    }
+    if (!settings.workerEnabled) return
     void buildTwinWorkerConfig(settings).then((config) => {
       if (disposed) return
       if (!config) {
@@ -150,7 +147,7 @@ export function useBackgroundTwinWorker(): UseTwinWorkerStatus {
     }
   }, [settings])
 
-  return status
+  return settings.workerEnabled ? status : { active: false, reasonKey: "disabled" }
 }
 
 /**
