@@ -25,7 +25,7 @@ function renderCard(over: Partial<MarketplaceSourcePreview> = {}, props = {}) {
   const onAdd = jest.fn()
   const onCancel = jest.fn()
   const onOpenRepo = jest.fn()
-  render(
+  const result = render(
     <PluginSourcePreviewCard
       preview={makePreview(over)}
       adding={false}
@@ -35,7 +35,7 @@ function renderCard(over: Partial<MarketplaceSourcePreview> = {}, props = {}) {
       {...props}
     />
   )
-  return { onAdd, onCancel, onOpenRepo }
+  return { onAdd, onCancel, onOpenRepo, ...result }
 }
 
 describe("PluginSourcePreviewCard", () => {
@@ -72,8 +72,11 @@ describe("PluginSourcePreviewCard", () => {
   })
 
   it("always states that the plugins are unreviewed", () => {
-    renderCard()
-    expect(screen.getByText(/doesn't review these plugins/i)).toBeInTheDocument()
+    const { container } = renderCard()
+    expect(screen.getByRole("alert")).toHaveTextContent(/doesn't review these plugins/i)
+    expect(container.querySelector("[data-slot='card-header']")).not.toBeNull()
+    expect(container.querySelector("[data-slot='card-content']")).not.toBeNull()
+    expect(container.querySelector("[data-slot='card-footer']")).not.toBeNull()
   })
 
   it("disables the CTA for a source that is already added", () => {

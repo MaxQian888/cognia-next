@@ -35,8 +35,11 @@ beforeEach(() => {
 
 describe("PluginDiscovery", () => {
   it("renders featured entries returned by the marketplace", async () => {
-    render(<PluginDiscovery onInstall={jest.fn()} />)
+    const { container } = render(<PluginDiscovery onInstall={jest.fn()} />)
     await waitFor(() => expect(screen.getByText("Plugin 1")).toBeInTheDocument())
+    expect(container.querySelector("[data-slot='card-header']")).not.toBeNull()
+    expect(container.querySelector("[data-slot='card-content']")).not.toBeNull()
+    expect(container.querySelector("[data-slot='card-footer']")).not.toBeNull()
   })
 
   it("install button delegates to the onInstall prop with id + version", async () => {

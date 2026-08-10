@@ -105,27 +105,25 @@ export const PluginCard = memo(function PluginCard({
           className="mt-0.5"
         />
         <Button
-          asChild
           variant="ghost"
           className="flex-1 min-w-0 h-auto justify-start p-0 text-left font-normal hover:bg-transparent"
+          onClick={() => onOpen(plugin.id)}
         >
-          <button type="button" onClick={() => onOpen(plugin.id)}>
-            <div className="block w-full min-w-0">
-              {/* flex-wrap lets the version / "update available" badges drop to
-               *  a second line in narrow grid columns instead of overflowing
-               *  the card; the name still truncates on its own line. */}
-              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                <span className="font-medium truncate">{plugin.name}</span>
-                <PluginVersionBadge version={plugin.version} className="shrink-0" />
-                {updateAvailable && (
-                  <Badge variant="secondary" className="text-xs shrink-0">
-                    {t("updateBadge")}
-                  </Badge>
-                )}
-              </div>
-              <div className="text-xs text-muted-foreground truncate mt-0.5">{plugin.id}</div>
+          <div className="block w-full min-w-0">
+            {/* flex-wrap lets the version / "update available" badges drop to
+             *  a second line in narrow grid columns instead of overflowing
+             *  the card; the name still truncates on its own line. */}
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+              <span className="font-medium truncate">{plugin.name}</span>
+              <PluginVersionBadge version={plugin.version} className="shrink-0" />
+              {updateAvailable && (
+                <Badge variant="secondary" className="text-xs shrink-0">
+                  {t("updateBadge")}
+                </Badge>
+              )}
             </div>
-          </button>
+            <div className="text-xs text-muted-foreground truncate mt-0.5">{plugin.id}</div>
+          </div>
         </Button>
 
         <PluginRowActionsMenu

@@ -52,6 +52,7 @@ function renderView(over: Partial<Props> = {}) {
 describe("PluginMarketplaceSourcesDialogView", () => {
   it("previews on click and on Enter", () => {
     const { onPreview } = renderView({ input: "acme/plugins" })
+    expect(document.querySelector("[data-slot='field']")).not.toBeNull()
     fireEvent.click(screen.getByTestId("marketplace-source-preview-submit"))
     expect(onPreview).toHaveBeenCalledTimes(1)
 
@@ -97,7 +98,9 @@ describe("PluginMarketplaceSourcesDialogView", () => {
 
   it("shows a preview failure as an alert", () => {
     renderView({ previewState: { kind: "error", message: "no marketplace.json found" } })
-    expect(screen.getByRole("alert")).toHaveTextContent("no marketplace.json found")
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent("no marketplace.json found")
+    expect(alert).toHaveAttribute("data-slot", "alert")
   })
 
   it("lists saved sources and refreshes them all", () => {
@@ -111,6 +114,7 @@ describe("PluginMarketplaceSourcesDialogView", () => {
   it("falls back to the plain empty sentence when nothing is curated", () => {
     renderView()
     expect(screen.getByText("No sources added yet.")).toBeInTheDocument()
+    expect(document.querySelector("[data-slot='empty']")).not.toBeNull()
     expect(screen.queryByTestId("marketplace-recommended-sources")).not.toBeInTheDocument()
   })
 

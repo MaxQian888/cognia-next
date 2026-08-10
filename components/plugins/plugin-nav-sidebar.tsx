@@ -18,6 +18,7 @@ import { useTranslations } from "next-intl"
 import { useDevtoolsGate } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import {
   PLUGIN_GOVERNANCE_VIEWS,
   PLUGIN_LIBRARY_SUBFILTERS,
@@ -46,22 +47,21 @@ export function PluginNavSidebar() {
           const active = activeSection === section
           return (
             <li key={section}>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => setActiveSection(section)}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm",
-                  "transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-                  active
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                  "w-full justify-start gap-2 px-2 font-normal",
+                  active ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground"
                 )}
                 data-testid={`plugin-nav-${section}`}
               >
                 <Icon className="size-4 shrink-0" />
                 <span className="truncate">{t(labelKey)}</span>
-              </button>
+              </Button>
               {section === "library" && active && (
                 <SubList
                   testIdPrefix="plugin-nav-library-sub"
@@ -113,21 +113,20 @@ function SubList<T extends string>({
         const active = value === item.value
         return (
           <li key={item.value}>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => onSelect(item.value)}
               aria-current={active ? "true" : undefined}
               className={cn(
-                "flex w-full items-center rounded-md px-2 py-1 text-xs",
-                "transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-                active
-                  ? "bg-accent/60 text-foreground font-medium"
-                  : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                "h-7 w-full justify-start px-2 text-xs font-normal",
+                active ? "bg-accent/60 text-foreground font-medium" : "text-muted-foreground"
               )}
               data-testid={`${testIdPrefix}-${item.value}`}
             >
               {t(item.labelKey)}
-            </button>
+            </Button>
           </li>
         )
       })}

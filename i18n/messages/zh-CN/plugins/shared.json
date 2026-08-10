@@ -1,4 +1,5 @@
 {
+  "capabilityCount": "{count} 项能力",
   "capabilityOverflow": "+{count} 项",
   "emptyHint": "换个关键词或切换分区再试试。",
   "emptyTitle": "暂无内容",

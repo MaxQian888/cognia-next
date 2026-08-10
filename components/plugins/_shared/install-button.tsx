@@ -10,10 +10,10 @@
  */
 
 import { useTranslations } from "next-intl"
-import { Loader2Icon } from "lucide-react"
 import type { ComponentProps, ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -73,7 +73,7 @@ export function InstallButton({
       data-testid={dataTestId}
       className={cn("gap-1.5", className)}
     >
-      {installing && <Loader2Icon className="size-3 animate-spin" aria-hidden="true" />}
+      {installing && <Spinner className="size-3" />}
       <span>{label}</span>
     </Button>
   )

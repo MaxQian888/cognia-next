@@ -2,29 +2,47 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+const getVersionsMock = jest.fn(async () => [] as Array<{ version: string }>)
+
 // Deterministic marketplace client — no real network from the detail sheet's
 // getVersions / getPlugin effects.
 jest.mock("@/hooks/plugins/use-plugin-marketplace", () => ({
   loadPluginMarketplaceClient: async () => ({
-    getVersions: async () => [],
+    getVersions: getVersionsMock,
     getPlugin: async () => null,
   }),
 }))
 
-// Stub the chat CodeBlock (async Shiki) so the manifest dialog stays
-// synchronous and its props can be asserted.
+// Stub the AI Elements CodeBlock (async Shiki) so the manifest dialog stays
+// synchronous and its composition can be asserted.
 const codeBlockPropsMock = jest.fn()
-jest.mock("@/components/chat/renderers/code-block", () => ({
-  CodeBlock: (props: { code: string; language?: string }) => {
+jest.mock("@/components/ai-elements/code-block", () => ({
+  CodeBlock: (props: { code: string; language?: string; children?: React.ReactNode }) => {
     codeBlockPropsMock(props)
-    return <pre data-testid="manifest-code">{props.code}</pre>
+    return (
+      <div data-testid="manifest-code-block">
+        {props.children}
+        <pre data-testid="manifest-code">{props.code}</pre>
+      </div>
+    )
   },
+  CodeBlockHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CodeBlockTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CodeBlockFilename: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
+  CodeBlockActions: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CodeBlockCopyButton: (props: React.ComponentProps<"button">) => <button {...props} />,
+}))
+
+// MarkdownRenderer has its own chat code-block dependency; keep that unrelated
+// renderer inert while this suite exercises the raw-manifest AI Element.
+jest.mock("@/components/chat/renderers/code-block", () => ({
+  CodeBlock: ({ code }: { code: string }) => <pre>{code}</pre>,
 }))
 
 import { PluginMarketplaceDetail } from "./plugin-marketplace-detail"
@@ -49,6 +67,11 @@ const detail = {
 }
 
 describe("PluginMarketplaceDetail", () => {
+  beforeEach(() => {
+    getVersionsMock.mockReset()
+    getVersionsMock.mockResolvedValue([])
+  })
+
   it("renders nothing when entry is null even if open=true", () => {
     const { container } = render(
       <PluginMarketplaceDetail
@@ -150,10 +173,29 @@ describe("PluginMarketplaceDetail", () => {
     )
     fireEvent.click(screen.getByText("rawManifest"))
     expect(screen.getByText("rawManifestTitle")).toBeInTheDocument()
-    expect(codeBlockPropsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ language: "json", filename: "p1.json" })
-    )
+    expect(codeBlockPropsMock).toHaveBeenCalledWith(expect.objectContaining({ language: "json" }))
+    expect(screen.getByText("p1.json")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "copy" })).toBeInTheDocument()
     expect(screen.getByTestId("manifest-code").textContent).toContain('"p1"')
+  })
+
+  it("groups registry versions inside the shadcn SelectGroup", async () => {
+    getVersionsMock.mockResolvedValue([{ version: "1.1.0" }, { version: "1.0.0" }])
+    render(
+      <PluginMarketplaceDetail
+        open
+        entry={detail}
+        installed={false}
+        installing={false}
+        onClose={() => {}}
+        onInstall={() => {}}
+        onUninstall={() => {}}
+      />
+    )
+
+    const picker = await screen.findByTestId("plugin-marketplace-version-picker")
+    fireEvent.click(picker)
+    await waitFor(() => expect(document.querySelector("[data-slot='select-group']")).not.toBeNull())
   })
 
   it("omits the raw-manifest viewer when no manifest is available", () => {

@@ -123,7 +123,10 @@ describe("PluginMarketplace", () => {
   it("renders the section toggle group", async () => {
     render(<PluginMarketplace />)
     await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
-    expect(screen.getByTestId("plugin-marketplace-toolbar")).toHaveClass("min-w-0")
+    const toolbar = screen.getByTestId("plugin-marketplace-toolbar")
+    expect(toolbar).toHaveClass("min-w-0")
+    expect(toolbar).toHaveAttribute("data-slot", "card")
+    expect(toolbar.querySelector("[data-slot='card-content']")).not.toBeNull()
     expect(screen.getByTestId("plugin-marketplace-sections-scroller")).toHaveClass(
       "overflow-x-auto"
     )

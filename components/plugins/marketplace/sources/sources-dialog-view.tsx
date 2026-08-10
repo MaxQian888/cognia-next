@@ -10,7 +10,7 @@
 // network call, and the toasts; everything below is render-only.
 
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, GitBranchIcon, Loader2Icon, RefreshCwIcon } from "lucide-react"
+import { AlertTriangleIcon, GitBranchIcon, RefreshCwIcon } from "lucide-react"
 
 import {
   Dialog,
@@ -19,13 +19,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 
 import { PluginSourcePreviewCard } from "./source-preview-card"
 import { PluginMarketplaceSourceRow } from "./source-row"
@@ -110,8 +113,8 @@ export function PluginMarketplaceSourcesDialogView({
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2">
-          <Label htmlFor="marketplace-source-ref">{t("label")}</Label>
+        <Field>
+          <FieldLabel htmlFor="marketplace-source-ref">{t("label")}</FieldLabel>
           <div className="flex gap-2">
             <Input
               id="marketplace-source-ref"
@@ -129,39 +132,34 @@ export function PluginMarketplaceSourcesDialogView({
               disabled={busy}
               data-testid="marketplace-source-preview-submit"
             >
-              {previewState.kind === "loading" ? (
-                <Loader2Icon className="size-3.5 animate-spin" />
-              ) : (
-                t("preview")
-              )}
+              {previewState.kind === "loading" ? <Spinner className="size-3.5" /> : t("preview")}
             </Button>
           </div>
           {resolvedRef && previewState.kind !== "ready" && (
-            <p className="text-xs text-muted-foreground font-mono">
+            <FieldDescription className="font-mono text-xs">
               {t("resolvedRef", { ref: resolvedRef })}
-            </p>
+            </FieldDescription>
           )}
           {previewState.kind === "error" && (
-            <p role="alert" className="flex items-start gap-1.5 text-sm text-destructive">
-              <AlertTriangleIcon className="size-3.5 mt-0.5 shrink-0" />
-              {previewState.message}
-            </p>
+            <Alert variant="destructive">
+              <AlertTriangleIcon aria-hidden />
+              <AlertDescription>{previewState.message}</AlertDescription>
+            </Alert>
           )}
-        </div>
+        </Field>
 
         <ScrollArea className="flex-1 min-h-0 -mx-1 px-1">
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
             {previewState.kind === "loading" && (
-              <Card
-                className="p-3 gap-0 space-y-2"
-                data-testid="marketplace-source-preview-skeleton"
-              >
-                <Skeleton className="h-4 w-40" />
-                <Skeleton className="h-3 w-28" />
-                <Separator className="my-1.5" />
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-5/6" />
-                <Skeleton className="h-3 w-2/3" />
+              <Card className="gap-0 py-0" data-testid="marketplace-source-preview-skeleton">
+                <CardContent className="flex flex-col gap-2 p-3">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-28" />
+                  <Separator className="my-1.5" />
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-5/6" />
+                  <Skeleton className="h-3 w-2/3" />
+                </CardContent>
               </Card>
             )}
 
@@ -182,10 +180,14 @@ export function PluginMarketplaceSourcesDialogView({
               // recommended block below is the better empty state when it has
               // anything in it.
               !hasUnaddedRecommendations && (
-                <p className="text-sm text-muted-foreground">{t("empty")}</p>
+                <Empty className="p-4 md:p-4">
+                  <EmptyHeader>
+                    <EmptyDescription>{t("empty")}</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               )
             ) : (
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-muted-foreground">
                     {t("savedTitle", { count: sources.length })}
@@ -198,9 +200,11 @@ export function PluginMarketplaceSourcesDialogView({
                     disabled={refreshingAll}
                     data-testid="marketplace-sources-refresh-all"
                   >
-                    <RefreshCwIcon
-                      className={`size-3.5 mr-1.5 ${refreshingAll ? "animate-spin" : ""}`}
-                    />
+                    {refreshingAll ? (
+                      <Spinner className="size-3.5" />
+                    ) : (
+                      <RefreshCwIcon className="size-3.5" />
+                    )}
                     {t("refreshAll")}
                   </Button>
                 </div>

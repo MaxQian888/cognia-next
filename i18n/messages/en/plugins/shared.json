@@ -1,4 +1,5 @@
 {
+  "capabilityCount": "{count, plural, one {# capability} other {# capabilities}}",
   "capabilityOverflow": "+{count} more",
   "emptyHint": "Try a different search or section.",
   "emptyTitle": "Nothing here yet",

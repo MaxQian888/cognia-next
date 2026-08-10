@@ -24,7 +24,10 @@ describe("PluginMarketplaceModeBanner", () => {
 
   it("renders the degraded banner when mode override is 'degraded'", () => {
     render(<PluginMarketplaceModeBanner mode="degraded" />)
-    expect(screen.getByTestId("plugin-marketplace-mode-banner-degraded")).toBeInTheDocument()
+    const banner = screen.getByTestId("plugin-marketplace-mode-banner-degraded")
+    expect(banner).toHaveAttribute("data-slot", "alert")
+    expect(banner.querySelector("[data-slot='alert-title']")).not.toBeNull()
+    expect(banner.querySelector("[data-slot='alert-description']")).not.toBeNull()
     expect(screen.getByText("degradedTitle")).toBeInTheDocument()
     expect(screen.queryByTestId("plugin-marketplace-mode-banner-demo")).not.toBeInTheDocument()
   })
@@ -36,7 +39,7 @@ describe("PluginMarketplaceModeBanner", () => {
     expect(screen.queryByTestId("plugin-marketplace-mode-banner-degraded")).not.toBeInTheDocument()
   })
 
-  it("forwards className to the banner card", () => {
+  it("forwards className to the banner alert", () => {
     const { container } = render(
       <PluginMarketplaceModeBanner mode="degraded" className="custom-banner" />
     )

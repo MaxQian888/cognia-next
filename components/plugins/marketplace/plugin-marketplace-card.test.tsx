@@ -33,10 +33,15 @@ const callbacks = () => ({
 describe("PluginMarketplaceCard", () => {
   it("renders core metadata", () => {
     const cb = callbacks()
-    render(<PluginMarketplaceCard entry={baseEntry} installed={false} installing={false} {...cb} />)
+    const { container } = render(
+      <PluginMarketplaceCard entry={baseEntry} installed={false} installing={false} {...cb} />
+    )
     expect(screen.getByText("Plugin One")).toBeInTheDocument()
     expect(screen.getByText("v1.0.0")).toBeInTheDocument()
     expect(screen.getByText("Acme")).toBeInTheDocument()
+    expect(container.querySelector("[data-slot='card-header']")).not.toBeNull()
+    expect(container.querySelector("[data-slot='card-content']")).not.toBeNull()
+    expect(container.querySelector("[data-slot='card-footer']")).not.toBeNull()
   })
 
   it("install button invokes onInstall with id + version", () => {
@@ -211,14 +216,12 @@ describe("PluginMarketplaceCard", () => {
     })
   })
 
-  it("renders the click-card region as a real <button> so it inherits keyboard focus", () => {
+  it("renders the click-card region with the shadcn Button primitive", () => {
     const cb = callbacks()
     render(<PluginMarketplaceCard entry={baseEntry} installed={false} installing={false} {...cb} />)
-    // The Button asChild wrapper merges shadcn focus styling onto the inner
-    // <button>. The DOM should still expose a single button with type="button"
-    // whose accessible name resolves through the visible name + id text.
     const region = screen.getByText("Plugin One").closest("button")
     expect(region).not.toBeNull()
     expect(region).toHaveAttribute("type", "button")
+    expect(region).toHaveAttribute("data-slot", "button")
   })
 })

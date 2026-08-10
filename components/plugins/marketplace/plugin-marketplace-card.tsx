@@ -22,7 +22,14 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginSourceBadge } from "../plugin-source-badge"
@@ -138,73 +145,77 @@ export function PluginMarketplaceCard({
   const isBuiltin = entry.source === "builtin"
 
   return (
-    <Card className="p-3 space-y-2 flex flex-col">
-      <div className="flex items-start justify-between gap-2">
-        <Button
-          asChild
-          variant="ghost"
-          className="flex-1 min-w-0 h-auto justify-start p-0 text-left font-normal hover:bg-transparent"
-        >
-          <button type="button" onClick={() => onView(entry.id)}>
-            <div className="block w-full min-w-0">
-              <div className="flex items-center gap-1.5 min-w-0">
+    <Card className="flex flex-col gap-0 py-0">
+      <CardHeader className="gap-2 px-3 pt-3">
+        <CardTitle className="min-w-0">
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-auto w-full min-w-0 justify-start p-0 text-left font-normal hover:bg-transparent"
+            onClick={() => onView(entry.id)}
+          >
+            <span className="block w-full min-w-0">
+              <span className="flex min-w-0 items-center gap-1.5">
                 <span className="font-medium truncate">{entry.name}</span>
                 <PluginVersionBadge version={entry.version} className="shrink-0" />
-              </div>
-              <div className="text-xs text-muted-foreground truncate mt-0.5">{entry.id}</div>
-            </div>
-          </button>
-        </Button>
-        <PluginSignatureBadge state={sigState} compact />
-      </div>
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                {entry.id}
+              </span>
+            </span>
+          </Button>
+        </CardTitle>
+        <CardAction>
+          <PluginSignatureBadge state={sigState} compact />
+        </CardAction>
+      </CardHeader>
 
-      {entry.description && (
-        <p className="text-xs text-muted-foreground line-clamp-2">{entry.description}</p>
-      )}
+      <CardContent className="flex flex-1 flex-col gap-2 px-3 py-2">
+        {entry.description && (
+          <p className="line-clamp-2 text-xs text-muted-foreground">{entry.description}</p>
+        )}
 
-      <div className="flex flex-wrap items-center gap-1">
-        <CapabilityChips capabilities={entry.capabilities ?? []} limit={3} />
-        {dangerous && (
-          <Badge variant="destructive" className="text-xs gap-1">
-            <AlertTriangleIcon className="size-3" />
-            {t("dangerous")}
-          </Badge>
-        )}
-        {verifiedPublisher && (
-          <ExplainedBadge
-            icon={BadgeCheckIcon}
-            label={tv("publisherVerified")}
-            // The namespace is the thing Open VSX actually verified ownership
-            // of, so the tooltip names it rather than gesturing at "the
-            // publisher". `author` carries the namespace for Open VSX entries.
-            tooltip={tv("publisherVerifiedTooltip", {
-              namespace: entry.author ?? entry.id.split(".")[0],
-            })}
-            variant="secondary"
-            testId={`plugin-openvsx-verified-${entry.id}`}
-          />
-        )}
-        {integrityChecked && (
-          <ExplainedBadge
-            icon={FileCheckIcon}
-            label={tv("integrityChecked")}
-            tooltip={tv("integrityCheckedTooltip")}
-            variant="outline"
-            testId={`plugin-openvsx-integrity-${entry.id}`}
-          />
-        )}
-        {unsupportedApis && unsupportedApis.length > 0 && (
-          <ExplainedBadge
-            icon={PlugZapIcon}
-            label={tv("unsupportedApis", { apis: unsupportedApis.join(", ") })}
-            tooltip={tv("unsupportedApisTooltip", { apis: unsupportedApis.join(", ") })}
-            variant="destructive"
-            testId={`plugin-openvsx-unsupported-${entry.id}`}
-          />
-        )}
-      </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <CapabilityChips capabilities={entry.capabilities ?? []} limit={3} />
+          {dangerous && (
+            <Badge variant="destructive" className="text-xs gap-1">
+              <AlertTriangleIcon className="size-3" />
+              {t("dangerous")}
+            </Badge>
+          )}
+          {verifiedPublisher && (
+            <ExplainedBadge
+              icon={BadgeCheckIcon}
+              label={tv("publisherVerified")}
+              tooltip={tv("publisherVerifiedTooltip", {
+                namespace: entry.author ?? entry.id.split(".")[0],
+              })}
+              variant="secondary"
+              testId={`plugin-openvsx-verified-${entry.id}`}
+            />
+          )}
+          {integrityChecked && (
+            <ExplainedBadge
+              icon={FileCheckIcon}
+              label={tv("integrityChecked")}
+              tooltip={tv("integrityCheckedTooltip")}
+              variant="outline"
+              testId={`plugin-openvsx-integrity-${entry.id}`}
+            />
+          )}
+          {unsupportedApis && unsupportedApis.length > 0 && (
+            <ExplainedBadge
+              icon={PlugZapIcon}
+              label={tv("unsupportedApis", { apis: unsupportedApis.join(", ") })}
+              tooltip={tv("unsupportedApisTooltip", { apis: unsupportedApis.join(", ") })}
+              variant="destructive"
+              testId={`plugin-openvsx-unsupported-${entry.id}`}
+            />
+          )}
+        </div>
+      </CardContent>
 
-      <div className="flex items-center justify-between gap-2 mt-auto pt-2">
+      <CardFooter className="mt-auto justify-between gap-2 px-3 pb-3">
         <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
           {typeof entry.rating === "number" && entry.rating > 0 && (
             <span className="flex items-center gap-0.5">
@@ -261,7 +272,7 @@ export function PluginMarketplaceCard({
             </>
           )}
         </div>
-      </div>
+      </CardFooter>
     </Card>
   )
 }

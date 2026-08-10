@@ -1,6 +1,6 @@
 "use client"
 
-import { Card } from "@/components/ui/card"
+import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /**
@@ -15,20 +15,22 @@ export function PluginMarketplaceSkeleton({ count = 6 }: { count?: number }) {
     <div className="@container/plugin-grid" data-testid="plugin-marketplace-skeleton" aria-busy>
       <div className="grid gap-3 @lg/plugin-grid:grid-cols-2 @4xl/plugin-grid:grid-cols-3">
         {Array.from({ length: count }, (_, i) => (
-          <Card key={i} className="p-4 space-y-3">
-            <div className="flex items-center gap-2">
+          <Card key={i} className="gap-0 py-0">
+            <CardHeader className="flex flex-row items-center gap-2 px-4 pt-4">
               <Skeleton className="size-8 rounded-md" />
-              <div className="flex-1 space-y-1">
+              <div className="flex flex-1 flex-col gap-1">
                 <Skeleton className="h-3 w-32" />
                 <Skeleton className="h-2.5 w-16" />
               </div>
-            </div>
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-4/5" />
-            <div className="flex items-center justify-between pt-1">
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 px-4 py-3">
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-4/5" />
+            </CardContent>
+            <CardFooter className="justify-between px-4 pb-4 pt-1">
               <Skeleton className="h-2.5 w-16" />
               <Skeleton className="h-7 w-20" />
-            </div>
+            </CardFooter>
           </Card>
         ))}
       </div>

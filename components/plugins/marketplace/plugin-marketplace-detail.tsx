@@ -25,9 +25,16 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { CodeBlock } from "@/components/chat/renderers/code-block"
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockCopyButton,
+  CodeBlockFilename,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@/components/ai-elements/code-block"
 import { InstallButton } from "../_shared/install-button"
 import { PluginVersionBadge } from "../_shared/plugin-version-badge"
 import { PluginDependencyPanel } from "../_shared/plugin-dependency-panel"
@@ -48,6 +55,7 @@ import { loadPluginMarketplaceClient } from "@/hooks/plugins/use-plugin-marketpl
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -112,7 +120,7 @@ export function PluginMarketplaceDetail({
               {entry.description && <SheetDescription>{entry.description}</SheetDescription>}
             </SheetHeader>
 
-            <div className="space-y-4 mt-4">
+            <div className="mt-4 flex flex-col gap-4">
               <RawManifestSection entry={entry} />
               <MetaCard entry={entry} />
 
@@ -128,18 +136,22 @@ export function PluginMarketplaceDetail({
               />
 
               {entry.readme && (
-                <Card className="p-3">
-                  <div className="text-xs font-semibold mb-2">{t("readme")}</div>
-                  <ScrollArea className="max-h-[40vh]">
-                    <div className="text-sm pr-2">
-                      <MarkdownRenderer
-                        content={entry.readme}
-                        enableMermaid={false}
-                        enableMath={false}
-                        rhythm="document"
-                      />
-                    </div>
-                  </ScrollArea>
+                <Card className="gap-2 py-0">
+                  <CardHeader className="px-3 pt-3">
+                    <CardTitle className="text-xs">{t("readme")}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-3 pb-3">
+                    <ScrollArea className="max-h-[40vh]">
+                      <div className="pr-2 text-sm">
+                        <MarkdownRenderer
+                          content={entry.readme}
+                          enableMermaid={false}
+                          enableMath={false}
+                          rhythm="document"
+                        />
+                      </div>
+                    </ScrollArea>
+                  </CardContent>
                 </Card>
               )}
             </div>
@@ -250,11 +262,13 @@ function InstallSection({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {versions.map((v) => (
-              <SelectItem key={v} value={v}>
-                {v}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              {versions.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {v}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
       )}
@@ -279,6 +293,7 @@ function InstallSection({
  */
 function RawManifestSection({ entry }: { entry: DetailEntry }) {
   const t = useTranslations("plugins.marketplaceDetail")
+  const tCommon = useTranslations("common")
   const [manifest, setManifest] = useState<PluginManifest | null>(entry.manifest ?? null)
   const [open, setOpen] = useState(false)
 
@@ -315,7 +330,7 @@ function RawManifestSection({ entry }: { entry: DetailEntry }) {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>
           <Button size="sm" variant="outline">
-            <CodeIcon className="mr-1.5 size-3.5" />
+            <CodeIcon className="size-3.5" />
             {t("rawManifest")}
           </Button>
         </DialogTrigger>
@@ -325,12 +340,18 @@ function RawManifestSection({ entry }: { entry: DetailEntry }) {
           </DialogHeader>
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-4">
-              <CodeBlock
-                code={JSON.stringify(manifest, null, 2)}
-                language="json"
-                filename={`${entry.id}.json`}
-                className="my-0"
-              />
+              <CodeBlock code={JSON.stringify(manifest, null, 2)} language="json">
+                <CodeBlockHeader>
+                  <CodeBlockTitle>
+                    <CodeIcon className="size-3.5" />
+                    {/* i18n-exempt: manifest filename extension */}
+                    <CodeBlockFilename>{entry.id}.json</CodeBlockFilename>
+                  </CodeBlockTitle>
+                  <CodeBlockActions>
+                    <CodeBlockCopyButton aria-label={tCommon("copy")} />
+                  </CodeBlockActions>
+                </CodeBlockHeader>
+              </CodeBlock>
             </div>
           </ScrollArea>
         </DialogContent>
@@ -342,54 +363,45 @@ function RawManifestSection({ entry }: { entry: DetailEntry }) {
 function MetaCard({ entry }: { entry: DetailEntry }) {
   const t = useTranslations("plugins.marketplaceDetail")
   return (
-    <Card className="p-3 space-y-1.5">
-      {entry.author && <Row label={t("author")} value={entry.author} />}
-      {entry.license && <Row label={t("license")} value={entry.license} />}
-      {(entry.capabilities ?? []).length > 0 && (
-        <div className="flex items-start justify-between gap-3 text-xs">
-          <span className="text-muted-foreground">{t("capabilities")}</span>
-          <div className="flex flex-wrap gap-1 justify-end">
-            {(entry.capabilities ?? []).map((cap) => (
-              <Badge key={cap} variant="outline" className="text-xs">
-                {cap}
-              </Badge>
-            ))}
+    <Card className="gap-0 py-0">
+      <CardContent className="flex flex-col gap-1.5 p-3">
+        {entry.author && <Row label={t("author")} value={entry.author} />}
+        {entry.license && <Row label={t("license")} value={entry.license} />}
+        {(entry.capabilities ?? []).length > 0 && (
+          <div className="flex items-start justify-between gap-3 text-xs">
+            <span className="text-muted-foreground">{t("capabilities")}</span>
+            <div className="flex flex-wrap justify-end gap-1">
+              {(entry.capabilities ?? []).map((cap) => (
+                <Badge key={cap} variant="outline" className="text-xs">
+                  {cap}
+                </Badge>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
-      {entry.homepage && (
-        <Row
-          label={t("homepage")}
-          value={
-            <a
-              className="inline-flex items-center gap-1 underline"
-              href={entry.homepage}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {entry.homepage}
-              <ExternalLinkIcon className="size-3" />
-            </a>
-          }
-        />
-      )}
-      {entry.repository && (
-        <Row
-          label={t("repository")}
-          value={
-            <a
-              className="inline-flex items-center gap-1 underline"
-              href={entry.repository}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {entry.repository}
-              <ExternalLinkIcon className="size-3" />
-            </a>
-          }
-        />
-      )}
+        )}
+        {entry.homepage && (
+          <Row label={t("homepage")} value={<ExternalLink href={entry.homepage} />} />
+        )}
+        {entry.repository && (
+          <Row label={t("repository")} value={<ExternalLink href={entry.repository} />} />
+        )}
+      </CardContent>
     </Card>
+  )
+}
+
+function ExternalLink({ href }: { href: string }) {
+  return (
+    <Button
+      asChild
+      variant="link"
+      className="h-auto max-w-full whitespace-normal p-0 text-right text-xs"
+    >
+      <a href={href} target="_blank" rel="noreferrer">
+        <span className="break-all">{href}</span>
+        <ExternalLinkIcon className="size-3" />
+      </a>
+    </Button>
   )
 }
 
@@ -410,22 +422,28 @@ function PermissionList({
   permissions: PluginPermission[]
 }) {
   return (
-    <Card className="p-3 space-y-1.5">
-      <h3 className="text-xs font-semibold">{title}</h3>
-      <ul className="space-y-1">
-        {permissions.map((perm) => {
-          const dangerous = DANGEROUS_PERMISSIONS.includes(perm)
-          return (
-            <li key={perm} className="flex items-start gap-2 text-xs">
-              {dangerous && (
-                <AlertTriangleIcon className="size-3 text-destructive shrink-0 mt-0.5" />
-              )}
-              <code className="font-mono shrink-0">{perm}</code>
-              <span className="text-muted-foreground">{PERMISSION_DESCRIPTIONS[perm] ?? perm}</span>
-            </li>
-          )
-        })}
-      </ul>
+    <Card className="gap-2 py-0">
+      <CardHeader className="px-3 pt-3">
+        <CardTitle className="text-xs">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="px-3 pb-3">
+        <ul className="flex flex-col gap-1">
+          {permissions.map((perm) => {
+            const dangerous = DANGEROUS_PERMISSIONS.includes(perm)
+            return (
+              <li key={perm} className="flex items-start gap-2 text-xs">
+                {dangerous && (
+                  <AlertTriangleIcon className="mt-0.5 size-3 shrink-0 text-destructive" />
+                )}
+                <code className="shrink-0 font-mono">{perm}</code>
+                <span className="text-muted-foreground">
+                  {PERMISSION_DESCRIPTIONS[perm] ?? perm}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      </CardContent>
     </Card>
   )
 }

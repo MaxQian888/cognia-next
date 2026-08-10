@@ -5,6 +5,9 @@ describe("PluginMarketplaceSkeleton", () => {
   it("renders the requested number of card placeholders", () => {
     const { container } = render(<PluginMarketplaceSkeleton count={4} />)
     expect(container.querySelectorAll("[data-slot='card']")).toHaveLength(4)
+    expect(container.querySelectorAll("[data-slot='card-header']")).toHaveLength(4)
+    expect(container.querySelectorAll("[data-slot='card-content']")).toHaveLength(4)
+    expect(container.querySelectorAll("[data-slot='card-footer']")).toHaveLength(4)
   })
 
   it("defaults to 6 placeholders + tags the wrapper as aria-busy", () => {

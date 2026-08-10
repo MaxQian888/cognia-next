@@ -12,7 +12,7 @@
 // infer: plugins already installed from this source are not uninstalled.
 
 import { useTranslations, useFormatter, useNow } from "next-intl"
-import { ExternalLinkIcon, Loader2Icon, RefreshCwIcon, Trash2Icon } from "lucide-react"
+import { AlertTriangleIcon, ExternalLinkIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
 
 import {
   AlertDialog,
@@ -26,17 +26,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Item, ItemActions, ItemContent, ItemFooter, ItemHeader } from "@/components/ui/item"
+import { Spinner } from "@/components/ui/spinner"
 
-import type { MarketplaceSourceItem, SourceSyncState } from "./types"
-
-const DOT_CLASS: Record<SourceSyncState["kind"], string> = {
-  ok: "bg-emerald-500",
-  error: "bg-destructive",
-  syncing: "bg-muted-foreground animate-pulse",
-  never: "bg-muted-foreground/40",
-}
+import type { MarketplaceSourceItem } from "./types"
 
 interface Props {
   source: MarketplaceSourceItem
@@ -75,29 +70,27 @@ export function PluginMarketplaceSourceRow({ source, onRefresh, onRemove, onOpen
   })()
 
   return (
-    <Card className="p-2.5 gap-0 space-y-1.5" data-testid={`marketplace-source-${source.id}`}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-start gap-2 min-w-0">
-          <span
-            className={cn("size-1.5 rounded-full mt-1.5 shrink-0", DOT_CLASS[sync.kind])}
-            aria-hidden="true"
+    <Item
+      variant="outline"
+      size="sm"
+      className="items-stretch gap-1.5"
+      data-testid={`marketplace-source-${source.id}`}
+    >
+      <ItemHeader>
+        <ItemContent className="min-w-0">
+          <div className="truncate text-sm font-medium">{source.name}</div>
+          <div className="truncate font-mono text-xs text-muted-foreground">{source.repoRef}</div>
+          <Badge
+            variant={sync.kind === "error" ? "destructive" : "outline"}
+            className="w-fit max-w-full gap-1 text-xs"
             data-testid={`marketplace-source-status-${sync.kind}`}
-          />
-          <div className="min-w-0">
-            <div className="text-sm font-medium truncate">{source.name}</div>
-            <div className="text-xs text-muted-foreground font-mono truncate">{source.repoRef}</div>
-            <div
-              className={cn(
-                "text-xs",
-                sync.kind === "error" ? "text-destructive" : "text-muted-foreground"
-              )}
-            >
-              {statusLine}
-            </div>
-          </div>
-        </div>
+          >
+            {sync.kind === "syncing" && <Spinner className="size-3" />}
+            <span className="truncate">{statusLine}</span>
+          </Badge>
+        </ItemContent>
 
-        <div className="flex items-center gap-0.5 shrink-0">
+        <ItemActions className="gap-0.5">
           <Button
             variant="ghost"
             size="icon"
@@ -106,11 +99,7 @@ export function PluginMarketplaceSourceRow({ source, onRefresh, onRemove, onOpen
             disabled={syncing}
             onClick={() => onRefresh(source.id)}
           >
-            {syncing ? (
-              <Loader2Icon className="size-3.5 animate-spin" />
-            ) : (
-              <RefreshCwIcon className="size-3.5" />
-            )}
+            {syncing ? <Spinner className="size-3.5" /> : <RefreshCwIcon className="size-3.5" />}
           </Button>
           <Button
             variant="ghost"
@@ -145,29 +134,34 @@ export function PluginMarketplaceSourceRow({ source, onRefresh, onRemove, onOpen
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        </div>
-      </div>
+        </ItemActions>
+      </ItemHeader>
 
       {sync.kind === "error" && (
-        <div className="flex items-center justify-between gap-2 pl-3.5">
-          <p className="text-xs text-destructive truncate" role="alert">
-            {sync.message}
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 px-2 text-xs shrink-0"
-            onClick={() => onRefresh(source.id)}
-          >
-            {t("retry")}
-          </Button>
-        </div>
+        <ItemFooter>
+          <Alert variant="destructive" className="py-2">
+            <AlertTriangleIcon aria-hidden />
+            <AlertDescription className="flex min-w-0 flex-row items-center justify-between gap-2">
+              <span className="truncate text-xs">{sync.message}</span>
+              <Button
+                variant="outline"
+                size="xs"
+                className="shrink-0"
+                onClick={() => onRefresh(source.id)}
+              >
+                {t("retry")}
+              </Button>
+            </AlertDescription>
+          </Alert>
+        </ItemFooter>
       )}
       {sync.kind === "error" && lastSyncedAt !== undefined && (
-        <p className="text-xs text-muted-foreground pl-3.5">
-          {t("syncedAt", { time: format.relativeTime(new Date(lastSyncedAt), now) })}
-        </p>
+        <ItemFooter>
+          <p className="text-xs text-muted-foreground">
+            {t("syncedAt", { time: format.relativeTime(new Date(lastSyncedAt), now) })}
+          </p>
+        </ItemFooter>
       )}
-    </Card>
+    </Item>
   )
 }

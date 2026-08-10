@@ -14,7 +14,7 @@ function renderRow(sync: SourceSyncState) {
   const onRefresh = jest.fn()
   const onRemove = jest.fn()
   const onOpenRepo = jest.fn()
-  render(
+  const result = render(
     <PluginMarketplaceSourceRow
       source={source}
       onRefresh={onRefresh}
@@ -22,14 +22,15 @@ function renderRow(sync: SourceSyncState) {
       onOpenRepo={onOpenRepo}
     />
   )
-  return { onRefresh, onRemove, onOpenRepo }
+  return { onRefresh, onRemove, onOpenRepo, ...result }
 }
 
 describe("PluginMarketplaceSourceRow", () => {
   it("shows plugin count and last sync when healthy", () => {
-    renderRow({ kind: "ok", pluginCount: 8, lastSyncedAt: 1_700_000_000_000 })
+    const { container } = renderRow({ kind: "ok", pluginCount: 8, lastSyncedAt: 1_700_000_000_000 })
     expect(screen.getByText(/8 plugins/)).toBeInTheDocument()
-    expect(screen.getByTestId("marketplace-source-status-ok")).toBeInTheDocument()
+    expect(screen.getByTestId("marketplace-source-status-ok")).toHaveAttribute("data-slot", "badge")
+    expect(container.querySelector("[data-slot='item']")).not.toBeNull()
   })
 
   it("distinguishes never-synced from zero plugins", () => {

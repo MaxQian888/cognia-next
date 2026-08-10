@@ -11,6 +11,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { listPlugins } from "@/lib/db/plugins"
 import { usePluginMarketplace, useBuiltinPluginEntries } from "@/hooks/plugins"
@@ -217,77 +218,79 @@ export function PluginMarketplace() {
   const showDiscovery = section === "all" && market.query.trim() === ""
 
   return (
-    <div className="w-full min-w-0 max-w-full space-y-4 overflow-x-clip">
+    <div className="flex w-full min-w-0 max-w-full flex-col gap-4 overflow-x-clip">
       <PluginMarketplaceModeBanner />
       {showDiscovery && <PluginDiscovery onInstall={(id, version) => onInstallById(id, version)} />}
-      <div
-        className="min-w-0 space-y-2 rounded-xl border bg-card/40 p-2.5 shadow-xs"
+      <Card
+        className="min-w-0 gap-0 bg-card/40 py-0 shadow-xs"
         data-testid="plugin-marketplace-toolbar"
       >
-        <div className="flex min-w-0 items-center gap-2">
-          {/* Same Input, two data sources. The Open VSX hook debounces
+        <CardContent className="flex flex-col gap-2 p-2.5">
+          <div className="flex min-w-0 items-center gap-2">
+            {/* Same Input, two data sources. The Open VSX hook debounces
               internally, so Enter is a redundant-but-harmless refresh there. */}
-          <Input
-            placeholder={isVscodeSection ? tv("searchPlaceholder") : t("searchPlaceholder")}
-            aria-label={isVscodeSection ? tv("searchPlaceholder") : t("searchPlaceholder")}
-            value={isVscodeSection ? openVsx.query : market.query}
-            onChange={(e) =>
-              isVscodeSection ? openVsx.setQuery(e.target.value) : market.setQuery(e.target.value)
-            }
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return
-              if (isVscodeSection) openVsx.refresh()
-              else void market.refresh()
-            }}
-            className="min-w-0 flex-1 bg-background/80 sm:max-w-lg"
-          />
-          <div className="flex shrink-0 items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSourcesDialogOpen(true)}
-              aria-label={t("manageSources")}
-              data-testid="plugin-marketplace-manage-sources"
-            >
-              <GitBranchIcon className="size-3.5 lg:mr-1.5" />
-              <span className="hidden lg:inline">{t("manageSources")}</span>
-            </Button>
-            <PluginComparisonTrigger />
+            <Input
+              placeholder={isVscodeSection ? tv("searchPlaceholder") : t("searchPlaceholder")}
+              aria-label={isVscodeSection ? tv("searchPlaceholder") : t("searchPlaceholder")}
+              value={isVscodeSection ? openVsx.query : market.query}
+              onChange={(e) =>
+                isVscodeSection ? openVsx.setQuery(e.target.value) : market.setQuery(e.target.value)
+              }
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return
+                if (isVscodeSection) openVsx.refresh()
+                else void market.refresh()
+              }}
+              className="min-w-0 flex-1 bg-background/80 sm:max-w-lg"
+            />
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSourcesDialogOpen(true)}
+                aria-label={t("manageSources")}
+                data-testid="plugin-marketplace-manage-sources"
+              >
+                <GitBranchIcon className="size-3.5" />
+                <span className="hidden lg:inline">{t("manageSources")}</span>
+              </Button>
+              <PluginComparisonTrigger />
+            </div>
           </div>
-        </div>
-        <div className="flex min-w-0 items-center">
-          <ScrollShadowRow
-            className="min-w-0 flex-1"
-            scrollerClassName="-mx-0.5 px-0.5 pb-0.5"
-            testId="plugin-marketplace-sections"
-          >
-            <ToggleGroup
-              type="single"
-              value={section}
-              onValueChange={(v) => v && setSection(v as Section)}
-              variant="outline"
-              size="sm"
-              className="w-max"
+          <div className="flex min-w-0 items-center">
+            <ScrollShadowRow
+              className="min-w-0 flex-1"
+              scrollerClassName="-mx-0.5 px-0.5 pb-0.5"
+              testId="plugin-marketplace-sections"
             >
-              <ToggleGroupItem value="all">{t("sections.all")}</ToggleGroupItem>
-              <ToggleGroupItem value="featured">{t("sections.featured")}</ToggleGroupItem>
-              <ToggleGroupItem value="popular">{t("sections.popular")}</ToggleGroupItem>
-              <ToggleGroupItem value="recent">{t("sections.recent")}</ToggleGroupItem>
-              <ToggleGroupItem value="builtin">{t("sections.builtin")}</ToggleGroupItem>
-              <ToggleGroupItem value="workspace">{t("sections.workspace")}</ToggleGroupItem>
-              <ToggleGroupItem value="shared">{t("sections.shared")}</ToggleGroupItem>
-              <ToggleGroupItem value="vscode">{t("sections.vscode")}</ToggleGroupItem>
-            </ToggleGroup>
-          </ScrollShadowRow>
-        </div>
-      </div>
+              <ToggleGroup
+                type="single"
+                value={section}
+                onValueChange={(v) => v && setSection(v as Section)}
+                variant="outline"
+                size="sm"
+                className="w-max"
+              >
+                <ToggleGroupItem value="all">{t("sections.all")}</ToggleGroupItem>
+                <ToggleGroupItem value="featured">{t("sections.featured")}</ToggleGroupItem>
+                <ToggleGroupItem value="popular">{t("sections.popular")}</ToggleGroupItem>
+                <ToggleGroupItem value="recent">{t("sections.recent")}</ToggleGroupItem>
+                <ToggleGroupItem value="builtin">{t("sections.builtin")}</ToggleGroupItem>
+                <ToggleGroupItem value="workspace">{t("sections.workspace")}</ToggleGroupItem>
+                <ToggleGroupItem value="shared">{t("sections.shared")}</ToggleGroupItem>
+                <ToggleGroupItem value="vscode">{t("sections.vscode")}</ToggleGroupItem>
+              </ToggleGroup>
+            </ScrollShadowRow>
+          </div>
+        </CardContent>
+      </Card>
 
       {isVscodeSection && (
         <p className="text-xs text-muted-foreground">{tv("vscodeSectionHint")}</p>
       )}
 
       {status.kind === "loading" ? (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           {!isVscodeSection && <p className="text-sm text-muted-foreground">{t("loading")}</p>}
           <PluginMarketplaceSkeleton />
         </div>

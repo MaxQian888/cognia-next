@@ -11,10 +11,18 @@
 // to its plain empty state rather than showing an empty heading.
 
 import { useTranslations } from "next-intl"
-import { Loader2Icon, PlusIcon } from "lucide-react"
+import { PlusIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item"
+import { Spinner } from "@/components/ui/spinner"
 
 import type { RecommendedMarketplaceSource } from "./types"
 
@@ -32,43 +40,41 @@ export function PluginRecommendedSources({ sources, addedIds, busyRepoRef, onAdd
   if (sources.length === 0) return null
 
   return (
-    <div className="space-y-2" data-testid="marketplace-recommended-sources">
+    <div className="flex flex-col gap-2" data-testid="marketplace-recommended-sources">
       <div className="text-xs font-medium text-muted-foreground">{t("recommendedTitle")}</div>
-      <div className="space-y-2">
+      <ItemGroup className="gap-2">
         {sources.map((source) => {
           const added = addedIds.has(source.repoRef)
           const busy = busyRepoRef === source.repoRef
           return (
-            <Card
+            <Item
               key={source.repoRef}
-              className="flex flex-row items-center justify-between gap-2 p-2.5"
+              variant="outline"
+              size="sm"
               data-testid={`marketplace-recommended-${source.repoRef}`}
             >
-              <div className="min-w-0 space-y-0.5">
-                <div className="text-sm font-medium truncate">{source.name}</div>
+              <ItemContent className="min-w-0">
+                <ItemTitle className="truncate">{source.name}</ItemTitle>
                 <div className="text-xs text-muted-foreground font-mono truncate">
                   {source.repoRef}
                 </div>
-                <p className="text-xs text-muted-foreground truncate">{source.description}</p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0"
-                disabled={added || busy}
-                onClick={() => onAdd(source.repoRef)}
-              >
-                {busy ? (
-                  <Loader2Icon className="size-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <PlusIcon className="size-3.5 mr-1.5" />
-                )}
-                {added ? t("alreadyAdded") : t("add")}
-              </Button>
-            </Card>
+                <ItemDescription className="truncate text-xs">{source.description}</ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={added || busy}
+                  onClick={() => onAdd(source.repoRef)}
+                >
+                  {busy ? <Spinner className="size-3.5" /> : <PlusIcon className="size-3.5" />}
+                  {added ? t("alreadyAdded") : t("add")}
+                </Button>
+              </ItemActions>
+            </Item>
           )
         })}
-      </div>
+      </ItemGroup>
       <p className="text-xs text-muted-foreground">{t("recommendedHint")}</p>
     </div>
   )

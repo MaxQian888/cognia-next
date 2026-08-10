@@ -10,7 +10,7 @@
 
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, FlaskConicalIcon } from "lucide-react"
-import { Card } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
 import type { MarketplaceSourceMode } from "@/stores/plugin-runtime/plugin-marketplace-store"
@@ -34,31 +34,28 @@ export function PluginMarketplaceModeBanner({ mode: override, className }: Props
   // of the marketplace surface when the user retuned their primary hue.
   if (mode === "demo") {
     return (
-      <Card
+      <Alert
         role="status"
-        className={cn("p-3 flex items-start gap-2 border-primary/40 bg-primary/5", className)}
+        className={cn("border-primary/40 bg-primary/5", className)}
         data-testid="plugin-marketplace-mode-banner-demo"
       >
-        <FlaskConicalIcon className="size-4 mt-0.5 shrink-0 text-primary" aria-hidden />
-        <div className="space-y-0.5 min-w-0">
-          <p className="text-sm font-medium text-foreground">{t("demoTitle")}</p>
-          <p className="text-xs text-muted-foreground">{t("demoHint")}</p>
-        </div>
-      </Card>
+        <FlaskConicalIcon className="text-primary" aria-hidden />
+        <AlertTitle>{t("demoTitle")}</AlertTitle>
+        <AlertDescription className="text-xs">{t("demoHint")}</AlertDescription>
+      </Alert>
     )
   }
 
   return (
-    <Card
+    <Alert
       role="status"
-      className={cn("p-3 flex items-start gap-2 border-destructive/40 bg-destructive/5", className)}
+      variant="destructive"
+      className={cn("border-destructive/40 bg-destructive/5", className)}
       data-testid="plugin-marketplace-mode-banner-degraded"
     >
-      <AlertTriangleIcon className="size-4 mt-0.5 shrink-0 text-destructive" aria-hidden />
-      <div className="space-y-0.5 min-w-0">
-        <p className="text-sm font-medium text-foreground">{t("degradedTitle")}</p>
-        <p className="text-xs text-muted-foreground">{t("degradedHint")}</p>
-      </div>
-    </Card>
+      <AlertTriangleIcon aria-hidden />
+      <AlertTitle>{t("degradedTitle")}</AlertTitle>
+      <AlertDescription className="text-xs">{t("degradedHint")}</AlertDescription>
+    </Alert>
   )
 }

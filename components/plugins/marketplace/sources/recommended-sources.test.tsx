@@ -10,7 +10,7 @@ const SOURCES: RecommendedMarketplaceSource[] = [
 
 function renderList(props: Partial<React.ComponentProps<typeof PluginRecommendedSources>> = {}) {
   const onAdd = jest.fn()
-  render(
+  const result = render(
     <PluginRecommendedSources
       sources={SOURCES}
       addedIds={new Set()}
@@ -19,15 +19,17 @@ function renderList(props: Partial<React.ComponentProps<typeof PluginRecommended
       {...props}
     />
   )
-  return { onAdd }
+  return { onAdd, ...result }
 }
 
 describe("PluginRecommendedSources", () => {
   it("lists each curated marketplace with its reference", () => {
-    renderList()
+    const { container } = renderList()
     expect(screen.getByText("Acme Plugins")).toBeInTheDocument()
     expect(screen.getByText("beta/labs")).toBeInTheDocument()
     expect(screen.getByText("Or paste any GitHub repository above.")).toBeInTheDocument()
+    expect(container.querySelector("[data-slot='item-group']")).not.toBeNull()
+    expect(container.querySelectorAll("[data-slot='item']")).toHaveLength(2)
   })
 
   it("adds a source by its reference", () => {

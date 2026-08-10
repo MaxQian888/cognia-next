@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { GitBranchIcon, AlertTriangleIcon, Loader2Icon, DownloadIcon } from "lucide-react"
+import { GitBranchIcon, AlertTriangleIcon, DownloadIcon } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Spinner } from "@/components/ui/spinner"
 import { canUseTauriInvoke } from "@/lib/native/utils"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { PluginLicense } from "../_shared/plugin-license"
@@ -171,7 +172,7 @@ export function PluginInstallFromGithubDialog({ open, onOpenChange, initialRef }
               disabled={loading}
             />
             <Button variant="outline" onClick={() => void handleFetch()} disabled={loading}>
-              {loading ? <Loader2Icon className="size-3.5 animate-spin" /> : t("fetch")}
+              {loading ? <Spinner className="size-3.5" /> : t("fetch")}
             </Button>
           </div>
           {error && (
@@ -245,7 +246,7 @@ export function PluginInstallFromGithubDialog({ open, onOpenChange, initialRef }
           </Button>
           <Button onClick={handleInstall} disabled={!preview || preInstall.busy}>
             {preInstall.busy ? (
-              <Loader2Icon className="size-3.5 mr-1.5 animate-spin" />
+              <Spinner className="size-3.5" />
             ) : (
               <DownloadIcon className="size-3.5 mr-1.5" />
             )}

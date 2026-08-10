@@ -115,7 +115,7 @@ describe("PluginScheduledJobs", () => {
 
     // The mock i18n translator returns the raw key. Click the paused chip
     // (label = "status.paused") and confirm only the paused row remains.
-    fireEvent.click(screen.getByRole("button", { name: /status\.paused/i }))
+    fireEvent.click(screen.getByRole("radio", { name: /status\.paused/i }))
     expect(screen.queryByText("alpha")).not.toBeInTheDocument()
     expect(screen.getByText("beta")).toBeInTheDocument()
     expect(screen.queryByText("gamma")).not.toBeInTheDocument()
@@ -129,10 +129,10 @@ describe("PluginScheduledJobs", () => {
     ]
     render(<PluginScheduledJobs />)
 
-    expect(screen.getByRole("button", { name: "status.all 3" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "status.active 1" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "status.paused 1" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "status.disabled 1" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "status.all 3" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "status.active 1" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "status.paused 1" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "status.disabled 1" })).toBeInTheDocument()
   })
 
   it("hides the handler column on narrow viewports via hidden sm:table-cell", () => {

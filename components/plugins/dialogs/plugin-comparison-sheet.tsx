@@ -15,7 +15,9 @@ import { AlertTriangleIcon, CheckIcon, DownloadIcon, StarIcon, XIcon } from "luc
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty"
+import { Separator } from "@/components/ui/separator"
 import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
 import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
 
@@ -77,7 +79,11 @@ export function PluginComparisonSheet({ resolveEntry, entries, installedIds, onI
         </SheetHeader>
 
         {resolved.length === 0 ? (
-          <Card className="p-6 text-center mt-4 text-sm text-muted-foreground">{t("empty")}</Card>
+          <Empty className="mt-4 p-6 md:p-6">
+            <EmptyHeader>
+              <EmptyDescription>{t("empty")}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <div className="mt-4 overflow-x-auto">
             <div
@@ -124,12 +130,12 @@ function ComparisonColumn({ entry, installed, onRemove, onInstall }: ColumnProps
   const dangerousCount = (entry.permissions ?? []).filter((p) => DANGEROUS_PERMS.has(p)).length
 
   return (
-    <Card className="p-3 space-y-2 flex flex-col">
-      <div className="flex items-start justify-between gap-2">
-        <div className="space-y-0.5 min-w-0">
-          <p className="font-medium truncate">{entry.name}</p>
+    <Card className="flex flex-col gap-0 py-0">
+      <CardHeader className="flex flex-row items-start justify-between gap-2 px-3 pt-3">
+        <CardTitle className="min-w-0">
+          <p className="truncate font-medium">{entry.name}</p>
           <p className="text-xs text-muted-foreground truncate">v{entry.version}</p>
-        </div>
+        </CardTitle>
         <Button
           variant="ghost"
           size="icon"
@@ -140,76 +146,78 @@ function ComparisonColumn({ entry, installed, onRemove, onInstall }: ColumnProps
         >
           <XIcon className="size-3.5" />
         </Button>
-      </div>
+      </CardHeader>
 
-      {entry.author && <Row label={t("author")} value={entry.author} />}
-      {typeof entry.rating === "number" && entry.rating > 0 && (
+      <CardContent className="flex flex-1 flex-col gap-2 px-3 py-2">
+        {entry.author && <Row label={t("author")} value={entry.author} />}
+        {typeof entry.rating === "number" && entry.rating > 0 && (
+          <Row
+            label={t("rating")}
+            value={
+              <span className="flex items-center gap-1">
+                <StarIcon className="size-3 fill-current" />
+                {entry.rating.toFixed(1)}
+              </span>
+            }
+          />
+        )}
+        {typeof entry.downloads === "number" && entry.downloads > 0 && (
+          <Row
+            label={t("downloads")}
+            value={
+              <span className="flex items-center gap-1">
+                <DownloadIcon className="size-3" />
+                {entry.downloads.toLocaleString()}
+              </span>
+            }
+          />
+        )}
         <Row
-          label={t("rating")}
+          label={t("signed")}
           value={
-            <span className="flex items-center gap-1">
-              <StarIcon className="size-3 fill-current" />
-              {entry.rating.toFixed(1)}
-            </span>
-          }
-        />
-      )}
-      {typeof entry.downloads === "number" && entry.downloads > 0 && (
-        <Row
-          label={t("downloads")}
-          value={
-            <span className="flex items-center gap-1">
-              <DownloadIcon className="size-3" />
-              {entry.downloads.toLocaleString()}
-            </span>
-          }
-        />
-      )}
-      <Row
-        label={t("signed")}
-        value={
-          entry.signed ? (
-            <span className="flex items-center gap-1 text-green-700 dark:text-green-400">
-              <CheckIcon className="size-3" />
-              {t("yes")}
-            </span>
-          ) : (
-            t("no")
-          )
-        }
-      />
-      {(entry.capabilities ?? []).length > 0 && (
-        <Row
-          label={t("capabilities")}
-          value={
-            <div className="flex flex-wrap gap-1 justify-end">
-              {(entry.capabilities ?? []).map((cap) => (
-                <Badge key={cap} variant="outline" className="text-xs">
-                  {cap}
-                </Badge>
-              ))}
-            </div>
-          }
-        />
-      )}
-      <Row
-        label={t("permissions")}
-        value={
-          <div className="text-right">
-            <div className="text-xs">
-              {t("permissionsCount", { count: (entry.permissions ?? []).length })}
-            </div>
-            {dangerousCount > 0 && (
-              <Badge variant="destructive" className="text-xs gap-1 mt-0.5">
-                <AlertTriangleIcon className="size-3" />
-                {t("dangerousCount", { count: dangerousCount })}
+            entry.signed ? (
+              <Badge variant="secondary" className="gap-1 text-xs">
+                <CheckIcon className="size-3" />
+                {t("yes")}
               </Badge>
-            )}
-          </div>
-        }
-      />
+            ) : (
+              t("no")
+            )
+          }
+        />
+        {(entry.capabilities ?? []).length > 0 && (
+          <Row
+            label={t("capabilities")}
+            value={
+              <div className="flex flex-wrap justify-end gap-1">
+                {(entry.capabilities ?? []).map((cap) => (
+                  <Badge key={cap} variant="outline" className="text-xs">
+                    {cap}
+                  </Badge>
+                ))}
+              </div>
+            }
+          />
+        )}
+        <Row
+          label={t("permissions")}
+          value={
+            <div className="text-right">
+              <div className="text-xs">
+                {t("permissionsCount", { count: (entry.permissions ?? []).length })}
+              </div>
+              {dangerousCount > 0 && (
+                <Badge variant="destructive" className="mt-0.5 gap-1 text-xs">
+                  <AlertTriangleIcon className="size-3" />
+                  {t("dangerousCount", { count: dangerousCount })}
+                </Badge>
+              )}
+            </div>
+          }
+        />
+      </CardContent>
 
-      <div className="mt-auto pt-2">
+      <CardFooter className="mt-auto px-3 pb-3">
         {installed ? (
           <Badge variant="secondary" className="w-full justify-center text-xs">
             {t("installed")}
@@ -224,16 +232,19 @@ function ComparisonColumn({ entry, installed, onRemove, onInstall }: ColumnProps
             {t("install")}
           </Button>
         ) : null}
-      </div>
+      </CardFooter>
     </Card>
   )
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-2 text-xs border-t pt-1.5">
-      <span className="text-muted-foreground shrink-0">{label}</span>
-      <div className="text-right min-w-0">{value}</div>
+    <div className="flex flex-col gap-1.5">
+      <Separator />
+      <div className="flex items-start justify-between gap-2 text-xs">
+        <span className="shrink-0 text-muted-foreground">{label}</span>
+        <div className="min-w-0 text-right">{value}</div>
+      </div>
     </div>
   )
 }

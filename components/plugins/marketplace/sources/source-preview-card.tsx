@@ -15,19 +15,15 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import {
-  AlertTriangleIcon,
-  ExternalLinkIcon,
-  Loader2Icon,
-  PackageIcon,
-  PlusIcon,
-} from "lucide-react"
+import { AlertTriangleIcon, ExternalLinkIcon, PackageIcon, PlusIcon } from "lucide-react"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { Spinner } from "@/components/ui/spinner"
 
 import type { MarketplaceSourcePreview } from "./types"
 
@@ -53,9 +49,9 @@ export function PluginSourcePreviewCard({ preview, adding, onAdd, onCancel, onOp
   const visible = expanded ? entries : entries.slice(0, COLLAPSED_ROWS)
 
   return (
-    <Card className="p-3 gap-0 space-y-3" data-testid="marketplace-source-preview">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 space-y-0.5">
+    <Card className="gap-0 py-0" data-testid="marketplace-source-preview">
+      <CardHeader className="flex flex-row items-start justify-between gap-2 px-3 pt-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-medium truncate">{preview.name}</span>
             {preview.alreadyAdded && (
@@ -82,58 +78,62 @@ export function PluginSourcePreviewCard({ preview, adding, onAdd, onCancel, onOp
         >
           <ExternalLinkIcon className="size-3.5" />
         </Button>
-      </div>
+      </CardHeader>
 
-      <Separator />
+      <CardContent className="flex flex-col gap-3 px-3 py-3">
+        <Separator />
 
-      {entries.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t("emptyCatalog")}</p>
-      ) : (
-        <>
-          <ScrollArea className={expanded ? "max-h-56 pr-2" : "pr-2"}>
-            <ul className="space-y-1.5">
-              {visible.map((entry) => (
-                <li key={entry.id} className="flex items-start gap-2">
-                  <PackageIcon
-                    className="size-3.5 mt-0.5 shrink-0 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-sm truncate">{entry.name}</span>
-                      {entry.version && (
-                        <span className="text-xs text-muted-foreground font-mono shrink-0">
-                          v{entry.version}
-                        </span>
+        {entries.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t("emptyCatalog")}</p>
+        ) : (
+          <>
+            <ScrollArea className={expanded ? "max-h-56 pr-2" : "pr-2"}>
+              <ul className="flex flex-col gap-1.5">
+                {visible.map((entry) => (
+                  <li key={entry.id} className="flex items-start gap-2">
+                    <PackageIcon
+                      className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="truncate text-sm">{entry.name}</span>
+                        {entry.version && (
+                          <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                            v{entry.version}
+                          </span>
+                        )}
+                      </div>
+                      {entry.description && (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {entry.description}
+                        </p>
                       )}
                     </div>
-                    {entry.description && (
-                      <p className="text-xs text-muted-foreground truncate">{entry.description}</p>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
-          {hidden > 0 && (
-            <Button
-              variant="link"
-              size="sm"
-              className="h-auto p-0 text-xs self-start justify-start"
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? t("showLess") : t("showMore", { count: hidden })}
-            </Button>
-          )}
-        </>
-      )}
+                  </li>
+                ))}
+              </ul>
+            </ScrollArea>
+            {hidden > 0 && (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto self-start justify-start p-0 text-xs"
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? t("showLess") : t("showMore", { count: hidden })}
+              </Button>
+            )}
+          </>
+        )}
 
-      <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-        <AlertTriangleIcon className="size-3.5 mt-px shrink-0" aria-hidden="true" />
-        {t("unreviewed")}
-      </p>
+        <Alert>
+          <AlertTriangleIcon aria-hidden />
+          <AlertDescription className="text-xs">{t("unreviewed")}</AlertDescription>
+        </Alert>
+      </CardContent>
 
-      <div className="flex justify-end gap-2 pt-1">
+      <CardFooter className="justify-end gap-2 px-3 pb-3">
         <Button variant="outline" size="sm" onClick={onCancel} disabled={adding}>
           {t("cancel")}
         </Button>
@@ -143,14 +143,10 @@ export function PluginSourcePreviewCard({ preview, adding, onAdd, onCancel, onOp
           disabled={adding || preview.alreadyAdded}
           data-testid="marketplace-source-preview-add"
         >
-          {adding ? (
-            <Loader2Icon className="size-3.5 mr-1.5 animate-spin" />
-          ) : (
-            <PlusIcon className="size-3.5 mr-1.5" />
-          )}
+          {adding ? <Spinner className="size-3.5" /> : <PlusIcon className="size-3.5" />}
           {t("addThisSource")}
         </Button>
-      </div>
+      </CardFooter>
     </Card>
   )
 }

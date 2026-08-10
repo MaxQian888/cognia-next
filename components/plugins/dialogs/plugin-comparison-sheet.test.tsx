@@ -62,6 +62,9 @@ describe("PluginComparisonSheet", () => {
     expect(screen.getByTestId("plugin-comparison-remove-a")).toBeInTheDocument()
     expect(screen.getByTestId("plugin-comparison-remove-b")).toBeInTheDocument()
     expect(screen.queryByTestId("plugin-comparison-remove-c")).not.toBeInTheDocument()
+    expect(document.querySelectorAll("[data-slot='card-header']")).toHaveLength(2)
+    expect(document.querySelectorAll("[data-slot='card-content']")).toHaveLength(2)
+    expect(document.querySelectorAll("[data-slot='card-footer']")).toHaveLength(2)
   })
 
   it("clicking remove drops the entry from the store", () => {

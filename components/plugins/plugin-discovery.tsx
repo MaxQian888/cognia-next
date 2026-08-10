@@ -6,7 +6,8 @@
 
 import { useTranslations } from "next-intl"
 import { SparklesIcon } from "lucide-react"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Spinner } from "@/components/ui/spinner"
 import { usePluginMarketplace } from "@/hooks/plugins"
 import { InstallButton } from "./_shared/install-button"
 import { PluginEmptyState } from "./_shared/plugin-empty-state"
@@ -28,7 +29,12 @@ export function PluginDiscovery({ onInstall }: Props) {
   const market = usePluginMarketplace()
 
   if (market.state.kind === "loading") {
-    return <p className="text-sm text-muted-foreground">{t("loading")}</p>
+    return (
+      <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Spinner />
+        <span>{t("loading")}</span>
+      </div>
+    )
   }
 
   const featured = market.featured.slice(0, 6)
@@ -37,22 +43,24 @@ export function PluginDiscovery({ onInstall }: Props) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <SparklesIcon className="size-4" />
         <h3 className="text-sm font-semibold">{t("title")}</h3>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {featured.map((entry) => (
-          <Card key={entry.id} className="p-3 space-y-2 flex flex-col">
-            <div className="space-y-0.5">
-              <div className="text-sm font-medium truncate">{entry.name}</div>
-              <div className="text-xs text-muted-foreground truncate">{entry.id}</div>
-            </div>
-            {entry.description && (
-              <p className="text-xs text-muted-foreground line-clamp-3">{entry.description}</p>
-            )}
-            <div className="flex items-center justify-between gap-2 mt-auto pt-2">
+          <Card key={entry.id} className="flex flex-col gap-0 py-0">
+            <CardHeader className="gap-0.5 px-3 pt-3">
+              <CardTitle className="truncate text-sm">{entry.name}</CardTitle>
+              <div className="truncate text-xs text-muted-foreground">{entry.id}</div>
+            </CardHeader>
+            <CardContent className="flex-1 px-3 py-2">
+              {entry.description && (
+                <p className="line-clamp-3 text-xs text-muted-foreground">{entry.description}</p>
+              )}
+            </CardContent>
+            <CardFooter className="mt-auto justify-between gap-2 px-3 pb-3">
               <PluginVersionBadge version={entry.version} variant="outline" />
               <InstallButton
                 installed={false}
@@ -61,7 +69,7 @@ export function PluginDiscovery({ onInstall }: Props) {
                 installLabel={t("install")}
                 installingLabel={t("installing")}
               />
-            </div>
+            </CardFooter>
           </Card>
         ))}
       </div>

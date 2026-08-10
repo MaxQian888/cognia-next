@@ -49,5 +49,6 @@ describe("CapabilityChips", () => {
     )
     const trigger = screen.getByRole("button", { name: /\+2 more/i })
     expect(trigger).toBeInTheDocument()
+    expect(trigger).toHaveAttribute("data-variant", "ghost")
   })
 })

@@ -14,6 +14,7 @@
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { cn } from "@/lib/utils"
 
@@ -54,16 +55,20 @@ export function CapabilityChips({
         (hoverable ? (
           <HoverCard openDelay={200} closeDelay={100}>
             <HoverCardTrigger asChild>
-              <button
+              <Button
                 type="button"
-                className="inline-flex"
+                variant="ghost"
+                size="xs"
+                className="h-auto rounded-full p-0"
                 aria-label={t("capabilityOverflow", { count: overflow })}
               >
                 {overflowBadge}
-              </button>
+              </Button>
             </HoverCardTrigger>
             <HoverCardContent className="w-72 p-3" align="start">
-              <div className="text-xs font-medium mb-1">{capabilities.length} capabilities</div>
+              <div className="mb-1 text-xs font-medium">
+                {t("capabilityCount", { count: capabilities.length })}
+              </div>
               <div className="flex flex-wrap gap-1">
                 {capabilities.map((cap) => (
                   <Badge key={cap} variant={variant} className="text-xs">
