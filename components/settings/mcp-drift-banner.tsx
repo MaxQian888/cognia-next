@@ -100,9 +100,13 @@ export function McpDriftBanner() {
               className="rounded border border-amber-500/30 bg-background/60 px-2.5 py-1.5"
             >
               <div className="flex items-center gap-2 text-xs">
-                <button
+                <Button
                   type="button"
-                  className={cn("inline-flex items-center gap-1 hover:underline")}
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-auto gap-1 p-0 font-normal hover:bg-transparent hover:underline"
+                  )}
                   onClick={() => toggleExpand(status.agent.id)}
                   aria-expanded={isOpen}
                 >
@@ -112,7 +116,7 @@ export function McpDriftBanner() {
                     <ChevronRightIcon className="size-3" />
                   )}
                   <span className="font-medium">{status.agent.displayName}</span>
-                </button>
+                </Button>
                 <span className="text-[10px] text-muted-foreground">
                   {t("missingCount", { count: d.missing.length })}
                   {d.unmanaged.length > 0 &&

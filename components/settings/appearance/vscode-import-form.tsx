@@ -11,6 +11,7 @@ import { useTranslations } from "next-intl"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Loader2Icon, UploadIcon } from "lucide-react"
 import {
@@ -193,7 +194,7 @@ export function VscodeImportForm({ onComplete, showDescription = true }: VscodeI
           "flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 text-center text-sm"
         )}
       >
-        <input
+        <Input
           ref={inputRef}
           type="file"
           accept=".json,.vsix"

@@ -478,11 +478,13 @@ function TeamEditor({
           />
           <div className="grid grid-cols-3 gap-1">
             {COLOR_PALETTE.map((c) => (
-              <button
+              <Button
                 key={c}
                 type="button"
+                variant="outline"
+                size="icon"
                 onClick={() => setS({ ...s, avatarColor: c })}
-                className="size-4 rounded-full ring-1 ring-border"
+                className="size-4 rounded-full p-0 ring-1 ring-border"
                 style={{
                   backgroundColor: c,
                   outline: s.avatarColor === c ? "2px solid var(--ring)" : undefined,
@@ -597,12 +599,14 @@ function TeamEditor({
               const active = memberIds.includes(c.id)
               const order = active ? memberIds.indexOf(c.id) + 1 : null
               return (
-                <button
+                <Button
                   key={c.id}
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => toggleMember(c.id)}
                   className={
-                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors " +
+                    "h-auto gap-1 rounded-full px-2 py-0.5 text-xs font-normal " +
                     (active
                       ? "border-primary bg-primary/10 text-foreground"
                       : "border-border bg-muted/30 text-muted-foreground hover:bg-muted")
@@ -622,7 +626,7 @@ function TeamEditor({
                     <span className="font-mono text-[10px] text-muted-foreground">#{order}</span>
                   )}
                   {c.name}
-                </button>
+                </Button>
               )
             })
           )}
@@ -639,22 +643,26 @@ function TeamEditor({
                   className="inline-flex items-center gap-0.5 rounded border bg-background px-1 text-[11px]"
                 >
                   {c.name}
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon"
                     onClick={() => move(m.characterId, -1)}
-                    className="px-1 text-muted-foreground hover:text-foreground"
+                    className="size-5 text-muted-foreground hover:text-foreground"
                     aria-label={tEditor("moveUp", { name: c.name })}
                   >
                     ↑
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon"
                     onClick={() => move(m.characterId, 1)}
-                    className="px-1 text-muted-foreground hover:text-foreground"
+                    className="size-5 text-muted-foreground hover:text-foreground"
                     aria-label={tEditor("moveDown", { name: c.name })}
                   >
                     ↓
-                  </button>
+                  </Button>
                 </span>
               )
             })}
@@ -665,13 +673,14 @@ function TeamEditor({
       {s.members.length > 0 && (
         <Collapsible>
           <CollapsibleTrigger asChild>
-            <button
+            <Button
               type="button"
-              className="group flex w-full items-center gap-1.5 rounded-md py-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
+              variant="ghost"
+              className="group h-auto w-full justify-start gap-1.5 py-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
             >
               <ChevronDownIcon className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
               {tEditor("memberOverrides", { count: countOverrides(s.members) })}
-            </button>
+            </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-2 pt-1">
             <p className="text-[11px] text-muted-foreground">{tEditor("overrideHelp")}</p>
@@ -702,9 +711,11 @@ function TeamEditor({
             mcpServers.map((m) => {
               const active = (s.mcpServerIds ?? []).includes(m.id)
               return (
-                <button
+                <Button
                   key={m.id}
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
                     const cur = new Set(s.mcpServerIds ?? [])
                     if (cur.has(m.id)) cur.delete(m.id)
@@ -723,7 +734,7 @@ function TeamEditor({
                   }
                 >
                   {m.name}
-                </button>
+                </Button>
               )
             })
           )}
@@ -840,9 +851,11 @@ function MemberOverrideCard({ character, member, mcpServers, onPatch }: MemberOv
               const cur = member.mcpServerIdsOverride ?? null
               const active = cur?.includes(srv.id) ?? false
               return (
-                <button
+                <Button
                   key={srv.id}
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
                     const next = new Set(cur ?? [])
                     if (next.has(srv.id)) next.delete(srv.id)
@@ -860,7 +873,7 @@ function MemberOverrideCard({ character, member, mcpServers, onPatch }: MemberOv
                   }
                 >
                   {srv.name}
-                </button>
+                </Button>
               )
             })
           )}

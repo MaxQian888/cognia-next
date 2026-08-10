@@ -31,11 +31,13 @@ describe("settings component primitives", () => {
 
     expect(violations).not.toEqual(
       expect.arrayContaining([
+        "components/settings/a2ui/debugger-tab.tsx",
         "components/settings/a2ui/templates-tab.tsx",
         "components/settings/actions/settings-actions-menu.tsx",
         "components/settings/about/resources-card.tsx",
         "components/settings/about/tech-stack.tsx",
         "components/settings/agent/custom-mode-settings.tsx",
+        "components/settings/agent/external-agent-settings.tsx",
         "components/settings/agent-runtime/tabs/sidecar-tab.tsx",
         "components/settings/agent-runtime/tool-search-runtime-card.tsx",
         "components/settings/appearance/components/appearance-config-toolbar.tsx",
@@ -50,6 +52,7 @@ describe("settings component primitives", () => {
         "components/settings/appearance/tabs/preset-grid.tsx",
         "components/settings/appearance/tabs/theme-tab.tsx",
         "components/settings/appearance/tabs/wallpaper-tab.tsx",
+        "components/settings/appearance/vscode-import-form.tsx",
         "components/settings/characters-section.tsx",
         "components/settings/automation/inspector-tab.tsx",
         "components/settings/common/related-sections-strip.tsx",
@@ -69,12 +72,16 @@ describe("settings component primitives", () => {
         "components/settings/pet/pet-model-manager.tsx",
         "components/settings/profile/profile-avatar-picker.tsx",
         "components/settings/prompt-presets-section.tsx",
+        "components/settings/presets/editor-sections/identity-section.tsx",
+        "components/settings/presets/editor-sections/tools-section.tsx",
+        "components/settings/presets/preset-card.tsx",
         "components/settings/hooks/builtin-hooks-card.tsx",
         "components/settings/memory/danger-zone.tsx",
         "components/settings/memory/memory-nav.tsx",
         "components/settings/mcp/mcp-panel.tsx",
         "components/settings/mcp/mcp-preset-grid.tsx",
         "components/settings/mcp/mcp-server-editor.tsx",
+        "components/settings/mcp-drift-banner.tsx",
         "components/settings/mcp-agent-chip-group.tsx",
         "components/settings/mcp-import-dialog.tsx",
         "components/settings/search/search-settings-nav.tsx",
@@ -83,9 +90,11 @@ describe("settings component primitives", () => {
         "components/settings/slash-commands/command-editor-dialog.tsx",
         "components/settings/subagents/subagent-import-dialog.tsx",
         "components/settings/subagents/subagents-nav.tsx",
+        "components/settings/subagents/tool-scope-field.tsx",
         "components/settings/subscription/components/subscription-nav.tsx",
         "components/settings/subscription/account-list.tsx",
         "components/settings/tray-section.tsx",
+        "components/settings/teams-section.tsx",
         "components/settings/provider/model-list-dialog.tsx",
         "components/settings/provider/add-provider-popover.tsx",
         "components/settings/provider/add-provider-wizard.tsx",
@@ -113,6 +122,6 @@ describe("settings component primitives", () => {
         "components/settings/tray-panel/tray-panel-field-editor.tsx",
       ])
     )
-    expect(violations.length).toBeLessThanOrEqual(9)
+    expect(violations).toEqual([])
   })
 })

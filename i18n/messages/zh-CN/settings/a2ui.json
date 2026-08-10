@@ -6,6 +6,10 @@
     "confirmClear": "清空全部事件历史？",
     "description": "所有 surface 的 userAction + dataModelChange 事件。",
     "empty": "当前筛选下无事件。",
+    "eventTypes": {
+      "dataModelChange": "数据模型变更",
+      "userAction": "用户操作"
+    },
     "filterSurface": "按 surface 筛选",
     "refresh": "刷新",
     "selectHint": "选择一个事件查看 payload。",

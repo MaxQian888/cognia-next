@@ -112,10 +112,12 @@ export function ToolScopeField({
         data-testid={`${testId}-mode`}
       >
         {MODES.map((m) => (
-          <button
+          <Button
             key={m}
             type="button"
             role="radio"
+            variant="ghost"
+            size="sm"
             aria-checked={mode === m}
             onClick={() => selectMode(m)}
             data-testid={`${testId}-mode-${m}`}
@@ -128,7 +130,7 @@ export function ToolScopeField({
             )}
           >
             {t(`modes.${m}`)}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -157,14 +159,16 @@ export function ToolScopeField({
                   data-testid={`${testId}-chip-${tool}`}
                 >
                   <span className="max-w-[16rem] truncate">{tool}</span>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon"
                     onClick={() => setSelected(selected.filter((x) => x !== tool))}
                     aria-label={t("removeTool", { tool })}
-                    className="text-muted-foreground hover:text-foreground"
+                    className="size-4 text-muted-foreground hover:text-foreground"
                   >
                     <XIcon className="size-3" />
-                  </button>
+                  </Button>
                 </span>
               ))}
               <Button

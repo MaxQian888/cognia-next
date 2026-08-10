@@ -20843,6 +20843,10 @@
         "confirmClear": "Clear all event history?",
         "description": "userAction + dataModelChange events from every surface.",
         "empty": "No events match the current filter.",
+        "eventTypes": {
+          "dataModelChange": "Data model change",
+          "userAction": "User action"
+        },
         "filterSurface": "Filter by surface",
         "refresh": "Refresh",
         "selectHint": "Select an event to inspect its payload.",

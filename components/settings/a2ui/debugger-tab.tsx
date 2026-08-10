@@ -32,6 +32,8 @@ export function DebuggerTab() {
   const [typeFilter, setTypeFilter] = useState<FilterType>("all")
   const [selected, setSelected] = useState<A2UIEventHistoryRow | null>(null)
   const surfaces = useA2UIStore((s) => s.surfaces)
+  const eventTypeLabel = (type: A2UIEventHistoryRow["type"]) =>
+    type === "userAction" ? t("eventTypes.userAction") : t("eventTypes.dataModelChange")
 
   const refresh = async () => {
     const all = await listEvents({ limit: 500 })
@@ -140,8 +142,8 @@ export function DebuggerTab() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">{t("allTypes")}</SelectItem>
-                <SelectItem value="userAction">userAction</SelectItem>
-                <SelectItem value="dataModelChange">dataModelChange</SelectItem>
+                <SelectItem value="userAction">{eventTypeLabel("userAction")}</SelectItem>
+                <SelectItem value="dataModelChange">{eventTypeLabel("dataModelChange")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -153,11 +155,12 @@ export function DebuggerTab() {
                   <p className="p-4 text-center text-sm text-muted-foreground">{t("empty")}</p>
                 ) : (
                   filtered.map((r) => (
-                    <button
+                    <Button
                       key={r.id}
                       type="button"
+                      variant="ghost"
                       onClick={() => setSelected(r)}
-                      className={`block w-full text-left px-3 py-2 text-xs hover:bg-accent ${
+                      className={`h-auto w-full justify-start whitespace-normal rounded-none px-3 py-2 text-left text-xs font-normal hover:bg-accent ${
                         selected?.id === r.id ? "bg-accent" : ""
                       }`}
                     >
@@ -167,7 +170,7 @@ export function DebuggerTab() {
                           variant={r.type === "userAction" ? "default" : "secondary"}
                           className="text-[10px]"
                         >
-                          {r.type}
+                          {eventTypeLabel(r.type)}
                         </Badge>
                       </div>
                       <div className="mt-0.5 flex items-center justify-between text-muted-foreground">
@@ -180,7 +183,7 @@ export function DebuggerTab() {
                           {new Date(r.timestamp).toLocaleTimeString()}
                         </span>
                       </div>
-                    </button>
+                    </Button>
                   ))
                 )}
               </div>

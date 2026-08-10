@@ -8,6 +8,7 @@
 import { useTranslations } from "next-intl"
 
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -69,11 +70,13 @@ export function IdentitySection({ state, onPatch, defaultOpen = true }: Identity
           />
           <div className="grid grid-cols-4 gap-1">
             {COLOR_PALETTE.map((c) => (
-              <button
+              <Button
                 key={c}
                 type="button"
+                variant="outline"
+                size="icon"
                 onClick={() => onPatch({ color: c })}
-                className="size-4 rounded-full ring-1 ring-border"
+                className="size-4 rounded-full p-0 ring-1 ring-border"
                 style={{
                   backgroundColor: c,
                   outline: state.color === c ? "2px solid var(--ring)" : undefined,

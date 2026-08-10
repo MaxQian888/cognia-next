@@ -1551,19 +1551,20 @@ function RailItem({
   dataTestId: string
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onClick}
       aria-pressed={active}
       data-testid={dataTestId}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/50",
+        "h-auto w-full justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left text-sm font-normal hover:bg-accent/50",
         active && "bg-accent font-medium text-accent-foreground"
       )}
     >
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="truncate">{label}</span>
-    </button>
+    </Button>
   )
 }
 
@@ -1813,12 +1814,13 @@ export function ExternalAgentSettings() {
                           isSelected && "bg-accent"
                         )}
                       >
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
                           data-testid={`agent-row-${agent.id}`}
                           onClick={() => setView({ kind: "agent", id: agent.id })}
                           aria-pressed={isSelected}
-                          className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left"
+                          className="h-auto min-w-0 flex-1 justify-start whitespace-normal rounded-md px-2 py-1.5 text-left font-normal"
                         >
                           <div className="flex items-center gap-2">
                             <ConnectionStatusIcon status={status} />
@@ -1854,7 +1856,7 @@ export function ExternalAgentSettings() {
                               `${agent.protocol} · ${agent.transport}`
                             )}
                           </p>
-                        </button>
+                        </Button>
                         {/* Connect without leaving the list — the most frequent
                             action was previously two clicks deep. */}
                         <Button

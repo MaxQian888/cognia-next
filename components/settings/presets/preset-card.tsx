@@ -13,7 +13,6 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   AlertDialog,
@@ -94,8 +93,11 @@ export function PresetCard({
   }
 
   return (
-    <Card
-      className={cn("p-3", selectionMode && selected === true && "border-primary bg-primary/5")}
+    <div
+      className={cn(
+        "border-b border-border/60 p-3 last:border-b-0",
+        selectionMode && selected === true && "bg-primary/5"
+      )}
     >
       <div className="flex items-start gap-3">
         {selectionMode ? (
@@ -106,14 +108,16 @@ export function PresetCard({
             className="mt-1"
           />
         ) : reorderable ? (
-          <button
+          <Button
             type="button"
-            className="touch-none cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing"
+            variant="ghost"
+            size="icon"
+            className="size-7 touch-none cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing"
             aria-label={safeTCard("dragHandle", "Drag to reorder")}
             {...dragHandleProps}
           >
             <GripVerticalIcon className="size-4" />
-          </button>
+          </Button>
         ) : null}
         <span
           className="flex size-10 shrink-0 items-center justify-center rounded-full text-base"
@@ -275,6 +279,6 @@ export function PresetCard({
           </AlertDialog>
         </div>
       </div>
-    </Card>
+    </div>
   )
 }

@@ -10,6 +10,7 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { SettingsCard } from "@/components/settings/common/settings-section"
 import type { McpServer, Skill } from "@cognia/agent-config-types"
@@ -207,12 +208,14 @@ function ItemMultiSelect({
             const active = selectedIds.includes(it.id)
             const order = active ? selectedIds.indexOf(it.id) + 1 : null
             return (
-              <button
+              <Button
                 key={it.id}
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={() => toggle(it.id)}
                 className={
-                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors " +
+                  "h-auto gap-1 rounded-full px-2 py-0.5 text-xs font-normal " +
                   (active
                     ? "border-primary bg-primary/10 text-foreground"
                     : "border-border bg-muted/30 text-muted-foreground hover:bg-muted")
@@ -223,7 +226,7 @@ function ItemMultiSelect({
                   <span className="font-mono text-[10px] text-muted-foreground">#{order}</span>
                 )}
                 {it.name}
-              </button>
+              </Button>
             )
           })
         )}
@@ -240,22 +243,26 @@ function ItemMultiSelect({
                 className="inline-flex items-center gap-0.5 rounded border bg-background px-1 text-[11px]"
               >
                 {it.name}
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={() => move(id, -1)}
-                  className="px-1 text-muted-foreground hover:text-foreground"
+                  className="size-5 text-muted-foreground hover:text-foreground"
                   aria-label={`Move ${it.name} up`}
                 >
                   ↑
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={() => move(id, 1)}
-                  className="px-1 text-muted-foreground hover:text-foreground"
+                  className="size-5 text-muted-foreground hover:text-foreground"
                   aria-label={`Move ${it.name} down`}
                 >
                   ↓
-                </button>
+                </Button>
               </span>
             )
           })}
