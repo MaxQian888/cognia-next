@@ -167,11 +167,19 @@
   },
   "checkpoint": {
     "action": "Restore files to this checkpoint",
+    "affectedFiles": "Affected files",
     "cancel": "Cancel",
     "confirm": "Restore files",
     "description": "Review the dry-run result before restoring tracked files. Conversation history is not changed.",
+    "noAffectedFiles": "No affected paths were reported.",
     "previewFailed": "Could not preview this checkpoint.",
+    "reason": "Reason",
     "restoreFailed": "Could not restore this checkpoint.",
+    "status": {
+      "ready": "Ready to restore",
+      "unavailable": "Restore unavailable",
+      "unknown": "Preview returned no status"
+    },
     "title": "Restore file checkpoint"
   },
   "composer": {

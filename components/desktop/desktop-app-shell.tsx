@@ -49,6 +49,7 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { AgentThreadBrowser } from "@/components/agent/agent-thread-browser"
+import { AgentExecutionHandleProvider } from "@/components/providers/agent-execution-handle-provider"
 
 const log = loggers.shell
 
@@ -172,7 +173,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
           {sidebarSide === "left" ? guildRail : null}
           <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
             <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
-              {children}
+              <AgentExecutionHandleProvider>{children}</AgentExecutionHandleProvider>
             </div>
             <TerminalDockRegion slot="bottom" />
           </div>

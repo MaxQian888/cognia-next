@@ -151,6 +151,7 @@ import {
   createAgentExecutionHandle,
   type AgentExecutionHandle,
 } from "@/lib/ai/agent/execution/agent-execution-handle"
+import { useAgentExecutionHandleDirectory } from "@/components/providers/agent-execution-handle-provider"
 import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
 import { useGitStore } from "@/stores/git/git-store"
 import { refreshGitStatus } from "@/lib/git/load"
@@ -774,6 +775,12 @@ export function useClaudeChat() {
   // resolver callback supplies the exact spec used for the outgoing send, so
   // this hook never resolves execution a second time.
   const executionHandlesRef = useRef<Map<string, AgentExecutionHandle>>(new Map())
+  const executionHandleDirectory = useAgentExecutionHandleDirectory()
+  const getExecutionHandle = useCallback(
+    (sessionId: string) =>
+      executionHandlesRef.current.get(sessionId) ?? executionHandleDirectory.get(sessionId),
+    [executionHandleDirectory]
+  )
 
   /**
    * Per-session streaming coalescers. Each open session gets its own
@@ -834,7 +841,7 @@ export function useClaudeChat() {
           handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef, sendRef, {
             messagesMirrorRef,
             registry,
-            executionHandlesRef,
+            getExecutionHandle,
           })
         )
         .catch((err) => {
@@ -847,7 +854,7 @@ export function useClaudeChat() {
       })
       return tail
     },
-    [registry]
+    [registry, getExecutionHandle]
   )
 
   // Subscribe to sidecar events once. Desktop gets them via Tauri events;
@@ -1013,7 +1020,7 @@ export function useClaudeChat() {
             // simply falls through to the queue. It takes the whole `content`,
             // so an attachment-only follow-up goes live here too.
             try {
-              const handle = executionHandlesRef.current.get(sessionId)
+              const handle = getExecutionHandle(sessionId)
               if (handle) await handle.steer(content)
               else {
                 const { steerSession } = await import("@/lib/claude/ipc")
@@ -1087,8 +1094,14 @@ export function useClaudeChat() {
         sendOptions =
           opts ??
           (await buildSendOptions(session, userMessageText, (spec) => {
-            if (executionHandlesRef.current.has(sessionId)) return
-            executionHandlesRef.current.set(sessionId, createAgentExecutionHandle(sessionId, spec))
+            const existingHandle = getExecutionHandle(sessionId)
+            if (existingHandle) {
+              executionHandlesRef.current.set(sessionId, existingHandle)
+              return
+            }
+            const handle = createAgentExecutionHandle(sessionId, spec)
+            executionHandlesRef.current.set(sessionId, handle)
+            executionHandleDirectory.register(handle)
           }))
       } catch (err) {
         // RoutingNoCandidatesError (alias matched, every deployment down)
@@ -1917,7 +1930,15 @@ export function useClaudeChat() {
         }
       }
     },
-    [store, tRouting, tInlineErr, registry, enqueueClaudeEvent]
+    [
+      store,
+      tRouting,
+      tInlineErr,
+      registry,
+      enqueueClaudeEvent,
+      getExecutionHandle,
+      executionHandleDirectory,
+    ]
   )
 
   // Keep the module-scope `handleEvent` pointed at the latest `send` so it can
@@ -2036,7 +2057,7 @@ export function useClaudeChat() {
           standaloneController.abort()
           standaloneAbortRef.current.delete(sessionId)
         } else {
-          const handle = executionHandlesRef.current.get(sessionId)
+          const handle = getExecutionHandle(sessionId)
           if (handle) await handle.interrupt()
           else await interruptSession(sessionId)
         }
@@ -2044,28 +2065,31 @@ export function useClaudeChat() {
         console.error("interrupt failed", err)
       }
     },
-    [store, registry]
+    [store, registry, getExecutionHandle]
   )
 
   // "Interrupt & steer now": cut the running turn short so its settle replays
   // the queued steer immediately, instead of waiting for the turn to finish.
   // Arming covers the case where the abort surfaces as an errored
   // `session_ended`. No-op when nothing is queued.
-  const interruptAndSteer = useCallback(async (targetSessionId?: string) => {
-    const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
-    if (!sessionId) return
-    const queued = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []
-    if (queued.length === 0) return
-    steerArmed.add(sessionId)
-    try {
-      const handle = executionHandlesRef.current.get(sessionId)
-      if (handle) await handle.interrupt()
-      else await interruptSession(sessionId)
-    } catch (err) {
-      console.error("interrupt(steer) failed", err)
-      steerArmed.delete(sessionId)
-    }
-  }, [])
+  const interruptAndSteer = useCallback(
+    async (targetSessionId?: string) => {
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return
+      const queued = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []
+      if (queued.length === 0) return
+      steerArmed.add(sessionId)
+      try {
+        const handle = getExecutionHandle(sessionId)
+        if (handle) await handle.interrupt()
+        else await interruptSession(sessionId)
+      } catch (err) {
+        console.error("interrupt(steer) failed", err)
+        steerArmed.delete(sessionId)
+      }
+    },
+    [getExecutionHandle]
+  )
 
   // Replay a session's queued steer NOW, without a turn boundary. Used by the
   // Run Panel after an errored settle, where the queue is preserved but no
@@ -2159,7 +2183,7 @@ export function useClaudeChat() {
         }
       }
       try {
-        const handle = executionHandlesRef.current.get(approval.sessionId)
+        const handle = getExecutionHandle(approval.sessionId)
         if (handle) {
           await handle.resolvePermission(approval.requestId, decision)
         } else {
@@ -2175,13 +2199,13 @@ export function useClaudeChat() {
         store.getState().clearApproval(approval.requestId, approval.sessionId)
       }
     },
-    [store]
+    [store, getExecutionHandle]
   )
 
   const close = useCallback(
     async (sessionId: string) => {
+      const handle = getExecutionHandle(sessionId)
       try {
-        const handle = executionHandlesRef.current.get(sessionId)
         if (handle) await handle.cancel()
         else await closeSession(sessionId)
       } catch (err) {
@@ -2193,6 +2217,7 @@ export function useClaudeChat() {
         registry.release(sessionId)
         messagesMirrorRef.current.delete(sessionId)
         executionHandlesRef.current.delete(sessionId)
+        executionHandleDirectory.unregister(sessionId, handle)
         useChatStore.getState().closeSession(sessionId)
         clearSessionGrants(sessionId)
         releaseSkillLoadContext(sessionId)
@@ -2205,34 +2230,44 @@ export function useClaudeChat() {
         releaseDispatchStateForSession(sessionId)
       }
     },
-    [registry]
+    [registry, getExecutionHandle, executionHandleDirectory]
   )
 
-  const compact = useCallback(async (sessionId: string) => {
-    const handle = executionHandlesRef.current.get(sessionId)
-    if (handle) await handle.compact()
-    else await compactSession(sessionId)
-  }, [])
+  const compact = useCallback(
+    async (sessionId: string) => {
+      const handle = getExecutionHandle(sessionId)
+      if (handle) await handle.compact()
+      else await compactSession(sessionId)
+    },
+    [getExecutionHandle]
+  )
 
-  const setModel = useCallback(async (sessionId: string, model: string) => {
-    const handle = executionHandlesRef.current.get(sessionId)
-    if (handle) await handle.setModel(model)
-    else await setSessionModel(sessionId, model)
-  }, [])
+  const setModel = useCallback(
+    async (sessionId: string, model: string) => {
+      const handle = getExecutionHandle(sessionId)
+      if (handle) await handle.setModel(model)
+      else await setSessionModel(sessionId, model)
+    },
+    [getExecutionHandle]
+  )
 
-  const resetRuntime = useCallback(async (sessionId: string) => {
-    const handle = executionHandlesRef.current.get(sessionId)
-    try {
-      if (handle) await handle.cancel()
-      else await closeSession(sessionId)
-    } finally {
-      executionHandlesRef.current.delete(sessionId)
-    }
-  }, [])
+  const resetRuntime = useCallback(
+    async (sessionId: string) => {
+      const handle = getExecutionHandle(sessionId)
+      try {
+        if (handle) await handle.cancel()
+        else await closeSession(sessionId)
+      } finally {
+        executionHandlesRef.current.delete(sessionId)
+        executionHandleDirectory.unregister(sessionId, handle)
+      }
+    },
+    [getExecutionHandle, executionHandleDirectory]
+  )
 
   const rewindFiles = useCallback(
     async (sessionId: string, checkpointId: string, dryRun: boolean) => {
-      const handle = executionHandlesRef.current.get(sessionId)
+      const handle = getExecutionHandle(sessionId)
       if (!handle) throw new Error("checkpoint execution handle is unavailable")
       const result = await handle.rewindFiles(checkpointId, { dryRun })
       if (!dryRun) {
@@ -2240,7 +2275,7 @@ export function useClaudeChat() {
       }
       return result
     },
-    []
+    [getExecutionHandle]
   )
 
   /**
@@ -2576,7 +2611,7 @@ function isTeamSubSession(sessionId: string): boolean {
 interface StreamCoalescing {
   messagesMirrorRef: React.MutableRefObject<Map<string, UIMessage[]>>
   registry: SessionCoalescingRegistry
-  executionHandlesRef: React.MutableRefObject<Map<string, AgentExecutionHandle>>
+  getExecutionHandle: (sessionId: string) => AgentExecutionHandle | undefined
 }
 
 /**
@@ -2664,7 +2699,7 @@ async function handleEvent(
   sendRef: React.MutableRefObject<SendFn | null>,
   coalescing: StreamCoalescing
 ) {
-  const { messagesMirrorRef, registry, executionHandlesRef } = coalescing
+  const { messagesMirrorRef, registry, getExecutionHandle } = coalescing
   // Skip events for team sub-sessions outright — useTeamChat handles them.
   if (
     (evt.type === "event" ||
@@ -3154,7 +3189,7 @@ async function handleEvent(
           // workflow-editor and direct chat) into the runtime store so they render
           // in the chat subagent tree alongside `dispatch_agent` runs.
           const { applySdkSubagentBridge } = await import("@/lib/claude/sdk-subagent-bridge")
-          const handle = executionHandlesRef.current.get(sessionId)
+          const handle = getExecutionHandle(sessionId)
           if (handle) applySdkSubagentBridge(env.event, sessionId, handle)
           else applySdkSubagentBridge(env.event, sessionId)
           // ExitPlanMode capture (ADR-0045): project the SDK plan-mode plan into

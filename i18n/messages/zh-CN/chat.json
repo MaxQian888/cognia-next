@@ -167,11 +167,19 @@
   },
   "checkpoint": {
     "action": "恢复到此文件检查点",
+    "affectedFiles": "受影响的文件",
     "cancel": "取消",
     "confirm": "恢复文件",
     "description": "请先检查试运行结果，再恢复被跟踪的文件。对话历史不会改变。",
+    "noAffectedFiles": "SDK 未报告受影响的路径。",
     "previewFailed": "无法预览此检查点。",
+    "reason": "原因",
     "restoreFailed": "无法恢复此检查点。",
+    "status": {
+      "ready": "可以恢复",
+      "unavailable": "无法恢复",
+      "unknown": "预览未返回状态"
+    },
     "title": "恢复文件检查点"
   },
   "composer": {

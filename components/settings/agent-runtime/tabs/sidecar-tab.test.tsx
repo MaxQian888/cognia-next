@@ -4,6 +4,13 @@ const getSidecarStatusMock = jest.fn()
 const restartSidecarMock = jest.fn()
 const getSessionMock = jest.fn()
 const activeSessionRef = { current: "s1" as string | null }
+const executionHandleRef = {
+  current: null as null | {
+    reloadPlugins: jest.Mock<Promise<unknown>, []>
+    reloadSkills: jest.Mock<Promise<unknown>, []>
+    reinitialize: jest.Mock<Promise<unknown>, []>
+  },
+}
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -58,6 +65,9 @@ jest.mock("@/hooks/chat/use-sdk-session-capabilities", () => ({
 jest.mock("@/components/settings/agent-runtime/sdk-parity-card", () => ({
   SdkParityCard: () => <div data-testid="sdk-parity-card" />,
 }))
+jest.mock("@/components/providers/agent-execution-handle-provider", () => ({
+  useAgentExecutionHandle: () => executionHandleRef.current,
+}))
 const routerReplaceMock = jest.fn()
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace: (...args: unknown[]) => routerReplaceMock(...args) }),
@@ -83,6 +93,7 @@ describe("SidecarTab", () => {
     restartSidecarMock.mockReset()
     getSessionMock.mockReset()
     hydratedRows = false
+    executionHandleRef.current = null
   })
 
   it("shows the Desktop-only badge in web mode", () => {
@@ -126,6 +137,52 @@ describe("SidecarTab", () => {
     render(<SidecarTab />)
     await user.click(screen.getByRole("button", { name: "restartBtn" }))
     expect(restartSidecarMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("routes live capability mutations through the active execution handle", async () => {
+    const user = userEvent.setup()
+    const reloadPlugins = jest.fn().mockResolvedValue(undefined)
+    const reloadSkills = jest.fn().mockResolvedValue(undefined)
+    const reinitialize = jest.fn().mockResolvedValue(undefined)
+    executionHandleRef.current = { reloadPlugins, reloadSkills, reinitialize }
+    getSidecarStatusMock.mockResolvedValue({ ready: true })
+    getSessionMock.mockResolvedValue({ sdkSessionId: "sdk-1" })
+
+    render(<SidecarTab />)
+    await user.click(screen.getByRole("button", { name: "reloadPluginsBtn" }))
+    await user.click(screen.getByRole("button", { name: "reloadSkillsBtn" }))
+    await user.click(screen.getByRole("button", { name: "reinitializeBtn" }))
+
+    expect(reloadPlugins).toHaveBeenCalledTimes(1)
+    expect(reloadSkills).toHaveBeenCalledTimes(1)
+    expect(reinitialize).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith("capabilityActionSucceeded")
+  })
+
+  it("disables live capability mutations when Chat has no registered handle", () => {
+    getSidecarStatusMock.mockResolvedValue({ ready: true })
+    render(<SidecarTab />)
+
+    expect(screen.getByRole("button", { name: "reloadPluginsBtn" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "reloadSkillsBtn" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "reinitializeBtn" })).toBeDisabled()
+  })
+
+  it("surfaces a live capability mutation failure and unblocks the controls", async () => {
+    const user = userEvent.setup()
+    const reloadPlugins = jest.fn().mockRejectedValue(new Error("reload refused"))
+    executionHandleRef.current = {
+      reloadPlugins,
+      reloadSkills: jest.fn().mockResolvedValue(undefined),
+      reinitialize: jest.fn().mockResolvedValue(undefined),
+    }
+    getSidecarStatusMock.mockResolvedValue({ ready: true })
+
+    render(<SidecarTab />)
+    await user.click(screen.getByRole("button", { name: "reloadPluginsBtn" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("reload refused"))
+    expect(screen.getByRole("button", { name: "reloadPluginsBtn" })).not.toBeDisabled()
   })
 
   it("falls back to 'stopped' when the status call rejects", async () => {

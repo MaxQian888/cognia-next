@@ -21350,6 +21350,9 @@
         "save": "保存",
         "sdk": {
           "cancel": "取消",
+          "close": "关闭",
+          "continueInChat": "在对话中继续",
+          "continued": "已在对话中打开 SDK 会话。",
           "count": "{count} 个原生会话",
           "delete": "删除 SDK 会话",
           "deleteConfirm": "永久删除",
@@ -21357,8 +21360,14 @@
           "deleteTitle": "删除原生 SDK 会话？",
           "deleted": "SDK 会话已删除。",
           "description": "由 Claude Agent SDK 保存的会话，包括尚未关联到 Cognia 对话的记录。",
+          "details": "查看 SDK 会话",
+          "detailsDescription": "查看压缩后的原生对话记录及其子智能体记录，不会修改 SDK 源会话。",
+          "detailsPartial": "SDK 返回了此对话记录的部分页面。",
+          "detailsPartialError": "部分会话详情加载失败，下方展示当前可用的对话记录。",
           "disabled": "请先在侧载诊断中启用 Claude Agent SDK 完整支持，再管理原生会话。",
+          "editTag": "编辑 SDK 会话标签",
           "empty": "未找到原生 SDK 会话。",
+          "emptyTranscript": "SDK 未返回对话消息。",
           "errors": {
             "continueFailed": "无法在对话中继续此 SDK 会话。",
             "deleteFailed": "无法删除 SDK 会话。",
@@ -21368,15 +21377,6 @@
             "renameFailed": "无法重命名 SDK 会话。",
             "tagFailed": "无法保存 SDK 会话标签。"
           },
-          "close": "关闭",
-          "continueInChat": "在对话中继续",
-          "continued": "已在对话中打开 SDK 会话。",
-          "details": "查看 SDK 会话",
-          "detailsDescription": "查看压缩后的原生对话记录及其子智能体记录，不会修改 SDK 源会话。",
-          "detailsPartial": "SDK 返回了此对话记录的部分页面。",
-          "detailsPartialError": "部分会话详情加载失败，下方展示当前可用的对话记录。",
-          "editTag": "编辑 SDK 会话标签",
-          "emptyTranscript": "SDK 未返回对话消息。",
           "fork": "Fork SDK 会话",
           "forked": "SDK 会话已分支。",
           "importStore": "导入 SessionStore",
@@ -21408,6 +21408,9 @@
           "modelsLabel": "账户模型（{count}）",
           "title": "会话实时能力"
         },
+        "capabilityActionSucceeded": "实时会话能力已刷新。",
+        "capabilityControlsDescription": "无需重启，即可将 SDK 能力变更应用到当前 Chat 会话。",
+        "capabilityControlsTitle": "实时会话控制",
         "checking": "检查中…",
         "countHooks": "Hook",
         "countHooksHint": "打开 hooks",
@@ -21418,6 +21421,7 @@
         "countsTitle": "关联面板",
         "description": "进程内 Claude SDK 侧载的只读视图。",
         "desktopOnlyHint": "重启功能仅在桌面端版本中提供。",
+        "liveHandleUnavailable": "请先打开一个由 SDK 驱动的 Chat 会话以使用这些控制。",
         "parity": {
           "capabilities": "已配置的能力覆盖",
           "checkpoint": {
@@ -21444,6 +21448,9 @@
           },
           "title": "Claude Agent SDK 高级功能"
         },
+        "reinitializeBtn": "重新初始化会话",
+        "reloadPluginsBtn": "重新加载插件",
+        "reloadSkillsBtn": "重新加载技能",
         "restartBtn": "重启侧载",
         "restartedToast": "已请求重启侧载。",
         "running": "运行中",

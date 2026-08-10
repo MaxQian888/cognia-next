@@ -31,6 +31,7 @@ import { listSlashCommands } from "@/lib/slash-commands/registry"
 import { CliSyncCard } from "@/components/settings/cli-bridge/cli-sync-card"
 import { SdkCapabilitiesCard } from "@/components/settings/agent-runtime/sdk-capabilities-card"
 import { SdkParityCard } from "@/components/settings/agent-runtime/sdk-parity-card"
+import { useAgentExecutionHandle } from "@/components/providers/agent-execution-handle-provider"
 
 const POLL_INTERVAL_MS = 3000
 
@@ -39,6 +40,7 @@ export function SidecarTab() {
   const router = useRouter()
   const desktop = isTauri()
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const executionHandle = useAgentExecutionHandle(activeSessionId)
   const sidecarInfo = useSidecarInfo()
 
   const sessions = useLiveQuery(() => listSessions(), [])
@@ -52,6 +54,9 @@ export function SidecarTab() {
 
   const [ready, setReady] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
+  const [capabilityBusy, setCapabilityBusy] = useState<
+    "reloadPlugins" | "reloadSkills" | "reinitialize" | null
+  >(null)
   const [sdkSessionId, setSdkSessionId] = useState<string | null>(null)
 
   // Status & SDK-session-id reads are external IO; the warnings about
@@ -111,6 +116,21 @@ export function SidecarTab() {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const handleCapabilityAction = async (
+    action: "reloadPlugins" | "reloadSkills" | "reinitialize"
+  ) => {
+    if (!executionHandle) return
+    setCapabilityBusy(action)
+    try {
+      await executionHandle[action]()
+      toast.success(t("capabilityActionSucceeded"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCapabilityBusy(null)
     }
   }
 
@@ -222,6 +242,43 @@ export function SidecarTab() {
       </SettingsBlock>
 
       <SdkCapabilitiesCard />
+
+      <SettingsBlock
+        title={t("capabilityControlsTitle")}
+        description={t("capabilityControlsDescription")}
+      >
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => void handleCapabilityAction("reloadPlugins")}
+            disabled={!desktop || !executionHandle || capabilityBusy !== null}
+            aria-label={t("reloadPluginsBtn")}
+          >
+            {t("reloadPluginsBtn")}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void handleCapabilityAction("reloadSkills")}
+            disabled={!desktop || !executionHandle || capabilityBusy !== null}
+            aria-label={t("reloadSkillsBtn")}
+          >
+            {t("reloadSkillsBtn")}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void handleCapabilityAction("reinitialize")}
+            disabled={!desktop || !executionHandle || capabilityBusy !== null}
+            aria-label={t("reinitializeBtn")}
+          >
+            {t("reinitializeBtn")}
+          </Button>
+        </div>
+        {!executionHandle ? (
+          <p className="text-xs text-muted-foreground" role="status">
+            {t("liveHandleUnavailable")}
+          </p>
+        ) : null}
+      </SettingsBlock>
 
       <SdkParityCard />
 

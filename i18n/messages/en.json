@@ -21350,6 +21350,9 @@
         "save": "Save",
         "sdk": {
           "cancel": "Cancel",
+          "close": "Close",
+          "continueInChat": "Continue in Chat",
+          "continued": "SDK session opened in Chat.",
           "count": "{count, plural, one {# native session} other {# native sessions}}",
           "delete": "Delete SDK session",
           "deleteConfirm": "Delete permanently",
@@ -21357,8 +21360,14 @@
           "deleteTitle": "Delete native SDK session?",
           "deleted": "SDK session deleted.",
           "description": "Sessions stored by the Claude Agent SDK, including transcripts that are not yet linked to a Cognia chat.",
+          "details": "Inspect SDK session",
+          "detailsDescription": "Inspect the compacted native transcript and its subagent transcripts without changing the SDK source session.",
+          "detailsPartial": "The SDK returned a partial page of this transcript.",
+          "detailsPartialError": "Some session details could not be loaded. Available transcript data is shown below.",
           "disabled": "Enable Claude Agent SDK parity in Sidecar diagnostics to manage native sessions.",
+          "editTag": "Edit SDK session tag",
           "empty": "No native SDK sessions were found.",
+          "emptyTranscript": "No transcript messages were returned.",
           "errors": {
             "continueFailed": "The SDK session could not be continued in Chat.",
             "deleteFailed": "The SDK session could not be deleted.",
@@ -21368,15 +21377,6 @@
             "renameFailed": "The SDK session could not be renamed.",
             "tagFailed": "The SDK session tag could not be saved."
           },
-          "close": "Close",
-          "continueInChat": "Continue in Chat",
-          "continued": "SDK session opened in Chat.",
-          "details": "Inspect SDK session",
-          "detailsDescription": "Inspect the compacted native transcript and its subagent transcripts without changing the SDK source session.",
-          "detailsPartial": "The SDK returned a partial page of this transcript.",
-          "detailsPartialError": "Some session details could not be loaded. Available transcript data is shown below.",
-          "editTag": "Edit SDK session tag",
-          "emptyTranscript": "No transcript messages were returned.",
           "fork": "Fork SDK session",
           "forked": "SDK session forked.",
           "importStore": "Import into SessionStore",
@@ -21408,6 +21408,9 @@
           "modelsLabel": "Account models ({count})",
           "title": "Live session capabilities"
         },
+        "capabilityActionSucceeded": "Live session capabilities refreshed.",
+        "capabilityControlsDescription": "Apply SDK capability changes to the active Chat session without restarting it.",
+        "capabilityControlsTitle": "Live session controls",
         "checking": "Checking…",
         "countHooks": "Hooks",
         "countHooksHint": "Open hooks",
@@ -21418,6 +21421,7 @@
         "countsTitle": "Linked surfaces",
         "description": "Read-only view of the in-process Claude SDK sidecar.",
         "desktopOnlyHint": "Restart is only available in the desktop build.",
+        "liveHandleUnavailable": "Open an SDK-backed Chat session to use these controls.",
         "parity": {
           "capabilities": "Configured capability coverage",
           "checkpoint": {
@@ -21444,6 +21448,9 @@
           },
           "title": "Claude Agent SDK advanced features"
         },
+        "reinitializeBtn": "Reinitialize session",
+        "reloadPluginsBtn": "Reload plugins",
+        "reloadSkillsBtn": "Reload skills",
         "restartBtn": "Restart sidecar",
         "restartedToast": "Sidecar restart requested.",
         "running": "Running",
