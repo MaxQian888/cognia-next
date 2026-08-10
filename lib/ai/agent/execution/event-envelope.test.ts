@@ -7,6 +7,7 @@ import {
   canonicalEventFromCaptureEvent,
   canonicalEventFromExternalEvent,
   captureEventFromCanonical,
+  createEnvelopeOrderTracker,
   createEnvelopeSequencer,
   isKnownCanonicalAgentEventKind,
 } from "./event-envelope"
@@ -54,6 +55,46 @@ describe("createEnvelopeSequencer — fixture parity with the sidecar emitter", 
     expect(withParent({ kind: "lifecycle", phase: "started" }).parentRunId).toBe("root-1")
     const without = createEnvelopeSequencer(fixture.context)
     expect("parentRunId" in without({ kind: "lifecycle", phase: "started" })).toBe(false)
+  })
+
+  it("keeps event ids distinct when an attempt id is reused by another turn", () => {
+    const first = createEnvelopeSequencer({ ...fixture.context, turnId: "turn-1" })
+    const second = createEnvelopeSequencer({ ...fixture.context, turnId: "turn-2" })
+
+    expect(first({ kind: "lifecycle", phase: "started" }).eventId).toBe("s1:turn-1:a1:0")
+    expect(second({ kind: "lifecycle", phase: "started" }).eventId).toBe("s1:turn-2:a1:0")
+  })
+})
+
+describe("createEnvelopeOrderTracker", () => {
+  it("deduplicates within one turn without suppressing another turn", () => {
+    const tracker = createEnvelopeOrderTracker()
+    const first = createEnvelopeSequencer({ ...fixture.context, turnId: "turn-1" })({
+      kind: "lifecycle",
+      phase: "started",
+    })
+    const secondTurn = createEnvelopeSequencer({ ...fixture.context, turnId: "turn-2" })({
+      kind: "lifecycle",
+      phase: "started",
+    })
+
+    expect(tracker.observe(first)).toEqual({ kind: "accept" })
+    expect(tracker.observe(first)).toEqual({ kind: "duplicate" })
+    expect(tracker.observe(secondTurn)).toEqual({ kind: "accept" })
+  })
+
+  it("reports a sequence gap for the affected session/turn/attempt", () => {
+    const tracker = createEnvelopeOrderTracker()
+    const sequencer = createEnvelopeSequencer(fixture.context)
+    const first = sequencer({ kind: "lifecycle", phase: "started" })
+    const third = { ...sequencer({ kind: "text-delta", delta: "skipped" }), sequence: 2 }
+
+    expect(tracker.observe(first)).toEqual({ kind: "accept" })
+    expect(tracker.observe(third)).toEqual({
+      kind: "gap",
+      expectedSequence: 1,
+      receivedSequence: 2,
+    })
   })
 })
 

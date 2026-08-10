@@ -8,6 +8,7 @@ import { createGateController, runTurn, type TurnSession } from "./turn-engine"
 import type { TuiAction } from "../state/types"
 import { CliDbSnapshotError } from "../../db/bootstrap"
 import { resetRenderDiagnostics, snapshotRenderDiagnostics } from "../runtime/render-diagnostics"
+import { __clearLiveSubagentsForTesting, listLiveSubagents } from "../../agent/subagent-live-output"
 
 const okResult = (overrides?: Partial<RunAndCaptureResult>): RunAndCaptureResult => ({
   text: "done",
@@ -219,6 +220,98 @@ describe("runTurn", () => {
     expect(captures).toContain("tool-call")
     expect(toolCalls).toEqual([["Read", { path: "a.ts" }]])
     expect(snapshotRenderDiagnostics({}).unknownParts).toBe(1)
+  })
+
+  it("projects canonical SDK tasks into the existing agents board registry", async () => {
+    __clearLiveSubagentsForTesting()
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        opts.onEnvelope?.({
+          schemaVersion: 1,
+          eventId: "s:t:a:0",
+          sequence: 0,
+          sessionId: "s",
+          runId: "r",
+          turnId: "t",
+          attemptId: "a",
+          hostRef: "cli",
+          runtime: "claude-agent-sdk",
+          timestamp: new Date(0).toISOString(),
+          event: {
+            kind: "task",
+            phase: "started",
+            taskId: "native-1",
+            subagentType: "worker",
+            description: "Run the delegated task",
+            status: "running",
+          },
+        })
+        return okResult()
+      },
+    }
+
+    await runTurn({
+      session,
+      prompt: "go",
+      dispatch: () => {},
+      gate: async () => ({ decision: "allow" }),
+    })
+
+    expect(listLiveSubagents("s")).toEqual([
+      expect.objectContaining({ runtimeTaskId: "native-1", status: "running" }),
+    ])
+  })
+
+  it("deduplicates canonical delivery and surfaces sequence gaps", async () => {
+    const actions: TuiAction[] = []
+    const base = {
+      schemaVersion: 1 as const,
+      sessionId: "s",
+      runId: "r",
+      turnId: "t",
+      attemptId: "a",
+      hostRef: "cli",
+      runtime: "claude-agent-sdk",
+      timestamp: new Date(0).toISOString(),
+    }
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        const first = {
+          ...base,
+          eventId: "s:t:a:0",
+          sequence: 0,
+          event: { kind: "text-delta" as const, delta: "once" },
+        }
+        opts.onEnvelope?.(first)
+        opts.onEnvelope?.(first)
+        opts.onEnvelope?.({
+          ...base,
+          eventId: "s:t:a:2",
+          sequence: 2,
+          event: { kind: "text-delta", delta: "after-gap" },
+        })
+        return okResult()
+      },
+    }
+
+    await runTurn({
+      session,
+      prompt: "go",
+      dispatch: (action) => actions.push(action),
+      gate: async () => ({ decision: "allow" }),
+    })
+
+    expect(actions.filter((action) => action.type === "INFLIGHT_TEXT")).toEqual([
+      { type: "INFLIGHT_TEXT", delta: "once" },
+      { type: "INFLIGHT_TEXT", delta: "after-gap" },
+    ])
+    expect(actions).toContainEqual(
+      expect.objectContaining({
+        type: "CANONICAL_EVENT_NOTICE",
+        title: "Event stream gap",
+        summary: "Expected sequence 1, received 2",
+      })
+    )
   })
 
   it("streams capture events into reducer actions and commits", async () => {

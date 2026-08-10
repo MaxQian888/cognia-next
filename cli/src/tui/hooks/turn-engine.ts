@@ -11,7 +11,10 @@ import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claud
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
-import { captureEventFromCanonical } from "@/lib/ai/agent/execution/event-envelope"
+import {
+  captureEventFromCanonical,
+  createEnvelopeOrderTracker,
+} from "@/lib/ai/agent/execution/event-envelope"
 import { canonicalEnvelopeToActions, captureEventToActions } from "../state/event-mapper"
 import { recordUnknownPart } from "../runtime/render-diagnostics"
 import { classifyError } from "../format/error-classify"
@@ -22,6 +25,7 @@ import type { CliDbSnapshotError } from "../../db/bootstrap"
 import type { PermissionResponder } from "../../agent/permission-gate"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { TuiAction } from "../state/types"
+import { applyCanonicalTaskEnvelope } from "../../agent/subagent-live-output"
 
 /** The subset of `AgentSession` the turn engine drives. */
 export interface TurnSession {
@@ -205,10 +209,23 @@ export async function runTurn(
   // discard a response the user already earned — the db failure is orthogonal to
   // the reply. Hold it and append a permanent error cell once the turn commits.
   let databaseError: CliDbSnapshotError | null = null
+  const envelopeOrder = createEnvelopeOrderTracker()
   try {
     const result = await opts.session.send(opts.prompt, {
       gate: opts.gate,
       onEnvelope: (envelope) => {
+        const order = envelopeOrder.observe(envelope)
+        if (order.kind === "duplicate") return
+        if (order.kind === "gap") {
+          opts.dispatch({
+            type: "CANONICAL_EVENT_NOTICE",
+            eventId: `${envelope.eventId}:gap`,
+            level: "warning",
+            title: "Event stream gap",
+            summary: `Expected sequence ${order.expectedSequence}, received ${order.receivedSequence}`,
+          })
+        }
+        applyCanonicalTaskEnvelope(envelope)
         const actions = canonicalEnvelopeToActions(envelope)
         for (const action of actions) {
           if (

@@ -194,7 +194,7 @@ describe("createEnvelopeEmitter", () => {
 
     expect(first).toMatchObject({
       schemaVersion: 1,
-      eventId: "s1:run_1:t0:a0:0",
+      eventId: "s1:run_1:t0:run_1:t0:a0:0",
       sequence: 0,
       sessionId: "s1",
       runId: "run_1",

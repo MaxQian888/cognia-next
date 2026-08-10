@@ -2,9 +2,14 @@
  * @jest-environment node
  */
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import type {
+  AgentEventEnvelope,
+  CanonicalAgentEvent,
+} from "@cognia/agent-config-types/agent-execution"
 
 import {
   __clearLiveSubagentsForTesting,
+  applyCanonicalTaskEnvelope,
   applyLiveSubagentEvent,
   getLiveSubagent,
   listLiveSubagents,
@@ -12,6 +17,22 @@ import {
   settleLiveSubagent,
   startLiveSubagent,
 } from "./subagent-live-output"
+
+function canonicalEnvelope(event: CanonicalAgentEvent, sequence = 0): AgentEventEnvelope {
+  return {
+    schemaVersion: 1,
+    eventId: `s1:t1:a1:${sequence}`,
+    sequence,
+    sessionId: "s1",
+    runId: "r1",
+    turnId: "t1",
+    attemptId: "a1",
+    hostRef: "cli",
+    runtime: "claude-agent-sdk",
+    timestamp: new Date(sequence * 1_000).toISOString(),
+    event,
+  }
+}
 
 beforeEach(() => __clearLiveSubagentsForTesting())
 
@@ -50,6 +71,92 @@ describe("startLiveSubagent", () => {
     const entry = getLiveSubagent(id)!
     expect(entry.startedAt).toBe(42)
     expect(entry.task.length).toBe(200)
+  })
+})
+
+describe("applyCanonicalTaskEnvelope", () => {
+  it("projects an SDK-native task into the existing live registry and settles it", () => {
+    expect(
+      applyCanonicalTaskEnvelope(
+        canonicalEnvelope({
+          kind: "task",
+          phase: "started",
+          taskId: "task-1",
+          subagentType: "explorer",
+          description: "Inspect the repository",
+          status: "running",
+        })
+      )
+    ).toBe(true)
+
+    expect(listLiveSubagents("s1")).toEqual([
+      expect.objectContaining({
+        runtimeTaskId: "task-1",
+        name: "explorer",
+        task: "Inspect the repository",
+        status: "running",
+      }),
+    ])
+
+    applyCanonicalTaskEnvelope(
+      canonicalEnvelope(
+        {
+          kind: "task",
+          phase: "settled",
+          taskId: "task-1",
+          status: "completed",
+          usage: { totalTokens: 123, toolUses: 4 },
+        },
+        1
+      )
+    )
+
+    expect(listLiveSubagents("s1")[0]).toMatchObject({
+      runtimeTaskId: "task-1",
+      status: "done",
+      usageTokens: 123,
+      toolUseCount: 4,
+    })
+  })
+
+  it("replaces only live canonical tasks when an inventory arrives", () => {
+    startLiveSubagent({ liveId: "renderer-run", name: "renderer", task: "keep", sessionId: "s1" })
+    for (const taskId of ["task-1", "task-2"]) {
+      applyCanonicalTaskEnvelope(
+        canonicalEnvelope({
+          kind: "task",
+          phase: "started",
+          taskId,
+          description: taskId,
+          status: "running",
+        })
+      )
+    }
+
+    expect(
+      applyCanonicalTaskEnvelope(
+        canonicalEnvelope({
+          kind: "task-inventory",
+          tasks: [{ taskId: "task-2", taskType: "worker", description: "still running" }],
+        })
+      )
+    ).toBe(true)
+
+    const entries = listLiveSubagents("s1")
+    expect(entries.find((entry) => entry.liveId === "renderer-run")).toBeDefined()
+    expect(entries.find((entry) => entry.runtimeTaskId === "task-1")).toBeUndefined()
+    expect(entries.find((entry) => entry.runtimeTaskId === "task-2")).toMatchObject({
+      status: "running",
+    })
+  })
+
+  it("ignores non-task canonical events", () => {
+    expect(
+      applyCanonicalTaskEnvelope(
+        canonicalEnvelope({ kind: "text-delta", delta: "ordinary transcript output" })
+      )
+    ).toBe(false)
+    expect(listLiveSubagents("s1")).toEqual([])
   })
 })
 

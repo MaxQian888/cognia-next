@@ -48,13 +48,25 @@ describe("canonical envelope log", () => {
     expect(read.map((e) => e.eventId)).toEqual(["s1:a1:0", "s1:a1:1", "s1:a1:2"])
   })
 
-  it("is idempotent on eventId — replays write nothing, across cache resets too", async () => {
+  it("is idempotent on envelope identity across cache resets", async () => {
     await appendCanonicalEnvelopes("run-b", [envelope(0), envelope(1)])
     expect(await appendCanonicalEnvelopes("run-b", [envelope(0), envelope(1)])).toBe(0)
     // Cold cache (fresh process): the persisted rows still dedupe the replay.
     __resetCanonicalLogForTesting()
     expect(await appendCanonicalEnvelopes("run-b", [envelope(1), envelope(2)])).toBe(1)
     expect((await readCanonicalEnvelopes("run-b")).map((e) => e.sequence)).toEqual([0, 1, 2])
+  })
+
+  it("keeps legacy envelopes whose reused event id belongs to another turn", async () => {
+    const first = envelope(0)
+    const second = { ...envelope(0), turnId: "t2" }
+
+    expect(await appendCanonicalEnvelopes("run-legacy-collision", [first])).toBe(1)
+    __resetCanonicalLogForTesting()
+    expect(await appendCanonicalEnvelopes("run-legacy-collision", [second])).toBe(1)
+    expect(
+      (await readCanonicalEnvelopes("run-legacy-collision")).map((item) => item.turnId)
+    ).toEqual(["t1", "t2"])
   })
 
   it("serializes concurrent appends so duplicate ids remain exactly once", async () => {
@@ -118,7 +130,7 @@ describe("canonical envelope log", () => {
       runId: "run-d",
       sessionId: "s1",
       eventCount: 3,
-      lastSequenceByAttempt: { a1: 1, a2: 0 },
+      lastSequenceByAttempt: { "s1:t1:a1": 1, "s1:t1:a2": 0 },
       firstTimestamp: "2026-07-24T00:00:00.000Z",
       lastTimestamp: "2026-07-24T00:00:00.000Z",
     })

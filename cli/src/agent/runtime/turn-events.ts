@@ -144,7 +144,7 @@ export function createEnvelopeEmitter(options: EmitterOptions): EnvelopeEmitter 
     const identity = options.identity
     const envelope: AgentEventEnvelope = {
       schemaVersion: 1,
-      eventId: `${identity.sessionId}:${identity.attemptId}:${sequence}`,
+      eventId: `${identity.sessionId}:${identity.turnId}:${identity.attemptId}:${sequence}`,
       sequence,
       sessionId: identity.sessionId,
       runId: identity.runId,

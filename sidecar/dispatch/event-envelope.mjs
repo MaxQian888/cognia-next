@@ -113,13 +113,14 @@ export function createEnvelopeEmitter(params) {
   return function emitWithEnvelope(msg) {
     emit(msg)
     for (const event of canonicalEventsFromWireMessage(msg, sdkState)) {
+      const turnId = turnRef?.id ?? msg?.turnId ?? "turn-unbound"
       const envelope = {
         schemaVersion: 1,
-        eventId: `${sessionId}:${attemptId}:${sequence}`,
+        eventId: `${sessionId}:${turnId}:${attemptId}:${sequence}`,
         sequence,
         sessionId,
         runId,
-        turnId: turnRef?.id ?? msg?.turnId ?? "turn-unbound",
+        turnId,
         attemptId,
         ...(parentRunId ? { parentRunId } : {}),
         hostRef,

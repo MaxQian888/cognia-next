@@ -43,13 +43,16 @@ function makeEnvelope(
 ): AgentEventEnvelope {
   const runId = fleetCanonicalRunId(session)
   const attemptId = `fleet-monitor:${session.startedAt}`
+  const sessionId = `external:${session.agent}:${stableRef(session.sessionId)}`
+  const turnId = `fleet-turn:${Math.max(0, session.turnCount)}`
+  const sequence = timestampMs * SEQUENCE_SCALE + ordinal
   return {
     schemaVersion: 1,
-    eventId: `${runId}:${attemptId}:${key}`,
-    sequence: timestampMs * SEQUENCE_SCALE + ordinal,
-    sessionId: `external:${session.agent}:${stableRef(session.sessionId)}`,
+    eventId: `${sessionId}:${turnId}:${attemptId}:${sequence}`,
+    sequence,
+    sessionId,
     runId,
-    turnId: `fleet-turn:${Math.max(0, session.turnCount)}`,
+    turnId,
     attemptId,
     hostRef: session.terminal?.app ? `local-terminal:${session.terminal.app}` : "local-desktop",
     runtime: `external-${session.agent}`,

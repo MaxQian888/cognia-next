@@ -36,7 +36,7 @@ export function createEnvelopeSequencer(context: EnvelopeContext) {
   return function envelope(event: CanonicalAgentEvent): AgentEventEnvelope {
     const out: AgentEventEnvelope = {
       schemaVersion: 1,
-      eventId: `${context.sessionId}:${context.attemptId}:${sequence}`,
+      eventId: `${context.sessionId}:${context.turnId}:${context.attemptId}:${sequence}`,
       sequence,
       sessionId: context.sessionId,
       runId: context.runId,
@@ -50,6 +50,38 @@ export function createEnvelopeSequencer(context: EnvelopeContext) {
     }
     sequence += 1
     return out
+  }
+}
+
+export type EnvelopeOrderObservation =
+  | { kind: "accept" }
+  | { kind: "duplicate" }
+  | { kind: "gap"; expectedSequence: number; receivedSequence: number }
+
+/**
+ * Track at-least-once canonical delivery by the full ordering scope. Sequence
+ * numbers are only comparable inside one session/turn/attempt tuple; treating
+ * attemptId alone as global can suppress a later turn that reused it.
+ */
+export function createEnvelopeOrderTracker(): {
+  observe(envelope: AgentEventEnvelope): EnvelopeOrderObservation
+} {
+  const nextByAttempt = new Map<string, number>()
+  return {
+    observe(envelope) {
+      const key = `${envelope.sessionId}\u001f${envelope.turnId}\u001f${envelope.attemptId}`
+      const expected = nextByAttempt.get(key) ?? 0
+      if (envelope.sequence < expected) return { kind: "duplicate" }
+      nextByAttempt.set(key, envelope.sequence + 1)
+      if (envelope.sequence > expected) {
+        return {
+          kind: "gap",
+          expectedSequence: expected,
+          receivedSequence: envelope.sequence,
+        }
+      }
+      return { kind: "accept" }
+    },
   }
 }
 

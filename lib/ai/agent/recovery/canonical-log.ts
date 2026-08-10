@@ -5,7 +5,7 @@
 // rides a `run_log` row whose payload carries the additive discriminator
 // `kind: "agent_envelope"`. `run_log` rows are already dropped by the
 // semantic-journal mapper, so envelope frames never pollute the run timeline.
-// Appends are idempotent on `envelope.eventId` (crash/replay safe), and the
+// Appends are idempotent on the full envelope identity (crash/replay safe), and the
 // header projection derives the session-level view without a second store.
 
 import {
@@ -37,7 +37,7 @@ function isEnvelopePayload(payload: unknown): payload is EnvelopePayload {
   )
 }
 
-/** Per-run cache of already-persisted eventIds (idempotency without rescans). */
+/** Per-run cache of already-persisted envelope identities (idempotency without rescans). */
 const seenByRun = new Map<string, Set<string>>()
 /** Serialize appends per run so concurrent snapshot effects cannot race dedupe. */
 const appendTailByRun = new Map<string, Promise<unknown>>()
@@ -56,14 +56,22 @@ export function __resetCanonicalLogForTesting(): void {
   appendTailByRun.clear()
 }
 
-async function seenEventIds(runId: string): Promise<Set<string>> {
+function envelopeIdentityKey(envelope: AgentEventEnvelope): string {
+  return `${envelope.sessionId}\u001f${envelope.turnId}\u001f${envelope.attemptId}\u001f${envelope.sequence}`
+}
+
+function attemptSequenceKey(envelope: AgentEventEnvelope): string {
+  return `${envelope.sessionId}:${envelope.turnId}:${envelope.attemptId}`
+}
+
+async function seenEnvelopeKeys(runId: string): Promise<Set<string>> {
   let seen = seenByRun.get(runId)
   if (!seen) {
     seen = new Set(
       (await listRunEvents(runId))
         .map((row) => row.payload)
         .filter(isEnvelopePayload)
-        .map((payload) => payload.envelope.eventId)
+        .map((payload) => envelopeIdentityKey(payload.envelope))
     )
     seenByRun.set(runId, seen)
   }
@@ -71,8 +79,10 @@ async function seenEventIds(runId: string): Promise<Set<string>> {
 }
 
 /**
- * Append envelopes to the run's canonical log, skipping any whose `eventId`
- * is already persisted (idempotent replay). Returns the count actually
+ * Append envelopes to the run's canonical log, skipping any whose full
+ * session/turn/attempt/sequence identity is already persisted. Using the full
+ * identity keeps old schema-v1 logs readable even when their legacy eventId
+ * omitted turnId. Returns the count actually
  * written.
  */
 export async function appendCanonicalEnvelopes(
@@ -84,8 +94,14 @@ export async function appendCanonicalEnvelopes(
     .catch(() => undefined)
     .then(() =>
       outsideCurrentDexieTransaction(async () => {
-        const seen = await seenEventIds(runId)
-        const fresh = envelopes.filter((envelope) => !seen.has(envelope.eventId))
+        const seen = await seenEnvelopeKeys(runId)
+        const pendingKeys = new Set<string>()
+        const fresh = envelopes.filter((envelope) => {
+          const key = envelopeIdentityKey(envelope)
+          if (seen.has(key) || pendingKeys.has(key)) return false
+          pendingKeys.add(key)
+          return true
+        })
         if (fresh.length === 0) return 0
         await appendEvents(
           fresh.map((envelope) => ({
@@ -94,7 +110,7 @@ export async function appendCanonicalEnvelopes(
             payload: { kind: ENVELOPE_KIND, envelope } satisfies EnvelopePayload,
           }))
         )
-        for (const envelope of fresh) seen.add(envelope.eventId)
+        for (const envelope of fresh) seen.add(envelopeIdentityKey(envelope))
         return fresh.length
       })
     )
@@ -189,7 +205,7 @@ export interface CanonicalLogHeader {
   runId: string
   sessionId?: string
   eventCount: number
-  /** Highest per-attempt sequence numbers (gap detection input). */
+  /** Highest per session/turn/attempt sequence numbers (gap detection input). */
   lastSequenceByAttempt: Record<string, number>
   firstTimestamp?: string
   lastTimestamp?: string
@@ -202,8 +218,9 @@ export function projectCanonicalHeader(
 ): CanonicalLogHeader {
   const lastSequenceByAttempt: Record<string, number> = {}
   for (const envelope of envelopes) {
-    const prev = lastSequenceByAttempt[envelope.attemptId] ?? -1
-    if (envelope.sequence > prev) lastSequenceByAttempt[envelope.attemptId] = envelope.sequence
+    const key = attemptSequenceKey(envelope)
+    const prev = lastSequenceByAttempt[key] ?? -1
+    if (envelope.sequence > prev) lastSequenceByAttempt[key] = envelope.sequence
   }
   return {
     runId,

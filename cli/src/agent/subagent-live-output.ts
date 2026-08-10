@@ -20,6 +20,7 @@
  * another session's subagent output even though the registry is process-global.
  */
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
 import { summarizeToolCall } from "../tui/format/tools"
 
@@ -70,6 +71,8 @@ export interface SubagentLiveEntry {
   /** The `liveId` of the subagent that dispatched this run — the tree edge.
    * Absent for a run dispatched by the chat turn itself. */
   parentLiveId?: string
+  /** Native SDK task id when this entry was projected from a canonical task event. */
+  runtimeTaskId?: string
   status: SubagentLiveStatus
   startedAt: number
   settledAt?: number
@@ -115,6 +118,8 @@ export interface StartLiveSubagentMeta {
   depth?: number
   /** Dispatching subagent's `liveId` (the tree edge); omitted for depth-1 runs. */
   parentLiveId?: string
+  /** Native SDK task id; omitted for renderer-dispatched and journal-backed runs. */
+  runtimeTaskId?: string
   /** Defaults to `Date.now()`. */
   startedAt?: number
 }
@@ -208,6 +213,7 @@ export function startLiveSubagent(meta: StartLiveSubagentMeta): string {
     sessionId: meta.sessionId,
     ...(meta.depth !== undefined ? { depth: meta.depth } : {}),
     ...(meta.parentLiveId !== undefined ? { parentLiveId: meta.parentLiveId } : {}),
+    ...(meta.runtimeTaskId !== undefined ? { runtimeTaskId: meta.runtimeTaskId } : {}),
     status: "running",
     startedAt: meta.startedAt ?? Date.now(),
     text: "",
@@ -219,6 +225,114 @@ export function startLiveSubagent(meta: StartLiveSubagentMeta): string {
     version: 0,
   })
   return liveId
+}
+
+function canonicalTaskLiveId(sessionId: string, taskId: string): string {
+  return `sdk-task:${encodeURIComponent(sessionId)}:${encodeURIComponent(taskId)}`
+}
+
+function canonicalTimestamp(timestamp: string): number {
+  const parsed = Date.parse(timestamp)
+  return Number.isFinite(parsed) ? parsed : Date.now()
+}
+
+function canonicalTaskStatus(
+  status: Extract<AgentEventEnvelope["event"], { kind: "task" }>["status"],
+  phase: Extract<AgentEventEnvelope["event"], { kind: "task" }>["phase"]
+): SubagentLiveStatus | null {
+  switch (status) {
+    case "completed":
+      return "done"
+    case "failed":
+      return "error"
+    case "killed":
+    case "stopped":
+      return "interrupted"
+    case "pending":
+    case "running":
+    case "paused":
+      return "running"
+    default:
+      return phase === "settled" ? "done" : null
+  }
+}
+
+/**
+ * Fold canonical SDK Task events into the same owner-scoped registry used by
+ * renderer-dispatched and background subagents. Non-task events are ignored so
+ * the canonical stream never becomes a second transcript writer.
+ */
+export function applyCanonicalTaskEnvelope(envelope: AgentEventEnvelope): boolean {
+  const event = envelope.event
+  if (event.kind === "task-inventory") {
+    const liveTaskIds = new Set(event.tasks.map((task) => task.taskId))
+    for (const [liveId, entry] of entries) {
+      if (
+        entry.sessionId === envelope.sessionId &&
+        entry.runtimeTaskId &&
+        entry.status === "running" &&
+        !liveTaskIds.has(entry.runtimeTaskId)
+      ) {
+        entries.delete(liveId)
+      }
+    }
+    for (const task of event.tasks) {
+      const liveId = canonicalTaskLiveId(envelope.sessionId, task.taskId)
+      if (entries.has(liveId)) continue
+      startLiveSubagent({
+        liveId,
+        runtimeTaskId: task.taskId,
+        name: task.taskType || "task",
+        task: task.description,
+        sessionId: envelope.sessionId,
+        startedAt: canonicalTimestamp(envelope.timestamp),
+      })
+    }
+    return true
+  }
+  if (event.kind !== "task") return false
+
+  const liveId = canonicalTaskLiveId(envelope.sessionId, event.taskId)
+  let entry = entries.get(liveId)
+  if (!entry) {
+    startLiveSubagent({
+      liveId,
+      runtimeTaskId: event.taskId,
+      name: event.subagentType || "task",
+      task: event.description || event.summary || event.taskId,
+      sessionId: envelope.sessionId,
+      startedAt: canonicalTimestamp(envelope.timestamp),
+    })
+    entry = entries.get(liveId)
+  }
+  if (!entry) return true
+
+  let changed = false
+  if (event.subagentType && entry.name !== event.subagentType) {
+    entry.name = event.subagentType
+    changed = true
+  }
+  if (event.description && entry.task !== event.description) {
+    entry.task = event.description.slice(0, TASK_CAP)
+    changed = true
+  }
+  if (event.summary && !entry.text.endsWith(event.summary)) {
+    const delta = `${entry.text ? "\n" : ""}${event.summary}`
+    applyLiveSubagentEvent(liveId, { type: "text-delta", delta })
+  }
+  if (event.usage?.totalTokens !== undefined && entry.usageTokens !== event.usage.totalTokens) {
+    entry.usageTokens = event.usage.totalTokens
+    changed = true
+  }
+  if (event.usage?.toolUses !== undefined && event.usage.toolUses > entry.toolUseCount) {
+    entry.toolUseCount = event.usage.toolUses
+    changed = true
+  }
+  if (changed) entry.version += 1
+
+  const status = canonicalTaskStatus(event.status, event.phase)
+  if (status && status !== "running") settleLiveSubagent(liveId, status)
+  return true
 }
 
 /**

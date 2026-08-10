@@ -48,13 +48,13 @@ test("raw legacy messages keep flowing unchanged, in order, before their envelop
   assert.equal(out[1].type, "agent_event")
 })
 
-test("sequence is monotonic per emitter and ids embed session+attempt", () => {
+test("sequence is monotonic per emitter and ids embed session+turn+attempt", () => {
   const { out, emitter } = collectEmitter()
   for (const c of fixture.cases) emitter(c.wire)
   const seqs = out.filter((m) => m.type === "agent_event").map((m) => m.envelope.sequence)
   assert.deepEqual(seqs, [0, 1, 2])
   for (const m of out.filter((m) => m.type === "agent_event")) {
-    assert.equal(m.envelope.eventId, `s1:a1:${m.envelope.sequence}`)
+    assert.equal(m.envelope.eventId, `s1:t1:a1:${m.envelope.sequence}`)
   }
 })
 
