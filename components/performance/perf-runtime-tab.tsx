@@ -24,7 +24,6 @@ import {
   TimerIcon,
   TrendingUpIcon,
 } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { StatCard } from "@/components/observability/stat-card"
@@ -188,11 +187,11 @@ export function PerfRuntimeTab({ runtime, history = [] }: PerfRuntimeTabProps) {
         />
       </Section>
 
-      <Card data-testid="perf-rt-per-worker">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">{t("perWorker")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
+      <section className="border-y bg-background" data-testid="perf-rt-per-worker">
+        <header className="border-b px-4 py-3">
+          <h3 className="text-base font-medium">{t("perWorker")}</h3>
+        </header>
+        <div className="flex flex-col gap-2 p-4">
           {runtime.perWorkerBusyPct.map((pct, i) => (
             <div key={i} className="flex items-center gap-3" data-testid={`perf-rt-worker-${i}`}>
               <span className="w-20 shrink-0 font-mono text-xs text-muted-foreground">
@@ -211,21 +210,21 @@ export function PerfRuntimeTab({ runtime, history = [] }: PerfRuntimeTabProps) {
               </span>
             </div>
           ))}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card data-testid="perf-rt-traces">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <section className="border-y bg-background" data-testid="perf-rt-traces">
+        <header className="flex flex-row flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <div>
-            <CardTitle className="text-base">{t("traces.title")}</CardTitle>
+            <h3 className="text-base font-medium">{t("traces.title")}</h3>
             <p className="mt-1 text-xs text-muted-foreground">{t("traces.description")}</p>
           </div>
           <Button variant="outline" size="sm" onClick={openTraces} data-testid="perf-open-traces">
             <FolderOpenIcon className="mr-1 size-4" />
             {t("traces.open")}
           </Button>
-        </CardHeader>
-        <CardContent>
+        </header>
+        <div className="p-4">
           {traces.length === 0 ? (
             <p className="text-sm text-muted-foreground" data-testid="perf-traces-empty">
               {t("traces.empty")}
@@ -246,8 +245,8 @@ export function PerfRuntimeTab({ runtime, history = [] }: PerfRuntimeTabProps) {
               ))}
             </ul>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     </div>
   )
 }

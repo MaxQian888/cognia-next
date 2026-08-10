@@ -14,7 +14,6 @@ import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CpuIcon, MonitorIcon, PackageIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { perfSystemDetails } from "@/lib/perf/backend/commands"
 import { formatBytes, formatCount } from "@/lib/perf/backend/format"
 import type { SystemDetails } from "@/lib/perf/backend/types"
@@ -93,14 +92,14 @@ export function PerfSystemTab({ load = perfSystemDetails }: PerfSystemTabProps) 
 
   return (
     <div className="grid gap-4 md:grid-cols-3" data-testid="perf-system-tab">
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
+      <section className="border-y bg-background">
+        <header className="border-b px-4 py-3">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
             <MonitorIcon className="size-4 text-chart-1" />
             {t("host.title")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+          </h3>
+        </header>
+        <div className="px-4 py-3">
           <dl className="divide-y">
             <FactRow label={t("host.os")} value={osLine || UNKNOWN} testId="perf-system-os" />
             <FactRow
@@ -119,17 +118,17 @@ export function PerfSystemTab({ load = perfSystemDetails }: PerfSystemTabProps) 
               testId="perf-system-arch"
             />
           </dl>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
+      <section className="border-y bg-background">
+        <header className="border-b px-4 py-3">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
             <CpuIcon className="size-4 text-chart-2" />
             {t("hardware.title")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+          </h3>
+        </header>
+        <div className="px-4 py-3">
           <dl className="divide-y">
             <FactRow
               label={t("hardware.cpu")}
@@ -152,17 +151,17 @@ export function PerfSystemTab({ load = perfSystemDetails }: PerfSystemTabProps) 
               testId="perf-system-used-mem"
             />
           </dl>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
+      <section className="border-y bg-background">
+        <header className="border-b px-4 py-3">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
             <PackageIcon className="size-4 text-chart-5" />
             {t("build.title")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+          </h3>
+        </header>
+        <div className="px-4 py-3">
           <dl className="divide-y">
             <FactRow
               label={t("build.appVersion")}
@@ -196,8 +195,8 @@ export function PerfSystemTab({ load = perfSystemDetails }: PerfSystemTabProps) 
               </div>
             )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     </div>
   )
 }

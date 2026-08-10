@@ -11,12 +11,14 @@ import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -44,7 +46,7 @@ export function PerfToolbar({
   const t = useTranslations("performance.toolbar")
 
   return (
-    <div className="flex items-center gap-2" data-testid="perf-toolbar">
+    <div className="flex flex-wrap items-center justify-end gap-2" data-testid="perf-toolbar">
       <Button
         variant="outline"
         size="sm"
@@ -67,11 +69,13 @@ export function PerfToolbar({
           <SelectValue />
         </SelectTrigger>
         <SelectContent align="end">
-          {PERF_INTERVAL_OPTIONS.map((ms) => (
-            <SelectItem key={ms} value={String(ms)}>
-              {t("intervalValue", { seconds: ms / 1000 })}
-            </SelectItem>
-          ))}
+          <SelectGroup>
+            {PERF_INTERVAL_OPTIONS.map((ms) => (
+              <SelectItem key={ms} value={String(ms)}>
+                {t("intervalValue", { seconds: ms / 1000 })}
+              </SelectItem>
+            ))}
+          </SelectGroup>
         </SelectContent>
       </Select>
 
@@ -88,21 +92,23 @@ export function PerfToolbar({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => onExport("json")} data-testid="perf-export-json">
-            {t("export.json")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => onExport("csv-processes")}
-            data-testid="perf-export-processes"
-          >
-            {t("export.processes")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => onExport("csv-hotspots")}
-            data-testid="perf-export-hotspots"
-          >
-            {t("export.hotspots")}
-          </DropdownMenuItem>
+          <DropdownMenuGroup>
+            <DropdownMenuItem onClick={() => onExport("json")} data-testid="perf-export-json">
+              {t("export.json")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onExport("csv-processes")}
+              data-testid="perf-export-processes"
+            >
+              {t("export.processes")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onExport("csv-hotspots")}
+              data-testid="perf-export-hotspots"
+            >
+              {t("export.hotspots")}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

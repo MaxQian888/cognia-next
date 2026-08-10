@@ -7,6 +7,7 @@
  */
 
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { PerfSparkline } from "./perf-sparkline"
 
 export interface PerfMetricTileProps {
@@ -31,14 +32,15 @@ export function PerfMetricTile({
   "data-testid": testId,
 }: PerfMetricTileProps) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onSelect}
       aria-pressed={active}
       data-testid={testId}
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
-        active ? "border-primary/40 bg-primary/10" : "border-transparent bg-muted/40 hover:bg-muted"
+        "h-auto w-full justify-start gap-3 rounded-none border-y px-3 py-2 text-left whitespace-normal",
+        active ? "border-primary/40 bg-primary/10" : "border-transparent hover:bg-muted"
       )}
     >
       <PerfSparkline points={points} color={color} className="h-8 w-16 shrink-0" />
@@ -46,6 +48,6 @@ export function PerfMetricTile({
         <div className="truncate text-xs text-muted-foreground">{label}</div>
         <div className="font-mono text-sm font-semibold tabular-nums">{value}</div>
       </div>
-    </button>
+    </Button>
   )
 }

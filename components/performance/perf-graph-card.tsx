@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * PerfGraphCard — a Windows-Task-Manager-style rolling graph: a big current-
+ * PerfGraphCard — a Windows-Task-Manager-style flat rolling graph: a big current-
  * value readout above a filled area chart of the recent window. Reused for CPU,
  * memory, runtime busy %, and task count.
  */
@@ -16,7 +16,6 @@ import {
   Tooltip,
   YAxis,
 } from "recharts"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { TOOLTIP_STYLE } from "@/lib/observability/chart-config"
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
 import { cn } from "@/lib/utils"
@@ -87,8 +86,11 @@ export function PerfGraphCard({
   const yDomain = perfYDomain(max)
 
   return (
-    <Card className={cn("flex flex-col", className)} data-testid={testId}>
-      <CardHeader className="flex flex-row items-baseline justify-between gap-2 space-y-0 pb-2">
+    <section
+      className={cn("flex min-w-0 flex-col border-y bg-background", className)}
+      data-testid={testId}
+    >
+      <header className="flex flex-row flex-wrap items-baseline justify-between gap-2 border-b px-4 py-3">
         <span className="text-sm font-medium text-muted-foreground">{title}</span>
         <span
           className="font-mono text-2xl font-semibold tabular-nums"
@@ -96,8 +98,8 @@ export function PerfGraphCard({
         >
           {current}
         </span>
-      </CardHeader>
-      <CardContent className={cn("flex-1 pb-3", fill && "flex min-h-0 flex-col")}>
+      </header>
+      <div className={cn("flex-1 p-4 pt-3", fill && "flex min-h-0 flex-col")}>
         {subtitle ? (
           <p className="mb-2 text-xs text-muted-foreground" data-testid="perf-graph-subtitle">
             {subtitle}
@@ -158,7 +160,7 @@ export function PerfGraphCard({
             </AreaChart>
           </ResponsiveContainer>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }

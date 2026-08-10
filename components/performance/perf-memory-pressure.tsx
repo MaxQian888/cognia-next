@@ -7,7 +7,8 @@
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
 import type { SystemMemory } from "@/lib/perf/backend/types"
 import { formatBytes } from "@/lib/perf/backend/format"
@@ -24,21 +25,21 @@ function pressureLevel(ratio: number): PressureLevel {
   return "low"
 }
 
-const LEVEL_STYLES: Record<PressureLevel, { bar: string; text: string; dot: string }> = {
+const LEVEL_STYLES: Record<
+  PressureLevel,
+  { progress: string; badge: "secondary" | "outline" | "destructive" }
+> = {
   low: {
-    bar: "bg-green-500",
-    text: "text-green-600 dark:text-green-400",
-    dot: "bg-green-500",
+    progress: "[&_[data-slot=progress-indicator]]:bg-success",
+    badge: "secondary",
   },
   moderate: {
-    bar: "bg-yellow-500",
-    text: "text-yellow-600 dark:text-yellow-400",
-    dot: "bg-yellow-500",
+    progress: "[&_[data-slot=progress-indicator]]:bg-warning",
+    badge: "outline",
   },
   high: {
-    bar: "bg-red-500",
-    text: "text-red-600 dark:text-red-400",
-    dot: "bg-red-500",
+    progress: "[&_[data-slot=progress-indicator]]:bg-destructive",
+    badge: "destructive",
   },
 }
 
@@ -61,33 +62,31 @@ export function PerfMemoryPressure({ memory }: PerfMemoryPressureProps) {
   const styles = LEVEL_STYLES[level]
 
   return (
-    <Card data-testid="perf-memory-pressure">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 pb-4">
+    <section className="border-y bg-background" data-testid="perf-memory-pressure">
+      <header className="border-b px-4 py-3">
+        <h3 className="text-sm font-medium">{t("title")}</h3>
+      </header>
+      <div className="flex flex-col gap-3 p-4">
         <div className="flex items-baseline gap-2">
           <span className="font-mono text-2xl font-semibold tabular-nums">{usedStr}</span>
           <span className="text-sm text-muted-foreground">/ {totalStr}</span>
         </div>
 
-        <div className="space-y-1.5">
-          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className={cn("h-full rounded-full transition-all", styles.bar)}
-              style={{ width: `${Math.min(ratio * 100, 100)}%` }}
-              data-testid="perf-mem-pressure-bar"
-            />
-          </div>
+        <div className="flex flex-col gap-1.5">
+          <Progress
+            value={Math.min(ratio * 100, 100)}
+            className={cn("h-2", styles.progress)}
+            data-testid="perf-mem-pressure-bar"
+            data-level={level}
+          />
           <div className="flex items-center gap-1.5">
-            <span className={cn("size-2 rounded-full", styles.dot)} />
-            <span className={cn("text-xs font-medium", styles.text)}>{t(level)}</span>
+            <Badge variant={styles.badge}>{t(level)}</Badge>
             <span className="ml-auto text-xs text-muted-foreground">
               {memory ? `${(ratio * 100).toFixed(1)}%` : "—"}
             </span>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }

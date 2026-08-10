@@ -18,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { SpanSnapshot } from "@/lib/perf/backend/types"
 import { formatCount, formatMs } from "@/lib/perf/backend/format"
@@ -88,14 +89,12 @@ export function PerfHotspotsTable({ spans }: PerfHotspotsTableProps) {
       data-testid={`perf-hot-th-${key}`}
       aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
     >
-      {/* A real button, not an onClick on the <th> — see perf-process-table. */}
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="xs"
         onClick={() => toggleSort(key)}
-        className={cn(
-          "inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          numeric && "flex-row-reverse"
-        )}
+        className={cn("h-6 gap-1 rounded-sm px-1", numeric && "flex-row-reverse")}
       >
         {label}
         {sortKey === key ? (
@@ -105,7 +104,7 @@ export function PerfHotspotsTable({ spans }: PerfHotspotsTableProps) {
             <ArrowDownIcon className="size-3" />
           )
         ) : null}
-      </button>
+      </Button>
     </TableHead>
   )
 
@@ -119,7 +118,7 @@ export function PerfHotspotsTable({ spans }: PerfHotspotsTableProps) {
   }
 
   return (
-    <div className="rounded-lg border" data-testid="perf-hotspots-table">
+    <div className="border-y" data-testid="perf-hotspots-table">
       <Table>
         <TableHeader>
           <TableRow>

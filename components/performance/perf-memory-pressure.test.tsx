@@ -17,33 +17,36 @@ describe("PerfMemoryPressure", () => {
 
   it("shows low pressure for <70% usage", () => {
     render(<PerfMemoryPressure memory={{ totalBytes: 16_000_000_000, usedBytes: 8_000_000_000 }} />)
-    // 50% → low (green)
+    // 50% → low
     const bar = screen.getByTestId("perf-mem-pressure-bar")
-    expect(bar.className).toContain("bg-green")
+    expect(bar).toHaveAttribute("data-level", "low")
+    expect(bar).toHaveAttribute("aria-valuenow", "50")
   })
 
   it("shows moderate pressure for 70-85% usage", () => {
     render(
       <PerfMemoryPressure memory={{ totalBytes: 16_000_000_000, usedBytes: 12_000_000_000 }} />
     )
-    // 75% → moderate (yellow)
+    // 75% → moderate
     const bar = screen.getByTestId("perf-mem-pressure-bar")
-    expect(bar.className).toContain("bg-yellow")
+    expect(bar).toHaveAttribute("data-level", "moderate")
+    expect(bar).toHaveAttribute("aria-valuenow", "75")
   })
 
   it("shows high pressure for >=85% usage", () => {
     render(
       <PerfMemoryPressure memory={{ totalBytes: 16_000_000_000, usedBytes: 15_000_000_000 }} />
     )
-    // ~94% → high (red)
+    // ~94% → high
     const bar = screen.getByTestId("perf-mem-pressure-bar")
-    expect(bar.className).toContain("bg-red")
+    expect(bar).toHaveAttribute("data-level", "high")
+    expect(bar).toHaveAttribute("aria-valuenow", "93.75")
   })
 
   it("caps bar width at 100%", () => {
     render(<PerfMemoryPressure memory={{ totalBytes: 8_000_000_000, usedBytes: 16_000_000_000 }} />)
     // 200% → capped to 100%
     const bar = screen.getByTestId("perf-mem-pressure-bar")
-    expect(bar).toHaveStyle({ width: "100%" })
+    expect(bar).toHaveAttribute("aria-valuenow", "100")
   })
 })

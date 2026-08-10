@@ -210,7 +210,7 @@ export function PerfManagedProcesses({ latest }: PerfManagedProcessesProps) {
               {rows.length}
             </Badge>
           </div>
-          <div className="rounded-lg border">
+          <div className="border-y">
             <Table>
               <TableHeader>
                 <TableRow>

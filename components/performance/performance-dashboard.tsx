@@ -14,6 +14,7 @@ import { toast } from "sonner"
 import { ActivityIcon, BoxesIcon, CpuIcon, GaugeIcon, LayersIcon, MonitorIcon } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { usePerfStream } from "@/hooks/perf/use-perf-stream"
 import { exportPerfSnapshot, type PerfExportFormat } from "@/lib/perf/backend/export"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -41,14 +42,18 @@ export function PerformanceDashboard() {
 
   if (!available) {
     return (
-      <div
+      <Empty
         className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center"
         data-testid="perf-desktop-only"
       >
-        <GaugeIcon className="size-10 text-muted-foreground" />
-        <h2 className="text-lg font-semibold">{t("desktopOnly.title")}</h2>
-        <p className="max-w-sm text-sm text-muted-foreground">{t("desktopOnly.description")}</p>
-      </div>
+        <EmptyMedia variant="icon">
+          <GaugeIcon className="size-8 text-muted-foreground" />
+        </EmptyMedia>
+        <EmptyHeader>
+          <EmptyTitle>{t("desktopOnly.title")}</EmptyTitle>
+          <EmptyDescription className="max-w-sm">{t("desktopOnly.description")}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     )
   }
 
@@ -74,7 +79,7 @@ export function PerformanceDashboard() {
       />
 
       <Tabs defaultValue="overview" className="flex min-h-0 flex-1 flex-col">
-        <TabsList className="mx-4 mt-3 w-fit">
+        <TabsList className="mx-4 mt-3 flex w-auto max-w-[calc(100%-2rem)] justify-start overflow-x-auto">
           <TabsTrigger value="overview" data-testid="perf-tab-overview">
             <CpuIcon className="mr-1 size-4" />
             {t("tabs.overview")}

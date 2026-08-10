@@ -32,6 +32,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import { Button } from "@/components/ui/button"
 import { StatCard } from "@/components/observability/stat-card"
 import { cn, formatDurationShort } from "@/lib/utils"
 import type { PerfSample, ProcessRole } from "@/lib/perf/backend/types"
@@ -151,21 +152,20 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
     }
   }
 
-  // The sort control is a real <button> inside the <th>, not an onClick on the
-  // <th> itself — the latter is unreachable by keyboard and exposes no role.
+  // The sort control is a real shadcn Button inside the header cell; keeping
+  // the control separate from the cell preserves keyboard and screen-reader access.
   const header = (key: SortKey, label: string, numeric = false) => (
     <TableHead
       className={cn("select-none", numeric && "text-right")}
       data-testid={`perf-proc-th-${key}`}
       aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
     >
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="xs"
         onClick={() => toggleSort(key)}
-        className={cn(
-          "inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          numeric && "flex-row-reverse"
-        )}
+        className={cn("h-6 gap-1 rounded-sm px-1", numeric && "flex-row-reverse")}
       >
         {label}
         {sortKey === key ? (
@@ -175,7 +175,7 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
             <ArrowDownIcon className="size-3" />
           )
         ) : null}
-      </button>
+      </Button>
     </TableHead>
   )
 
@@ -240,7 +240,7 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
           {t("noMatch")}
         </p>
       ) : (
-        <div className="rounded-lg border">
+        <div className="border-y">
           <Table>
             <TableHeader>
               <TableRow>
