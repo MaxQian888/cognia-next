@@ -21,10 +21,19 @@ import {
 } from "lucide-react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
 import { useMediaQuery } from "@/hooks/ui/use-media-query"
 import { Spinner } from "@/components/ui/spinner"
@@ -137,7 +146,7 @@ export function SourceControlPanel() {
             </EmptyMedia>
             <EmptyTitle>{t("emptyState.noFolder")}</EmptyTitle>
           </EmptyHeader>
-          <div className="flex gap-2">
+          <EmptyContent className="flex-row gap-2">
             <Button onClick={() => void openFolder()} data-testid="open-folder-button">
               {t("emptyState.openFolder")}
             </Button>
@@ -149,7 +158,7 @@ export function SourceControlPanel() {
               <DownloadIcon className="size-3.5" />
               {t("clone.open")}
             </Button>
-          </div>
+          </EmptyContent>
         </Empty>
         {cloneDialog}
       </>
@@ -166,7 +175,7 @@ export function SourceControlPanel() {
             </EmptyMedia>
             <EmptyDescription>{t("emptyState.notARepo")}</EmptyDescription>
           </EmptyHeader>
-          <div className="flex gap-2">
+          <EmptyContent className="flex-row gap-2">
             <Button
               onClick={() => {
                 // Direct call (not via actions.run): rootDir is bound but not a
@@ -193,7 +202,7 @@ export function SourceControlPanel() {
             >
               {t("emptyState.openFolder")}
             </Button>
-          </div>
+          </EmptyContent>
         </Empty>
         {cloneDialog}
       </>
@@ -257,8 +266,8 @@ export function SourceControlPanel() {
                 >
                   <SlidersHorizontalIcon className="size-3.5" />
                   {!prefsIsDefault && (
-                    <span
-                      className="absolute right-1 top-1 size-1.5 rounded-full bg-blue-500"
+                    <Badge
+                      className="absolute right-1 top-1 size-1.5 rounded-full p-0"
                       aria-hidden
                     />
                   )}
@@ -273,48 +282,53 @@ export function SourceControlPanel() {
       />
 
       {repoState?.operationInProgress && (
-        <div
-          className="flex items-center gap-2 border-b bg-amber-500/10 px-3 py-1.5 text-xs"
+        <Alert
+          className="rounded-none border-x-0 border-t-0 px-3 py-1.5"
           data-testid="sequencer-banner"
         >
-          <span className="min-w-0 flex-1 truncate text-amber-700 dark:text-amber-400">
-            {t(`sequencer.inProgress.${repoState.operationInProgress}` as never)}
-          </span>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-6 text-xs"
-            onClick={() => void actions.sequencerContinue()}
-            data-testid="sequencer-continue"
-          >
-            {t("sequencer.continue")}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 text-xs text-destructive"
-            onClick={() => void actions.sequencerAbort()}
-            data-testid="sequencer-abort"
-          >
-            {t("sequencer.abort")}
-          </Button>
-        </div>
+          <AlertDescription className="flex min-w-0 items-center gap-2 text-xs">
+            <span className="min-w-0 flex-1 truncate">
+              {t(`sequencer.inProgress.${repoState.operationInProgress}` as never)}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-xs"
+              onClick={() => void actions.sequencerContinue()}
+              data-testid="sequencer-continue"
+            >
+              {t("sequencer.continue")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-xs text-destructive"
+              onClick={() => void actions.sequencerAbort()}
+              data-testid="sequencer-abort"
+            >
+              {t("sequencer.abort")}
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
 
       {loadError && status && (
-        <div
-          className="flex items-center gap-2 border-b border-destructive/20 bg-destructive/8 px-3 py-1.5 text-xs"
+        <Alert
+          variant="destructive"
+          className="rounded-none border-x-0 border-t-0 px-3 py-1.5"
           data-testid="sc-load-error-banner"
         >
           <AlertTriangleIcon className="size-3.5 shrink-0 text-destructive" />
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">
-            {t("repository.stale", { message: loadError })}
-          </span>
-          <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={refreshSafely}>
-            <RefreshCwIcon className="size-3" />
-            {t("repository.retry")}
-          </Button>
-        </div>
+          <AlertDescription className="flex min-w-0 items-center gap-2 text-xs">
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              {t("repository.stale", { message: loadError })}
+            </span>
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={refreshSafely}>
+              <RefreshCwIcon className="size-3" />
+              {t("repository.retry")}
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
 
       {!status && loadingStatus ? (
@@ -335,10 +349,12 @@ export function SourceControlPanel() {
             <EmptyTitle>{t("repository.errorTitle")}</EmptyTitle>
             <EmptyDescription>{loadError}</EmptyDescription>
           </EmptyHeader>
-          <Button onClick={refreshSafely} data-testid="sc-load-retry">
-            <RefreshCwIcon className="size-3.5" />
-            {t("repository.retry")}
-          </Button>
+          <EmptyContent>
+            <Button onClick={refreshSafely} data-testid="sc-load-retry">
+              <RefreshCwIcon className="size-3.5" />
+              {t("repository.retry")}
+            </Button>
+          </EmptyContent>
         </Empty>
       ) : (
         <ResizablePanelGroup

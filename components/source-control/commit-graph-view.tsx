@@ -16,6 +16,7 @@ import { useThemeColors } from "@/hooks/logging/use-theme-colors"
 import { resolveGraphPalette } from "@/lib/git/lane-palette"
 import { assignLanes } from "@/lib/git/commit-graph"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import type { GitCommit, GitRef } from "@/types/git"
 
 const ROW_H = 30
@@ -46,11 +47,12 @@ export function CommitGraphView({ commits, refs, selectedCommit, onSelect }: Com
     <ul className="flex flex-col p-1" data-testid="commit-graph">
       {layout.rows.map((row) => (
         <li key={row.commit.hash}>
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => onSelect(row.commit.hash)}
             className={cn(
-              "flex w-full items-stretch gap-2 rounded text-left hover:bg-accent",
+              "h-auto w-full items-stretch justify-start gap-2 rounded p-0 text-left font-normal",
               selectedCommit === row.commit.hash && "bg-accent"
             )}
             data-testid={`graph-commit-${row.commit.hash}`}
@@ -119,7 +121,7 @@ export function CommitGraphView({ commits, refs, selectedCommit, onSelect }: Com
                 <span className="truncate">{row.commit.authorName}</span>
               </span>
             </span>
-          </button>
+          </Button>
         </li>
       ))}
     </ul>

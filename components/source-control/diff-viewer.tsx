@@ -159,10 +159,12 @@ export function DiffViewer({ diff, hunkActions = [], density = "compact" }: Diff
               )}
               data-testid={`hunk-row-${i}`}
             >
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 className={cn(
-                  "rounded font-mono text-[10px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  "h-auto rounded px-0 py-0 font-mono text-[10px] text-muted-foreground",
                   density === "touch" && "min-h-11 px-2"
                 )}
                 onClick={() => revealHunk(hunk)}
@@ -171,7 +173,7 @@ export function DiffViewer({ diff, hunkActions = [], density = "compact" }: Diff
                 data-testid={`hunk-jump-${i}`}
               >
                 @@ {hunk.newStart}
-              </button>
+              </Button>
               {hunkActions.map((action) => {
                 const Icon = ICON[action.icon]
                 return (

@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import { ArrowDownIcon, ArrowUpIcon, GitBranchIcon, RefreshCwIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { useGitBranchIndicator } from "@/hooks/git/use-git-branch-indicator"
 import { useGitAutoFetch } from "@/hooks/git/use-git-auto-fetch"
 
@@ -25,13 +26,15 @@ export function StatusBarBranch() {
   if (!available || !branch) return null
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="sm"
       onClick={() => router.push("/source-control")}
       aria-label={t("statusBar.openSourceControl")}
       title={t("statusBar.openSourceControl")}
       data-testid="status-branch"
-      className="flex h-6 shrink-0 items-center gap-1 px-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      className="h-6 shrink-0 gap-1 px-2 text-muted-foreground"
     >
       <GitBranchIcon aria-hidden className="size-3" />
       <span className="max-w-[16ch] truncate">{branch}</span>
@@ -48,6 +51,6 @@ export function StatusBarBranch() {
         </span>
       )}
       {busy && <RefreshCwIcon aria-hidden className={cn("size-2.5 animate-spin")} />}
-    </button>
+    </Button>
   )
 }

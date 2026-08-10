@@ -10,6 +10,7 @@ import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -125,11 +126,12 @@ export function CompareRefsSheet({ open, onOpenChange, rootDir }: CompareRefsShe
                 const { name, dir } = splitPath(f.path)
                 return (
                   <li key={f.path}>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
                       onClick={() => setSelected(f.path)}
                       className={cn(
-                        "flex w-full min-w-0 items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-accent",
+                        "h-auto w-full min-w-0 justify-start gap-1.5 rounded px-2 py-1 text-left text-xs font-normal",
                         selected === f.path && "bg-accent"
                       )}
                       data-testid={`compare-file-${f.path}`}
@@ -141,7 +143,7 @@ export function CompareRefsSheet({ open, onOpenChange, rootDir }: CompareRefsShe
                         )}
                       </span>
                       <span className={cn("font-mono", deco.colorClass)}>{deco.letter}</span>
-                    </button>
+                    </Button>
                   </li>
                 )
               })}

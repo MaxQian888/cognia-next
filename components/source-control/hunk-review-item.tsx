@@ -139,16 +139,18 @@ export const HunkReviewItem = memo(function HunkReviewItem({
 
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger asChild>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             className={cn(
-              "flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground",
+              "h-auto justify-start gap-1 px-0 py-0 text-[11px] text-muted-foreground",
               density === "touch" && "min-h-11 px-2"
             )}
           >
             <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
             {t("viewChanges")}
-          </button>
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent>
           <pre className="mt-1.5 max-h-60 overflow-auto rounded bg-muted/40 p-2 text-[11px] leading-relaxed">

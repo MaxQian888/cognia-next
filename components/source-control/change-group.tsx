@@ -50,12 +50,13 @@ export function ChangeGroup({
           density === "touch" && "h-auto min-h-11"
         )}
       >
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={onToggle}
           aria-expanded={expanded}
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-1 rounded px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground",
+            "h-auto min-w-0 flex-1 justify-start gap-1 rounded px-1 py-0 text-[11px] uppercase tracking-wide text-muted-foreground",
             density === "touch" && "min-h-11"
           )}
           data-testid={`group-toggle-${group}`}
@@ -65,7 +66,7 @@ export function ChangeGroup({
           <Badge variant="secondary" className="ml-1 h-4 px-1.5 text-[10px]">
             {count}
           </Badge>
-        </button>
+        </Button>
         <span
           className={cn(
             "flex shrink-0 items-center opacity-0 transition-opacity group-hover/header:opacity-100",

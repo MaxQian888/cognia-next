@@ -357,10 +357,11 @@ export function CommitDetail({
                     selected === f.path && "bg-accent"
                   )}
                 >
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => setSelected(f.path)}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1 text-left text-xs"
+                    className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded px-2 py-1 text-left text-xs font-normal"
                     data-testid={`commit-file-${f.path}`}
                   >
                     <span className="min-w-0 flex-1 truncate">
@@ -368,18 +369,20 @@ export function CommitDetail({
                       {dir && <span className="ml-1 text-[10px] text-muted-foreground">{dir}</span>}
                     </span>
                     <span className={cn("font-mono", deco.colorClass)}>{deco.letter}</span>
-                  </button>
+                  </Button>
                   {onViewBlame && (
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       onClick={() => onViewBlame(f.path, commit.hash)}
-                      className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+                      className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
                       aria-label={t("actions.viewBlame")}
                       title={t("actions.viewBlame")}
                       data-testid={`commit-blame-${f.path}`}
                     >
                       <ScanLineIcon className="size-3" />
-                    </button>
+                    </Button>
                   )}
                 </li>
               )

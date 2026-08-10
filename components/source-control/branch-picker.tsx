@@ -152,22 +152,28 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
       </Command>
       <div className="border-t p-2">
         <div className="mb-1 flex gap-2 text-[11px]">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => setMode("create")}
-            className={cn("hover:underline", mode === "create" && "font-semibold text-foreground")}
+            aria-pressed={mode === "create"}
+            className={cn("h-6 px-1 text-[11px]", mode === "create" && "bg-accent")}
             data-testid="branch-mode-create"
           >
             {t("branches.create")}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => setMode("rename")}
-            className={cn("hover:underline", mode === "rename" && "font-semibold text-foreground")}
+            aria-pressed={mode === "rename"}
+            className={cn("h-6 px-1 text-[11px]", mode === "rename" && "bg-accent")}
             data-testid="branch-mode-rename"
           >
             {t("branches.rename")}
-          </button>
+          </Button>
         </div>
         <div className="flex gap-1">
           <Input

@@ -190,11 +190,12 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
             <ul className="flex flex-col p-2">
               {visibleCommits.map((c) => (
                 <li key={c.hash}>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => selectCommit(c.hash)}
                     className={cn(
-                      "flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-accent",
+                      "h-auto w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left font-normal",
                       selectedCommit === c.hash && "bg-accent"
                     )}
                     data-testid={`timeline-commit-${c.hash}`}
@@ -204,7 +205,7 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
                       <span className="font-mono">{c.shortHash}</span>
                       <span>{c.authorName}</span>
                     </span>
-                  </button>
+                  </Button>
                 </li>
               ))}
               {visibleCommits.length === 0 && (
