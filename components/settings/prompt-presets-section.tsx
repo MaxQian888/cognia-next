@@ -1,5 +1,6 @@
 "use client"
 
+import { Input } from "@/components/ui/input"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -629,7 +630,7 @@ export function PromptPresetsSection({ mobile = false }: PromptPresetsSectionPro
           </AlertDialog>
         </DropdownMenuContent>
       </DropdownMenu>
-      <input
+      <Input
         ref={fileInputRef}
         type="file"
         accept="application/json,.json"

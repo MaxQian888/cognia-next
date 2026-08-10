@@ -297,6 +297,7 @@ function ModelListItem({
   onSetDefault,
   onSettings,
 }: ModelListItemProps) {
+  const t = useTranslations("providers")
   const language = useSettingsStore((s) => s.language)
   const currency = getCurrencyForLocale(language)
   const currencyConfig = CURRENCIES[currency]
@@ -350,7 +351,9 @@ function ModelListItem({
         <div className="min-w-0 flex-1">
           <div className="font-medium text-sm truncate">{model.name}</div>
           <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
-            <span>{formatContextLength(model.contextLength)} context</span>
+            <span>
+              {formatContextLength(model.contextLength)} {t("context")}
+            </span>
             {model.pricing && model.pricing.promptPer1M > 0 && (
               <>
                 <span>•</span>
@@ -363,22 +366,22 @@ function ModelListItem({
             {model.pricing && model.pricing.promptPer1M === 0 && (
               <>
                 <span>•</span>
-                <span className="text-green-600">{isCNY ? "免费" : "Free"}</span>
+                <span className="text-green-600">{t("free")}</span>
               </>
             )}
             {hasCachePrice && (
               <>
                 <span>•</span>
-                <span title="Cached input price">
-                  {isCNY ? "缓存" : "Cache"} {formatPrice(model.pricing!.cachedInputPer1M)}
+                <span title={t("cachedInputPrice")}>
+                  {t("cachedInputShort")} {formatPrice(model.pricing!.cachedInputPer1M)}
                 </span>
               </>
             )}
             {hasBatchPrice && (
               <>
                 <span>•</span>
-                <span title="Batch API price">
-                  {isCNY ? "批量" : "Batch"} {formatPrice(model.pricing!.batchInputPer1M)}
+                <span title={t("batchApiPrice")}>
+                  {t("batchShort")} {formatPrice(model.pricing!.batchInputPer1M)}
                 </span>
               </>
             )}
@@ -389,51 +392,51 @@ function ModelListItem({
         {model.supportsVision && (
           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 gap-1">
             <Eye className="h-2.5 w-2.5" />
-            Vision
+            {t("filterVision")}
           </Badge>
         )}
         {model.supportsTools && (
           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 gap-1">
             <Wrench className="h-2.5 w-2.5" />
-            Tools
+            {t("filterTools")}
           </Badge>
         )}
         {model.supportsReasoning && (
           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 gap-1">
             <Brain className="h-2.5 w-2.5" />
-            Reasoning
+            {t("filterReasoning")}
           </Badge>
         )}
         {onSetDefault && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             onClick={(e) => {
               e.stopPropagation()
               onSetDefault()
             }}
-            className={cn(
-              "p-1 rounded hover:bg-muted transition-colors",
-              isDefault && "text-amber-500"
-            )}
-            title={isDefault ? "Default model" : "Set as default"}
+            className={cn(isDefault && "text-amber-500")}
+            title={isDefault ? t("defaultModel") : t("setAsDefault")}
           >
             <Star
               className={cn("h-3.5 w-3.5", isDefault ? "fill-current" : "text-muted-foreground")}
             />
-          </button>
+          </Button>
         )}
         {onSettings && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             onClick={(e) => {
               e.stopPropagation()
               onSettings()
             }}
-            className="p-1 rounded hover:bg-muted transition-colors"
-            title="Model Settings"
+            title={t("modelSettings")}
           >
             <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
+          </Button>
         )}
       </div>
     </div>

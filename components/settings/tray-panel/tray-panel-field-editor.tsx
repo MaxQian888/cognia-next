@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import type { TrayPanelField, TrayPanelFieldKind } from "@/lib/tray-panel/types"
 
 const FIELD_KINDS: TrayPanelFieldKind[] = ["text", "textarea", "select", "switch", "number"]
@@ -174,12 +175,12 @@ export function TrayPanelFieldEditor({ fields, onChange, invalidIds }: TrayPanel
               <Label htmlFor={`field-options-${index}`} className="text-xs text-muted-foreground">
                 {t("options")}
               </Label>
-              <textarea
+              <Textarea
                 id={`field-options-${index}`}
                 rows={3}
                 value={formatOptionLines(field.options)}
                 placeholder={t("optionsPlaceholder")}
-                className="w-full rounded-md border bg-transparent px-2 py-1.5 font-mono text-xs"
+                className="font-mono text-xs"
                 onChange={(e) => patch(index, { options: parseOptionLines(e.target.value) })}
               />
             </div>

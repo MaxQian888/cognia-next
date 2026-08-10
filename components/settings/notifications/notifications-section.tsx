@@ -9,6 +9,7 @@
 import { useTranslations } from "next-intl"
 import { BellIcon, RotateCcwIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
@@ -175,22 +176,22 @@ export function NotificationsSection() {
         </div>
         {prefs.quietHours.enabled && (
           <div className="flex items-center gap-3 text-sm">
-            <input
+            <Input
               type="time"
               aria-label={t("dndStart")}
               value={prefs.quietHours.start}
               onChange={(e) =>
                 update({ quietHours: { ...prefs.quietHours, start: e.target.value } })
               }
-              className="rounded-md border bg-background px-2 py-1"
+              className="w-auto"
             />
             <span className="text-muted-foreground">→</span>
-            <input
+            <Input
               type="time"
               aria-label={t("dndEnd")}
               value={prefs.quietHours.end}
               onChange={(e) => update({ quietHours: { ...prefs.quietHours, end: e.target.value } })}
-              className="rounded-md border bg-background px-2 py-1"
+              className="w-auto"
             />
           </div>
         )}

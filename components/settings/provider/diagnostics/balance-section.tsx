@@ -5,6 +5,7 @@ import { Coins, RefreshCw, Trash2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -184,119 +185,135 @@ export function BalanceSection({
 
             {/* Provenance, folded away: which credential produced this number and
                 when. It is the first thing asked when a balance looks wrong. */}
-            <details className="mt-3 text-xs">
-              <summary className="cursor-pointer text-muted-foreground">
-                {t("balance.audit")}
-              </summary>
-              <dl className="mt-2 grid gap-1 rounded bg-muted/30 p-2">
-                <div>
-                  <dt className="inline text-muted-foreground">{t("balance.sourceId")}: </dt>
-                  <dd className="inline break-all">{source.id}</dd>
-                </div>
-                <div>
-                  <dt className="inline text-muted-foreground">{t("balance.credential")}: </dt>
-                  <dd className="inline break-all">{source.credentialFingerprint}</dd>
-                </div>
-                <div>
-                  <dt className="inline text-muted-foreground">{t("balance.fetchedAt")}: </dt>
-                  <dd className="inline">
-                    {snapshot ? new Date(snapshot.fetchedAt).toLocaleString() : "—"}
-                  </dd>
-                </div>
-                {source.scriptConfig?.grants.map((grant) => (
-                  <div key={grant.domain}>
-                    <dt className="inline text-muted-foreground">{t("balance.grant")}: </dt>
+            <Collapsible className="mt-3 text-xs">
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-auto px-0 text-muted-foreground">
+                  {t("balance.audit")}
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <dl className="mt-2 grid gap-1 bg-muted/30 p-2">
+                  <div>
+                    <dt className="inline text-muted-foreground">{t("balance.sourceId")}: </dt>
+                    <dd className="inline break-all">{source.id}</dd>
+                  </div>
+                  <div>
+                    <dt className="inline text-muted-foreground">{t("balance.credential")}: </dt>
+                    <dd className="inline break-all">{source.credentialFingerprint}</dd>
+                  </div>
+                  <div>
+                    <dt className="inline text-muted-foreground">{t("balance.fetchedAt")}: </dt>
                     <dd className="inline">
-                      {grant.domain} ·{" "}
-                      {t("balance.grantPolicy", {
-                        https: t("balance.policyHttps"),
-                        http: grant.allowHttp ? t("balance.policyHttp") : "",
-                        private: grant.allowPrivate ? t("balance.policyPrivate") : "",
-                      })}
+                      {snapshot ? new Date(snapshot.fetchedAt).toLocaleString() : "—"}
                     </dd>
                   </div>
-                ))}
-              </dl>
-            </details>
+                  {source.scriptConfig?.grants.map((grant) => (
+                    <div key={grant.domain}>
+                      <dt className="inline text-muted-foreground">{t("balance.grant")}: </dt>
+                      <dd className="inline">
+                        {grant.domain} ·{" "}
+                        {t("balance.grantPolicy", {
+                          https: t("balance.policyHttps"),
+                          http: grant.allowHttp ? t("balance.policyHttp") : "",
+                          private: grant.allowPrivate ? t("balance.policyPrivate") : "",
+                        })}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         )
       })}
 
-      <details className="rounded-lg border p-3">
-        <summary className="cursor-pointer text-sm font-medium">{t("balance.addScript")}</summary>
-        <div className="mt-3 grid gap-3">
-          <div className="grid gap-3 @md/diagnostics:grid-cols-2">
-            <div className="space-y-1">
-              <Label htmlFor="balance-script-label">{t("balance.scriptLabel")}</Label>
-              <Input
-                id="balance-script-label"
-                value={label}
-                disabled={readOnly}
-                onChange={(event) => setLabel(event.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="balance-script-origin">{t("balance.scriptOrigin")}</Label>
-              <Input
-                id="balance-script-origin"
-                value={origin}
-                disabled={readOnly}
-                onChange={(event) => setOrigin(event.target.value)}
-              />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="balance-script-token">{t("balance.scriptToken")}</Label>
-            <Input
-              id="balance-script-token"
-              type="password"
-              value={token}
-              disabled={readOnly}
-              onChange={(event) => setToken(event.target.value)}
-              autoComplete="off"
-            />
-            <p className="text-xs text-muted-foreground">{t("balance.scriptTokenHint")}</p>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="balance-script-code">{t("balance.scriptCode")}</Label>
-            <Textarea
-              id="balance-script-code"
-              className="min-h-40 font-mono text-xs"
-              value={code}
-              disabled={readOnly}
-              onChange={(event) => setCode(event.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="balance-script-domain">{t("balance.grantDomain")}</Label>
-            <Input
-              id="balance-script-domain"
-              value={grantDomain}
-              disabled={readOnly}
-              onChange={(event) => setGrantDomain(event.target.value)}
-              placeholder={t("balance.grantOptional")}
-            />
-          </div>
-          <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-2 text-xs">
-              <Switch checked={allowHttp} disabled={readOnly} onCheckedChange={setAllowHttp} />
-              {t("balance.allowHttp")}
-            </label>
-            <label className="flex items-center gap-2 text-xs">
-              <Switch
-                checked={allowPrivate}
-                disabled={readOnly}
-                onCheckedChange={setAllowPrivate}
-              />
-              {t("balance.allowPrivate")}
-            </label>
-          </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button disabled={readOnly} onClick={() => void submit()}>
-            {t("balance.saveScript")}
+      <Collapsible className="border-y py-2">
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" className="h-auto w-full justify-start px-2 py-1 text-sm">
+            {t("balance.addScript")}
           </Button>
-        </div>
-      </details>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="mt-3 grid gap-3 px-2">
+            <div className="grid gap-3 @md/diagnostics:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="balance-script-label">{t("balance.scriptLabel")}</Label>
+                <Input
+                  id="balance-script-label"
+                  value={label}
+                  disabled={readOnly}
+                  onChange={(event) => setLabel(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="balance-script-origin">{t("balance.scriptOrigin")}</Label>
+                <Input
+                  id="balance-script-origin"
+                  value={origin}
+                  disabled={readOnly}
+                  onChange={(event) => setOrigin(event.target.value)}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="balance-script-token">{t("balance.scriptToken")}</Label>
+              <Input
+                id="balance-script-token"
+                type="password"
+                value={token}
+                disabled={readOnly}
+                onChange={(event) => setToken(event.target.value)}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">{t("balance.scriptTokenHint")}</p>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="balance-script-code">{t("balance.scriptCode")}</Label>
+              <Textarea
+                id="balance-script-code"
+                className="min-h-40 font-mono text-xs"
+                value={code}
+                disabled={readOnly}
+                onChange={(event) => setCode(event.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="balance-script-domain">{t("balance.grantDomain")}</Label>
+              <Input
+                id="balance-script-domain"
+                value={grantDomain}
+                disabled={readOnly}
+                onChange={(event) => setGrantDomain(event.target.value)}
+                placeholder={t("balance.grantOptional")}
+              />
+            </div>
+            <div className="flex flex-wrap gap-4">
+              <Label htmlFor="balance-allow-http" className="flex items-center gap-2 text-xs">
+                <Switch
+                  id="balance-allow-http"
+                  checked={allowHttp}
+                  disabled={readOnly}
+                  onCheckedChange={setAllowHttp}
+                />
+                {t("balance.allowHttp")}
+              </Label>
+              <Label htmlFor="balance-allow-private" className="flex items-center gap-2 text-xs">
+                <Switch
+                  id="balance-allow-private"
+                  checked={allowPrivate}
+                  disabled={readOnly}
+                  onCheckedChange={setAllowPrivate}
+                />
+                {t("balance.allowPrivate")}
+              </Label>
+            </div>
+            {error && <p className="text-xs text-destructive">{error}</p>}
+            <Button disabled={readOnly} onClick={() => void submit()}>
+              {t("balance.saveScript")}
+            </Button>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </ProviderSection>
   )
 }

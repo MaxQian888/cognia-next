@@ -178,7 +178,8 @@ describe("WikiRebuildCard — rebuild flow", () => {
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("1 failed"))
     )
-    // The collapsible <details> summary + per-error row both render.
+    await user.click(screen.getByRole("button", { name: /1 error/i }))
+    // The shadcn Collapsible trigger reveals the per-error row.
     expect(await screen.findByText(/a\.ts: parse failed/i)).toBeInTheDocument()
   })
 

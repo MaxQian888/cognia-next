@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -670,7 +671,8 @@ export function ProviderImportExport({ onClose, compact = false }: ProviderImpor
           <span className={cn(compact && "sr-only")}>{t("import")}</span>
         </Button>
       </div>
-      <input
+      <Input
+        id="provider-import-file"
         ref={fileInputRef}
         type="file"
         accept=".json"
@@ -723,18 +725,19 @@ export function ProviderImportExport({ onClose, compact = false }: ProviderImpor
               <ScrollArea className="h-[160px] rounded-md border p-2">
                 <div className="space-y-2">
                   {availableProviders.map((provider) => (
-                    <div
+                    <Label
                       key={provider.id}
+                      htmlFor={`provider-export-${provider.id}`}
                       className={cn(
-                        "flex items-center justify-between p-2 rounded-md transition-colors cursor-pointer",
+                        "flex cursor-pointer items-center justify-between rounded-md p-2 transition-colors",
                         selectedProviders.includes(provider.id)
                           ? "bg-primary/10"
                           : "hover:bg-muted/50"
                       )}
-                      onClick={() => toggleProviderSelection(provider.id)}
                     >
                       <div className="flex items-center gap-2">
                         <Checkbox
+                          id={`provider-export-${provider.id}`}
                           checked={selectedProviders.includes(provider.id)}
                           onCheckedChange={() => toggleProviderSelection(provider.id)}
                         />
@@ -743,7 +746,7 @@ export function ProviderImportExport({ onClose, compact = false }: ProviderImpor
                       <Badge variant="secondary" className="text-[10px]">
                         {t("modelsCountBadge", { count: provider.modelsCount })}
                       </Badge>
-                    </div>
+                    </Label>
                   ))}
                 </div>
               </ScrollArea>
@@ -763,32 +766,26 @@ export function ProviderImportExport({ onClose, compact = false }: ProviderImpor
             <div className="space-y-2">
               <Label className="text-sm font-medium">{t("exportFormat") || "Export Format"}</Label>
               <div className="flex items-center gap-2">
-                <button
+                <Button
+                  type="button"
+                  variant={exportFormat === "json" ? "default" : "outline"}
+                  size="sm"
                   onClick={() => setExportFormat("json")}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors",
-                    exportFormat === "json"
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "hover:bg-muted"
-                  )}
                 >
                   <FileJson className="h-4 w-4" />
                   {/* i18n-exempt: file format name, identical in every locale */}
                   JSON
-                </button>
-                <button
+                </Button>
+                <Button
+                  type="button"
+                  variant={exportFormat === "env" ? "default" : "outline"}
+                  size="sm"
                   onClick={() => setExportFormat("env")}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors",
-                    exportFormat === "env"
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "hover:bg-muted"
-                  )}
                 >
                   <File className="h-4 w-4" />
                   {/* i18n-exempt: literal filename, identical in every locale */}
                   .env
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -851,14 +848,14 @@ export function ProviderImportExport({ onClose, compact = false }: ProviderImpor
           <div className="space-y-4 py-2">
             {/* Drag & Drop Zone */}
             {!importData && !importError && (
-              <div
+              <Label
+                htmlFor="provider-import-file"
                 className={cn(
-                  "flex flex-col items-center justify-center p-8 rounded-lg border-2 border-dashed transition-colors cursor-pointer",
+                  "flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors",
                   isDragging
                     ? "border-primary bg-primary/5"
                     : "border-muted-foreground/30 hover:border-muted-foreground/50"
                 )}
-                onClick={() => fileInputRef.current?.click()}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
@@ -869,7 +866,7 @@ export function ProviderImportExport({ onClose, compact = false }: ProviderImpor
                 </p>
                 {/* i18n-exempt: literal filename glob, identical in every locale */}
                 <p className="text-xs text-muted-foreground mt-1">cognia-providers-*.json</p>
-              </div>
+              </Label>
             )}
 
             {/* Error State */}
@@ -964,42 +961,33 @@ export function ProviderImportExport({ onClose, compact = false }: ProviderImpor
                         {t("conflictResolution") || "Conflict Resolution"}
                       </Label>
                       <div className="grid grid-cols-3 gap-2">
-                        <button
+                        <Button
                           type="button"
+                          variant={importResolution === "overwrite" ? "default" : "outline"}
+                          size="sm"
                           onClick={() => setImportResolution("overwrite")}
-                          className={cn(
-                            "p-2 text-xs rounded-md border transition-colors",
-                            importResolution === "overwrite"
-                              ? "border-primary bg-primary/10 text-primary"
-                              : "border-border hover:border-muted-foreground/50"
-                          )}
+                          className="text-xs"
                         >
                           {t("overwrite") || "Overwrite"}
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          variant={importResolution === "skip" ? "default" : "outline"}
+                          size="sm"
                           onClick={() => setImportResolution("skip")}
-                          className={cn(
-                            "p-2 text-xs rounded-md border transition-colors",
-                            importResolution === "skip"
-                              ? "border-primary bg-primary/10 text-primary"
-                              : "border-border hover:border-muted-foreground/50"
-                          )}
+                          className="text-xs"
                         >
                           {t("skip") || "Skip"}
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          variant={importResolution === "merge" ? "default" : "outline"}
+                          size="sm"
                           onClick={() => setImportResolution("merge")}
-                          className={cn(
-                            "p-2 text-xs rounded-md border transition-colors",
-                            importResolution === "merge"
-                              ? "border-primary bg-primary/10 text-primary"
-                              : "border-border hover:border-muted-foreground/50"
-                          )}
+                          className="text-xs"
                         >
                           {t("merge") || "Merge"}
-                        </button>
+                        </Button>
                       </div>
                       <p className="text-[10px] text-muted-foreground">
                         {importResolution === "overwrite" &&

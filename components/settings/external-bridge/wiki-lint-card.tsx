@@ -14,11 +14,13 @@ import { Loader2Icon, ScanSearchIcon, TriangleAlertIcon, UnlinkIcon } from "luci
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -151,36 +153,44 @@ export function WikiLintCard() {
         {result && (result.orphans.length > 0 || result.brokenLinks.length > 0) && (
           <div className="space-y-2 rounded border bg-card px-3 py-2 text-xs">
             {result.brokenLinks.length > 0 && (
-              <details open>
-                <summary className="cursor-pointer text-red-500">
-                  {t("brokenListSummary", { count: result.brokenLinks.length })}
-                </summary>
-                <ul className="mt-1 space-y-1">
-                  {result.brokenLinks.map((f) => (
-                    <li key={f.slug} className="flex items-start gap-1">
-                      <UnlinkIcon className="h-3 w-3 mt-0.5 shrink-0 text-red-500" />
-                      <span className="font-mono">
-                        {f.slug} → {(f.deadLinks ?? []).join(", ")}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
+              <Collapsible defaultOpen>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-auto px-0 text-red-500">
+                    {t("brokenListSummary", { count: result.brokenLinks.length })}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <ul className="mt-1 space-y-1">
+                    {result.brokenLinks.map((f) => (
+                      <li key={f.slug} className="flex items-start gap-1">
+                        <UnlinkIcon className="h-3 w-3 mt-0.5 shrink-0 text-red-500" />
+                        <span className="font-mono">
+                          {f.slug} → {(f.deadLinks ?? []).join(", ")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </CollapsibleContent>
+              </Collapsible>
             )}
             {result.orphans.length > 0 && (
-              <details>
-                <summary className="cursor-pointer text-amber-500">
-                  {t("orphanListSummary", { count: result.orphans.length })}
-                </summary>
-                <ul className="mt-1 space-y-1">
-                  {result.orphans.map((f) => (
-                    <li key={f.slug} className="flex items-start gap-1">
-                      <TriangleAlertIcon className="h-3 w-3 mt-0.5 shrink-0 text-amber-500" />
-                      <span className="font-mono">{f.slug}</span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-auto px-0 text-amber-500">
+                    {t("orphanListSummary", { count: result.orphans.length })}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <ul className="mt-1 space-y-1">
+                    {result.orphans.map((f) => (
+                      <li key={f.slug} className="flex items-start gap-1">
+                        <TriangleAlertIcon className="h-3 w-3 mt-0.5 shrink-0 text-amber-500" />
+                        <span className="font-mono">{f.slug}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CollapsibleContent>
+              </Collapsible>
             )}
           </div>
         )}
@@ -223,10 +233,12 @@ export function WikiLintCard() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="off">{t("scheduleMode.off")}</SelectItem>
-                <SelectItem value="daily">{t("scheduleMode.daily")}</SelectItem>
-                <SelectItem value="weekly">{t("scheduleMode.weekly")}</SelectItem>
-                <SelectItem value="custom">{t("scheduleMode.custom")}</SelectItem>
+                <SelectGroup>
+                  <SelectItem value="off">{t("scheduleMode.off")}</SelectItem>
+                  <SelectItem value="daily">{t("scheduleMode.daily")}</SelectItem>
+                  <SelectItem value="weekly">{t("scheduleMode.weekly")}</SelectItem>
+                  <SelectItem value="custom">{t("scheduleMode.custom")}</SelectItem>
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>

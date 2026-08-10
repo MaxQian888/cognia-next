@@ -1586,11 +1586,7 @@ export type EditorState = {
 
 type AgentMemoryScope = EditorState["memoryReadableScopes"][number]
 type MemoryBooleanField =
-  | "memoryRecall"
-  | "memoryCreate"
-  | "memoryUpdate"
-  | "memoryForget"
-  | "memoryAutoLearn"
+  "memoryRecall" | "memoryCreate" | "memoryUpdate" | "memoryForget" | "memoryAutoLearn"
 
 const AGENT_MEMORY_SCOPES: readonly AgentMemoryScope[] = [
   "global",
@@ -2011,7 +2007,7 @@ export function CharacterEditor({
           <div className="flex flex-col items-center gap-0.5">
             <label className="cursor-pointer text-[10px] text-primary underline-offset-2 hover:underline">
               {tEditor("avatarImage.upload")}
-              <input
+              <Input
                 type="file"
                 accept="image/*"
                 className="hidden"
@@ -2843,7 +2839,7 @@ function ComputerUseSubSettings({ value, onChange }: ComputerUseSubSettingsProps
                   key={tool.id}
                   className="flex cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[11px]"
                 >
-                  <input
+                  <Input
                     type="checkbox"
                     className="h-3 w-3"
                     checked={checked}

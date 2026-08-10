@@ -13,6 +13,14 @@
 import React, { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { useSettingsStore } from "@/stores"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { getBuiltInProviderCatalogEntry } from "@cognia/provider-types/built-in-provider-catalog"
@@ -296,51 +304,48 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
       {/* ── Per-model cost table ──────────────────────────────────────── */}
       {/* overflow-x-auto, not just overflow-hidden: five columns plus the rate
           breakdown clip rather than scroll in a narrow pane. */}
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[32rem] text-sm">
-          <thead>
-            <tr className="border-b bg-muted/40">
-              <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+      <div className="border-y">
+        <Table className="min-w-[32rem] text-sm">
+          <TableHeader>
+            <TableRow className="bg-muted/40 hover:bg-muted/40">
+              <TableHead className="px-3 py-2 text-left text-muted-foreground">
                 {t("costTab.modelName")}
-              </th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">
+              </TableHead>
+              <TableHead className="px-3 py-2 text-right text-muted-foreground">
                 {t("costTab.callCount")}
-              </th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">
+              </TableHead>
+              <TableHead className="px-3 py-2 text-right text-muted-foreground">
                 {t("costTab.inputTokens")}
-              </th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">
+              </TableHead>
+              <TableHead className="px-3 py-2 text-right text-muted-foreground">
                 {t("costTab.outputTokens")}
-              </th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">
+              </TableHead>
+              <TableHead className="px-3 py-2 text-right text-muted-foreground">
                 {t("costTab.estimatedCost")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.map((row) => (
-              <tr
-                key={row.modelId}
-                className="border-b last:border-b-0 hover:bg-muted/20 transition-colors"
-              >
-                <td className="px-3 py-2 font-mono text-xs">
+              <TableRow key={row.modelId} className="hover:bg-muted/20">
+                <TableCell className="px-3 py-2 font-mono text-xs whitespace-normal">
                   <div>{row.modelId}</div>
                   {row.pricing && <PricingRates pricing={row.pricing} t={(k) => t(k)} />}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">{row.callCount}</td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                </TableCell>
+                <TableCell className="px-3 py-2 text-right tabular-nums">{row.callCount}</TableCell>
+                <TableCell className="px-3 py-2 text-right tabular-nums">
                   {formatTokens(row.inputTokens)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                </TableCell>
+                <TableCell className="px-3 py-2 text-right tabular-nums">
                   {formatTokens(row.outputTokens)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                </TableCell>
+                <TableCell className="px-3 py-2 text-right tabular-nums">
                   {row.estimatedCost !== null ? formatCost(row.estimatedCost) : "N/A"}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   )

@@ -100,14 +100,14 @@ export function CannedResponsesTab() {
         {rows.map((c) => (
           <li key={c.id} className="space-y-1 px-3 py-2">
             <div className="flex items-center gap-2">
-              <input
+              <Input
                 defaultValue={c.title}
                 aria-label={t("rowTitleAria", { title: c.title })}
                 onBlur={(e) => {
                   const v = e.target.value.trim()
                   if (v && v !== c.title) void updateCanned(c.id, { title: v })
                 }}
-                className="flex-1 truncate rounded bg-transparent px-1 text-sm font-medium outline-none focus:bg-muted"
+                className="h-auto flex-1 truncate border-0 bg-transparent px-1 py-0 text-sm font-medium shadow-none focus-visible:ring-0"
               />
               {c.isBuiltIn && (
                 <Badge variant="outline" className="text-[10px]">
@@ -127,7 +127,7 @@ export function CannedResponsesTab() {
                 </Button>
               )}
             </div>
-            <textarea
+            <Textarea
               defaultValue={c.body}
               aria-label={t("rowBodyAria", { title: c.title })}
               onBlur={(e) => {
@@ -135,7 +135,7 @@ export function CannedResponsesTab() {
                 if (v && v !== c.body) void updateCanned(c.id, { body: v })
               }}
               rows={2}
-              className="w-full resize-y rounded bg-transparent px-1 text-xs text-muted-foreground outline-none focus:bg-muted"
+              className="min-h-0 w-full resize-y border-0 bg-transparent px-1 py-0 text-xs text-muted-foreground shadow-none focus-visible:ring-0"
             />
           </li>
         ))}

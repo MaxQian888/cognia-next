@@ -10,6 +10,9 @@
 import { lazy, Suspense, useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import {
   Dialog,
   DialogContent,
@@ -241,12 +244,12 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
               />
             )}
             <div className="flex items-center gap-2">
-              <label htmlFor="pet-preview-state" className="text-xs text-muted-foreground">
+              <Label htmlFor="pet-preview-state" className="text-xs text-muted-foreground">
                 {t("previewState")}
-              </label>
-              <select
+              </Label>
+              <NativeSelect
                 id="pet-preview-state"
-                className="rounded-md border bg-background px-2 py-1 text-sm"
+                className="text-sm"
                 value={previewState}
                 onChange={(e) => {
                   setPreviewShot(null)
@@ -254,11 +257,11 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
                 }}
               >
                 {STATE_KEYS.map((s) => (
-                  <option key={s} value={s}>
+                  <NativeSelectOption key={s} value={s}>
                     {tStates(s)}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
           </div>
         ) : (
@@ -292,12 +295,12 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
                 value === null ? "disabled" : typeof value === "string" ? "custom" : "auto"
               return (
                 <div key={role} className="grid gap-2 sm:grid-cols-[8rem_8rem_1fr] sm:items-center">
-                  <label htmlFor={`pet-parameter-mode-${role}`} className="text-sm">
+                  <Label htmlFor={`pet-parameter-mode-${role}`} className="text-sm">
                     {t(`parameters.roles.${role}`)}
-                  </label>
-                  <select
+                  </Label>
+                  <NativeSelect
                     id={`pet-parameter-mode-${role}`}
-                    className="rounded-md border bg-background px-2 py-1 text-sm"
+                    className="text-sm"
                     value={mode}
                     onChange={(event) =>
                       setParameterRoleMode(
@@ -306,16 +309,18 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
                       )
                     }
                   >
-                    <option value="auto">{t("parameters.auto")}</option>
-                    <option value="custom">{t("parameters.custom")}</option>
-                    <option value="disabled">{t("parameters.disabled")}</option>
-                  </select>
+                    <NativeSelectOption value="auto">{t("parameters.auto")}</NativeSelectOption>
+                    <NativeSelectOption value="custom">{t("parameters.custom")}</NativeSelectOption>
+                    <NativeSelectOption value="disabled">
+                      {t("parameters.disabled")}
+                    </NativeSelectOption>
+                  </NativeSelect>
                   {mode === "custom" && (
-                    <input
+                    <Input
                       aria-label={t("parameters.parameterIdFor", {
                         role: t(`parameters.roles.${role}`),
                       })}
-                      className="rounded-md border bg-background px-2 py-1 text-sm"
+                      className="text-sm"
                       value={typeof value === "string" ? value : ""}
                       placeholder={t("parameters.parameterIdPlaceholder")}
                       onChange={(event) =>

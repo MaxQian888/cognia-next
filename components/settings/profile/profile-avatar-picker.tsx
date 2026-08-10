@@ -8,6 +8,7 @@
  * syncs to companion devices and rides WebDAV backups).
  */
 
+import { Input } from "@/components/ui/input"
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -85,7 +86,7 @@ export function ProfileAvatarPicker({
         </div>
         <p className="text-xs text-muted-foreground">{t("avatarHint")}</p>
       </div>
-      <input
+      <Input
         ref={inputRef}
         type="file"
         accept="image/png,image/jpeg,image/webp,image/gif,image/avif"

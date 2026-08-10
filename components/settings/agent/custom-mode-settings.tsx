@@ -756,7 +756,7 @@ export function CustomModeSettings() {
       </div>
 
       {/* Hidden file input for import */}
-      <input
+      <Input
         ref={fileInputRef}
         type="file"
         accept=".json"

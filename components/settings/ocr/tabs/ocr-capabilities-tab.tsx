@@ -14,6 +14,7 @@ import * as React from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Layers } from "lucide-react"
 import { OCR_PROVIDER_CAPABILITIES, type OcrCapabilityFields } from "@/lib/ocr/capabilities"
 import {
@@ -76,9 +77,9 @@ export function OcrCapabilitiesTab({
         )}
       </header>
 
-      <div className="overflow-hidden rounded-lg border">
-        <table className="min-w-full text-sm">
-          <tbody className="divide-y">
+      <div className="overflow-hidden border-y">
+        <Table className="min-w-full text-sm">
+          <TableBody>
             {VALUE_FIELDS.map((field) => (
               <CapabilityRow
                 key={field}
@@ -106,8 +107,8 @@ export function OcrCapabilitiesTab({
             >
               <OcrCapabilityCostCell tier={caps.costTier} />
             </CapabilityRow>
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       <Separator />
@@ -127,12 +128,12 @@ function CapabilityRow({
   children: React.ReactNode
 }) {
   return (
-    <tr className="even:bg-muted/20">
-      <td className="w-3/4 px-3 py-2 align-top">
+    <TableRow className="even:bg-muted/20">
+      <TableCell className="w-3/4 px-3 py-2 align-top whitespace-normal">
         <div className="text-sm font-medium">{label}</div>
         <div className="text-xs text-muted-foreground">{description}</div>
-      </td>
-      <td className="px-3 py-2 text-center align-middle">{children}</td>
-    </tr>
+      </TableCell>
+      <TableCell className="px-3 py-2 text-center align-middle">{children}</TableCell>
+    </TableRow>
   )
 }

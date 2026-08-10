@@ -9,6 +9,7 @@ import Link from "next/link"
 import { useLocale, useTranslations } from "next-intl"
 import { DownloadIcon, UploadIcon, Trash2Icon, ExternalLinkIcon, FilePlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -111,7 +112,7 @@ export function TemplatesTab() {
                 <label>
                   <UploadIcon className="mr-1 size-3.5" />
                   {t("user.import")}
-                  <input
+                  <Input
                     type="file"
                     accept="application/json"
                     className="hidden"

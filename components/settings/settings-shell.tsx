@@ -453,7 +453,7 @@ function SettingsShellInner({ actions }: Props) {
 
         {FILL_HEIGHT_SECTIONS.has(activeSection) ? (
           <div
-            className="flex flex-1 min-h-0 flex-col p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb"
+            className="flex w-full max-w-[100vw] min-w-0 flex-1 flex-col p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb"
             data-settings-panel
           >
             <div className="mx-auto flex w-full min-h-0 flex-1 flex-col animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -466,7 +466,10 @@ function SettingsShellInner({ actions }: Props) {
           </div>
         ) : (
           <ScrollArea className="flex-1 min-h-0">
-            <div className="p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb" data-settings-panel>
+            <div
+              className="w-full max-w-[100vw] min-w-0 p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb"
+              data-settings-panel
+            >
               <div className="mx-auto w-full max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-200">
                 <SectionContent
                   section={activeSection}

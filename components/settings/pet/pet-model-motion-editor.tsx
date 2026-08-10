@@ -9,6 +9,7 @@
 
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { PlayIcon } from "lucide-react"
 import { ALL_MAPPING_ROWS, type MappingRow } from "@/lib/pet/live2d/state-keys"
 import type { Live2dMotionOverride, Live2dMotionOverrides } from "@/types/pet"
@@ -120,53 +121,55 @@ export function PetModelMotionEditor({
               )}
             </span>
 
-            <select
+            <NativeSelect
               aria-label={t("motionGroup")}
               data-testid={`pet-mapping-group-${row.key}`}
-              className="rounded-md border bg-background px-2 py-1 text-sm"
+              className="text-sm"
               value={groupSelectValue(entry)}
               onChange={(e) => handleGroupChange(row, e.target.value)}
             >
-              <option value={SENTINEL_DEFAULT}>{t("optionDefault")}</option>
-              <option value={SENTINEL_ENGINE}>{t("optionEngine")}</option>
+              <NativeSelectOption value={SENTINEL_DEFAULT}>{t("optionDefault")}</NativeSelectOption>
+              <NativeSelectOption value={SENTINEL_ENGINE}>{t("optionEngine")}</NativeSelectOption>
               {motionGroups.map((g) => (
-                <option key={g} value={g}>
+                <NativeSelectOption key={g} value={g}>
                   {g}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
 
-            <select
+            <NativeSelect
               aria-label={t("motionIndex")}
               data-testid={`pet-mapping-index-${row.key}`}
-              className="rounded-md border bg-background px-2 py-1 text-sm"
+              className="text-sm"
               disabled={group === undefined}
               value={entry?.motionIndex === undefined ? SENTINEL_RANDOM : String(entry.motionIndex)}
               onChange={(e) => handleIndexChange(row, e.target.value)}
             >
-              <option value={SENTINEL_RANDOM}>{t("indexRandom")}</option>
+              <NativeSelectOption value={SENTINEL_RANDOM}>{t("indexRandom")}</NativeSelectOption>
               {Array.from({ length: count }, (_, i) => (
-                <option key={i} value={String(i)}>
+                <NativeSelectOption key={i} value={String(i)}>
                   {i}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
 
-            <select
+            <NativeSelect
               aria-label={t("expression")}
               data-testid={`pet-mapping-expression-${row.key}`}
-              className="rounded-md border bg-background px-2 py-1 text-sm"
+              className="text-sm"
               disabled={entry === undefined}
               value={entry?.expressionId ?? SENTINEL_NO_EXPRESSION}
               onChange={(e) => handleExpressionChange(row, e.target.value)}
             >
-              <option value={SENTINEL_NO_EXPRESSION}>{t("optionNoExpression")}</option>
+              <NativeSelectOption value={SENTINEL_NO_EXPRESSION}>
+                {t("optionNoExpression")}
+              </NativeSelectOption>
               {expressionIds.map((id) => (
-                <option key={id} value={id}>
+                <NativeSelectOption key={id} value={id}>
                   {id}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
 
             <Button
               variant="ghost"

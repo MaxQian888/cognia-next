@@ -90,43 +90,49 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
   const tKind = useTranslations("settings.connections.audit.kind")
   const [expanded, setExpanded] = useState(false)
   const hasFields = entry.fields && Object.keys(entry.fields).length > 0
+  const summary = (
+    <>
+      {hasFields ? (
+        expanded ? (
+          <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        )
+      ) : (
+        <span className="size-3.5 shrink-0" />
+      )}
+      <span className="shrink-0 font-mono text-xs text-muted-foreground">
+        {new Date(entry.at).toLocaleString()}
+      </span>
+      <span className="flex-1 truncate text-xs text-muted-foreground">{entry.adapterId}</span>
+      <Badge
+        variant={kindBadgeVariant(entry.kind)}
+        className={cn("shrink-0 text-xs", kindBadgeClass(entry.kind))}
+      >
+        {auditKindLabel(tKind, entry.kind)}
+      </Badge>
+      {entry.reason && (
+        <span className="max-w-[160px] truncate text-xs text-muted-foreground">{entry.reason}</span>
+      )}
+    </>
+  )
 
   return (
-    <div className="rounded-lg border bg-card text-sm">
-      <div
-        className={cn("flex items-center gap-2 px-3 py-2", {
-          "cursor-pointer hover:bg-muted/50": hasFields,
-        })}
-        onClick={hasFields ? () => setExpanded((v) => !v) : undefined}
-        role={hasFields ? "button" : undefined}
-        aria-expanded={hasFields ? expanded : undefined}
-        aria-label={hasFields ? (expanded ? t("collapseAria") : t("expandAria")) : undefined}
-      >
-        {hasFields ? (
-          expanded ? (
-            <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRightIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          )
-        ) : (
-          <span className="h-3.5 w-3.5 shrink-0" />
-        )}
-        <span className="shrink-0 font-mono text-xs text-muted-foreground">
-          {new Date(entry.at).toLocaleString()}
-        </span>
-        <span className="flex-1 truncate text-xs text-muted-foreground">{entry.adapterId}</span>
-        <Badge
-          variant={kindBadgeVariant(entry.kind)}
-          className={cn("shrink-0 text-xs", kindBadgeClass(entry.kind))}
+    <div className="border-b text-sm last:border-b-0">
+      {hasFields ? (
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-auto w-full justify-start rounded-none px-3 py-2 font-normal"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+          aria-label={expanded ? t("collapseAria") : t("expandAria")}
         >
-          {auditKindLabel(tKind, entry.kind)}
-        </Badge>
-        {entry.reason && (
-          <span className="truncate text-xs text-muted-foreground max-w-[160px]">
-            {entry.reason}
-          </span>
-        )}
-      </div>
+          {summary}
+        </Button>
+      ) : (
+        <div className="flex items-center gap-2 px-3 py-2">{summary}</div>
+      )}
       {expanded && entry.fields && (
         <div className="border-t bg-muted/30 px-3 py-2">
           <pre className="overflow-x-auto text-xs text-muted-foreground whitespace-pre-wrap">

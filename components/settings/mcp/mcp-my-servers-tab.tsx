@@ -188,9 +188,15 @@ export function McpMyServersTab() {
       ) : visibleServers.length === 0 && filtersActive ? (
         <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
           {tList("noMatch")}{" "}
-          <button type="button" className="underline hover:text-foreground" onClick={resetFilters}>
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-xs"
+            onClick={resetFilters}
+          >
             {tList("clearFilters")}
-          </button>
+          </Button>
         </p>
       ) : (
         <>
@@ -200,15 +206,17 @@ export function McpMyServersTab() {
               onCheckedChange={toggleSelectAll}
               aria-label={tList("selectAllAria")}
             />
-            <button
+            <Button
               type="button"
+              variant="link"
+              size="sm"
               onClick={toggleSelectAll}
-              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+              className="h-auto p-0 text-xs text-muted-foreground"
             >
               {allVisibleSelected
                 ? tList("clearSelection")
                 : tList("selectAll", { count: visibleServers.length })}
-            </button>
+            </Button>
           </div>
           <McpServerList
             servers={visibleServers}

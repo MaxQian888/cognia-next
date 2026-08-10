@@ -54,7 +54,7 @@ export function ColorTokenRow({
         {label ?? tokenKey}
       </Label>
       <div className="flex flex-1 items-center gap-2">
-        <input
+        <Input
           id={`color-token-${tokenKey}`}
           type="color"
           value={swatchValue}

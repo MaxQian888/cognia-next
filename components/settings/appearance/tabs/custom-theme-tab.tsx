@@ -354,7 +354,7 @@ export function CustomThemeTab() {
           <Button size="sm" variant="outline" onClick={() => importInputRef.current?.click()}>
             {t("actions.import")}
           </Button>
-          <input
+          <Input
             ref={importInputRef}
             type="file"
             accept=".json,application/json"

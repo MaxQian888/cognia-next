@@ -6,6 +6,7 @@
 
 "use client"
 
+import { Input } from "@/components/ui/input"
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -176,7 +177,7 @@ export function PetModelManager({ settings, onPatch, coreReady }: PetModelManage
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <input
+                  <Input
                     type="radio"
                     name="pet-live2d-active"
                     aria-label={t("setActive")}
@@ -267,7 +268,7 @@ export function PetModelManager({ settings, onPatch, coreReady }: PetModelManage
       <p className="text-xs text-muted-foreground">{t("importHint")}</p>
 
       <div className="flex flex-wrap gap-2">
-        <input
+        <Input
           ref={fileInputRef}
           type="file"
           className="hidden"
@@ -275,7 +276,7 @@ export function PetModelManager({ settings, onPatch, coreReady }: PetModelManage
           aria-label={t("import")}
           onChange={(e) => void handleFiles(e.target.files)}
         />
-        <input
+        <Input
           ref={folderInputRef}
           type="file"
           className="hidden"

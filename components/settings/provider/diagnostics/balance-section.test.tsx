@@ -109,6 +109,7 @@ describe("BalanceSection", () => {
 
   it("clears the script form — including the token — once the save resolves", async () => {
     render(<BalanceSection {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "balance.addScript" }))
     fireEvent.change(screen.getByLabelText("balance.scriptLabel"), { target: { value: "My API" } })
     fireEvent.change(screen.getByLabelText("balance.scriptToken"), { target: { value: "secret" } })
     fireEvent.change(screen.getByLabelText("balance.scriptCode"), { target: { value: "return 1" } })
@@ -127,6 +128,7 @@ describe("BalanceSection", () => {
       throw new Error("balance.scriptRequired")
     })
     render(<BalanceSection {...props} onSaveScript={onSaveScript} />)
+    fireEvent.click(screen.getByRole("button", { name: "balance.addScript" }))
     fireEvent.change(screen.getByLabelText("balance.scriptLabel"), { target: { value: "Draft" } })
     fireEvent.click(screen.getByRole("button", { name: "balance.saveScript" }))
 
@@ -136,6 +138,7 @@ describe("BalanceSection", () => {
 
   it("locks every control for a paired client", () => {
     render(<BalanceSection {...props} readOnly sources={[source({ primary: false })]} />)
+    fireEvent.click(screen.getByRole("button", { name: "balance.addScript" }))
     expect(screen.getByRole("button", { name: /balance\.refresh/ })).toBeDisabled()
     expect(screen.getByRole("button", { name: "balance.makePrimary" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "balance.saveScript" })).toBeDisabled()

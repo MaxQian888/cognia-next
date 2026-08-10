@@ -85,6 +85,7 @@ describe("WikiLintCard", () => {
     )
     render(<WikiLintCard />)
     expect(await screen.findByText(/bad → ghost/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: /1 orphan/i }))
     expect(screen.getByText("lonely")).toBeInTheDocument()
   })
 

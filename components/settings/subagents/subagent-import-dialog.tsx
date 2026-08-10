@@ -7,6 +7,7 @@
  * library. Triggered from the Subagents settings tab toolbar.
  */
 
+import { Input } from "@/components/ui/input"
 import { useCallback, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
@@ -361,7 +362,7 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
                   <p className="text-sm font-medium">{t("pickFiles")}</p>
                   <p className="text-xs text-muted-foreground">{t("webPickFormats")}</p>
                 </button>
-                <input
+                <Input
                   ref={fileInputRef}
                   data-testid="subagent-import-file-input"
                   type="file"
@@ -380,7 +381,7 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
                   <p className="text-sm font-medium">{t("pickFolder")}</p>
                   <p className="text-xs text-muted-foreground">{t("webPickFormats")}</p>
                 </button>
-                <input
+                <Input
                   ref={folderInputRef}
                   data-testid="subagent-import-folder-input"
                   type="file"

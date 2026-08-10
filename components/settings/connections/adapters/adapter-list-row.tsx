@@ -120,69 +120,72 @@ export function AdapterListRow({
   }
 
   return (
-    <li
-      role="button"
-      aria-pressed={selected}
-      data-testid={`adapter-card-${row.id}`}
-      onClick={onSelect}
-      className={cn(
-        "flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
-        selected
-          ? "border-l-2 border-l-primary bg-primary text-primary-foreground"
-          : "hover:bg-muted/50"
-      )}
-    >
-      <span
+    <li className="flex items-center rounded-lg text-sm">
+      <Button
+        type="button"
+        variant="ghost"
+        data-testid={`adapter-card-${row.id}`}
+        aria-pressed={selected}
+        onClick={onSelect}
         className={cn(
-          "flex size-7 shrink-0 items-center justify-center rounded-md",
-          selected ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground"
+          "h-auto min-w-0 flex-1 justify-start gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
+          selected
+            ? "border-l-2 border-l-primary bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground"
+            : "hover:bg-muted/50"
         )}
       >
-        <Icon className="size-4" aria-hidden />
-      </span>
-
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-medium">{row.displayName}</div>
-        <div
+        <span
           className={cn(
-            "truncate text-[11px]",
-            selected ? "text-primary-foreground/70" : "text-muted-foreground"
+            "flex size-7 shrink-0 items-center justify-center rounded-md",
+            selected ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground"
           )}
         >
-          {platformLabel} · {transportLabel}
+          <Icon className="size-4" aria-hidden />
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium">{row.displayName}</div>
+          <div
+            className={cn(
+              "truncate text-[11px]",
+              selected ? "text-primary-foreground/70" : "text-muted-foreground"
+            )}
+          >
+            {platformLabel} · {transportLabel}
+          </div>
         </div>
-      </div>
 
-      <span
-        data-testid={`adapter-row-status-${row.id}`}
-        data-status={status.status}
-        aria-label={t("rowHealth.aria", { state: t(status.labelKey) })}
-        title={statusReason}
-        className={cn(
-          "flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]",
-          status.tint
-        )}
-      >
-        <StatusIcon className="size-3" aria-hidden />
-        <span className="hidden sm:inline">{t(status.labelKey)}</span>
-      </span>
-
-      {pendingCount > 0 && (
-        <Badge
-          variant="secondary"
+        <span
+          data-testid={`adapter-row-status-${row.id}`}
+          data-status={status.status}
+          aria-label={t("rowHealth.aria", { state: t(status.labelKey) })}
+          title={statusReason}
           className={cn(
-            "shrink-0 gap-1 text-xs",
-            selected && "bg-primary-foreground/20 text-primary-foreground"
+            "flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]",
+            status.tint
           )}
-          aria-label={t("pendingBadgeAria", { count: pendingCount })}
-          data-testid={`adapter-pending-${row.id}`}
         >
-          <InboxIcon className="h-3 w-3" aria-hidden />
-          {pendingCount}
-        </Badge>
-      )}
+          <StatusIcon className="size-3" aria-hidden />
+          <span className="hidden sm:inline">{t(status.labelKey)}</span>
+        </span>
 
-      <span onClick={(e) => e.stopPropagation()}>
+        {pendingCount > 0 && (
+          <Badge
+            variant="secondary"
+            className={cn(
+              "shrink-0 gap-1 text-xs",
+              selected && "bg-primary-foreground/20 text-primary-foreground"
+            )}
+            aria-label={t("pendingBadgeAria", { count: pendingCount })}
+            data-testid={`adapter-pending-${row.id}`}
+          >
+            <InboxIcon className="h-3 w-3" aria-hidden />
+            {pendingCount}
+          </Badge>
+        )}
+      </Button>
+
+      <div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -215,7 +218,7 @@ export function AdapterListRow({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </span>
+      </div>
 
       <AlertDialog open={removeOpen} onOpenChange={setRemoveOpen}>
         <AlertDialogContent onClick={(e) => e.stopPropagation()}>

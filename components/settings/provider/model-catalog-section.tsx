@@ -14,6 +14,7 @@ import type {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import {
@@ -240,31 +241,31 @@ export function ModelCatalogSection() {
             className="pl-9"
           />
         </label>
-        <select
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+        <NativeSelect
+          className="text-sm"
           value={modality}
           onChange={(event) => setModality(event.target.value as (typeof MODALITIES)[number])}
           aria-label={t("modalityLabel")}
         >
           {MODALITIES.map((item) => (
-            <option key={item} value={item}>
+            <NativeSelectOption key={item} value={item}>
               {t(`modalities.${item}`)}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
-        <select
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+        </NativeSelect>
+        <NativeSelect
+          className="text-sm"
           value={lifecycle}
           disabled={!advanced}
           onChange={(event) => setLifecycle(event.target.value as (typeof LIFECYCLES)[number])}
           aria-label={t("lifecycleLabel")}
         >
           {LIFECYCLES.map((item) => (
-            <option key={item} value={item}>
+            <NativeSelectOption key={item} value={item}>
               {t(`lifecycles.${item}`)}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
+        </NativeSelect>
       </div>
 
       <div className="flex flex-wrap gap-2">

@@ -18,9 +18,10 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { LoaderIcon, RefreshCwIcon } from "lucide-react"
+import { ChevronDownIcon, LoaderIcon, RefreshCwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NoticeItem } from "@/components/inbox/notices/notice-item"
 import { useSettingsStore } from "@/stores/settings"
 
@@ -73,17 +74,26 @@ export function SettingsLoadFailedBanner() {
         >
           <p className="mt-0.5 text-muted-foreground">{t("body")}</p>
           {loadError && (
-            <details className="mt-1">
-              <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
-                {t("detailsLabel")}
-              </summary>
-              <pre
-                className="mt-1 max-h-24 overflow-auto rounded bg-muted/40 p-1.5 text-[11px] leading-relaxed font-mono"
-                data-testid="settings-load-failed-detail"
-              >
-                {loadError}
-              </pre>
-            </details>
+            <Collapsible className="group/collapsible mt-1">
+              <CollapsibleTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-auto gap-1 px-0 py-0 text-[11px] text-muted-foreground hover:bg-transparent hover:text-foreground"
+                >
+                  {t("detailsLabel")}
+                  <ChevronDownIcon className="size-3 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent forceMount>
+                <pre
+                  className="mt-1 max-h-24 overflow-auto rounded bg-muted/40 p-1.5 text-[11px] leading-relaxed font-mono"
+                  data-testid="settings-load-failed-detail"
+                >
+                  {loadError}
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
           )}
         </NoticeItem>
       </div>

@@ -99,7 +99,7 @@ export function LabelsTab() {
         )}
         {labels.map((l) => (
           <li key={l.id} className="flex items-center gap-2 px-3 py-2">
-            <input
+            <Input
               type="color"
               defaultValue={l.color ?? DEFAULT_COLOR}
               aria-label={t("rowColorAria", { name: l.name })}
@@ -108,7 +108,7 @@ export function LabelsTab() {
               }}
               className="h-6 w-8 shrink-0 cursor-pointer rounded border p-0.5"
             />
-            <input
+            <Input
               defaultValue={l.name}
               aria-label={t("rowNameAria", { name: l.name })}
               onBlur={(e) => {

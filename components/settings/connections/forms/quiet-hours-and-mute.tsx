@@ -17,6 +17,7 @@ import { useTranslations } from "next-intl"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Separator } from "@/components/ui/separator"
 
 export interface QuietHoursValue {
@@ -210,22 +211,25 @@ function QuietHoursFields({ value, onChange, disabled }: QuietHoursFieldsProps) 
             className="h-9 text-xs"
           />
         ) : (
-          <select
+          <NativeSelect
             id="qhm-tz"
             value={COMMON_TZ.includes(value.tz) ? value.tz : CUSTOM_TZ_VALUE}
             onChange={(e) => onSelectChange(e.target.value)}
             disabled={disabled}
             aria-label={t("timezoneAria")}
             data-testid="qhm-tz-select"
-            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="text-xs"
+            wrapperClassName="w-full"
           >
             {COMMON_TZ.map((tz) => (
-              <option key={tz} value={tz}>
+              <NativeSelectOption key={tz} value={tz}>
                 {tz}
-              </option>
+              </NativeSelectOption>
             ))}
-            <option value={CUSTOM_TZ_VALUE}>{t("timezoneCustomOption")}</option>
-          </select>
+            <NativeSelectOption value={CUSTOM_TZ_VALUE}>
+              {t("timezoneCustomOption")}
+            </NativeSelectOption>
+          </NativeSelect>
         )}
         {isCustom && value.tz.length > 0 && !tzValid && (
           <p className="text-[10px] text-destructive" data-testid="qhm-tz-invalid">

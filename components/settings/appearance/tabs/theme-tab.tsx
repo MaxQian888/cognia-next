@@ -398,7 +398,7 @@ export function ThemeTab() {
             className="relative inline-flex size-8 cursor-pointer items-center justify-center overflow-hidden rounded-md border"
             style={accentColor ? { background: accentColor } : undefined}
           >
-            <input
+            <Input
               type="color"
               value={accentColor ?? "#3b82f6"}
               onChange={(e) => void setAccentColor(e.target.value)}

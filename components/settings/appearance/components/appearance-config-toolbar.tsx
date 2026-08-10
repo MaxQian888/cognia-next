@@ -11,6 +11,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { DownloadIcon, UploadIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -92,7 +93,7 @@ export function AppearanceConfigToolbar() {
         <UploadIcon className="size-3" />
         {t("import")}
       </Button>
-      <input
+      <Input
         ref={inputRef}
         type="file"
         accept="application/json,.json"

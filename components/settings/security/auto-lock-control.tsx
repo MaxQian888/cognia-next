@@ -10,6 +10,7 @@
 import { useTranslations } from "next-intl"
 
 import { SettingsRow } from "@/components/settings/common/settings-section"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { useSettingsStore } from "@/stores/settings"
 
 export const AUTO_LOCK_OPTIONS = [0, 5, 15, 30, 60] as const
@@ -24,20 +25,20 @@ export function AutoLockControl() {
 
   return (
     <SettingsRow label={t("autoLock.label")} description={t("autoLock.help")}>
-      <select
+      <NativeSelect
         id="account-auto-lock"
         aria-label={t("autoLock.label")}
         value={autoLockMinutes}
         onChange={(e) => void save({ accountAutoLockMinutes: Number(e.target.value) })}
-        className="h-9 rounded-md border border-input bg-transparent px-2 text-xs"
+        className="text-xs"
         data-testid="account-auto-lock-select"
       >
         {AUTO_LOCK_OPTIONS.map((minutes) => (
-          <option key={minutes} value={minutes}>
+          <NativeSelectOption key={minutes} value={minutes}>
             {optionLabel(minutes)}
-          </option>
+          </NativeSelectOption>
         ))}
-      </select>
+      </NativeSelect>
     </SettingsRow>
   )
 }

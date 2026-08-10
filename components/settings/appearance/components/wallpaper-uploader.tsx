@@ -8,6 +8,7 @@
 // the drop target now, and this renders inside a popover behind the gallery's
 // "+" tile.
 
+import { Input } from "@/components/ui/input"
 import { useCallback, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
@@ -59,7 +60,7 @@ export function WallpaperUploader({ onUpload, disabled, className }: WallpaperUp
       data-testid="wallpaper-uploader"
       className={cn("flex flex-col items-center gap-2 text-center text-sm", className)}
     >
-      <input
+      <Input
         ref={inputRef}
         type="file"
         accept={ACCEPTED_WALLPAPER_MIMES.join(",")}

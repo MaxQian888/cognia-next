@@ -37,6 +37,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
@@ -396,7 +397,7 @@ export function WebRtcCard() {
           <Label htmlFor="webrtc-turn-provider" className="text-xs font-medium">
             {t("turnProviderLabel")}
           </Label>
-          <select
+          <NativeSelect
             id="webrtc-turn-provider"
             value={form.turnProviderKind}
             onChange={(e) =>
@@ -406,13 +407,16 @@ export function WebRtcCard() {
               }))
             }
             disabled={busy}
-            className="h-9 rounded-md border border-input bg-transparent px-2 text-xs"
+            className="text-xs"
+            wrapperClassName="w-full"
             data-testid="webrtc-turn-provider-kind"
           >
-            <option value="none">{t("turnProviderNone")}</option>
-            <option value="cloudflare-calls">{t("turnProviderCloudflare")}</option>
-            <option value="twilio">{t("turnProviderTwilio")}</option>
-          </select>
+            <NativeSelectOption value="none">{t("turnProviderNone")}</NativeSelectOption>
+            <NativeSelectOption value="cloudflare-calls">
+              {t("turnProviderCloudflare")}
+            </NativeSelectOption>
+            <NativeSelectOption value="twilio">{t("turnProviderTwilio")}</NativeSelectOption>
+          </NativeSelect>
           <p className="text-[10px] text-muted-foreground">{t("turnProviderHelp")}</p>
 
           {form.turnProviderKind === "cloudflare-calls" ? (

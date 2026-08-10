@@ -30,10 +30,19 @@ import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import {
   clearGatewayRequestLog,
@@ -144,12 +153,14 @@ export function GatewayLogViewer() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL_KEYS}>{t("logFilterAllKeys")}</SelectItem>
-              {keys.map((k) => (
-                <SelectItem key={k.id} value={k.id}>
-                  {k.name}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                <SelectItem value={ALL_KEYS}>{t("logFilterAllKeys")}</SelectItem>
+                {keys.map((k) => (
+                  <SelectItem key={k.id} value={k.id}>
+                    {k.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
@@ -158,35 +169,33 @@ export function GatewayLogViewer() {
         {rows.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("logEmpty")}</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs" data-testid="gateway-log">
-              <thead className="text-muted-foreground">
-                <tr className="border-b text-left">
-                  <th className="w-6 py-1" />
-                  <th className="py-1 pr-2 font-medium">{t("colTime")}</th>
-                  <th className="py-1 pr-2 font-medium">{t("colModel")}</th>
-                  <th className="py-1 pr-2 font-medium">{t("colProvider")}</th>
-                  <th className="py-1 pr-2 font-medium">{t("colKey")}</th>
-                  <th className="py-1 pr-2 font-medium">{t("colStatus")}</th>
-                  <th className="py-1 pr-2 font-medium">{t("colLatency")}</th>
-                  <th className="py-1 pr-2 font-medium">{t("colTokens")}</th>
-                  <th className="py-1 pr-2 font-medium">{t("colCost")}</th>
-                </tr>
-              </thead>
-              <tbody className="font-mono">
-                {rows.map((r) => (
-                  <LogRow
-                    key={r.id}
-                    row={r}
-                    keyName={keyName(r.keyId)}
-                    isFresh={new Date(r.at).getTime() > openedAt}
-                    isExpanded={expanded === r.id}
-                    onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table className="text-xs" data-testid="gateway-log">
+            <TableHeader className="text-muted-foreground">
+              <TableRow className="text-left hover:bg-transparent">
+                <TableHead className="w-6 py-1" />
+                <TableHead className="py-1 pr-2">{t("colTime")}</TableHead>
+                <TableHead className="py-1 pr-2">{t("colModel")}</TableHead>
+                <TableHead className="py-1 pr-2">{t("colProvider")}</TableHead>
+                <TableHead className="py-1 pr-2">{t("colKey")}</TableHead>
+                <TableHead className="py-1 pr-2">{t("colStatus")}</TableHead>
+                <TableHead className="py-1 pr-2">{t("colLatency")}</TableHead>
+                <TableHead className="py-1 pr-2">{t("colTokens")}</TableHead>
+                <TableHead className="py-1 pr-2">{t("colCost")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className="font-mono">
+              {rows.map((r) => (
+                <LogRow
+                  key={r.id}
+                  row={r}
+                  keyName={keyName(r.keyId)}
+                  isFresh={new Date(r.at).getTime() > openedAt}
+                  isExpanded={expanded === r.id}
+                  onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
+                />
+              ))}
+            </TableBody>
+          </Table>
         )}
       </CardContent>
     </Card>
@@ -220,41 +229,50 @@ function LogRow({
 
   return (
     <>
-      <tr className="border-b">
-        <td className="py-1">
-          <button
+      <TableRow>
+        <TableCell className="py-1">
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             onClick={onToggle}
             aria-expanded={isExpanded}
             aria-label={t("logRowDetailAria", { id: row.id })}
-            className="rounded-sm p-0.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="text-muted-foreground"
           >
             <ChevronRightIcon
               className={cn("size-3.5 transition-transform", isExpanded && "rotate-90")}
               aria-hidden
             />
-          </button>
-        </td>
-        <td className="whitespace-nowrap py-1 pr-2 text-muted-foreground">
+          </Button>
+        </TableCell>
+        <TableCell className="whitespace-nowrap py-1 pr-2 text-muted-foreground">
           {/* Only genuinely new rows animate; a filter change re-orders the whole
               table and animating 100 rows there drops frames while scrolling. */}
           <MotionReveal disabled={!isFresh}>
             <span>{new Date(row.at).toLocaleTimeString()}</span>
           </MotionReveal>
-        </td>
-        <td className="max-w-[8rem] truncate py-1 pr-2">{row.model ?? "—"}</td>
-        <td className="max-w-[7rem] truncate py-1 pr-2 text-muted-foreground">
+        </TableCell>
+        <TableCell className="max-w-[8rem] truncate py-1 pr-2">{row.model ?? "—"}</TableCell>
+        <TableCell className="max-w-[7rem] truncate py-1 pr-2 text-muted-foreground">
           {row.providerId ?? "—"}
-        </td>
-        <td className="max-w-[7rem] truncate py-1 pr-2 text-muted-foreground">{keyName}</td>
-        <td className="py-1 pr-2">
+        </TableCell>
+        <TableCell className="max-w-[7rem] truncate py-1 pr-2 text-muted-foreground">
+          {keyName}
+        </TableCell>
+        <TableCell className="py-1 pr-2">
           <Badge variant={row.status < 400 ? "secondary" : "destructive"}>{row.status}</Badge>
-        </td>
-        <td className="py-1 pr-2 text-muted-foreground">{t("latencyMs", { ms: row.latencyMs })}</td>
-        <td className="py-1 pr-2 text-muted-foreground">
+        </TableCell>
+        <TableCell className="py-1 pr-2 text-muted-foreground">
+          {t("latencyMs", { ms: row.latencyMs })}
+        </TableCell>
+        <TableCell className="py-1 pr-2 text-muted-foreground">
           {(row.inputTokens ?? 0) + " / " + (row.outputTokens ?? 0)}
-        </td>
-        <td className="py-1 pr-2 text-muted-foreground" data-testid={`gateway-log-cost-${row.id}`}>
+        </TableCell>
+        <TableCell
+          className="py-1 pr-2 text-muted-foreground"
+          data-testid={`gateway-log-cost-${row.id}`}
+        >
           {/* Upstream LLM pricing is quoted in USD, so the currency is fixed —
               but the grouping, decimal separator and symbol placement are not,
               and `$0.0123` hard-coded en-US into every locale. */}
@@ -266,10 +284,10 @@ function LogRow({
                 minimumFractionDigits: 4,
                 maximumFractionDigits: 4,
               })}
-        </td>
-      </tr>
-      <tr>
-        <td colSpan={9} className="p-0">
+        </TableCell>
+      </TableRow>
+      <TableRow className="hover:bg-transparent">
+        <TableCell colSpan={9} className="p-0">
           <MotionCollapse open={isExpanded}>
             <dl
               className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 bg-muted/40 px-3 py-2 text-[11px]"
@@ -289,8 +307,8 @@ function LogRow({
               )}
             </dl>
           </MotionCollapse>
-        </td>
-      </tr>
+        </TableCell>
+      </TableRow>
     </>
   )
 }

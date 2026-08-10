@@ -66,7 +66,7 @@ describe("SourcePill", () => {
         onRemove={onRemove}
       />
     )
-    fireEvent.click(screen.getByText("×"))
+    fireEvent.click(screen.getByRole("button", { name: "× D" }))
     expect(onRemove).toHaveBeenCalledTimes(1)
     expect(onToggle).not.toHaveBeenCalled()
   })
@@ -75,6 +75,6 @@ describe("SourcePill", () => {
     render(
       <SourcePill sourceId="x" name="E" selected={false} disabled={false} onToggle={jest.fn()} />
     )
-    expect(screen.queryByText("×")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "× E" })).not.toBeInTheDocument()
   })
 })

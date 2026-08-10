@@ -205,7 +205,7 @@ function TrayDisplayCard() {
           <Label htmlFor="tray-icon-color">{t("iconColor")}</Label>
           <p className="text-xs text-muted-foreground">{t("iconColorHint")}</p>
         </div>
-        <input
+        <Input
           id="tray-icon-color"
           type="color"
           value={display.iconColor}

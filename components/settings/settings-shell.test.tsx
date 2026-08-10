@@ -208,6 +208,7 @@ describe("SettingsShell fill-height layout", () => {
     const { container } = render(<SettingsShell />)
     const panel = container.querySelector("[data-settings-panel]")
     expect(panel).not.toBeNull()
+    expect(panel).toHaveClass("w-full", "max-w-[100vw]", "min-w-0")
     // Fill-height branch: the panel wrapper grows to fill the frame...
     expect(panel!.className).toMatch(/\bflex-1\b/)
     // ...and never centers content behind a fixed max width.
@@ -221,6 +222,7 @@ describe("SettingsShell fill-height layout", () => {
     const { container } = render(<SettingsShell />)
     const panel = container.querySelector("[data-settings-panel]")
     expect(panel).not.toBeNull()
+    expect(panel).toHaveClass("w-full", "max-w-[100vw]", "min-w-0")
     expect(panel!.className).toMatch(/\bflex-1\b/)
     expect(container.innerHTML).not.toMatch(/max-w-5xl/)
   })
@@ -245,6 +247,7 @@ describe("SettingsShell fill-height layout", () => {
     const { container } = render(<SettingsShell />)
     const panel = container.querySelector("[data-settings-panel]")
     expect(panel).not.toBeNull()
+    expect(panel).toHaveClass("w-full", "max-w-[100vw]", "min-w-0")
     expect(panel!.className).not.toMatch(/\bflex-1\b/)
     expect(container.innerHTML).toMatch(/max-w-5xl/)
   })

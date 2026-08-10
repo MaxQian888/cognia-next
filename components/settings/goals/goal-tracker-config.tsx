@@ -6,6 +6,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { ExternalLinkIcon } from "lucide-react"
 import { getCharacter } from "@/lib/db/characters"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 const GOAL_TRACKER_ID = "char_builtin_goal_tracker"
 
@@ -52,12 +53,18 @@ export function GoalTrackerConfig() {
           <p className="text-xs text-muted-foreground">{character.description}</p>
         </div>
       </div>
-      <details className="rounded-md border p-3 text-sm">
-        <summary className="cursor-pointer font-medium">{t("tracker.systemPrompt")}</summary>
-        <pre className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">
-          {character.systemPrompt}
-        </pre>
-      </details>
+      <Collapsible className="border-y py-2 text-sm">
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" className="h-auto w-full justify-start px-2 py-1 font-medium">
+            {t("tracker.systemPrompt")}
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <pre className="mt-2 whitespace-pre-wrap px-2 text-xs text-muted-foreground">
+            {character.systemPrompt}
+          </pre>
+        </CollapsibleContent>
+      </Collapsible>
       <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
         <span>{t("tracker.permissionMode", { mode: character.permissionMode ?? "default" })}</span>
         <span>•</span>

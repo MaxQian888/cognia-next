@@ -16,12 +16,15 @@ import { BookOpenIcon, Loader2Icon, RotateCwIcon, TriangleAlertIcon } from "luci
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -247,10 +250,12 @@ export function WikiRebuildCard() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="off">{t("scheduleMode.off")}</SelectItem>
-                    <SelectItem value="daily">{t("scheduleMode.daily")}</SelectItem>
-                    <SelectItem value="weekly">{t("scheduleMode.weekly")}</SelectItem>
-                    <SelectItem value="custom">{t("scheduleMode.custom")}</SelectItem>
+                    <SelectGroup>
+                      <SelectItem value="off">{t("scheduleMode.off")}</SelectItem>
+                      <SelectItem value="daily">{t("scheduleMode.daily")}</SelectItem>
+                      <SelectItem value="weekly">{t("scheduleMode.weekly")}</SelectItem>
+                      <SelectItem value="custom">{t("scheduleMode.custom")}</SelectItem>
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </div>
@@ -272,17 +277,22 @@ export function WikiRebuildCard() {
                 </div>
               ) : (
                 <div className="flex flex-col justify-end">
-                  <label className="flex items-center gap-1.5 text-xs">
-                    <input
-                      type="checkbox"
+                  <Label
+                    htmlFor="wiki-schedule-force"
+                    className="flex items-center gap-1.5 text-xs"
+                  >
+                    <Checkbox
+                      id="wiki-schedule-force"
                       checked={schedule.force === true}
-                      onChange={(e) => setSchedule({ ...schedule, force: e.target.checked })}
+                      onCheckedChange={(checked) =>
+                        setSchedule({ ...schedule, force: checked === true })
+                      }
                       disabled={scheduleSaving || schedule.mode === "off"}
                       aria-label={t("scheduleForceAria")}
                       data-testid="wiki-schedule-force"
                     />
                     {t("scheduleForceLabel")}
-                  </label>
+                  </Label>
                 </div>
               )}
             </div>
@@ -317,21 +327,25 @@ export function WikiRebuildCard() {
                 </div>
               </div>
               {lastResult.errors.length > 0 && (
-                <details className="mt-2">
-                  <summary className="cursor-pointer text-muted-foreground">
-                    {t("errorListSummary", { count: lastResult.errors.length })}
-                  </summary>
-                  <ul className="mt-1 space-y-1">
-                    {lastResult.errors.map((e, i) => (
-                      <li key={i} className="flex items-start gap-1 text-red-500">
-                        <TriangleAlertIcon className="h-3 w-3 mt-0.5 shrink-0" />
-                        <span className="font-mono">
-                          {e.module}: {e.message}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
+                <Collapsible className="mt-2">
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-auto px-0 text-muted-foreground">
+                      {t("errorListSummary", { count: lastResult.errors.length })}
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <ul className="mt-1 space-y-1">
+                      {lastResult.errors.map((e, i) => (
+                        <li key={i} className="flex items-start gap-1 text-red-500">
+                          <TriangleAlertIcon className="h-3 w-3 mt-0.5 shrink-0" />
+                          <span className="font-mono">
+                            {e.module}: {e.message}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CollapsibleContent>
+                </Collapsible>
               )}
             </div>
           )}
