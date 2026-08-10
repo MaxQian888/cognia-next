@@ -259,55 +259,52 @@ export function BackupScheduleDialog({ trigger, onScheduled }: BackupScheduleDia
             <div className="space-y-3 rounded-lg border p-3">
               <Label className="text-sm font-medium">{t("backup.includeOptions")}</Label>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label htmlFor="include-sessions" className="flex items-center gap-2 text-sm">
+                <div className="flex items-center gap-2 text-sm">
                   <Checkbox
                     id="include-sessions"
                     checked={includeSessions}
                     onCheckedChange={(c) => setIncludeSessions(c === true)}
                   />
-                  <span>{t("backup.options.sessions")}</span>
-                </label>
-                <label htmlFor="include-settings" className="flex items-center gap-2 text-sm">
+                  <Label htmlFor="include-sessions">{t("backup.options.sessions")}</Label>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
                   <Checkbox
                     id="include-settings"
                     checked={includeSettings}
                     onCheckedChange={(c) => setIncludeSettings(c === true)}
                   />
-                  <span>{t("backup.options.settings")}</span>
-                </label>
-                <label htmlFor="include-artifacts" className="flex items-center gap-2 text-sm">
+                  <Label htmlFor="include-settings">{t("backup.options.settings")}</Label>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
                   <Checkbox
                     id="include-artifacts"
                     checked={includeArtifacts}
                     onCheckedChange={(c) => setIncludeArtifacts(c === true)}
                   />
-                  <span>{t("backup.options.artifacts")}</span>
-                </label>
-                <label htmlFor="include-indexeddb" className="flex items-center gap-2 text-sm">
+                  <Label htmlFor="include-artifacts">{t("backup.options.artifacts")}</Label>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
                   <Checkbox
                     id="include-indexeddb"
                     checked={includeIndexedDB}
                     onCheckedChange={(c) => setIncludeIndexedDB(c === true)}
                   />
-                  <span>{t("backup.options.indexedDB")}</span>
-                </label>
+                  <Label htmlFor="include-indexeddb">{t("backup.options.indexedDB")}</Label>
+                </div>
               </div>
             </div>
           )}
 
           <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
             <CollapsibleTrigger asChild>
-              <button
-                type="button"
-                className="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm"
-              >
+              <Button type="button" variant="outline" className="w-full justify-between">
                 <span>{t("advancedSettings")}</span>
                 {showAdvanced ? (
                   <ChevronUpIcon className="size-4" />
                 ) : (
                   <ChevronDownIcon className="size-4" />
                 )}
-              </button>
+              </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2 space-y-3 rounded-lg border bg-muted/20 p-3">
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

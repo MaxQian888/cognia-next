@@ -16,6 +16,7 @@ import { useLocale, useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
 
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { groupOccurrencesByTask, type Occurrence } from "@/lib/scheduler/upcoming-occurrences"
 import { listContainerVariants, listItemVariants, staticIf } from "./scheduler-motion"
 
@@ -62,15 +63,17 @@ export function OccurrenceList({
         const overflow = group.times.length - visible.length
         return (
           <motion.li key={group.taskId} variants={listItemVariants}>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => onSelectTask(group.taskId)}
               data-testid={`${testIdPrefix}-${group.taskId}`}
               aria-label={t("occurrenceList.rowAria", {
                 name: group.taskName,
                 count: group.times.length,
               })}
-              className="flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted/50"
+              className="h-auto w-full items-start justify-start gap-2.5 px-2 py-1.5 text-left whitespace-normal"
             >
               <span
                 className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
@@ -96,7 +99,7 @@ export function OccurrenceList({
                   )}
                 </span>
               </span>
-            </button>
+            </Button>
           </motion.li>
         )
       })}

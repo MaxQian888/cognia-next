@@ -27,6 +27,7 @@ import { SchedulerDashboardViewToggle } from "./scheduler-dashboard-view-toggle"
 import { SchedulerCalendarView } from "./scheduler-calendar-view"
 import { SchedulerTimelineView } from "./scheduler-timeline-view"
 import { staticIf, viewSwitchVariants } from "./scheduler-motion"
+import { Button } from "@/components/ui/button"
 
 /** Flattens a nested `Card` surface so the overview reads as one page. */
 const FLAT_PANEL = "border-0 bg-transparent p-0 shadow-none [&>[data-slot=card-content]]:p-0"
@@ -185,10 +186,13 @@ function OverviewBody({
           ) : (
             <div className="space-y-0.5">
               {upcomingTasks.slice(0, 5).map((task) => (
-                <button
+                <Button
                   key={task.id}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => onSelectTask(task.id)}
-                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-muted/50"
+                  className="h-auto w-full justify-start gap-3 px-2 py-2 text-left"
                 >
                   <div
                     className={cn(
@@ -204,7 +208,7 @@ function OverviewBody({
                     className="h-3 w-3 shrink-0 text-muted-foreground/50"
                     aria-hidden="true"
                   />
-                </button>
+                </Button>
               ))}
             </div>
           )}

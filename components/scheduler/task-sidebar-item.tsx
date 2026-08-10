@@ -43,6 +43,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { formatNextRun } from "@/lib/scheduler/format-utils"
 import type { ScheduledTask, ScheduledTaskType, ScheduledTaskStatus } from "@/types/scheduler"
@@ -327,19 +328,21 @@ export const TaskSidebarItem = React.memo(function TaskSidebarItem({
       {hasAnyAction && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               aria-label={t("moreOptions")}
               data-testid={`task-row-menu-${task.id}`}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => e.stopPropagation()}
               className={cn(
-                "flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground",
+                "shrink-0 text-muted-foreground transition-opacity",
                 "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
               )}
             >
-              <MoreVertical className="h-3.5 w-3.5" />
-            </button>
+              <MoreVertical />
+            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="right" className="w-44">
             {onRunNow && (

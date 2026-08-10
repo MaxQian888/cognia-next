@@ -8,6 +8,7 @@ import { useState } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import { Clock, CheckCircle, XCircle, RefreshCw, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { formatDuration } from "@/lib/scheduler/format-utils"
 import type { TaskExecution, TaskExecutionStatus } from "@/types/scheduler"
@@ -95,8 +96,10 @@ function ExecutionErrorLine({
         {error}
       </p>
       {isLong && (
-        <button
+        <Button
           type="button"
+          variant="link"
+          size="xs"
           data-testid="error-toggle"
           aria-expanded={expanded}
           onClick={(e) => {
@@ -104,10 +107,10 @@ function ExecutionErrorLine({
             setExpanded((v) => !v)
           }}
           onKeyDown={(e) => e.stopPropagation()}
-          className="mt-0.5 text-[10px] text-muted-foreground underline-offset-2 hover:underline"
+          className="mt-0.5 h-auto p-0 text-[10px] text-muted-foreground"
         >
           {expanded ? collapseLabel : expandLabel}
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -206,12 +209,13 @@ export function TaskExecutionHistory({
               <p className="text-xs text-muted-foreground truncate">
                 {formatTimestamp(execution.startedAt, format)}
                 {execution.triggerSource && execution.triggerSource !== "schedule" && (
-                  <span
-                    className="ml-1.5 inline-flex items-center rounded-full border border-border/50 px-1.5 text-[10px]"
+                  <Badge
+                    variant="outline"
+                    className="ml-1.5 rounded-full px-1.5 text-[10px]"
                     data-testid="execution-trigger-source"
                   >
                     {t(`triggerSources.${execution.triggerSource}`)}
-                  </span>
+                  </Badge>
                 )}
               </p>
 

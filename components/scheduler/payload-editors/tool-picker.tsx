@@ -83,19 +83,25 @@ export function ToolPicker({ value, onChange, disabled, testId }: ToolPickerProp
     <div className="space-y-3" data-testid={testId}>
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
         {SDK_BUILTIN_TOOLS.map((name) => (
-          <label
+          <div
             key={name}
             className="flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-sm hover:bg-muted/40"
             title={name}
           >
             <Checkbox
+              id={`${testId}-builtin-${name}`}
               checked={selected.has(name)}
               onCheckedChange={() => toggle(name)}
               disabled={disabled}
               data-testid={`${testId}-builtin-${name}`}
             />
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">{name}</span>
-          </label>
+            <Label
+              htmlFor={`${testId}-builtin-${name}`}
+              className="min-w-0 flex-1 truncate font-mono text-xs"
+            >
+              {name}
+            </Label>
+          </div>
         ))}
       </div>
 
@@ -110,15 +116,17 @@ export function ToolPicker({ value, onChange, disabled, testId }: ToolPickerProp
                 data-testid={`${testId}-custom-${name}`}
               >
                 <span className="font-mono">{name}</span>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={() => removeExtra(name)}
                   disabled={disabled}
                   aria-label={t("tools.remove")}
-                  className="rounded-sm text-muted-foreground hover:bg-background hover:text-foreground"
+                  className="text-muted-foreground"
                 >
-                  <X className="h-3 w-3" />
-                </button>
+                  <X />
+                </Button>
               </span>
             ))}
           </div>

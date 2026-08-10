@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import type { TaskConfirmationRequest } from "@/types/scheduler"
 
@@ -183,16 +184,16 @@ export function TaskConfirmationDialog({
 
               {/* Confirmation checkbox for critical operations */}
               {isCritical && (
-                <label className="flex cursor-pointer items-center gap-2 rounded-md border p-3">
+                <div className="flex items-center gap-2 rounded-md border p-3">
                   <Checkbox
                     id="understand-risk"
                     checked={understood}
                     onCheckedChange={(checked) => setUnderstood(checked === true)}
                   />
-                  <span className="text-xs">
+                  <Label htmlFor="understand-risk" className="cursor-pointer text-xs">
                     {t("understandRisks") || "I understand the risks and confirm to proceed"}
-                  </span>
-                </label>
+                  </Label>
+                </div>
               )}
             </div>
           </AlertDialogDescription>

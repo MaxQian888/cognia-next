@@ -20,6 +20,7 @@ import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Toggle } from "@/components/ui/toggle"
 import type { ScheduledTask } from "@/types/scheduler"
 import {
   computeUpcomingOccurrences,
@@ -195,11 +196,10 @@ export function SchedulerCalendarView({
               const isToday = key === todayKey
               const isSelected = key === selectedKey
               return (
-                <button
+                <Toggle
                   key={key}
-                  type="button"
-                  onClick={() => setSelectedKey(key)}
-                  aria-pressed={isSelected}
+                  pressed={isSelected}
+                  onPressedChange={() => setSelectedKey(key)}
                   aria-label={t("calendar.dayAria", {
                     day: cell.date.getDate(),
                     count,
@@ -230,7 +230,7 @@ export function SchedulerCalendarView({
                     {cell.date.getDate()}
                   </span>
                   {count > 0 && <DensityDots count={count} selected={isSelected} />}
-                </button>
+                </Toggle>
               )
             })}
           </div>

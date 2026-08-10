@@ -21,7 +21,12 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
 import type { ScheduledTask, SystemTask, TaskStatistics } from "@/types/scheduler"
 import {
@@ -239,26 +244,30 @@ export function SchedulerSidebarContent({
 
       {/* Search */}
       <div className="px-3 py-2 group-data-[collapsible=icon]:hidden">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
+        <InputGroup className="h-8">
+          <InputGroupAddon align="inline-start">
+            <Search aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupInput
             placeholder={t("searchTasks")}
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="h-8 pl-8 pr-7 text-sm"
+            className="text-sm"
             aria-label={t("searchTasks")}
           />
           {searchQuery && (
-            <button
-              type="button"
-              aria-label={t("clearSearch")}
-              onClick={() => onSearchChange("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                type="button"
+                size="icon-xs"
+                aria-label={t("clearSearch")}
+                onClick={() => onSearchChange("")}
+              >
+                <X />
+              </InputGroupButton>
+            </InputGroupAddon>
           )}
-        </div>
+        </InputGroup>
       </div>
 
       {/* Status filter chips */}

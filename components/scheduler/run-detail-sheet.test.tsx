@@ -108,8 +108,10 @@ describe("RunDetailSheet", () => {
         })}
       />
     )
-    const stack = screen.getByTestId("run-sheet-stack") as HTMLDetailsElement
-    expect(stack.open).toBe(false)
+    const stack = screen.getByTestId("run-sheet-stack")
+    expect(stack).toHaveAttribute("data-state", "closed")
+    fireEvent.click(screen.getByRole("button", { name: "stackTrace" }))
+    expect(stack).toHaveAttribute("data-state", "open")
     // Bounded + wrapping, so opening it can't stretch the sheet indefinitely.
     const pre = stack.querySelector("pre")!
     expect(pre.className).toContain("max-h-64")

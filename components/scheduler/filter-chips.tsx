@@ -1,6 +1,6 @@
 "use client"
 
-import { cn } from "@/lib/utils"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 interface FilterChip {
   key: string
@@ -16,26 +16,30 @@ interface FilterChipsProps {
 
 export function FilterChips({ filters, activeFilter, onFilterChange }: FilterChipsProps) {
   return (
-    <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+    <ToggleGroup
+      type="single"
+      value={activeFilter}
+      onValueChange={(value) => {
+        if (value) onFilterChange(value)
+      }}
+      variant="outline"
+      size="sm"
+      spacing={1.5}
+      className="flex w-full flex-wrap justify-start px-3 pb-2"
+    >
       {filters.map((filter) => (
-        <button
+        <ToggleGroupItem
           key={filter.key}
-          type="button"
+          value={filter.key}
           data-active={activeFilter === filter.key}
-          onClick={() => onFilterChange(filter.key)}
-          className={cn(
-            "shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-            activeFilter === filter.key
-              ? "border-primary/30 bg-primary/10 text-primary"
-              : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
-          )}
+          className="h-6 rounded-full px-2.5 text-[11px] data-[state=on]:border-primary/30 data-[state=on]:bg-primary/10 data-[state=on]:text-primary"
         >
           {filter.label}
           {filter.count !== undefined && (
             <span className="ml-1 tabular-nums text-[10px] opacity-70">{filter.count}</span>
           )}
-        </button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </ToggleGroup>
   )
 }

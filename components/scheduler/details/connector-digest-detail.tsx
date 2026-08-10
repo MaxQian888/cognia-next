@@ -132,16 +132,18 @@ export function ConnectorDigestDetail({ taskId, onSelectRun }: ConnectorDigestDe
           <ul className="space-y-1" data-testid="connector-digest-recent-runs">
             {runs.map((run) => (
               <li key={run.unifiedId}>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => onSelectRun?.(run)}
-                  className="w-full text-left flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent"
+                  className="h-auto w-full justify-between gap-2 px-2 py-1.5 text-left text-xs"
                 >
                   <span className="truncate">{new Date(run.startedAt).toLocaleString()}</span>
                   <span className="shrink-0 text-muted-foreground">
                     {t(`unifiedRunStatuses.${run.status}`) || run.status}
                   </span>
-                </button>
+                </Button>
               </li>
             ))}
           </ul>

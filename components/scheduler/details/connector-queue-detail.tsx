@@ -11,6 +11,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { InspectRow } from "./_shared/inspect-row"
 import { useUnifiedRecentRuns } from "@/hooks/scheduler/use-unified-recent-runs"
 import { getDb } from "@/lib/db/schema"
+import { Button } from "@/components/ui/button"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
 export interface ConnectorQueueDetailProps {
@@ -70,16 +71,18 @@ export function ConnectorQueueDetail({ onSelectRun }: ConnectorQueueDetailProps)
           <ul className="space-y-1" data-testid="connector-queue-recent-dispatches">
             {runs.map((run) => (
               <li key={run.unifiedId}>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => onSelectRun?.(run)}
-                  className="w-full text-left flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent"
+                  className="h-auto w-full justify-between gap-2 px-2 py-1.5 text-left text-xs"
                 >
                   <span className="truncate">{run.itemName}</span>
                   <span className="shrink-0 text-muted-foreground">
                     {t(`unifiedRunStatuses.${run.status}`) || run.status}
                   </span>
-                </button>
+                </Button>
               </li>
             ))}
           </ul>

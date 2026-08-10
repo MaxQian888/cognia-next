@@ -13,6 +13,7 @@
 import { useTranslations } from "next-intl"
 import { Activity } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useUnifiedRecentRuns } from "@/hooks/scheduler/use-unified-recent-runs"
 import { kindConfig } from "./details/_shared/kind-config"
@@ -69,13 +70,15 @@ export function UnifiedRecentRuns({ limit = 5, onSelectRun, className }: Unified
               const isClickable = !!onSelectRun
               return (
                 <li key={run.unifiedId}>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="sm"
                     data-testid={`unified-run-row-${run.unifiedId}`}
                     onClick={isClickable ? () => onSelectRun!(run) : undefined}
                     disabled={!isClickable}
                     className={cn(
-                      "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left",
+                      "h-auto w-full justify-start gap-3 px-2 py-2 text-left",
                       isClickable && "hover:bg-accent/50"
                     )}
                   >
@@ -94,7 +97,7 @@ export function UnifiedRecentRuns({ limit = 5, onSelectRun, className }: Unified
                     <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
                       {formatRelativeTime(startedAt)}
                     </span>
-                  </button>
+                  </Button>
                 </li>
               )
             })}

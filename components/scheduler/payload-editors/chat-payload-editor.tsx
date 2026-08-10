@@ -19,6 +19,7 @@ import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -387,14 +388,15 @@ export function ChatPayloadEditor({
       {/* Tools — collapsible */}
       <Collapsible defaultOpen={!!draft.allowedTools?.length || !!draft.disallowedTools?.length}>
         <CollapsibleTrigger asChild>
-          <button
+          <Button
             type="button"
-            className="flex w-full items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted/50"
+            variant="outline"
+            className="w-full justify-between bg-muted/30"
             data-testid={`${testId}-tools-toggle`}
           >
             <span>{t("payload.tools.heading")}</span>
-            <ChevronDown className="h-4 w-4" />
-          </button>
+            <ChevronDown />
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 space-y-3 rounded-md border p-3">
           <div className="space-y-2">
@@ -423,14 +425,15 @@ export function ChatPayloadEditor({
       {/* MCP servers — collapsible */}
       <Collapsible defaultOpen={draft.mcpMode === "custom"}>
         <CollapsibleTrigger asChild>
-          <button
+          <Button
             type="button"
-            className="flex w-full items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted/50"
+            variant="outline"
+            className="w-full justify-between bg-muted/30"
             data-testid={`${testId}-mcp-toggle`}
           >
             <span>{t("payload.mcp.heading")}</span>
-            <ChevronDown className="h-4 w-4" />
-          </button>
+            <ChevronDown />
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 rounded-md border p-3">
           <McpPicker
@@ -447,14 +450,15 @@ export function ChatPayloadEditor({
       {/* Built-in tools — collapsible */}
       <Collapsible defaultOpen={!!draft.builtinTools && Object.keys(draft.builtinTools).length > 0}>
         <CollapsibleTrigger asChild>
-          <button
+          <Button
             type="button"
-            className="flex w-full items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted/50"
+            variant="outline"
+            className="w-full justify-between bg-muted/30"
             data-testid={`${testId}-builtin-tools-toggle`}
           >
             <span>{t("payload.builtinToolsHeading")}</span>
-            <ChevronDown className="h-4 w-4" />
-          </button>
+            <ChevronDown />
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 rounded-md border p-3">
           <BuiltinToolsToggles
@@ -469,14 +473,15 @@ export function ChatPayloadEditor({
       {/* Additional directories — collapsible */}
       <Collapsible defaultOpen={!!draft.additionalDirectories?.length}>
         <CollapsibleTrigger asChild>
-          <button
+          <Button
             type="button"
-            className="flex w-full items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted/50"
+            variant="outline"
+            className="w-full justify-between bg-muted/30"
             data-testid={`${testId}-additional-dirs-toggle`}
           >
             <span>{t("payload.additionalDirectories.heading")}</span>
-            <ChevronUp className="h-4 w-4" />
-          </button>
+            <ChevronUp />
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 rounded-md border p-3">
           <AdditionalDirectoriesList
@@ -491,14 +496,15 @@ export function ChatPayloadEditor({
       {/* Append system prompt — collapsible */}
       <Collapsible defaultOpen={!!draft.appendSystemPrompt}>
         <CollapsibleTrigger asChild>
-          <button
+          <Button
             type="button"
-            className="flex w-full items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted/50"
+            variant="outline"
+            className="w-full justify-between bg-muted/30"
             data-testid={`${testId}-append-system-toggle`}
           >
             <span>{t("payload.appendSystemPromptHeading")}</span>
-            <ChevronDown className="h-4 w-4" />
-          </button>
+            <ChevronDown />
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 rounded-md border p-3 space-y-2">
           <p className="text-xs text-muted-foreground">{t("payload.appendSystemPromptHelp")}</p>

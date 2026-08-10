@@ -8,6 +8,7 @@ import { useState, useRef, useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { Download, Upload, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
@@ -191,12 +192,12 @@ export function ImportTasksDialog({ open, onOpenChange }: ImportTasksDialogProps
 
         <div className="space-y-4">
           <div>
-            <input
+            <Input
               ref={fileInputRef}
               type="file"
               accept=".json"
               onChange={handleFileChange}
-              className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-2 file:text-xs file:font-medium file:text-primary hover:file:bg-primary/20"
+              className="h-auto py-1.5 text-sm"
             />
             {previewCount > 0 && (
               <Badge variant="secondary" className="mt-2 text-xs">

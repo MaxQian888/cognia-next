@@ -14,6 +14,7 @@
 import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
+import { Progress } from "@/components/ui/progress"
 import type { TaskStatistics } from "@/types/scheduler"
 import { SCHEDULED_ITEM_KINDS, type ScheduledItemKind } from "@/types/scheduler/unified"
 
@@ -25,11 +26,20 @@ export interface SchedulerOverviewSummaryProps {
 }
 
 /** Success-rate colour bands, shared by the number and its meter. */
-export function successRateTone(rate: number): { text: string; bar: string } {
+export function successRateTone(rate: number): {
+  text: string
+  bar: "bg-green-500" | "bg-yellow-500" | "bg-red-500"
+} {
   if (rate >= 90) return { text: "text-green-500", bar: "bg-green-500" }
   if (rate >= 70) return { text: "text-yellow-500", bar: "bg-yellow-500" }
   return { text: "text-red-500", bar: "bg-red-500" }
 }
+
+const progressIndicatorTone = {
+  "bg-green-500": "[&>[data-slot=progress-indicator]]:bg-green-500",
+  "bg-yellow-500": "[&>[data-slot=progress-indicator]]:bg-yellow-500",
+  "bg-red-500": "[&>[data-slot=progress-indicator]]:bg-red-500",
+} as const
 
 /** Percentage of `part` in `total`, guarding the zero-total case. */
 function share(part: number, total: number): number {
@@ -113,16 +123,11 @@ export function SchedulerOverviewSummary({
             {successRate}%
           </p>
 
-          <div
-            className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted"
-            role="progressbar"
-            aria-valuenow={successRate}
-            aria-valuemin={0}
-            aria-valuemax={100}
+          <Progress
+            value={successRate}
             aria-label={t("successRate")}
-          >
-            <span className={cn("block h-full", tone.bar)} style={{ width: `${successRate}%` }} />
-          </div>
+            className={cn("mt-3 h-1.5 bg-muted", progressIndicatorTone[tone.bar])}
+          />
 
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
             <Legend dot="bg-blue-500" label={t("totalExecutions")} value={totalExecutions} />

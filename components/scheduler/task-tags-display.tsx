@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl"
 import { Tag } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 interface TaskTagsDisplayProps {
@@ -25,12 +26,13 @@ export function TaskTagsDisplay({ tags, className }: TaskTagsDisplayProps) {
             <span className="text-sm text-muted-foreground">{t("noTags") || "No tags"}</span>
           ) : (
             tags.map((tag) => (
-              <span
+              <Badge
                 key={tag}
-                className="rounded-full border border-border/50 bg-muted/50 px-2.5 py-0.5 text-xs text-muted-foreground"
+                variant="outline"
+                className="rounded-full text-xs text-muted-foreground"
               >
                 {tag}
-              </span>
+              </Badge>
             ))
           )}
         </div>

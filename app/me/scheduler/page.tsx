@@ -24,7 +24,7 @@ import { useTranslations } from "next-intl"
 import { Search } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
-import { buttonVariants } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Sheet,
   SheetContent,
@@ -522,8 +522,9 @@ export default function MobileSchedulerPage() {
           accessible button. The connector / sync layer keeps Dexie reads
           live, so most users never need this, but a manual control is wired
           for parity with the desktop refresh menu. */}
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => refresh()}
         className="sr-only"
         aria-label={t("refresh") || "Refresh"}

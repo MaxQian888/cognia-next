@@ -24,6 +24,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { formatNextRun } from "@/lib/scheduler/format-utils"
 import { kindConfig } from "./details/_shared/kind-config"
@@ -121,15 +123,14 @@ export const UnifiedTaskSidebarItem = React.memo(function UnifiedTaskSidebarItem
       )}
     >
       {onToggleSelect && (
-        <input
-          type="checkbox"
+        <Checkbox
           checked={!!isSelected}
           onClick={(e) => e.stopPropagation()}
-          onChange={() => onToggleSelect(item)}
+          onCheckedChange={() => onToggleSelect(item)}
           aria-label={t("selectRow") || "Select row"}
           data-testid={`unified-row-checkbox-${item.unifiedId}`}
           className={cn(
-            "h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-border accent-primary transition-opacity",
+            "size-3.5 cursor-pointer transition-opacity",
             // On pointer devices the checkbox is hover-revealed; on touch (no
             // hover) it is always shown so multi-select is discoverable.
             isSelected
@@ -168,21 +169,23 @@ export const UnifiedTaskSidebarItem = React.memo(function UnifiedTaskSidebarItem
       {hasAnyAction && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               aria-label={t("moreOptions") || "More options"}
               data-testid={`unified-row-menu-${item.unifiedId}`}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => e.stopPropagation()}
               className={cn(
-                "flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground",
+                "shrink-0 text-muted-foreground transition-opacity",
                 // Hover-revealed on pointer devices; always visible on touch
                 // (no hover) and while the menu is open.
                 "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
               )}
             >
-              <MoreVertical className="h-3.5 w-3.5" />
-            </button>
+              <MoreVertical />
+            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="right" className="w-44">
             {showRun && (

@@ -10,6 +10,7 @@
 
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
+import { Toggle } from "@/components/ui/toggle"
 import { SCHEDULED_ITEM_KINDS, type ScheduledItemKind } from "@/types/scheduler/unified"
 
 export interface KindFilterChipsProps {
@@ -30,30 +31,34 @@ export function KindFilterChips({
   const totalCount = SCHEDULED_ITEM_KINDS.reduce((sum, k) => sum + (countsByKind[k] ?? 0), 0)
   return (
     <div data-testid="kind-filter-chips" className="flex flex-wrap gap-1.5 px-3 pb-2">
-      <button
-        type="button"
+      <Toggle
+        variant="outline"
+        size="sm"
+        pressed={allActive}
         data-active={allActive}
-        onClick={onClear}
+        onPressedChange={onClear}
         className={cn(chipClass, allActive ? activeClass : inactiveClass)}
       >
         {t("kindFilter.all") || "All"}
         <span className="ml-1 tabular-nums text-[10px] opacity-70">{totalCount}</span>
-      </button>
+      </Toggle>
       {SCHEDULED_ITEM_KINDS.map((kind) => {
         const isActive = selected.has(kind)
         const count = countsByKind[kind] ?? 0
         return (
-          <button
+          <Toggle
             key={kind}
-            type="button"
+            variant="outline"
+            size="sm"
+            pressed={isActive}
             data-active={isActive}
             data-testid={`kind-filter-${kind}`}
-            onClick={() => onToggle(kind)}
+            onPressedChange={() => onToggle(kind)}
             className={cn(chipClass, isActive ? activeClass : inactiveClass)}
           >
             {t(`kindFilter.${kind}`) || labelFallback(kind)}
             <span className="ml-1 tabular-nums text-[10px] opacity-70">{count}</span>
-          </button>
+          </Toggle>
         )
       })}
     </div>

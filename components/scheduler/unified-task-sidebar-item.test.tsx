@@ -183,7 +183,7 @@ describe("UnifiedTaskSidebarItem", () => {
     expect(checkbox.className).toContain("[@media(hover:none)]:opacity-100")
   })
 
-  it("reflects the isSelected prop on the checkbox's checked attribute", () => {
+  it("reflects the isSelected prop on the shadcn checkbox state", () => {
     const item = makeItem()
     render(
       <UnifiedTaskSidebarItem
@@ -194,10 +194,9 @@ describe("UnifiedTaskSidebarItem", () => {
         isSelected
       />
     )
-    const checkbox = screen.getByTestId(
-      `unified-row-checkbox-${item.unifiedId}`
-    ) as HTMLInputElement
-    expect(checkbox.checked).toBe(true)
+    const checkbox = screen.getByTestId(`unified-row-checkbox-${item.unifiedId}`)
+    expect(checkbox).toHaveAttribute("data-state", "checked")
+    expect(checkbox).toHaveAttribute("aria-checked", "true")
   })
 
   it("falls back to event-type text for event triggers", () => {

@@ -9,6 +9,7 @@
 import { useTranslations } from "next-intl"
 import { ArrowRight, Calendar, Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
@@ -51,11 +52,13 @@ function UnifiedRecentBlock({ onSelectRun }: { onSelectRun: (run: UnifiedExecuti
       {runs.map((run) => {
         const when = run.finishedAt ?? run.startedAt
         return (
-          <button
+          <Button
             key={run.unifiedId}
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => onSelectRun(run)}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-muted/50"
+            className="h-auto w-full justify-start gap-2 px-2 py-1.5 text-left"
             data-testid={`upcoming-rail-recent-${run.unifiedId}`}
           >
             <span
@@ -75,7 +78,7 @@ function UnifiedRecentBlock({ onSelectRun }: { onSelectRun: (run: UnifiedExecuti
             <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
               {formatRelativeTime(new Date(when))}
             </span>
-          </button>
+          </Button>
         )
       })}
     </div>
@@ -117,11 +120,13 @@ export function SchedulerUpcomingRail({
         ) : (
           <div className="space-y-0.5">
             {upcoming.map((task) => (
-              <button
+              <Button
                 key={task.id}
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => onSelectTask(task.id)}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-muted/50"
+                className="h-auto w-full justify-start gap-2 px-2 py-1.5 text-left"
                 data-testid={`upcoming-rail-upcoming-${task.id}`}
               >
                 <span
@@ -139,7 +144,7 @@ export function SchedulerUpcomingRail({
                   className="h-3 w-3 shrink-0 text-muted-foreground/40"
                   aria-hidden="true"
                 />
-              </button>
+              </Button>
             ))}
           </div>
         )}

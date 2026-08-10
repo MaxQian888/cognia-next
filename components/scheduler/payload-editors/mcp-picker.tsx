@@ -73,20 +73,28 @@ export function McpPicker({
         className="grid grid-cols-1 sm:grid-cols-2 gap-2"
         disabled={disabled}
       >
-        <label className="flex items-start gap-2 rounded-md border p-2 hover:bg-muted/40">
-          <RadioGroupItem value="default" data-testid={`${testId}-mode-default`} />
-          <div className="space-y-0.5">
+        <div className="flex items-start gap-2 rounded-md border p-2 hover:bg-muted/40">
+          <RadioGroupItem
+            id={`${testId}-mode-default`}
+            value="default"
+            data-testid={`${testId}-mode-default`}
+          />
+          <Label htmlFor={`${testId}-mode-default`} className="flex-1 flex-col items-start gap-0.5">
             <p className="text-sm font-medium">{t("mcp.modes.default.label")}</p>
             <p className="text-xs text-muted-foreground">{t("mcp.modes.default.help")}</p>
-          </div>
-        </label>
-        <label className="flex items-start gap-2 rounded-md border p-2 hover:bg-muted/40">
-          <RadioGroupItem value="custom" data-testid={`${testId}-mode-custom`} />
-          <div className="space-y-0.5">
+          </Label>
+        </div>
+        <div className="flex items-start gap-2 rounded-md border p-2 hover:bg-muted/40">
+          <RadioGroupItem
+            id={`${testId}-mode-custom`}
+            value="custom"
+            data-testid={`${testId}-mode-custom`}
+          />
+          <Label htmlFor={`${testId}-mode-custom`} className="flex-1 flex-col items-start gap-0.5">
             <p className="text-sm font-medium">{t("mcp.modes.custom.label")}</p>
             <p className="text-xs text-muted-foreground">{t("mcp.modes.custom.help")}</p>
-          </div>
-        </label>
+          </Label>
+        </div>
       </RadioGroup>
 
       {mode === "custom" && (
@@ -105,17 +113,21 @@ export function McpPicker({
           {servers && servers.length > 0 && (
             <div className="space-y-1.5">
               {servers.map((srv) => (
-                <label
+                <div
                   key={srv.id}
                   className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-sm hover:bg-muted/40"
                 >
                   <Checkbox
+                    id={`${testId}-server-${srv.id}`}
                     checked={selected.has(srv.id)}
                     onCheckedChange={() => toggle(srv.id)}
                     disabled={disabled || !srv.enabled}
                     data-testid={`${testId}-server-${srv.id}`}
                   />
-                  <div className="min-w-0 flex-1">
+                  <Label
+                    htmlFor={`${testId}-server-${srv.id}`}
+                    className="min-w-0 flex-1 flex-col items-start gap-0"
+                  >
                     <p className="truncate font-medium">
                       {srv.name}
                       {!srv.enabled && (
@@ -127,8 +139,8 @@ export function McpPicker({
                     <p className="truncate text-xs text-muted-foreground font-mono">
                       {srv.transport}
                     </p>
-                  </div>
-                </label>
+                  </Label>
+                </div>
               ))}
             </div>
           )}

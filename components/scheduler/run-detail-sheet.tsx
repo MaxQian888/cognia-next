@@ -15,6 +15,8 @@ import { useTranslations } from "next-intl"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { ChevronRight, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Badge } from "@/components/ui/badge"
 import { InspectRow } from "./details/_shared/inspect-row"
 import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 import { toRunStatusPill, type UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
@@ -62,12 +64,13 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
               <p className="text-xs text-muted-foreground mt-1">
                 {t(`kindFilter.${run.kind}`)} · {run.origin.tableName}
                 {run.triggerSource && (
-                  <span
-                    className="ml-1.5 inline-flex items-center rounded-full border border-border/50 px-1.5 text-[10px]"
+                  <Badge
+                    variant="outline"
+                    className="ml-1.5 rounded-full px-1.5 text-[10px]"
                     data-testid="run-sheet-trigger-source"
                   >
                     {t(`triggerSources.${run.triggerSource}`)}
-                  </span>
+                  </Badge>
                 )}
               </p>
             </div>
@@ -127,51 +130,61 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
                     scroll them in place so expanding never buries the logs
                     section below. */}
                 {run.error.stack && (
-                  <details className="mt-2" data-testid="run-sheet-stack">
-                    <summary className="cursor-pointer select-none text-[10px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground">
-                      {t("stackTrace")}
-                    </summary>
-                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-muted-foreground">
-                      {run.error.stack}
-                    </pre>
-                  </details>
+                  <Collapsible className="mt-2" data-testid="run-sheet-stack">
+                    <CollapsibleTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="xs"
+                        className="h-auto p-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                      >
+                        {t("stackTrace")}
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-muted-foreground">
+                        {run.error.stack}
+                      </pre>
+                    </CollapsibleContent>
+                  </Collapsible>
                 )}
               </div>
             </section>
           )}
 
           {run.logs && run.logs.length > 0 && (
-            <section>
-              <button
-                type="button"
-                className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                onClick={() => setShowLogs((v) => !v)}
-                data-testid="run-sheet-logs-toggle"
-              >
-                {showLogs ? (
-                  <ChevronDown className="h-3 w-3" />
-                ) : (
-                  <ChevronRight className="h-3 w-3" />
-                )}
-                {t("logs")} ({run.logs.length})
-              </button>
-              {showLogs && (
-                <ul className="mt-2 space-y-1" data-testid="run-sheet-logs">
-                  {run.logs.map((log, i) => (
-                    <li
-                      key={`${log.ts}-${i}`}
-                      className="rounded bg-muted/50 px-2 py-1 text-[11px] font-mono"
-                    >
-                      <span className="text-muted-foreground">
-                        [{new Date(log.ts).toISOString()}]
-                      </span>{" "}
-                      <span className={logLevelColor(log.level)}>{log.level.toUpperCase()}</span>{" "}
-                      <span>{log.message}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            <Collapsible open={showLogs} onOpenChange={setShowLogs} asChild>
+              <section>
+                <CollapsibleTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="h-auto px-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                    data-testid="run-sheet-logs-toggle"
+                  >
+                    {showLogs ? <ChevronDown /> : <ChevronRight />}
+                    {t("logs")} ({run.logs.length})
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent asChild>
+                  <ul className="mt-2 space-y-1" data-testid="run-sheet-logs">
+                    {run.logs.map((log, i) => (
+                      <li
+                        key={`${log.ts}-${i}`}
+                        className="rounded bg-muted/50 px-2 py-1 text-[11px] font-mono"
+                      >
+                        <span className="text-muted-foreground">
+                          [{new Date(log.ts).toISOString()}]
+                        </span>{" "}
+                        <span className={logLevelColor(log.level)}>{log.level.toUpperCase()}</span>{" "}
+                        <span>{log.message}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CollapsibleContent>
+              </section>
+            </Collapsible>
           )}
         </div>
 

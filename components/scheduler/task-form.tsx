@@ -8,6 +8,7 @@ import { useReducer, useCallback } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import { Clock, Calendar, Zap, Bell, Settings, ChevronDown, ChevronUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { TimezoneSelect } from "@/components/scheduler/timezone-select"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -206,19 +207,18 @@ function TaskChipSelect({
           {selected.map((id) => {
             const task = existingTasks.find((t) => t.id === id)
             return (
-              <span
-                key={id}
-                className="inline-flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-1 text-[11px]"
-              >
+              <Badge key={id} variant="secondary" className="gap-1 rounded-full py-1 text-[11px]">
                 {task?.name || id}
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={() => onChange(selected.filter((x) => x !== id))}
                   className="ml-0.5 text-muted-foreground hover:text-destructive"
                 >
                   ×
-                </button>
-              </span>
+                </Button>
+              </Badge>
             )
           })}
         </div>
@@ -852,13 +852,14 @@ export function TaskForm({
       {!initialValues?.name && (
         <Collapsible>
           <CollapsibleTrigger asChild>
-            <button
+            <Button
               type="button"
-              className="flex w-full items-center justify-between rounded-xl border border-dashed border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+              variant="outline"
+              className="h-auto w-full justify-between border-dashed border-primary/30 bg-primary/5 py-3 text-primary hover:bg-primary/10"
             >
               <span>{t("templates") || "Quick Create from Template"}</span>
-              <ChevronDown className="h-4 w-4" />
-            </button>
+              <ChevronDown />
+            </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2">
             <div className="space-y-3">
@@ -870,11 +871,13 @@ export function TaskForm({
                     <p className="mb-1.5 text-xs font-medium text-muted-foreground">{cat.name}</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                       {templates.map((tpl) => (
-                        <button
+                        <Button
                           key={tpl.id}
                           type="button"
+                          variant="outline"
+                          size="sm"
                           onClick={() => applyTemplate(tpl)}
-                          className="flex items-center gap-2.5 rounded-lg border bg-card p-2.5 text-left text-sm transition-all hover:border-primary/50 hover:bg-accent"
+                          className="h-auto justify-start gap-2.5 bg-card p-2.5 text-left whitespace-normal hover:border-primary/50"
                         >
                           <span className="text-base">{tpl.icon}</span>
                           <div className="min-w-0 flex-1">
@@ -883,7 +886,7 @@ export function TaskForm({
                               {tpl.description}
                             </p>
                           </div>
-                        </button>
+                        </Button>
                       ))}
                     </div>
                   </div>
@@ -946,9 +949,12 @@ export function TaskForm({
             <Label className="text-sm font-medium">{t("taskType") || "Task Type"}</Label>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
               {TASK_TYPES.map((type) => (
-                <button
+                <Button
                   key={type.value}
                   type="button"
+                  variant={f.taskType === type.value ? "secondary" : "outline"}
+                  size="sm"
+                  aria-pressed={f.taskType === type.value}
                   onClick={() => handleTaskTypeChange(type.value)}
                   className={cn(
                     "rounded-lg border px-2 py-2 text-xs font-medium transition-all",
@@ -959,7 +965,7 @@ export function TaskForm({
                   )}
                 >
                   {t(`taskTypes.${type.value}`)}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -979,9 +985,11 @@ export function TaskForm({
           {/* Trigger Type Selection */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {TRIGGER_TYPES.map((type) => (
-              <button
+              <Button
                 key={type.value}
                 type="button"
+                variant={f.triggerType === type.value ? "secondary" : "outline"}
+                aria-pressed={f.triggerType === type.value}
                 onClick={() => updateForm({ triggerType: type.value })}
                 className={cn(
                   "flex items-center gap-2.5 rounded-lg border p-3 text-left transition-all",
@@ -1013,7 +1021,7 @@ export function TaskForm({
                     {t(`triggerTypes.${type.value}`)}
                   </div>
                 </div>
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -1050,13 +1058,15 @@ export function TaskForm({
                       <p className="rounded-md bg-green-500/10 px-2 py-1 text-xs text-green-600 dark:text-green-400">
                         {describeCronExpression(f.cronExpression, tCron)}
                       </p>
-                      <button
+                      <Button
                         type="button"
+                        variant="link"
+                        size="xs"
                         onClick={handleFormatCron}
-                        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                        className="h-auto p-0 text-[10px] text-muted-foreground"
                       >
                         {t("formatExpression") || "Format expression"}
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -1399,8 +1409,10 @@ export function TaskForm({
             <div className="flex gap-2">
               {(["desktop", "toast", "im"] as NotificationChannel[]).map((channel) => (
                 <div key={channel} className="flex-1 space-y-1">
-                  <button
+                  <Button
                     type="button"
+                    variant={f.notificationChannels.includes(channel) ? "secondary" : "outline"}
+                    aria-pressed={f.notificationChannels.includes(channel)}
                     onClick={() => toggleChannel(channel)}
                     className={cn(
                       "w-full rounded-lg border px-3 py-2 text-sm font-medium capitalize transition-all",
@@ -1411,18 +1423,20 @@ export function TaskForm({
                     )}
                   >
                     {channel}
-                  </button>
+                  </Button>
                   {f.notificationChannels.includes(channel) && (
-                    <button
+                    <Button
                       type="button"
+                      variant="link"
+                      size="xs"
                       onClick={() => handleTestNotification(channel)}
                       disabled={f.isTestingNotification}
-                      className="w-full text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                      className="h-auto w-full p-0 text-[10px] text-muted-foreground"
                     >
                       {f.isTestingNotification
                         ? t("testing") || "Testing..."
                         : t("testChannel") || "Test"}
-                    </button>
+                    </Button>
                   )}
                 </div>
               ))}
@@ -1465,11 +1479,11 @@ export function TaskForm({
       {/* Advanced Settings */}
       <Collapsible open={f.showAdvanced} onOpenChange={(v) => updateForm({ showAdvanced: v })}>
         <CollapsibleTrigger asChild>
-          <button
+          <Button
             type="button"
+            variant="outline"
             className={cn(
-              "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-sm font-medium transition-all",
-              "hover:bg-muted/50",
+              "h-auto w-full justify-between py-3",
               f.showAdvanced ? "bg-muted/30" : "bg-background"
             )}
           >
@@ -1482,7 +1496,7 @@ export function TaskForm({
             ) : (
               <ChevronDown className="h-4 w-4" />
             )}
-          </button>
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 rounded-xl border bg-muted/20 p-3 sm:p-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1682,21 +1696,24 @@ export function TaskForm({
                   {f.dependsOn.map((depId) => {
                     const depTask = existingTasks.find((t) => t.id === depId)
                     return (
-                      <span
+                      <Badge
                         key={depId}
-                        className="inline-flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-1 text-[11px]"
+                        variant="secondary"
+                        className="gap-1 rounded-full py-1 text-[11px]"
                       >
                         {depTask?.name || depId}
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="icon-xs"
                           onClick={() =>
                             updateForm({ dependsOn: f.dependsOn.filter((id) => id !== depId) })
                           }
                           className="ml-0.5 text-muted-foreground hover:text-destructive"
                         >
                           ×
-                        </button>
-                      </span>
+                        </Button>
+                      </Badge>
                     )
                   })}
                 </div>

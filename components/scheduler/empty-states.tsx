@@ -3,6 +3,14 @@
 import { useTranslations } from "next-intl"
 import { CalendarPlus, AlertTriangle, SearchX } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 
 export interface TaskListEmptyStateProps {
@@ -26,61 +34,61 @@ export function TaskListEmptyState({
 
   if (variant === "filtered") {
     return (
-      <div
+      <Empty
         data-testid="scheduler-empty-state-filtered"
         role="status"
-        className={cn(
-          "flex flex-col items-center justify-center gap-3 px-4 py-10 text-center",
-          className
-        )}
+        className={cn("gap-3 px-4 py-10", className)}
       >
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-          <SearchX className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-sm font-medium">{t("emptyFilteredTitle") || "No matching tasks"}</p>
-          <p className="text-xs text-muted-foreground max-w-[14rem]">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <SearchX aria-hidden="true" />
+          </EmptyMedia>
+          <EmptyTitle className="text-sm">
+            {t("emptyFilteredTitle") || "No matching tasks"}
+          </EmptyTitle>
+          <EmptyDescription className="max-w-[14rem] text-xs">
             {t("emptyFilteredDescription") || "Try different search terms or clear filters."}
-          </p>
-        </div>
+          </EmptyDescription>
+        </EmptyHeader>
         {onClearFilters && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onClearFilters}
-            data-testid="scheduler-empty-clear-filters"
-          >
-            {t("emptyClearFilters") || "Clear filters"}
-          </Button>
+          <EmptyContent>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClearFilters}
+              data-testid="scheduler-empty-clear-filters"
+            >
+              {t("emptyClearFilters") || "Clear filters"}
+            </Button>
+          </EmptyContent>
         )}
-      </div>
+      </Empty>
     )
   }
 
   return (
-    <div
+    <Empty
       data-testid="scheduler-empty-state"
       role="status"
-      className={cn(
-        "flex flex-col items-center justify-center gap-3 px-4 py-12 text-center",
-        className
-      )}
+      className={cn("gap-3 px-4 py-12", className)}
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-        <CalendarPlus className="h-5 w-5 text-primary" aria-hidden="true" />
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm font-medium">{t("emptyTitle") || "No scheduled tasks yet"}</p>
-        <p className="text-xs text-muted-foreground max-w-[16rem]">
+      <EmptyHeader>
+        <EmptyMedia variant="icon" className="bg-primary/10 text-primary">
+          <CalendarPlus aria-hidden="true" />
+        </EmptyMedia>
+        <EmptyTitle className="text-sm">{t("emptyTitle") || "No scheduled tasks yet"}</EmptyTitle>
+        <EmptyDescription className="max-w-[16rem] text-xs">
           {t("emptyDescription") || "Create your first scheduled task to automate recurring work."}
-        </p>
-      </div>
+        </EmptyDescription>
+      </EmptyHeader>
       {onCreate && (
-        <Button size="sm" onClick={onCreate} data-testid="scheduler-empty-create">
-          {t("emptyCreateCta") || "Create task"}
-        </Button>
+        <EmptyContent>
+          <Button size="sm" onClick={onCreate} data-testid="scheduler-empty-create">
+            {t("emptyCreateCta") || "Create task"}
+          </Button>
+        </EmptyContent>
       )}
-    </div>
+    </Empty>
   )
 }
 
@@ -98,35 +106,34 @@ export interface PanelErrorStateProps {
 export function PanelErrorState({ title, description, onRetry, className }: PanelErrorStateProps) {
   const t = useTranslations("scheduler")
   return (
-    <div
+    <Empty
       data-testid="scheduler-panel-error"
       role="alert"
-      className={cn(
-        "flex flex-col items-center justify-center gap-3 px-4 py-10 text-center",
-        className
-      )}
+      className={cn("gap-3 px-4 py-10", className)}
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-        <AlertTriangle className="h-5 w-5 text-destructive" aria-hidden="true" />
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm font-medium">
+      <EmptyHeader>
+        <EmptyMedia variant="icon" className="bg-destructive/10 text-destructive">
+          <AlertTriangle aria-hidden="true" />
+        </EmptyMedia>
+        <EmptyTitle className="text-sm">
           {title || t("panelErrorTitle") || "Something went wrong"}
-        </p>
-        <p className="text-xs text-muted-foreground max-w-[18rem]">
+        </EmptyTitle>
+        <EmptyDescription className="max-w-[18rem] text-xs">
           {description || t("panelErrorDescription") || "This panel failed to render."}
-        </p>
-      </div>
+        </EmptyDescription>
+      </EmptyHeader>
       {onRetry && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onRetry}
-          data-testid="scheduler-panel-error-retry"
-        >
-          {t("panelErrorRetry") || "Retry"}
-        </Button>
+        <EmptyContent>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRetry}
+            data-testid="scheduler-panel-error-retry"
+          >
+            {t("panelErrorRetry") || "Retry"}
+          </Button>
+        </EmptyContent>
       )}
-    </div>
+    </Empty>
   )
 }
