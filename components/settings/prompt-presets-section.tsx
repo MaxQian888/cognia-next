@@ -823,19 +823,21 @@ function Chip({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="sm"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+        "h-auto rounded-full px-2.5 py-0.5 text-xs font-normal",
         active
           ? "border-primary bg-primary/10 text-foreground"
           : "border-border bg-muted/30 text-muted-foreground hover:bg-muted"
       )}
     >
       {children}
-    </button>
+    </Button>
   )
 }
 

@@ -357,9 +357,10 @@ export function ThemeTab() {
             const swatches = PRESET_SWATCHES[preset]
             const active = colorTheme === preset && !activeCustomThemeId && !activePluginThemeId
             return (
-              <button
+              <Button
                 key={preset}
                 type="button"
+                variant="outline"
                 onClick={() => {
                   // Selecting a preset clears any active custom OR plugin
                   // theme (setActiveCustomTheme(null) nulls both pointers).
@@ -367,7 +368,7 @@ export function ThemeTab() {
                   void save({ colorTheme: preset })
                 }}
                 className={cn(
-                  "flex items-center gap-2 rounded-md border-2 px-2 py-2 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "h-auto justify-start gap-2 border-2 px-2 py-2 text-left text-xs font-normal",
                   active ? "border-primary" : "border-border hover:border-foreground/30"
                 )}
                 aria-pressed={active}
@@ -377,7 +378,7 @@ export function ThemeTab() {
                   <span className="size-3 rounded-full" style={{ background: swatches.dark }} />
                 </span>
                 <span className="truncate">{t(`colorPresets.${preset}`)}</span>
-              </button>
+              </Button>
             )
           })}
         </div>

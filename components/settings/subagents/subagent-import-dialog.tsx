@@ -352,16 +352,17 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3">
-                <button
+                <Button
                   type="button"
+                  variant="outline"
                   onClick={() => fileInputRef.current?.click()}
-                  className="rounded border border-dashed p-4 text-center cursor-pointer hover:bg-accent transition-colors"
+                  className="h-auto whitespace-normal border-dashed p-4 text-center"
                   data-testid="subagent-import-web-pick-files"
                 >
                   <FileTextIcon className="mx-auto mb-2 size-6 text-muted-foreground" />
                   <p className="text-sm font-medium">{t("pickFiles")}</p>
                   <p className="text-xs text-muted-foreground">{t("webPickFormats")}</p>
-                </button>
+                </Button>
                 <Input
                   ref={fileInputRef}
                   data-testid="subagent-import-file-input"
@@ -371,16 +372,17 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
                   className="hidden"
                   onChange={handleBrowserFiles}
                 />
-                <button
+                <Button
                   type="button"
+                  variant="outline"
                   onClick={() => folderInputRef.current?.click()}
-                  className="rounded border border-dashed p-4 text-center cursor-pointer hover:bg-accent transition-colors"
+                  className="h-auto whitespace-normal border-dashed p-4 text-center"
                   data-testid="subagent-import-web-pick-folder"
                 >
                   <FolderOpenIcon className="mx-auto mb-2 size-6 text-muted-foreground" />
                   <p className="text-sm font-medium">{t("pickFolder")}</p>
                   <p className="text-xs text-muted-foreground">{t("webPickFormats")}</p>
-                </button>
+                </Button>
                 <Input
                   ref={folderInputRef}
                   data-testid="subagent-import-folder-input"

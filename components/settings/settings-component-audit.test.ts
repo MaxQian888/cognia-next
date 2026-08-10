@@ -33,13 +33,18 @@ describe("settings component primitives", () => {
       expect.arrayContaining([
         "components/settings/a2ui/templates-tab.tsx",
         "components/settings/actions/settings-actions-menu.tsx",
+        "components/settings/agent/custom-mode-settings.tsx",
         "components/settings/appearance/components/appearance-config-toolbar.tsx",
         "components/settings/appearance/components/color-token-row.tsx",
         "components/settings/appearance/components/wallpaper-uploader.tsx",
         "components/settings/appearance/tabs/custom-theme-tab.tsx",
+        "components/settings/appearance/tabs/theme-tab.tsx",
+        "components/settings/characters-section.tsx",
         "components/settings/connections/tabs/labels-tab.tsx",
         "components/settings/pet/pet-model-manager.tsx",
         "components/settings/profile/profile-avatar-picker.tsx",
+        "components/settings/prompt-presets-section.tsx",
+        "components/settings/subagents/subagent-import-dialog.tsx",
         "components/settings/tray-section.tsx",
         "components/settings/provider/model-list-dialog.tsx",
         "components/settings/provider/provider-import-export.tsx",
@@ -55,6 +60,6 @@ describe("settings component primitives", () => {
         "components/settings/tray-panel/tray-panel-field-editor.tsx",
       ])
     )
-    expect(violations.length).toBeLessThanOrEqual(68)
+    expect(violations.length).toBeLessThanOrEqual(63)
   })
 })

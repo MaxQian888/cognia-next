@@ -481,8 +481,9 @@ export function CustomModeSettings() {
                 onCheckedChange={() => toggleModeSelection(mode.id)}
                 aria-label={tCustomMode("selectMode", { name: mode.name })}
               />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 data-testid={`custom-mode-row-${mode.id}`}
                 data-active={mode.id === activeMode?.id}
                 aria-current={mode.id === activeMode?.id ? "true" : undefined}
@@ -491,7 +492,7 @@ export function CustomModeSettings() {
                   setMobileSheetOpen(false)
                 }}
                 className={cn(
-                  "flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 text-left transition-colors",
+                  "h-auto min-w-0 flex-1 items-start justify-start gap-2 whitespace-normal rounded-md px-2 py-2 text-left font-normal transition-colors",
                   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                   mode.id === activeMode?.id
                     ? "bg-accent text-accent-foreground"
@@ -514,7 +515,7 @@ export function CustomModeSettings() {
                     {mode.description || tCustomMode("noDescription")}
                   </span>
                 </span>
-              </button>
+              </Button>
             </div>
           ))
         )}

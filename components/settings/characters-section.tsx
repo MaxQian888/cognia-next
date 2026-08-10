@@ -1448,9 +1448,11 @@ function PackRow({
           {packDescription && (
             <p className="mt-0.5 text-xs text-muted-foreground">{packDescription}</p>
           )}
-          <button
+          <Button
             type="button"
-            className="mt-1 text-left text-[11px] text-muted-foreground hover:text-foreground"
+            variant="ghost"
+            size="sm"
+            className="mt-1 h-auto justify-start p-0 text-left text-[11px] font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
             onClick={() => setExpanded((v) => !v)}
             aria-label={
               expanded
@@ -1460,7 +1462,7 @@ function PackRow({
           >
             {t("packs.characterCount", { count: characters.length })}
             <span aria-hidden> {expanded ? "▾" : "▸"}</span>
-          </button>
+          </Button>
           {expanded && (
             <ul className="mt-2 space-y-1 border-l-2 border-border pl-3">
               {characters.map((ch) => (
@@ -1990,11 +1992,13 @@ export function CharacterEditor({
           />
           <div className="grid grid-cols-4 gap-1">
             {COLOR_PALETTE.map((c) => (
-              <button
+              <Button
                 key={c}
                 type="button"
+                variant="outline"
+                size="icon"
                 onClick={() => setS({ ...s, avatarColor: c })}
-                className="size-4 rounded-full ring-1 ring-border"
+                className="size-4 rounded-full p-0 ring-1 ring-border"
                 style={{
                   backgroundColor: c,
                   outline: s.avatarColor === c ? "2px solid var(--ring)" : undefined,
@@ -2016,13 +2020,15 @@ export function CharacterEditor({
               />
             </label>
             {s.avatarImageDataUrl && (
-              <button
+              <Button
                 type="button"
-                className="text-[10px] text-muted-foreground underline-offset-2 hover:underline"
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-[10px] text-muted-foreground"
                 onClick={() => setS({ ...s, avatarImageDataUrl: "" })}
               >
                 {tEditor("avatarImage.clear")}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -2954,12 +2960,14 @@ function ItemMultiSelect({
             const active = selectedIds.includes(it.id)
             const order = active ? selectedIds.indexOf(it.id) + 1 : null
             return (
-              <button
+              <Button
                 key={it.id}
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={() => toggle(it.id)}
                 className={
-                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors " +
+                  "h-auto gap-1 rounded-full px-2 py-0.5 text-xs font-normal " +
                   (active
                     ? "border-primary bg-primary/10 text-foreground"
                     : "border-border bg-muted/30 text-muted-foreground hover:bg-muted")
@@ -2970,7 +2978,7 @@ function ItemMultiSelect({
                   <span className="font-mono text-[10px] text-muted-foreground">#{order}</span>
                 )}
                 {it.name}
-              </button>
+              </Button>
             )
           })
         )}
@@ -2987,22 +2995,26 @@ function ItemMultiSelect({
                 className="inline-flex items-center gap-0.5 rounded border bg-background px-1 text-[11px]"
               >
                 {it.name}
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={() => move(id, -1)}
-                  className="px-1 text-muted-foreground hover:text-foreground"
+                  className="size-5 text-muted-foreground hover:text-foreground"
                   aria-label={tMS("moveUp", { name: it.name })}
                 >
                   ↑
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={() => move(id, 1)}
-                  className="px-1 text-muted-foreground hover:text-foreground"
+                  className="size-5 text-muted-foreground hover:text-foreground"
                   aria-label={tMS("moveDown", { name: it.name })}
                 >
                   ↓
-                </button>
+                </Button>
               </span>
             )
           })}
