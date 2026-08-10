@@ -183,14 +183,16 @@ export function SectionHeading({
       <span className="h-px flex-1 bg-border/60" aria-hidden />
       {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
       {onDismiss ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           onClick={onDismiss}
           aria-label={dismissLabel}
-          className="-mr-1 shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="-mr-1 size-5 shrink-0 text-muted-foreground/70 hover:text-foreground"
         >
           <XIcon className="size-3.5" aria-hidden />
-        </button>
+        </Button>
       ) : null}
     </div>
   )
@@ -418,12 +420,13 @@ export function EmptyChatState({
             >
               {charPrompts.map((prompt, i) => (
                 <motion.div key={`${i}-${prompt.slice(0, 24)}`} variants={STAGGER_CHILD}>
-                  <button
-                    type="button"
+                  <Suggestion
+                    suggestion={prompt}
+                    variant="ghost"
                     aria-label={prompt}
-                    onClick={() => onUseSample(prompt)}
+                    onClick={onUseSample}
                     className={cn(
-                      "group flex h-full w-full items-center gap-2.5 px-3 py-2.5 text-left",
+                      "group h-full w-full justify-start gap-2.5 whitespace-normal px-3 py-2.5 text-left",
                       QUIET_ITEM_CLASS
                     )}
                   >
@@ -432,7 +435,7 @@ export function EmptyChatState({
                       aria-hidden
                     />
                     <span className="line-clamp-2 text-sm">{prompt}</span>
-                  </button>
+                  </Suggestion>
                 </motion.div>
               ))}
             </motion.div>
@@ -453,12 +456,13 @@ export function EmptyChatState({
             >
               {starters.map(({ key, icon: Icon, title, prompt }) => (
                 <motion.div key={key} variants={STAGGER_CHILD}>
-                  <button
-                    type="button"
+                  <Suggestion
+                    suggestion={prompt}
+                    variant="ghost"
                     aria-label={title}
-                    onClick={() => onUseSample(prompt)}
+                    onClick={onUseSample}
                     className={cn(
-                      "group flex h-full w-full items-start gap-3 px-3 py-2.5 text-left",
+                      "group h-full w-full items-start justify-start gap-3 whitespace-normal px-3 py-2.5 text-left",
                       QUIET_ITEM_CLASS
                     )}
                   >
@@ -471,7 +475,7 @@ export function EmptyChatState({
                         {prompt}
                       </span>
                     </span>
-                  </button>
+                  </Suggestion>
                 </motion.div>
               ))}
             </motion.div>
@@ -485,12 +489,13 @@ export function EmptyChatState({
             <motion.div className="flex flex-col" variants={STAGGER_CONTAINER}>
               {recents.map((s) => (
                 <motion.div key={s.id} variants={STAGGER_CHILD}>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => onResumeSession?.(s.id)}
                     aria-label={s.title}
                     className={cn(
-                      "group flex w-full items-center gap-2.5 px-3 py-2 text-left",
+                      "group h-auto w-full justify-start gap-2.5 whitespace-normal px-3 py-2 text-left font-normal",
                       QUIET_ITEM_CLASS
                     )}
                   >
@@ -502,7 +507,7 @@ export function EmptyChatState({
                     <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
                       {format.relativeTime(s.updatedAt, now)}
                     </span>
-                  </button>
+                  </Button>
                 </motion.div>
               ))}
             </motion.div>

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { escapeHtml, renderHTML, renderSVG, getReactShellHtml } from "./preview-utils"
+import { escapeHtml, renderHTML, renderSVG, getReactShellHtml, sanitizeHTML } from "./preview-utils"
 
 describe("escapeHtml", () => {
   it("escapes the canonical HTML special characters", () => {
@@ -35,6 +35,23 @@ describe("renderHTML / renderSVG", () => {
     renderHTML(doc, "<html><body><script>alert(1)</script><p>safe</p></body></html>")
     expect(doc.body.innerHTML).not.toMatch(/<script/i)
     expect(doc.body.innerHTML.toLowerCase()).toContain("<p>safe</p>")
+  })
+
+  it("sanitizes reusable HTML while preserving safe document content", () => {
+    const sanitized = sanitizeHTML(
+      '<meta http-equiv="refresh" content="0;url=https://evil.example"><table><tbody><tr><td>safe</td></tr></tbody></table><img src="data:image/png;base64,AA==" onerror="alert(1)"><form action="https://evil.example"><input></form><script>alert(1)</script>'
+    )
+
+    expect(sanitized).toContain("<table")
+    expect(sanitized).toContain("safe")
+    expect(sanitized).toContain("data:image/png")
+    expect(sanitized).not.toMatch(/http-equiv|onerror|<form|<input|<script/i)
+  })
+
+  it("can sanitize a fragment without wrapping it as a document", () => {
+    expect(sanitizeHTML("<strong>safe</strong>", { wholeDocument: false })).toBe(
+      "<strong>safe</strong>"
+    )
   })
 
   it("renders SVG inside a wrapper page", () => {

@@ -18,7 +18,11 @@ jest.mock("@/lib/code-adoption/persist", () => ({
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("@/components/chat/markdown-renderer", () => ({
-  MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
+  MarkdownRenderer: ({ content, rhythm }: { content: string; rhythm?: string }) => (
+    <div data-testid="markdown-renderer" data-rhythm={rhythm}>
+      {content}
+    </div>
+  ),
 }))
 jest.mock("@/lib/task-workspace/client", () => ({
   installTaskWorkspaceEventListener: jest.fn(async () => jest.fn()),
@@ -138,6 +142,7 @@ describe("TaskResourcesPanel", () => {
     expect(await screen.findByText("# Result")).toBeInTheDocument()
     await user.click(screen.getByRole("tab", { name: "preview" }))
     expect(await screen.findByText("# Result")).toBeInTheDocument()
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute("data-rhythm", "document")
     await user.click(screen.getByRole("tab", { name: "diff" }))
     expect(await screen.findByText("@@ diff")).toBeInTheDocument()
   })

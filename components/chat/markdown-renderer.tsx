@@ -17,12 +17,16 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import rehypeRaw from "rehype-raw"
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
+import rehypeSanitize from "rehype-sanitize"
 import { cjk } from "@streamdown/cjk"
 import { cn } from "@/lib/utils"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
 import { createSharedMarkdownComponents } from "@/components/chat/markdown/shared-components"
+import {
+  chatMarkdownSanitizeSchema,
+  chatMarkdownUrlTransform,
+} from "@/components/chat/markdown/rendering-policy"
 import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
 import { ExternalLink } from "@/components/shared/external-link"
 import { ProjectFileLink } from "@/components/chat/project-file-link"
@@ -96,81 +100,6 @@ const SafeMermaidBlock = withRendererErrorBoundary(MermaidBlock, "Mermaid")
 const SafeDiffBlock = withRendererErrorBoundary(DiffBlock, "Diff")
 const SafeA2UIBlock = withRendererErrorBoundary(A2UIBlock, "A2UI")
 
-/**
- * Sanitization schema extended with KaTeX MathML and a small set of safe
- * inline styling attributes. Dangerous protocols (javascript:, etc.) are
- * blocked via the `protocols` whitelist below.
- */
-const sanitizeSchema = {
-  ...defaultSchema,
-  tagNames: [
-    ...(defaultSchema.tagNames ?? []),
-    "div",
-    "span",
-    "summary",
-    "details",
-    "figure",
-    "figcaption",
-    "sup",
-    "sub",
-    // KaTeX MathML elements
-    "math",
-    "annotation",
-    "semantics",
-    "mrow",
-    "mi",
-    "mo",
-    "mn",
-    "ms",
-    "mtext",
-    "mspace",
-    "msqrt",
-    "mroot",
-    "mfrac",
-    "msub",
-    "msup",
-    "msubsup",
-    "munder",
-    "mover",
-    "munderover",
-    "mtable",
-    "mtr",
-    "mtd",
-    "menclose",
-    "maction",
-    "mpadded",
-    "mphantom",
-    "mglyph",
-    "mlabeledtr",
-    "mmultiscripts",
-    "mprescripts",
-    "none",
-    "maligngroup",
-    "malignmark",
-  ],
-  attributes: {
-    ...(defaultSchema.attributes ?? {}),
-    "*": [...(defaultSchema.attributes?.["*"] ?? []), "className", "class", "aria-hidden"],
-    div: [...(defaultSchema.attributes?.div ?? []), "className", "class", "style"],
-    span: [...(defaultSchema.attributes?.span ?? []), "className", "class", "style"],
-    a: [...(defaultSchema.attributes?.a ?? []), "className", "class"],
-    img: [...(defaultSchema.attributes?.img ?? []), "className", "class", "loading"],
-    th: [...(defaultSchema.attributes?.th ?? []), "className", "class", "rowSpan", "colSpan"],
-    td: [...(defaultSchema.attributes?.td ?? []), "className", "class", "rowSpan", "colSpan"],
-    // KaTeX-specific attributes
-    math: ["xmlns", "display"],
-    annotation: ["encoding"],
-    mrow: ["displaystyle"],
-    mtable: ["columnalign", "columnspacing", "rowspacing"],
-    mtd: ["columnalign"],
-  },
-  protocols: {
-    ...defaultSchema.protocols,
-    href: ["http", "https", "mailto", "file"],
-    src: ["http", "https", "data:image"],
-  },
-}
-
 type RemarkPlugins = NonNullable<Parameters<typeof ReactMarkdown>[0]["remarkPlugins"]>
 type RehypePlugins = NonNullable<Parameters<typeof ReactMarkdown>[0]["rehypePlugins"]>
 
@@ -186,7 +115,7 @@ const baseRemarkPlugins: RemarkPlugins = [
 const mathRemarkPlugins: RemarkPlugins = [...baseRemarkPlugins, remarkMath]
 const rehypePlugins: RehypePlugins = [
   rehypeRaw,
-  [rehypeSanitize, sanitizeSchema],
+  [rehypeSanitize, chatMarkdownSanitizeSchema],
   rehypeMarkdownHeadingIds,
 ]
 
@@ -380,6 +309,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins}
         components={components}
+        urlTransform={chatMarkdownUrlTransform}
       >
         {processedContent}
       </ReactMarkdown>
@@ -436,6 +366,7 @@ function buildComponents(
       enableAlerts,
       enableVideoEmbed,
       enableAudioEmbed,
+      isStreaming,
     }),
     // Every block renderer reached from here paints its own `<pre>` or
     // `<table>` — Shiki's fence, KaTeX's display math, Mermaid's source

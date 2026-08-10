@@ -18,15 +18,30 @@ export function escapeHtml(text: string): string {
 }
 
 /**
- * Render sanitized HTML content into an iframe document
+ * Sanitize an HTML document for passive iframe previews.
+ *
+ * Scripts, event handlers and executable form controls are removed while
+ * preserving document formatting, tables, styles, images and safe links.
  */
-export function renderHTML(doc: Document, content: string): void {
-  const sanitized = DOMPurify.sanitize(content, {
-    WHOLE_DOCUMENT: true,
+export function sanitizeHTML(
+  content: string,
+  { wholeDocument = true }: { wholeDocument?: boolean } = {}
+): string {
+  return DOMPurify.sanitize(content, {
+    WHOLE_DOCUMENT: wholeDocument,
     ADD_TAGS: ["style", "link", "meta"],
     ADD_ATTR: ["target", "rel", "class", "id", "style"],
     ALLOW_DATA_ATTR: true,
+    FORBID_ATTR: ["http-equiv"],
+    FORBID_TAGS: ["script", "form", "input", "button", "textarea", "select", "option"],
   })
+}
+
+/**
+ * Render sanitized HTML content into an iframe document
+ */
+export function renderHTML(doc: Document, content: string): void {
+  const sanitized = sanitizeHTML(content)
   doc.open()
   doc.write(sanitized)
   doc.close()

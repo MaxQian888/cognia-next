@@ -28,9 +28,13 @@ describe("FollowUpSuggestions", () => {
       loading: false,
       dismiss: jest.fn(),
     })
-    render(<FollowUpSuggestions session={session} onUseSample={jest.fn()} />)
-    expect(screen.getByText("Tell me more")).toBeInTheDocument()
+    const { container } = render(<FollowUpSuggestions session={session} onUseSample={jest.fn()} />)
+    expect(screen.getByText("Tell me more").closest("button")).toHaveAttribute(
+      "data-slot",
+      "button"
+    )
     expect(screen.getByText("Why is that?")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="scroll-area"]')).toBeInTheDocument()
   })
 
   it("inserts the suggestion and dismisses on click", async () => {

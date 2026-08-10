@@ -16,7 +16,7 @@ import {
   useRef,
   useState,
 } from "react"
-import { Streamdown } from "streamdown"
+import { Streamdown, type StreamdownProps } from "streamdown"
 
 import { Shimmer } from "./shimmer"
 
@@ -193,20 +193,25 @@ export const ReasoningTrigger = memo(
 
 export type ReasoningContentProps = ComponentProps<typeof CollapsibleContent> & {
   children: string
+  streamdownProps?: Omit<StreamdownProps, "children">
 }
 
-export const ReasoningContent = memo(({ className, children, ...props }: ReasoningContentProps) => (
-  <CollapsibleContent
-    className={cn(
-      "mt-4 text-sm",
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
-      className
-    )}
-    {...props}
-  >
-    <Streamdown plugins={streamdownPlugins}>{children}</Streamdown>
-  </CollapsibleContent>
-))
+export const ReasoningContent = memo(
+  ({ className, children, streamdownProps, ...props }: ReasoningContentProps) => (
+    <CollapsibleContent
+      className={cn(
+        "mt-4 text-sm",
+        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+        className
+      )}
+      {...props}
+    >
+      <Streamdown plugins={streamdownPlugins} {...streamdownProps}>
+        {children}
+      </Streamdown>
+    </CollapsibleContent>
+  )
+)
 
 Reasoning.displayName = "Reasoning"
 ReasoningTrigger.displayName = "ReasoningTrigger"

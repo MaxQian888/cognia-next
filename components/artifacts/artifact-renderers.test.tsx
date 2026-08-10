@@ -18,7 +18,11 @@ jest.mock("@/components/chat/renderers/mermaid-block", () => ({
   MermaidBlock: ({ content }: { content: string }) => <div data-testid="mermaid">{content}</div>,
 }))
 jest.mock("@/components/chat/markdown-renderer", () => ({
-  MarkdownRenderer: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
+  MarkdownRenderer: ({ content, rhythm }: { content: string; rhythm?: string }) => (
+    <div data-testid="md" data-rhythm={rhythm}>
+      {content}
+    </div>
+  ),
 }))
 jest.mock("./chart-renderer", () => ({
   ChartRenderer: ({ content }: { content: string }) => <div data-testid="chart">{content}</div>,
@@ -105,7 +109,7 @@ describe("ArtifactRenderer", () => {
 
   it("dispatches to MarkdownRenderer for documents", () => {
     render(<ArtifactRenderer type="document" content="# hi" />)
-    expect(screen.getByTestId("md")).toBeInTheDocument()
+    expect(screen.getByTestId("md")).toHaveAttribute("data-rhythm", "document")
   })
 
   it("dispatches to CodeBlock for code", () => {

@@ -745,7 +745,9 @@
   "filePreview": {
     "extractedChars": "{count, plural, =1 {1 char} other {# chars}} extracted",
     "loading": "Loading {name}…",
-    "pdfFallback": "PDF preview is unavailable."
+    "pdfFallback": "PDF preview is unavailable.",
+    "preview": "Preview",
+    "source": "Source"
   },
   "header": {
     "accountSwitcher": {
@@ -1163,6 +1165,11 @@
     },
     "pluginMenu": "Plugin actions",
     "readAloud": "Read aloud",
+    "reasoning": {
+      "completed": "Thought for a few seconds",
+      "completedSeconds": "Thought for {duration, plural, =1 {1 second} other {# seconds}}",
+      "streaming": "Thinking…"
+    },
     "regenerateLabel": "Regenerate",
     "regenerateTooltip": "Regenerate",
     "shareCardLabel": "Share as card",
@@ -1359,6 +1366,16 @@
       "viewSource": "View source"
     },
     "table": {
+      "actionFailed": "Table action failed",
+      "closeFullscreen": "Close fullscreen table",
+      "copy": "Copy table",
+      "copyCsv": "Copy as CSV",
+      "copyMarkdown": "Copy as Markdown",
+      "copyTsv": "Copy as TSV",
+      "download": "Download table",
+      "downloadCsv": "Download as CSV",
+      "downloadMarkdown": "Download as Markdown",
+      "fullscreen": "View table fullscreen",
       "showAllRows": "Show all rows",
       "truncatedNotice": "Showing the first {shown, number} of {total, number} rows."
     },

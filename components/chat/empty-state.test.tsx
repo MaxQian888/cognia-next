@@ -138,7 +138,9 @@ describe("<EmptyChatState />", () => {
     const user = userEvent.setup()
     render(<EmptyChatState {...props} />)
     expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: /samples.exploreTitle/ }))
+    const starter = screen.getByRole("button", { name: /samples.exploreTitle/ })
+    expect(starter).toHaveAttribute("data-slot", "button")
+    await user.click(starter)
     expect(props.onUseSample).toHaveBeenCalledWith("samples.explorePrompt")
   })
 

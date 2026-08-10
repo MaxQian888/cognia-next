@@ -7,6 +7,7 @@
   "loadingPreview": "正在加载预览...",
   "noChartData": "暂无图表数据",
   "noComponentFound": "未找到组件。请导出名为 App、Component 或 Main 的函数。",
+  "notebookHtmlOutput": "笔记本 HTML 输出",
   "notebookParseError": "Jupyter Notebook 解析失败",
   "previewError": "预览错误",
   "previewFailed": "预览渲染失败",

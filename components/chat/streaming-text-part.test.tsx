@@ -35,6 +35,10 @@ jest.mock("./markdown-renderer", () => ({
     <div data-testid="finalized-markdown-content">{content}</div>
   ),
 }))
+jest.mock("./markdown/rendering-policy", () => ({
+  chatMarkdownUrlTransform: (url: string) => url,
+  chatStreamdownRehypePlugins: ["shared-rehype"],
+}))
 
 import { FinalizedLongTextPart, StreamingTextPart, blockRendersCode } from "./streaming-text-part"
 
@@ -63,6 +67,23 @@ describe("StreamingTextPart", () => {
     )
     rerender(<StreamingTextPart text="finalised" isStreaming={false} />)
     expect(getByTestId("msg-response").textContent).toBe("finalised")
+    expect(mockMessageResponse.mock.calls.at(-1)?.[0]).toMatchObject({
+      controls: { table: false },
+      isAnimating: false,
+      mode: "streaming",
+      rehypePlugins: ["shared-rehype"],
+    })
+  })
+
+  it("forwards active streaming state to Streamdown animation and table controls", () => {
+    render(<StreamingTextPart text="hello" isStreaming={true} />)
+
+    expect(mockMessageResponse.mock.calls.at(-1)?.[0]).toMatchObject({
+      controls: { table: false },
+      isAnimating: true,
+      mode: "streaming",
+      rehypePlugins: ["shared-rehype"],
+    })
   })
 
   it("memo equality skips identical re-renders (text + isStreaming unchanged)", () => {

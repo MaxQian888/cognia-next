@@ -745,7 +745,9 @@
   "filePreview": {
     "extractedChars": "已提取 {count} 字符",
     "loading": "正在加载 {name}…",
-    "pdfFallback": "无法预览此 PDF。"
+    "pdfFallback": "无法预览此 PDF。",
+    "preview": "预览",
+    "source": "源码"
   },
   "header": {
     "accountSwitcher": {
@@ -1163,6 +1165,11 @@
     },
     "pluginMenu": "插件操作",
     "readAloud": "朗读",
+    "reasoning": {
+      "completed": "思考了几秒",
+      "completedSeconds": "思考了 {duration, number} 秒",
+      "streaming": "正在思考…"
+    },
     "regenerateLabel": "重新生成",
     "regenerateTooltip": "重新生成",
     "shareCardLabel": "分享为卡片",
@@ -1359,6 +1366,16 @@
       "viewSource": "查看源码"
     },
     "table": {
+      "actionFailed": "表格操作失败",
+      "closeFullscreen": "关闭全屏表格",
+      "copy": "复制表格",
+      "copyCsv": "复制为 CSV",
+      "copyMarkdown": "复制为 Markdown",
+      "copyTsv": "复制为 TSV",
+      "download": "下载表格",
+      "downloadCsv": "下载为 CSV",
+      "downloadMarkdown": "下载为 Markdown",
+      "fullscreen": "全屏查看表格",
       "showAllRows": "显示全部行",
       "truncatedNotice": "已显示 {total, number} 行中的前 {shown, number} 行。"
     },

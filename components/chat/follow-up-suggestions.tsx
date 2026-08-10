@@ -8,9 +8,10 @@
 
 import { useTranslations } from "next-intl"
 import { SparklesIcon, XIcon } from "lucide-react"
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
+import { Button } from "@/components/ui/button"
 import { useFollowUpSuggestions } from "@/hooks/chat/use-follow-up-suggestions"
 import type { ChatSession } from "@cognia/agent-config-types"
-import { cn } from "@/lib/utils"
 
 interface FollowUpSuggestionsProps {
   session: ChatSession | null | undefined
@@ -31,31 +32,30 @@ export function FollowUpSuggestions({ session, onUseSample }: FollowUpSuggestion
       aria-label={t("label")}
     >
       <SparklesIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
-      {suggestions.map((text, i) => (
-        <button
-          key={i}
-          type="button"
-          onClick={() => {
-            onUseSample(text)
-            dismiss()
-          }}
-          className={cn(
-            "max-w-full truncate rounded-full border bg-background px-2.5 py-1 text-xs text-muted-foreground",
-            "transition-colors hover:border-primary/30 hover:bg-accent hover:text-foreground",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          )}
-        >
-          {text}
-        </button>
-      ))}
-      <button
+      <Suggestions className="w-full flex-wrap gap-1.5 whitespace-normal">
+        {suggestions.map((text, i) => (
+          <Suggestion
+            key={i}
+            suggestion={text}
+            onClick={(suggestion) => {
+              onUseSample(suggestion)
+              dismiss()
+            }}
+            size="xs"
+            className="max-w-full truncate px-2.5 font-normal text-muted-foreground hover:border-primary/30 hover:text-foreground"
+          />
+        ))}
+      </Suggestions>
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-xs"
         onClick={dismiss}
         aria-label={t("dismiss")}
-        className="rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="text-muted-foreground/70 hover:text-foreground"
       >
         <XIcon className="size-3" aria-hidden />
-      </button>
+      </Button>
     </div>
   )
 }

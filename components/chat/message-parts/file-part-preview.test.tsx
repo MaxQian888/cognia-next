@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { FilePartPreview } from "./file-part-preview"
 
 jest.mock("next-intl", () => ({
@@ -13,6 +14,13 @@ jest.mock("@/components/chat/renderers/code-block", () => ({
     <pre data-testid="code-block" data-language={language}>
       {code}
     </pre>
+  ),
+}))
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content, rhythm }: { content: string; rhythm?: "chat" | "document" }) => (
+    <article data-testid="markdown-preview" data-rhythm={rhythm}>
+      {content}
+    </article>
   ),
 }))
 
@@ -66,5 +74,51 @@ describe("FilePartPreview", () => {
     } as Response)
     render(<FilePartPreview url="blob:py" filename="script.py" />)
     await waitFor(() => expect(screen.getByTestId("code-block").dataset.language).toBe("python"))
+  })
+
+  it.each([
+    ["text/markdown", "notes.txt"],
+    ["text/plain", "notes.md"],
+    ["application/octet-stream", "notes.mdx"],
+  ])("renders Markdown by default for %s / %s", async (mediaType, filename) => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("# Notes"),
+    } as Response)
+
+    render(<FilePartPreview url={"blob:" + filename} mediaType={mediaType} filename={filename} />)
+
+    const preview = await screen.findByTestId("markdown-preview")
+    expect(preview).toHaveTextContent("# Notes")
+    expect(preview).toHaveAttribute("data-rhythm", "document")
+    expect(screen.queryByTestId("code-block")).toBeNull()
+  })
+
+  it("toggles a Markdown attachment between rendered preview and existing source view", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("# Notes"),
+    } as Response)
+    render(<FilePartPreview url="blob:md" mediaType="text/markdown" filename="notes.md" />)
+    await screen.findByTestId("markdown-preview")
+
+    await userEvent.click(screen.getByRole("tab", { name: "source" }))
+    expect(screen.getByTestId("code-block")).toHaveTextContent("# Notes")
+    expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "markdown")
+
+    await userEvent.click(screen.getByRole("tab", { name: "preview" }))
+    expect(screen.getByTestId("markdown-preview")).toBeInTheDocument()
+  })
+
+  it("keeps CSV attachments in the existing code preview", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("name,value\nA,1"),
+    } as Response)
+    render(<FilePartPreview url="blob:csv" mediaType="text/csv" filename="table.csv" />)
+
+    expect(await screen.findByTestId("code-block")).toHaveTextContent("name,value")
+    expect(screen.queryByRole("tab")).toBeNull()
+    expect(screen.queryByTestId("markdown-preview")).toBeNull()
   })
 })

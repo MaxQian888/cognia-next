@@ -26,6 +26,7 @@ import { ExternalLink } from "@/components/shared/external-link"
 import { parseProjectFileReference } from "@/lib/files/project-file-reference"
 import { cn } from "@/lib/utils"
 import { MarkdownRenderer } from "./markdown-renderer"
+import { chatMarkdownUrlTransform, chatStreamdownRehypePlugins } from "./markdown/rendering-policy"
 import {
   createIncrementalMarkdownBlockParser,
   type MarkdownBlockParser,
@@ -178,7 +179,10 @@ export const FinalizedLongTextPart = memo(function FinalizedLongTextPart({
 
 type StreamdownComponents = NonNullable<MessageResponseProps["components"]>
 
-function createStreamingComponents(projectRoot?: string | null): StreamdownComponents {
+export function createStreamingComponents(
+  projectRoot?: string | null,
+  isStreaming = false
+): StreamdownComponents {
   return {
     // Shared with `MarkdownRenderer` so images, tables, GitHub alerts,
     // `<details>`, `<kbd>` and task lists don't visually re-lay-out the moment
@@ -188,11 +192,9 @@ function createStreamingComponents(projectRoot?: string | null): StreamdownCompo
     //   - `code` / `pre` stay with `@streamdown/code` (theme-aligned in
     //     `ai-elements/streamdown-plugins.ts`) so incremental highlighting
     //     survives.
-    //   - No `rehype-raw` runs here, so `<details>` / `<kbd>` written as raw
-    //     HTML only pick these up once the message finalises. Markdown-syntax
-    //     nodes hit them immediately. Keeping raw-HTML parsing off the
-    //     per-token path is a cost/attack-surface choice, not an oversight.
-    ...createSharedMarkdownComponents(),
+    // Raw HTML is parsed by Streamdown and then constrained by the shared
+    // chat sanitization policy supplied to `MessageResponse` below.
+    ...createSharedMarkdownComponents({ isStreaming }),
     a({ href, children, node: _node, ...props }) {
       const target = href ? parseProjectFileReference(href, projectRoot) : null
       if (target) {
@@ -207,11 +209,14 @@ function createStreamingComponents(projectRoot?: string | null): StreamdownCompo
   }
 }
 
-function StreamingTextPartInner({ text, projectRoot }: Props) {
+function StreamingTextPartInner({ text, isStreaming, projectRoot }: Props) {
   const [parser] = useState<MarkdownBlockParser>(() =>
     createIncrementalMarkdownBlockParser(parseMarkdownIntoBlocks)
   )
-  const components = useMemo(() => createStreamingComponents(projectRoot), [projectRoot])
+  const components = useMemo(
+    () => createStreamingComponents(projectRoot, isStreaming),
+    [isStreaming, projectRoot]
+  )
   // Reduced motion: a static (non-blinking) caret so we still signal "more is
   // coming" without an animation. `animate-pulse` is a guaranteed Tailwind
   // utility (no dependency on `animate-caret-blink`).
@@ -222,8 +227,12 @@ function StreamingTextPartInner({ text, projectRoot }: Props) {
         BlockComponent={ContainedStreamdownBlock}
         className="typeset typeset-chat"
         components={components}
+        controls={{ table: false }}
+        isAnimating={isStreaming}
         mode="streaming"
         parseMarkdownIntoBlocksFn={parser}
+        rehypePlugins={chatStreamdownRehypePlugins}
+        urlTransform={chatMarkdownUrlTransform}
       >
         {text}
       </MessageResponse>

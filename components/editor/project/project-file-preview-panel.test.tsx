@@ -3,13 +3,18 @@ import { ProjectFilePreviewPanel } from "./project-file-preview-panel"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("@/components/chat/markdown-renderer", () => ({
-  MarkdownRenderer: ({ content }: { content: string }) => <article>{content}</article>,
+  MarkdownRenderer: ({ content, rhythm }: { content: string; rhythm?: string }) => (
+    <article data-testid="markdown-renderer" data-rhythm={rhythm}>
+      {content}
+    </article>
+  ),
 }))
 
 describe("ProjectFilePreviewPanel", () => {
   it("renders Markdown, HTML, and JSON through safe preview surfaces", () => {
     const { rerender } = render(<ProjectFilePreviewPanel relPath="README.md" content="# Hello" />)
     expect(screen.getByTestId("project-markdown-preview")).toHaveTextContent("# Hello")
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute("data-rhythm", "document")
 
     rerender(<ProjectFilePreviewPanel relPath="index.html" content="<h1>Hello</h1>" />)
     expect(screen.getByTestId("project-html-preview")).toHaveAttribute(

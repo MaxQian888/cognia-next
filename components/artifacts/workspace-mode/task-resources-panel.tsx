@@ -811,7 +811,7 @@ function ResourcePreview({
 }) {
   const t = useTranslations("artifacts.workspace.taskResources")
   if (resource.mediaType === "text/markdown" && content !== null)
-    return <MarkdownRenderer content={content} />
+    return <MarkdownRenderer content={content} rhythm="document" />
   if (
     (resource.mediaType === "text/html" || resource.mediaType === "image/svg+xml") &&
     content !== null

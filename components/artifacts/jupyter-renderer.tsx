@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { sanitizeHTML } from "@/lib/artifacts/preview-utils"
 import { loggers } from "@cognia/logging"
 import type { JupyterCell, JupyterNotebook, JupyterOutput } from "@/types"
 
@@ -56,7 +57,25 @@ function getOutputDataAsString(data: Record<string, unknown> | undefined, mimeTy
   return ""
 }
 
+const NOTEBOOK_HTML_CSP =
+  "default-src 'none'; img-src data: blob: https:; style-src 'unsafe-inline'; font-src data:; form-action 'none'; base-uri 'none'; frame-src 'none';"
+
+function notebookHtmlSrcDoc(content: string): string {
+  const sanitizedContent = sanitizeHTML(content, { wholeDocument: false })
+  return [
+    '<!doctype html><html><head><meta charset="utf-8">',
+    '<meta http-equiv="Content-Security-Policy" content="',
+    NOTEBOOK_HTML_CSP,
+    '"><meta name="viewport" content="width=device-width, initial-scale=1">',
+    "<style>:root{color-scheme:light dark}body{margin:0;padding:12px;font:13px/1.5 system-ui,sans-serif;overflow-wrap:anywhere}table{border-collapse:collapse;max-width:100%}th,td{border:1px solid color-mix(in srgb,currentColor 25%,transparent);padding:4px 8px}img{max-width:100%;height:auto}</style>",
+    "</head><body>",
+    sanitizedContent,
+    "</body></html>",
+  ].join("")
+}
+
 function JupyterCellOutput({ output }: { output: JupyterOutput }) {
+  const t = useTranslations("artifactPreview")
   if (output.output_type === "stream") {
     const text = flattenText(output.text)
     const isErr = output.name === "stderr"
@@ -101,10 +120,11 @@ function JupyterCellOutput({ output }: { output: JupyterOutput }) {
 
   if (html) {
     return (
-      <div
-        className="mt-2 rounded-md border bg-muted/40 p-3 text-xs"
-        // Trusted: notebook output is sandboxed at the artifact-preview iframe layer.
-        dangerouslySetInnerHTML={{ __html: html }}
+      <iframe
+        title={t("notebookHtmlOutput")}
+        sandbox="allow-popups"
+        srcDoc={notebookHtmlSrcDoc(html)}
+        className="mt-2 h-64 w-full rounded-md border bg-background"
       />
     )
   }
@@ -125,7 +145,7 @@ function JupyterCellView({ cell, language }: { cell: JupyterCell; language: stri
   if (cell.cell_type === "markdown") {
     return (
       <div className="rounded-md border bg-card p-3">
-        <MarkdownRenderer content={source} />
+        <MarkdownRenderer content={source} rhythm="document" />
       </div>
     )
   }

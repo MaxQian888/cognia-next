@@ -3,6 +3,9 @@
 
 import * as ReactForMocks from "react"
 
+const mockReasoningTrigger = jest.fn()
+const mockReasoningContent = jest.fn()
+
 jest.mock("@/components/ai-elements/message", () => ({
   Message: ({
     children,
@@ -46,9 +49,14 @@ jest.mock("@/components/ai-elements/message", () => ({
 jest.mock("@/components/ai-elements/reasoning", () => ({
   Reasoning: ({ children }: { children: ReactForMocks.ReactNode }) =>
     ReactForMocks.createElement("div", { "data-test": "reasoning" }, children),
-  ReasoningTrigger: () => null,
-  ReasoningContent: ({ children }: { children: ReactForMocks.ReactNode }) =>
-    ReactForMocks.createElement("div", null, children),
+  ReasoningTrigger: (props: Record<string, unknown>) => {
+    mockReasoningTrigger(props)
+    return null
+  },
+  ReasoningContent: (props: { children: ReactForMocks.ReactNode }) => {
+    mockReasoningContent(props)
+    return ReactForMocks.createElement("div", null, props.children)
+  },
 }))
 
 jest.mock("@/components/ai-elements/task", () => ({
@@ -113,6 +121,10 @@ jest.mock("./markdown-renderer", () => ({
       { "data-test": "markdown", "data-project-root": projectRoot },
       content
     ),
+}))
+jest.mock("@/components/chat/markdown/rendering-policy", () => ({
+  chatMarkdownUrlTransform: (url: string) => url,
+  chatStreamdownRehypePlugins: ["shared-rehype"],
 }))
 
 jest.mock("@/components/chat/renderers/message-image-gallery", () => ({
@@ -296,6 +308,8 @@ function userMsg(id = "u1", text = "Hi"): UIMessage {
 
 beforeEach(() => {
   useChatStore.getState().clear()
+  mockReasoningContent.mockClear()
+  mockReasoningTrigger.mockClear()
 })
 
 // ── text rendering ────────────────────────────────────────────────────────────
@@ -395,6 +409,42 @@ describe("reasoning parts", () => {
     }
     render(<MessageRenderer message={msg} />)
     expect(document.querySelector("[data-test='reasoning']")).toBeTruthy()
+  })
+
+  it("reuses the shared Streamdown configuration and translated trigger text", () => {
+    const msg: UIMessage = {
+      id: "r2",
+      role: "assistant",
+      parts: [{ type: "reasoning", text: "thinking…", state: "streaming" }],
+    }
+    render(<MessageRenderer message={msg} isStreaming projectRoot="/repo" />)
+
+    expect(mockReasoningContent.mock.calls.at(-1)?.[0].streamdownProps).toMatchObject({
+      className: "typeset typeset-chat",
+      controls: { table: false },
+      isAnimating: true,
+      mode: "streaming",
+      rehypePlugins: ["shared-rehype"],
+    })
+    const trigger = mockReasoningTrigger.mock.calls.at(-1)?.[0] as {
+      getThinkingMessage: (streaming: boolean, duration?: number) => ReactForMocks.ReactNode
+    }
+    expect(trigger.getThinkingMessage(true)).toBe("reasoning.streaming")
+    expect(trigger.getThinkingMessage(false, 2)).toBe("reasoning.completedSeconds")
+  })
+
+  it("switches completed reasoning to static Streamdown mode", () => {
+    const msg: UIMessage = {
+      id: "r3",
+      role: "assistant",
+      parts: [{ type: "reasoning", text: "done", state: "done" }],
+    }
+    render(<MessageRenderer message={msg} />)
+
+    expect(mockReasoningContent.mock.calls.at(-1)?.[0].streamdownProps).toMatchObject({
+      isAnimating: false,
+      mode: "static",
+    })
   })
 })
 

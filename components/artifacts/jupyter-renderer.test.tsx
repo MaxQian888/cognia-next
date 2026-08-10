@@ -15,7 +15,11 @@ jest.mock("@/components/chat/renderers/code-block", () => ({
 }))
 
 jest.mock("@/components/chat/markdown-renderer", () => ({
-  MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
+  MarkdownRenderer: ({ content, rhythm }: { content: string; rhythm?: string }) => (
+    <div data-testid="markdown-cell" data-rhythm={rhythm}>
+      {content}
+    </div>
+  ),
 }))
 
 import { JupyterRenderer } from "./jupyter-renderer"
@@ -94,7 +98,42 @@ describe("JupyterRenderer", () => {
     const { container } = render(<JupyterRenderer content={JSON.stringify(validNotebook)} />)
     expect(container.textContent).toContain("hi")
     expect(container.textContent).toContain("ValueError")
-    expect(container.textContent).toContain("html out")
     expect(container.textContent).toContain("42")
+    expect(screen.getByTestId("markdown-cell")).toHaveAttribute("data-rhythm", "document")
+    const iframe = screen.getByTitle("notebookHtmlOutput")
+    expect(iframe).toHaveAttribute("sandbox", "allow-popups")
+    expect(iframe.getAttribute("srcdoc")).toContain("<b>html out</b>")
+    expect(iframe.getAttribute("srcdoc")).toMatch(/Content-Security-Policy/i)
+  })
+
+  it("blocks active notebook HTML while retaining safe tables", () => {
+    const notebook = {
+      ...validNotebook,
+      cells: [
+        {
+          cell_type: "code",
+          source: "unsafe()",
+          outputs: [
+            {
+              output_type: "display_data",
+              data: {
+                "text/html":
+                  '<meta http-equiv="refresh" content="0;url=https://evil.example"><a href="https://safe.example" target="_blank" rel="noopener">safe link</a><table><tbody><tr><td>safe cell</td></tr></tbody></table><img src="data:image/png;base64,AA==" onerror="parent.location=\'https://evil.example\'"><form action="https://evil.example"><input></form><script>parent.location="https://evil.example"</script>',
+              },
+            },
+          ],
+        },
+      ],
+    }
+
+    render(<JupyterRenderer content={JSON.stringify(notebook)} />)
+    const srcDoc = screen.getByTitle("notebookHtmlOutput").getAttribute("srcdoc") ?? ""
+    expect(srcDoc).toContain("<table")
+    expect(srcDoc).toContain("safe cell")
+    expect(srcDoc).toContain('href="https://safe.example"')
+    expect(srcDoc).toContain('target="_blank"')
+    expect(srcDoc).not.toMatch(
+      /http-equiv="refresh"|onerror|<form|<input|<script|parent\.location/i
+    )
   })
 })

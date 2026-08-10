@@ -26,7 +26,7 @@ export function ProjectFilePreviewPanel({
   if (extension === "md" || extension === "markdown") {
     return (
       <div className="h-full overflow-auto p-4" data-testid="project-markdown-preview">
-        <MarkdownRenderer content={content} />
+        <MarkdownRenderer content={content} rhythm="document" />
       </div>
     )
   }

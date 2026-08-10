@@ -7,6 +7,7 @@
   "loadingPreview": "Loading preview...",
   "noChartData": "No chart data",
   "noComponentFound": "No component found. Export an App, Component, or Main function.",
+  "notebookHtmlOutput": "Notebook HTML output",
   "notebookParseError": "Failed to parse notebook",
   "previewError": "Preview error",
   "previewFailed": "Preview failed to render",

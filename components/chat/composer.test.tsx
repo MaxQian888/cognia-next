@@ -677,6 +677,7 @@ describe("Composer — large-paste folding", () => {
     expect(ta.value).toContain("[Pasted 6 lines #0]")
     expect(ta.value).not.toContain("L6")
     expect(screen.getByTestId("composer-pasted-chips")).toBeInTheDocument()
+    expect(screen.getByLabelText("Remove pasted text")).toHaveAttribute("data-slot", "button")
   })
 
   it("leaves a small paste inline (no chip, no placeholder)", () => {

@@ -112,6 +112,10 @@ jest.mock("@/lib/tauri/opener", () => ({
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import React from "react"
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, rmSync } from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { MarkdownRenderer, addMarkdownHeadingIds, parseTaskListItem } from "./markdown-renderer"
 import { openExternal } from "@/lib/tauri/opener"
 
@@ -143,6 +147,49 @@ describe("MarkdownRenderer", () => {
     const root = container.querySelector(".markdown-renderer")
     expect(root).toHaveClass("typeset")
     expect(root).not.toHaveClass("typeset-chat")
+  })
+
+  it("keeps shared semantics and URL policy in parity with real Streamdown", () => {
+    const fixture = path.join(
+      process.cwd(),
+      "tests/integration/fixtures/markdown-renderer-parity.tsx"
+    )
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "cognia-markdown-parity-"))
+    const bundle = path.join(tempDir, "fixture.cjs")
+    let output = ""
+    try {
+      execFileSync(
+        require.resolve("esbuild/bin/esbuild"),
+        [
+          fixture,
+          "--bundle",
+          "--platform=node",
+          "--format=cjs",
+          "--log-level=error",
+          "--outfile=" + bundle,
+        ],
+        { encoding: "utf8" }
+      )
+      output = execFileSync(process.execPath, [bundle], { encoding: "utf8" })
+    } finally {
+      rmSync(tempDir, { force: true, recursive: true })
+    }
+    const result = JSON.parse(output) as {
+      finalized: Record<string, unknown>
+      streaming: Record<string, unknown>
+    }
+
+    expect(result.finalized).toEqual(result.streaming)
+    expect(result.finalized).toMatchObject({
+      orderedListStart: "4",
+      tableAlignment: ["left", "center", "right"],
+      details: true,
+      keyboard: "Cmd",
+      tel: 1,
+      file: 1,
+      unsafe: 0,
+      dataImage: 1,
+    })
   })
 
   // typeset's element rules are an unbounded descendant match, so any block

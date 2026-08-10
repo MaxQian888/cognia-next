@@ -1,13 +1,15 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
 import {
   TABLE_AUTO_RENDER_MAX_ROWS,
   countRowCells,
   createSharedMarkdownComponents,
+  extractMarkdownTableData,
   extractTextContent,
   isAudioUrl,
   isVideoUrl,
@@ -70,7 +72,25 @@ jest.mock("@/components/chat/renderers/task-list", () => ({
 }))
 
 const messages = {
-  chat: { renderers: { details: { defaultSummary: "Details" } } },
+  chat: {
+    renderers: {
+      details: { defaultSummary: "Details" },
+      table: {
+        actionFailed: "Table action failed",
+        closeFullscreen: "Close fullscreen table",
+        copy: "Copy table",
+        copyCsv: "Copy as CSV",
+        copyMarkdown: "Copy as Markdown",
+        copyTsv: "Copy as TSV",
+        download: "Download table",
+        downloadCsv: "Download as CSV",
+        downloadMarkdown: "Download as Markdown",
+        fullscreen: "View table fullscreen",
+        showAllRows: "Show all rows",
+        truncatedNotice: "Showing the first {shown} of {total} rows.",
+      },
+    },
+  },
 }
 
 function renderNode(node: React.ReactNode) {
@@ -232,6 +252,17 @@ describe("createSharedMarkdownComponents — lists and inline", () => {
     expect(container.querySelector("hr")).not.toHaveAttribute("class")
   })
 
+  it("preserves an ordered list's explicit start value", () => {
+    const { ol: Ol } = createSharedMarkdownComponents()
+    renderNode(
+      <Ol start={3}>
+        <li>third</li>
+      </Ol>
+    )
+
+    expect(screen.getByRole("list")).toHaveAttribute("start", "3")
+  })
+
   it("keeps the Cognia accent on blockquotes but not their spacing", () => {
     const { blockquote: Blockquote } = createSharedMarkdownComponents({ enableAlerts: false })
     const { container } = renderNode(<Blockquote>quoted</Blockquote>)
@@ -264,6 +295,28 @@ describe("createSharedMarkdownComponents — lists and inline", () => {
     // well — typeset zeroes `padding-inline-start` on first-column cells.
     expect(screen.getByText("head")).toHaveClass("border", "bg-muted", "px-4", "py-2")
     expect(screen.getByText("cell")).toHaveClass("border", "px-4", "py-2")
+  })
+
+  it("preserves GFM table alignment without forwarding arbitrary styles", () => {
+    const c = createSharedMarkdownComponents()
+    renderNode(
+      <table>
+        <tbody>
+          <tr>
+            <c.th style={{ textAlign: "center", color: "red" }}>head</c.th>
+            <c.td align="right" style={{ color: "red" }}>
+              cell
+            </c.td>
+          </tr>
+        </tbody>
+      </table>
+    )
+
+    expect(screen.getByText("head")).toHaveStyle({ textAlign: "center" })
+    expect(screen.getByText("head")).not.toHaveStyle({ color: "red" })
+    expect(screen.getByText("cell")).toHaveAttribute("align", "right")
+    expect(screen.getByText("cell")).toHaveStyle({ textAlign: "right" })
+    expect(screen.getByText("cell")).not.toHaveStyle({ color: "red" })
   })
 })
 
@@ -409,6 +462,178 @@ describe("table row budget", () => {
     fireEvent.click(getByRole("button", { name: /show all/i }))
 
     expect(container.querySelectorAll("tbody tr")).toHaveLength(TABLE_AUTO_RENDER_MAX_ROWS + 50)
+  })
+})
+
+describe("table actions", () => {
+  const cell = (tagName: "th" | "td", value: string) => ({
+    type: "element",
+    tagName,
+    children: [{ type: "text", value }],
+  })
+  const row = (cells: ReturnType<typeof cell>[]) => ({
+    type: "element",
+    tagName: "tr",
+    children: cells,
+  })
+
+  function tableNode(rowCount: number) {
+    return {
+      type: "element",
+      tagName: "table",
+      children: [
+        {
+          type: "element",
+          tagName: "thead",
+          children: [row([cell("th", "Name"), cell("th", "Value")])],
+        },
+        {
+          type: "element",
+          tagName: "tbody",
+          children: Array.from({ length: rowCount }, (_, index) =>
+            row([cell("td", `row ${index}`), cell("td", String(index))])
+          ),
+        },
+      ],
+    }
+  }
+
+  function renderTable(rowCount: number, isStreaming = false) {
+    const components = createSharedMarkdownComponents({ isStreaming })
+    const Table = components.table as React.ComponentType<{
+      children?: React.ReactNode
+      node?: unknown
+    }>
+    const Tbody = components.tbody as React.ComponentType<{ children?: React.ReactNode }>
+    return renderNode(
+      <Table node={tableNode(rowCount)}>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <Tbody>
+          {Array.from({ length: rowCount }, (_, index) => (
+            <tr key={index}>
+              <td>{`row ${index}`}</td>
+              <td>{index}</td>
+            </tr>
+          ))}
+        </Tbody>
+      </Table>
+    )
+  }
+
+  it("exports every source row even when the visible table is capped", () => {
+    const data = extractMarkdownTableData(tableNode(TABLE_AUTO_RENDER_MAX_ROWS + 2))
+
+    expect(data.rows).toHaveLength(TABLE_AUTO_RENDER_MAX_ROWS + 2)
+    expect(data.rows.at(-1)).toEqual(["row 201", "201"])
+  })
+
+  it("exports rows from every body section and the footer", () => {
+    const node = tableNode(1)
+    node.children.push(
+      {
+        type: "element",
+        tagName: "tbody",
+        children: [row([cell("td", "second body"), cell("td", "2")])],
+      },
+      {
+        type: "element",
+        tagName: "tfoot",
+        children: [row([cell("td", "footer"), cell("td", "3")])],
+      }
+    )
+
+    expect(extractMarkdownTableData(node).rows).toEqual([
+      ["row 0", "0"],
+      ["second body", "2"],
+      ["footer", "3"],
+    ])
+  })
+
+  it("offers all copy/download formats and an independently capped fullscreen table", async () => {
+    renderTable(TABLE_AUTO_RENDER_MAX_ROWS + 2)
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy table" }))
+    expect(await screen.findByRole("menuitem", { name: "Copy as Markdown" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Copy as CSV" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Copy as TSV" })).toBeInTheDocument()
+    await userEvent.keyboard("{Escape}")
+
+    await userEvent.click(screen.getByRole("button", { name: "Download table" }))
+    expect(await screen.findByRole("menuitem", { name: "Download as CSV" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Download as Markdown" })).toBeInTheDocument()
+    await userEvent.keyboard("{Escape}")
+
+    await userEvent.click(screen.getByRole("button", { name: "View table fullscreen" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog.querySelectorAll("tbody tr")).toHaveLength(TABLE_AUTO_RENDER_MAX_ROWS + 1)
+    await userEvent.click(within(dialog).getByRole("button", { name: "Show all rows" }))
+    expect(dialog.querySelectorAll("tbody tr")).toHaveLength(TABLE_AUTO_RENDER_MAX_ROWS + 2)
+    expect(within(dialog).getByText("row 201")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Close fullscreen table" })).toBeInTheDocument()
+  })
+
+  it("runs every copy and download action through the shared table controls", async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    const createObjectURL = jest.fn(() => "blob:table")
+    const revokeObjectURL = jest.fn()
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL })
+    const anchorClick = jest
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined)
+    renderTable(TABLE_AUTO_RENDER_MAX_ROWS + 2)
+
+    for (const item of ["Copy as Markdown", "Copy as CSV", "Copy as TSV"]) {
+      await userEvent.click(screen.getByRole("button", { name: "Copy table" }))
+      await userEvent.click(await screen.findByRole("menuitem", { name: item }))
+    }
+    expect(writeText).toHaveBeenCalledTimes(3)
+    expect(writeText.mock.calls.every(([value]) => String(value).includes("row 201"))).toBe(true)
+    expect(writeText.mock.calls.map(([value]) => value)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("| Name | Value |"),
+        expect.stringContaining("Name,Value"),
+        expect.stringContaining("Name\tValue"),
+      ])
+    )
+
+    for (const item of ["Download as CSV", "Download as Markdown"]) {
+      await userEvent.click(screen.getByRole("button", { name: "Download table" }))
+      await userEvent.click(await screen.findByRole("menuitem", { name: item }))
+    }
+    expect(createObjectURL).toHaveBeenCalledTimes(2)
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2)
+    expect(anchorClick).toHaveBeenCalledTimes(2)
+    const downloaded = await Promise.all(
+      createObjectURL.mock.calls.map(
+        ([blob]) =>
+          new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.addEventListener("load", () => resolve(String(reader.result)))
+            reader.addEventListener("error", () => reject(reader.error))
+            reader.readAsText(blob as Blob)
+          })
+      )
+    )
+    expect(downloaded.every((value) => value.includes("row 201"))).toBe(true)
+    anchorClick.mockRestore()
+  })
+
+  it("disables every table action while Markdown is streaming", () => {
+    renderTable(2, true)
+
+    expect(screen.getByRole("button", { name: "Copy table" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Download table" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "View table fullscreen" })).toBeDisabled()
   })
 })
 

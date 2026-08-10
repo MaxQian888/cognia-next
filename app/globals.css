@@ -5,6 +5,12 @@
 /* After Tailwind so its `@layer components` slot exists — see app/typeset.css. */
 @import "./typeset.css";
 
+@source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+@source "../node_modules/@streamdown/cjk/dist/*.js";
+@source "../node_modules/@streamdown/math/dist/*.js";
+@source "../node_modules/@streamdown/mermaid/dist/*.js";
+
 /*
  * Bundled Powerline / Nerd Font for the integrated terminal (see
  * components/terminal/terminal-instance.tsx). `local(...)` is listed first so a

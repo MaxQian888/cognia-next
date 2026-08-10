@@ -1933,14 +1933,16 @@ function ComposerInner(props: InnerProps) {
                   >
                     <FileTextIcon className="size-3 shrink-0" aria-hidden />
                     {t("pastedChip", { count: body.split("\n").length })}
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       onClick={() => removePastedBlock(ph)}
                       aria-label={t("removePastedChip")}
-                      className="text-muted-foreground/60 hover:text-foreground"
+                      className="-mr-1 size-4 rounded-sm text-muted-foreground/60 hover:bg-transparent hover:text-foreground"
                     >
                       <XIcon className="size-3" aria-hidden />
-                    </button>
+                    </Button>
                   </span>
                 ))}
               </div>

@@ -1,16 +1,17 @@
 "use client"
 
-// gap2 — inline preview for non-image `file` message parts. Text/code files
-// render through the shared CodeBlock (syntax-highlighted, copyable); PDFs
-// embed via <object>; everything else (binary / unknown) keeps the plain
-// download link. The download link is always available as a fallback, so a
-// fetch failure or an unsupported type degrades gracefully.
+// Inline preview for non-image `file` message parts. Markdown files use the
+// shared rendered/source surfaces, other text files keep the existing
+// copyable CodeBlock, and PDFs embed via <object>. Binary or unknown files and
+// fetch failures retain the plain download fallback.
 
 import { memo, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2Icon, PaperclipIcon } from "lucide-react"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { languageFromPath } from "@/components/chat/message-parts/mcp-renderers/common"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export interface FilePartPreviewProps {
   url: string
@@ -31,11 +32,18 @@ function isTextLike(mediaType: string | undefined, filename: string | undefined)
   }
   // Fall back to the filename extension — languageFromPath returns "text" for
   // anything it doesn't recognize as code.
-  return languageFromPath(filename) !== "text"
+  return /\.(?:md|markdown|mdx)$/i.test(filename ?? "") || languageFromPath(filename) !== "text"
 }
 
 function isPdf(mediaType: string | undefined, filename: string | undefined): boolean {
   return mediaType === "application/pdf" || /\.pdf$/i.test(filename ?? "")
+}
+
+function isMarkdown(mediaType: string | undefined, filename: string | undefined): boolean {
+  return (
+    /(?:^|[/+.-])(?:markdown|mdx)(?:$|[;+.-])/i.test(mediaType ?? "") ||
+    /\.(?:md|markdown|mdx)$/i.test(filename ?? "")
+  )
 }
 
 /** Plain downloadable link — the universal fallback (unknown/binary types). */
@@ -88,6 +96,7 @@ export const FilePartPreview = memo(function FilePartPreview({
   const displayName = filename ?? url
   const pdf = isPdf(mediaType, filename)
   const textLike = !pdf && isTextLike(mediaType, filename)
+  const markdown = textLike && isMarkdown(mediaType, filename)
   const text = useFileText(url, textLike)
 
   if (pdf) {
@@ -119,6 +128,31 @@ export const FilePartPreview = memo(function FilePartPreview({
           <Loader2Icon className="size-3.5 shrink-0 animate-spin" aria-hidden />
           <span className="truncate">{t("loading", { name: displayName })}</span>
         </p>
+      )
+    }
+    if (markdown) {
+      return (
+        <Tabs
+          key={url}
+          defaultValue="preview"
+          className="my-1 gap-1"
+          data-testid="file-preview-text"
+        >
+          <TabsList variant="line" className="h-7">
+            <TabsTrigger value="preview" className="px-2 text-xs">
+              {t("preview")}
+            </TabsTrigger>
+            <TabsTrigger value="source" className="px-2 text-xs">
+              {t("source")}
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="preview" className="max-h-96 overflow-auto rounded border p-3">
+            <MarkdownRenderer content={text} rhythm="document" />
+          </TabsContent>
+          <TabsContent value="source" className="max-h-96 overflow-auto">
+            <CodeBlock code={text} language="markdown" filename={filename} />
+          </TabsContent>
+        </Tabs>
       )
     }
     return (

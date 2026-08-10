@@ -289,7 +289,7 @@ export function ArtifactRenderer({
     case "math":
       return <MathBlock content={content} className={className} />
     case "document":
-      return <ChatMarkdownRenderer content={content} className={className} />
+      return <ChatMarkdownRenderer content={content} className={className} rhythm="document" />
     case "code":
       return (
         <CodeBlock

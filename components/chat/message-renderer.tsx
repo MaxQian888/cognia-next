@@ -10,9 +10,14 @@ import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-e
 import { Tool, ToolHeader, ToolContent } from "@/components/ai-elements/tool"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import {
+  chatMarkdownUrlTransform,
+  chatStreamdownRehypePlugins,
+} from "@/components/chat/markdown/rendering-policy"
+import {
   FINALIZED_MARKDOWN_LAZY_THRESHOLD,
   FinalizedLongTextPart,
   StreamingTextPart,
+  createStreamingComponents,
 } from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
@@ -1216,8 +1221,26 @@ function renderPart(
         // transcript and should stay readable.
         closeOnFinish={false}
       >
-        <ReasoningTrigger />
-        <ReasoningContent>{text}</ReasoningContent>
+        <ReasoningTrigger
+          getThinkingMessage={(streaming, duration) => {
+            if (streaming || duration === 0) return t("reasoning.streaming")
+            if (duration === undefined) return t("reasoning.completed")
+            return t("reasoning.completedSeconds", { duration })
+          }}
+        />
+        <ReasoningContent
+          streamdownProps={{
+            className: "typeset typeset-chat",
+            components: createStreamingComponents(projectRoot, stillStreaming),
+            controls: { table: false },
+            isAnimating: stillStreaming,
+            mode: stillStreaming ? "streaming" : "static",
+            rehypePlugins: chatStreamdownRehypePlugins,
+            urlTransform: chatMarkdownUrlTransform,
+          }}
+        >
+          {text}
+        </ReasoningContent>
       </Reasoning>
     )
   }
