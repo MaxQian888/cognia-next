@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { GatewayListenerPanel } from "./listener-panel"
 import { DEFAULT_GATEWAY_CONFIG, type GatewayConfig, type GatewayStatus } from "@/types/gateway"
@@ -79,11 +80,21 @@ describe("GatewayListenerPanel", () => {
   })
 
   it("switches the bind interface and reveals the LAN warning", async () => {
+    const user = userEvent.setup()
     const { persist } = setup()
 
     expect(screen.queryByText("lanWarning")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "bindLan" }))
+    await user.click(screen.getByRole("radio", { name: "bindLan" }))
     expect(persist).toHaveBeenCalledWith({ bindInterface: "lan" })
+  })
+
+  it("does not clear the selected bind interface", async () => {
+    const user = userEvent.setup()
+    const { persist } = setup()
+
+    await user.click(screen.getByRole("radio", { name: "bindLoopback" }))
+
+    expect(persist).not.toHaveBeenCalled()
   })
 
   it("shows the LAN warning whenever LAN is the configured interface", () => {

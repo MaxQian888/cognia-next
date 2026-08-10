@@ -12,10 +12,16 @@
  */
 
 import { useState } from "react"
-import { PlusIcon } from "lucide-react"
+import { PlusIcon, XIcon } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 
 export interface ChipInputProps {
   values: string[]
@@ -46,14 +52,11 @@ export function ChipInput({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {values.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {values.map((entry) => (
-            <span
-              key={entry}
-              className="flex items-center gap-1 rounded bg-muted py-1 pl-2 pr-1 font-mono text-xs"
-            >
+            <Badge key={entry} variant="secondary" className="gap-1 py-1 pl-2 pr-1 font-mono">
               {entry}
               <Button
                 type="button"
@@ -63,14 +66,14 @@ export function ChipInput({
                 aria-label={`${removeLabel} ${entry}`}
                 onClick={() => onCommit(values.filter((e) => e !== entry))}
               >
-                ×
+                <XIcon className="size-3" aria-hidden />
               </Button>
-            </span>
+            </Badge>
           ))}
         </div>
       )}
-      <div className="flex items-center gap-2">
-        <Input
+      <InputGroup>
+        <InputGroupInput
           value={draft}
           placeholder={placeholder}
           aria-label={ariaLabel}
@@ -83,27 +86,27 @@ export function ChipInput({
             commitDraft()
           }}
         />
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={!draft.trim()}
-          // Qualified by the field: several of these render on one panel and a
-          // bare "Add" is ambiguous to a screen reader — and indistinguishable
-          // to a test, which then asserts against the wrong (disabled) button
-          // and passes for the wrong reason.
-          aria-label={`${addLabel} ${ariaLabel}`}
-          // Commit on mousedown, NOT click: mousedown blurs the input, whose
-          // onBlur commits and clears the draft, which renders this button
-          // disabled — so an onClick handler would never fire and the button
-          // would be decorative. Ordering mousedown first makes the button the
-          // thing that actually commits; the blur that follows sees an empty
-          // draft and no-ops.
-          onMouseDown={commitDraft}
-        >
-          <PlusIcon className="h-3.5 w-3.5" />
-        </Button>
-      </div>
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton
+            size="icon-sm"
+            disabled={!draft.trim()}
+            // Qualified by the field: several of these render on one panel and a
+            // bare "Add" is ambiguous to a screen reader — and indistinguishable
+            // to a test, which then asserts against the wrong (disabled) button
+            // and passes for the wrong reason.
+            aria-label={`${addLabel} ${ariaLabel}`}
+            // Commit on mousedown, NOT click: mousedown blurs the input, whose
+            // onBlur commits and clears the draft, which renders this button
+            // disabled — so an onClick handler would never fire and the button
+            // would be decorative. Ordering mousedown first makes the button the
+            // thing that actually commits; the blur that follows sees an empty
+            // draft and no-ops.
+            onMouseDown={commitDraft}
+          >
+            <PlusIcon className="size-3.5" aria-hidden />
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
     </div>
   )
 }

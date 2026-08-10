@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { GatewayOverviewPanel } from "./overview-panel"
 import { DEFAULT_GATEWAY_CONFIG, type GatewayStatus } from "@/types/gateway"
@@ -120,9 +121,7 @@ describe("GatewayOverviewPanel", () => {
       })
     )
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "strategyUnavailable:plugin:private-selector"
-    )
+    expect(screen.getByText("strategyUnavailable:plugin:private-selector")).toBeInTheDocument()
   })
 
   it("labels legacy routing and handles a missing policy revision", () => {
@@ -165,9 +164,13 @@ describe("GatewayOverviewPanel", () => {
     expect(screen.getByTestId("gateway-snapshot-age")).toHaveTextContent("snapshotNone")
     // No status means no key confirmed, so the switch stays locked.
     expect(screen.getByRole("switch", { name: "enabled" })).toBeDisabled()
-    // …and it falls back to the configured port for the snippets. Both the
-    // Anthropic and OpenAI lines carry it, hence getAllByText.
-    expect(screen.getAllByText(/127\.0\.0\.1:47823/)).toHaveLength(2)
+    // …and it falls back to the configured port for both read-only snippets.
+    expect(screen.getByRole("textbox", { name: "anthropicSnippet" })).toHaveValue(
+      "ANTHROPIC_BASE_URL=http://127.0.0.1:47823"
+    )
+    expect(screen.getByRole("textbox", { name: "openaiSnippet" })).toHaveValue(
+      "OPENAI_BASE_URL=http://127.0.0.1:47823/v1"
+    )
   })
 
   it("renders a probe row that reports no HTTP status at all", async () => {
@@ -213,22 +216,41 @@ describe("GatewayOverviewPanel", () => {
   })
 
   it("renders and copies the client base-URL snippets", async () => {
+    const user = userEvent.setup()
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
     setup()
 
-    expect(screen.getByText(/ANTHROPIC_BASE_URL=http:\/\/127\.0\.0\.1:47823/)).toBeInTheDocument()
-    expect(screen.getByText(/OPENAI_BASE_URL=http:\/\/127\.0\.0\.1:47823\/v1/)).toBeInTheDocument()
-
-    fireEvent.click(screen.getAllByRole("button", { name: "copy" })[0])
-    await waitFor(() =>
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining("http://127.0.0.1:47823")
-      )
+    expect(screen.getByRole("textbox", { name: "anthropicSnippet" })).toHaveValue(
+      "ANTHROPIC_BASE_URL=http://127.0.0.1:47823"
     )
+    expect(screen.getByRole("textbox", { name: "openaiSnippet" })).toHaveValue(
+      "OPENAI_BASE_URL=http://127.0.0.1:47823/v1"
+    )
+
+    await user.click(screen.getByRole("button", { name: "copy anthropicSnippet" }))
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining("http://127.0.0.1:47823"))
+    )
+  })
+
+  it("reports a client snippet copy failure", async () => {
+    const user = userEvent.setup()
+    const writeText = jest.fn().mockRejectedValueOnce(new Error("copy denied"))
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    const { toast } = jest.requireMock("sonner")
+    setup()
+
+    await user.click(screen.getByRole("button", { name: "copy anthropicSnippet" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("copy denied"))
   })
 
   it("prefers the bound port over the configured one in the snippets", () => {
     setup(status({ running: true, boundPort: 50505 }))
-    expect(screen.getByText(/ANTHROPIC_BASE_URL=http:\/\/127\.0\.0\.1:50505/)).toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "anthropicSnippet" })).toHaveValue(
+      "ANTHROPIC_BASE_URL=http://127.0.0.1:50505"
+    )
   })
 
   it("toggles the listener and disables the switch without a key", () => {

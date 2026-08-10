@@ -18,15 +18,16 @@
 import { useEffect, useMemo, useState } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { ChevronRightIcon, Trash2Icon } from "lucide-react"
+import { ChevronRightIcon, ScrollTextIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { estimateCallCostUsd } from "@cognia/provider-core/providers/model-pricing"
 import { MotionCollapse, MotionReveal } from "@/components/chat/motion/motion-reveal"
+import { SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
 import {
   Select,
   SelectContent,
@@ -43,6 +44,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { cn } from "@/lib/utils"
 import {
   clearGatewayRequestLog,
@@ -52,6 +54,8 @@ import {
 } from "@/lib/db/gateway-request-log"
 import { gatewayListKeys } from "@/lib/tauri/gateway"
 import type { GatewayApiKeyRedacted, GatewayRequestLogRow } from "@/types/gateway"
+
+import { GatewayPanelSection } from "./shared/panel-section"
 
 type Outcome = "all" | "ok" | "errors"
 
@@ -99,106 +103,118 @@ export function GatewayLogViewer() {
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between text-sm font-medium">
-          {t("logHeading")}
-          <Button size="sm" variant="ghost" onClick={() => void onClear()}>
-            <Trash2Icon className="mr-1.5 h-3.5 w-3.5" />
-            {t("clearLog")}
-          </Button>
-        </CardTitle>
-        <CardDescription>{t("logHelp")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {/* Usage summary */}
-        <div
-          className="grid grid-cols-2 gap-2 @lg/gateway-pane:grid-cols-4"
-          data-testid="gateway-usage-summary"
+    <GatewayPanelSection
+      icon={<ScrollTextIcon className="size-4" />}
+      title={t("logHeading")}
+      description={t("logHelp")}
+      action={
+        <Button size="sm" variant="ghost" onClick={() => void onClear()}>
+          <Trash2Icon className="mr-1.5 h-3.5 w-3.5" />
+          {t("clearLog")}
+        </Button>
+      }
+    >
+      {/* Usage summary */}
+      <div
+        className="grid grid-cols-2 gap-2 @lg/gateway-pane:grid-cols-4"
+        data-testid="gateway-usage-summary"
+      >
+        <SummaryTile label={t("summaryRequests")} value={String(summary.requests)} />
+        <SummaryTile label={t("summaryErrors")} value={String(summary.errors)} />
+        <SummaryTile
+          label={t("summaryTokens")}
+          value={`${summary.inputTokens} / ${summary.outputTokens}`}
+        />
+        <SummaryTile label={t("summaryAvgLatency")} value={`${summary.avgLatencyMs}ms`} />
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          value={outcome}
+          onValueChange={(value) => {
+            if (value) setOutcome(value as Outcome)
+          }}
+          aria-label={t("logHeading")}
         >
-          <SummaryTile label={t("summaryRequests")} value={String(summary.requests)} />
-          <SummaryTile label={t("summaryErrors")} value={String(summary.errors)} />
-          <SummaryTile
-            label={t("summaryTokens")}
-            value={`${summary.inputTokens} / ${summary.outputTokens}`}
-          />
-          <SummaryTile label={t("summaryAvgLatency")} value={`${summary.avgLatencyMs}ms`} />
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex gap-1" role="group" aria-label={t("logHeading")}>
-            {(["all", "ok", "errors"] as const).map((o) => (
-              <Button
-                key={o}
-                size="sm"
-                variant={outcome === o ? "default" : "outline"}
-                onClick={() => setOutcome(o)}
-              >
-                {t(o === "all" ? "logFilterAll" : o === "ok" ? "logFilterOk" : "logFilterErrors")}
-              </Button>
-            ))}
-          </div>
-          <Input
-            value={model}
-            placeholder={t("logFilterModelPlaceholder")}
-            aria-label={t("colModel")}
-            className="h-8 w-40 text-xs"
-            onChange={(e) => setModel(e.target.value)}
-          />
-          {/* shadcn Select, not a bare <select>: this was the only native one
+          {(["all", "ok", "errors"] as const).map((filterOutcome) => (
+            <ToggleGroupItem key={filterOutcome} value={filterOutcome}>
+              {t(
+                filterOutcome === "all"
+                  ? "logFilterAll"
+                  : filterOutcome === "ok"
+                    ? "logFilterOk"
+                    : "logFilterErrors"
+              )}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <Input
+          value={model}
+          placeholder={t("logFilterModelPlaceholder")}
+          aria-label={t("colModel")}
+          className="h-8 w-40 text-xs"
+          onChange={(e) => setModel(e.target.value)}
+        />
+        {/* shadcn Select, not a bare <select>: this was the only native one
               left in the repo and it ignored the app theme. */}
-          <Select value={keyFilter} onValueChange={setKeyFilter}>
-            <SelectTrigger className="h-8 w-44 text-xs" aria-label={t("colKey")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value={ALL_KEYS}>{t("logFilterAllKeys")}</SelectItem>
-                {keys.map((k) => (
-                  <SelectItem key={k.id} value={k.id}>
-                    {k.name}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Rows */}
-        {rows.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("logEmpty")}</p>
-        ) : (
-          <Table className="text-xs" data-testid="gateway-log">
-            <TableHeader className="text-muted-foreground">
-              <TableRow className="text-left hover:bg-transparent">
-                <TableHead className="w-6 py-1" />
-                <TableHead className="py-1 pr-2">{t("colTime")}</TableHead>
-                <TableHead className="py-1 pr-2">{t("colModel")}</TableHead>
-                <TableHead className="py-1 pr-2">{t("colProvider")}</TableHead>
-                <TableHead className="py-1 pr-2">{t("colKey")}</TableHead>
-                <TableHead className="py-1 pr-2">{t("colStatus")}</TableHead>
-                <TableHead className="py-1 pr-2">{t("colLatency")}</TableHead>
-                <TableHead className="py-1 pr-2">{t("colTokens")}</TableHead>
-                <TableHead className="py-1 pr-2">{t("colCost")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody className="font-mono">
-              {rows.map((r) => (
-                <LogRow
-                  key={r.id}
-                  row={r}
-                  keyName={keyName(r.keyId)}
-                  isFresh={new Date(r.at).getTime() > openedAt}
-                  isExpanded={expanded === r.id}
-                  onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
-                />
+        <Select value={keyFilter} onValueChange={setKeyFilter}>
+          <SelectTrigger className="h-8 w-44 text-xs" aria-label={t("colKey")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value={ALL_KEYS}>{t("logFilterAllKeys")}</SelectItem>
+              {keys.map((k) => (
+                <SelectItem key={k.id} value={k.id}>
+                  {k.name}
+                </SelectItem>
               ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Rows */}
+      {rows.length === 0 ? (
+        <SettingsEmptyState
+          icon={<ScrollTextIcon className="size-5" />}
+          title={t("logEmpty")}
+          className="py-6"
+        />
+      ) : (
+        <Table className="text-xs" data-testid="gateway-log">
+          <TableHeader className="text-muted-foreground">
+            <TableRow className="text-left hover:bg-transparent">
+              <TableHead className="w-6 py-1" />
+              <TableHead className="py-1 pr-2">{t("colTime")}</TableHead>
+              <TableHead className="py-1 pr-2">{t("colModel")}</TableHead>
+              <TableHead className="py-1 pr-2">{t("colProvider")}</TableHead>
+              <TableHead className="py-1 pr-2">{t("colKey")}</TableHead>
+              <TableHead className="py-1 pr-2">{t("colStatus")}</TableHead>
+              <TableHead className="py-1 pr-2">{t("colLatency")}</TableHead>
+              <TableHead className="py-1 pr-2">{t("colTokens")}</TableHead>
+              <TableHead className="py-1 pr-2">{t("colCost")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody className="font-mono">
+            {rows.map((r) => (
+              <LogRow
+                key={r.id}
+                row={r}
+                keyName={keyName(r.keyId)}
+                isFresh={new Date(r.at).getTime() > openedAt}
+                isExpanded={expanded === r.id}
+                onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </GatewayPanelSection>
   )
 }
 
@@ -315,10 +331,14 @@ function LogRow({
 
 function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border bg-muted/30 p-2">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="text-sm font-semibold tabular-nums">{value}</p>
-    </div>
+    <ItemGroup>
+      <Item role="listitem" variant="muted" size="sm">
+        <ItemContent>
+          <ItemDescription className="text-[11px]">{label}</ItemDescription>
+          <ItemTitle className="text-sm tabular-nums">{value}</ItemTitle>
+        </ItemContent>
+      </Item>
+    </ItemGroup>
   )
 }
 

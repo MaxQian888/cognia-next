@@ -20,14 +20,17 @@ import { useTranslations } from "next-intl"
 import { RefreshCwIcon, ShieldIcon } from "lucide-react"
 
 import { MotionReveal } from "@/components/chat/motion/motion-reveal"
-import { SettingsCard } from "@/components/settings/common/settings-section"
+import { SettingsEmptyState } from "@/components/settings/common/settings-section"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
 import type { GatewayKeyCooldown } from "@/types/gateway"
 
 import { ChipInput } from "../shared/chip-input"
 import { NumberRow } from "../../common/number-row"
 import type { GatewayPanelContext } from "../gateway-section"
+import { GatewayPanelSection, GatewayPanelStack } from "../shared/panel-section"
 
 export interface GatewayUpstreamPanelProps {
   ctx: GatewayPanelContext
@@ -44,8 +47,8 @@ export function GatewayUpstreamPanel({
   const { config, persist } = ctx
 
   return (
-    <div className="space-y-4">
-      <SettingsCard
+    <GatewayPanelStack>
+      <GatewayPanelSection
         icon={<ShieldIcon className="size-4" />}
         title={t("concurrencyHeading")}
         description={t("concurrencyHelp")}
@@ -88,9 +91,9 @@ export function GatewayUpstreamPanel({
           max={3600}
           onCommit={(v) => void persist({ streamIdleTimeoutSecs: v })}
         />
-      </SettingsCard>
+      </GatewayPanelSection>
 
-      <SettingsCard title={t("cooldownHeading")} description={t("cooldownHelp")}>
+      <GatewayPanelSection title={t("cooldownHeading")} description={t("cooldownHelp")}>
         <NumberRow
           id="gw-cooldown-fallback"
           label={t("cooldownFallback")}
@@ -122,12 +125,12 @@ export function GatewayUpstreamPanel({
           />
           <p className="text-xs text-muted-foreground">{t("disableKeywordsHelp")}</p>
         </div>
-      </SettingsCard>
+      </GatewayPanelSection>
 
-      <SettingsCard
+      <GatewayPanelSection
         title={t("cooldownsHeading")}
         description={t("cooldownsHelp")}
-        headerAction={
+        action={
           <Button
             size="sm"
             variant="outline"
@@ -140,38 +143,44 @@ export function GatewayUpstreamPanel({
         }
       >
         {cooldowns.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("cooldownsEmpty")}</p>
+          <SettingsEmptyState
+            icon={<ShieldIcon className="size-5" />}
+            title={t("cooldownsEmpty")}
+            className="py-6"
+          />
         ) : (
-          <ul className="space-y-1" data-testid="gateway-cooldowns">
+          <ItemGroup data-testid="gateway-cooldowns">
             {cooldowns.map((c, index) => (
               <MotionReveal key={`${c.providerId}-${c.keyHint}`} index={index}>
-                <li className="space-y-0.5 rounded bg-muted px-2 py-1.5 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 flex-1 truncate font-mono">
+                <Item role="listitem" size="sm" variant="muted">
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="truncate font-mono text-xs">
                       {c.providerId} · {c.keyHint}
-                    </span>
-                    {c.permanent ? (
-                      <span className="shrink-0 text-destructive">{t("cooldownsPermanent")}</span>
-                    ) : (
-                      <CooldownCountdown untilMs={c.untilMs} />
+                    </ItemTitle>
+                    {c.reason && (
+                      <ItemDescription
+                        className="line-clamp-none text-[11px]"
+                        data-testid={`gateway-cooldown-reason-${c.providerId}`}
+                      >
+                        {c.reason}
+                      </ItemDescription>
                     )}
-                  </div>
-                  {c.reason && (
-                    <p
-                      className="text-[11px] text-muted-foreground"
-                      data-testid={`gateway-cooldown-reason-${c.providerId}`}
-                    >
-                      {c.reason}
-                    </p>
+                  </ItemContent>
+                  {c.permanent ? (
+                    <Badge variant="destructive" className="shrink-0">
+                      {t("cooldownsPermanent")}
+                    </Badge>
+                  ) : (
+                    <CooldownCountdown untilMs={c.untilMs} />
                   )}
-                </li>
+                </Item>
               </MotionReveal>
             ))}
-          </ul>
+          </ItemGroup>
         )}
-      </SettingsCard>
+      </GatewayPanelSection>
 
-      <SettingsCard title={t("fieldStripHeading")} description={t("fieldStripHelp")}>
+      <GatewayPanelSection title={t("fieldStripHeading")} description={t("fieldStripHelp")}>
         <div className="space-y-2">
           <Label>{t("strippedFields")}</Label>
           <ChipInput
@@ -197,8 +206,8 @@ export function GatewayUpstreamPanel({
           />
           <p className="text-xs text-muted-foreground">{t("fieldStripAllowHelp")}</p>
         </div>
-      </SettingsCard>
-    </div>
+      </GatewayPanelSection>
+    </GatewayPanelStack>
   )
 }
 
@@ -221,18 +230,19 @@ export function CooldownCountdown({ untilMs }: { untilMs: number }) {
   const remainingMs = untilMs - now
   if (remainingMs <= 0) {
     return (
-      <span className="shrink-0 text-muted-foreground" data-testid="gateway-cooldown-recovered">
+      <Badge variant="outline" className="shrink-0" data-testid="gateway-cooldown-recovered">
         {t("cooldownsRecovered")}
-      </span>
+      </Badge>
     )
   }
 
   return (
-    <span
-      className="shrink-0 tabular-nums text-amber-600 dark:text-amber-400"
+    <Badge
+      variant="secondary"
+      className="shrink-0 tabular-nums"
       data-testid="gateway-cooldown-remaining"
     >
       {t("cooldownsRecoversIn", { seconds: Math.ceil(remainingMs / 1000) })}
-    </span>
+    </Badge>
   )
 }

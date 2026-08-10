@@ -19,25 +19,27 @@ import { useTranslations } from "next-intl"
 import {
   ActivityIcon,
   CheckCircle2Icon,
-  CopyIcon,
   Loader2Icon,
   StethoscopeIcon,
   XCircleIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Snippet, SnippetCopyButton, SnippetInput } from "@/components/ai-elements/snippet"
 import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import { RollingNumber } from "@/components/settings/subagents/motion/rolling-number"
-import { SettingsCard } from "@/components/settings/common/settings-section"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { gatewayProbeUpstream } from "@/lib/tauri/gateway"
 import type { GatewayUpstreamProbeResult } from "@/types/gateway"
 
 import type { GatewayPanelContext } from "../gateway-section"
+import { GatewayPanelSection, GatewayPanelStack } from "../shared/panel-section"
 
 export interface GatewayOverviewPanelProps {
   ctx: GatewayPanelContext
@@ -60,23 +62,15 @@ export function GatewayOverviewPanel({
   const baseUrl = `http://127.0.0.1:${port}`
   const running = status?.running ?? false
 
-  const copySnippet = useCallback(
-    async (value: string) => {
-      await navigator.clipboard.writeText(value).catch(() => {})
-      toast.success(t("copied"))
-    },
-    [t]
-  )
-
   return (
-    <div className="space-y-4">
-      <SettingsCard
+    <GatewayPanelStack>
+      <GatewayPanelSection
         icon={<ActivityIcon className="size-4" />}
         title={t("serverHeading")}
         description={t("enabledHelp")}
         badge={running ? t("badgeRunning") : t("badgeStopped")}
         badgeVariant={running ? "default" : "outline"}
-        headerAction={
+        action={
           <div className="flex items-center gap-2">
             {starting ? (
               <Loader2Icon
@@ -144,35 +138,42 @@ export function GatewayOverviewPanel({
           </p>
         ) : null}
         {status?.routingStrategyUnavailable ? (
-          <p className="text-xs text-destructive" role="alert">
-            {t("strategyUnavailable", { strategy: status.routingStrategyUnavailable })}
-          </p>
+          <Alert variant="destructive">
+            <AlertDescription>
+              {t("strategyUnavailable", { strategy: status.routingStrategyUnavailable })}
+            </AlertDescription>
+          </Alert>
         ) : null}
-      </SettingsCard>
+      </GatewayPanelSection>
 
-      <UpstreamSelfCheckCard running={running} onProbed={onRefreshStatus} />
+      <UpstreamSelfCheckSection running={running} onProbed={onRefreshStatus} />
 
-      <SettingsCard title={t("connectHeading")} description={t("connectHelp")}>
+      <GatewayPanelSection title={t("connectHeading")} description={t("connectHelp")}>
         {[
           { label: t("anthropicSnippet"), value: `ANTHROPIC_BASE_URL=${baseUrl}` },
           { label: t("openaiSnippet"), value: `OPENAI_BASE_URL=${baseUrl}/v1` },
         ].map((snippet) => (
-          <div key={snippet.label} className="space-y-1">
-            <p className="text-xs text-muted-foreground">{snippet.label}</p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-xs">
-                {snippet.value}
-              </code>
-              <Button size="sm" variant="outline" onClick={() => void copySnippet(snippet.value)}>
-                <CopyIcon className="mr-1.5 h-3.5 w-3.5" />
-                {t("copy")}
-              </Button>
-            </div>
+          <div key={snippet.label} className="flex flex-col gap-1">
+            <Label
+              htmlFor={`gw-snippet-${snippet.label}`}
+              className="text-xs text-muted-foreground"
+            >
+              {snippet.label}
+            </Label>
+            <Snippet code={snippet.value}>
+              <SnippetInput id={`gw-snippet-${snippet.label}`} className="text-xs" />
+              <SnippetCopyButton
+                aria-label={`${t("copy")} ${snippet.label}`}
+                title={t("copy")}
+                onCopy={() => toast.success(t("copied"))}
+                onError={(error) => toast.error(error.message)}
+              />
+            </Snippet>
           </div>
         ))}
         <p className="text-xs text-muted-foreground">{t("authNote")}</p>
-      </SettingsCard>
-    </div>
+      </GatewayPanelSection>
+    </GatewayPanelStack>
   )
 }
 
@@ -186,10 +187,12 @@ function StatTile({
   testId: string
 }) {
   return (
-    <div className="rounded-md border bg-muted/30 p-2" data-testid={testId}>
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="text-sm font-semibold tabular-nums">{value}</p>
-    </div>
+    <Item variant="muted" size="sm" data-testid={testId}>
+      <ItemContent>
+        <ItemDescription className="text-[11px]">{label}</ItemDescription>
+        <ItemTitle className="text-sm tabular-nums">{value}</ItemTitle>
+      </ItemContent>
+    </Item>
   )
 }
 
@@ -198,7 +201,7 @@ function StatTile({
  * `/healthz/upstream` route. Every row is a real, billable upstream call, so
  * this never runs on mount — only on an explicit click.
  */
-function UpstreamSelfCheckCard({
+function UpstreamSelfCheckSection({
   running,
   onProbed,
 }: {
@@ -230,7 +233,7 @@ function UpstreamSelfCheckCard({
   }, [model, onProbed])
 
   return (
-    <SettingsCard
+    <GatewayPanelSection
       icon={<StethoscopeIcon className="size-4" />}
       title={t("selfCheckHeading")}
       description={t("selfCheckHelp")}
@@ -271,56 +274,72 @@ function UpstreamSelfCheckCard({
         </Button>
       </div>
 
-      {!running && <p className="text-xs text-muted-foreground">{t("selfCheckNeedsRunning")}</p>}
+      {!running ? (
+        <Alert>
+          <AlertDescription>{t("selfCheckNeedsRunning")}</AlertDescription>
+        </Alert>
+      ) : null}
       <p className="text-xs text-muted-foreground">{t("selfCheckBillingWarning")}</p>
 
       <MotionCollapse open={error !== null}>
         {error ? (
-          <p className="text-xs text-destructive" data-testid="gateway-probe-error">
-            {error}
-          </p>
+          <Alert variant="destructive" data-testid="gateway-probe-error">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         ) : null}
       </MotionCollapse>
 
       <MotionCollapse open={results !== null && results.length > 0}>
-        <ul className="space-y-1" data-testid="gateway-probe-results">
+        <ItemGroup data-testid="gateway-probe-results">
           {(results ?? []).map((row) => (
-            <li
+            <Item
               key={`${row.providerId}-${row.modelId}`}
-              className="flex items-center justify-between gap-2 rounded bg-muted px-2 py-1 text-xs"
+              role="listitem"
+              size="sm"
+              variant="muted"
             >
-              <span className="min-w-0 flex-1 truncate font-mono">
-                {row.providerId} · {row.modelId}
-              </span>
-              <span className="shrink-0 tabular-nums text-muted-foreground">
-                {t("latencyMs", { ms: row.latencyMs })}
-              </span>
+              <ItemContent className="min-w-0">
+                <ItemTitle className="truncate font-mono text-xs">
+                  {row.providerId} · {row.modelId}
+                </ItemTitle>
+                <ItemDescription className="text-xs tabular-nums">
+                  {t("latencyMs", { ms: row.latencyMs })}
+                </ItemDescription>
+              </ItemContent>
               <MotionStatusSwap swapKey={`${row.providerId}-${row.ok}`}>
-                {row.ok ? (
-                  <CheckCircle2Icon className="size-3.5 text-emerald-500" aria-hidden />
-                ) : (
-                  <XCircleIcon className="size-3.5 text-destructive" aria-hidden />
-                )}
+                <Badge
+                  variant={row.ok ? "secondary" : "destructive"}
+                  aria-label={t(row.ok ? "logFilterOk" : "logFilterErrors")}
+                >
+                  {row.ok ? (
+                    <CheckCircle2Icon className="size-3.5" aria-hidden />
+                  ) : (
+                    <XCircleIcon className="size-3.5" aria-hidden />
+                  )}
+                  {row.status ?? t("selfCheckNoStatus")}
+                </Badge>
               </MotionStatusSwap>
-              <Badge variant={row.ok ? "secondary" : "destructive"} className="shrink-0">
-                {row.status ?? t("selfCheckNoStatus")}
-              </Badge>
-            </li>
+            </Item>
           ))}
-        </ul>
+        </ItemGroup>
       </MotionCollapse>
 
       {(results ?? []).some((row) => row.error) && (
-        <ul className="space-y-1">
+        <ItemGroup>
           {(results ?? [])
             .filter((row) => row.error)
             .map((row) => (
-              <li key={`${row.providerId}-err`} className="text-[11px] text-muted-foreground">
-                <span className="font-mono">{row.providerId}</span>: {row.error}
-              </li>
+              <Item key={`${row.providerId}-err`} role="listitem" size="sm">
+                <ItemContent>
+                  <ItemTitle className="font-mono text-xs">{row.providerId}</ItemTitle>
+                  <ItemDescription className="line-clamp-none text-[11px]">
+                    {row.error}
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
             ))}
-        </ul>
+        </ItemGroup>
       )}
-    </SettingsCard>
+    </GatewayPanelSection>
   )
 }

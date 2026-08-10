@@ -15,7 +15,6 @@
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
-  CopyIcon,
   EyeIcon,
   KeyRoundIcon,
   PencilIcon,
@@ -25,13 +24,23 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Snippet, SnippetCopyButton, SnippetInput } from "@/components/ai-elements/snippet"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { MotionCollapse, MotionReveal } from "@/components/chat/motion/motion-reveal"
-import { SettingsCard } from "@/components/settings/common/settings-section"
+import { SettingsEmptyState } from "@/components/settings/common/settings-section"
 import {
   gatewayCreateKey,
   gatewayDeleteKey,
@@ -41,6 +50,8 @@ import {
   gatewayUpdateKey,
 } from "@/lib/tauri/gateway"
 import type { GatewayApiKey, GatewayApiKeyRedacted } from "@/types/gateway"
+
+import { GatewayPanelSection, GatewayPanelStack } from "./shared/panel-section"
 
 function parseCsv(value: string): string[] {
   return value
@@ -223,69 +234,77 @@ export function GatewayKeysCard({ onChanged }: { onChanged?: () => void }) {
     }
   }
 
-  const copyFresh = async () => {
-    if (!freshKey) return
-    await navigator.clipboard.writeText(freshKey.secret).catch(() => {})
-    toast.success(t("keyCopied"))
-  }
-
   return (
-    <SettingsCard
-      icon={<KeyRoundIcon className="size-4" />}
-      title={t("keysHeading")}
-      description={t("keysHelp")}
-      badge={keys.length > 0 ? String(keys.length) : undefined}
-    >
-      {/* The freshly-minted secret is shown exactly once, so it slides in
+    <GatewayPanelStack>
+      <GatewayPanelSection
+        icon={<KeyRoundIcon className="size-4" />}
+        title={t("keysHeading")}
+        description={t("keysHelp")}
+        badge={keys.length > 0 ? String(keys.length) : undefined}
+      >
+        {/* The freshly-minted secret is shown exactly once, so it slides in
           rather than popping — the entrance is what draws the eye to the one
           thing on this screen that cannot be recovered later. */}
-      <MotionCollapse open={freshKey !== null}>
-        {freshKey ? (
-          <div
-            className="space-y-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3"
-            data-testid="gateway-fresh-key"
-          >
-            <p className="text-xs font-medium">{t("newKeyHeading")}</p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs">
-                {freshKey.secret}
-              </code>
-              <Button size="sm" variant="outline" onClick={copyFresh}>
-                <CopyIcon className="mr-1.5 h-3.5 w-3.5" />
-                {t("copyKey")}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setFreshKey(null)}>
-                {t("hide")}
-              </Button>
-            </div>
-            <p className="text-xs text-amber-600 dark:text-amber-400">{t("newKeyReveal")}</p>
-          </div>
-        ) : null}
-      </MotionCollapse>
+        <MotionCollapse open={freshKey !== null}>
+          {freshKey ? (
+            <Alert data-testid="gateway-fresh-key">
+              <KeyRoundIcon />
+              <AlertTitle>{t("newKeyHeading")}</AlertTitle>
+              <AlertDescription className="w-full gap-2">
+                <div className="flex w-full min-w-0 flex-col gap-2 @md/gateway-pane:flex-row">
+                  <Snippet code={freshKey.secret} className="min-w-0 flex-1">
+                    <SnippetInput aria-label={t("newKeyHeading")} className="text-xs" />
+                    <SnippetCopyButton
+                      aria-label={t("copyKey")}
+                      title={t("copyKey")}
+                      onCopy={() => toast.success(t("keyCopied"))}
+                      onError={(error) => toast.error(error.message)}
+                    />
+                  </Snippet>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="self-end @md/gateway-pane:self-auto"
+                    onClick={() => setFreshKey(null)}
+                  >
+                    {t("hide")}
+                  </Button>
+                </div>
+                <p>{t("newKeyReveal")}</p>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+        </MotionCollapse>
 
-      {/* Key list */}
-      {keys.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t("keysEmpty")}</p>
-      ) : (
-        <ul className="space-y-2" data-testid="gateway-keys">
-          {keys.map((k, index) => {
-            const expired = k.expiresAtMs != null && k.expiresAtMs <= now
-            const overQuota = k.quotaTokens != null && k.quotaUsedTokens >= k.quotaTokens
-            const isEditing = editId === k.id
-            return (
-              <MotionReveal key={k.id} index={index} className="rounded-md border p-3">
-                <li>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium">{k.name}</span>
-                        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+        {/* Key list */}
+        {keys.length === 0 ? (
+          <SettingsEmptyState
+            icon={<KeyRoundIcon className="size-5" />}
+            title={t("keysEmpty")}
+            className="py-6"
+          />
+        ) : (
+          <ItemGroup className="gap-2" data-testid="gateway-keys">
+            {keys.map((k, index) => {
+              const expired = k.expiresAtMs != null && k.expiresAtMs <= now
+              const overQuota = k.quotaTokens != null && k.quotaUsedTokens >= k.quotaTokens
+              const isEditing = editId === k.id
+              return (
+                <MotionReveal key={k.id} index={index}>
+                  <Item role="listitem" variant="muted" className="items-start">
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="w-full min-w-0 flex-wrap">
+                        <span className="truncate">{k.name}</span>
+                        <Badge
+                          variant="outline"
+                          className="max-w-full truncate font-mono text-[10px] font-normal"
+                        >
                           {k.secretPreview}
-                        </code>
+                        </Badge>
                         {expired && <Badge variant="destructive">{t("keyExpired")}</Badge>}
                         {overQuota && <Badge variant="destructive">{t("quotaExceeded")}</Badge>}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                      </ItemTitle>
+                      <ItemDescription className="flex max-w-full flex-wrap items-center gap-1.5 text-[11px]">
                         <span>
                           {k.modelAllowlist.length === 0
                             ? t("keyModelsAll")
@@ -318,9 +337,9 @@ export function GatewayKeysCard({ onChanged }: { onChanged?: () => void }) {
                             ? `${t("keyLastUsed")}: ${new Date(k.lastUsedAtMs).toLocaleString()}`
                             : t("keyNeverUsed")}
                         </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5">
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions className="max-w-full flex-wrap justify-end">
                       <Switch
                         checked={k.enabled}
                         onCheckedChange={(v) => void onToggle(k.id, v)}
@@ -366,183 +385,197 @@ export function GatewayKeysCard({ onChanged }: { onChanged?: () => void }) {
                       >
                         <Trash2Icon className="h-3.5 w-3.5" />
                       </Button>
-                    </div>
-                  </div>
-                  <MotionCollapse open={confirmDeleteId === k.id}>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <p className="flex-1 text-xs text-destructive">{t("deleteKeyConfirm")}</p>
-                      <Button size="sm" variant="destructive" onClick={() => void onDelete(k.id)}>
-                        {t("deleteKey")}
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(null)}>
-                        {t("cancel")}
-                      </Button>
-                    </div>
-                  </MotionCollapse>
-                  <MotionCollapse open={isEditing && editDraft !== null}>
-                    {isEditing && editDraft ? (
-                      <div
-                        // `@lg/gateway-pane`, not `sm:` — this sits inside the
-                        // detail pane, which is a fraction of the window, so a
-                        // viewport breakpoint would split it into two columns
-                        // while the pane itself is still narrow.
-                        className="mt-3 grid gap-2 rounded-md border border-dashed p-3 @lg/gateway-pane:grid-cols-2"
-                        data-testid={`gateway-key-edit-${k.id}`}
-                      >
-                        <div className="space-y-1">
-                          <Label htmlFor={`edit-name-${k.id}`} className="text-xs">
-                            {t("keyName")}
-                          </Label>
-                          <Input
-                            id={`edit-name-${k.id}`}
-                            value={editDraft.name}
-                            onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor={`edit-models-${k.id}`} className="text-xs">
-                            {t("keyModels")}
-                          </Label>
-                          <Input
-                            id={`edit-models-${k.id}`}
-                            value={editDraft.models}
-                            placeholder={t("keyModelsPlaceholder")}
-                            onChange={(e) => setEditDraft({ ...editDraft, models: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor={`edit-expiry-${k.id}`} className="text-xs">
-                            {t("keyExpiry")}
-                          </Label>
-                          <Input
-                            id={`edit-expiry-${k.id}`}
-                            type="date"
-                            value={editDraft.expiry}
-                            onChange={(e) => setEditDraft({ ...editDraft, expiry: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor={`edit-rate-${k.id}`} className="text-xs">
-                            {t("keyRateLimit")}
-                          </Label>
-                          <Input
-                            id={`edit-rate-${k.id}`}
-                            type="number"
-                            min={1}
-                            value={editDraft.rate}
-                            placeholder={t("keyRateLimitNone")}
-                            onChange={(e) => setEditDraft({ ...editDraft, rate: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor={`edit-quota-${k.id}`} className="text-xs">
-                            {t("keyQuota")}
-                          </Label>
-                          <Input
-                            id={`edit-quota-${k.id}`}
-                            type="number"
-                            min={1}
-                            value={editDraft.quota}
-                            placeholder={t("keyQuotaNone")}
-                            onChange={(e) => setEditDraft({ ...editDraft, quota: e.target.value })}
-                          />
-                          <p className="text-[10px] text-muted-foreground">{t("keyQuotaHelp")}</p>
-                        </div>
-                        <div className="flex items-center gap-2 @lg/gateway-pane:col-span-2">
-                          <Button size="sm" onClick={() => void onSaveEdit(k.id)}>
-                            {t("save")}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setEditId(null)
-                              setEditDraft(null)
-                            }}
+                    </ItemActions>
+                    <div className="w-full basis-full">
+                      <MotionCollapse open={confirmDeleteId === k.id}>
+                        <Alert variant="destructive" className="mt-2">
+                          <AlertDescription className="flex w-full flex-col gap-2 @md/gateway-pane:flex-row @md/gateway-pane:items-center">
+                            <p className="flex-1">{t("deleteKeyConfirm")}</p>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => void onDelete(k.id)}
+                              >
+                                {t("deleteKey")}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setConfirmDeleteId(null)}
+                              >
+                                {t("cancel")}
+                              </Button>
+                            </div>
+                          </AlertDescription>
+                        </Alert>
+                      </MotionCollapse>
+                      <MotionCollapse open={isEditing && editDraft !== null}>
+                        {isEditing && editDraft ? (
+                          <FieldGroup
+                            // `@lg/gateway-pane`, not `sm:` — this sits inside the
+                            // detail pane, which is a fraction of the window, so a
+                            // viewport breakpoint would split it into two columns
+                            // while the pane itself is still narrow.
+                            className="mt-3 grid gap-3 @lg/gateway-pane:grid-cols-2"
+                            data-testid={`gateway-key-edit-${k.id}`}
                           >
-                            {t("cancel")}
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </MotionCollapse>
-                </li>
-              </MotionReveal>
-            )
-          })}
-        </ul>
-      )}
+                            <Field>
+                              <FieldLabel htmlFor={`edit-name-${k.id}`}>{t("keyName")}</FieldLabel>
+                              <Input
+                                id={`edit-name-${k.id}`}
+                                value={editDraft.name}
+                                onChange={(e) =>
+                                  setEditDraft({ ...editDraft, name: e.target.value })
+                                }
+                              />
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`edit-models-${k.id}`}>
+                                {t("keyModels")}
+                              </FieldLabel>
+                              <Input
+                                id={`edit-models-${k.id}`}
+                                value={editDraft.models}
+                                placeholder={t("keyModelsPlaceholder")}
+                                onChange={(e) =>
+                                  setEditDraft({ ...editDraft, models: e.target.value })
+                                }
+                              />
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`edit-expiry-${k.id}`}>
+                                {t("keyExpiry")}
+                              </FieldLabel>
+                              <Input
+                                id={`edit-expiry-${k.id}`}
+                                type="date"
+                                value={editDraft.expiry}
+                                onChange={(e) =>
+                                  setEditDraft({ ...editDraft, expiry: e.target.value })
+                                }
+                              />
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`edit-rate-${k.id}`}>
+                                {t("keyRateLimit")}
+                              </FieldLabel>
+                              <Input
+                                id={`edit-rate-${k.id}`}
+                                type="number"
+                                min={1}
+                                value={editDraft.rate}
+                                placeholder={t("keyRateLimitNone")}
+                                onChange={(e) =>
+                                  setEditDraft({ ...editDraft, rate: e.target.value })
+                                }
+                              />
+                            </Field>
+                            <Field>
+                              <FieldLabel htmlFor={`edit-quota-${k.id}`}>
+                                {t("keyQuota")}
+                              </FieldLabel>
+                              <Input
+                                id={`edit-quota-${k.id}`}
+                                type="number"
+                                min={1}
+                                value={editDraft.quota}
+                                placeholder={t("keyQuotaNone")}
+                                onChange={(e) =>
+                                  setEditDraft({ ...editDraft, quota: e.target.value })
+                                }
+                              />
+                              <FieldDescription>{t("keyQuotaHelp")}</FieldDescription>
+                            </Field>
+                            <div className="flex flex-wrap items-center gap-2 @lg/gateway-pane:col-span-2">
+                              <Button size="sm" onClick={() => void onSaveEdit(k.id)}>
+                                {t("save")}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setEditId(null)
+                                  setEditDraft(null)
+                                }}
+                              >
+                                {t("cancel")}
+                              </Button>
+                            </div>
+                          </FieldGroup>
+                        ) : null}
+                      </MotionCollapse>
+                    </div>
+                  </Item>
+                </MotionReveal>
+              )
+            })}
+          </ItemGroup>
+        )}
+      </GatewayPanelSection>
 
       {/* Create form */}
-      <div className="grid gap-2 rounded-md border border-dashed p-3 @lg/gateway-pane:grid-cols-2">
-        <div className="space-y-1">
-          <Label htmlFor="gw-key-name" className="text-xs">
-            {t("keyName")}
-          </Label>
-          <Input
-            id="gw-key-name"
-            value={name}
-            placeholder={t("keyNamePlaceholder")}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="gw-key-models" className="text-xs">
-            {t("keyModels")}
-          </Label>
-          <Input
-            id="gw-key-models"
-            value={models}
-            placeholder={t("keyModelsPlaceholder")}
-            onChange={(e) => setModels(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="gw-key-expiry" className="text-xs">
-            {t("keyExpiry")}
-          </Label>
-          <Input
-            id="gw-key-expiry"
-            type="date"
-            value={expiry}
-            onChange={(e) => setExpiry(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="gw-key-rate" className="text-xs">
-            {t("keyRateLimit")}
-          </Label>
-          <Input
-            id="gw-key-rate"
-            type="number"
-            min={1}
-            value={rate}
-            placeholder={t("keyRateLimitNone")}
-            onChange={(e) => setRate(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="gw-key-quota" className="text-xs">
-            {t("keyQuota")}
-          </Label>
-          <Input
-            id="gw-key-quota"
-            type="number"
-            min={1}
-            value={quota}
-            placeholder={t("keyQuotaNone")}
-            onChange={(e) => setQuota(e.target.value)}
-          />
-          <p className="text-[10px] text-muted-foreground">{t("keyQuotaHelp")}</p>
-        </div>
-        <div className="@lg/gateway-pane:col-span-2">
-          <Button size="sm" onClick={() => void onCreate()}>
-            <PlusIcon className="mr-1.5 h-4 w-4" />
-            {t("createKey")}
-          </Button>
-        </div>
-      </div>
-    </SettingsCard>
+      <GatewayPanelSection title={t("createKey")}>
+        <FieldGroup className="grid gap-3 @lg/gateway-pane:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor="gw-key-name">{t("keyName")}</FieldLabel>
+            <Input
+              id="gw-key-name"
+              value={name}
+              placeholder={t("keyNamePlaceholder")}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="gw-key-models">{t("keyModels")}</FieldLabel>
+            <Input
+              id="gw-key-models"
+              value={models}
+              placeholder={t("keyModelsPlaceholder")}
+              onChange={(e) => setModels(e.target.value)}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="gw-key-expiry">{t("keyExpiry")}</FieldLabel>
+            <Input
+              id="gw-key-expiry"
+              type="date"
+              value={expiry}
+              onChange={(e) => setExpiry(e.target.value)}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="gw-key-rate">{t("keyRateLimit")}</FieldLabel>
+            <Input
+              id="gw-key-rate"
+              type="number"
+              min={1}
+              value={rate}
+              placeholder={t("keyRateLimitNone")}
+              onChange={(e) => setRate(e.target.value)}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="gw-key-quota">{t("keyQuota")}</FieldLabel>
+            <Input
+              id="gw-key-quota"
+              type="number"
+              min={1}
+              value={quota}
+              placeholder={t("keyQuotaNone")}
+              onChange={(e) => setQuota(e.target.value)}
+            />
+            <FieldDescription>{t("keyQuotaHelp")}</FieldDescription>
+          </Field>
+          <div className="@lg/gateway-pane:col-span-2">
+            <Button size="sm" onClick={() => void onCreate()}>
+              <PlusIcon className="mr-1.5 h-4 w-4" />
+              {t("createKey")}
+            </Button>
+          </div>
+        </FieldGroup>
+      </GatewayPanelSection>
+    </GatewayPanelStack>
   )
 }
 

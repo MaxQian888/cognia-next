@@ -20,6 +20,7 @@ import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, MenuIcon, NetworkIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
@@ -192,9 +193,10 @@ export function GatewaySection() {
 
   if (!desktop) {
     return (
-      <div className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
-        <AlertTriangleIcon className="mb-2 inline h-4 w-4" /> {t("desktopOnlyNotice")}
-      </div>
+      <Alert>
+        <AlertTriangleIcon />
+        <AlertDescription>{t("desktopOnlyNotice")}</AlertDescription>
+      </Alert>
     )
   }
 
@@ -221,7 +223,7 @@ export function GatewaySection() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-4 md:grid-cols-[320px_minmax(0,1fr)] md:grid-rows-1">
         {/* Desktop nav */}
         <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
           {navNode}
@@ -256,7 +258,7 @@ export function GatewaySection() {
         {/* `@container/gateway-pane`: the detail pane is a fraction of the
             window, so anything multi-column inside a panel must size off this
             box rather than the viewport. */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border">
           <div
             className="min-h-0 flex-1 overflow-y-auto p-3 @container/gateway-pane"
             data-testid="gateway-panel-body"
@@ -317,14 +319,7 @@ function GatewayPanelBody(args: RenderArgs) {
     case "listener":
       return <GatewayListenerPanel ctx={panelContext} onRestarted={refreshStatus} />
     case "keys":
-      // Rendered directly: these two cards predate the master/detail split
-      // and are self-contained, so a `*-panel.tsx` around them would be a
-      // file whose entire contribution is a wrapping div.
-      return (
-        <div className="space-y-4">
-          <GatewayKeysCard onChanged={() => void refreshStatus()} />
-        </div>
-      )
+      return <GatewayKeysCard onChanged={() => void refreshStatus()} />
     case "reliability":
       return <GatewayReliabilityPanel ctx={panelContext} />
     case "upstream":
@@ -338,11 +333,7 @@ function GatewayPanelBody(args: RenderArgs) {
     case "exposure":
       return <GatewayExposurePanel ctx={panelContext} />
     case "logs":
-      return (
-        <div className="space-y-4">
-          <GatewayLogViewer />
-        </div>
-      )
+      return <GatewayLogViewer />
     case "tickets":
       return <GatewayRouteTicketsPanel />
   }

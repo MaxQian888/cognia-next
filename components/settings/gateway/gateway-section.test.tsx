@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { GatewaySection } from "./gateway-section"
+import { isTauri } from "@/lib/tauri"
 import { DEFAULT_GATEWAY_CONFIG, type GatewayConfig, type GatewayStatus } from "@/types/gateway"
 
 // Echo the interpolation values too — otherwise a test that means to assert an
@@ -47,8 +48,8 @@ jest.mock("./panels/overview-panel", () => ({
 jest.mock("./panels/listener-panel", () => ({
   GatewayListenerPanel: () => <div data-testid="panel-listener" />,
 }))
-// The keys and logs panels were wrapper divs around these two self-contained
-// cards, so the section renders them directly now.
+// The keys and logs panels are self-contained, so the section renders them
+// directly.
 jest.mock("./gateway-keys-card", () => ({
   GatewayKeysCard: () => <div data-testid="panel-keys" />,
 }))
@@ -68,8 +69,8 @@ jest.mock("./panels/route-tickets-panel", () => ({
   GatewayRouteTicketsPanel: () => <div data-testid="panel-tickets" />,
 }))
 
-let tauri = true
-jest.mock("@/lib/tauri", () => ({ isTauri: () => tauri }))
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
+const mockIsTauri = jest.mocked(isTauri)
 
 const mockGetConfig = jest.fn()
 const mockGetStatus = jest.fn()
@@ -107,7 +108,7 @@ const config = (over: Partial<GatewayConfig> = {}): GatewayConfig => ({
 })
 
 beforeEach(() => {
-  tauri = true
+  mockIsTauri.mockReturnValue(true)
   searchString = ""
   replace.mockReset()
   mockGetConfig.mockReset().mockResolvedValue(config())
@@ -120,7 +121,7 @@ beforeEach(() => {
 
 describe("GatewaySection", () => {
   it("shows the desktop-only notice outside Tauri", () => {
-    tauri = false
+    mockIsTauri.mockReturnValue(false)
     render(<GatewaySection />)
 
     expect(screen.getByText("desktopOnlyNotice")).toBeInTheDocument()
@@ -128,7 +129,7 @@ describe("GatewaySection", () => {
   })
 
   it("does no IPC outside Tauri", () => {
-    tauri = false
+    mockIsTauri.mockReturnValue(false)
     render(<GatewaySection />)
 
     expect(mockGetConfig).not.toHaveBeenCalled()

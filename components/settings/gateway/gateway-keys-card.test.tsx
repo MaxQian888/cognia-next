@@ -61,6 +61,7 @@ beforeEach(() => {
   mockResetQuota.mockReset().mockResolvedValue(undefined)
   mockReveal.mockReset().mockResolvedValue("sk-cognia-FULLSECRET0000")
   ;(toast.success as jest.Mock).mockClear()
+  ;(toast.error as jest.Mock).mockClear()
 })
 
 describe("GatewayKeysCard", () => {
@@ -68,6 +69,10 @@ describe("GatewayKeysCard", () => {
     render(<GatewayKeysCard />)
     expect(await screen.findByText("CLI")).toBeInTheDocument()
     expect(screen.getByText("sk-cognia-…abcd")).toBeInTheDocument()
+
+    const keyList = screen.getByTestId("gateway-keys")
+    expect(keyList).toHaveRole("list")
+    expect(within(keyList).getAllByRole("listitem")).toHaveLength(1)
   })
 
   it("shows the empty state when no keys exist", async () => {
@@ -97,7 +102,7 @@ describe("GatewayKeysCard", () => {
         quotaTokens: 100000,
       })
     )
-    expect(await screen.findByTestId("gateway-fresh-key")).toHaveTextContent(
+    expect(await screen.findByRole("textbox", { name: "newKeyHeading" })).toHaveValue(
       "sk-cognia-FULLSECRET0000"
     )
     expect(onChanged).toHaveBeenCalled()
@@ -168,7 +173,23 @@ describe("GatewayKeysCard", () => {
 
   describe("the one-time secret banner", () => {
     it("copies the freshly minted secret", async () => {
+      const user = userEvent.setup()
       const writeText = jest.fn().mockResolvedValue(undefined)
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+      render(<GatewayKeysCard />)
+      await screen.findByText("CLI")
+
+      await user.type(screen.getByLabelText("keyName"), "Laptop")
+      await user.click(screen.getByRole("button", { name: "createKey" }))
+      await screen.findByTestId("gateway-fresh-key")
+
+      await user.click(screen.getByRole("button", { name: "copyKey" }))
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith("sk-cognia-FULLSECRET0000"))
+    })
+
+    it("reports a clipboard failure for the freshly minted secret", async () => {
+      const writeText = jest.fn().mockRejectedValue(new Error("copy denied"))
       Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")
@@ -179,7 +200,7 @@ describe("GatewayKeysCard", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "copyKey" }))
 
-      await waitFor(() => expect(writeText).toHaveBeenCalledWith("sk-cognia-FULLSECRET0000"))
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("copy denied"))
     })
 
     it("dismisses the banner", async () => {

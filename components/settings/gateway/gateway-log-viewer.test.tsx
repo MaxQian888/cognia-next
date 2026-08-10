@@ -114,9 +114,18 @@ describe("GatewayLogViewer", () => {
     const user = userEvent.setup()
     render(<GatewayLogViewer />)
 
-    await user.click(screen.getByRole("button", { name: "logFilterErrors" }))
+    await user.click(screen.getByRole("radio", { name: "logFilterErrors" }))
 
     await waitFor(() => expect(lastFilter).toEqual({ limit: 100, outcome: "errors" }))
+  })
+
+  it("does not clear the selected outcome filter", async () => {
+    const user = userEvent.setup()
+    render(<GatewayLogViewer />)
+
+    await user.click(screen.getByRole("radio", { name: "logFilterAll" }))
+
+    expect(lastFilter).toEqual({ limit: 100 })
   })
 
   it("passes the model filter through and ignores whitespace", async () => {

@@ -26,13 +26,21 @@ import { AlertTriangleIcon, RefreshCwIcon, TicketIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { MotionCollapse, MotionReveal } from "@/components/chat/motion/motion-reveal"
-import {
-  SettingsCard,
-  SettingsEmptyState,
-  SettingsToggle,
-} from "@/components/settings/common/settings-section"
+import { SettingsEmptyState } from "@/components/settings/common/settings-section"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import {
   isAgentExecutionFlagEnabled,
   setAgentExecutionFlag,
@@ -40,6 +48,8 @@ import {
 } from "@/lib/ai/agent/execution/feature-flags"
 import { gatewayListRouteTickets, gatewayRevokeRouteTicket } from "@/lib/tauri/gateway"
 import type { GatewayRouteTicket } from "@/types/gateway"
+
+import { GatewayPanelSection, GatewayPanelStack } from "../shared/panel-section"
 
 /**
  * Prerender snapshot for the route-ticket flag.
@@ -108,98 +118,112 @@ export function GatewayRouteTicketsPanel() {
   )
 
   return (
-    <div className="space-y-4">
-      <SettingsCard
+    <GatewayPanelStack>
+      <GatewayPanelSection
         icon={<TicketIcon className="size-4" />}
         title={t("title")}
         description={t("description")}
         badge={t("experimentalBadge")}
         badgeVariant="outline"
       >
-        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
-          <AlertTriangleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>{t("routingWarning")}</span>
-        </div>
+        <Alert>
+          <AlertTriangleIcon />
+          <AlertDescription>{t("routingWarning")}</AlertDescription>
+        </Alert>
 
-        <SettingsToggle
-          id="gw-route-tickets-enabled"
-          label={t("enableLabel")}
-          description={t("enableHelp")}
-          checked={enabled}
-          onCheckedChange={onToggle}
-        />
-      </SettingsCard>
+        <Field orientation="responsive">
+          <FieldContent>
+            <FieldLabel htmlFor="gw-route-tickets-enabled">{t("enableLabel")}</FieldLabel>
+            <FieldDescription>{t("enableHelp")}</FieldDescription>
+          </FieldContent>
+          <Switch id="gw-route-tickets-enabled" checked={enabled} onCheckedChange={onToggle} />
+        </Field>
+      </GatewayPanelSection>
 
-      <MotionCollapse open={!enabled}>
-        <SettingsEmptyState
-          icon={<TicketIcon className="size-5" />}
-          title={t("disabledTitle")}
-          description={t("disabledDescription")}
-        />
-      </MotionCollapse>
+      <div>
+        <MotionCollapse open={!enabled}>
+          <SettingsEmptyState
+            icon={<TicketIcon className="size-5" />}
+            title={t("disabledTitle")}
+            description={t("disabledDescription")}
+          />
+        </MotionCollapse>
 
-      <MotionCollapse open={enabled}>
-        <SettingsCard
-          title={t("activeHeading")}
-          description={t("activeHelp")}
-          headerAction={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void refresh()}
-              data-testid="gateway-tickets-refresh"
-            >
-              <RefreshCwIcon className="mr-1.5 size-3.5" aria-hidden />
-              {t("refresh")}
-            </Button>
-          }
-        >
-          {!loaded ? (
-            // Distinct from the empty state on purpose: rendering the (empty)
-            // list container while the first read is still in flight claims
-            // "no tickets" before anything has been read.
-            <div className="space-y-1" data-testid="gateway-tickets-loading" aria-busy="true">
-              <div className="h-7 animate-pulse rounded bg-muted" />
-              <div className="h-7 w-2/3 animate-pulse rounded bg-muted" />
-            </div>
-          ) : tickets.length === 0 ? (
-            <p className="text-xs text-muted-foreground" data-testid="gateway-tickets-empty">
-              {t("noneActive")}
-            </p>
-          ) : (
-            <ul className="space-y-1" data-testid="gateway-tickets">
-              {tickets.map((ticket, index) => (
-                <MotionReveal key={ticket.ticketId} index={index}>
-                  <li className="space-y-1 rounded bg-muted px-2 py-1.5 text-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 flex-1 truncate font-mono">{ticket.ticketId}</span>
-                      <Badge variant={ticket.revoked ? "destructive" : "secondary"}>
-                        {ticket.revoked ? t("statusRevoked") : ticket.credentialAffinity}
-                      </Badge>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={ticket.revoked}
-                        onClick={() => void onRevoke(ticket.ticketId)}
-                        aria-label={t("revokeAria", { id: ticket.ticketId })}
-                      >
-                        {t("revoke")}
-                      </Button>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      {t("ticketMeta", {
-                        session: ticket.sessionId,
-                        candidates: ticket.candidates.length,
-                        expires: new Date(ticket.expiresAtMs).toLocaleTimeString(),
-                      })}
-                    </p>
-                  </li>
-                </MotionReveal>
-              ))}
-            </ul>
-          )}
-        </SettingsCard>
-      </MotionCollapse>
-    </div>
+        <MotionCollapse open={enabled}>
+          <GatewayPanelSection
+            title={t("activeHeading")}
+            description={t("activeHelp")}
+            action={
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void refresh()}
+                data-testid="gateway-tickets-refresh"
+              >
+                <RefreshCwIcon className="mr-1.5 size-3.5" aria-hidden />
+                {t("refresh")}
+              </Button>
+            }
+          >
+            {!loaded ? (
+              // Distinct from the empty state on purpose: rendering the (empty)
+              // list container while the first read is still in flight claims
+              // "no tickets" before anything has been read.
+              <div
+                className="flex flex-col gap-2"
+                data-testid="gateway-tickets-loading"
+                aria-busy="true"
+              >
+                <Skeleton className="h-10" />
+                <Skeleton className="h-10 w-2/3" />
+              </div>
+            ) : tickets.length === 0 ? (
+              <div data-testid="gateway-tickets-empty">
+                <SettingsEmptyState
+                  icon={<TicketIcon className="size-5" />}
+                  title={t("noneActive")}
+                  className="py-6"
+                />
+              </div>
+            ) : (
+              <ItemGroup data-testid="gateway-tickets">
+                {tickets.map((ticket, index) => (
+                  <MotionReveal key={ticket.ticketId} index={index}>
+                    <Item role="listitem" size="sm" variant="muted">
+                      <ItemContent className="min-w-0">
+                        <ItemTitle className="truncate font-mono text-xs">
+                          {ticket.ticketId}
+                        </ItemTitle>
+                        <ItemDescription className="line-clamp-none text-[11px]">
+                          {t("ticketMeta", {
+                            session: ticket.sessionId,
+                            candidates: ticket.candidates.length,
+                            expires: new Date(ticket.expiresAtMs).toLocaleTimeString(),
+                          })}
+                        </ItemDescription>
+                      </ItemContent>
+                      <ItemActions className="max-w-full flex-wrap">
+                        <Badge variant={ticket.revoked ? "destructive" : "secondary"}>
+                          {ticket.revoked ? t("statusRevoked") : ticket.credentialAffinity}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={ticket.revoked}
+                          onClick={() => void onRevoke(ticket.ticketId)}
+                          aria-label={t("revokeAria", { id: ticket.ticketId })}
+                        >
+                          {t("revoke")}
+                        </Button>
+                      </ItemActions>
+                    </Item>
+                  </MotionReveal>
+                ))}
+              </ItemGroup>
+            )}
+          </GatewayPanelSection>
+        </MotionCollapse>
+      </div>
+    </GatewayPanelStack>
   )
 }

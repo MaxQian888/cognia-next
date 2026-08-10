@@ -20,16 +20,18 @@ import { AlertTriangleIcon, Loader2Icon, RotateCwIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { MotionCollapse } from "@/components/chat/motion/motion-reveal"
-import { SettingsCard } from "@/components/settings/common/settings-section"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { gatewayStart, gatewayStop } from "@/lib/tauri/gateway"
 import { type GatewayBindInterface } from "@/types/gateway"
 
 import { ChipInput } from "../shared/chip-input"
 import { NumberRow } from "../../common/number-row"
 import type { GatewayPanelContext } from "../gateway-section"
+import { GatewayPanelSection } from "../shared/panel-section"
 
 export interface GatewayListenerPanelProps {
   ctx: GatewayPanelContext
@@ -66,95 +68,98 @@ export function GatewayListenerPanel({ ctx, onRestarted }: GatewayListenerPanelP
   }, [onRestarted, t])
 
   return (
-    <div className="space-y-4">
-      <SettingsCard
-        title={t("listenerHeading")}
-        description={t("listenerHelp")}
-        badge={t("bindTimeBadge")}
-        badgeVariant="outline"
-        headerAction={
-          <MotionCollapse open={needsRestart}>
-            <Button
-              size="sm"
-              variant="default"
-              disabled={restarting}
-              onClick={() => void onRestart()}
-              data-testid="gateway-restart-listener"
-            >
-              {restarting ? (
-                <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
-              ) : (
-                <RotateCwIcon className="mr-1.5 size-3.5" aria-hidden />
-              )}
-              {t("restartListener")}
-            </Button>
-          </MotionCollapse>
-        }
-      >
+    <GatewayPanelSection
+      title={t("listenerHeading")}
+      description={t("listenerHelp")}
+      badge={t("bindTimeBadge")}
+      badgeVariant="outline"
+      action={
         <MotionCollapse open={needsRestart}>
-          <div
-            className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400"
-            data-testid="gateway-restart-required"
+          <Button
+            size="sm"
+            variant="default"
+            disabled={restarting}
+            onClick={() => void onRestart()}
+            data-testid="gateway-restart-listener"
           >
-            <AlertTriangleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>{t("restartRequired")}</span>
-          </div>
+            {restarting ? (
+              <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+            ) : (
+              <RotateCwIcon className="mr-1.5 size-3.5" aria-hidden />
+            )}
+            {t("restartListener")}
+          </Button>
         </MotionCollapse>
+      }
+    >
+      <MotionCollapse open={needsRestart}>
+        <Alert data-testid="gateway-restart-required">
+          <AlertTriangleIcon />
+          <AlertDescription>{t("restartRequired")}</AlertDescription>
+        </Alert>
+      </MotionCollapse>
 
-        <NumberRow
-          id="gw-port"
-          label={t("port")}
-          help={t("portHelp")}
-          value={config.port}
-          min={1024}
-          max={65535}
-          onCommit={(v) => void persist({ port: v })}
+      <NumberRow
+        id="gw-port"
+        label={t("port")}
+        help={t("portHelp")}
+        value={config.port}
+        min={1024}
+        max={65535}
+        onCommit={(v) => void persist({ port: v })}
+      />
+
+      <div className="space-y-2">
+        <Label>{t("bindInterface")}</Label>
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          value={config.bindInterface}
+          onValueChange={(value) => {
+            if (value) void persist({ bindInterface: value as GatewayBindInterface })
+          }}
+          aria-label={t("bindInterface")}
+        >
+          {(["loopback", "lan"] as const).map((iface) => (
+            <ToggleGroupItem
+              key={iface}
+              value={iface}
+              aria-label={t(iface === "loopback" ? "bindLoopback" : "bindLan")}
+            >
+              {t(iface === "loopback" ? "bindLoopback" : "bindLan")}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <p className="text-xs text-muted-foreground">{t("bindHelp")}</p>
+        <MotionCollapse open={config.bindInterface === "lan"}>
+          <Alert>
+            <AlertTriangleIcon />
+            <AlertDescription>{t("lanWarning")}</AlertDescription>
+          </Alert>
+        </MotionCollapse>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Label>{t("allowlist")}</Label>
+          <Badge variant="outline" className="text-[10px]">
+            {t("bindTimeBadge")}
+          </Badge>
+        </div>
+        <ChipInput
+          values={config.allowlist}
+          onCommit={(next) => {
+            setAllowlistDirty(true)
+            void persist({ allowlist: next })
+          }}
+          placeholder={t("allowlistPlaceholder")}
+          ariaLabel={t("allowlist")}
+          addLabel={t("add")}
+          removeLabel={t("remove")}
         />
-
-        <div className="space-y-2">
-          <Label>{t("bindInterface")}</Label>
-          <div className="flex gap-1" role="group" aria-label={t("bindInterface")}>
-            {(["loopback", "lan"] as const).map((iface) => (
-              <Button
-                key={iface}
-                size="sm"
-                variant={config.bindInterface === iface ? "default" : "outline"}
-                onClick={() => void persist({ bindInterface: iface as GatewayBindInterface })}
-              >
-                {t(iface === "loopback" ? "bindLoopback" : "bindLan")}
-              </Button>
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground">{t("bindHelp")}</p>
-          <MotionCollapse open={config.bindInterface === "lan"}>
-            <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
-              <AlertTriangleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>{t("lanWarning")}</span>
-            </div>
-          </MotionCollapse>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Label>{t("allowlist")}</Label>
-            <Badge variant="outline" className="text-[10px]">
-              {t("bindTimeBadge")}
-            </Badge>
-          </div>
-          <ChipInput
-            values={config.allowlist}
-            onCommit={(next) => {
-              setAllowlistDirty(true)
-              void persist({ allowlist: next })
-            }}
-            placeholder={t("allowlistPlaceholder")}
-            ariaLabel={t("allowlist")}
-            addLabel={t("add")}
-            removeLabel={t("remove")}
-          />
-          <p className="text-xs text-muted-foreground">{t("allowlistHelp")}</p>
-        </div>
-      </SettingsCard>
-    </div>
+        <p className="text-xs text-muted-foreground">{t("allowlistHelp")}</p>
+      </div>
+    </GatewayPanelSection>
   )
 }
