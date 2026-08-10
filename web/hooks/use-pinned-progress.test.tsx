@@ -1,7 +1,6 @@
 /** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import {
-  PIN_MAX_HEIGHT,
   PIN_MIN_WIDTH,
   indexFromScroll,
   scrollTopForIndex,
@@ -126,19 +125,13 @@ describe("usePinnedProgress", () => {
     expect(result.current.pinned).toBe(false)
   })
 
-  it("pins once the viewport fits the desktop stage window", () => {
+  it("pins once the viewport is wide enough, regardless of its height", () => {
     stubViewport(true)
     const { result } = renderHook(() => usePinnedProgress({ steps: 6, enabled: true }))
     expect(result.current.pinned).toBe(true)
   })
 
-  it(`does not pin above ${PIN_MAX_HEIGHT}px`, () => {
-    stubViewport(false)
-    const { result } = renderHook(() => usePinnedProgress({ steps: 6, enabled: true }))
-    expect(result.current.pinned).toBe(false)
-  })
-
-  it("queries the documented width and height window", () => {
+  it("queries the adaptive desktop breakpoint without excluding tall screens", () => {
     const spy = jest.fn().mockReturnValue({
       matches: false,
       addEventListener: () => {},
@@ -146,9 +139,7 @@ describe("usePinnedProgress", () => {
     })
     window.matchMedia = spy as unknown as typeof window.matchMedia
     renderHook(() => usePinnedProgress({ steps: 6, enabled: true }))
-    expect(spy).toHaveBeenCalledWith(
-      `(min-width: ${PIN_MIN_WIDTH}px) and (max-height: ${PIN_MAX_HEIGHT}px)`
-    )
+    expect(spy).toHaveBeenCalledWith(`(min-width: ${PIN_MIN_WIDTH}px) and (min-height: 640px)`)
   })
 
   it("unpins when the viewport narrows past the breakpoint", () => {

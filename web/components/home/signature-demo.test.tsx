@@ -183,11 +183,20 @@ describe("SignatureDemo when scroll-pinned", () => {
     expect(wrapper?.style.height).toBe(`calc(${expectedDvh}dvh)`)
   })
 
-  it("lets the pinned stage follow its content instead of creating an empty slab", () => {
+  it("centres intrinsic content inside a full-height pinned viewport", () => {
     const { container } = render(
       <SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />
     )
+    const viewport = container.querySelector("#task [data-pinned-viewport]")
     const stage = container.querySelector("#task [data-pinned-stage]")
+    expect(viewport).toHaveClass(
+      "sticky",
+      "top-16",
+      "flex",
+      "h-[calc(100dvh-4rem)]",
+      "items-center"
+    )
+    expect(stage).toHaveClass("w-full")
     expect(stage).not.toHaveClass("h-[min(46rem,calc(100dvh-5rem))]")
     expect(stage).not.toHaveClass("h-[calc(100dvh-5rem)]")
     expect(container.querySelector("#task .bg-graphite")).not.toHaveClass("h-full")

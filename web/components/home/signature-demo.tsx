@@ -201,114 +201,117 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel }: Signature
           className="mt-14"
         >
           <div
-            data-pinned-stage={pinned ? "" : undefined}
-            className={`grid gap-8 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] lg:gap-10 ${
-              // Tall screens use the compact non-pinned mode. Laptop-height
-              // screens keep the scroll-led chapter, sized by its real content.
-              pinned ? "sticky top-20 items-start pb-6" : ""
-            }`}
+            data-pinned-viewport={pinned ? "" : undefined}
+            className={pinned ? "sticky top-16 flex h-[calc(100dvh-4rem)] items-center py-6" : ""}
           >
-            <div className={pinned ? "flex min-h-0 flex-col" : "lg:sticky lg:top-28 lg:self-start"}>
-              <ol aria-label={copy.stepperLabel} className="flex flex-col gap-px">
-                {copy.steps.map((step, index) => {
-                  const current = index === activeIndex
-                  return (
-                    <li key={step.key}>
-                      <button
-                        type="button"
-                        onClick={() => (pinned ? scrollToIndex(index) : rail.goTo(index))}
-                        aria-current={current ? "step" : undefined}
-                        className={`flex w-full items-baseline gap-3 border-l py-2.5 pl-4 text-left transition-colors ${
-                          current
-                            ? "border-action text-ink"
-                            : "border-hairline text-muted hover:text-ink"
-                        }`}
-                      >
-                        {STEP_ICON[step.key] ? (
-                          <Icon
-                            name={STEP_ICON[step.key]}
-                            size={14}
-                            className={current ? TONE_CLASS[step.tone] : undefined}
-                          />
-                        ) : null}
-                        <span aria-hidden className={`text-xs ${TONE_CLASS[step.tone]}`}>
-                          {TONE_MARK[step.tone]}
-                        </span>
-                        <span className="font-mono text-xs uppercase tracking-widest">
-                          {step.rail}
-                        </span>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ol>
+            <div
+              data-pinned-stage={pinned ? "" : undefined}
+              className="grid w-full items-start gap-8 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] lg:gap-10"
+            >
+              <div
+                className={pinned ? "flex min-h-0 flex-col" : "lg:sticky lg:top-28 lg:self-start"}
+              >
+                <ol aria-label={copy.stepperLabel} className="flex flex-col gap-px">
+                  {copy.steps.map((step, index) => {
+                    const current = index === activeIndex
+                    return (
+                      <li key={step.key}>
+                        <button
+                          type="button"
+                          onClick={() => (pinned ? scrollToIndex(index) : rail.goTo(index))}
+                          aria-current={current ? "step" : undefined}
+                          className={`flex w-full items-baseline gap-3 border-l py-2.5 pl-4 text-left transition-colors ${
+                            current
+                              ? "border-action text-ink"
+                              : "border-hairline text-muted hover:text-ink"
+                          }`}
+                        >
+                          {STEP_ICON[step.key] ? (
+                            <Icon
+                              name={STEP_ICON[step.key]}
+                              size={14}
+                              className={current ? TONE_CLASS[step.tone] : undefined}
+                            />
+                          ) : null}
+                          <span aria-hidden className={`text-xs ${TONE_CLASS[step.tone]}`}>
+                            {TONE_MARK[step.tone]}
+                          </span>
+                          <span className="font-mono text-xs uppercase tracking-widest">
+                            {step.rail}
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ol>
 
-              <div className="mt-8 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => (pinned ? scrollToIndex(activeIndex - 1) : rail.previous())}
-                  disabled={activeIndex === 0}
-                  className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink disabled:opacity-40"
-                >
-                  <Icon name="previous" size={14} />
-                  {copy.previousLabel}
-                </button>
-                {/* Autoplay only exists when the reader is not already driving.
-                 * A play button that fights the scroll position would be a
-                 * control that visibly does nothing. */}
-                {pinned ? null : (
+                <div className="mt-8 flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={rail.toggle}
-                    className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink"
+                    onClick={() => (pinned ? scrollToIndex(activeIndex - 1) : rail.previous())}
+                    disabled={activeIndex === 0}
+                    className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink disabled:opacity-40"
                   >
-                    <Icon name={rail.playing ? "pending" : "play"} size={14} />
-                    {rail.playing ? copy.pauseLabel : copy.playLabel}
+                    <Icon name="previous" size={14} />
+                    {copy.previousLabel}
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => (pinned ? scrollToIndex(activeIndex + 1) : rail.next())}
-                  disabled={activeIndex === copy.steps.length - 1}
-                  className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink disabled:opacity-40"
-                >
-                  {copy.nextLabel}
-                  <Icon name="next" size={14} />
-                </button>
+                  {/* Autoplay only exists when the reader is not already driving.
+                   * A play button that fights the scroll position would be a
+                   * control that visibly does nothing. */}
+                  {pinned ? null : (
+                    <button
+                      type="button"
+                      onClick={rail.toggle}
+                      className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink"
+                    >
+                      <Icon name={rail.playing ? "pending" : "play"} size={14} />
+                      {rail.playing ? copy.pauseLabel : copy.playLabel}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => (pinned ? scrollToIndex(activeIndex + 1) : rail.next())}
+                    disabled={activeIndex === copy.steps.length - 1}
+                    className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink disabled:opacity-40"
+                  >
+                    {copy.nextLabel}
+                    <Icon name="next" size={14} />
+                  </button>
+                </div>
+
+                <p aria-live="polite" className="mt-4 font-mono text-xs text-muted">
+                  {format(copy.stepOf, { current: activeIndex + 1, total: copy.steps.length })}
+                </p>
+
+                {/* Pinned, the page heading above has scrolled away, so the one
+                 * task the whole site follows (spec §9) is restated beside the
+                 * controls. Keeping it in the control cluster avoids a tall,
+                 * disconnected void between the step count and the task. */}
+                {pinned ? (
+                  <div data-pinned-task-summary="" className="mt-8 border-t border-hairline pt-6">
+                    <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-muted">
+                      <Icon name="agents" size={14} />
+                      {copy.taskLabel}
+                    </p>
+                    <p className="mt-3 border-l-2 border-action pl-3 text-sm leading-relaxed text-ink">
+                      {copy.task}
+                    </p>
+                  </div>
+                ) : null}
               </div>
 
-              <p aria-live="polite" className="mt-4 font-mono text-xs text-muted">
-                {format(copy.stepOf, { current: activeIndex + 1, total: copy.steps.length })}
-              </p>
-
-              {/* Pinned, the page heading above has scrolled away, so the one
-               * task the whole site follows (spec §9) is restated beside the
-               * controls. Keeping it in the control cluster avoids a tall,
-               * disconnected void between the step count and the task. */}
-              {pinned ? (
-                <div data-pinned-task-summary="" className="mt-8 border-t border-hairline pt-6">
-                  <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-muted">
-                    <Icon name="agents" size={14} />
-                    {copy.taskLabel}
-                  </p>
-                  <p className="mt-3 border-l-2 border-action pl-3 text-sm leading-relaxed text-ink">
-                    {copy.task}
-                  </p>
-                </div>
-              ) : null}
-            </div>
-
-            {/* Keying on the step id restarts the fade-through, so the state
-             * change is always accompanied by real content changing. */}
-            <div
-              key={active.key}
-              className={`animate-[fade-through_320ms_ease-out] ${pinned ? "min-h-0" : ""}`}
-            >
-              <StepPanel
-                step={active}
-                reconstruction={reconstruction}
-                fileTreeLabel={fileTreeLabel}
-              />
+              {/* Keying on the step id restarts the fade-through, so the state
+               * change is always accompanied by real content changing. */}
+              <div
+                key={active.key}
+                className={`animate-[fade-through_320ms_ease-out] ${pinned ? "min-h-0" : ""}`}
+              >
+                <StepPanel
+                  step={active}
+                  reconstruction={reconstruction}
+                  fileTreeLabel={fileTreeLabel}
+                />
+              </div>
             </div>
           </div>
         </div>
