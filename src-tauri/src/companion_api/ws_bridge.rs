@@ -67,7 +67,7 @@ use super::SharedState;
 
 /// Bridge protocol version. Bumped only on breaking frame-shape changes;
 /// mismatches close the socket with code 1002.
-pub const BRIDGE_PROTOCOL_VERSION: u32 = 1;
+pub const BRIDGE_PROTOCOL_VERSION: u32 = 2;
 
 /// How long the server waits for the brain's `hello` before closing 1002.
 #[cfg(not(test))]
@@ -117,6 +117,10 @@ pub enum BridgeFrame {
         account_id: String,
         #[serde(default)]
         capabilities: Vec<String>,
+        #[serde(rename = "catalogHash")]
+        catalog_hash: String,
+        #[serde(rename = "contractVersion")]
+        contract_version: u32,
     },
     /// server → brain, reply to a valid `hello`.
     HelloAck {
@@ -126,6 +130,10 @@ pub enum BridgeFrame {
         protocol: u32,
         #[serde(rename = "accountId")]
         account_id: String,
+        #[serde(rename = "catalogHash")]
+        catalog_hash: String,
+        #[serde(rename = "contractVersion")]
+        contract_version: u32,
     },
     /// server → brain: a bridge request. `event` is the Tauri channel name;
     /// `payload` is byte-identical to the desktop event payload.
@@ -255,6 +263,8 @@ pub struct BrainHello {
     pub brain_version: String,
     pub account_id: String,
     pub capabilities: Vec<String>,
+    pub catalog_hash: String,
+    pub contract_version: u32,
 }
 
 struct BridgeSlot {
@@ -458,6 +468,8 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
         account_id: hello_account,
         brain_version,
         capabilities,
+        catalog_hash,
+        contract_version,
         ..
     } = hello
     else {
@@ -471,6 +483,28 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
             &format!(
                 "unsupported bridge protocol {protocol} (server speaks {BRIDGE_PROTOCOL_VERSION})"
             ),
+        )
+        .await;
+        return;
+    }
+    let contract = match super::command_manifest::headless_contract() {
+        Ok(contract) => contract,
+        Err(_) => {
+            close_with(
+                &mut socket,
+                CLOSE_PROTOCOL_ERROR,
+                "Headless contract unavailable",
+            )
+            .await;
+            return;
+        }
+    };
+    if catalog_hash != contract.catalog_hash() || contract_version != contract.schema_version() {
+        super::metrics::record_contract_mismatch();
+        close_with(
+            &mut socket,
+            CLOSE_PROTOCOL_ERROR,
+            "Headless contract mismatch",
         )
         .await;
         return;
@@ -491,6 +525,8 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
         server_version: env!("CARGO_PKG_VERSION").to_string(),
         protocol: BRIDGE_PROTOCOL_VERSION,
         account_id: account_id.clone(),
+        catalog_hash: contract.catalog_hash().to_string(),
+        contract_version: contract.schema_version(),
     };
     let ack_text = match serde_json::to_string(&ack) {
         Ok(t) => t,
@@ -515,6 +551,8 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
             brain_version,
             account_id: account_id.clone(),
             capabilities,
+            catalog_hash,
+            contract_version,
         },
     );
     log::info!("companion-api ws-bridge: brain connected (conn {conn_id})");
@@ -759,6 +797,13 @@ pub(crate) mod test_support {
                 brain_version: "0.0.0-test".to_string(),
                 account_id: "local_acct_a".to_string(),
                 capabilities: Vec::new(),
+                catalog_hash: crate::companion_api::command_manifest::headless_contract()
+                    .expect("embedded contract")
+                    .catalog_hash()
+                    .to_string(),
+                contract_version: crate::companion_api::command_manifest::headless_contract()
+                    .expect("embedded contract")
+                    .schema_version(),
             },
         );
         TestBridgeReceiver { rx }
@@ -871,10 +916,14 @@ mod tests {
     }
 
     fn hello_frame() -> String {
+        let contract =
+            crate::companion_api::command_manifest::headless_contract().expect("embedded contract");
         serde_json::to_string(&json!({
-            "v": 1, "type": "hello", "role": "brain", "brainVersion": "0.0.0-test",
-            "protocol": 1, "accountId": ACCOUNT_ID,
-            "capabilities": ["sync", "messages", "writes"]
+            "v": BRIDGE_PROTOCOL_VERSION, "type": "hello", "role": "brain", "brainVersion": "0.0.0-test",
+            "protocol": BRIDGE_PROTOCOL_VERSION, "accountId": ACCOUNT_ID,
+            "capabilities": ["sync", "messages", "writes"],
+            "catalogHash": contract.catalog_hash(),
+            "contractVersion": contract.schema_version()
         }))
         .unwrap()
     }
@@ -993,8 +1042,8 @@ mod tests {
         let mut ws = connect(addr, &service_token()).await;
 
         let ack = handshake(&mut ws).await;
-        assert_eq!(ack["v"], 1);
-        assert_eq!(ack["protocol"], 1);
+        assert_eq!(ack["v"], BRIDGE_PROTOCOL_VERSION);
+        assert_eq!(ack["protocol"], BRIDGE_PROTOCOL_VERSION);
         assert_eq!(ack["accountId"], ACCOUNT_ID);
         assert!(ack["serverVersion"].as_str().is_some_and(|s| !s.is_empty()));
 
@@ -1003,6 +1052,10 @@ mod tests {
         let hello = brain_hello().expect("hello metadata");
         assert_eq!(hello.brain_version, "0.0.0-test");
         assert_eq!(hello.capabilities, vec!["sync", "messages", "writes"]);
+        let contract =
+            crate::companion_api::command_manifest::headless_contract().expect("embedded contract");
+        assert_eq!(hello.catalog_hash, contract.catalog_hash());
+        assert_eq!(hello.contract_version, contract.schema_version());
 
         ws.close(None).await.ok();
         wait_disconnected().await;
@@ -1016,8 +1069,9 @@ mod tests {
         let mut ws = connect(addr, &service_token()).await;
 
         let bad_hello = serde_json::to_string(&json!({
-            "v": 1, "type": "hello", "role": "brain", "brainVersion": "x",
-            "protocol": 99, "accountId": ACCOUNT_ID, "capabilities": []
+            "v": BRIDGE_PROTOCOL_VERSION, "type": "hello", "role": "brain", "brainVersion": "x",
+            "protocol": 99, "accountId": ACCOUNT_ID, "capabilities": [],
+            "catalogHash": "mismatch", "contractVersion": 1
         }))
         .unwrap();
         ws.send(WsMessage::Text(bad_hello)).await.unwrap();
@@ -1034,6 +1088,35 @@ mod tests {
             other => panic!("expected close frame, got {other:?}"),
         }
         assert!(!bridge_connected(), "mismatched brain must not install");
+    }
+
+    #[tokio::test]
+    async fn catalog_mismatch_closes_with_1002() {
+        let _guard = lock_slot().await;
+        let state = test_state();
+        let addr = serve_bridge(state).await;
+        let mut ws = connect(addr, &service_token()).await;
+
+        let bad_hello = serde_json::to_string(&json!({
+            "v": BRIDGE_PROTOCOL_VERSION, "type": "hello", "role": "brain", "brainVersion": "x",
+            "protocol": BRIDGE_PROTOCOL_VERSION, "accountId": ACCOUNT_ID, "capabilities": [],
+            "catalogHash": "stale-catalog", "contractVersion": 1
+        }))
+        .unwrap();
+        ws.send(WsMessage::Text(bad_hello)).await.unwrap();
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), ws.next())
+            .await
+            .expect("close timeout")
+            .expect("stream ended")
+            .expect("ws frame err");
+        match msg {
+            WsMessage::Close(Some(frame)) => {
+                assert_eq!(u16::from(frame.code), CLOSE_PROTOCOL_ERROR);
+            }
+            other => panic!("expected close frame, got {other:?}"),
+        }
+        assert!(!bridge_connected(), "stale brain must not install");
     }
 
     #[tokio::test]
@@ -1065,8 +1148,10 @@ mod tests {
         let mut ws = connect(addr, &service_token()).await;
 
         let wrong_account = serde_json::to_string(&json!({
-            "v": 1, "type": "hello", "role": "brain", "brainVersion": "x",
-            "protocol": 1, "accountId": "some_other_account", "capabilities": []
+            "v": BRIDGE_PROTOCOL_VERSION, "type": "hello", "role": "brain", "brainVersion": "x",
+            "protocol": BRIDGE_PROTOCOL_VERSION, "accountId": "some_other_account", "capabilities": [],
+            "catalogHash": crate::companion_api::command_manifest::headless_contract().expect("contract").catalog_hash(),
+            "contractVersion": crate::companion_api::command_manifest::headless_contract().expect("contract").schema_version()
         }))
         .unwrap();
         ws.send(WsMessage::Text(wrong_account)).await.unwrap();
@@ -1133,7 +1218,7 @@ mod tests {
         };
 
         let respond = serde_json::to_string(&json!({
-            "v": 1, "type": "respond", "command": "companion_sync_pull_response",
+            "v": BRIDGE_PROTOCOL_VERSION, "type": "respond", "command": "companion_sync_pull_response",
             "payload": { "requestId": request_id, "delta": { "rows": [1, 2] }, "error": null }
         }))
         .unwrap();
@@ -1232,7 +1317,7 @@ mod tests {
         wait_connected().await;
 
         let pong = serde_json::to_string(&json!({
-            "v": 1, "type": "pong", "ts": 123, "rssBytes": 987654321_u64, "lastFlushAt": 456
+            "v": BRIDGE_PROTOCOL_VERSION, "type": "pong", "ts": 123, "rssBytes": 987654321_u64, "lastFlushAt": 456
         }))
         .unwrap();
         ws.send(WsMessage::Text(pong)).await.unwrap();
@@ -1343,7 +1428,7 @@ mod tests {
             panic!("expected text frame");
         };
         let v: Value = serde_json::from_str(text.as_str()).unwrap();
-        assert_eq!(v["v"], 1);
+        assert_eq!(v["v"], BRIDGE_PROTOCOL_VERSION);
         assert_eq!(v["type"], "event");
         assert_eq!(v["event"], "companion://sync-pull-request");
         assert_eq!(v["payload"]["request_id"], "r1");

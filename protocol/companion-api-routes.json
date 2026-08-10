@@ -49,8 +49,19 @@
     },
 
     { "path": "/internal/_rpc/{name}", "method": "post", "document": "headless" },
+    {
+      "path": "/internal/operations/{operation_id}",
+      "method": "get",
+      "document": "headless"
+    },
     { "path": "/internal/events", "method": "get", "document": "headless" },
     { "path": "/internal/bridge", "method": "get", "document": "headless" },
+    {
+      "path": "/integrations/mcp/oauth/callback",
+      "runtimePath": "/oauth/callback",
+      "method": "get",
+      "document": "headless"
+    },
     { "path": "/ide/content", "method": "post", "document": "headless" },
     { "path": "/ide/content/{handle_id}", "method": "get", "document": "headless" },
 

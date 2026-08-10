@@ -370,6 +370,11 @@ async function rpc(name, args, auth) {
 
 /** Loopback RPC from inside the container (service scope). */
 async function containerRpc(name, args, token) {
+  const response = await containerRpcResponse(name, args, token)
+  return response.body
+}
+
+async function containerRpcResponse(name, args, token) {
   const out = await composeExec([
     "curl",
     "-sk",
@@ -382,12 +387,41 @@ async function containerRpc(name, args, token) {
     "Content-Type: application/json",
     "-d",
     JSON.stringify(args ?? {}),
+    "-w",
+    "\n%{http_code}",
   ])
+  const lines = out.trimEnd().split("\n")
+  const status = Number(lines.pop())
+  const rawBody = lines.join("\n")
   try {
-    return JSON.parse(out)
+    return { status, body: JSON.parse(rawBody) }
   } catch {
-    return out.trim()
+    return { status, body: rawBody.trim() }
   }
+}
+
+async function headlessContractGuards(health) {
+  check(health?.headlessContract?.schemaVersion === 1, "healthz reports Headless contract v1")
+  check(
+    typeof health?.headlessContract?.catalogHash === "string" &&
+      health.headlessContract.catalogHash.length === 64,
+    "healthz reports the 64-character Headless catalog hash"
+  )
+  check(
+    health?.headlessContract?.commandCount === 450,
+    `healthz reports all 450 Headless commands (got ${health?.headlessContract?.commandCount})`
+  )
+  const token = (await composeExec(["cognia-server", "issue-service-token"])).trim()
+  const invalid = await containerRpcResponse("mcp_oauth_status", {}, token)
+  check(invalid.status === 422, `invalid Headless input → 422 (got ${invalid.status})`)
+  check(
+    invalid.body?.code === "contract_input_violation",
+    "invalid Headless input uses the strict contract envelope"
+  )
+  check(
+    !JSON.stringify(invalid.body?.details ?? {}).includes("serverName"),
+    "contract diagnostics do not echo rejected values"
+  )
 }
 
 async function waitForServerHealthz() {
@@ -866,6 +900,7 @@ async function tierServer() {
   const ready = await waitForBrainReady()
   check(ready.brain.ready === true, "brain completed the bridge hello")
   check(typeof ready.sidecar?.restart_count === "number", "healthz reports the sidecar block")
+  await headlessContractGuards(ready)
 
   const auth = await pairDevice()
   if (!auth) {

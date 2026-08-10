@@ -5,7 +5,7 @@ description: "一个分层的计划，用于在桌面、移动端、浏览器和
 
 # 0061 — 跨设备工作流执行（能力基础）
 
-**状态：** 已接受（第一阶段实施）**日期：** 2026-07-02 **分支：** `dev`
+**状态：** 已接受（阶段 1–4 已实施；2026-08 增补持久检查点）**日期：** 2026-07-02 **分支：** `dev`
 
 > 在开发过程中，代码注释中会以“ADR-0060”来引用;0060号同时被个人知识捕获ADR声称拥有，因此本文档为0061。引用能力/deviceId工作的代码注释ADR-0060指本文档。
 
@@ -82,7 +82,7 @@ description: "一个分层的计划，用于在桌面、移动端、浏览器和
 
 - **P2 — 可视化 + 人工参与（已实现）:**
   - `workflow://run-status` 实时帧 + `sync://invalidate` 发布（自 ADR-0027 年以来，移动事件驱动同步频道订阅的首个发布商）+ `workflow://run-terminal` 推送，全部搭乘 `persistRunState` 漏斗（`lib/workflow/runtime/companion-run-events.ts`）。推送策略：总是失败;succeeded/cancelled只有在设备触发时才会启动;仅IDS+状态。
-  - `action.approval.request`节点：唤醒总线阻断执行器，具有事件日志检查点恢复（无重复通知，原始超时预算）、approved/rejected决策句柄、通知中心Approve/Reject动作、`workflow_approval_list`/`workflow_approval_respond` RPCs（控制门控，JWT-injected响应者身份）以及移动PendingApprovalsCard。
+  - `action.approval.request`、工作流 risk gate 与 `flow.wait(event)` 现在共用持久化 `WorkflowWaitpoint` seam。pending 状态存放在 Dexie v156 与 Tauri/headless workflow SQLite mirror 中；事件日志只承担审计。重复创建保留首次绝对截止时间，决策使用“首次写入胜出”的 compare-and-set，事件先持久化后匹配且只消费一次，未匹配事件 24 小时后清理。Companion 的 `workflow_approval_list` / `workflow_approval_respond` 直接读取和决策 host-owned mirror，因此 WebView 暂停时设备仍可审批；renderer 恢复后同步终态并写入既有 Action Review Receipt。
 - **P3 — 反向执行（已实现）:** 集线器编排的远程步骤，基于现有管道——代理（`lib/workflow/runtime/remote-step-broker.ts`）发出`workflow://step-execute` WS帧 + 仅 ids `workflow://step-pending`推送;手机的远程步进服务器通过`lib/capacitor`结果界面执行，并通过分块`workflow_step_result` RPC响应（64 KiB体上限下的32 KiB片;响应者身份对请求目标进行JWT-verified）。五种节点类型出货：`action.mobile.{camera,scanBarcode,location,share,notify}`带集线器代理执行器（最新设备，可钉脚）、远程感知的预检（`remoteCapabilityUnion`）和“手机运行”编辑器徽章。前景优先;延迟后续：语音录制（音频载荷需要一个blob中继，而不是分块JSON）、OS后台运行路径，以及当HTTP/WS宕机时通过对称的WebRTC DataChannel发送请求。
 - **P4 — 运行租赁与索赔争议（已实施）:**
   - `WorkflowRunRow.lease`（`lib/workflow/runtime/run-lease.ts`）：在第一步前通过一次Dexie事务被认领，心跳更新（TTL/3），在每个终端路径上释放——第二个执行者会退后而不是重复执行，终端行守卫阻止续跑回放复活soft-cancelled/finished。

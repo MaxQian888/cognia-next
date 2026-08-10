@@ -248,6 +248,12 @@ async fn execute_inner(
     authorize_transport(&request, descriptor)?;
     authorize_capability(&request, descriptor)?;
     authorize_approval(&request, descriptor)?;
+    validate_contract_value(
+        &request.request_id,
+        &request.command,
+        &request.args,
+        cognia_headless_contract::ContractDirection::Input,
+    )?;
 
     if request.principal.scope != "service" {
         if let super::rate_limit::RateLimitDecision::Reject { retry_after } =
@@ -266,6 +272,12 @@ async fn execute_inner(
 
     if descriptor.idempotency != CommandIdempotency::Required {
         let result = dispatch(state, &request).await?;
+        validate_contract_value(
+            &request.request_id,
+            &request.command,
+            &result,
+            cognia_headless_contract::ContractDirection::Output,
+        )?;
         return Ok(ExecutionOutcome::Completed {
             request_id: request.request_id,
             operation_id: None,
@@ -328,6 +340,34 @@ async fn execute_inner(
 
     match dispatch(state, &request).await {
         Ok(result) => {
+            if let Err(mut error) = validate_contract_value(
+                &request.request_id,
+                &request.command,
+                &result,
+                cognia_headless_contract::ContractDirection::Output,
+            ) {
+                let receipt = json!({
+                    "httpStatus": error.status.as_u16(),
+                    "error": {
+                        "code": error.code,
+                        "message": error.message,
+                        "retryable": error.retryable,
+                        "details": error.details,
+                    }
+                });
+                store
+                    .complete_idempotent_operation(
+                        &request.principal.account_id,
+                        &request.principal.device_id,
+                        idempotency_key,
+                        &receipt.to_string(),
+                        false,
+                        unix_time_secs(),
+                    )
+                    .map_err(|store_error| map_store_error(&request.request_id, store_error))?;
+                error.operation_id = Some(operation_id);
+                return Err(error);
+            }
             let receipt = json!({ "httpStatus": 200, "result": result });
             store
                 .complete_idempotent_operation(
@@ -370,6 +410,66 @@ async fn execute_inner(
             Err(error)
         }
     }
+}
+
+fn validate_contract_value(
+    request_id: &str,
+    command: &str,
+    value: &Value,
+    direction: cognia_headless_contract::ContractDirection,
+) -> Result<(), ExecutionError> {
+    if !super::command_manifest::headless_contract_enforced() {
+        return Ok(());
+    }
+    let contract = super::command_manifest::headless_contract().map_err(|_| {
+        let mut error = ExecutionError::new(
+            request_id,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "contract_unavailable",
+            "the Headless contract catalog is unavailable",
+        );
+        error.retryable = false;
+        error
+    })?;
+    let validation = match direction {
+        cognia_headless_contract::ContractDirection::Input => {
+            contract.validate_input(command, value)
+        }
+        cognia_headless_contract::ContractDirection::Output => {
+            contract.validate_output(command, value)
+        }
+    };
+    validation.map_err(|violation| {
+        super::metrics::record_contract_violation(direction);
+        let (status, code, message, violations) = match violation {
+            cognia_headless_contract::ContractViolation::UnknownCommand { .. } => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "contract_unavailable",
+                "the Headless command has no generated contract",
+                Vec::new(),
+            ),
+            cognia_headless_contract::ContractViolation::Invalid { violations, .. }
+                if direction == cognia_headless_contract::ContractDirection::Input =>
+            {
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "contract_input_violation",
+                    "the request body violates the Headless command contract",
+                    violations,
+                )
+            }
+            cognia_headless_contract::ContractViolation::Invalid { violations, .. } => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "contract_output_violation",
+                "the command result violates the Headless command contract",
+                violations,
+            ),
+        };
+        let mut error = ExecutionError::new(request_id, status, code, message);
+        error.retryable = false;
+        error.details = json!({ "violations": violations });
+        error
+    })
 }
 
 fn authorize_transport(
@@ -573,6 +673,10 @@ fn replay_receipt(
         .and_then(|value| value.get("retryable"))
         .and_then(Value::as_bool)
         .unwrap_or_else(|| status.is_server_error());
+    error.details = detail
+        .and_then(|value| value.get("details"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
     Err(error)
 }
 
@@ -909,6 +1013,64 @@ mod tests {
         let request = execution_request("service", None)
             .with_traceparent(Some("not-a-traceparent".to_string()));
         assert_eq!(request.traceparent, None);
+    }
+
+    #[test]
+    fn strict_contract_errors_are_typed_and_do_not_echo_values() {
+        let error = validate_contract_value(
+            "request-a",
+            "browser_session_ensure",
+            &json!({
+                "chatSessionId": "chat-a",
+                "workspaceId": "workspace-a",
+                "userEnabled": true,
+                "unexpected": "do-not-leak-this-value",
+            }),
+            cognia_headless_contract::ContractDirection::Input,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(error.code, "contract_input_violation");
+        assert_eq!(error.request_id, "request-a");
+        assert!(!error.retryable);
+        assert!(!error.details.to_string().contains("do-not-leak-this-value"));
+    }
+
+    #[test]
+    fn workflow_approval_list_output_contract_accepts_the_runtime_envelope() {
+        validate_contract_value(
+            "request-approval-list",
+            "workflow_approval_list",
+            &json!({ "approvals": [] }),
+            cognia_headless_contract::ContractDirection::Output,
+        )
+        .expect("workflow approval list uses an object envelope on every host");
+    }
+
+    #[test]
+    fn failed_receipt_replay_preserves_contract_violation_details() {
+        let receipt = json!({
+            "httpStatus": 500,
+            "error": {
+                "code": "contract_output_violation",
+                "message": "response violates the command contract",
+                "retryable": true,
+                "details": {
+                    "violations": [{
+                        "instancePath": "/result",
+                        "schemaPath": "/properties/result/type"
+                    }]
+                }
+            }
+        });
+
+        let error = replay_receipt("request-a", "operation-a".to_string(), &receipt.to_string())
+            .unwrap_err();
+
+        assert_eq!(error.code, "contract_output_violation");
+        assert_eq!(error.operation_id.as_deref(), Some("operation-a"));
+        assert_eq!(error.details, receipt["error"]["details"]);
     }
 
     #[test]

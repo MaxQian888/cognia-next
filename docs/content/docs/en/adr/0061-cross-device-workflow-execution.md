@@ -5,7 +5,7 @@ description: "A layered plan for running workflows across desktop, mobile, brows
 
 # ADR 0061 — Cross-Device Workflow Execution
 
-**Status:** Accepted (Phase 1 implemented)
+**Status:** Accepted (Phases 1–4 implemented; durable checkpoint amendment 2026-08)
 **Date:** 2026-07-02
 **Branch:** `dev`
 
@@ -185,12 +185,16 @@ foundation.
     riding the `persistRunState` funnel
     (`lib/workflow/runtime/companion-run-events.ts`). Push policy: failed
     always; succeeded/cancelled only when device-triggered; ids+status only.
-  - `action.approval.request` node: wake-bus blocking executor with
-    event-log checkpoint resume (no duplicate notify, original timeout
-    budget), approved/rejected decision handles, notification-center
-    Approve/Reject actions, `workflow_approval_list` /
-    `workflow_approval_respond` RPCs (control-gated, JWT-injected responder
-    identity), and the mobile PendingApprovalsCard.
+  - `action.approval.request`, the workflow risk gate, and `flow.wait(event)`
+    now share the durable `WorkflowWaitpoint` seam. Pending state lives in
+    Dexie v156 and the Tauri/headless workflow SQLite mirror; the event log is
+    audit-only. Creation preserves the first absolute deadline, decisions use
+    first-writer-wins compare-and-set, events are persisted before matching and
+    consumed once, and unmatched events expire after 24 hours. Companion
+    `workflow_approval_list` / `workflow_approval_respond` read and decide the
+    host-owned mirror directly, so a device can approve while the WebView is
+    suspended. The renderer syncs the terminal row on resume and writes the
+    existing Action Review Receipt.
 - **P3 — reverse execution (implemented):** hub-orchestrated remote steps
   over existing plumbing — the broker
   (`lib/workflow/runtime/remote-step-broker.ts`) emits

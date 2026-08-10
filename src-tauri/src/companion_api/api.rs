@@ -433,6 +433,53 @@ pub(crate) async fn operation_handler(
     }
 }
 
+pub(crate) async fn internal_operation_handler(
+    Path(operation_id): Path<String>,
+    Extension(context): Extension<DeviceContext>,
+) -> Response {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    internal_operation_response(store(), &context, operation_id, request_id)
+}
+
+fn internal_operation_response(
+    store: Result<std::sync::Arc<SecurityStore>, ApiError>,
+    context: &DeviceContext,
+    operation_id: String,
+    request_id: String,
+) -> Response {
+    match store.and_then(|store| {
+        store
+            .operation(&context.account_id, &context.device_id, &operation_id)
+            .map_err(store_error)
+    }) {
+        Ok(Some(operation)) => (StatusCode::OK, Json(operation)).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "code": "operation_not_found",
+                "message": "the requested operation does not exist for this service principal",
+                "requestId": request_id,
+                "retryable": false,
+                "details": {},
+                "operationId": operation_id,
+            })),
+        )
+            .into_response(),
+        Err(error) => (
+            error.status,
+            Json(json!({
+                "code": error.code,
+                "message": error.message,
+                "requestId": request_id,
+                "retryable": error.retryable,
+                "details": {},
+                "operationId": operation_id,
+            })),
+        )
+            .into_response(),
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PoliciesResponse {
@@ -649,6 +696,9 @@ pub async fn internal_rpc_handler(
                 Json(json!({
                     "code": "invalid_json_request",
                     "message": "the request body must be valid JSON for this endpoint",
+                    "requestId": uuid::Uuid::new_v4().to_string(),
+                    "retryable": false,
+                    "details": {},
                 })),
             )
                 .into_response();
@@ -704,16 +754,24 @@ pub async fn internal_rpc_handler(
                 StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE
             );
             observation.finish(super::metrics::RpcOutcome::Error { saturated });
-            (
-                error.status,
-                Json(json!({
-                    "code": error.code,
-                    "message": error.message,
-                })),
-            )
-                .into_response()
+            let status = error.status;
+            (status, Json(internal_execution_error_body(error))).into_response()
         }
     }
+}
+
+fn internal_execution_error_body(error: super::remote_execution::ExecutionError) -> Value {
+    let mut body = serde_json::Map::from_iter([
+        ("code".to_string(), Value::String(error.code)),
+        ("message".to_string(), Value::String(error.message)),
+        ("requestId".to_string(), Value::String(error.request_id)),
+        ("retryable".to_string(), Value::Bool(error.retryable)),
+        ("details".to_string(), error.details),
+    ]);
+    if let Some(operation_id) = error.operation_id {
+        body.insert("operationId".to_string(), Value::String(operation_id));
+    }
+    Value::Object(body)
 }
 
 fn execution_error_response(error: super::remote_execution::ExecutionError) -> Response {
@@ -1922,6 +1980,82 @@ mod tests {
         assert_eq!(response_json(response).await["code"], "unknown_command");
         let after = value(&super::super::metrics::render_prometheus());
         assert!(after >= before + 1);
+    }
+
+    #[tokio::test]
+    async fn internal_operation_lookup_is_principal_scoped_and_returns_receipts() {
+        let store = SecurityStore::in_memory().unwrap();
+        let operation_id = match store
+            .begin_idempotent_operation(
+                "tenant-a",
+                "service-a",
+                "host-a",
+                "idempotency-a",
+                "request-hash-a",
+                10,
+            )
+            .unwrap()
+        {
+            super::super::security_store::IdempotencyDecision::Started { operation_id } => {
+                operation_id
+            }
+            other => panic!("unexpected decision: {other:?}"),
+        };
+        store
+            .mark_operation_running("tenant-a", &operation_id, 11)
+            .unwrap();
+        let receipt = json!({
+            "httpStatus": 500,
+            "error": {
+                "code": "operation_interrupted",
+                "message": "the service restarted before completion",
+                "retryable": true,
+                "details": {}
+            }
+        });
+        store
+            .complete_idempotent_operation(
+                "tenant-a",
+                "service-a",
+                "idempotency-a",
+                &receipt.to_string(),
+                false,
+                12,
+            )
+            .unwrap();
+        let context = DeviceContext {
+            device_id: "service-a".into(),
+            account_id: "tenant-a".into(),
+            scope: "service".into(),
+            granted_scopes: Vec::new(),
+            authorization_capabilities: None,
+        };
+
+        let found = internal_operation_response(
+            Ok(store.clone()),
+            &context,
+            operation_id.clone(),
+            "request-found".into(),
+        );
+        assert_eq!(found.status(), StatusCode::OK);
+        let found_body = response_json(found).await;
+        assert_eq!(found_body["operationId"], operation_id);
+        assert_eq!(found_body["status"], "failed");
+        assert_eq!(found_body["receipt"], receipt);
+
+        let mut other_principal = context;
+        other_principal.device_id = "service-b".into();
+        let hidden = internal_operation_response(
+            Ok(store),
+            &other_principal,
+            operation_id.clone(),
+            "request-hidden".into(),
+        );
+        assert_eq!(hidden.status(), StatusCode::NOT_FOUND);
+        let hidden_body = response_json(hidden).await;
+        assert_eq!(hidden_body["code"], "operation_not_found");
+        assert_eq!(hidden_body["requestId"], "request-hidden");
+        assert_eq!(hidden_body["operationId"], operation_id);
     }
 
     #[tokio::test]

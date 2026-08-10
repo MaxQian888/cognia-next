@@ -140,6 +140,11 @@ static DESCRIPTORS: Lazy<HashMap<&'static str, &'static CommandDescriptor>> = La
         .collect()
 });
 
+static HEADLESS_CONTRACT: Lazy<Result<cognia_headless_contract::HeadlessContract, String>> =
+    Lazy::new(|| {
+        cognia_headless_contract::HeadlessContract::embedded().map_err(|error| error.to_string())
+    });
+
 pub fn commands() -> &'static [CommandDescriptor] {
     &MANIFEST.commands
 }
@@ -152,13 +157,26 @@ pub fn descriptor(name: &str) -> Option<&'static CommandDescriptor> {
     DESCRIPTORS.get(name).copied()
 }
 
+pub fn headless_contract(
+) -> Result<&'static cognia_headless_contract::HeadlessContract, &'static str> {
+    match &*HEADLESS_CONTRACT {
+        Ok(contract) => Ok(contract),
+        Err(error) => Err(error.as_str()),
+    }
+}
+
+pub fn headless_contract_enforced() -> bool {
+    !std::env::var("COGNIA_HEADLESS_CONTRACT_ENFORCEMENT")
+        .is_ok_and(|value| value.eq_ignore_ascii_case("off"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn shared_manifest_is_complete_and_validated() {
-        assert_eq!(commands().len(), 1034);
+        assert_eq!(commands().len(), 1035);
         assert_eq!(command_names().len(), commands().len());
         assert_eq!(DESCRIPTORS.len(), commands().len());
     }
@@ -168,5 +186,34 @@ mod tests {
         let command = descriptor("secret_store_get").expect("descriptor");
         assert_eq!(command.target, CommandTarget::Service);
         assert_eq!(command.transports, vec![CommandTransport::Internal]);
+    }
+
+    #[test]
+    fn embedded_headless_contract_matches_the_generated_inventory() {
+        let contract = headless_contract().expect("embedded Headless contract");
+        assert_eq!(contract.schema_version(), 1);
+        assert_eq!(contract.catalog_hash().len(), 64);
+        assert_eq!(contract.command_count(), 450);
+        assert!(contract
+            .validate_input(
+                "browser_session_ensure",
+                &serde_json::json!({
+                    "chatSessionId": "chat-a",
+                    "workspaceId": "workspace-a",
+                    "userEnabled": true,
+                }),
+            )
+            .is_ok());
+        assert!(contract
+            .validate_input(
+                "browser_session_ensure",
+                &serde_json::json!({
+                    "chatSessionId": "chat-a",
+                    "workspaceId": "workspace-a",
+                    "userEnabled": true,
+                    "unexpected": "secret-value",
+                }),
+            )
+            .is_err());
     }
 }

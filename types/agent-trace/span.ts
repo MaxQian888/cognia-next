@@ -18,7 +18,13 @@ export type SpanOperationName =
 
 /** OTel `gen_ai.provider.name` plus our vendor extensions. */
 export type SpanProviderName =
-  "anthropic" | "openai" | "cognia.plugin" | "cognia.team" | "cognia.connector" | "cognia.workflow"
+  | "anthropic"
+  | "openai"
+  | "cognia.plugin"
+  | "cognia.team"
+  | "cognia.connector"
+  | "cognia.workflow"
+  | "cognia.twin"
 
 /** Surface that produced the span — drives the agent-trace UI grouping. */
 export type SpanSurface = "chat" | "agent-team" | "plugin-hook" | "connector" | "workflow"

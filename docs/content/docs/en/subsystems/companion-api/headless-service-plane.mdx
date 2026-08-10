@@ -63,14 +63,41 @@ certificate, and environment setup.
 | Route | Purpose |
 | --- | --- |
 | `POST /internal/_rpc/{name}` | Invoke any command accepted by the shared dispatcher |
+| `GET /internal/operations/{operation_id}` | Read a durable operation without replaying the original mutation |
 | `GET /internal/events?token=…&since=…` | Brain event stream with replay cursor |
 | `GET /internal/bridge?token=…` | Bidirectional Rust-to-Brain data-plane bridge |
+| `GET /integrations/mcp/oauth/callback` | Complete a pending MCP authorization-code + PKCE flow |
 | `POST /ide/content` | Publish managed IDE content through the loopback broker |
 | `GET /ide/content/{handle_id}` | Resolve a brokered content handle |
 
-The full generated contract is `docs/api/headless-service-api.openapi.yaml`. It is deliberately
+The generated HTTP contract is `docs/api/headless-service-api.openapi.yaml`; the event and bridge
+frames are generated into `docs/api/headless-service-api.asyncapi.yaml`. They are deliberately
 separate from the paired-device specification so a service-only command can never be mistaken for a
 public mobile endpoint.
+
+The current catalog contains **450** Headless commands. The server compiles the embedded Draft
+2020-12 input and output schemas at startup, validates input before dispatch, and validates output
+before recording a successful receipt. A request violation returns `422 contract_input_violation`;
+an implementation/schema mismatch returns `500 contract_output_violation`. Violation details contain
+instance and schema paths, never the rejected value. `COGNIA_HEADLESS_CONTRACT_ENFORCEMENT=off` is an
+emergency rollback switch, not a compatibility mode.
+
+Mutating commands return `202` when their durable operation is still active. `cognia host call`
+polls the operation route until the receipt is terminal; it only replays the identical `POST` against
+an older server that returns `404` for the operation route. On process restart, interrupted
+`queued`, `running`, or recovery states become terminal `operation_interrupted` failures instead of
+remaining permanently pending.
+
+## MCP OAuth in Headless mode
+
+The existing `mcp_oauth_status`, `mcp_oauth_load_entry`, `mcp_oauth_authenticate`,
+`mcp_oauth_refresh`, and `mcp_oauth_clear` commands are service-owned and account-isolated. Set
+`COGNIA_PUBLIC_URL` to the externally reachable HTTPS origin; the authorization redirect is
+`$COGNIA_PUBLIC_URL/integrations/mcp/oauth/callback`. Authentication stores PKCE state and dynamic
+client information in the encrypted secret store, returns an authorization URL, and accepts each
+256-bit state value once for at most three minutes. Access tokens are never included in callback
+HTML or completion events. Loopback HTTP callbacks are only accepted in the explicit local-debug
+configuration.
 
 ## Agent-first operator CLI
 
@@ -153,3 +180,6 @@ pnpm companion-api:lint
 
 When a command is added to the dispatcher, the generator and Rust parity test require the Headless
 spec to expose it. Public exposure still requires the stricter target and transport classification.
+The same generator owns the embedded catalog hash, the compact Brain bridge identity module, the
+OpenAPI document, and the AsyncAPI document. Bridge protocol v2 refuses `hello`/`hello_ack` when the
+catalog hash or contract version differs, so a stale Brain never becomes ready.

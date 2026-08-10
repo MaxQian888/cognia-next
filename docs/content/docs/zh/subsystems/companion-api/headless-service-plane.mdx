@@ -59,13 +59,37 @@ curl --insecure \
 | 路由 | 用途 |
 | --- | --- |
 | `POST /internal/_rpc/{name}` | 调用共享 dispatcher 接受的任意命令 |
+| `GET /internal/operations/{operation_id}` | 查询持久化操作，而不重放原始变更请求 |
 | `GET /internal/events?token=…&since=…` | 带 replay cursor 的 Brain 事件流 |
 | `GET /internal/bridge?token=…` | Rust 与 Brain 间的双向 data-plane bridge |
+| `GET /integrations/mcp/oauth/callback` | 完成 MCP authorization-code + PKCE 流程 |
 | `POST /ide/content` | 通过 loopback broker 发布受管 IDE 内容 |
 | `GET /ide/content/{handle_id}` | 读取 broker content handle |
 
-完整生成契约位于 `docs/api/headless-service-api.openapi.yaml`。它与配对设备 spec 刻意分离，避免
-service-only 命令被误认为公开移动端接口。
+生成的 HTTP 契约位于 `docs/api/headless-service-api.openapi.yaml`；事件流与 bridge frame 位于
+`docs/api/headless-service-api.asyncapi.yaml`。它们与配对设备 spec 刻意分离，避免 service-only
+命令被误认为公开移动端接口。
+
+当前 catalog 包含 **450** 个 Headless 命令。服务启动时会编译内嵌的 Draft 2020-12 输入与输出
+schema，在 dispatch 前校验输入，并在写入成功 receipt 前校验输出。请求不符合契约时返回
+`422 contract_input_violation`；实现输出与 schema 不一致时返回
+`500 contract_output_violation`。违规详情只包含 instance path 与 schema path，不包含被拒绝的
+值。`COGNIA_HEADLESS_CONTRACT_ENFORCEMENT=off` 只用于紧急回滚，不是兼容模式。
+
+变更命令仍在执行时返回 `202`。`cognia host call` 会轮询 operation 路由直到 receipt 进入终态；
+仅当旧服务对 operation 路由返回 `404` 时，才兼容性地重放完全相同的 `POST`。进程重启后，原先
+处于 `queued`、`running` 或恢复中状态的操作会以 `operation_interrupted` 终止失败，不会永久
+停留在 pending。
+
+## Headless MCP OAuth
+
+现有的 `mcp_oauth_status`、`mcp_oauth_load_entry`、`mcp_oauth_authenticate`、
+`mcp_oauth_refresh` 与 `mcp_oauth_clear` 均为 service-owned，并按 account 隔离。将
+`COGNIA_PUBLIC_URL` 设置为外部可访问的 HTTPS origin；授权 redirect 为
+`$COGNIA_PUBLIC_URL/integrations/mcp/oauth/callback`。认证流程把 PKCE state 与动态 client 信息
+写入加密 secret store，返回 authorization URL；每个 256-bit state 最多存活三分钟且只能消费
+一次。access token 不会出现在 callback HTML 或完成事件中。只有明确的 local-debug 配置才允许
+loopback HTTP callback。
 
 ## Agent-first 运维 CLI
 
@@ -141,3 +165,6 @@ pnpm companion-api:lint
 
 dispatcher 新增命令后，生成器和 Rust parity test 会要求 Headless spec 同步公开；公开设备暴露仍需
 通过更严格的 target 与 transport 分类。
+同一生成器还负责内嵌 catalog hash、Brain bridge 的精简 identity 模块、OpenAPI 和 AsyncAPI。
+Bridge protocol v2 会在 `hello` / `hello_ack` 的 catalog hash 或 contract version 不一致时拒绝
+连接，因此旧 Brain 不会进入 ready 状态。

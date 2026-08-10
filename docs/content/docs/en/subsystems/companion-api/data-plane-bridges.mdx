@@ -1,6 +1,6 @@
 ---
 title: Data Plane & WebView Bridges
-description: How an axum handler reads and writes data that lives in the WebView's Dexie — three oneshot request/response bridges, the sync-table allowlist, the TS bridge sources, and the headless DataPlane that swaps in a SQLite store when there is no WebView.
+description: How axum reaches the canonical Dexie brain through three request/response bridges, with a bounded SQLite fallback while the Headless Brain is unavailable.
 ---
 
 # Data Plane & WebView Bridges
@@ -14,14 +14,14 @@ description: How an axum handler reads and writes data that lives in the WebView
   event carrying a `request_id`, registers a `oneshot::Sender` keyed by that id, and waits up to
   **30 seconds**; a TS listener processes the request against Dexie and replies via a
   `companion_*_response` Tauri command; Rust resolves the oneshot and writes the result into the HTTP
-  response. For the headless `cognia-server` (no WebView), a `DataPlane` abstraction swaps the bridge
-  for a direct SQLite `AppStore`.
+  response. In Headless mode the same bridge protocol runs over `/internal/bridge` to the Node Brain;
+  the direct SQLite `AppStore` is only a bounded degraded fallback while no Brain is connected.
 </TLDR>
 
 <StatGrid>
   <Stat label="Bridges" value="3" hint="sync · messages · writes" />
   <Stat label="Bridge timeout" value="30 s" hint="enough to wake a sleeping desktop" />
-  <Stat label="Sync tables" value="10" hint="sync_registry allowlist" />
+  <Stat label="Sync tables" value="22" hint="sync_registry allowlist" />
   <Stat label="Write commands" value="~40" hint="one unified writes bridge" />
 </StatGrid>
 
@@ -54,11 +54,11 @@ sequenceDiagram
 | Bridge | Request event | Response command | Timeout | Used by |
 | --- | --- | --- | --- | --- |
 | `sync_bridge.rs` | `companion://sync-pull-request` (`:34`) | `companion_sync_pull_response` (`commands.rs:164`) | 30 s (`:35`) | `sync_pull` |
-| `desktop_messages_bridge.rs` | 5 events (`:41-45`) | `companion_message_response` (`commands.rs:200`) | 30 s (`:46`) | `message_update` / `message_delete` / `session_list` / `message_get_by_session` / `message_send` |
+| `desktop_messages_bridge.rs` | 9 message/session/transcript events | `companion_message_response` | 30 s | message CRUD, session listing, transcript capability/timeline/detail/media reads |
 | `desktop_writes_bridge.rs` | one unified `companion://desktop-write-request` `{ request_id, command, payload }` (`:35`) | `companion_desktop_write_response` (`commands.rs:231`) | 30 s (`:36`) | all ~40 Wave-2/4 mutating commands |
 
-The messages bridge fans out five distinct event names but shares one `register()` (`:253`) +
-`await_response()` (`:266`) + `resolve()` (`:285`). The writes bridge takes the opposite tack: a
+The messages bridge fans out nine distinct event names but shares one request registry and response
+resolver. The writes bridge takes the opposite tack: a
 **single** event carrying the command name in its payload, dispatched in `dispatch()` (`:68`) — that
 is why the RPC manifest can collapse 40 write commands into one OR-pattern arm (`rpc.rs:1072`).
 
@@ -79,11 +79,13 @@ the matching event:
 
 `sync_pull` is the bulk read path — a phone pulls table deltas at startup and on invalidation. Which
 tables it may pull is itself an allowlist, `SyncTableRegistry` (`sync_registry.rs:34`), seeded by
-`with_defaults()` (`:45`). The **10** allowed tables (`sync_registry.rs:69-122`):
+`with_defaults()`. The **22** default tables are:
 
 ```text
-characters · skills · sessions · messages · workflows
-twinProfile · plugins · adapterInstances · settings · conversationOverrides
+characters · skills · sessions · messages · workflows · workflowRuns · executionRuns
+twinProfile · plugins · adapterInstances · settings · conversationOverrides · goals · memories
+mcpServers · terminalHistory · agentTeamBoard · agentTasks · agentTaskAttempts
+templateDefinitions · templatePackages · templateInstances
 ```
 
 `contains()` (`sync_registry.rs:58`) gates `sync_pull` at `rpc.rs:993`; an off-list table name is
@@ -92,24 +94,20 @@ are the mirror image — one handler per allowed table.
 
 ## The headless DataPlane
 
-The Companion API code is reused by a headless `cognia-server` binary that has **no WebView** — so
-the message/session bridges have no TS side to answer them. `DataPlane` (`data_plane.rs:54`) abstracts
-that difference:
+The Companion API code is reused by a headless `cognia-server` binary that has **no WebView**.
+`DataPlane` abstracts both the transport and the degraded fallback:
 
 ```rust title="src-tauri/src/companion_api/data_plane.rs"
 enum DataPlane {
-    TauriBridge { bridge, app },        // desktop: route through the WebView
-    Direct(Arc<dyn AppStore>),          // headless: a SQLite store
-}                                       // data_plane.rs:54
+    Bridge { bridge, transport },       // socket Brain or desktop WebView
+    Direct(Arc<dyn AppStore>),          // degraded SQLite fallback
+}
 ```
 
-A process-global `HEADLESS_STORE` (`data_plane.rs:41`) is installed via `install_headless_store()`
-(`:45`); `pick()` (`:64`) prefers the headless store, else the Tauri bridge, else `None`. The five
-message/session methods (`list_sessions` `:77`, `get_messages_by_session` `:99`, `send_message` `:121`,
-`update_message` `:145`, `delete_message` `:175`) each branch on the active variant; `rpc.rs` selects
-it via `pick_data_plane()` (`rpc.rs:647`). On the desktop product, `Direct` is never installed, so the
-WebView bridge is always chosen — the `AppStore` / `SqliteAppStore` in `store.rs` exists purely for the
-headless path.
+`pick()` resolves in strict order: connected socket Brain, desktop WebView, then the process-global
+`HEADLESS_STORE`. This is the implemented ADR-0059 D3 rule: the Brain's Dexie remains authoritative;
+SQLite serves a limited degraded surface during Brain startup or restart and must not shadow a live
+Brain. Desktop behavior is unchanged because the WebView transport wins when present.
 
 ## Why 30 seconds
 

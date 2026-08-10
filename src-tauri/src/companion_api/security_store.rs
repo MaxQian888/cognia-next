@@ -116,16 +116,12 @@ pub fn security_store() -> Option<Arc<SecurityStore>> {
 
 impl SecurityStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Arc<Self>, SecurityStoreError> {
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA_SQL)?;
-        conn.execute(
-            "UPDATE runs SET status = 'recovering', updated_at = ?1
-             WHERE status IN ('queued', 'running', 'waiting_input', 'cancelling')",
-            [unix_time_secs()],
-        )?;
+        reconcile_interrupted_operations(&mut conn, unix_time_secs())?;
         Ok(Arc::new(Self {
             conn: Arc::new(Mutex::new(conn)),
         }))
@@ -1167,6 +1163,72 @@ fn insert_audit(
     Ok(())
 }
 
+fn reconcile_interrupted_operations(
+    conn: &mut Connection,
+    now: i64,
+) -> Result<usize, SecurityStoreError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let interrupted = {
+        let mut statement = tx.prepare(
+            "SELECT r.tenant_id, r.device_id, r.id
+             FROM runs r
+             JOIN idempotency_records i
+               ON i.tenant_id = r.tenant_id
+              AND i.device_id = r.device_id
+              AND i.operation_id = r.id
+             WHERE r.status IN ('queued', 'running', 'waiting_input', 'cancelling', 'recovering')
+               AND i.receipt_json IS NULL",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+    let receipt = serde_json::json!({
+        "httpStatus": 500,
+        "error": {
+            "code": "operation_interrupted",
+            "message": "the server restarted before the operation recorded a terminal result",
+            "retryable": true,
+            "details": {},
+        }
+    })
+    .to_string();
+    for (tenant_id, device_id, operation_id) in &interrupted {
+        tx.execute(
+            "UPDATE idempotency_records
+             SET status = 'failed', receipt_json = ?1, updated_at = ?2
+             WHERE tenant_id = ?3 AND device_id = ?4 AND operation_id = ?5
+               AND receipt_json IS NULL",
+            params![receipt, now, tenant_id, device_id, operation_id],
+        )?;
+        tx.execute(
+            "UPDATE runs SET status = 'failed', updated_at = ?1
+             WHERE tenant_id = ?2 AND device_id = ?3 AND id = ?4",
+            params![now, tenant_id, device_id, operation_id],
+        )?;
+        insert_audit(
+            &tx,
+            tenant_id,
+            device_id,
+            "run.interrupted",
+            operation_id,
+            now,
+        )?;
+    }
+    tx.commit()?;
+    for _ in 0..interrupted.len() {
+        super::metrics::record_operation(super::metrics::OperationOutcome::Interrupted);
+    }
+    Ok(interrupted.len())
+}
+
 fn insert_default_grants(
     tx: &rusqlite::Transaction<'_>,
     tenant_id: &str,
@@ -1892,7 +1954,7 @@ mod tests {
     }
 
     #[test]
-    fn reopening_marks_incomplete_runs_recovering_without_replaying_them() {
+    fn reopening_terminally_fails_incomplete_operations_without_replaying_them() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("security.sqlite");
         let store = SecurityStore::open(&path).unwrap();
@@ -1917,14 +1979,20 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(status, "recovering");
-        assert_eq!(
-            reopened
-                .begin_idempotent_operation(
-                    "tenant-a", "device-a", "host-b", "key-a", "hash-a", 102,
-                )
-                .unwrap(),
-            IdempotencyDecision::InProgress { operation_id }
-        );
+        assert_eq!(status, "failed");
+        let decision = reopened
+            .begin_idempotent_operation("tenant-a", "device-a", "host-b", "key-a", "hash-a", 102)
+            .unwrap();
+        let IdempotencyDecision::Completed {
+            operation_id: completed_id,
+            receipt_json,
+        } = decision
+        else {
+            panic!("expected a terminal receipt");
+        };
+        assert_eq!(completed_id, operation_id);
+        let receipt: serde_json::Value = serde_json::from_str(&receipt_json).unwrap();
+        assert_eq!(receipt["error"]["code"], "operation_interrupted");
+        assert_eq!(receipt["error"]["retryable"], true);
     }
 }

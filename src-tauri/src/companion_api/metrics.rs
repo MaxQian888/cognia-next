@@ -55,6 +55,10 @@ static INTERNAL_RPC_METRICS: Lazy<RpcPlaneMetrics> = Lazy::new(RpcPlaneMetrics::
 static OPERATIONS_ACCEPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static OPERATIONS_COMPLETED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static OPERATIONS_REPLAYED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static OPERATIONS_INTERRUPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static CONTRACT_INPUT_VIOLATIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static CONTRACT_OUTPUT_VIOLATIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static CONTRACT_MISMATCHES_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RpcPlane {
@@ -154,6 +158,7 @@ pub enum OperationOutcome {
     Accepted,
     Completed,
     Replayed,
+    Interrupted,
 }
 
 pub fn record_operation(outcome: OperationOutcome) {
@@ -161,8 +166,21 @@ pub fn record_operation(outcome: OperationOutcome) {
         OperationOutcome::Accepted => &OPERATIONS_ACCEPTED_TOTAL,
         OperationOutcome::Completed => &OPERATIONS_COMPLETED_TOTAL,
         OperationOutcome::Replayed => &OPERATIONS_REPLAYED_TOTAL,
+        OperationOutcome::Interrupted => &OPERATIONS_INTERRUPTED_TOTAL,
     };
     counter.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_contract_violation(direction: cognia_headless_contract::ContractDirection) {
+    let counter = match direction {
+        cognia_headless_contract::ContractDirection::Input => &CONTRACT_INPUT_VIOLATIONS_TOTAL,
+        cognia_headless_contract::ContractDirection::Output => &CONTRACT_OUTPUT_VIOLATIONS_TOTAL,
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_contract_mismatch() {
+    CONTRACT_MISMATCHES_TOTAL.fetch_add(1, Ordering::Relaxed);
 }
 
 // ── Lark dual-entry counters (plan 2026-07-24 P6.2) ─────────────────────────
@@ -364,12 +382,33 @@ pub fn render_prometheus() -> String {
         ("accepted", &OPERATIONS_ACCEPTED_TOTAL),
         ("completed", &OPERATIONS_COMPLETED_TOTAL),
         ("replayed", &OPERATIONS_REPLAYED_TOTAL),
+        ("interrupted", &OPERATIONS_INTERRUPTED_TOTAL),
     ] {
         out.push_str(&format!(
             "cognia_rpc_operations_total{{outcome=\"{outcome}\"}} {}\n",
             counter.load(Ordering::Relaxed)
         ));
     }
+    out.push_str(
+        "# HELP cognia_headless_contract_violations_total Rejected values by contract direction.\n",
+    );
+    out.push_str("# TYPE cognia_headless_contract_violations_total counter\n");
+    for (direction, counter) in [
+        ("input", &CONTRACT_INPUT_VIOLATIONS_TOTAL),
+        ("output", &CONTRACT_OUTPUT_VIOLATIONS_TOTAL),
+    ] {
+        out.push_str(&format!(
+            "cognia_headless_contract_violations_total{{direction=\"{direction}\"}} {}\n",
+            counter.load(Ordering::Relaxed)
+        ));
+    }
+    push_metric(
+        &mut out,
+        "cognia_headless_contract_mismatches_total",
+        "counter",
+        "Brain bridge handshakes rejected for a catalog or contract-version mismatch.",
+        CONTRACT_MISMATCHES_TOTAL.load(Ordering::Relaxed),
+    );
 
     // Lark dual-entry counters (plan 2026-07-24 P6.2).
     let lark_series: &[(&str, &AtomicU64, &str)] = &[
@@ -575,12 +614,24 @@ mod tests {
         record_operation(OperationOutcome::Replayed);
         let after = render_prometheus();
 
-        for outcome in ["accepted", "completed", "replayed"] {
+        for outcome in ["accepted", "completed", "replayed", "interrupted"] {
             assert!(after.contains(&format!(
                 "cognia_rpc_operations_total{{outcome=\"{outcome}\"}}"
             )));
         }
         assert_ne!(before, after);
+    }
+
+    #[test]
+    fn headless_contract_metrics_use_bounded_labels() {
+        record_contract_violation(cognia_headless_contract::ContractDirection::Input);
+        record_contract_violation(cognia_headless_contract::ContractDirection::Output);
+        record_contract_mismatch();
+        let text = render_prometheus();
+        assert!(text.contains("cognia_headless_contract_violations_total{direction=\"input\"}"));
+        assert!(text.contains("cognia_headless_contract_violations_total{direction=\"output\"}"));
+        assert!(text.contains("cognia_headless_contract_mismatches_total"));
+        assert!(!text.contains("command=\""));
     }
 
     #[test]

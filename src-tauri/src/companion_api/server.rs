@@ -63,6 +63,18 @@ async fn harden_internal_response(request: Request, next: Next) -> Response {
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
+    if let Ok(contract) = super::command_manifest::headless_contract() {
+        if let Ok(value) = HeaderValue::from_str(contract.catalog_hash()) {
+            response
+                .headers_mut()
+                .insert("x-cognia-headless-catalog-hash", value);
+        }
+        if let Ok(value) = HeaderValue::from_str(&contract.schema_version().to_string()) {
+            response
+                .headers_mut()
+                .insert("x-cognia-headless-contract-version", value);
+        }
+    }
     response
 }
 
@@ -406,6 +418,10 @@ fn build_router_for_mode(state: SharedState, _mode: super::deployment::Deploymen
             "/internal/_rpc/{name}",
             post(super::api::internal_rpc_handler),
         )
+        .route(
+            "/internal/operations/{operation_id}",
+            get(super::api::internal_operation_handler),
+        )
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_service_jwt,
@@ -482,6 +498,15 @@ fn build_router_for_mode(state: SharedState, _mode: super::deployment::Deploymen
         let lark_router = crate::companion_api::lark_entry::router(lark_entry_state)
             .layer(from_fn(middleware::pre_auth_rate_limit));
         router = router.nest("/integrations/lark", lark_router);
+
+        let mcp_oauth_router = Router::new()
+            .route(
+                "/oauth/callback",
+                get(crate::mcp_oauth::headless_callback_handler),
+            )
+            .with_state(state.clone())
+            .layer(from_fn(middleware::pre_auth_rate_limit));
+        router = router.nest("/integrations/mcp", mcp_oauth_router);
     }
 
     // Body-size limit applied to all routes (incl. the ingress — Lark/Slack
@@ -832,6 +857,22 @@ mod tests {
             response.headers().get(header::REFERRER_POLICY),
             Some(&HeaderValue::from_static("no-referrer"))
         );
+        let contract =
+            crate::companion_api::command_manifest::headless_contract().expect("embedded contract");
+        assert_eq!(
+            response
+                .headers()
+                .get("x-cognia-headless-catalog-hash")
+                .and_then(|value| value.to_str().ok()),
+            Some(contract.catalog_hash())
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("x-cognia-headless-contract-version")
+                .and_then(|value| value.to_str().ok()),
+            Some("1")
+        );
     }
 
     #[tokio::test]
@@ -925,13 +966,29 @@ mod tests {
                 axum::http::Request::builder()
                     .method("POST")
                     .uri("/connectors/webhook/telegram/ghost")
-                    .extension(peer)
+                    .extension(peer.clone())
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(resp.status().as_u16(), 404, "unregistered adapter → 404");
+
+        let resp = build_router(test_state())
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/integrations/mcp/oauth/callback")
+                    .extension(peer)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "headless mounts the public MCP OAuth callback"
+        );
 
         crate::headless::install_headless_services(None);
     }

@@ -11510,7 +11510,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_client_create (host.admin)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -11639,7 +11639,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_client_list (host.observe)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       requestBody:
         required: true
         content:
@@ -11751,7 +11751,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_client_revoke (host.admin)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -11870,7 +11870,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_client_rotate (host.admin)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -11989,7 +11989,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_config_get (host.observe)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       requestBody:
         required: true
         content:
@@ -12101,7 +12101,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_config_update (host.admin)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -12333,7 +12333,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_relay_enable (host.admin)
       description: "Device-reachable write command. Risk: critical; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -12446,7 +12446,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_restart (process.spawn)
       description: "Device-reachable side-effect command. Risk: critical; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -12559,7 +12559,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_start (process.spawn)
       description: "Device-reachable side-effect command. Risk: critical; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -12672,7 +12672,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_status (host.observe)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       requestBody:
         required: true
         content:
@@ -12784,7 +12784,7 @@ paths:
         - rpc-dispatch
       summary: external_bridge_stop (process.spawn)
       description: "Device-reachable side-effect command. Risk: critical; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -23300,7 +23300,7 @@ paths:
         - rpc-dispatch
       summary: host_admin_lease_issue (host.admin)
       description: "Device-reachable write command. Risk: critical; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -23429,7 +23429,7 @@ paths:
         - rpc-dispatch
       summary: host_admin_lease_revoke (host.admin)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -31762,7 +31762,7 @@ paths:
         - rpc-dispatch
       summary: skills_bundle_upload_abort (workspace.write)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -31881,7 +31881,7 @@ paths:
         - rpc-dispatch
       summary: skills_bundle_upload_commit (workspace.write)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -32000,7 +32000,7 @@ paths:
         - rpc-dispatch
       summary: skills_bundle_upload_open (workspace.write)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -32119,7 +32119,7 @@ paths:
         - rpc-dispatch
       summary: skills_bundle_upload_write (workspace.write)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -32254,7 +32254,7 @@ paths:
         - rpc-dispatch
       summary: skills_catalog_get (host.observe)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       requestBody:
         required: true
         content:
@@ -32366,7 +32366,7 @@ paths:
         - rpc-dispatch
       summary: skills_install_atomic (workspace.write)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -32874,7 +32874,7 @@ paths:
         - rpc-dispatch
       summary: skills_uninstall (workspace.write)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -34597,7 +34597,7 @@ paths:
         - rpc-dispatch
       summary: task_workspace_export_resource_manifest (host.observe)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       requestBody:
         required: true
         content:
@@ -35067,7 +35067,7 @@ paths:
         - rpc-dispatch
       summary: task_workspace_get_resource_summary (host.observe)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       requestBody:
         required: true
         content:
@@ -35298,7 +35298,7 @@ paths:
         - rpc-dispatch
       summary: task_workspace_list_resource_events (host.observe)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       requestBody:
         required: true
         content:
@@ -35775,7 +35775,7 @@ paths:
         - rpc-dispatch
       summary: task_workspace_prune (workspace.write)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -35888,7 +35888,7 @@ paths:
         - rpc-dispatch
       summary: task_workspace_record_tool_event (workspace.write)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -36275,7 +36275,7 @@ paths:
         - rpc-dispatch
       summary: task_workspace_status (host.observe)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       requestBody:
         required: true
         content:
@@ -38100,6 +38100,135 @@ paths:
                 - id
               properties:
                 id:
+                  type: string
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+  /api/_rpc/twin_draft_review:
+    post:
+      operationId: publicRpcTwinDraftReview
+      tags:
+        - rpc-dispatch
+      summary: twin_draft_review (workspace.write)
+      description: "Device-reachable write command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - draftId
+                - action
+              properties:
+                twinId:
+                  type: string
+                  minLength: 1
+                draftId:
+                  type: string
+                  minLength: 1
+                action:
+                  type: string
+                  enum:
+                    - accept
+                    - reject
+                reviewerNote:
                   type: string
               additionalProperties: false
       responses:
@@ -42000,6 +42129,7 @@ components:
           - terminal_list_for_project
           - twin_create
           - twin_delete
+          - twin_draft_review
           - twin_ingest_source
           - twin_job_cancel
           - twin_job_pause
@@ -43607,9 +43737,9 @@ x-cognia-generated:
     - protocol/companion-request-schemas.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  publicCommandCount: 321
-  generatedRequestSchemaCount: 321
-  runtimeInferredRequestSchemaCount: 26
-  contractRequestSchemaCount: 295
+  publicCommandCount: 322
+  generatedRequestSchemaCount: 322
+  runtimeInferredRequestSchemaCount: 0
+  contractRequestSchemaCount: 322
   genericRequestSchemaCount: 0
   legacyCompatibility: false

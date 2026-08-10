@@ -234,6 +234,23 @@ impl RpcError {
     }
 }
 
+const TWIN_DRAFT_REVIEW_CONFLICT_SENTINEL: &str = "[TWIN_DRAFT_REVIEW_CONFLICT]";
+
+fn map_desktop_write_bridge_error(command: &str, detail: String) -> (StatusCode, Json<RpcError>) {
+    if command == "twin_draft_review" && detail.starts_with(TWIN_DRAFT_REVIEW_CONFLICT_SENTINEL) {
+        return (
+            StatusCode::CONFLICT,
+            Json(RpcError::new(
+                "twin_draft_review_conflict",
+                detail
+                    .trim_start_matches(TWIN_DRAFT_REVIEW_CONFLICT_SENTINEL)
+                    .trim(),
+            )),
+        );
+    }
+    RpcError::internal(detail)
+}
+
 fn terminal_rpc_authorization(
     device_id: &str,
     host_remote_access_enabled: bool,
@@ -318,6 +335,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "mcp_server_start",
     "mcp_server_stop",
     "mcp_server_restart",
+    "mcp_oauth_authenticate",
+    "mcp_oauth_status",
+    "mcp_oauth_load_entry",
+    "mcp_oauth_refresh",
+    "mcp_oauth_clear",
     "read_agent_config",
     "write_agent_config",
     // Generic encrypted secret-store facade for the headless brain. The
@@ -750,10 +772,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "background_monitor_cancel",
     "background_monitor_register_scheduled",
     // ── Workflow approval gate (ADR-0061 P2) ────────────────────────────────
-    // Pending `action.approval.request` entries live in the renderer's
-    // in-memory registry — round-trip through desktop_writes_bridge.
-    // `workflow_approval_respond` resolves a run's HITL gate, so it is
-    // control-gated; the caller device id is injected server-side.
+    // Pending approvals live in the host-owned workflow SQLite mirror, so
+    // list/respond remain available while the renderer is suspended.
     "workflow_approval_list",
     "workflow_approval_respond",
     // ── Remote step execution (ADR-0061 P3) ─────────────────────────────────
@@ -779,6 +799,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // patch (gated as a CONTROL command — it can reset/rewrite the persona).
     "twin_create",
     "twin_source_create",
+    "twin_draft_review",
     "twin_profile_update",
     // Goal create / update / status (coarse remote surface). create + update
     // are CONTROL commands (they start / re-aim an autonomous agent loop);
@@ -895,6 +916,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "external_bridge_client_list",
     "external_bridge_status",
     "mcp_server_status",
+    "mcp_oauth_status",
+    "mcp_oauth_load_entry",
     "read_agent_config",
     "keyring_secret_get",
     "secret_store_get",
@@ -3401,6 +3424,58 @@ pub(super) async fn dispatch(
             let status = host.mcp_server_status();
             serde_json::to_value(status).map_err(|e| RpcError::internal(e.to_string()))
         }
+        "mcp_oauth_status" => {
+            let account_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("MCP OAuth requires an account-bound service principal")
+            })?;
+            let server_name: String = required_aliased(&args, "server_name", "serverName")?;
+            crate::mcp_oauth::headless_status(account_id, &server_name)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "mcp_oauth_load_entry" => {
+            let account_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("MCP OAuth requires an account-bound service principal")
+            })?;
+            let server_name: String = required_aliased(&args, "server_name", "serverName")?;
+            crate::mcp_oauth::headless_load_entry(account_id, &server_name)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "mcp_oauth_authenticate" => {
+            let account_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("MCP OAuth requires an account-bound service principal")
+            })?;
+            let server_name: String = required_aliased(&args, "server_name", "serverName")?;
+            let server: Value = required(&args, "server")?;
+            crate::mcp_oauth::headless_authenticate(account_id, &server_name, server)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "mcp_oauth_refresh" => {
+            let account_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("MCP OAuth requires an account-bound service principal")
+            })?;
+            let server_name: String = required_aliased(&args, "server_name", "serverName")?;
+            let server: Value = required(&args, "server")?;
+            crate::mcp_oauth::headless_refresh(account_id, &server_name, server)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "mcp_oauth_clear" => {
+            let account_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("MCP OAuth requires an account-bound service principal")
+            })?;
+            let server_name: String = required_aliased(&args, "server_name", "serverName")?;
+            crate::mcp_oauth::headless_clear(account_id, &server_name)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
         // ── Sync down (M4.7) ──────────────────────────────────────────────────
 
         "register_push_token" => {
@@ -3685,7 +3760,94 @@ pub(super) async fn dispatch(
                 label,
             )
             .await
-            .map_err(RpcError::internal)
+                .map_err(RpcError::internal)
+        }
+
+        // ── Durable workflow waitpoints ─────────────────────────────────────
+        // Host-owned SQLite is the authority here: a paired device can decide
+        // while the WebView is asleep, and the renderer observes the terminal
+        // row when it resumes polling.
+        "workflow_approval_list" => {
+            let rows = match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => app
+                    .state::<crate::workflow::WorkflowState>()
+                    .mirror
+                    .list_pending_waitpoints(),
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    services.workflow.mirror.list_pending_waitpoints()
+                }
+            }
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+            let approvals: Vec<Value> = rows
+                .into_iter()
+                .filter(|row| row.kind == "approval" || row.kind == "risk_gate")
+                .map(|row| {
+                    json!({
+                        "approvalId": row.id,
+                        "runId": row.run_id,
+                        "workflowId": row.workflow_id,
+                        "stepId": row.step_id,
+                        "title": row.title.unwrap_or_else(|| "Approval required".to_string()),
+                        "message": row.message,
+                        "requestedAt": row.created_at,
+                        "timeoutAt": row.expires_at,
+                        "kind": row.kind,
+                    })
+                })
+                .collect();
+            Ok(json!({ "approvals": approvals }))
+        }
+        "workflow_approval_respond" => {
+            let approval_id: String = required_aliased(&args, "approval_id", "approvalId")?;
+            let decision: String = required(&args, "decision")?;
+            if decision != "approved" && decision != "rejected" {
+                return Err(RpcError::malformed(
+                    "workflow_approval_respond.decision must be 'approved' or 'rejected'"
+                        .to_string(),
+                ));
+            }
+            let resolved_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as i64)
+                .unwrap_or(0);
+            let input = crate::workflow::types::WorkflowWaitpointDecisionInput {
+                id: approval_id.clone(),
+                status: if decision == "approved" {
+                    "resolved".to_string()
+                } else {
+                    "rejected".to_string()
+                },
+                resolution: json!({
+                    "outcome": decision,
+                    "respondedBy": format!("device:{device_id}"),
+                    "resolvedAt": resolved_at,
+                }),
+                updated_at: resolved_at,
+            };
+            let (changed, exists) = match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    let workflow = app.state::<crate::workflow::WorkflowState>();
+                    let changed = workflow.mirror.decide_waitpoint(&input);
+                    let exists = workflow.mirror.get_waitpoint(&approval_id);
+                    (changed, exists)
+                }
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    let changed = services.workflow.mirror.decide_waitpoint(&input);
+                    let exists = services.workflow.mirror.get_waitpoint(&approval_id);
+                    (changed, exists)
+                }
+            };
+            let changed = changed.map_err(|error| RpcError::internal(error.to_string()))?;
+            let exists = exists
+                .map_err(|error| RpcError::internal(error.to_string()))?
+                .is_some();
+            Ok(if changed {
+                json!({ "ok": true })
+            } else if exists {
+                json!({ "ok": false, "reason": "already-decided" })
+            } else {
+                json!({ "ok": false, "reason": "not-found" })
+            })
         }
 
         // ── Desktop-write bridge (Wave 2 mutating RPCs) ──────────────────────
@@ -3773,8 +3935,6 @@ pub(super) async fn dispatch(
         | "scheduled_task_emit_event"
         // ADR-0061 P2 — HITL approval gate; respond gets callerDeviceId
         // injected below so the responder identity is spoof-proof.
-        | "workflow_approval_list"
-        | "workflow_approval_respond"
         // ADR-0061 P3 — chunked result for a desktop-issued remote step.
         | "workflow_step_result"
         | "twin_delete"
@@ -3788,6 +3948,7 @@ pub(super) async fn dispatch(
         | "twin_job_retry"
         | "twin_create"
         | "twin_source_create"
+        | "twin_draft_review"
         | "twin_profile_update"
         | "goal_create"
         | "goal_update"
@@ -3826,7 +3987,7 @@ pub(super) async fn dispatch(
                     crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
-                .map_err(RpcError::internal)
+                .map_err(|error| map_desktop_write_bridge_error(name, error))
         }
 
         // ── Headless external-agent execution plane (ADR-0059 R11) ───────────
@@ -9317,6 +9478,89 @@ rl.on("line", (line) => {
         .expect("unregister integration route");
     }
 
+    #[tokio::test]
+    async fn workflow_approval_rpc_uses_durable_headless_waitpoints() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+        services
+            .workflow
+            .mirror
+            .create_waitpoint(&crate::workflow::types::WorkflowWaitpointRow {
+                id: "approval-1".into(),
+                kind: "approval".into(),
+                status: "pending".into(),
+                run_id: "run-1".into(),
+                workflow_id: "workflow-1".into(),
+                step_id: "gate".into(),
+                key: "approval:run-1:gate".into(),
+                correlation_id: None,
+                title: Some("Ship?".into()),
+                message: None,
+                created_at: 1,
+                not_before: 1,
+                expires_at: Some(10_000),
+                resolution: None,
+                notification_sent_at: None,
+                resolution_notification_sent_at: None,
+                updated_at: 1,
+            })
+            .expect("persist approval");
+
+        let listed = dispatch(
+            "workflow_approval_list",
+            json!({}),
+            &state,
+            &host,
+            "device-1",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("list approvals");
+        assert_eq!(listed["approvals"][0]["approvalId"], "approval-1");
+
+        let decided = dispatch(
+            "workflow_approval_respond",
+            json!({ "approvalId": "approval-1", "decision": "approved" }),
+            &state,
+            &host,
+            "device-1",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("decide approval");
+        assert_eq!(decided, json!({ "ok": true }));
+
+        let duplicate = dispatch(
+            "workflow_approval_respond",
+            json!({ "approvalId": "approval-1", "decision": "rejected" }),
+            &state,
+            &host,
+            "device-2",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("duplicate decision");
+        assert_eq!(
+            duplicate,
+            json!({ "ok": false, "reason": "already-decided" })
+        );
+        let row = services
+            .workflow
+            .mirror
+            .get_waitpoint("approval-1")
+            .expect("read approval")
+            .expect("approval exists");
+        assert_eq!(row.status, "resolved");
+        assert_eq!(
+            row.resolution.expect("resolution")["respondedBy"],
+            "device:device-1"
+        );
+    }
+
     /// Malformed args map to 400 malformed_request, not a panic or 500.
     #[tokio::test]
     async fn connectors_http_request_rejects_malformed_args() {
@@ -10655,6 +10899,29 @@ rl.on("line", (line) => {
         assert!(KNOWN_COMMANDS.contains(&"host_feature_manifest"));
         assert!(READ_ONLY_COMMANDS.contains(&"host_feature_manifest"));
         assert!(!CONTROL_COMMANDS.contains(&"host_feature_manifest"));
+    }
+
+    #[test]
+    fn twin_draft_review_is_a_mutating_desktop_bridge_command() {
+        assert!(KNOWN_COMMANDS.contains(&"twin_draft_review"));
+        assert!(!READ_ONLY_COMMANDS.contains(&"twin_draft_review"));
+        assert!(!SERVICE_ONLY_COMMANDS.contains(&"twin_draft_review"));
+    }
+
+    #[test]
+    fn twin_draft_review_conflict_is_non_retryable_at_the_rpc_boundary() {
+        let (status, Json(error)) = map_desktop_write_bridge_error(
+            "twin_draft_review",
+            format!("{TWIN_DRAFT_REVIEW_CONFLICT_SENTINEL} accept already in progress"),
+        );
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error.code, "twin_draft_review_conflict");
+        assert!(!error.message.contains(TWIN_DRAFT_REVIEW_CONFLICT_SENTINEL));
+
+        let (status, Json(error)) =
+            map_desktop_write_bridge_error("twin_source_create", "offline".to_string());
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.code, "internal_error");
     }
 
     #[test]

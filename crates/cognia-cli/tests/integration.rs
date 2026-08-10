@@ -187,12 +187,12 @@ fn plugin_contract_json_returns_the_complete_canonical_inventory_without_writing
     assert_eq!(parsed["schemaVersion"], 2);
     assert_eq!(parsed["ok"], true);
     assert_eq!(parsed["action"], "contract");
-    assert_eq!(parsed["catalogSchemaVersion"], 4);
+    assert_eq!(parsed["catalogSchemaVersion"], 2);
     assert_eq!(parsed["pluginPointSchemaVersion"], 1);
     assert_eq!(parsed["catalogCounts"]["pluginTypes"], 5);
     assert_eq!(parsed["catalogCounts"]["capabilities"], 68);
     assert_eq!(parsed["catalogCounts"]["manifestContributions"], 55);
-    assert_eq!(parsed["catalogCounts"]["permissions"], 108);
+    assert_eq!(parsed["catalogCounts"]["permissions"], 110);
     assert_eq!(parsed["catalogCounts"]["runtimeEntries"], 5);
     assert_eq!(parsed["catalogCounts"]["pathFields"], 50);
     assert_eq!(parsed["catalogCounts"]["pluginPoints"], 275);
@@ -274,7 +274,7 @@ fn plugin_contract_filters_related_capabilities_contributions_and_runtime_entrie
     assert_eq!(parsed["selectionCounts"]["manifestContributions"], 3);
     // Permissions and path contracts remain complete because the canonical
     // catalog does not claim a one-to-one permission/path mapping.
-    assert_eq!(parsed["selectionCounts"]["permissions"], 108);
+    assert_eq!(parsed["selectionCounts"]["permissions"], 110);
     assert_eq!(parsed["selectionCounts"]["pathFields"], 50);
     assert_eq!(parsed["selectionCounts"]["pluginPoints"], 275);
 }

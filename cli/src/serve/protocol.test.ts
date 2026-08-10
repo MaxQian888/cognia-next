@@ -6,6 +6,7 @@
  * @jest-environment node
  */
 import fixtures from "./fixtures/bridge-frames.json"
+import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
 import {
   BRIDGE_PROTOCOL_VERSION,
   buildHello,
@@ -19,6 +20,10 @@ import {
 describe("bridge protocol golden fixtures", () => {
   it("matches the protocol version", () => {
     expect(fixtures.protocol).toBe(BRIDGE_PROTOCOL_VERSION)
+    expect(fixtures.frames.hello.catalogHash).toBe(HEADLESS_CATALOG_HASH)
+    expect(fixtures.frames.hello.contractVersion).toBe(HEADLESS_CONTRACT_VERSION)
+    expect(fixtures.frames.helloAck.catalogHash).toBe(HEADLESS_CATALOG_HASH)
+    expect(fixtures.frames.helloAck.contractVersion).toBe(HEADLESS_CONTRACT_VERSION)
   })
 
   it("every fixture frame parses and roundtrips byte-identically", () => {

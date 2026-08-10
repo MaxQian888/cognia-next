@@ -1,0 +1,317 @@
+asyncapi: 3.0.0
+info:
+  title: Cognia Headless Service Event and Bridge API
+  version: "1"
+  description: Generated WebSocket contract for the existing Headless event stream and Brain data-plane bridge.
+  x-cognia-catalog-hash: 3dedfc4a5ba354366de4f1cb66f7aa1a830c249d05255f3aa163b05d078c4cde
+servers:
+  loopback:
+    host: 127.0.0.1:{port}
+    protocol: wss
+    pathname: /
+    variables:
+      port:
+        default: "3000"
+    security:
+      - $ref: "#/components/securitySchemes/serviceQueryToken"
+channels:
+  headlessEvents:
+    address: /internal/events
+    messages:
+      event:
+        $ref: "#/components/messages/EventFrame"
+      streamReady:
+        $ref: "#/components/messages/StreamReadyFrame"
+      resyncRequired:
+        $ref: "#/components/messages/ResyncRequiredFrame"
+      ping:
+        $ref: "#/components/messages/EventPingFrame"
+  headlessBridge:
+    address: /internal/bridge
+    messages:
+      hello:
+        $ref: "#/components/messages/BridgeHelloFrame"
+      helloAck:
+        $ref: "#/components/messages/BridgeHelloAckFrame"
+      event:
+        $ref: "#/components/messages/BridgeEventFrame"
+      respond:
+        $ref: "#/components/messages/BridgeRespondFrame"
+      ping:
+        $ref: "#/components/messages/BridgePingFrame"
+      pong:
+        $ref: "#/components/messages/BridgePongFrame"
+      tokenRefresh:
+        $ref: "#/components/messages/BridgeTokenRefreshFrame"
+operations:
+  receiveHeadlessEvents:
+    action: receive
+    channel:
+      $ref: "#/channels/headlessEvents"
+    messages:
+      - $ref: "#/channels/headlessEvents/messages/event"
+      - $ref: "#/channels/headlessEvents/messages/streamReady"
+      - $ref: "#/channels/headlessEvents/messages/resyncRequired"
+      - $ref: "#/channels/headlessEvents/messages/ping"
+  sendBridgeFrames:
+    action: send
+    channel:
+      $ref: "#/channels/headlessBridge"
+    messages:
+      - $ref: "#/channels/headlessBridge/messages/hello"
+      - $ref: "#/channels/headlessBridge/messages/respond"
+      - $ref: "#/channels/headlessBridge/messages/pong"
+  receiveBridgeFrames:
+    action: receive
+    channel:
+      $ref: "#/channels/headlessBridge"
+    messages:
+      - $ref: "#/channels/headlessBridge/messages/helloAck"
+      - $ref: "#/channels/headlessBridge/messages/event"
+      - $ref: "#/channels/headlessBridge/messages/ping"
+      - $ref: "#/channels/headlessBridge/messages/pong"
+      - $ref: "#/channels/headlessBridge/messages/tokenRefresh"
+components:
+  securitySchemes:
+    serviceQueryToken:
+      type: apiKey
+      in: query
+      name: token
+  messages:
+    EventFrame:
+      name: EventFrame
+      payload:
+        type: object
+        required:
+          - type
+          - seq
+          - payload
+          - ts_ms
+        additionalProperties: false
+        properties:
+          type:
+            type: string
+            description: Tauri-compatible event topic.
+          seq:
+            type: integer
+            minimum: 1
+          payload: {}
+          ts_ms:
+            type: integer
+            format: int64
+    StreamReadyFrame:
+      name: StreamReadyFrame
+      payload:
+        type: object
+        required:
+          - type
+          - cursor
+        additionalProperties: false
+        properties:
+          type:
+            type: string
+            const: stream_ready
+          cursor:
+            type: integer
+            minimum: 0
+    ResyncRequiredFrame:
+      name: ResyncRequiredFrame
+      payload:
+        type: object
+        required:
+          - type
+        properties:
+          type:
+            type: string
+            const: resync_required
+          cursor:
+            type: integer
+            minimum: 0
+          domains:
+            type: array
+            items:
+              type: string
+    EventPingFrame:
+      name: EventPingFrame
+      payload:
+        type: object
+        required:
+          - type
+          - ts
+        additionalProperties: false
+        properties:
+          type:
+            type: string
+            const: ping
+          ts:
+            type: integer
+            format: int64
+    BridgeHelloFrame:
+      name: BridgeHelloFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - role
+          - brainVersion
+          - protocol
+          - accountId
+          - capabilities
+          - catalogHash
+          - contractVersion
+        properties:
+          v: &a1
+            type: integer
+            const: 2
+          type:
+            type: string
+            const: hello
+          role:
+            type: string
+            const: brain
+          brainVersion:
+            type: string
+          protocol:
+            type: integer
+            const: 2
+          accountId:
+            type: string
+          capabilities:
+            type: array
+            items:
+              type: string
+          catalogHash:
+            type: string
+            const: 3dedfc4a5ba354366de4f1cb66f7aa1a830c249d05255f3aa163b05d078c4cde
+          contractVersion:
+            type: integer
+            const: 1
+        additionalProperties: false
+    BridgeHelloAckFrame:
+      name: BridgeHelloAckFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - serverVersion
+          - protocol
+          - accountId
+          - catalogHash
+          - contractVersion
+        properties:
+          v: *a1
+          type:
+            type: string
+            const: hello_ack
+          serverVersion:
+            type: string
+          protocol:
+            type: integer
+            const: 2
+          accountId:
+            type: string
+          catalogHash:
+            type: string
+            const: 3dedfc4a5ba354366de4f1cb66f7aa1a830c249d05255f3aa163b05d078c4cde
+          contractVersion:
+            type: integer
+            const: 1
+        additionalProperties: false
+    BridgeEventFrame:
+      name: BridgeEventFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - event
+          - payload
+        properties:
+          v: *a1
+          type:
+            type: string
+            const: event
+          event:
+            type: string
+          payload: {}
+        additionalProperties: false
+    BridgeRespondFrame:
+      name: BridgeRespondFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - command
+          - payload
+        properties:
+          v: *a1
+          type:
+            type: string
+            const: respond
+          command:
+            type: string
+          payload:
+            type: object
+        additionalProperties: false
+    BridgePingFrame:
+      name: BridgePingFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - ts
+        properties:
+          v: *a1
+          type:
+            type: string
+            const: ping
+          ts:
+            type: integer
+            format: int64
+        additionalProperties: false
+    BridgePongFrame:
+      name: BridgePongFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - ts
+          - rssBytes
+          - lastFlushAt
+        properties:
+          v: *a1
+          type:
+            type: string
+            const: pong
+          ts:
+            type: integer
+            format: int64
+          rssBytes:
+            type: integer
+            minimum: 0
+          lastFlushAt:
+            type: integer
+            format: int64
+        additionalProperties: false
+    BridgeTokenRefreshFrame:
+      name: BridgeTokenRefreshFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - token
+        properties:
+          v: *a1
+          type:
+            type: string
+            const: token_refresh
+          token:
+            type: string
+            writeOnly: true
+        additionalProperties: false

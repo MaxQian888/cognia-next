@@ -1892,6 +1892,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "cognia-headless-contract",
  "cognia-observability",
  "color-eyre",
  "comfy-table",
@@ -1903,7 +1904,6 @@ dependencies = [
  "hex",
  "indicatif 0.17.11",
  "is-terminal",
- "jsonschema",
  "native-tls",
  "notify",
  "openssl",
@@ -2088,6 +2088,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-headless-contract"
+version = "0.1.0"
+dependencies = [
+ "jsonschema",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "cognia-instrument"
 version = "0.1.0"
 dependencies = [
@@ -2205,6 +2215,7 @@ dependencies = [
  "cognia-external-agent",
  "cognia-gateway",
  "cognia-git",
+ "cognia-headless-contract",
  "cognia-instrument",
  "cognia-jobs",
  "cognia-mcp-server",

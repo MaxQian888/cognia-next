@@ -16,6 +16,7 @@
  * `token_refresh` frames update the token used on the next (re)connect.
  */
 import type { RuntimeBridge } from "@/lib/headless/types"
+import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
 
 import {
   BRIDGE_PROTOCOL_VERSION,
@@ -256,6 +257,14 @@ export class BridgeClient implements RuntimeBridge {
       }
       switch (frame.type) {
         case "hello_ack": {
+          if (frame.accountId !== this.opts.accountId) {
+            this.log("error", "bridge account mismatch")
+            this.close()
+            this.connectReject?.(new Error("bridge account mismatch"))
+            this.connectReject = null
+            this.connectResolve = null
+            return
+          }
           if (frame.protocol !== BRIDGE_PROTOCOL_VERSION) {
             this.log(
               "error",
@@ -263,6 +272,17 @@ export class BridgeClient implements RuntimeBridge {
             )
             this.close()
             this.connectReject?.(new Error("bridge protocol mismatch"))
+            this.connectReject = null
+            this.connectResolve = null
+            return
+          }
+          if (
+            frame.catalogHash !== HEADLESS_CATALOG_HASH ||
+            frame.contractVersion !== HEADLESS_CONTRACT_VERSION
+          ) {
+            this.log("error", "bridge Headless contract mismatch")
+            this.close()
+            this.connectReject?.(new Error("bridge Headless contract mismatch"))
             this.connectReject = null
             this.connectResolve = null
             return

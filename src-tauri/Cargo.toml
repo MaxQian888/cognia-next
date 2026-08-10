@@ -93,6 +93,7 @@ cognia-terminal = { path = "../crates/cognia-terminal" }
 # Owns `bash(run_in_background)` and scheduled-task background work.
 cognia-jobs = { path = "../crates/cognia-jobs" }
 cognia-observability = { path = "../crates/cognia-observability" }
+cognia-headless-contract = { path = "../crates/cognia-headless-contract" }
 # ADR-0067 Tier B — subscription vault/providers (ADR-0025); `subscription/`
 # stays as an app-side facade holding the top-level command surface.
 cognia-subscription = { path = "../crates/cognia-subscription" }

@@ -26,6 +26,10 @@ hook、进程外 minidump monitor、崩溃报告 UI 和 OpenTelemetry 接入。�
 - 在 HTTP、Tauri IPC、子进程、Sidecar、Companion、移动端、CLI 与插件边界显式传播
   W3C Trace Context。异步任务使用不可变 scoped logger；共享可变 trace/span 状态只作为
   旧接口兼容，并在调用点迁移后移除。
+- 每次工作流运行都会创建根 `traceId`；step span、Agent、LLM 调用、子工作流与 ensemble
+  子运行继承该上下文。持久化的 `WorkflowRunLineage`（`rootRunId`、父 run/step、重试来源与
+  模式）负责导航和重放权威，trace tree 负责遥测视图；任何外部 observability transport
+  仍必须经过既有 PII gate。
 - 每个运行时拥有有界、抗崩溃的本地 spool。低等级事件批量写入，`warn` 快速转发，
   `error`、`fatal`、crash marker 与终态 lifecycle 使用该运行时可提供的最强 flush。
 - 常规日志默认不远程上报。崩溃 bundle 始终先保存在本地，并在预览后征得同意；只有用户
@@ -67,4 +71,3 @@ Capacitor 之间关联，同时不会暗中上传常规活动。崩溃恢复从�
 
 完整契约、状态机、发布闸门、容量限制与验证矩阵见
 [`docs/plans/2026-08-01-unified-observability-crash-diagnostics.md`](../../../../plans/2026-08-01-unified-observability-crash-diagnostics.md)。
-

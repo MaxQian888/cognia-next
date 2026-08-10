@@ -60,9 +60,9 @@ ctrlc = "3"
 # parsing & serde out of the binary — we only need `Local::now()`.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cognia-observability = { path = "../cognia-observability" }
+cognia-headless-contract = { path = "../cognia-headless-contract" }
 uuid = { version = "1", features = ["v4"] }
 url = "2"
-jsonschema = { version = "0.29.1", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

@@ -88,13 +88,8 @@
     },
     {
       "disposition": "separate-design-required",
-      "reason": "The existing command depends on an interactive desktop authentication or media lifecycle and needs a separately approved Headless-native design before exposure.",
+      "reason": "The existing command depends on an interactive media lifecycle and needs a separately approved Headless-native design before exposure.",
       "commands": [
-        "mcp_oauth_authenticate",
-        "mcp_oauth_clear",
-        "mcp_oauth_load_entry",
-        "mcp_oauth_refresh",
-        "mcp_oauth_status",
         "tts_edge_synthesize",
         "tts_keyring_delete",
         "tts_keyring_get",

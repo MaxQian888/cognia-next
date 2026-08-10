@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import Ajv2020 from "ajv/dist/2020.js"
+import { parse as parseYaml } from "yaml"
 
 import {
   buildHostCommandCatalog,
@@ -167,6 +168,49 @@ test("builds a deterministic host catalog from the generated Headless command se
     ),
     true,
   )
+})
+
+test("generates one drift-free identity for HTTP, WebSocket, CLI, and bridge consumers", () => {
+  const inspected = inspectCommittedContract()
+  const catalog = inspected.desiredHostCommandCatalog
+  const asyncApi = parseYaml(inspected.desiredHeadlessAsyncApiSource)
+
+  assert.equal(asyncApi.asyncapi, "3.0.0")
+  assert.equal(asyncApi.info["x-cognia-catalog-hash"], catalog.catalogHash)
+  assert.equal(asyncApi.info.version, String(catalog.schemaVersion))
+  assert.equal(asyncApi.channels.headlessEvents.address, "/internal/events")
+  assert.equal(asyncApi.channels.headlessBridge.address, "/internal/bridge")
+  assert.match(inspected.desiredHeadlessContractIdentitySource, new RegExp(catalog.catalogHash))
+  assert.match(
+    inspected.desiredHeadlessContractIdentitySource,
+    new RegExp(`HEADLESS_CONTRACT_VERSION = ${catalog.schemaVersion}`),
+  )
+  const bridgeFixture = JSON.parse(inspected.desiredBridgeFixtureSource)
+  for (const name of ["hello", "helloAck"]) {
+    assert.equal(bridgeFixture.frames[name].catalogHash, catalog.catalogHash)
+    assert.equal(bridgeFixture.frames[name].contractVersion, catalog.schemaVersion)
+  }
+  assert.equal(inspected.headlessAsyncApiDrift, false)
+  assert.equal(inspected.hostCommandCatalogDrift, false)
+  assert.equal(inspected.headlessContractIdentityDrift, false)
+  assert.equal(inspected.bridgeFixtureDrift, false)
+})
+
+test("publishes promoted request contracts and the durable Headless control routes", () => {
+  const inspected = inspectCommittedContract()
+  const generated = inspected.desiredHeadlessSpec["x-cognia-generated"]
+
+  assert.equal(generated.genericRequestSchemaCount, 0)
+  assert.equal(inspected.requestSchemaCatalogDrift, false)
+  assert.ok(inspected.desiredHeadlessSpec.paths["/internal/operations/{operation_id}"].get)
+  assert.ok(inspected.desiredHeadlessSpec.paths["/integrations/mcp/oauth/callback"].get)
+
+  const unownedOpaque = inspected.desiredHostCommandCatalog.commands.filter(
+    (command) =>
+      JSON.stringify(command.outputSchema).includes("x-cognia-opaque-reason") &&
+      typeof command.outputSchema?.["x-cognia-schema-owner"] !== "string",
+  )
+  assert.deepEqual(unownedOpaque, [])
 })
 
 test("compiles every generated Headless input as Draft 2020-12 JSON Schema", () => {
@@ -417,7 +461,7 @@ test("classifies every client-only command outside the Headless surface", () => 
     ),
     true,
   )
-  assert.equal(headlessDispositions.get("mcp_oauth_authenticate").disposition, "separate-design-required")
+  assert.equal(headlessDispositions.has("mcp_oauth_authenticate"), false)
   assert.equal(headlessDispositions.get("scheduler_create_task").disposition, "covered-by-headless")
 })
 

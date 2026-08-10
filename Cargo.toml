@@ -24,6 +24,7 @@ resolver = "2"
 members = [
   "src-tauri",
   "crates/cognia-cli",
+  "crates/cognia-headless-contract",
   "crates/cognia-sandbox-runner",
   # ADR-0067 Tier-A decomposition — subsystem library crates extracted from the
   # monolithic `app_lib` so an edit recompiles ~2–15k LOC + a relink instead of

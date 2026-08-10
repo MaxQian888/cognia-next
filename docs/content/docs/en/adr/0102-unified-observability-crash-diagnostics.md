@@ -32,6 +32,11 @@ the working pipeline.
   Sidecar, Companion, mobile, CLI, and plugin boundaries. Async work uses an
   immutable scoped logger; shared mutable trace/span state is legacy-only and
   is removed after call-site migration.
+- Every workflow run creates a root `traceId`; step spans, agents, LLM calls,
+  subworkflows, and ensemble child runs inherit that context. Persisted
+  `WorkflowRunLineage` (`rootRunId`, parent step/run, retry origin/mode) is the
+  navigation and replay authority, while the trace tree is the telemetry view.
+  Any external observability transport still passes the existing PII gate.
 - Give every runtime a bounded crash-safe local spool. Low-severity events are
   batched; `warn` is forwarded promptly; `error`, `fatal`, crash markers, and
   terminal lifecycle events use the strongest flush available on the runtime.
@@ -93,4 +98,3 @@ remote processing must never remove local reports or make V1 spools unreadable.
 The source-accurate contracts, state machines, rollout gates, limits, and
 verification matrix live in
 [`docs/plans/2026-08-01-unified-observability-crash-diagnostics.md`](../../../../plans/2026-08-01-unified-observability-crash-diagnostics.md).
-

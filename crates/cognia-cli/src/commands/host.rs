@@ -10,7 +10,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -29,7 +29,9 @@ use crate::cli::{
 };
 use crate::ui::RuntimeUi;
 
-const CATALOG_BYTES: &[u8] = include_bytes!("../../assets/host-command-catalog.json");
+const CATALOG_BYTES: &[u8] = cognia_headless_contract::EMBEDDED_CATALOG_BYTES;
+static HEADLESS_CONTRACT: OnceLock<Result<cognia_headless_contract::HeadlessContract, String>> =
+    OnceLock::new();
 const HOST_SKILL: &str = include_str!("../../assets/skills/cognia-host/SKILL.md");
 const HOST_OUTPUT_REFERENCE: &str =
     include_str!("../../assets/skills/cognia-host/references/output-contract.md");
@@ -751,16 +753,40 @@ fn run_call(
     let deadline = Instant::now() + Duration::from_secs(timeout_seconds);
     let mut delay = Duration::from_millis(250);
     let mut last_operation_id = None;
+    let mut poll_operation = false;
 
     loop {
-        let outcome = post_rpc_with_retry(
-            &agent,
-            &resolved,
-            &token,
-            name,
-            &body,
-            idempotency_key.as_deref(),
-        )?;
+        let outcome = if poll_operation {
+            let operation_id = last_operation_id.as_deref().ok_or_else(|| {
+                HostFailure::new(
+                    "server",
+                    "missing_operation_id",
+                    "the Headless server accepted an operation without an operation id",
+                )
+                .with_exit(6)
+            })?;
+            match poll_operation_with_retry(&agent, &resolved, &token, operation_id) {
+                Ok(outcome) => outcome,
+                Err(error) if error.http_status == Some(404) => post_rpc_with_retry(
+                    &agent,
+                    &resolved,
+                    &token,
+                    name,
+                    &body,
+                    idempotency_key.as_deref(),
+                )?,
+                Err(error) => return Err(error),
+            }
+        } else {
+            post_rpc_with_retry(
+                &agent,
+                &resolved,
+                &token,
+                name,
+                &body,
+                idempotency_key.as_deref(),
+            )?
+        };
         if outcome.status == 202 {
             last_operation_id = outcome
                 .body
@@ -768,6 +794,7 @@ fn run_call(
                 .and_then(Value::as_str)
                 .map(str::to_owned)
                 .or(last_operation_id);
+            poll_operation = last_operation_id.is_some();
             if no_wait {
                 return print_call_success(
                     name,
@@ -867,34 +894,19 @@ fn validate_body(
     command: &HostCatalogCommand,
     body: &Value,
 ) -> std::result::Result<(), HostFailure> {
-    let validator = jsonschema::draft202012::options()
-        .should_validate_formats(true)
-        .build(&command.input_schema)
-        .map_err(|error| {
-            HostFailure::configuration(
-                "invalid_embedded_schema",
+    match shared_contract()?.validate_input(&command.name, body) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let violations = contract_violations(error)?;
+            Err(HostFailure::validation(
+                "invalid_request_body",
                 format!(
-                    "embedded schema for `{}` cannot compile: {error}",
+                    "request body does not match the `{}` input schema",
                     command.name
                 ),
             )
-        })?;
-    let errors: Vec<String> = validator
-        .iter_errors(body)
-        .take(20)
-        .map(|error| error.to_string())
-        .collect();
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(HostFailure::validation(
-            "invalid_request_body",
-            format!(
-                "request body does not match the `{}` input schema",
-                command.name
-            ),
-        )
-        .with_details(json!({ "violations": errors })))
+            .with_details(json!({ "violations": violations })))
+        }
     }
 }
 
@@ -909,38 +921,15 @@ fn validate_completed_output(
             violations: Vec::new(),
         });
     }
-    let schema = command.output_schema.as_ref().ok_or_else(|| {
-        HostFailure::configuration(
-            "missing_embedded_output_schema",
-            format!(
-                "embedded catalog marks `{}` as typed but contains no output schema",
-                command.name
-            ),
-        )
-    })?;
-    let validator = jsonschema::draft202012::options()
-        .should_validate_formats(true)
-        .build(schema)
-        .map_err(|error| {
-            HostFailure::configuration(
-                "invalid_embedded_output_schema",
-                format!(
-                    "embedded output schema for `{}` cannot compile: {error}",
-                    command.name
-                ),
-            )
-        })?;
-    let violations: Vec<String> = validator
-        .iter_errors(body)
-        .take(20)
-        .map(|error| error.to_string())
-        .collect();
-    if violations.is_empty() {
-        return Ok(OutputValidation {
-            status: "valid",
-            violations,
-        });
-    }
+    let violations = match shared_contract()?.validate_output(&command.name, body) {
+        Ok(()) => {
+            return Ok(OutputValidation {
+                status: "valid",
+                violations: Vec::new(),
+            })
+        }
+        Err(error) => contract_violations(error)?,
+    };
     if strict {
         return Err(HostFailure::new(
             "contract",
@@ -957,6 +946,33 @@ fn validate_completed_output(
         status: "invalid",
         violations,
     })
+}
+
+fn shared_contract(
+) -> std::result::Result<&'static cognia_headless_contract::HeadlessContract, HostFailure> {
+    match HEADLESS_CONTRACT.get_or_init(|| {
+        cognia_headless_contract::HeadlessContract::embedded().map_err(|error| error.to_string())
+    }) {
+        Ok(contract) => Ok(contract),
+        Err(error) => Err(HostFailure::configuration(
+            "invalid_embedded_catalog",
+            format!("embedded Headless contract cannot compile: {error}"),
+        )),
+    }
+}
+
+fn contract_violations(
+    error: cognia_headless_contract::ContractViolation,
+) -> std::result::Result<Vec<String>, HostFailure> {
+    match error {
+        cognia_headless_contract::ContractViolation::Invalid { violations, .. } => Ok(violations),
+        cognia_headless_contract::ContractViolation::UnknownCommand { command } => {
+            Err(HostFailure::configuration(
+                "missing_embedded_schema",
+                format!("embedded Headless catalog has no contract for `{command}`"),
+            ))
+        }
+    }
 }
 
 fn resolve_idempotency_key(
@@ -1260,6 +1276,120 @@ fn post_rpc_with_retry(
     unreachable!()
 }
 
+fn poll_operation_with_retry(
+    agent: &ureq::Agent,
+    resolved: &ResolvedConfig,
+    token: &str,
+    operation_id: &str,
+) -> std::result::Result<HttpOutcome, HostFailure> {
+    Uuid::parse_str(operation_id).map_err(|_| {
+        HostFailure::new(
+            "server",
+            "invalid_operation_id",
+            "the Headless server returned a non-UUID operation id",
+        )
+        .with_exit(6)
+    })?;
+    let endpoint = resolved
+        .base_url
+        .join(&format!("internal/operations/{operation_id}"))
+        .map_err(|_| {
+            HostFailure::configuration("invalid_operation_url", "cannot build operation URL")
+        })?;
+    for attempt in 0..3 {
+        match agent
+            .get(endpoint.as_str())
+            .set("Authorization", &format!("Bearer {token}"))
+            .call()
+        {
+            Ok(response) => return parse_operation_response(parse_response(response)?),
+            Err(ureq::Error::Status(status, response)) => {
+                return Err(server_failure(status, response));
+            }
+            Err(_) if attempt < 2 => thread::sleep(Duration::from_millis(100 * (attempt + 1))),
+            Err(_) => {
+                return Err(HostFailure::transport(
+                    "operation_poll_failed",
+                    "could not poll the durable Headless operation after three attempts",
+                ))
+            }
+        }
+    }
+    unreachable!()
+}
+
+fn parse_operation_response(outcome: HttpOutcome) -> std::result::Result<HttpOutcome, HostFailure> {
+    let operation_status = outcome
+        .body
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            HostFailure::new(
+                "server",
+                "invalid_operation_response",
+                "the Headless operation response has no status",
+            )
+            .with_status(outcome.status)
+            .with_exit(6)
+        })?;
+    match operation_status {
+        "queued" | "running" | "waiting_input" | "cancelling" | "recovering" => Ok(HttpOutcome {
+            status: 202,
+            body: outcome.body,
+        }),
+        "succeeded" => {
+            let receipt = outcome.body.get("receipt").ok_or_else(|| {
+                HostFailure::new(
+                    "server",
+                    "missing_operation_receipt",
+                    "the completed Headless operation has no receipt",
+                )
+                .with_exit(6)
+            })?;
+            let body = receipt
+                .get("result")
+                .cloned()
+                .or_else(|| receipt.get("body").cloned())
+                .ok_or_else(|| {
+                    HostFailure::new(
+                        "server",
+                        "invalid_operation_receipt",
+                        "the completed Headless operation receipt has no result",
+                    )
+                    .with_exit(6)
+                })?;
+            Ok(HttpOutcome { status: 200, body })
+        }
+        "failed" => {
+            let receipt = outcome.body.get("receipt").ok_or_else(|| {
+                HostFailure::new(
+                    "server",
+                    "missing_operation_receipt",
+                    "the failed Headless operation has no receipt",
+                )
+                .with_exit(6)
+            })?;
+            let status = receipt
+                .get("httpStatus")
+                .and_then(Value::as_u64)
+                .and_then(|value| u16::try_from(value).ok())
+                .unwrap_or(500);
+            let detail = receipt
+                .get("error")
+                .or_else(|| receipt.get("body").and_then(|body| body.get("error")))
+                .unwrap_or(receipt);
+            Err(server_failure_from_detail(status, detail))
+        }
+        _ => Err(HostFailure::new(
+            "server",
+            "unknown_operation_status",
+            "the Headless operation returned an unknown status",
+        )
+        .with_status(outcome.status)
+        .with_exit(6)),
+    }
+}
+
 fn parse_response(response: ureq::Response) -> std::result::Result<HttpOutcome, HostFailure> {
     let status = response.status();
     let body = response.into_string().map_err(|_| {
@@ -1289,6 +1419,10 @@ fn server_failure(status: u16, response: ureq::Response) -> HostFailure {
         .and_then(|body| serde_json::from_str::<Value>(&body).ok())
         .unwrap_or_else(|| json!({}));
     let detail = body.get("error").unwrap_or(&body);
+    server_failure_from_detail(status, detail)
+}
+
+fn server_failure_from_detail(status: u16, detail: &Value) -> HostFailure {
     let code = detail
         .get("code")
         .and_then(Value::as_str)
@@ -1321,6 +1455,7 @@ impl HostFailure {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn print_call_success(
     name: &str,
     command: &HostCatalogCommand,
@@ -1381,8 +1516,8 @@ fn run_doctor(
     ];
     if !offline {
         let agent = build_agent(&resolved)?;
-        checks.push(probe_json(&agent, &resolved, "healthz")?);
-        checks.push(probe_json(&agent, &resolved, "readyz")?);
+        checks.push(probe_json(&agent, &resolved, "healthz", Some(catalog))?);
+        checks.push(probe_json(&agent, &resolved, "readyz", None)?);
         let token = resolve_service_token(&resolved)?;
         let safe = find_command(catalog, "host_capabilities")?;
         validate_body(safe, &json!({}))?;
@@ -1428,6 +1563,7 @@ fn probe_json(
     agent: &ureq::Agent,
     resolved: &ResolvedConfig,
     path: &str,
+    expected_contract: Option<&HostCatalog>,
 ) -> std::result::Result<Value, HostFailure> {
     let url = resolved
         .base_url
@@ -1436,7 +1572,7 @@ fn probe_json(
     match agent.get(url.as_str()).call() {
         Ok(response) => {
             let status = response.status();
-            let _body: Value = response.into_json().map_err(|_| {
+            let body: Value = response.into_json().map_err(|_| {
                 HostFailure::new(
                     "server",
                     "invalid_probe_response",
@@ -1444,6 +1580,9 @@ fn probe_json(
                 )
                 .with_exit(6)
             })?;
+            if let Some(catalog) = expected_contract {
+                validate_server_contract_identity(&body, catalog)?;
+            }
             Ok(json!({"name":path,"status":"ok","detail":format!("HTTP {status}")}))
         }
         Err(ureq::Error::Status(status, _)) => Err(HostFailure::new(
@@ -1458,6 +1597,36 @@ fn probe_json(
             format!("could not reach /{path}"),
         )),
     }
+}
+
+fn validate_server_contract_identity(
+    body: &Value,
+    catalog: &HostCatalog,
+) -> std::result::Result<(), HostFailure> {
+    let identity = body.get("headlessContract").and_then(Value::as_object);
+    let server_hash = identity
+        .and_then(|value| value.get("catalogHash"))
+        .and_then(Value::as_str);
+    let server_version = identity
+        .and_then(|value| value.get("schemaVersion"))
+        .and_then(Value::as_u64);
+    if server_hash == Some(catalog.catalog_hash.as_str())
+        && server_version == Some(u64::from(catalog.schema_version))
+    {
+        return Ok(());
+    }
+    Err(HostFailure::new(
+        "server",
+        "headless_contract_mismatch",
+        "the CLI catalog does not match the running Headless server",
+    )
+    .with_exit(6)
+    .with_details(json!({
+        "clientCatalogHash": catalog.catalog_hash,
+        "clientSchemaVersion": catalog.schema_version,
+        "serverCatalogHash": server_hash,
+        "serverSchemaVersion": server_version,
+    })))
 }
 
 fn run_events(
@@ -2097,6 +2266,28 @@ mod tests {
     }
 
     #[test]
+    fn server_contract_identity_must_match_the_embedded_catalog() {
+        let catalog = catalog();
+        validate_server_contract_identity(
+            &json!({
+                "headlessContract": {
+                    "catalogHash": catalog.catalog_hash.clone(),
+                    "schemaVersion": catalog.schema_version,
+                }
+            }),
+            &catalog,
+        )
+        .expect("matching identity");
+
+        let failure = validate_server_contract_identity(
+            &json!({"headlessContract":{"catalogHash":"stale","schemaVersion":1}}),
+            &catalog,
+        )
+        .expect_err("stale server must fail doctor");
+        assert_eq!(failure.code, "headless_contract_mismatch");
+    }
+
+    #[test]
     fn every_category_has_commands_and_an_embedded_skill() {
         let catalog = catalog();
         for category in &catalog.categories {
@@ -2208,43 +2399,26 @@ mod tests {
     #[test]
     fn output_validation_reports_valid_invalid_and_untyped_results() {
         let catalog = catalog();
-        let mut command = find_command(&catalog, "session_list").unwrap().clone();
-        command.output_typed = true;
-        command.output_schema = Some(json!({
-            "type": "object",
-            "required": ["total"],
-            "properties": { "total": { "type": "integer", "minimum": 0 } },
-            "additionalProperties": false
-        }));
+        let command = find_command(&catalog, "session_list").unwrap();
 
         assert_eq!(
-            validate_completed_output(&command, &json!({"total": 1}), false)
+            validate_completed_output(command, &json!({"rows": [], "total": 1}), false)
                 .unwrap()
                 .status,
             "valid"
         );
-        let invalid = validate_completed_output(&command, &json!({"total": -1}), false).unwrap();
+        let invalid =
+            validate_completed_output(command, &json!({"rows": [], "total": -1}), false).unwrap();
         assert_eq!(invalid.status, "invalid");
         assert!(!invalid.violations.is_empty());
-
-        command.output_typed = false;
-        command.output_schema = None;
-        assert_eq!(
-            validate_completed_output(&command, &json!({"anything": true}), false)
-                .unwrap()
-                .status,
-            "untyped"
-        );
     }
 
     #[test]
     fn strict_output_validation_rejects_contract_violations() {
         let catalog = catalog();
-        let mut command = find_command(&catalog, "session_list").unwrap().clone();
-        command.output_typed = true;
-        command.output_schema = Some(json!({"type": "boolean"}));
+        let command = find_command(&catalog, "session_list").unwrap();
 
-        let failure = validate_completed_output(&command, &json!({}), true).unwrap_err();
+        let failure = validate_completed_output(command, &json!({}), true).unwrap_err();
         assert_eq!(failure.error_type, "contract");
         assert_eq!(failure.code, "invalid_server_output");
         assert_eq!(failure.exit_code, 6);
@@ -2405,13 +2579,16 @@ mod tests {
     }
 
     #[test]
-    fn accepted_rpc_can_be_replayed_with_the_identical_request() {
+    fn accepted_rpc_is_completed_through_the_operation_route() {
         let _guard = TLS_TEST_LOCK
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let server = spawn_tls_server(vec![
             (202, r#"{"operationId":"operation-1","status":"running"}"#),
-            (200, r#"{"done":true}"#),
+            (
+                200,
+                r#"{"operationId":"operation-1","status":"succeeded","receipt":{"httpStatus":200,"result":{"done":true}},"createdAt":1,"updatedAt":2}"#,
+            ),
         ]);
         let agent = build_agent(&server.resolved).expect("trusted TLS agent");
         let key = Uuid::new_v4().to_string();
@@ -2426,22 +2603,22 @@ mod tests {
             Some(&key),
         )
         .expect("accepted response");
-        let completed = post_rpc_with_retry(
+        let completed = poll_operation_with_retry(
             &agent,
             &server.resolved,
             "service-token",
-            "test_command",
-            &body,
-            Some(&key),
+            "00000000-0000-4000-8000-000000000001",
         )
-        .expect("completed replay");
+        .expect("completed operation");
 
         assert_eq!(accepted.status, 202);
         assert_eq!(accepted.body["operationId"], "operation-1");
         assert_eq!(completed.status, 200);
         let first = server.requests.recv().expect("first request");
-        let second = server.requests.recv().expect("replayed request");
-        assert_eq!(first, second);
+        let second = server.requests.recv().expect("operation poll");
+        assert!(first.starts_with("POST /internal/_rpc/test_command HTTP/1.1"));
+        assert!(second
+            .starts_with("GET /internal/operations/00000000-0000-4000-8000-000000000001 HTTP/1.1"));
         server.handle.join().expect("TLS server");
     }
 

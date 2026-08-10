@@ -17,6 +17,40 @@
       },
       "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain."
     },
+    "WorkflowApprovalList": {
+      "type": "object",
+      "required": ["approvals"],
+      "properties": {
+        "approvals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "approvalId",
+              "runId",
+              "workflowId",
+              "stepId",
+              "title",
+              "requestedAt",
+              "kind"
+            ],
+            "properties": {
+              "approvalId": { "type": "string" },
+              "runId": { "type": "string" },
+              "workflowId": { "type": "string" },
+              "stepId": { "type": "string" },
+              "title": { "type": "string" },
+              "message": { "type": ["string", "null"] },
+              "requestedAt": { "type": "integer" },
+              "timeoutAt": { "type": ["integer", "null"] },
+              "kind": { "type": "string", "enum": ["approval", "risk_gate"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "NullResult": {
       "type": "null"
     },
@@ -28,6 +62,43 @@
     },
     "IntegerResult": {
       "type": "integer"
+    },
+    "McpOAuthAuthResult": {
+      "type": "object",
+      "required": ["ok", "status", "message"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "status": {
+          "type": "string",
+          "enum": ["authorized", "pending", "denied", "error", "unsupported"]
+        },
+        "message": { "type": "string" },
+        "attempt_id": { "type": "string", "format": "uuid" },
+        "authorization_url": { "type": "string", "format": "uri" },
+        "expires_at_ms": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "McpOAuthProjection": {
+      "type": ["object", "null"],
+      "properties": {
+        "access_token": { "type": ["string", "null"] },
+        "expires_at_ms": { "type": ["integer", "null"] }
+      },
+      "required": ["access_token", "expires_at_ms"],
+      "additionalProperties": false
+    },
+    "McpOAuthStatus": {
+      "type": "object",
+      "required": ["has_tokens", "expires_at_ms"],
+      "properties": {
+        "has_tokens": { "type": "boolean" },
+        "expires_at_ms": { "type": ["integer", "null"] },
+        "status": { "type": "string" },
+        "attempt_id": { "type": "string", "format": "uuid" },
+        "authorization_url": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": false
     },
     "SessionRow": {
       "type": "object",
@@ -925,6 +996,21 @@
     "lsp_host_request": {
       "$ref": "#/$defs/StringResult"
     },
+    "mcp_oauth_authenticate": {
+      "$ref": "#/$defs/McpOAuthAuthResult"
+    },
+    "mcp_oauth_clear": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "mcp_oauth_load_entry": {
+      "$ref": "#/$defs/McpOAuthProjection"
+    },
+    "mcp_oauth_refresh": {
+      "$ref": "#/$defs/McpOAuthProjection"
+    },
+    "mcp_oauth_status": {
+      "$ref": "#/$defs/McpOAuthStatus"
+    },
     "mcp_server_restart": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -1468,6 +1554,15 @@
     "twin_profile_update": {
       "$ref": "#/$defs/LegacyRecord"
     },
+    "twin_draft_review": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["accepted", "rejected"] },
+        "acceptedAsId": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "twin_source_create": {
       "$ref": "#/$defs/LegacyRecord"
     },
@@ -1481,7 +1576,7 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "workflow_approval_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/WorkflowApprovalList"
     },
     "workflow_approval_respond": {
       "$ref": "#/$defs/LegacyResult"

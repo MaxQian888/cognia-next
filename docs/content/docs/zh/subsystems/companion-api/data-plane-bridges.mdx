@@ -1,6 +1,6 @@
 ---
 title: 数据平面与 WebView Bridge
-description: axum handler 如何读写存储在 WebView Dexie 中的数据——三条 oneshot 请求/响应 bridge、sync 表 allowlist、TS bridge 源文件，以及在无 WebView 时切换为 SQLite store 的无头 DataPlane。
+description: axum 如何通过三条请求/响应 bridge 访问权威 Dexie Brain，并在 Headless Brain 不可用时使用受限 SQLite 降级路径。
 ---
 
 # 数据平面与 WebView Bridge
@@ -12,14 +12,15 @@ description: axum handler 如何读写存储在 WebView Dexie 中的数据——
   **WebView** 的 IndexedDB（Dexie）中，Rust 无法直接读取。三条 bridge 以相同的模式弥合这一差距：
   Rust 发出携带 `request_id` 的 `companion://<kind>-request` Tauri 事件，以该 id 为键注册
   `oneshot::Sender`，并等待最多 **30 秒**；TS 监听器处理请求后通过 `companion_*_response`
-  Tauri 命令将结果回传；Rust 解析 oneshot 并将结果写入 HTTP 响应。对于无头的 `cognia-server`
-  （无 WebView），`DataPlane` 抽象层会将 bridge 替换为直连的 SQLite `AppStore`。
+  Tauri 命令将结果回传；Rust 解析 oneshot 并将结果写入 HTTP 响应。Headless 模式下，同一 bridge
+  协议通过 `/internal/bridge` 连接 Node Brain；直连 SQLite `AppStore` 只在 Brain 未连接时提供受限
+  降级能力。
 </TLDR>
 
 <StatGrid>
   <Stat label="Bridge 数量" value="3" hint="sync · messages · writes" />
   <Stat label="Bridge 超时" value="30 s" hint="足以唤醒休眠中的桌面端" />
-  <Stat label="Sync 表数量" value="10" hint="sync_registry allowlist" />
+  <Stat label="Sync 表数量" value="22" hint="sync_registry allowlist" />
   <Stat label="写入命令数" value="~40" hint="统一走一条 writes bridge" />
 </StatGrid>
 
@@ -52,11 +53,11 @@ sequenceDiagram
 | Bridge | 请求事件 | 响应命令 | 超时 | 使用方 |
 | --- | --- | --- | --- | --- |
 | `sync_bridge.rs` | `companion://sync-pull-request` (`:34`) | `companion_sync_pull_response` (`commands.rs:164`) | 30 s (`:35`) | `sync_pull` |
-| `desktop_messages_bridge.rs` | 5 个事件 (`:41-45`) | `companion_message_response` (`commands.rs:200`) | 30 s (`:46`) | `message_update` / `message_delete` / `session_list` / `message_get_by_session` / `message_send` |
+| `desktop_messages_bridge.rs` | 9 个消息/会话/transcript 事件 | `companion_message_response` | 30 s | 消息 CRUD、会话列表、transcript capability/timeline/detail/media 读取 |
 | `desktop_writes_bridge.rs` | 统一的 `companion://desktop-write-request` `{ request_id, command, payload }` (`:35`) | `companion_desktop_write_response` (`commands.rs:231`) | 30 s (`:36`) | 全部约 40 条 Wave-2/4 变更命令 |
 
-messages bridge 扇出五个不同的事件名，但共用同一个 `register()` (`:253`) +
-`await_response()` (`:266`) + `resolve()` (`:285`)。writes bridge 则采取相反策略：通过
+messages bridge 扇出九个不同的事件名，但共用同一个请求 registry 与响应 resolver。writes
+bridge 则采取相反策略：通过
 `dispatch()` (`:68`) 发送**单一**事件，并在其 payload 中携带命令名——这正是 RPC manifest
 能将 40 条写入命令折叠为一条 OR 模式匹配分支的原因（`rpc.rs:1072`）。
 
@@ -76,11 +77,13 @@ WebView 侧的实现位于 `lib/companion/`。每个 `install*` 函数在启动�
 
 `sync_pull` 是批量读取路径——手机在启动时及收到失效通知时拉取表增量。允许拉取哪些表本身由
 allowlist `SyncTableRegistry`（`sync_registry.rs:34`）控制，初始值由 `with_defaults()`
-(`:45`) 填充。**10** 张允许的表（`sync_registry.rs:69-122`）：
+(`:45`) 填充。默认 **22** 张表：
 
 ```text
-characters · skills · sessions · messages · workflows
-twinProfile · plugins · adapterInstances · settings · conversationOverrides
+characters · skills · sessions · messages · workflows · workflowRuns · executionRuns
+twinProfile · plugins · adapterInstances · settings · conversationOverrides · goals · memories
+mcpServers · terminalHistory · agentTeamBoard · agentTasks · agentTaskAttempts
+templateDefinitions · templatePackages · templateInstances
 ```
 
 `contains()`（`sync_registry.rs:58`）在 `rpc.rs:993` 处对 `sync_pull` 进行门控；不在
@@ -89,24 +92,20 @@ allowlist 中的表名会被拒绝，而非静默返回空结果。客户端的 
 
 ## 无头 DataPlane
 
-Companion API 代码被无头的 `cognia-server` 二进制复用，后者**没有 WebView**——因此
-message/session bridge 没有 TS 侧来响应请求。`DataPlane`（`data_plane.rs:54`）对这一差异
-进行抽象：
+Companion API 代码被无头的 `cognia-server` 二进制复用，后者**没有 WebView**。`DataPlane`
+同时抽象 bridge transport 与降级存储：
 
 ```rust title="src-tauri/src/companion_api/data_plane.rs"
 enum DataPlane {
-    TauriBridge { bridge, app },        // desktop: route through the WebView
-    Direct(Arc<dyn AppStore>),          // headless: a SQLite store
-}                                       // data_plane.rs:54
+    Bridge { bridge, transport },       // socket Brain 或 desktop WebView
+    Direct(Arc<dyn AppStore>),          // 降级 SQLite fallback
+}
 ```
 
-进程全局的 `HEADLESS_STORE`（`data_plane.rs:41`）通过 `install_headless_store()`
-(`:45`) 安装；`pick()`（`:64`）优先选用 headless store，其次是 Tauri bridge，否则返回
-`None`。五个 message/session 方法（`list_sessions` `:77`、`get_messages_by_session`
-`:99`、`send_message` `:121`、`update_message` `:145`、`delete_message` `:175`）各自
-根据当前变体分支执行；`rpc.rs` 通过 `pick_data_plane()`（`rpc.rs:647`）选择对应实现。
-在桌面产品中，`Direct` 从未被安装，因此始终使用 WebView bridge——`store.rs` 中的
-`AppStore` / `SqliteAppStore` 仅为无头路径而存在。
+`pick()` 严格按以下顺序选择：已连接的 socket Brain、desktop WebView、最后才是进程全局
+`HEADLESS_STORE`。这就是 ADR-0059 D3 的实际实现：Brain Dexie 保持权威；SQLite 仅在 Brain
+启动或重启时提供受限降级面，不能遮蔽已经在线的 Brain。桌面端存在 WebView 时仍优先走原有
+transport，因此行为不变。
 
 ## 为何是 30 秒
 

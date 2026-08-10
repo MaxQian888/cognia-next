@@ -5,6 +5,7 @@
  */
 import { BridgeClient, type WebSocketLike } from "./bridge-client"
 import { BRIDGE_PROTOCOL_VERSION } from "./protocol"
+import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
 
 type Listener = (event: {
   data?: string
@@ -49,13 +50,19 @@ class FakeSocket implements WebSocketLike {
   }
 }
 
-function helloAck(protocol = BRIDGE_PROTOCOL_VERSION) {
+function helloAck(
+  protocol: number = BRIDGE_PROTOCOL_VERSION,
+  catalogHash: string = HEADLESS_CATALOG_HASH,
+  accountId: string = "local_acct_a"
+) {
   return {
-    v: 1,
+    v: BRIDGE_PROTOCOL_VERSION,
     type: "hello_ack",
     serverVersion: "0.9.0",
     protocol,
-    accountId: "local_acct_a",
+    accountId,
+    catalogHash,
+    contractVersion: HEADLESS_CONTRACT_VERSION,
   }
 }
 
@@ -133,7 +140,7 @@ describe("BridgeClient", () => {
       received.push(e.payload)
     )
     h.sockets[0].serverSend({
-      v: 1,
+      v: BRIDGE_PROTOCOL_VERSION,
       type: "event",
       event: "companion://sync-pull-request",
       payload: { request_id: "r1", table: "sessions", since: 0, account_id: "local_acct_a" },
@@ -143,7 +150,7 @@ describe("BridgeClient", () => {
     ])
     unlisten()
     h.sockets[0].serverSend({
-      v: 1,
+      v: BRIDGE_PROTOCOL_VERSION,
       type: "event",
       event: "companion://sync-pull-request",
       payload: {},
@@ -160,7 +167,7 @@ describe("BridgeClient", () => {
       error: null,
     })
     expect(h.sockets[0].lastSent()).toEqual({
-      v: 1,
+      v: BRIDGE_PROTOCOL_VERSION,
       type: "respond",
       command: "companion_sync_pull_response",
       payload: { requestId: "r1", delta: { rows: [] }, error: null },
@@ -194,9 +201,9 @@ describe("BridgeClient", () => {
   it("answers pings with a pong carrying the RSS gauge", async () => {
     const h = makeClient()
     await handshake(h)
-    h.sockets[0].serverSend({ v: 1, type: "ping", ts: 42 })
+    h.sockets[0].serverSend({ v: BRIDGE_PROTOCOL_VERSION, type: "ping", ts: 42 })
     expect(h.sockets[0].lastSent()).toEqual({
-      v: 1,
+      v: BRIDGE_PROTOCOL_VERSION,
       type: "pong",
       ts: 1751400000000,
       rssBytes: 123456789,
@@ -207,7 +214,11 @@ describe("BridgeClient", () => {
   it("token_refresh updates the token used by the next reconnect", async () => {
     const h = makeClient()
     await handshake(h)
-    h.sockets[0].serverSend({ v: 1, type: "token_refresh", token: "tok-2" })
+    h.sockets[0].serverSend({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: "token_refresh",
+      token: "tok-2",
+    })
     expect(h.refreshed).toEqual(["tok-2"])
 
     // Server drops the connection → scheduled reconnect uses the new token.
@@ -251,6 +262,26 @@ describe("BridgeClient", () => {
     h.sockets[0].fire("open", {})
     h.sockets[0].serverSend(helloAck(99))
     await expect(connected).rejects.toThrow(/protocol mismatch/)
+    expect(h.client.getState()).toBe("closed")
+  })
+
+  it("rejects connect when hello_ack belongs to another account", async () => {
+    const h = makeClient()
+    const connected = h.client.connect()
+    h.sockets[0].fire("open", {})
+    h.sockets[0].serverSend(
+      helloAck(BRIDGE_PROTOCOL_VERSION, HEADLESS_CATALOG_HASH, "local_acct_b")
+    )
+    await expect(connected).rejects.toThrow(/account mismatch/)
+    expect(h.client.getState()).toBe("closed")
+  })
+
+  it("rejects connect when the server catalog differs", async () => {
+    const h = makeClient()
+    const connected = h.client.connect()
+    h.sockets[0].fire("open", {})
+    h.sockets[0].serverSend(helloAck(BRIDGE_PROTOCOL_VERSION, "stale-catalog"))
+    await expect(connected).rejects.toThrow(/contract mismatch/)
     expect(h.client.getState()).toBe("closed")
   })
 

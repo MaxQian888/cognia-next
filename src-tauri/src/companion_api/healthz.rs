@@ -54,6 +54,7 @@ pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMa
         .get(EXPECTED_CONFIG_REVISION_HEADER)
         .and_then(|value| value.to_str().ok());
     let revision_ready = config_revision_matches(expected_revision, actual_revision.as_deref());
+    let contract_ready = super::command_manifest::headless_contract().is_ok();
     let mut checks = json!({
         "draining": !accepting_writes,
         "acceptingWrites": accepting_writes,
@@ -62,8 +63,9 @@ pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMa
         "sidecar": true,
         "gateway": true,
         "configRevision": revision_ready,
+        "headlessContract": contract_ready,
     });
-    let mut ready = accepting_writes && revision_ready;
+    let mut ready = accepting_writes && revision_ready && contract_ready;
     if let Some(services) = crate::headless::headless_services() {
         let storage_ready = super::data_plane::headless_store().is_some();
         let brain_required = std::env::var_os(crate::headless::brain::BRAIN_ENTRY_ENV).is_some();
@@ -82,6 +84,7 @@ pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMa
             "sidecar": sidecar_ready,
             "gateway": gateway_ready,
             "configRevision": revision_ready,
+            "headlessContract": contract_ready,
         });
     }
     let status = if ready {
@@ -119,6 +122,16 @@ pub async fn healthz_handler(State(state): State<SharedState>) -> Response {
         "advertised_port": advertised_port(),
         "server_id": server_id,
     });
+    if let Ok(contract) = super::command_manifest::headless_contract() {
+        payload["headlessContract"] = json!({
+            "schemaVersion": contract.schema_version(),
+            "catalogHash": contract.catalog_hash(),
+            "commandCount": contract.command_count(),
+            "enforced": super::command_manifest::headless_contract_enforced(),
+        });
+    } else {
+        payload["headlessContract"] = json!({ "available": false });
+    }
     if let Some(services) = crate::headless::headless_services() {
         let obj = payload.as_object_mut().expect("payload is an object");
         // `brain` reports the supervisor when one is installed; a headless

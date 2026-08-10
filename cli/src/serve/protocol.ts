@@ -1,5 +1,5 @@
 /**
- * Bridge WS protocol v1 — TS side (ADR-0059 W3 / T-B1).
+ * Bridge WS protocol v2 — TS side (ADR-0059 W3 / T-B1).
  *
  * Frame shapes are frozen in `./fixtures/bridge-frames.json`, asserted
  * byte-for-byte by BOTH this package's tests and the Rust server
@@ -7,7 +7,9 @@
  * change a field without bumping the protocol on both sides.
  */
 
-export const BRIDGE_PROTOCOL_VERSION = 1
+import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
+
+export const BRIDGE_PROTOCOL_VERSION = 2
 
 export interface HelloFrame {
   v: number
@@ -17,6 +19,8 @@ export interface HelloFrame {
   protocol: number
   accountId: string
   capabilities: string[]
+  catalogHash: string
+  contractVersion: number
 }
 
 export interface HelloAckFrame {
@@ -25,6 +29,8 @@ export interface HelloAckFrame {
   serverVersion: string
   protocol: number
   accountId: string
+  catalogHash: string
+  contractVersion: number
 }
 
 export interface EventFrame {
@@ -111,6 +117,8 @@ export function buildHello(opts: {
     protocol: BRIDGE_PROTOCOL_VERSION,
     accountId: opts.accountId,
     capabilities: opts.capabilities ?? ["sync", "messages", "writes"],
+    catalogHash: HEADLESS_CATALOG_HASH,
+    contractVersion: HEADLESS_CONTRACT_VERSION,
   }
 }
 
