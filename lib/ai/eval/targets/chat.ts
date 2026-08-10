@@ -10,7 +10,7 @@
  * (`runAndCaptureAssistantReply` + `agentTraces` query) on desktop.
  */
 
-import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
+import type { Character, SendContent, SendContentBlock } from "@cognia/agent-config-types"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { EvalCase, EvalSample, EvalToolCall, EvalRetrievedChunk } from "@/types/eval/eval"
 import type { EvalTarget } from "../runner"
@@ -149,6 +149,8 @@ export interface ChatTargetConfig {
   characterId?: string
   cwd?: string
   timeoutMs?: number
+  /** Ephemeral Character supplied by the Twin target; never persisted. */
+  character?: Character
 }
 
 export interface ChatTargetDeps {
@@ -158,6 +160,7 @@ export interface ChatTargetDeps {
     providerId?: string
     model: string
     characterId?: string
+    character?: Character
     cwd?: string
     timeoutMs?: number
     signal?: AbortSignal
@@ -181,6 +184,7 @@ export function createChatTarget(config: ChatTargetConfig, deps: ChatTargetDeps)
         ...(config.providerId ? { providerId: config.providerId } : {}),
         model: config.model,
         ...(config.characterId ? { characterId: config.characterId } : {}),
+        ...(config.character ? { character: config.character } : {}),
         ...(config.cwd ? { cwd: config.cwd } : {}),
         ...(config.timeoutMs ? { timeoutMs: config.timeoutMs } : {}),
         ...(signal ? { signal } : {}),
@@ -204,7 +208,16 @@ export function createChatTarget(config: ChatTargetConfig, deps: ChatTargetDeps)
  */
 export function defaultChatTargetDeps(): ChatTargetDeps {
   return {
-    async runTurn({ prompt, providerId, model, characterId, cwd, timeoutMs, signal }) {
+    async runTurn({
+      prompt,
+      providerId,
+      model,
+      characterId,
+      character: providedCharacter,
+      cwd,
+      timeoutMs,
+      signal,
+    }) {
       const [{ resolveCharacterById }, sessionsDb, settingsDb, buildOpts, runner] =
         await Promise.all([
           import("@/lib/db/characters"),
@@ -214,22 +227,25 @@ export function defaultChatTargetDeps(): ChatTargetDeps {
           import("@/lib/claude/run-and-capture"),
         ])
       const ts = Date.now()
-      const character = characterId
-        ? await resolveCharacterById(characterId)
-        : {
-            id: "__eval-target__",
-            name: "Eval Target",
-            avatarColor: "oklch(0.6 0 0)",
-            systemPrompt: "You are a focused, helpful agent.",
-            createdAt: ts,
-            updatedAt: ts,
-            model,
-            ...(cwd ? { workingDir: cwd } : {}),
-          }
+      const character =
+        providedCharacter ??
+        (characterId
+          ? await resolveCharacterById(characterId)
+          : {
+              id: "__eval-target__",
+              name: "Eval Target",
+              avatarColor: "oklch(0.6 0 0)",
+              systemPrompt: "You are a focused, helpful agent.",
+              createdAt: ts,
+              updatedAt: ts,
+              model,
+              ...(cwd ? { workingDir: cwd } : {}),
+            })
       if (!character) throw new Error(`eval target: character "${characterId}" not found`)
       const session = await sessionsDb.createSession({
         title: "Eval Run",
         characterId: character.id,
+        memoryLearn: false,
         ...(cwd ? { workingDir: cwd } : {}),
       })
       const appSettings = await settingsDb.getSettings().catch(() => undefined)
@@ -238,10 +254,23 @@ export function defaultChatTargetDeps(): ChatTargetDeps {
         ...(providerId ? { providerOverride: providerId } : {}),
         model,
       }
+      const twinDeps = character.twinId
+        ? await import("@/lib/twin/runtime/build-deps").then(({ tryBuildTwinDeps }) =>
+            tryBuildTwinDeps()
+          )
+        : undefined
+      const promptText =
+        typeof prompt === "string"
+          ? prompt
+          : prompt
+              .filter((block) => block.type === "text")
+              .map((block) => block.text)
+              .join("\n")
       const sendOptions = await buildOpts.resolveSendOptions({
         session: sessionRow,
         character,
         appSettings: appSettings ?? null,
+        ...(twinDeps ? { twinDeps, twinUserMessage: promptText } : {}),
       })
       const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
         ...(signal ? { signal } : {}),

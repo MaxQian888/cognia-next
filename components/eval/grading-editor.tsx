@@ -18,6 +18,8 @@
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { extractChoice, extractNumber } from "@/lib/ai/eval/scorers/match"
 import { GRADING_MODES, GSM8K_ANSWER_PATTERN } from "@/types/eval/grading"
 import type { GradingMode, GradingSpec } from "@/types/eval/grading"
@@ -58,18 +60,19 @@ export function GradingEditor({ value, onChange, sampleExpected }: GradingEditor
     <div className="flex flex-col gap-2 rounded-md border p-2" data-testid="grading-editor">
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium">{t("mode")}</span>
-        <select
+        <NativeSelect
           aria-label={t("mode")}
-          className="bg-background rounded-md border px-2 py-1 text-sm"
+          size="sm"
+          wrapperClassName="w-full"
           value={value.mode}
           onChange={(e) => patch({ mode: e.target.value as GradingMode })}
         >
           {GRADING_MODES.map((m) => (
-            <option key={m} value={m}>
+            <NativeSelectOption key={m} value={m}>
               {t(`modes.${m}` as never)}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <p className="text-muted-foreground text-xs">{t(`hints.${value.mode}` as never)}</p>
 
@@ -128,26 +131,23 @@ export function GradingEditor({ value, onChange, sampleExpected }: GradingEditor
       {(value.mode === "exact" || value.mode === "contains-any") && (
         <div className="flex flex-wrap gap-3 text-xs">
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={normalize.caseInsensitive !== false}
-              onChange={(e) => patchNormalize({ caseInsensitive: e.target.checked })}
+              onCheckedChange={(checked) => patchNormalize({ caseInsensitive: checked === true })}
             />
             {t("normalize.caseInsensitive")}
           </label>
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={normalize.stripPunctuation === true}
-              onChange={(e) => patchNormalize({ stripPunctuation: e.target.checked })}
+              onCheckedChange={(checked) => patchNormalize({ stripPunctuation: checked === true })}
             />
             {t("normalize.stripPunctuation")}
           </label>
           <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={normalize.stripArticles === true}
-              onChange={(e) => patchNormalize({ stripArticles: e.target.checked })}
+              onCheckedChange={(checked) => patchNormalize({ stripArticles: checked === true })}
             />
             {t("normalize.stripArticles")}
           </label>

@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
@@ -505,25 +506,25 @@ export function CalibrationPanel() {
       <div className="flex flex-wrap items-center gap-3">
         <label className="text-sm">
           {t("calibration.pickSet")}{" "}
-          <select
+          <NativeSelect
             aria-label={t("calibration.pickSet")}
-            className="rounded-md border bg-background px-2 py-1 text-sm"
+            size="sm"
             value={effectiveSetId ?? ""}
             onChange={(e) => setActiveSetId(e.target.value || undefined)}
           >
             {pendingSet && !sets.some((s) => s.setId === pendingSet.setId) && (
-              <option value={pendingSet.setId}>{pendingSet.setName}</option>
+              <NativeSelectOption value={pendingSet.setId}>{pendingSet.setName}</NativeSelectOption>
             )}
             {sets.map((s) => (
-              <option key={s.setId} value={s.setId}>
+              <NativeSelectOption key={s.setId} value={s.setId}>
                 {/* Names may repeat now that they are not identity; the id
                     suffix disambiguates rather than merging them. */}
                 {duplicateNames.has(s.setName)
                   ? `${s.setName} (${s.setId.slice(-6)}) · ${s.itemCount}`
                   : `${s.setName} · ${s.itemCount}`}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <Button
           size="sm"

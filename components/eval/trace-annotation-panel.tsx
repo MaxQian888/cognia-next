@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import {
   useEvalDatasets,
   useRecentTraces,
@@ -172,18 +173,18 @@ export function TraceAnnotationPanel() {
       <div className="flex flex-wrap items-center gap-3">
         <label className="text-sm">
           {t("annotate.pickDataset")}{" "}
-          <select
+          <NativeSelect
             aria-label={t("annotate.pickDataset")}
-            className="rounded-md border bg-background px-2 py-1 text-sm"
+            size="sm"
             value={effectiveDataset ?? ""}
             onChange={(e) => setDatasetId(e.target.value || undefined)}
           >
             {datasets.map((d) => (
-              <option key={d.id} value={d.id}>
+              <NativeSelectOption key={d.id} value={d.id}>
                 {d.name}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         {taxonomy.length > 0 && (
           <div className="flex flex-wrap items-center gap-1">

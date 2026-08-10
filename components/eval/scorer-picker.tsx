@@ -16,6 +16,7 @@
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import type { EvalDimension } from "@/types/eval/eval"
 import {
@@ -108,14 +109,13 @@ export function ScorerPicker({
                       disabled ? "opacity-50" : "hover:bg-accent cursor-pointer"
                     )}
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       aria-label={t(`scorerCatalog.${e.id}` as never)}
                       // Disabled scorers are never shown checked: "selected
                       // but cannot run" is not a state the user can act on.
                       checked={!disabled && checked.has(e.id)}
                       disabled={disabled}
-                      onChange={() => toggle(e.id)}
+                      onCheckedChange={() => toggle(e.id)}
                     />
                     <span className="flex-1 truncate">{t(`scorerCatalog.${e.id}` as never)}</span>
                     {e.requiresLlm && (

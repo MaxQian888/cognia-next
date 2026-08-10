@@ -9,6 +9,7 @@ import {
   BarChart3Icon,
   BotIcon,
   CheckCircle2Icon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleDollarSignIcon,
@@ -53,6 +54,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -64,6 +67,14 @@ import {
 } from "@/components/ui/sheet"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { APP_VERSION } from "@/lib/app-version"
 import { loadOrCreateEvalArtifactKey } from "@/lib/ai/eval/artifact-crypto"
 import { createBrowserEvalOrchestrator } from "@/lib/ai/eval/browser-execution"
@@ -833,32 +844,34 @@ export function EvalLabWorkspace() {
             <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="grid min-w-0 flex-1 gap-2">
                 <Label htmlFor="eval-saved-project">{t("lab.project.saved")}</Label>
-                <select
+                <NativeSelect
                   id="eval-saved-project"
-                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  wrapperClassName="w-full"
                   value={savedProjects.some((item) => item.id === projectId) ? projectId : ""}
                   onChange={(event) => loadSavedProject(event.target.value)}
                 >
-                  <option value="">{t("lab.project.newProject")}</option>
+                  <NativeSelectOption value="">{t("lab.project.newProject")}</NativeSelectOption>
                   {savedProjects.map((saved) => (
-                    <option key={saved.id} value={saved.id}>
+                    <NativeSelectOption key={saved.id} value={saved.id}>
                       {saved.name}
-                    </option>
+                    </NativeSelectOption>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
               {projectExperiments.length ? (
                 <div className="grid min-w-0 flex-1 gap-2">
                   <Label htmlFor="eval-saved-experiment">{t("lab.project.experiments")}</Label>
-                  <select
+                  <NativeSelect
                     id="eval-saved-experiment"
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
+                    wrapperClassName="w-full"
                     value={experimentId ?? ""}
                     onChange={(event) => void restoreExperiment(event.target.value)}
                   >
-                    <option value="">{t("lab.project.selectExperiment")}</option>
+                    <NativeSelectOption value="">
+                      {t("lab.project.selectExperiment")}
+                    </NativeSelectOption>
                     {projectExperiments.map((experiment) => (
-                      <option key={experiment.id} value={experiment.id}>
+                      <NativeSelectOption key={experiment.id} value={experiment.id}>
                         {t("lab.project.experimentOption", {
                           state: experiment.state,
                           createdAt: format.dateTime(experiment.createdAt, {
@@ -866,9 +879,9 @@ export function EvalLabWorkspace() {
                             timeStyle: "short",
                           }),
                         })}
-                      </option>
+                      </NativeSelectOption>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
               ) : null}
               <Button variant="outline" onClick={() => void saveProjectDraft()}>
@@ -920,20 +933,22 @@ export function EvalLabWorkspace() {
               <CardContent className="space-y-3">
                 <div className="grid gap-2">
                   <Label htmlFor="eval-dataset-select">{t("lab.data.selectDataset")}</Label>
-                  <select
+                  <NativeSelect
                     id="eval-dataset-select"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    wrapperClassName="w-full"
                     value={dataset?.datasetId ?? ""}
                     disabled={datasetLoading}
                     onChange={(event) => void selectDataset(event.target.value)}
                   >
-                    <option value="">{t("lab.data.selectPlaceholder")}</option>
+                    <NativeSelectOption value="">
+                      {t("lab.data.selectPlaceholder")}
+                    </NativeSelectOption>
                     {datasets.map((item) => (
-                      <option key={item.id} value={item.id}>
+                      <NativeSelectOption key={item.id} value={item.id}>
                         {item.name} · {t("lab.data.caseCount", { count: item.caseCount })}
-                      </option>
+                      </NativeSelectOption>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
                 <Button variant="outline" onClick={() => setLegacyTool("datasets")}>
                   <DatabaseIcon />
@@ -1000,18 +1015,24 @@ export function EvalLabWorkspace() {
                   {mode === "agent" ? (
                     <div className="grid gap-2">
                       <Label htmlFor={`${variant.id}-kind`}>{t("lab.variants.agentTarget")}</Label>
-                      <select
+                      <NativeSelect
                         id={`${variant.id}-kind`}
-                        className="h-9 rounded-md border bg-background px-3 text-sm"
+                        wrapperClassName="w-full"
                         value={variant.kind}
                         onChange={(event) =>
                           updateVariant(index, { kind: event.target.value as EvalVariant["kind"] })
                         }
                       >
-                        <option value="chat">{t("lab.variants.targetKinds.chat")}</option>
-                        <option value="team">{t("lab.variants.targetKinds.team")}</option>
-                        <option value="workflow">{t("lab.variants.targetKinds.workflow")}</option>
-                      </select>
+                        <NativeSelectOption value="chat">
+                          {t("lab.variants.targetKinds.chat")}
+                        </NativeSelectOption>
+                        <NativeSelectOption value="team">
+                          {t("lab.variants.targetKinds.team")}
+                        </NativeSelectOption>
+                        <NativeSelectOption value="workflow">
+                          {t("lab.variants.targetKinds.workflow")}
+                        </NativeSelectOption>
+                      </NativeSelect>
                     </div>
                   ) : null}
                   {mode === "model" || variant.kind === "chat" ? (
@@ -1680,9 +1701,9 @@ export function EvalLabWorkspace() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label htmlFor="eval-apply-target-type">{t("lab.review.apply.targetType")}</Label>
-                  <select
+                  <NativeSelect
                     id="eval-apply-target-type"
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
+                    wrapperClassName="w-full"
                     value={applicationTarget.targetType}
                     onChange={(event) => {
                       const targetType = event.target.value as EvalConfigurationTarget["targetType"]
@@ -1697,15 +1718,19 @@ export function EvalLabWorkspace() {
                       setApplication(null)
                     }}
                   >
-                    <option value="default-model">
+                    <NativeSelectOption value="default-model">
                       {t("lab.review.apply.targets.default-model")}
-                    </option>
-                    <option value="character">{t("lab.review.apply.targets.character")}</option>
-                    <option value="workflow">{t("lab.review.apply.targets.workflow")}</option>
-                    <option value="routing-policy">
+                    </NativeSelectOption>
+                    <NativeSelectOption value="character">
+                      {t("lab.review.apply.targets.character")}
+                    </NativeSelectOption>
+                    <NativeSelectOption value="workflow">
+                      {t("lab.review.apply.targets.workflow")}
+                    </NativeSelectOption>
+                    <NativeSelectOption value="routing-policy">
                       {t("lab.review.apply.targets.routing-policy")}
-                    </option>
-                  </select>
+                    </NativeSelectOption>
+                  </NativeSelect>
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="eval-apply-target-id">{t("lab.review.apply.targetId")}</Label>
@@ -1734,24 +1759,28 @@ export function EvalLabWorkspace() {
               ) : null}
               {applicationDiff.length ? (
                 <div className="overflow-hidden rounded-lg border">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-muted-foreground">
-                        <th className="p-2">{t("lab.review.apply.field")}</th>
-                        <th className="p-2">{t("lab.review.apply.before")}</th>
-                        <th className="p-2">{t("lab.review.apply.after")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table className="text-sm">
+                    <TableHeader>
+                      <TableRow className="text-muted-foreground hover:bg-transparent">
+                        <TableHead className="p-2">{t("lab.review.apply.field")}</TableHead>
+                        <TableHead className="p-2">{t("lab.review.apply.before")}</TableHead>
+                        <TableHead className="p-2">{t("lab.review.apply.after")}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {applicationDiff.map((entry) => (
-                        <tr key={entry.path} className="border-b last:border-0">
-                          <td className="p-2 font-mono text-xs">{entry.path}</td>
-                          <td className="p-2 font-mono text-xs">{JSON.stringify(entry.before)}</td>
-                          <td className="p-2 font-mono text-xs">{JSON.stringify(entry.after)}</td>
-                        </tr>
+                        <TableRow key={entry.path}>
+                          <TableCell className="p-2 font-mono text-xs">{entry.path}</TableCell>
+                          <TableCell className="p-2 font-mono text-xs">
+                            {JSON.stringify(entry.before)}
+                          </TableCell>
+                          <TableCell className="p-2 font-mono text-xs">
+                            {JSON.stringify(entry.after)}
+                          </TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               ) : null}
               <div className="flex flex-wrap gap-2">
@@ -1858,45 +1887,49 @@ export function EvalLabWorkspace() {
                 <CardDescription>{t("lab.review.confidenceHint")}</CardDescription>
               </CardHeader>
               <CardContent className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th className="p-2">{t("lab.review.variant")}</th>
-                      <th className="p-2">{t("lab.scoring.metrics.quality")}</th>
-                      <th className="p-2">{t("lab.scoring.metrics.reliability")}</th>
-                      <th className="p-2">{t("lab.scoring.metrics.cost")}</th>
-                      <th className="p-2">{t("lab.scoring.metrics.latency")}</th>
-                      <th className="p-2">{t("lab.review.effectiveCases")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table className="min-w-[640px] text-sm">
+                  <TableHeader>
+                    <TableRow className="text-muted-foreground hover:bg-transparent">
+                      <TableHead className="p-2">{t("lab.review.variant")}</TableHead>
+                      <TableHead className="p-2">{t("lab.scoring.metrics.quality")}</TableHead>
+                      <TableHead className="p-2">{t("lab.scoring.metrics.reliability")}</TableHead>
+                      <TableHead className="p-2">{t("lab.scoring.metrics.cost")}</TableHead>
+                      <TableHead className="p-2">{t("lab.scoring.metrics.latency")}</TableHead>
+                      <TableHead className="p-2">{t("lab.review.effectiveCases")}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {reportView.evidence.map((candidate) => {
                       const variant = reportView.experiment.manifest.variants.find(
                         (item) => item.id === candidate.variantId
                       )
                       return (
-                        <tr key={candidate.variantId} className="border-b last:border-0">
-                          <td className="p-2 font-medium">
+                        <TableRow key={candidate.variantId}>
+                          <TableCell className="p-2 font-medium">
                             {variant?.name ?? candidate.variantId}
-                          </td>
-                          <td className="p-2 tabular-nums">
+                          </TableCell>
+                          <TableCell className="p-2 tabular-nums">
                             {candidate.metrics.quality.toFixed(3)} [
                             {candidate.intervals.quality.low.toFixed(3)},{" "}
                             {candidate.intervals.quality.high.toFixed(3)}]
-                          </td>
-                          <td className="p-2 tabular-nums">
+                          </TableCell>
+                          <TableCell className="p-2 tabular-nums">
                             {candidate.metrics.reliability.toFixed(3)}
-                          </td>
-                          <td className="p-2 tabular-nums">{candidate.metrics.cost.toFixed(3)}</td>
-                          <td className="p-2 tabular-nums">
+                          </TableCell>
+                          <TableCell className="p-2 tabular-nums">
+                            {candidate.metrics.cost.toFixed(3)}
+                          </TableCell>
+                          <TableCell className="p-2 tabular-nums">
                             {candidate.metrics.latency.toFixed(3)}
-                          </td>
-                          <td className="p-2 tabular-nums">{candidate.effectiveCases}</td>
-                        </tr>
+                          </TableCell>
+                          <TableCell className="p-2 tabular-nums">
+                            {candidate.effectiveCases}
+                          </TableCell>
+                        </TableRow>
                       )
                     })}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </CardContent>
             </Card>
             {reportView.providerErrors.length ? (
@@ -1919,48 +1952,69 @@ export function EvalLabWorkspace() {
                     <Label htmlFor="eval-report-variant-filter">
                       {t("lab.review.filterVariant")}
                     </Label>
-                    <select
+                    <NativeSelect
                       id="eval-report-variant-filter"
-                      className="h-9 rounded-md border bg-background px-3 text-sm"
+                      wrapperClassName="w-full"
                       value={reportVariant}
                       onChange={(event) => setReportVariant(event.target.value)}
                     >
-                      <option value="">{t("lab.review.allVariants")}</option>
+                      <NativeSelectOption value="">
+                        {t("lab.review.allVariants")}
+                      </NativeSelectOption>
                       {reportView.experiment.manifest.variants.map((variant) => (
-                        <option key={variant.id} value={variant.id}>
+                        <NativeSelectOption key={variant.id} value={variant.id}>
                           {variant.name}
-                        </option>
+                        </NativeSelectOption>
                       ))}
-                    </select>
+                    </NativeSelect>
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="eval-report-status-filter">
                       {t("lab.review.filterStatus")}
                     </Label>
-                    <select
+                    <NativeSelect
                       id="eval-report-status-filter"
-                      className="h-9 rounded-md border bg-background px-3 text-sm"
+                      wrapperClassName="w-full"
                       value={reportStatus}
                       onChange={(event) => setReportStatus(event.target.value)}
                     >
-                      <option value="">{t("lab.review.allStatuses")}</option>
-                      <option value="passed">{t("lab.review.statuses.passed")}</option>
-                      <option value="failed">{t("lab.review.statuses.failed")}</option>
-                      <option value="errored">{t("lab.review.statuses.errored")}</option>
-                    </select>
+                      <NativeSelectOption value="">
+                        {t("lab.review.allStatuses")}
+                      </NativeSelectOption>
+                      <NativeSelectOption value="passed">
+                        {t("lab.review.statuses.passed")}
+                      </NativeSelectOption>
+                      <NativeSelectOption value="failed">
+                        {t("lab.review.statuses.failed")}
+                      </NativeSelectOption>
+                      <NativeSelectOption value="errored">
+                        {t("lab.review.statuses.errored")}
+                      </NativeSelectOption>
+                    </NativeSelect>
                   </div>
                 </div>
                 <div className="space-y-3">
                   {filteredReportCases.map((item) => (
-                    <details key={item.sampleId} className="rounded-lg border p-3">
-                      <summary className="cursor-pointer font-medium">
-                        {item.case.id} ·{" "}
-                        {reportView.experiment.manifest.variants.find(
-                          (variant) => variant.id === item.variantId
-                        )?.name ?? item.variantId}{" "}
-                        · {t(`lab.review.statuses.${item.status}`)}
-                      </summary>
-                      <div className="mt-3 grid gap-3 text-sm">
+                    <Collapsible
+                      key={item.sampleId}
+                      className="group/collapsible rounded-lg border p-3"
+                    >
+                      <CollapsibleTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          className="h-auto w-full justify-between p-0 text-left font-medium"
+                        >
+                          <span>
+                            {item.case.id} ·{" "}
+                            {reportView.experiment.manifest.variants.find(
+                              (variant) => variant.id === item.variantId
+                            )?.name ?? item.variantId}{" "}
+                            · {t(`lab.review.statuses.${item.status}`)}
+                          </span>
+                          <ChevronDownIcon className="size-4 shrink-0 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="mt-3 grid gap-3 text-sm">
                         <div>
                           <p className="text-xs font-medium text-muted-foreground">
                             {t("lab.review.input")}
@@ -1983,8 +2037,8 @@ export function EvalLabWorkspace() {
                             </Badge>
                           ))}
                         </div>
-                      </div>
-                    </details>
+                      </CollapsibleContent>
+                    </Collapsible>
                   ))}
                 </div>
               </CardContent>

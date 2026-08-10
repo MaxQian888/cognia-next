@@ -69,6 +69,19 @@ describe("createTargetFromSpec", () => {
     expect((await target.run(evalCase)).output).toBe("wf-out")
   })
 
+  it("builds a Twin target on the Chat execution seam", async () => {
+    const target = createTargetFromSpec(
+      { kind: "twin", label: "Alice", twinId: "alice", providerId: "anthropic", model: "m" },
+      deps
+    )
+    expect((await target.run(evalCase)).output).toBe("chat-out")
+    expect((deps.chat.runTurn as jest.Mock).mock.calls.at(-1)?.[0]).toMatchObject({
+      model: "m",
+      providerId: "anthropic",
+      character: expect.objectContaining({ twinId: "alice" }),
+    })
+  })
+
   it("threads the chat optional fields (characterId / cwd / timeoutMs)", async () => {
     const target = createTargetFromSpec(
       { kind: "chat", label: "c", model: "m", characterId: "char-1", cwd: "/tmp", timeoutMs: 5000 },

@@ -32,8 +32,7 @@ describe("scorer selection helpers", () => {
 describe("ScorerPicker", () => {
   it("renders every catalog scorer checked when fully selected", () => {
     render(<ScorerPicker value={[...ALL_SCORER_IDS]} onChange={jest.fn()} />)
-    const cost = screen.getByLabelText("scorerCatalog.cost") as HTMLInputElement
-    expect(cost.checked).toBe(true)
+    expect(screen.getByLabelText("scorerCatalog.cost")).toBeChecked()
   })
 
   it("toggles a single scorer off", () => {
@@ -66,9 +65,7 @@ describe("ScorerPicker", () => {
 
   it("disables the LLM scorers when no judge is available", () => {
     render(<ScorerPicker value={[...ALL_SCORER_IDS]} onChange={jest.fn()} judgeAvailable={false} />)
-    const judge = screen.getByLabelText("scorerCatalog.judge-task-completion") as HTMLInputElement
-    expect(judge.disabled).toBe(true)
-    const det = screen.getByLabelText("scorerCatalog.tool-selection") as HTMLInputElement
-    expect(det.disabled).toBe(false)
+    expect(screen.getByLabelText("scorerCatalog.judge-task-completion")).toBeDisabled()
+    expect(screen.getByLabelText("scorerCatalog.tool-selection")).not.toBeDisabled()
   })
 })

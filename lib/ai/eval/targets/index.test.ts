@@ -5,6 +5,8 @@ describe("targets barrel", () => {
     expect(typeof targets.createChatTarget).toBe("function")
     expect(typeof targets.defaultChatTargetDeps).toBe("function")
     expect(typeof targets.assembleSampleFromSpans).toBe("function")
+    expect(typeof targets.createTwinTarget).toBe("function")
+    expect(typeof targets.hydrateTwinRetrievalSpans).toBe("function")
     expect(typeof targets.createTeamTarget).toBe("function")
     expect(typeof targets.defaultTeamTargetDeps).toBe("function")
     expect(typeof targets.extractTeamText).toBe("function")

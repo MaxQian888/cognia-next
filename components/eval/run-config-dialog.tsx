@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { AppSettings } from "@cognia/agent-config-types"
 import { buildConfiguredRunDeps } from "@/lib/ai/eval/browser-deps"
 import { runEvalService } from "@/lib/ai/eval/service"
@@ -41,6 +42,7 @@ export interface RunConfigOptions {
   characters?: NameId[]
   teams?: NameId[]
   workflows?: NameId[]
+  twins?: NameId[]
 }
 
 interface TargetDraft {
@@ -49,6 +51,8 @@ interface TargetDraft {
   /** model (chat) | teamId (team) | workflowId (workflow). */
   ref: string
   characterId?: string
+  /** Twin targets need both a Twin registry id (`ref`) and a model. */
+  model?: string
 }
 
 function draftToSpec(d: TargetDraft): TargetSpec {
@@ -62,7 +66,8 @@ function draftToSpec(d: TargetDraft): TargetSpec {
     }
   }
   if (d.kind === "team") return { kind: "team", label, teamId: d.ref }
-  return { kind: "workflow", label, workflowId: d.ref }
+  if (d.kind === "workflow") return { kind: "workflow", label, workflowId: d.ref }
+  return { kind: "twin", label, twinId: d.ref, model: d.model ?? "" }
 }
 
 export interface RunConfigDialogProps {
@@ -239,16 +244,26 @@ export function RunConfigDialog({
         <span className="text-sm font-medium">{t("runConfig.targets")}</span>
         {targets.map((d, i) => (
           <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
-            <select
+            <NativeSelect
               aria-label={t("runConfig.targetKind")}
-              className="rounded-md border bg-background px-2 py-1 text-sm"
+              size="sm"
               value={d.kind}
-              onChange={(e) => setTarget(i, { kind: e.target.value as TargetKind, ref: "" })}
+              onChange={(e) => {
+                const kind = e.target.value as TargetKind
+                setTarget(i, {
+                  kind,
+                  ref: "",
+                  model: kind === "twin" ? defaultModel : undefined,
+                })
+              }}
             >
-              <option value="chat">{t("runConfig.kind.chat")}</option>
-              <option value="team">{t("runConfig.kind.team")}</option>
-              <option value="workflow">{t("runConfig.kind.workflow")}</option>
-            </select>
+              <NativeSelectOption value="chat">{t("runConfig.kind.chat")}</NativeSelectOption>
+              <NativeSelectOption value="team">{t("runConfig.kind.team")}</NativeSelectOption>
+              <NativeSelectOption value="workflow">
+                {t("runConfig.kind.workflow")}
+              </NativeSelectOption>
+              <NativeSelectOption value="twin">{t("runConfig.kind.twin")}</NativeSelectOption>
+            </NativeSelect>
             <RefField
               kind={d.kind}
               value={d.ref}
@@ -256,20 +271,28 @@ export function RunConfigDialog({
               onChange={(v) => setTarget(i, { ref: v })}
               label={t("runConfig.targetRef")}
             />
+            {d.kind === "twin" ? (
+              <ModelField
+                value={d.model ?? defaultModel}
+                models={options.models ?? []}
+                onChange={(model) => setTarget(i, { model })}
+                label={t("runConfig.twinModel")}
+              />
+            ) : null}
             {d.kind === "chat" && (options.characters?.length ?? 0) > 0 && (
-              <select
+              <NativeSelect
                 aria-label={t("runConfig.character")}
-                className="rounded-md border bg-background px-2 py-1 text-sm"
+                size="sm"
                 value={d.characterId ?? ""}
                 onChange={(e) => setTarget(i, { characterId: e.target.value || undefined })}
               >
-                <option value="">{t("runConfig.defaultCharacter")}</option>
+                <NativeSelectOption value="">{t("runConfig.defaultCharacter")}</NativeSelectOption>
                 {options.characters!.map((c) => (
-                  <option key={c.id} value={c.id}>
+                  <NativeSelectOption key={c.id} value={c.id}>
                     {c.name}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             )}
             <Input
               aria-label={t("runConfig.targetLabel")}
@@ -459,22 +482,24 @@ function RefField({
       ? (options.models ?? []).map((m) => ({ id: m, name: m }))
       : kind === "team"
         ? (options.teams ?? [])
-        : (options.workflows ?? [])
+        : kind === "workflow"
+          ? (options.workflows ?? [])
+          : (options.twins ?? [])
   if (list.length > 0) {
     return (
-      <select
+      <NativeSelect
         aria-label={label}
-        className="rounded-md border bg-background px-2 py-1 text-sm"
+        size="sm"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
-        <option value="">—</option>
+        <NativeSelectOption value="">—</NativeSelectOption>
         {list.map((o) => (
-          <option key={o.id} value={o.id}>
+          <NativeSelectOption key={o.id} value={o.id}>
             {o.name}
-          </option>
+          </NativeSelectOption>
         ))}
-      </select>
+      </NativeSelect>
     )
   }
   return (
@@ -485,5 +510,42 @@ function RefField({
       onChange={(e) => onChange(e.target.value)}
       className="h-8 w-44"
     />
+  )
+}
+
+function ModelField({
+  value,
+  models,
+  onChange,
+  label,
+}: {
+  value: string
+  models: string[]
+  onChange: (value: string) => void
+  label: string
+}) {
+  if (models.length === 0) {
+    return (
+      <Input
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-8 w-40"
+      />
+    )
+  }
+  return (
+    <NativeSelect
+      aria-label={label}
+      size="sm"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {models.map((model) => (
+        <NativeSelectOption key={model} value={model}>
+          {model}
+        </NativeSelectOption>
+      ))}
+    </NativeSelect>
   )
 }

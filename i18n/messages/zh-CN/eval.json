@@ -227,6 +227,7 @@
       "pick": "选择导出文件"
     },
     "heading": "导入测试集",
+    "progress": "已导入 {done} / {total}",
     "hf": {
       "fetch": "拉取并导入",
       "limit": "导入行数",
@@ -567,6 +568,7 @@
     "kind": {
       "chat": "聊天",
       "team": "Agent 团队",
+      "twin": "数字孪生",
       "workflow": "工作流"
     },
     "noTargets": "至少添加一个带模型 / 团队 / 工作流 ID 的目标。",
@@ -581,6 +583,7 @@
     "targetKind": "目标类型",
     "targetLabel": "标签",
     "targetRef": "模型 / 团队 / 工作流 ID",
+    "twinModel": "孪生模型",
     "targets": "被测目标"
   },
   "runDetail": {

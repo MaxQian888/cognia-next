@@ -18,6 +18,9 @@ jest.mock("@/lib/db/settings", () => ({
 jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: jest.fn(async () => ({ resolved: true })),
 }))
+jest.mock("@/lib/twin/runtime/build-deps", () => ({
+  tryBuildTwinDeps: jest.fn(async () => ({ store: { provider: "test" } })),
+}))
 jest.mock("@/lib/claude/run-and-capture", () => ({
   runAndCaptureAssistantReply: jest.fn(async () => ({ text: "captured reply", messageId: "m1" })),
 }))
@@ -27,6 +30,8 @@ jest.mock("@/lib/db/agent-traces", () => ({
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 
 import { defaultChatTargetDeps } from "./chat"
+import { createSession } from "@/lib/db/sessions"
+import { resolveSendOptions } from "@/lib/claude/build-options"
 
 describe("defaultChatTargetDeps", () => {
   it("synthesizes a character and runs a turn when no characterId is given", async () => {
@@ -34,12 +39,52 @@ describe("defaultChatTargetDeps", () => {
     const result = await deps.runTurn({ prompt: "hi", model: "claude-opus-4-8" })
     expect(result.text).toBe("captured reply")
     expect(result.sessionId).toBe("ses-eval")
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Eval Run", memoryLearn: false })
+    )
   })
 
   it("resolves an existing character by id", async () => {
     const deps = defaultChatTargetDeps()
     const result = await deps.runTurn({ prompt: "hi", model: "x", characterId: "known", cwd: "/w" })
     expect(result.sessionId).toBe("ses-eval")
+  })
+
+  it.each([
+    ["string", "Twin question", "Twin question"],
+    [
+      "blocks",
+      [
+        { type: "text" as const, text: "First" },
+        { type: "image" as const, source: { type: "base64" as const, data: "x" } },
+        { type: "text" as const, text: "Second" },
+      ],
+      "First\nSecond",
+    ],
+  ])("passes %s Twin prompts through the real context seam", async (_label, prompt, expected) => {
+    const deps = defaultChatTargetDeps()
+    const character = {
+      id: "eval-twin",
+      name: "Twin",
+      avatarColor: "blue",
+      systemPrompt: "Base",
+      twinId: "twin-1",
+      createdAt: 1,
+      updatedAt: 1,
+    }
+
+    await deps.runTurn({ prompt: prompt as never, model: "x", character })
+
+    expect(resolveSendOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        character,
+        twinDeps: expect.any(Object),
+        twinUserMessage: expected,
+      })
+    )
+    expect(createSession).toHaveBeenLastCalledWith(
+      expect.objectContaining({ characterId: "eval-twin", memoryLearn: false })
+    )
   })
 
   it("throws when the requested character is missing", async () => {

@@ -153,6 +153,33 @@ describe("RunConfigDialog", () => {
     expect(config.targets[1]).toMatchObject({ kind: "workflow", workflowId: "wf1" })
   })
 
+  it("builds a Twin target with a registry id and model", async () => {
+    render(
+      <RunConfigDialog
+        datasetId="d"
+        appSettings={{ defaultModel: "m1" } as never}
+        options={{ models: ["m1", "m2"], twins: [{ id: "twin-1", name: "Alice" }] }}
+        onClose={jest.fn()}
+      />
+    )
+    fireEvent.change(screen.getByLabelText("runConfig.targetKind"), {
+      target: { value: "twin" },
+    })
+    fireEvent.change(screen.getByLabelText("runConfig.targetRef"), {
+      target: { value: "twin-1" },
+    })
+    fireEvent.change(screen.getByLabelText("runConfig.twinModel"), {
+      target: { value: "m2" },
+    })
+    fireEvent.click(screen.getByText("runConfig.run"))
+    await waitFor(() => expect(runEvalService).toHaveBeenCalled())
+    expect(runEvalService.mock.calls[0][0].config.targets[0]).toMatchObject({
+      kind: "twin",
+      twinId: "twin-1",
+      model: "m2",
+    })
+  })
+
   it("surfaces a service failure as an alert", async () => {
     runEvalService.mockRejectedValueOnce(new Error("boom"))
     render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)

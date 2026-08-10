@@ -32,6 +32,9 @@ import { useTranslations } from "next-intl"
 import { Loader2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { Progress } from "@/components/ui/progress"
 import { bulkAddCases, updateDataset } from "@/lib/db/eval-datasets"
 import {
   parseCsv,
@@ -370,7 +373,7 @@ export function ImportDialog({
       </div>
 
       {tab === "file" && (
-        <input
+        <Input
           type="file"
           aria-label={t("import.file.pick")}
           accept=".csv,.json,.jsonl,.ndjson,.yaml,.yml"
@@ -405,18 +408,19 @@ export function ImportDialog({
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm">
                 <span>{t("import.hf.split")}</span>
-                <select
+                <NativeSelect
                   aria-label={t("import.hf.split")}
-                  className="bg-background rounded-md border px-2 py-1 text-sm"
+                  size="sm"
+                  wrapperClassName="w-full"
                   value={String(hfChoiceIdx)}
                   onChange={(e) => setHfChoiceIdx(Number(e.target.value))}
                 >
                   {hfSplits.map((s, i) => (
-                    <option key={`${s.config}/${s.split}`} value={String(i)}>
+                    <NativeSelectOption key={`${s.config}/${s.split}`} value={String(i)}>
                       {s.config} / {s.split}
-                    </option>
+                    </NativeSelectOption>
                   ))}
-                </select>
+                </NativeSelect>
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span>{t("import.hf.limit")}</span>
@@ -445,10 +449,9 @@ export function ImportDialog({
               {traces.map((tr) => (
                 <li key={tr.traceId}>
                   <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={picked.has(tr.traceId)}
-                      onChange={() =>
+                      onCheckedChange={() =>
                         setPicked((cur) => {
                           const next = new Set(cur)
                           if (next.has(tr.traceId)) next.delete(tr.traceId)
@@ -472,20 +475,20 @@ export function ImportDialog({
 
       {tab === "foreign" && (
         <div className="flex flex-col gap-2">
-          <select
+          <NativeSelect
             aria-label={t("import.foreign.format")}
-            className="bg-background rounded-md border px-2 py-1 text-sm"
+            size="sm"
             value={foreignFormat}
             onChange={(e) => setForeignFormat(e.target.value as ForeignFormat)}
           >
             {/* i18n-exempt: third-party product names, not translated */}
-            <option value="promptfoo">promptfoo</option>
+            <NativeSelectOption value="promptfoo">promptfoo</NativeSelectOption>
             {/* i18n-exempt: third-party product names, not translated */}
-            <option value="openai-evals">OpenAI Evals</option>
+            <NativeSelectOption value="openai-evals">OpenAI Evals</NativeSelectOption>
             {/* i18n-exempt: third-party product names, not translated */}
-            <option value="langsmith">LangSmith</option>
-          </select>
-          <input
+            <NativeSelectOption value="langsmith">LangSmith</NativeSelectOption>
+          </NativeSelect>
+          <Input
             type="file"
             aria-label={t("import.foreign.pick")}
             accept=".json,.jsonl,.yaml,.yml"
@@ -544,10 +547,9 @@ export function ImportDialog({
           {expectedCol && (
             <>
               <label className="flex items-center gap-1.5 text-sm">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={useGrading}
-                  onChange={(e) => setUseGrading(e.target.checked)}
+                  onCheckedChange={(checked) => setUseGrading(checked === true)}
                 />
                 {t("import.mapping.useGrading")}
               </label>
@@ -586,7 +588,11 @@ export function ImportDialog({
 
       {progress && (
         <div className="flex items-center gap-2" data-testid="import-progress">
-          <progress className="h-2 min-w-0 flex-1" value={progress.done} max={progress.total} />
+          <Progress
+            className="min-w-0 flex-1"
+            value={(progress.done / Math.max(progress.total, 1)) * 100}
+            aria-label={t("import.progress", { done: progress.done, total: progress.total })}
+          />
           <span className="text-muted-foreground text-xs tabular-nums">
             {progress.done}/{progress.total}
           </span>
@@ -652,19 +658,20 @@ function ColumnSelect({
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span>{label}</span>
-      <select
+      <NativeSelect
         aria-label={label}
-        className="bg-background rounded-md border px-2 py-1 text-sm"
+        size="sm"
+        wrapperClassName="w-full"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
-        {noneLabel && <option value="">{noneLabel}</option>}
+        {noneLabel && <NativeSelectOption value="">{noneLabel}</NativeSelectOption>}
         {columns.map((c) => (
-          <option key={c} value={c}>
+          <NativeSelectOption key={c} value={c}>
             {c}
-          </option>
+          </NativeSelectOption>
         ))}
-      </select>
+      </NativeSelect>
     </label>
   )
 }

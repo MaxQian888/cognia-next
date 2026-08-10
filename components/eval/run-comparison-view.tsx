@@ -12,6 +12,15 @@ import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { listCaseResults, type EvalRunCaseRow } from "@/lib/db/eval-run-cases"
 import { buildComparison } from "@/lib/ai/eval/compare"
 import { isLegacyScoring } from "@/lib/ai/eval/report"
@@ -89,10 +98,9 @@ export function RunComparisonView({ runs, inputsByCase = {} }: RunComparisonView
       <div className="flex flex-wrap gap-2">
         {runs.map((r) => (
           <label key={r.runId} className="flex items-center gap-1 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={selected.includes(r.runId)}
-              onChange={() => toggle(r.runId)}
+              onCheckedChange={() => toggle(r.runId)}
               aria-label={t("compare.selectRun", { label: r.targetLabel })}
             />
             <span>{r.targetLabel}</span>
@@ -144,28 +152,28 @@ export function RunComparisonView({ runs, inputsByCase = {} }: RunComparisonView
             ))}
           </div>
           <div className="hidden overflow-x-auto md:block">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="border p-2 text-left">{t("compare.case")}</th>
+            <Table className="border-collapse text-sm">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="border p-2">{t("compare.case")}</TableHead>
                   {comparison.runIds.map((id) => {
                     const run = runs.find((r) => r.runId === id)
                     return (
-                      <th key={id} className="border p-2 text-left">
+                      <TableHead key={id} className="border p-2">
                         {run?.targetLabel ?? id}
-                      </th>
+                      </TableHead>
                     )
                   })}
-                </tr>
-              </thead>
-              <tbody>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {comparison.rows.map((row) => (
-                  <tr key={row.caseId}>
-                    <td className="border p-2 align-top">
+                  <TableRow key={row.caseId}>
+                    <TableCell className="border p-2 align-top whitespace-normal">
                       <span className="line-clamp-2">{row.input || row.caseId}</span>
-                    </td>
+                    </TableCell>
                     {row.cells.map((cell, i) => (
-                      <td
+                      <TableCell
                         key={cell.runId}
                         className={cn(
                           "border p-2 text-center",
@@ -180,12 +188,12 @@ export function RunComparisonView({ runs, inputsByCase = {} }: RunComparisonView
                             {cell.delta > 0 ? "▲" : "▼"}
                           </span>
                         )}
-                      </td>
+                      </TableCell>
                     ))}
-                  </tr>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </>
       )}

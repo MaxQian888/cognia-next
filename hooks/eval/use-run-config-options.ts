@@ -14,6 +14,7 @@ import { collectModelOptions } from "@/lib/ai/model-options"
 import { listCharacters } from "@/lib/db/characters"
 import { listTeams } from "@/lib/db/teams"
 import { listWorkflowsByUpdated } from "@/lib/db/workflows"
+import { listTwins } from "@/lib/db/twins"
 import type { RunConfigOptions } from "@/components/eval/run-config-dialog"
 
 const EMPTY: { id: string; name: string }[] = []
@@ -42,8 +43,13 @@ export function useRunConfigOptions(): RunConfigOptions {
     [],
     EMPTY
   )
+  const twins = useLiveQuery(
+    async () => (await listTwins()).map((twin) => ({ id: twin.id, name: twin.name })),
+    [],
+    EMPTY
+  )
   return useMemo(
-    () => ({ models, characters, teams, workflows }),
-    [models, characters, teams, workflows]
+    () => ({ models, characters, teams, workflows, twins }),
+    [models, characters, teams, workflows, twins]
   )
 }

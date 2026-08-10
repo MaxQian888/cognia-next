@@ -33,6 +33,7 @@ jest.mock("@/lib/db/teams", () => ({ listTeams: async () => [{ id: "tm1", name: 
 jest.mock("@/lib/db/workflows", () => ({
   listWorkflowsByUpdated: async () => [{ id: "wf1", name: "Pipeline" }],
 }))
+jest.mock("@/lib/db/twins", () => ({ listTwins: async () => [{ id: "tw1", name: "Alice" }] }))
 
 it("folds models, characters, teams and workflows into RunConfigOptions", async () => {
   const { result } = renderHook(() => useRunConfigOptions())
@@ -41,4 +42,5 @@ it("folds models, characters, teams and workflows into RunConfigOptions", async 
   expect(result.current.models).toEqual(["claude-opus-4-8"])
   expect(result.current.characters).toEqual([{ id: "ch1", name: "Ava" }])
   expect(result.current.teams).toEqual([{ id: "tm1", name: "Core" }])
+  expect(result.current.twins).toEqual([{ id: "tw1", name: "Alice" }])
 })

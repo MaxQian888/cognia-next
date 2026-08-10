@@ -9,10 +9,12 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon, PaperclipIcon, XIcon } from "lucide-react"
+import { ChevronDownIcon, Loader2Icon, PaperclipIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { EvalCase, EvalInputPart, EvalReference } from "@/types/eval/eval"
 import type { EvalAssetClearance } from "@/lib/ai/eval/assets"
 
@@ -150,9 +152,14 @@ export function CaseEditor({ initial, onSave, onCancel, onAttach }: CaseEditorPr
         />
       </div>
 
-      <details className="rounded-md border p-2">
-        <summary className="cursor-pointer text-sm font-medium">{t("case.reference")}</summary>
-        <div className="mt-2 flex flex-col gap-2">
+      <Collapsible className="group/collapsible rounded-md border p-2">
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" className="h-auto w-full justify-between px-0 py-1 text-sm">
+            {t("case.reference")}
+            <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent forceMount className="mt-2 flex flex-col gap-2">
           <label className="flex flex-col gap-1 text-sm">
             <span>{t("case.expectedOutput")}</span>
             <Textarea
@@ -201,12 +208,17 @@ export function CaseEditor({ initial, onSave, onCancel, onAttach }: CaseEditorPr
               {t("case.invalidJson", { error: argsError })}
             </p>
           )}
-        </div>
-      </details>
+        </CollapsibleContent>
+      </Collapsible>
 
-      <details className="rounded-md border p-2">
-        <summary className="cursor-pointer text-sm font-medium">{t("case.attachments")}</summary>
-        <div className="mt-2 flex flex-col gap-2">
+      <Collapsible className="group/collapsible rounded-md border p-2">
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" className="h-auto w-full justify-between px-0 py-1 text-sm">
+            {t("case.attachments")}
+            <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent forceMount className="mt-2 flex flex-col gap-2">
           {contentParts.some((part) => part.type === "asset") ? (
             <ul className="space-y-1">
               {contentParts.map((part, index) =>
@@ -244,15 +256,17 @@ export function CaseEditor({ initial, onSave, onCancel, onAttach }: CaseEditorPr
           )}
           <label className="flex flex-col gap-1 text-sm">
             <span>{t("case.attachmentPrivacy")}</span>
-            <select
+            <NativeSelect
               aria-label={t("case.attachmentPrivacy")}
-              className="h-9 rounded-md border bg-background px-3 text-sm"
+              wrapperClassName="w-full"
               value={clearanceMode}
               onChange={(event) => setClearanceMode(event.target.value as "local-only" | "manual")}
             >
-              <option value="local-only">{t("case.privacy.local-only")}</option>
-              <option value="manual">{t("case.privacy.manual")}</option>
-            </select>
+              <NativeSelectOption value="local-only">
+                {t("case.privacy.local-only")}
+              </NativeSelectOption>
+              <NativeSelectOption value="manual">{t("case.privacy.manual")}</NativeSelectOption>
+            </NativeSelect>
           </label>
           {clearanceMode === "manual" ? (
             <Input
@@ -264,7 +278,7 @@ export function CaseEditor({ initial, onSave, onCancel, onAttach }: CaseEditorPr
           ) : null}
           <label className="flex flex-col gap-1 text-sm">
             <span>{t("case.pickAttachments")}</span>
-            <input
+            <Input
               type="file"
               multiple
               disabled={
@@ -288,8 +302,8 @@ export function CaseEditor({ initial, onSave, onCancel, onAttach }: CaseEditorPr
               {t("case.attachmentFailed", { error: attachmentError })}
             </p>
           ) : null}
-        </div>
-      </details>
+        </CollapsibleContent>
+      </Collapsible>
 
       <label className="flex flex-col gap-1 text-sm">
         <span>{t("case.notes")}</span>

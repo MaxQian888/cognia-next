@@ -4,7 +4,7 @@
  * one pinned {@link import("./eval").EvalReport} per target variant.
  */
 
-export type TargetKind = "chat" | "team" | "workflow"
+export type TargetKind = "chat" | "team" | "workflow" | "twin"
 
 export interface ChatTargetSpec {
   kind: "chat"
@@ -30,7 +30,16 @@ export interface WorkflowTargetSpec {
   timeoutMs?: number
 }
 
-export type TargetSpec = ChatTargetSpec | TeamTargetSpec | WorkflowTargetSpec
+export interface TwinTargetSpec {
+  kind: "twin"
+  label: string
+  twinId: string
+  providerId?: string
+  model: string
+  timeoutMs?: number
+}
+
+export type TargetSpec = ChatTargetSpec | TeamTargetSpec | WorkflowTargetSpec | TwinTargetSpec
 
 /** Case-subset selector applied before a run. All fields are AND-combined. */
 export interface CaseSubset {

@@ -8,6 +8,7 @@ import type { EvalTarget } from "../runner"
 import { createChatTarget, type ChatTargetDeps } from "./chat"
 import { createTeamTarget, type TeamTargetDeps } from "./team"
 import { createWorkflowTarget, type WorkflowTargetDeps } from "./workflow"
+import { createTwinTarget } from "./twin"
 
 export interface TargetDepsBundle {
   chat: ChatTargetDeps
@@ -46,6 +47,17 @@ export function createTargetFromSpec(spec: TargetSpec, deps: TargetDepsBundle): 
           ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}),
         },
         deps.workflow
+      )
+    case "twin":
+      return createTwinTarget(
+        {
+          label: spec.label,
+          twinId: spec.twinId,
+          model: spec.model,
+          ...(spec.providerId ? { providerId: spec.providerId } : {}),
+          ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}),
+        },
+        deps.chat
       )
     default: {
       const exhaustive: never = spec

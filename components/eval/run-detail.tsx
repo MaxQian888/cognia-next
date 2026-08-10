@@ -16,12 +16,22 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, ArrowLeftIcon, ScaleIcon } from "lucide-react"
+import { AlertTriangleIcon, ArrowLeftIcon, ChevronDownIcon, ScaleIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { getRun, type EvalRunRow } from "@/lib/db/eval-runs"
 import { useCalibrationSets, useEvalCases, useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"
 import { evaluateGate } from "@/lib/ai/eval/gate"
@@ -41,9 +51,9 @@ function rowVerdict(row: EvalRunCaseRow): "pass" | "fail" | "ungraded" {
  * scorer decided what it did.
  *
  * A run used to be a wall of numbers with no way to reach the underlying
- * answer — "case 7 failed" and nothing more. `<details>` rather than a dialog
- * so several cases can be open side by side while reading a run, and because
- * the repo's other eval forms already use it (jsdom-friendly, no Radix).
+ * answer — "case 7 failed" and nothing more. An uncontrolled Collapsible keeps
+ * several cases open side by side while reading a run without requiring a
+ * dialog per row.
  */
 function CaseCell({
   label,
@@ -63,11 +73,14 @@ function CaseCell({
   if (!hasDetail) return <span className="line-clamp-2">{label}</span>
 
   return (
-    <details data-testid="case-detail">
-      <summary className="cursor-pointer">
-        <span className="line-clamp-2 align-middle">{label}</span>
-      </summary>
-      <div className="mt-2 flex flex-col gap-2 text-xs">
+    <Collapsible className="group/collapsible" data-testid="case-detail">
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" className="h-auto w-full justify-between p-0 text-left font-normal">
+          <span className="line-clamp-2 align-middle">{label}</span>
+          <ChevronDownIcon className="size-3.5 shrink-0 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent forceMount className="mt-2 flex flex-col gap-2 text-xs">
         {row.sampleError && (
           <p className="text-destructive" role="alert">
             {t("sampleError", { error: row.sampleError })}
@@ -90,8 +103,8 @@ function CaseCell({
             <p className="break-words">{score!.reasoning}</p>
           </div>
         ))}
-      </div>
-    </details>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -187,19 +200,20 @@ function SeedCalibration({
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span>{t("calibration.set")}</span>
-          <select
+          <NativeSelect
             aria-label={t("calibration.set")}
-            className="bg-background rounded-md border px-2 py-1 text-sm"
+            size="sm"
+            wrapperClassName="w-full"
             value={targetSetId}
             onChange={(e) => setTargetSetId(e.target.value)}
           >
-            <option value="">{t("calibration.newSet")}</option>
+            <NativeSelectOption value="">{t("calibration.newSet")}</NativeSelectOption>
             {sets.map((s) => (
-              <option key={s.setId} value={s.setId}>
+              <NativeSelectOption key={s.setId} value={s.setId}>
                 {s.setName}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         {!targetSetId && (
           <label className="flex flex-col gap-1 text-sm">
@@ -213,18 +227,19 @@ function SeedCalibration({
         )}
         <label className="flex flex-col gap-1 text-sm">
           <span>{t("calibration.scorer")}</span>
-          <select
+          <NativeSelect
             aria-label={t("calibration.scorer")}
-            className="bg-background rounded-md border px-2 py-1 text-sm"
+            size="sm"
+            wrapperClassName="w-full"
             value={effectiveScorer}
             onChange={(e) => setScorerId(e.target.value)}
           >
             {judgeIds.map((id) => (
-              <option key={id} value={id}>
+              <NativeSelectOption key={id} value={id}>
                 {id}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
+          </NativeSelect>
         </label>
       </div>
       <p className="text-muted-foreground text-xs" data-testid="seed-preview">
@@ -444,30 +459,30 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
             })}
           </div>
           <div className="hidden overflow-x-auto md:block">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="border p-2 text-left">{t("caseColumn")}</th>
+            <Table className="border-collapse text-sm">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="border p-2">{t("caseColumn")}</TableHead>
                   {scorerIds.map((id) => (
-                    <th key={id} className="border p-2 text-left text-xs">
+                    <TableHead key={id} className="border p-2 text-xs">
                       {id}
-                    </th>
+                    </TableHead>
                   ))}
-                  <th className="border p-2 text-left">{t("verdict")}</th>
-                </tr>
-              </thead>
-              <tbody>
+                  <TableHead className="border p-2">{t("verdict")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows.map((row) => {
                   const verdict = rowVerdict(row)
                   return (
-                    <tr key={row.id} className="motion-safe:animate-in motion-safe:fade-in">
-                      <td className="border p-2 align-top">
+                    <TableRow key={row.id} className="motion-safe:animate-in motion-safe:fade-in">
+                      <TableCell className="border p-2 align-top whitespace-normal">
                         <CaseCell
                           label={inputByCase.get(row.caseId) ?? row.caseId}
                           row={row}
                           scorerIds={scorerIds}
                         />
-                      </td>
+                      </TableCell>
                       {scorerIds.map((id) => {
                         const s = row.scores[id]
                         // Only a real verdict gets a pass/fail colour. A
@@ -476,7 +491,7 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
                         // this wrong" when nothing had been graded at all.
                         const scored = !s || s.status === undefined || s.status === "scored"
                         return (
-                          <td
+                          <TableCell
                             key={id}
                             title={
                               s?.status && !scored ? t(`status.${s.status}` as never) : undefined
@@ -488,10 +503,10 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
                             )}
                           >
                             {!s ? "—" : scored ? s.value.toFixed(2) : "–"}
-                          </td>
+                          </TableCell>
                         )
                       })}
-                      <td
+                      <TableCell
                         className={cn(
                           "border p-2 text-center",
                           verdict === "pass" && "bg-emerald-500/15",
@@ -504,12 +519,12 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
                           : verdict === "pass"
                             ? t("pass")
                             : t("fail")}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   )
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </>
       )}
