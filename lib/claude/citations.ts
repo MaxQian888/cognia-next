@@ -68,20 +68,17 @@ export function extractAnthropicCitations(blocks: BetaContentBlock[]): SourcesPa
  * Twin-RAG retrieved chunk → SourcesPartItem. Shape mirrors what
  * `applyTwinContext` returns (chunk row + score + optional source title).
  */
-export interface TwinRetrievedChunk {
-  chunk: { vectorDocId: string; content: string; sourceId: string }
-  score: number
-  sourceTitle?: string
-}
+export type { RetrievedTwinChunk as TwinRetrievedChunk } from "@/types/twin"
+import type { RetrievedTwinChunk } from "@/types/twin"
 
 export function extractTwinRagSources(
-  chunks: readonly TwinRetrievedChunk[] | undefined | null
+  chunks: readonly RetrievedTwinChunk[] | undefined | null
 ): SourcesPartItem[] {
   if (!chunks || chunks.length === 0) return []
   return chunks.map((rc, i) => ({
     id: `twin-${rc.chunk.vectorDocId || i}`,
     title: rc.sourceTitle || `Twin chunk ${i + 1}`,
-    snippet: truncate(rc.chunk.content, 200),
+    snippet: truncate(rc.chunk.contentRedacted, 200),
     origin: "twin-rag",
     score: typeof rc.score === "number" ? rc.score : undefined,
   }))

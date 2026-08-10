@@ -15,7 +15,7 @@
  * sources for this answer".
  */
 
-import type { Playbook, ProfileEntity, StyleSample, TwinChunk } from "@/types/twin"
+import type { Playbook, ProfileEntity, RetrievedTwinChunk, StyleSample } from "@/types/twin"
 
 export interface ApplyTemplateInput {
   /** The character's existing systemPrompt (may be empty for fresh twins). */
@@ -34,13 +34,7 @@ export interface ApplyTemplateInput {
    */
   playbooks?: Playbook[]
   /** Retrieved chunks for THIS turn (already filtered by the RAG step). */
-  retrievedChunks: Array<{
-    chunk: TwinChunk
-    /** Relative score from the vector store. */
-    score: number
-    /** Source title — looked up from `twinSources` by the caller. */
-    sourceTitle?: string
-  }>
+  retrievedChunks: RetrievedTwinChunk[]
   /** Selected style few-shot samples for THIS turn. */
   styleSamples: StyleSample[]
   /** Maximum entities to list (alphabetical). Defaults to 20. */

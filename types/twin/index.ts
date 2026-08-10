@@ -220,6 +220,22 @@ export interface TwinChunk {
   createdAt: number
 }
 
+/**
+ * Network-safe retrieval projection. Runtime consumers deliberately receive
+ * only the redacted text; the original `TwinChunk.content` stays behind the
+ * local Dexie lookup boundary for explicit workbench display.
+ */
+export interface RetrievedTwinChunk {
+  chunk: {
+    id: string
+    vectorDocId: string
+    sourceId: string
+    contentRedacted: string
+  }
+  score: number
+  sourceTitle?: string
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Profile — distilled per-twin structured data.
 // ─────────────────────────────────────────────────────────────────────────────

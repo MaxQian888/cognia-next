@@ -247,6 +247,15 @@ describe("applyTwinContext", () => {
     expect(result.applied?.systemPrompt).toContain("## Relevant historical material")
     expect(result.applied?.systemPrompt).toContain("Onboarding notes (score 0.91)")
     expect(result.applied?.metadata.retrievedChunkIds).toEqual([chunk.id])
+    expect(result.retrievedChunks[0]).toEqual(
+      expect.objectContaining({
+        chunk: expect.objectContaining({
+          id: chunk.id,
+          contentRedacted: "Welcome to the team",
+        }),
+      })
+    )
+    expect(result.retrievedChunks[0]?.chunk).not.toHaveProperty("content")
     expect(result.degraded).toBe(false)
   })
 
@@ -307,7 +316,7 @@ describe("applyTwinContext", () => {
       deps: { ...baseDeps, store },
     })
     const ids = result.applied?.metadata.retrievedChunkIds ?? []
-    const contents = result.retrievedChunks.map((rc) => rc.chunk.content)
+    const contents = result.retrievedChunks.map((rc) => rc.chunk.contentRedacted)
     // BM25 lane pulls in the keyword chunk that the vector lane never returned.
     expect(contents).toContain("annual payroll reconciliation procedure")
     expect(ids.length).toBeGreaterThanOrEqual(2)

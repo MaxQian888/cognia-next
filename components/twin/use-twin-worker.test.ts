@@ -8,7 +8,7 @@
  * spins up a job-worker loop.
  */
 
-import { renderHook } from "@testing-library/react"
+import { renderHook, waitFor } from "@testing-library/react"
 
 const observeMock = jest.fn()
 const stopMock = jest.fn()
@@ -73,27 +73,29 @@ beforeEach(() => {
 })
 
 describe("buildTwinWorkerConfig", () => {
-  it("returns null when the worker is disabled", () => {
-    expect(buildTwinWorkerConfig({ ...COMPLETE_SETTINGS, workerEnabled: false })).toBeNull()
+  it("returns null when the worker is disabled", async () => {
+    await expect(
+      buildTwinWorkerConfig({ ...COMPLETE_SETTINGS, workerEnabled: false })
+    ).resolves.toBeNull()
   })
 
-  it("returns null when the embedding apiKey is missing", () => {
-    expect(
+  it("returns null when the embedding apiKey is missing", async () => {
+    await expect(
       buildTwinWorkerConfig({
         ...COMPLETE_SETTINGS,
         embedding: { ...COMPLETE_SETTINGS.embedding, apiKey: "" },
       })
-    ).toBeNull()
+    ).resolves.toBeNull()
   })
 
-  it("returns null when the llm apiKey is missing", () => {
-    expect(
+  it("returns null when the llm apiKey is missing", async () => {
+    await expect(
       buildTwinWorkerConfig({ ...COMPLETE_SETTINGS, llm: { ...COMPLETE_SETTINGS.llm, apiKey: "" } })
-    ).toBeNull()
+    ).resolves.toBeNull()
   })
 
-  it("returns a complete config when everything is set", () => {
-    const config = buildTwinWorkerConfig(COMPLETE_SETTINGS)
+  it("returns a complete config when everything is set", async () => {
+    const config = await buildTwinWorkerConfig(COMPLETE_SETTINGS)
     expect(config).not.toBeNull()
     expect(config?.store).toBeDefined()
     expect(config?.llm).toBeDefined()
@@ -101,19 +103,19 @@ describe("buildTwinWorkerConfig", () => {
     expect(config?.vectorBackend).toBe("qdrant")
   })
 
-  it("carries extraNameHints into the worker config", () => {
-    const config = buildTwinWorkerConfig({
+  it("carries extraNameHints into the worker config", async () => {
+    const config = await buildTwinWorkerConfig({
       ...COMPLETE_SETTINGS,
       extraNameHints: ["Alice Zhang", "张伟"],
     })
     expect(config?.nameHints).toEqual(["Alice Zhang", "张伟"])
   })
 
-  it("returns null when the vector-store client cannot be constructed", () => {
+  it("returns null when the vector-store client cannot be constructed", async () => {
     ;(createVectorStore as jest.Mock).mockImplementationOnce(() => {
       throw new Error("bad endpoint")
     })
-    expect(buildTwinWorkerConfig(COMPLETE_SETTINGS)).toBeNull()
+    await expect(buildTwinWorkerConfig(COMPLETE_SETTINGS)).resolves.toBeNull()
   })
 
   it.each([
@@ -121,8 +123,8 @@ describe("buildTwinWorkerConfig", () => {
     ["weaviate", { weaviate: { url: "http://w" } }],
     ["milvus", { milvus: { address: "localhost:19530", token: "t", ssl: false } }],
     ["chroma", { chroma: { mode: "server" as const, serverUrl: "http://c" } }],
-  ])("builds a config for the %s backend", (backend, extra) => {
-    const config = buildTwinWorkerConfig({
+  ])("builds a config for the %s backend", async (backend, extra) => {
+    const config = await buildTwinWorkerConfig({
       ...COMPLETE_SETTINGS,
       storage: {
         ...COMPLETE_SETTINGS.storage,
@@ -134,16 +136,17 @@ describe("buildTwinWorkerConfig", () => {
     expect(config?.vectorBackend).toBe(backend)
   })
 
-  it("returns null for an unsupported vector backend", () => {
-    const config = buildTwinWorkerConfig({
+  it("builds a config for the native vector backend", async () => {
+    const config = await buildTwinWorkerConfig({
       ...COMPLETE_SETTINGS,
       storage: { ...COMPLETE_SETTINGS.storage, vectorBackend: "native" as never },
     })
-    expect(config).toBeNull()
+    expect(config).not.toBeNull()
+    expect(config?.vectorBackend).toBe("native")
   })
 
-  it("returns null when a selected backend is missing its connection fields", () => {
-    const config = buildTwinWorkerConfig({
+  it("returns null when a selected backend is missing its connection fields", async () => {
+    const config = await buildTwinWorkerConfig({
       ...COMPLETE_SETTINGS,
       storage: { ...COMPLETE_SETTINGS.storage, vectorBackend: "pinecone" as never },
     })
@@ -159,7 +162,7 @@ describe("buildTwinWorkerConfig sourceLoader", () => {
       format: "markdown",
       source: "# body",
     })
-    const config = buildTwinWorkerConfig(COMPLETE_SETTINGS)
+    const config = await buildTwinWorkerConfig(COMPLETE_SETTINGS)
     const raw = await config!.sourceLoader({ id: "src1" } as never)
     expect(raw).toEqual({ id: "src1", filename: "doc.md", format: "markdown", text: "# body" })
   })
@@ -172,14 +175,14 @@ describe("buildTwinWorkerConfig sourceLoader", () => {
       source: "### 张伟\nhello",
       speakers: ["张伟", "Alice Zhang"],
     })
-    const config = buildTwinWorkerConfig(COMPLETE_SETTINGS)
+    const config = await buildTwinWorkerConfig(COMPLETE_SETTINGS)
     const raw = await config!.sourceLoader({ id: "src2" } as never)
     expect(raw.baseMetadata).toEqual({ speakers: ["张伟", "Alice Zhang"] })
   })
 
   it("throws when the source disappeared mid-load", async () => {
     getTwinSourceMock.mockResolvedValue(undefined)
-    const config = buildTwinWorkerConfig(COMPLETE_SETTINGS)
+    const config = await buildTwinWorkerConfig(COMPLETE_SETTINGS)
     await expect(config!.sourceLoader({ id: "gone" } as never)).rejects.toThrow("disappeared")
   })
 })
@@ -192,10 +195,10 @@ describe("isTwinWorkerConfigComplete", () => {
 })
 
 describe("useBackgroundTwinWorker", () => {
-  it("starts an all-twins worker (no twinId scope) when fully configured", () => {
+  it("starts an all-twins worker (no twinId scope) when fully configured", async () => {
     observeMock.mockReturnValue(COMPLETE_SETTINGS)
     const { result } = renderHook(() => useBackgroundTwinWorker())
-    expect(result.current.active).toBe(true)
+    await waitFor(() => expect(result.current.active).toBe(true))
     expect(startWorkerMock).toHaveBeenCalledTimes(1)
     // All-twins: only the config is passed; the twinId scope arg is absent.
     expect(startWorkerMock.mock.calls[0][1]).toBeUndefined()
@@ -209,21 +212,21 @@ describe("useBackgroundTwinWorker", () => {
     expect(startWorkerMock).not.toHaveBeenCalled()
   })
 
-  it("does not start a worker when the config is incomplete", () => {
+  it("does not start a worker when the config is incomplete", async () => {
     observeMock.mockReturnValue({
       ...COMPLETE_SETTINGS,
       embedding: { ...COMPLETE_SETTINGS.embedding, apiKey: "" },
     })
     const { result } = renderHook(() => useBackgroundTwinWorker())
+    await waitFor(() => expect(result.current.reasonKey).toBe("incompleteConfig"))
     expect(result.current.active).toBe(false)
-    expect(result.current.reasonKey).toBe("incompleteConfig")
     expect(startWorkerMock).not.toHaveBeenCalled()
   })
 
-  it("stops the worker on unmount", () => {
+  it("stops the worker on unmount", async () => {
     observeMock.mockReturnValue(COMPLETE_SETTINGS)
     const { unmount } = renderHook(() => useBackgroundTwinWorker())
-    expect(startWorkerMock).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(startWorkerMock).toHaveBeenCalledTimes(1))
     unmount()
     expect(stopMock).toHaveBeenCalledTimes(1)
   })

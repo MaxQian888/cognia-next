@@ -227,6 +227,17 @@ describe("createLlmRerankScorer", () => {
     )
   })
 
+  it("refuses to send a PII-bearing query or candidate to the model", async () => {
+    const client = { complete: jest.fn(async () => "[0.5, 0.5]") }
+    const scorer = createLlmRerankScorer(client)
+
+    await expect(scorer("email alice@example.com", cands)).rejects.toThrow("PII gate")
+    await expect(
+      scorer("safe query", [c("a", 0.9, "contact alice@example.com"), cands[1]])
+    ).rejects.toThrow("PII gate")
+    expect(client.complete).not.toHaveBeenCalled()
+  })
+
   it("drives rerank end-to-end (LLM output reorders the pool)", async () => {
     const client = { complete: jest.fn(async () => "[0.1, 0.95]") }
     const result = await rerank("q", cands, {

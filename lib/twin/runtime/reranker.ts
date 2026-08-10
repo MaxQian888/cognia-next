@@ -23,6 +23,8 @@
  * decides whether to call it; this file is only the algorithm.
  */
 
+import { hasNoLeakingPii } from "@cognia/redact"
+
 export interface RerankCandidate {
   /** Stable id from the vector store. */
   id: string
@@ -263,6 +265,12 @@ export function createLlmRerankScorer(
   opts?: { signal?: AbortSignal }
 ) => Promise<number[]> {
   return async (query, candidates, opts) => {
+    if (
+      !hasNoLeakingPii(query) ||
+      candidates.some((candidate) => !hasNoLeakingPii(candidate.content))
+    ) {
+      throw new Error("llm rerank: PII gate rejected query or candidate content")
+    }
     const raw = await client.complete(buildLlmRerankPrompt(query, candidates), {
       system: LLM_RERANK_SYSTEM,
       temperature: 0,

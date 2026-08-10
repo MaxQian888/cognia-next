@@ -19,19 +19,18 @@
  * surfacing the missing field in the UI is the Settings tab's job.
  */
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { loggers } from "@cognia/logging"
-import { createVectorStore, type IVectorStore, type VectorStoreConfig } from "@cognia/vector/store"
-import { embeddingProviderRequiresApiKey } from "@cognia/provider-embedding/embedding-catalog"
 import { observeTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { getTwinSource } from "@/lib/db/twin-sources"
 import { startJobWorker, type JobWorkerConfig, type SourceLoader } from "@/lib/twin/job-worker"
 import { createAnthropicLlmClient } from "@/lib/twin/distill"
+import {
+  buildTwinRuntimeAdapters,
+  deriveTwinVectorStoreConfig,
+} from "@/lib/twin/runtime/build-deps"
 import type { TwinRuntimeSettings, TwinSource } from "@/types/twin"
 import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
-
-const log = loggers.scheduler
 
 export type TwinWorkerReason = "noTwinSelected" | "disabled" | "incompleteConfig"
 
@@ -43,72 +42,6 @@ export interface UseTwinWorkerStatus {
    * free of `useTranslations`.
    */
   reasonKey?: TwinWorkerReason
-}
-
-function deriveVectorStoreConfig(settings: TwinRuntimeSettings): VectorStoreConfig | null {
-  const storage = settings.storage
-  const embedding = {
-    provider: settings.embedding.provider,
-    model: settings.embedding.model,
-    dimensions: undefined,
-    baseURL: settings.embedding.baseURL,
-  }
-  const apiKey = settings.embedding.apiKey
-  // Local providers (ollama / lmstudio / … / transformers.js) need no API key;
-  // only gate on a key when the provider actually requires one.
-  if (embeddingProviderRequiresApiKey(settings.embedding.provider) && !apiKey) return null
-
-  switch (storage.vectorBackend) {
-    case "qdrant":
-      if (!storage.qdrant?.url) return null
-      return {
-        provider: "qdrant",
-        embeddingConfig: embedding,
-        embeddingApiKey: apiKey,
-        qdrantUrl: storage.qdrant.url,
-        qdrantApiKey: storage.qdrant.apiKey,
-      }
-    case "pinecone":
-      if (!storage.pinecone?.apiKey || !storage.pinecone.indexName) return null
-      return {
-        provider: "pinecone",
-        embeddingConfig: embedding,
-        embeddingApiKey: apiKey,
-        pineconeApiKey: storage.pinecone.apiKey,
-        pineconeIndexName: storage.pinecone.indexName,
-        pineconeNamespace: storage.pinecone.namespace,
-      }
-    case "weaviate":
-      if (!storage.weaviate?.url) return null
-      return {
-        provider: "weaviate",
-        embeddingConfig: embedding,
-        embeddingApiKey: apiKey,
-        weaviateUrl: storage.weaviate.url,
-        weaviateApiKey: storage.weaviate.apiKey,
-      }
-    case "milvus":
-      if (!storage.milvus?.address) return null
-      return {
-        provider: "milvus",
-        embeddingConfig: embedding,
-        embeddingApiKey: apiKey,
-        milvusAddress: storage.milvus.address,
-        milvusToken: storage.milvus.token,
-        milvusSsl: storage.milvus.ssl,
-      }
-    case "chroma":
-      if (storage.chroma?.mode === "server" && !storage.chroma.serverUrl) return null
-      return {
-        provider: "chroma",
-        embeddingConfig: embedding,
-        embeddingApiKey: apiKey,
-        chromaMode: storage.chroma?.mode,
-        chromaServerUrl: storage.chroma?.serverUrl,
-      }
-    default:
-      return null
-  }
 }
 
 function buildSourceLoader(): SourceLoader {
@@ -139,7 +72,7 @@ function buildSourceLoader(): SourceLoader {
  */
 export function isTwinWorkerConfigComplete(settings: TwinRuntimeSettings): boolean {
   if (!settings.workerEnabled) return false
-  if (!deriveVectorStoreConfig(settings)) return false
+  if (!deriveTwinVectorStoreConfig(settings)) return false
   if (!settings.llm.apiKey) return false
   return true
 }
@@ -152,25 +85,17 @@ export function isTwinWorkerConfigComplete(settings: TwinRuntimeSettings): boole
  * if the vector-store client can't be constructed, matching the rest of the
  * twin runtime's best-effort semantics.
  */
-export function buildTwinWorkerConfig(settings: TwinRuntimeSettings): JobWorkerConfig | null {
+export async function buildTwinWorkerConfig(
+  settings: TwinRuntimeSettings
+): Promise<JobWorkerConfig | null> {
   if (!settings.workerEnabled) return null
-  const storeConfig = deriveVectorStoreConfig(settings)
-  if (!storeConfig) return null
   if (!settings.llm.apiKey) return null
-
-  let store: IVectorStore
-  try {
-    store = createVectorStore(storeConfig)
-  } catch (err) {
-    log.warn("twin worker: createVectorStore failed; worker will not start", {
-      err: String(err),
-    })
-    return null
-  }
+  const runtime = await buildTwinRuntimeAdapters(settings)
+  if (!runtime.ready) return null
   return {
     embedding: settings.embedding,
     vectorBackend: settings.storage.vectorBackend,
-    store,
+    store: runtime.adapters.store,
     sourceLoader: buildSourceLoader(),
     nameHints: settings.extraNameHints,
     llm: createAnthropicLlmClient({
@@ -196,24 +121,36 @@ export function useBackgroundTwinWorker(): UseTwinWorkerStatus {
     DEFAULT_TWIN_RUNTIME_SETTINGS
   )
 
-  // Memoise so an unrelated render doesn't tear the worker down. Settings
-  // changes (deep-equal-different) DO restart it via the effect dependency.
-  const config = useMemo<JobWorkerConfig | null>(() => buildTwinWorkerConfig(settings), [settings])
+  const [status, setStatus] = useState<UseTwinWorkerStatus>(() =>
+    settings.workerEnabled
+      ? { active: false, reasonKey: "incompleteConfig" }
+      : { active: false, reasonKey: "disabled" }
+  )
 
   useEffect(() => {
-    if (!config) return
-    // No twinId → claim across every twin's queue.
-    const handle = startJobWorker(config)
-    return () => {
-      void handle.stop()
+    let disposed = false
+    let handle: ReturnType<typeof startJobWorker> | undefined
+    if (!settings.workerEnabled) {
+      setStatus({ active: false, reasonKey: "disabled" })
+      return
     }
-  }, [config])
+    void buildTwinWorkerConfig(settings).then((config) => {
+      if (disposed) return
+      if (!config) {
+        setStatus({ active: false, reasonKey: "incompleteConfig" })
+        return
+      }
+      // No twinId → claim across every twin's queue.
+      handle = startJobWorker(config)
+      setStatus({ active: true })
+    })
+    return () => {
+      disposed = true
+      if (handle) void handle.stop()
+    }
+  }, [settings])
 
-  return useMemo<UseTwinWorkerStatus>(() => {
-    if (!settings.workerEnabled) return { active: false, reasonKey: "disabled" }
-    if (!config) return { active: false, reasonKey: "incompleteConfig" }
-    return { active: true }
-  }, [settings.workerEnabled, config])
+  return status
 }
 
 /**

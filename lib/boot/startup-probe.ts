@@ -9,6 +9,7 @@ interface ScheduledTaskProbeRow {
 export interface StartupProbeDependencies {
   getDatabase: () => CogniaDB
   listScheduledTasks: () => Promise<ScheduledTaskProbeRow[]>
+  getTwinRuntimeSettings: () => Promise<{ workerEnabled?: boolean }>
 }
 
 const defaultDependencies: StartupProbeDependencies = {
@@ -16,6 +17,10 @@ const defaultDependencies: StartupProbeDependencies = {
   listScheduledTasks: async () => {
     const { schedulerDb } = await import("@/lib/scheduler/scheduler-db")
     return schedulerDb.tasks.toArray()
+  },
+  getTwinRuntimeSettings: async () => {
+    const { getTwinRuntimeSettings } = await import("@/lib/db/twin-runtime-settings")
+    return getTwinRuntimeSettings()
   },
 }
 
@@ -28,11 +33,13 @@ export async function probeConfiguredBootCapabilities(
   dependencies: StartupProbeDependencies = defaultDependencies
 ): Promise<BootCapability[]> {
   const database = dependencies.getDatabase()
-  const [plugins, adapters, memoryJobs, scheduledTasks] = await Promise.all([
+  const [plugins, adapters, memoryJobs, twinJobs, scheduledTasks, twinSettings] = await Promise.all([
     database.plugins.toArray(),
     database.adapterInstances.toArray(),
     database.memoryJobs.toArray(),
+    database.twinJobs.toArray(),
     dependencies.listScheduledTasks(),
+    dependencies.getTwinRuntimeSettings(),
   ])
   const capabilities = new Set<BootCapability>()
 
@@ -55,7 +62,11 @@ export async function probeConfiguredBootCapabilities(
   if (adapters.some((adapter) => adapter.enabled)) {
     capabilities.add("integrations")
   }
-  if (memoryJobs.some((job) => job.status === "queued" || job.status === "running")) {
+  if (
+    memoryJobs.some((job) => job.status === "queued" || job.status === "running") ||
+    twinJobs.some((job) => job.status === "queued" || job.status === "running") ||
+    twinSettings.workerEnabled
+  ) {
     capabilities.add("knowledge-agents")
   }
   return [...capabilities]

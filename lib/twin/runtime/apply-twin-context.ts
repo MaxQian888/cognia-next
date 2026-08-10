@@ -23,7 +23,14 @@ import { backfillStyleSampleEmbeddings, getTwinProfile } from "@/lib/db/twin-pro
 import { getTwinSourcesByIds } from "@/lib/db/twin-sources"
 import type { Character } from "@cognia/agent-config-types"
 import type { IVectorStore } from "@cognia/vector/store"
-import type { StyleSample, TwinChunk, TwinSource, TwinSettings, VectorBackend } from "@/types/twin"
+import type {
+  RetrievedTwinChunk,
+  StyleSample,
+  TwinChunk,
+  TwinSource,
+  TwinSettings,
+  VectorBackend,
+} from "@/types/twin"
 import { DEFAULT_TWIN_SETTINGS } from "@/types/twin"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { vectorCollectionName } from "../ingest/persist"
@@ -104,11 +111,7 @@ export interface ApplyTwinContextInput {
  * SourcesPart alongside the assistant message. Mirrors the internal shape
  * used by `applySystemPromptTemplate`.
  */
-export interface ApplyTwinContextRetrievedChunk {
-  chunk: { vectorDocId: string; content: string; sourceId: string }
-  score: number
-  sourceTitle?: string
-}
+export type ApplyTwinContextRetrievedChunk = RetrievedTwinChunk
 
 export interface ApplyTwinContextResult {
   /** The applied template + metadata. `null` when the character is not
@@ -246,11 +249,7 @@ export async function applyTwinContext(
   }
 
   // RAG retrieval — only attempt when we have an embedding to search by.
-  let retrievedChunks: ApplyTwinContextResult["applied"] extends infer A
-    ? A extends { metadata: { retrievedChunkIds: string[] } }
-      ? Parameters<typeof applySystemPromptTemplate>[0]["retrievedChunks"]
-      : never
-    : never = []
+  let retrievedChunks: RetrievedTwinChunk[] = []
   if (settings.enableRag && queryEmbedding && deps.store.searchByEmbedding) {
     try {
       // Over-fetch when a reranker is configured so we have a wider pool to
@@ -362,12 +361,17 @@ export async function applyTwinContext(
       const sourceById = new Map<string, TwinSource>(
         (await getTwinSourcesByIds(sourceIds)).map((s) => [s.id, s])
       )
-      const enriched: typeof retrievedChunks = []
+      const enriched: RetrievedTwinChunk[] = []
       for (const id of orderedIds) {
         const chunk = chunkById.get(id)
         if (!chunk) continue
         enriched.push({
-          chunk,
+          chunk: {
+            id: chunk.id,
+            vectorDocId: chunk.vectorDocId,
+            sourceId: chunk.sourceId,
+            contentRedacted: chunk.contentRedacted,
+          },
           score: scoreById.get(id) ?? 0,
           sourceTitle: sourceById.get(chunk.sourceId)?.title,
         })
@@ -378,7 +382,7 @@ export async function applyTwinContext(
       if (deps.reranker && enriched.length > settings.ragTopK) {
         const candidates: RerankCandidate[] = enriched.map((rc) => ({
           id: rc.chunk.vectorDocId,
-          content: rc.chunk.content,
+          content: rc.chunk.contentRedacted,
           score: rc.score,
           sourceTitle: rc.sourceTitle,
         }))
@@ -406,7 +410,7 @@ export async function applyTwinContext(
           userMessage,
           retrievedChunks.map((rc) => ({
             id: rc.chunk.vectorDocId,
-            content: rc.chunk.content,
+            content: rc.chunk.contentRedacted,
             score: rc.score,
           })),
           { minKeep: settings.correctiveMinKeep ?? 1 }
@@ -472,7 +476,7 @@ export async function applyTwinContext(
       sessionId,
       retrievedChunks.map((rc) => ({
         id: rc.chunk.vectorDocId,
-        content: rc.chunk.content,
+        content: rc.chunk.contentRedacted,
         score: rc.score,
       }))
     )
@@ -486,7 +490,7 @@ export async function applyTwinContext(
       ? formatCitations(
           retrievedChunks.map((rc) => ({
             id: rc.chunk.vectorDocId,
-            content: rc.chunk.content,
+            content: rc.chunk.contentRedacted,
             rerankScore: rc.score,
             metadata: {
               title: rc.sourceTitle,
@@ -501,15 +505,7 @@ export async function applyTwinContext(
     applied,
     degraded,
     degradedReason,
-    retrievedChunks: retrievedChunks.map((rc) => ({
-      chunk: {
-        vectorDocId: rc.chunk.vectorDocId,
-        content: rc.chunk.content,
-        sourceId: rc.chunk.sourceId,
-      },
-      score: rc.score,
-      sourceTitle: rc.sourceTitle,
-    })),
+    retrievedChunks,
     selectedStyleSamples: styleSamples,
     ...(citations ? { citations } : {}),
   }

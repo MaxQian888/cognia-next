@@ -20,8 +20,10 @@ it("requests runtimes only for configured background work", async () => {
         },
         adapterInstances: { toArray: async () => [{ enabled: true }] },
         memoryJobs: { toArray: async () => [{ status: "queued" }] },
+        twinJobs: { toArray: async () => [] },
       }) as never,
     listScheduledTasks: async () => [{ status: "active" }],
+    getTwinRuntimeSettings: async () => ({ workerEnabled: false }),
   })
 
   expect(capabilities).toEqual([
@@ -39,9 +41,27 @@ it("keeps main startup light when no optional background work is configured", as
         plugins: { toArray: async () => [] },
         adapterInstances: { toArray: async () => [{ enabled: false }] },
         memoryJobs: { toArray: async () => [{ status: "completed" }] },
+        twinJobs: { toArray: async () => [] },
       }) as never,
     listScheduledTasks: async () => [{ status: "paused" }],
+    getTwinRuntimeSettings: async () => ({ workerEnabled: false }),
   })
 
   expect(capabilities).toEqual([])
+})
+
+it("boots knowledge agents for queued Twin work or an enabled Twin worker", async () => {
+  const capabilities = await probeConfiguredBootCapabilities({
+    getDatabase: () =>
+      ({
+        plugins: { toArray: async () => [] },
+        adapterInstances: { toArray: async () => [] },
+        memoryJobs: { toArray: async () => [] },
+        twinJobs: { toArray: async () => [{ status: "queued" }] },
+      }) as never,
+    listScheduledTasks: async () => [],
+    getTwinRuntimeSettings: async () => ({ workerEnabled: true }),
+  })
+
+  expect(capabilities).toEqual(["knowledge-agents"])
 })

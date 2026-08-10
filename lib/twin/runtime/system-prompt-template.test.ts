@@ -5,24 +5,14 @@
  */
 
 import { applySystemPromptTemplate } from "./system-prompt-template"
-import type { Playbook, ProfileEntity, StyleSample, TwinChunk } from "@/types/twin"
+import type { Playbook, ProfileEntity, RetrievedTwinChunk, StyleSample } from "@/types/twin"
 
-function makeChunk(id: string, content = "the chunk body"): TwinChunk {
+function makeChunk(id: string, content = "the chunk body"): RetrievedTwinChunk["chunk"] {
   return {
     id,
-    twinId: "twin_a",
     sourceId: "src_1",
-    content,
     contentRedacted: content,
-    charStart: 0,
-    charEnd: content.length,
-    vectorBackend: "qdrant",
-    vectorCollection: "c",
     vectorDocId: `vec_${id}`,
-    strategy: "paragraph",
-    tokenCount: 1,
-    metadata: {},
-    createdAt: 1,
   }
 }
 

@@ -1450,7 +1450,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (memoryPolicy.canRecall) {
       try {
         const { applyMemoryContext } = await import("@/lib/memory/runtime/apply-memory-context")
-        const twinChunkTexts = opts.twinContext?.retrievedChunks.map((c) => c.chunk.content) ?? []
+        const twinChunkTexts =
+          opts.twinContext?.retrievedChunks.map((c) => c.chunk.contentRedacted) ?? []
         const readableScopes = new Set(memoryPolicy.readableScopes)
         const scopedMemoryDeps = {
           ...ctx.memoryDeps,
