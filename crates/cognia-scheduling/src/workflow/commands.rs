@@ -9,7 +9,10 @@ use tauri::State;
 use super::run_mirror::MirrorError;
 use super::state::WorkflowState;
 use super::triggers::webhook_router::{IntegrationIngressEntry, WebhookEntry};
-use super::types::{InFlightRunRow, PersistRunStateInput, RegisterTriggerInput};
+use super::types::{
+    InFlightRunRow, PersistRunStateInput, RegisterTriggerInput, WorkflowWaitEventRow,
+    WorkflowWaitpointDecisionInput, WorkflowWaitpointRow,
+};
 
 fn map_mirror_err(e: MirrorError) -> String {
     e.to_string()
@@ -347,6 +350,68 @@ pub async fn workflow_ack_completed(
     run_id: String,
 ) -> Result<(), String> {
     state.mirror.ack_completed(&run_id).map_err(map_mirror_err)
+}
+
+#[tauri::command]
+pub async fn workflow_waitpoint_create(
+    state: State<'_, WorkflowState>,
+    waitpoint: WorkflowWaitpointRow,
+) -> Result<WorkflowWaitpointRow, String> {
+    state
+        .mirror
+        .create_waitpoint(&waitpoint)
+        .map_err(map_mirror_err)
+}
+
+#[tauri::command]
+pub async fn workflow_waitpoint_get(
+    state: State<'_, WorkflowState>,
+    waitpoint_id: String,
+) -> Result<Option<WorkflowWaitpointRow>, String> {
+    state
+        .mirror
+        .get_waitpoint(&waitpoint_id)
+        .map_err(map_mirror_err)
+}
+
+#[tauri::command]
+pub async fn workflow_waitpoint_list_pending(
+    state: State<'_, WorkflowState>,
+) -> Result<Vec<WorkflowWaitpointRow>, String> {
+    state
+        .mirror
+        .list_pending_waitpoints()
+        .map_err(map_mirror_err)
+}
+
+#[tauri::command]
+pub async fn workflow_waitpoint_decide(
+    state: State<'_, WorkflowState>,
+    input: WorkflowWaitpointDecisionInput,
+) -> Result<bool, String> {
+    state
+        .mirror
+        .decide_waitpoint(&input)
+        .map_err(map_mirror_err)
+}
+
+#[tauri::command]
+pub async fn workflow_wait_event_persist(
+    state: State<'_, WorkflowState>,
+    event: WorkflowWaitEventRow,
+) -> Result<(), String> {
+    state
+        .mirror
+        .persist_wait_event(&event)
+        .map_err(map_mirror_err)
+}
+
+#[tauri::command]
+pub async fn workflow_wait_event_prune(
+    state: State<'_, WorkflowState>,
+    now: i64,
+) -> Result<usize, String> {
+    state.mirror.prune_wait_events(now).map_err(map_mirror_err)
 }
 
 #[cfg(test)]

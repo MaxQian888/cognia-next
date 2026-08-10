@@ -64,13 +64,27 @@ describe("workflowRun", () => {
 
   it("runs a workflow and reports success via the activity pill", async () => {
     const { dispatch, actions } = recorder()
+    const run = jest.fn(async (_input: unknown) => ({
+      runId: "r1",
+      status: "succeeded" as const,
+    }))
     await workflowRun("w1", {
       dispatch,
       ensureDb: async () => {},
       get: async () => wf("w1", "Nightly", 2),
-      run: async () => ({ runId: "r1", status: "succeeded" }),
+      run,
       subscribe: noSub,
     })
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: "w1",
+        entrypoint: "cli",
+        caller: "cognia-cli",
+        triggerKind: "trigger.manual",
+        requestedRunId: expect.stringMatching(/^run_/),
+      })
+    )
+    expect(run.mock.calls[0][0]).not.toHaveProperty("workflow")
     expect(actions[0]).toMatchObject({
       type: "ACTIVITY_START",
       kind: "workflow",
@@ -113,11 +127,29 @@ describe("workflowRun", () => {
       },
       run: async (input) => {
         emit([
-          { id: "e1", runId: input.runId!, type: "step_started", stepId: "n0", ts: 1 } as never,
-          { id: "e2", runId: input.runId!, type: "step_completed", stepId: "n0", ts: 5 } as never,
-          { id: "e3", runId: input.runId!, type: "step_started", stepId: "n1", ts: 6 } as never,
+          {
+            id: "e1",
+            runId: input.requestedRunId!,
+            type: "step_started",
+            stepId: "n0",
+            ts: 1,
+          } as never,
+          {
+            id: "e2",
+            runId: input.requestedRunId!,
+            type: "step_completed",
+            stepId: "n0",
+            ts: 5,
+          } as never,
+          {
+            id: "e3",
+            runId: input.requestedRunId!,
+            type: "step_started",
+            stepId: "n1",
+            ts: 6,
+          } as never,
         ])
-        return { runId: input.runId!, status: "succeeded" }
+        return { runId: input.requestedRunId!, status: "succeeded" }
       },
     })
     const step = actions.findLast((a) => a.type === "WORKFLOW_RUN_STEP") as {

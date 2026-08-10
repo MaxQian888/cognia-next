@@ -13,17 +13,18 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import { RunDetail } from "./run-detail"
 
+const routerPush = jest.fn()
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: routerPush }),
 }))
 
-const runFromStepMock = jest.fn(async (..._args: unknown[]) => ({
+const retryWorkflowRunMock = jest.fn(async (..._args: unknown[]) => ({
   runId: "run2",
-  status: "succeeded" as const,
+  result: { runId: "run2", status: "succeeded" as const },
 }))
-jest.mock("@/lib/workflow/runtime/run-from-step", () => ({
+jest.mock("@/lib/workflow/runtime/execution-authority", () => ({
   __esModule: true,
-  runFromStep: (...args: unknown[]) => runFromStepMock(...args),
+  retryWorkflowRun: (...args: unknown[]) => retryWorkflowRunMock(...args),
 }))
 
 beforeEach(async () => {
@@ -31,7 +32,8 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-  runFromStepMock.mockClear()
+  retryWorkflowRunMock.mockClear()
+  routerPush.mockClear()
 })
 
 const snapshot: VisualWorkflow = {
@@ -77,6 +79,16 @@ describe("RunDetail", () => {
       startedAt: 100,
       completedAt: 200,
       workflowSnapshot: snapshot,
+      versionId: "version_1",
+      deploymentId: "deployment_1",
+      deploymentRevision: 1,
+      executionBinding: {
+        versionId: "version_1",
+        deploymentId: "deployment_1",
+        deploymentRevision: 1,
+        entrypoint: "http",
+        caller: "client:test",
+      },
     })
     await getDb().workflowRunEvents.bulkPut([
       { id: "e1", runId: "run1", ts: 101, type: "step_started", stepId: "n1" },
@@ -114,6 +126,16 @@ describe("RunDetail", () => {
       startedAt: 100,
       completedAt: 200,
       workflowSnapshot: snapshot,
+      versionId: "version_1",
+      deploymentId: "deployment_1",
+      deploymentRevision: 1,
+      executionBinding: {
+        versionId: "version_1",
+        deploymentId: "deployment_1",
+        deploymentRevision: 1,
+        entrypoint: "http",
+        caller: "client:test",
+      },
     })
     await getDb().workflowRunEvents.put({
       id: "e1",
@@ -139,6 +161,16 @@ describe("RunDetail", () => {
       startedAt: 100,
       completedAt: 200,
       workflowSnapshot: snapshot,
+      versionId: "version_1",
+      deploymentId: "deployment_1",
+      deploymentRevision: 1,
+      executionBinding: {
+        versionId: "version_1",
+        deploymentId: "deployment_1",
+        deploymentRevision: 1,
+        entrypoint: "http",
+        caller: "client:test",
+      },
     })
     await getDb().workflowRunEvents.put({
       id: "e1",
@@ -155,16 +187,51 @@ describe("RunDetail", () => {
     await waitFor(() => expect(btn).not.toBeDisabled())
     fireEvent.click(btn)
 
-    await waitFor(() => expect(runFromStepMock).toHaveBeenCalledTimes(1))
-    const arg = runFromStepMock.mock.calls[0][0] as Record<string, unknown>
+    await waitFor(() => expect(retryWorkflowRunMock).toHaveBeenCalledTimes(1))
+    const arg = retryWorkflowRunMock.mock.calls[0][0] as Record<string, unknown>
     expect(arg).toEqual(
       expect.objectContaining({
+        runId: "run1",
+        mode: "failed-step",
         startStepId: "n1",
-        seedFromRunId: "run1",
       })
     )
-    expect((arg.workflow as { id: string }).id).toBe("wf1")
-    expect((arg.trigger as { payload: unknown }).payload).toEqual({ greeting: "hi" })
+    await waitFor(() => expect(routerPush).toHaveBeenCalledWith(expect.stringContaining("run2")))
+  })
+
+  it("exposes original-version and current-production retries for formal runs", async () => {
+    await getDb().workflowRuns.put({
+      id: "run1",
+      workflowId: "wf1",
+      status: "failed",
+      triggerKind: "trigger.manual",
+      triggerPayload: {},
+      startedAt: 100,
+      completedAt: 200,
+      workflowSnapshot: snapshot,
+      versionId: "version_1",
+      deploymentId: "deployment_1",
+      deploymentRevision: 3,
+      executionBinding: {
+        versionId: "version_1",
+        deploymentId: "deployment_1",
+        deploymentRevision: 3,
+        entrypoint: "mcp",
+        caller: "principal:alice",
+      },
+      traceId: "trace_1",
+      lineage: { rootRunId: "run1" },
+    })
+
+    wrap()
+    fireEvent.click(await screen.findByTestId("run-detail-rerun-original"))
+    await waitFor(() =>
+      expect(retryWorkflowRunMock).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run1", mode: "original-version" })
+      )
+    )
+    expect(screen.getByTestId("run-provenance")).toHaveTextContent("entrypoint mcp")
+    expect(screen.getByTestId("run-provenance")).toHaveTextContent("deployment revision 3")
   })
 
   it("renders the export button and the step breakdown table", async () => {

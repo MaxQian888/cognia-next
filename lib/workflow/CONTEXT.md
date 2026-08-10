@@ -16,6 +16,15 @@ visual workflow subsystem (`lib/workflow/`, `components/workflow/`,
 > the decision, not the current state. See
 > `docs/plans/2026-07-16-workflow-linkage-remediation.md` for what closed when.
 
+> **Control-plane update (2026-08):** the taxonomy now contains 153 node kinds.
+> Formal CLI, trigger, history, Dead Letter, MCP, and subworkflow entrypoints
+> resolve an immutable production deployment through `execution-authority.ts`;
+> only editor Preview/Test may call the draft orchestrator directly. Every run
+> carries a root `traceId` plus explicit parent/retry lineage. Approval,
+> risk-gate, and event waits share the v156 `workflowWaitpoints` /
+> `workflowWaitEvents` repository (Dexie on web, mirrored in the Tauri workflow
+> SQLite store), so the pending state and original deadline survive restarts.
+
 ## Glossary
 
 ### Orchestration harness

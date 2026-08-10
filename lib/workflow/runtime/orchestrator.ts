@@ -25,6 +25,7 @@
  */
 
 import { nanoid } from "nanoid"
+import { generateTraceId } from "@cognia/logging"
 import { getDb } from "@/lib/db/schema"
 import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { DEFAULT_MAX_CONCURRENCY } from "@/types/workflow/visual"
@@ -37,6 +38,8 @@ import type {
   VisualWorkflow,
   WorkflowEdge,
   WorkflowRunRow,
+  WorkflowRunLineage,
+  WorkflowRunSecurityContext,
   WorkflowTriggeredFrom,
 } from "@/types/workflow/visual"
 import type { WorkflowExecutionBinding } from "@/types/workflow/deployment"
@@ -164,6 +167,9 @@ export interface RunWorkflowInput {
    * trace, letting the eval workflow target assemble the run via `queryByTrace`.
    */
   traceId?: string
+  /** Parent/retry provenance. Omitted inputs become a new root run. */
+  lineage?: WorkflowRunLineage
+  securityContext?: WorkflowRunSecurityContext
   /**
    * When true, the terminal-failure safety net (`flow.catch` finalization +
    * onFailure notify) is NOT run for this invocation. Set by the failure
@@ -239,6 +245,14 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   //   - A live lease held by another executor process means the run is
   //     already being driven — back off instead of double-executing.
   const existingRow = await getDb().workflowRuns.get(runId)
+  const traceId = input.traceId ?? existingRow?.traceId ?? generateTraceId()
+  const lineage: WorkflowRunLineage = input.lineage ?? existingRow?.lineage ?? { rootRunId: runId }
+  const securityContext: WorkflowRunSecurityContext = input.securityContext ??
+    existingRow?.securityContext ?? {
+      piiEgressRequired:
+        input.executionBinding !== undefined && trigger.kind === "trigger.connector.inbound",
+      sourceTriggerKind: trigger.kind,
+    }
   if (existingRow && TERMINAL_RUN_STATUSES.has(existingRow.status)) {
     await ackRunCompleted(runId)
     return { runId, status: existingRow.status, error: existingRow.error }
@@ -271,6 +285,9 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
             : {}),
         }
       : {}),
+    traceId,
+    lineage,
+    securityContext,
     projectId,
     status: "running",
     triggerKind: trigger.kind,
@@ -687,7 +704,9 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 secretResolver,
                 logger,
                 honorPinData: input.honorPinData,
-                ...(input.traceId ? { traceId: input.traceId } : {}),
+                traceId,
+                lineage,
+                securityContext,
                 ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
               })
             : await runStep({
@@ -703,7 +722,9 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 secretResolver,
                 logger,
                 honorPinData: input.honorPinData,
-                ...(input.traceId ? { traceId: input.traceId } : {}),
+                traceId,
+                lineage,
+                securityContext,
                 ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
               })
         stepOutputs.set(stepId, result.output)

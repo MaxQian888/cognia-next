@@ -15,6 +15,12 @@
       "tokens": "Tokens"
     },
     "export": "Export",
+    "formalRetryUnavailable": "This draft-era run has no immutable version and can only be replayed in local debug mode.",
+    "lineage": {
+      "children": "{count, plural, one {# child run} other {# child runs}}",
+      "parent": "Parent run",
+      "retryOf": "Original run"
+    },
     "notFound": {
       "description": "This run may have been deleted, or the URL is incorrect.",
       "title": "Run not found"
@@ -23,12 +29,27 @@
     "rerunFromStep": "Re-run from step",
     "rerunFromStepHint": "Select a step in the timeline to re-run from it",
     "rerunning": "Re-running…",
+    "retry": {
+      "currentDeployment": "Run current production",
+      "failedStep": "Continue from step",
+      "originalVersion": "Run original version"
+    },
     "running": "Running…",
+    "provenance": {
+      "caller": "caller {value}",
+      "draft": "draft/local debug",
+      "entrypoint": "entrypoint {value}",
+      "revision": "deployment revision {value}",
+      "trace": "trace {value}",
+      "trigger": "trigger {value}",
+      "version": "version {value}"
+    },
     "sparkline": {
       "title": "Duration trend"
     },
     "totalCost": "{cost} est.",
-    "totalTokens": "{tokens} tok"
+    "totalTokens": "{tokens} tok",
+    "unknownError": "unknown error"
   },
   "list": {
     "backToEditor": "Back to editor",

@@ -1,16 +1,15 @@
 /**
- * Thin wrapper around `runWorkflow` for IM-originated runs.
+ * Thin wrapper around Execution Authority for IM-originated formal runs.
  *
- * Why a wrapper instead of calling `runWorkflow` directly: every IM-side
+ * Why a wrapper instead of calling the authority directly: every IM-side
  * caller needs the same three things:
  *
- *   1. Look up the frozen `VisualWorkflow` from Dexie by id (the by-name
- *      tool already resolved the id; here we hydrate the row).
- *   2. Build the `TriggerEvent` envelope with `kind: "trigger.manual"` —
+ *   1. Resolve and pin the active production artifact by workflow id.
+ *   2. Build the formal trigger envelope with `kind: "trigger.manual"` —
  *      the same kind the editor's "Run now" button uses.
  *   3. Pass `triggeredBy` so the IM progress-runner can subscribe.
  *
- * Returning a thin `{runId}` instead of the full `RunWorkflowResult`
+ * Returning a thin `{runId}` instead of the full authority result
  * because the caller (bus dispatcher for `wf_approve`) waits only for the
  * durable run row, not completion. Completion shows up as a final-summary
  * card pushed by the runner, not as a tool response.

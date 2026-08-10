@@ -176,6 +176,63 @@ pub struct InFlightRunRow {
     pub started_at: i64,
 }
 
+/// Native mirror of the renderer's durable workflow checkpoint.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowWaitpointRow {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub run_id: String,
+    pub workflow_id: String,
+    pub step_id: String,
+    pub key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    pub created_at: i64,
+    pub not_before: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notification_sent_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution_notification_sent_at: Option<i64>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowWaitpointDecisionInput {
+    pub id: String,
+    pub status: String,
+    pub resolution: serde_json::Value,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowWaitEventRow {
+    pub id: String,
+    pub key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+    pub emitted_at: i64,
+    pub expires_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumed_by_waitpoint_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumed_at: Option<i64>,
+}
+
 /// Webhook trigger payload — the body of the inbound HTTP request, plus
 /// surface metadata so workflows can branch on the request method or query
 /// params without parsing them themselves. Constructed in Phase 5b when the

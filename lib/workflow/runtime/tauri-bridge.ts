@@ -18,6 +18,12 @@ import type {
 } from "@/types/workflow/visual"
 import { notifyCompanionsOfRunState } from "./companion-run-events"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
+import type {
+  WorkflowWaitEvent,
+  WorkflowWaitpoint,
+  WorkflowWaitpointResolution,
+  WorkflowWaitpointStatus,
+} from "@/types/workflow/waitpoint"
 
 let _isTauri: boolean | null = null
 
@@ -75,6 +81,55 @@ export async function reloadInFlightRuns(): Promise<InFlightRunRow[]> {
 /** Called when a run terminates successfully so Rust can drop the mirror row. */
 export async function ackRunCompleted(runId: string): Promise<void> {
   await safeInvoke("workflow_ack_completed", { runId })
+}
+
+function terminalStatus(resolution: WorkflowWaitpointResolution): WorkflowWaitpointStatus {
+  switch (resolution.outcome) {
+    case "rejected":
+      return "rejected"
+    case "timed_out":
+      return "timed_out"
+    case "cancelled":
+      return "cancelled"
+    default:
+      return "resolved"
+  }
+}
+
+export function createNativeWorkflowWaitpoint(
+  waitpoint: WorkflowWaitpoint
+): Promise<WorkflowWaitpoint | null> {
+  return safeInvoke<WorkflowWaitpoint>("workflow_waitpoint_create", { waitpoint })
+}
+
+export function getNativeWorkflowWaitpoint(id: string): Promise<WorkflowWaitpoint | null> {
+  return safeInvoke<WorkflowWaitpoint | null>("workflow_waitpoint_get", { waitpointId: id })
+}
+
+export function listNativePendingWorkflowWaitpoints(): Promise<WorkflowWaitpoint[] | null> {
+  return safeInvoke<WorkflowWaitpoint[]>("workflow_waitpoint_list_pending")
+}
+
+export function decideNativeWorkflowWaitpoint(
+  id: string,
+  resolution: WorkflowWaitpointResolution
+): Promise<boolean | null> {
+  return safeInvoke<boolean>("workflow_waitpoint_decide", {
+    input: {
+      id,
+      status: terminalStatus(resolution),
+      resolution,
+      updatedAt: resolution.resolvedAt,
+    },
+  })
+}
+
+export async function persistNativeWorkflowWaitEvent(event: WorkflowWaitEvent): Promise<void> {
+  await safeInvoke("workflow_wait_event_persist", { event })
+}
+
+export function pruneNativeWorkflowWaitEvents(now: number): Promise<number | null> {
+  return safeInvoke<number>("workflow_wait_event_prune", { now })
 }
 
 /**

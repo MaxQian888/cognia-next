@@ -11,7 +11,8 @@
  */
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
-import { applyPiiGate, type PiiGateMode } from "./pii-gate"
+import type { PiiGateMode } from "./pii-gate"
+import { guardWorkflowEgress } from "@/lib/workflow/runtime/egress-guard"
 import {
   runCouncil,
   defaultCouncilRunPrompt,
@@ -52,7 +53,13 @@ export async function executeAiCouncil(
   }
 
   // PII gate FIRST — the prompt egresses to every councillor + the synthesizer.
-  const gated = applyPiiGate(params.piiGate, { system: undefined, user: params.prompt ?? "" })
+  const guarded = guardWorkflowEgress({
+    securityContext: ctx.securityContext,
+    sink: "model",
+    requestedMode: params.piiGate,
+    value: { system: undefined as string | undefined, user: params.prompt ?? "" },
+  })
+  const gated = { ...guarded.value, redacted: guarded.redacted }
   if (!gated.user.trim()) {
     throw nonRetryable("ai.council: a non-empty prompt is required")
   }

@@ -143,6 +143,13 @@ describe("PluginInvokeConfig — mode inference", () => {
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: "task" }))
   })
+
+  it("defaults network-capable plugin egress to block", () => {
+    wrap(<PluginInvokeConfig params={{ mode: "task" }} onChange={jest.fn()} />)
+    expect(screen.getByRole("combobox", { name: "PII egress policy" })).toHaveTextContent(
+      "Block sensitive data"
+    )
+  })
 })
 
 describe("PluginInvokeConfig — capability-fed tool mode", () => {

@@ -25,7 +25,8 @@
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
 import type { ApiFlavor } from "@cognia/provider-types/provider"
-import { applyPiiGate, type PiiGateMode } from "./pii-gate"
+import type { PiiGateMode } from "./pii-gate"
+import { guardWorkflowEgress } from "@/lib/workflow/runtime/egress-guard"
 import { buildJsonInstruction, parseStructured } from "./structured"
 import { runStructuredTurn, type SchemaViolationMode } from "./structured-turn"
 import { validateAgainstJsonSchema } from "./schema-validate"
@@ -93,24 +94,19 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     ? [params.systemPrompt, buildJsonInstruction(schemaHint)].filter(Boolean).join("\n\n")
     : params.systemPrompt
 
-  // PII gate FIRST — nothing leaves the machine before it ran. "block"
-  // throws a non-retryable error; "redact" swaps prompts in place.
-  const gated = applyPiiGate(params.piiGate, {
-    system: baseSystem,
-    user: params.userPrompt ?? "",
-  })
+  let outboundSystem = baseSystem
+  const outboundUser = params.userPrompt ?? ""
 
   // Twin grounding: when the node targets a twin-bound character, wrap the
-  // (already PII-gated) system prompt with the twin's retrieved context via the
-  // shared injector. No characterId → byte-identical to before. Injected twin
-  // material is redacted at ingest, so it rides safely after the PII gate. The
-  // injector never throws and degrades to the original prompt on any failure.
+  // system prompt with retrieved context via the shared injector. The final
+  // assembled prompt is gated below, so locally-derived twin material cannot
+  // bypass the workflow egress boundary.
   if (typeof params.characterId === "string" && params.characterId.trim()) {
     const { injectTwinContext } = await import("../shared/twin-injector")
     const injected = await injectTwinContext({
       characterId: params.characterId,
-      userPrompt: gated.user,
-      baseSystemPrompt: gated.system,
+      userPrompt: outboundUser,
+      baseSystemPrompt: outboundSystem,
       source: "workflow:ai.prompt",
     })
     // MERGE, don't replace: the injector's returned prompt is the twin's own
@@ -119,9 +115,19 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     // Keep the twin context first and the node base last so the JSON instruction
     // retains its emphasis-last position.
     if (injected.applied) {
-      gated.system = [injected.systemPrompt, gated.system].filter(Boolean).join("\n\n")
+      outboundSystem = [injected.systemPrompt, outboundSystem].filter(Boolean).join("\n\n")
     }
   }
+
+  // Gate the complete model payload after every local enrichment. "block"
+  // throws a non-retryable error; "redact" swaps prompts in place.
+  const guarded = guardWorkflowEgress({
+    securityContext: ctx.securityContext,
+    sink: "model",
+    requestedMode: params.piiGate,
+    value: { system: outboundSystem, user: outboundUser },
+  })
+  const gated = { ...guarded.value, redacted: guarded.redacted }
 
   // Shared tail: attach `structured` / `parseError` in JSON mode, plus the
   // soft `schemaValid` / `schemaErrors` stamp when a schema is enforced —

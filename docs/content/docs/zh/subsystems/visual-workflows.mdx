@@ -11,6 +11,8 @@ cognia-next 借这层把已经成熟的运行时实体 —— [角色](../chat/c
 
 - 可视化图编辑器：左栏拖拽 → 拖到画布 → 句柄连接 → 右栏检查器配置 → Ctrl+S 保存 → zundo 撤销重做 → elkjs 自动布局。
 - 执行引擎：端到端跑图、每步写入持久事件日志、支持重试 / 超时 / 幂等、webview 崩溃后能从日志恢复。
+- 正式执行权威：CLI、触发器、MCP、子工作流、运行历史与 Dead Letter 必须经 Execution Authority 执行已发布 immutable artifact；只有编辑器 Preview/Test 是显式 draft 路径。
+- 持久检查点：审批、risk gate 与 event wait 共用 CAS-controlled repository，使用首次绝对截止时间与“事件先持久化、后匹配”语义。
 - 触发分类：手动 / cron / 连接器入站 / 聊天消息 / webhook —— 都接入现有基础设施，不另起调度器。
 - 混合运行时：**Rust 负责"工作流何时启动"和"这次运行是否撑过了崩溃"，TS 负责"给定一次运行，怎么把步骤一个个走完"**。
 
@@ -33,25 +35,28 @@ flowchart TB
     direction TB
     Cron[cron_daemon.rs<br/>tokio + cron crate]
     Webhook[webhook_router.rs<br/>axum 127.0.0.1:&lt;random&gt;]
-    Mirror[run_mirror.rs<br/>SQLite 运行状态镜像]
-    Commands[commands.rs<br/>workflow_register_trigger 等 6 个 IPC]
+    Mirror[run_mirror.rs<br/>SQLite run + waitpoint 镜像]
+    Commands[commands.rs<br/>trigger · run · waitpoint IPC]
   end
 
   subgraph TS["📜 TS 层 · lib/workflow/"]
     direction TB
     Editor[editor/<br/>Zustand+zundo · React Flow 适配]
     Orchestrator[runtime/orchestrator.ts<br/>topo-sort → step-executor → event-log]
+    Authority[runtime/execution-authority.ts<br/>immutable admission + retries]
     Registry[nodes/registry.ts<br/>kind+typeVersion → execute fn]
-    BuiltIns[nodes/built-ins.ts<br/>32 个内置执行器]
+    BuiltIns[nodes/<br/>153 个核心 kind + plugin registry]
     Bridge[runtime/trigger-bridge.ts<br/>workflow:trigger 监听]
     WebhookBridge[runtime/webhook-bridge.ts<br/>syncWorkflowTriggers]
   end
 
-  subgraph Storage["🗄️ Dexie v22"]
+  subgraph Storage["🗄️ Dexie v156"]
     Workflows[(workflows)]
     Runs[(workflowRuns<br/>含 frozen snapshot)]
     Events[(workflowRunEvents<br/>持久事件日志)]
     Triggers[(workflowTriggers)]
+    Versions[(workflowVersions<br/>workflowDeployments<br/>workflowInvocations)]
+    Waitpoints[(workflowWaitpoints<br/>workflowWaitEvents)]
   end
 
   subgraph UI["🎨 UI"]
@@ -66,11 +71,14 @@ flowchart TB
   Mirror <-- "workflow_persist_run_state" --> Orchestrator
   Commands <-- "invoke()" --> WebhookBridge
 
-  Bridge --> Orchestrator
+  Bridge --> Authority
+  Authority --> Orchestrator
   Orchestrator --> Registry
   Registry --> BuiltIns
   Orchestrator -- "appendEvent" --> Events
   Orchestrator -- "upsertRun" --> Runs
+  Authority -- "pin immutable artifact" --> Versions
+  Orchestrator -- "create / decide" --> Waitpoints
   Editor <-- "live query" --> Workflows
   Runs2 <-- "useLiveQuery [runId+ts]" --> Events
 
@@ -84,8 +92,8 @@ flowchart TB
   classDef storage fill:#0f172a,stroke:#475569,color:#cbd5e1
   classDef ui fill:#312e81,stroke:#818cf8,color:#e0e7ff
   class Cron,Webhook,Mirror,Commands rust
-  class Editor,Orchestrator,Registry,BuiltIns,Bridge,WebhookBridge ts
-  class Workflows,Runs,Events,Triggers storage
+  class Editor,Authority,Orchestrator,Registry,BuiltIns,Bridge,WebhookBridge ts
+  class Workflows,Runs,Events,Triggers,Versions,Waitpoints storage
   class Canvas,Library,Runs2,Settings ui
 ```
 
@@ -97,7 +105,7 @@ flowchart TB
 
 | 文件                                  | 用途                                                          |
 | ------------------------------------- | ------------------------------------------------------------- |
-| `types/workflow/visual.ts`            | `VisualWorkflow` / `WorkflowNode` / 38 种 `WorkflowNodeKind`  |
+| `types/workflow/visual.ts`            | `VisualWorkflow` / `WorkflowNode` / 153 种 `WorkflowNodeKind` |
 | `lib/workflow/definition/validate.ts` | zod envelope + 图完整性（循环、重复 id 检测）                 |
 | `lib/workflow/definition/seed.ts`     | 10 个内置模板（hello world / classify-branch / RAG FAQ / 等） |
 
@@ -112,7 +120,7 @@ flowchart TB
 | `lib/workflow/editor/expression-language.ts`         | CodeMirror 6 语法高亮（`{{ $node['x'].out.field }}`）                      |
 | `lib/workflow/editor/expression-suggestions.ts`      | 上下文敏感自动补全                                                         |
 | `components/workflow/editor/canvas.tsx`              | React Flow shell + 工具栏 + 空态                                           |
-| `components/workflow/editor/inspector-panel.tsx`     | 右栏检查器；按 kind 派发到 38 个表单之一                                   |
+| `components/workflow/editor/inspector-panel.tsx`     | 右栏检查器；按 kind 派发到 typed 或 schema-generated form                    |
 | `components/workflow/editor/node-search-sidebar.tsx` | 左栏拖拽源（custom MIME `application/x-workflow-kind`）                    |
 | `components/workflow/editor/command-palette.tsx`     | Ctrl+K cmdk 面板 —— 全部节点 + 编辑器动作 + 最近 5 个工作流                |
 
@@ -121,15 +129,18 @@ flowchart TB
 | 文件                                        | 用途                                                                            |
 | ------------------------------------------- | ------------------------------------------------------------------------------- |
 | `lib/workflow/runtime/orchestrator.ts`      | 顶层入口；validate → resolve secrets → topo-sort → step loop → 持久化           |
+| `lib/workflow/runtime/execution-authority.ts` | 正式 admission、immutable version、dependency lock 与三种重试                  |
+| `lib/workflow/runtime/egress-guard.ts`      | Connector 来源在模型、Connector、MCP、Plugin 与网络汇点的 PII 强制治理          |
+| `lib/workflow/runtime/waitpoint-repository.ts` | 审批/risk/event 的持久 pause-resume 与绝对 timeout                              |
 | `lib/workflow/runtime/topo-sort.ts`         | Kahn 算法 + `flow.loop` / `flow.wait` 反向边识别                                |
 | `lib/workflow/runtime/step-executor.ts`     | 重试（指数 / 固定退避）+ 超时（`AbortController`）+ 幂等                        |
 | `lib/workflow/runtime/event-log.ts`         | append-only 写入器；`createRunLogger(runId)` 作用域捕获                         |
 | `lib/workflow/runtime/idempotency.ts`       | Inngest 风格 memoization；崩溃恢复时从事件日志 hydrate                          |
 | `lib/workflow/runtime/expression.ts`        | 安全表达式解析（**不**用 `eval`）；`$node` / `$trigger` / `$static` / `$params` |
 | `lib/workflow/runtime/secret-resolver.ts`   | `NoopSecretResolver` + 内存实现；生产由 keyring 桥实现                          |
-| `lib/workflow/runtime/tauri-bridge.ts`      | 6 个 Tauri 命令 + `workflow:trigger` 监听；web 模式 no-op                       |
+| `lib/workflow/runtime/tauri-bridge.ts`      | trigger/run/waitpoint IPC + 事件监听；web 模式 no-op                            |
 | `lib/workflow/runtime/webhook-bridge.ts`    | 保存工作流时把 trigger 节点推送给 Rust（idempotent）                            |
-| `lib/workflow/runtime/trigger-bridge.ts`    | `workflow:trigger` 事件 → 解析 workflowId → `runWorkflow()`                     |
+| `lib/workflow/runtime/trigger-bridge.ts`    | `workflow:trigger` 事件 → Execution Authority admission                         |
 | `lib/workflow/runtime/resume-controller.ts` | 启动时回放进行中运行                                                            |
 | `lib/workflow/runtime/run-status-bridge.ts` | 订阅 `workflowRunEvents` 把每步状态推给编辑器 store                             |
 
@@ -138,7 +149,7 @@ flowchart TB
 | 文件                                    | 用途                                                                                            |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `lib/workflow/nodes/registry.ts`        | `registerNodeExecutor(kind, typeVersion, fn)` —— 插件也调这一个                                 |
-| `lib/workflow/nodes/built-ins.ts`       | 32 个内置执行器；导入即注册                                                                     |
+| `lib/workflow/nodes/built-ins.ts`       | 核心 executor registry 入口；专门的 action/AI 模块同时注册                                      |
 | `lib/workflow/nodes/catalog.ts`         | 每个 kind 的元数据（label / description / icon / keywords） —— 左栏 / 命令面板 / 检查器头部共用 |
 | `lib/workflow/nodes/params-schemas.ts`  | 每个 kind 的 JSON Schema —— 校验 + 自动生成表单                                                 |
 | `lib/workflow/nodes/validate-params.ts` | 运行前对每节点 params 跑 schema                                                                 |
@@ -148,8 +159,8 @@ flowchart TB
 | 文件                                                | 用途                                                                      |
 | --------------------------------------------------- | ------------------------------------------------------------------------- |
 | `src-tauri/src/workflow/mod.rs`                     | 模块入口 + `WorkflowState`                                                |
-| `src-tauri/src/workflow/commands.rs`                | 6 个 Tauri 命令（register/unregister/get_webhook_url/persist/reload/ack） |
-| `src-tauri/src/workflow/run_mirror.rs`              | SQLite 运行镜像（崩溃恢复用）                                             |
+| `src-tauri/src/workflow/commands.rs`                | trigger、run-state、webhook、integration-ingress 与 waitpoint IPC         |
+| `src-tauri/src/workflow/run_mirror.rs`              | SQLite run + waitpoint/event 镜像，用于崩溃与离线审批恢复                   |
 | `src-tauri/src/workflow/state.rs`                   | `WorkflowState` —— 持有 cron / webhook / mirror 句柄                      |
 | `src-tauri/src/workflow/triggers/cron_daemon.rs`    | tokio 任务 + `cron` crate；最近触发时间排序的小堆                         |
 | `src-tauri/src/workflow/triggers/webhook_router.rs` | axum 接收器，HMAC-SHA256 验签（`x-signature-256`）；1 MiB body cap        |
@@ -166,17 +177,16 @@ flowchart TB
 | `components/workflow/runs/run-detail.tsx`             | 单次运行视图 + "从此步重跑"                                 |
 | `components/settings/workflows/workflows-section.tsx` | 5 tab 设置壳：Library / Runs / Templates / Defaults / Audit |
 
-## 节点分类（38 种）
+## 节点分类（153 种）
 
 ```text
-trigger.*    manual · cron · connector.inbound · chat.message · webhook
-action.*     character.{send,create,update} · team.{run,create,update}
-             skill.{invoke,upsert} · twin.{rag,ingest}
-             connector.{send,draft} · mcp.invokeTool · plugin.invoke
-ai.*         prompt · classify · extract · embed
-flow.*       branch · switch · split · join · loop · wait · set · subworkflow
-data.*       transform · code · template
-io.*         http · webhook.respond
+trigger.*    manual · cron · connector/chat/integration/team/goal/desktop/terminal/pet/workflow event
+action.*     character · agent · goal · team · plan · scheduler · skill · twin · memory
+             connector · approval · mobile · MCP · plugin · git · desktop · terminal · pet
+ai.*         prompt · classify · extract · embed · browserModel · council · ensemble
+flow.*       branch · switch · split · join · loop · wait · set · subworkflow · catch/break/continue
+data.*       transform · aggregate · code · template · OCR · eval
+io.*         HTTP · webhook response · typed output · web clone
 annotation.* note · group
 ```
 
@@ -186,7 +196,10 @@ annotation.* note · group
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Validating: runWorkflow(input)
+  [*] --> Admission: 正式入口
+  Admission --> Failed: 无 active deployment<br/>或缺少 immutable binding
+  Admission --> Validating: artifact + dependency lock 已冻结
+  [*] --> Validating: 编辑器 Preview/Test (draft)
   Validating --> Failed: zod 错误<br/>or 循环 / 重复 id
   Validating --> Resolving: 通过
   Resolving --> TopoSorted: secrets 解析完毕
@@ -197,6 +210,9 @@ stateDiagram-v2
   StepRetrying --> StepFailed: 重试耗尽
   StepRunning --> StepSkipped: 上游决定 propagateSkip
   StepRunning --> StepFailed: 不可重试错误
+  StepRunning --> Waiting: approval / risk / event waitpoint
+  Waiting --> StepRunning: 首次终态决定或匹配事件
+  Waiting --> StepFailed: rejected / timed out / cancelled
   StepSucceeded --> TopoSorted: 还有节点
   StepSkipped --> TopoSorted
   StepSucceeded --> Completed: 队列空
@@ -209,16 +225,21 @@ stateDiagram-v2
 
 每次状态切换都通过 `event-log.ts:RunLogger` 追加一行 `workflowRunEvents`，UI 端 `useLiveQuery` 即刻刷新。
 
-## 数据库表（Dexie v22）
+## 数据库表（Dexie v156）
 
 | 表                  | 主键 | 关键索引                 | 用途                                                                          |
 | ------------------- | ---- | ------------------------ | ----------------------------------------------------------------------------- |
 | `workflows`         | `id` | -                        | 工作流定义（图 + settings + viewport）                                        |
-| `workflowRuns`      | `id` | `[workflowId+startedAt]` | 每次执行一行；含冻结的工作流 snapshot —— 历史重跑用 snapshot 而非 live 工作流 |
+| `workflowRuns`      | `id` | `[workflowId+startedAt]` | 每次执行一行；冻结 snapshot 用于查看/调试，正式重试使用 immutable execution binding |
 | `workflowRunEvents` | `id` | `[runId+ts]`             | 每步事件日志；按时间排序回放                                                  |
 | `workflowTriggers`  | `id` | `[workflowId+enabled]`   | 已注册触发器（cron / webhook / inbound / chat-msg）                           |
+| `workflowVersions` | `id` | `[workflowId+sequence]` | 不可变发布 artifact |
+| `workflowDeployments` | `id` | `[workflowId+environment]` | production pointer、revision 与 active/disabled 状态 |
+| `workflowInvocations` | `id` | deployment / version / status | 正式 admission、caller、idempotency、dependency lock 与 retry provenance |
+| `workflowWaitpoints` | `id` | `[kind+status]`、`[runId+status]` | 审批、risk 与 event checkpoint 的 pending/terminal 状态 |
+| `workflowWaitEvents` | `id` | `[key+emittedAt]` | 先持久化后匹配、只消费一次、24 小时后清理的事件 |
 
-完整 schema 见 [存储](../data/storage) 中的 v22 块。
+完整事实来源是 `lib/db/schema.ts`；旧版存储文档中的 v22 块只描述最初引入时的表。
 
 ## 配置项与扩展点
 

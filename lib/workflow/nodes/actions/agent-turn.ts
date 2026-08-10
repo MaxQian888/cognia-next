@@ -9,13 +9,18 @@
  * `requireTools: true` to fail instead of degrading.
  */
 
-import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
+import type {
+  StepExecutionContext,
+  StepExecutionResult,
+  WorkflowPiiGateMode,
+} from "@/types/workflow/visual"
 import {
   runStructuredTurn,
   type SchemaViolationMode,
 } from "@/lib/workflow/nodes/ai/structured-turn"
 import type { ExecuteAgentResult } from "@/lib/ai/agent/agent-executor"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import { guardWorkflowEgress } from "@/lib/workflow/runtime/egress-guard"
 
 export interface AgentTurnParams {
   prompt?: string
@@ -49,6 +54,7 @@ export interface AgentTurnParams {
    * returns the unvalidated object with `schemaValid: false`.
    */
   onSchemaViolation?: SchemaViolationMode
+  piiGate?: WorkflowPiiGateMode
 }
 
 const DEFAULT_TIMEOUT_MS = 600_000
@@ -60,7 +66,13 @@ const REQUIRE_TOOLS_UNAVAILABLE_MESSAGE =
 
 export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecutionResult> {
   const params = ctx.params as AgentTurnParams
-  const prompt = (params.prompt ?? "").trim()
+  const guarded = guardWorkflowEgress({
+    securityContext: ctx.securityContext,
+    sink: "model",
+    requestedMode: params.piiGate,
+    value: { prompt: params.prompt ?? "", systemPrompt: params.systemPrompt },
+  })
+  const prompt = guarded.value.prompt.trim()
   if (!prompt) {
     throw nonRetryable("action.agent.turn requires a non-empty 'prompt'")
   }
@@ -108,15 +120,17 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
       cfg: Parameters<typeof executeAgent>[1]
     ): Promise<ExecuteAgentResult & { degradedReason?: string }> => {
       if (!resolverAuthoritative) return executeAgent(turnPrompt, cfg)
-      const [{ executeAgentTurn, AgentHostUnavailableError }, { isTauri }] = await Promise.all([
-        import("@/lib/ai/agent/execution/agent-execution-service"),
-        import("@/lib/tauri"),
-      ])
+      const [{ executeAgentTurn, AgentHostUnavailableError }, { isTauri }, { isHeadlessHost }] =
+        await Promise.all([
+          import("@/lib/ai/agent/execution/agent-execution-service"),
+          import("@/lib/tauri"),
+          import("@/lib/platform/detect"),
+        ])
       try {
         return await executeAgentTurn(
           turnPrompt,
           cfg ?? {},
-          { isTauri: isTauri(), isHeadlessHost: false },
+          { isTauri: isTauri(), isHeadlessHost: isHeadlessHost() },
           {
             surface: "workflow-agent-turn",
             ...(params.requireTools !== undefined ? { requireTools: params.requireTools } : {}),
@@ -132,7 +146,7 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
     }
 
     const baseOptions = {
-      systemPrompt: params.systemPrompt,
+      systemPrompt: guarded.value.systemPrompt,
       model: params.model,
       maxSteps: params.maxTurns,
       temperature: params.temperature,
@@ -248,6 +262,7 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
         ...(degradedReason ? { degradedReason } : {}),
         ...(result.finishReason ? { finishReason: result.finishReason } : {}),
         ...(result.usage ? { usage: result.usage } : {}),
+        ...(guarded.redacted ? { piiRedacted: true } : {}),
         ...(structured
           ? {
               object: structured.object,

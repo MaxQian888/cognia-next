@@ -8,16 +8,16 @@ import {
   notifyApprovalResolved,
 } from "./approval-notify"
 import {
-  approvalWakeKey,
+  getPendingApproval,
   registerPendingApproval,
   __resetApprovalRegistryForTesting,
   type PendingApproval,
 } from "./approval-registry"
-import { subscribeWake, _clearWakeBusForTest } from "./wake-bus"
 import {
   dispatchNotificationCommand,
   __resetNotificationCommandsForTesting,
 } from "@/lib/notifications/action-registry"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
 const entry: PendingApproval = {
   approvalId: "apr_run_x_n_gate",
@@ -30,11 +30,17 @@ const entry: PendingApproval = {
   timeoutAt: 2_000,
 }
 
-afterEach(() => {
-  __resetApprovalRegistryForTesting()
-  __resetNotificationCommandsForTesting()
-  _clearWakeBusForTest()
+const dbFixture = createDbTestFixture()
+beforeAll(dbFixture.initialize)
+beforeEach(async () => {
+  await dbFixture.restore()
+  await __resetApprovalRegistryForTesting()
 })
+afterEach(async () => {
+  await __resetApprovalRegistryForTesting()
+  __resetNotificationCommandsForTesting()
+})
+afterAll(dbFixture.dispose)
 
 describe("notifyApprovalRequested", () => {
   it("posts a directed notification with approve/reject actions", async () => {
@@ -44,6 +50,7 @@ describe("notifyApprovalRequested", () => {
       expect.objectContaining({
         source: "workflow",
         directed: true,
+        dedupeKey: entry.approvalId,
         title: expect.stringContaining("Deploy?"),
         href: "/workflows/wf_x/runs/run_x",
         actions: [
@@ -102,16 +109,13 @@ describe("notifyApprovalResolved", () => {
 describe("installApprovalNotificationActions", () => {
   it("resolves the registry from a notification action click", async () => {
     const off = installApprovalNotificationActions()
-    registerPendingApproval(entry)
-    const wait = subscribeWake(approvalWakeKey(entry.runId, entry.stepId))
+    await registerPendingApproval(entry)
     await dispatchNotificationCommand({
       notificationId: "n1",
       command: APPROVAL_RESPOND_COMMAND,
       args: { approvalId: entry.approvalId, decision: "approved" },
     })
-    await expect(wait).resolves.toMatchObject({
-      data: { decision: "approved", respondedBy: "desktop" },
-    })
+    await expect(getPendingApproval(entry.approvalId)).resolves.toBeUndefined()
     off()
   })
 
@@ -125,3 +129,5 @@ describe("installApprovalNotificationActions", () => {
     off()
   })
 })
+/** @jest-environment jsdom */
+import "fake-indexeddb/auto"

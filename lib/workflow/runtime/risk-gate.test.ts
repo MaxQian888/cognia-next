@@ -1,5 +1,6 @@
 import type { VisualWorkflow, WorkflowNode } from "@/types/workflow/visual"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { decideWorkflowWaitpoint } from "@/lib/db/workflow-waitpoints"
 import { appendEvent } from "./event-log"
 import { listPendingApprovals, respondToApproval } from "./approval-registry"
 import {
@@ -20,17 +21,17 @@ jest.mock("./approval-notify", () => ({
 // Overridable seams for the failure branches. `null` = delegate to the real
 // implementation, so every other test in this file exercises the real thing.
 const seam: {
-  subscribeWake: null | (() => Promise<unknown>)
+  waitForWaitpoint: null | ((...args: unknown[]) => Promise<unknown>)
   listRunEvents: null | (() => Promise<unknown>)
   appendEvent: null | (() => Promise<unknown>)
-} = { subscribeWake: null, listRunEvents: null, appendEvent: null }
+} = { waitForWaitpoint: null, listRunEvents: null, appendEvent: null }
 
-jest.mock("./wake-bus", () => {
-  const actual = jest.requireActual("./wake-bus")
+jest.mock("./waitpoint-repository", () => {
+  const actual = jest.requireActual("./waitpoint-repository")
   return {
     ...actual,
-    subscribeWake: (...a: unknown[]) =>
-      seam.subscribeWake ? seam.subscribeWake() : actual.subscribeWake(...a),
+    waitForWorkflowWaitpoint: (...a: unknown[]) =>
+      seam.waitForWaitpoint ? seam.waitForWaitpoint(...a) : actual.waitForWorkflowWaitpoint(...a),
   }
 })
 
@@ -65,11 +66,11 @@ beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   await dbFixture.restore()
   notifyRequested.mockClear()
-  seam.subscribeWake = null
+  seam.waitForWaitpoint = null
   seam.listRunEvents = null
   seam.appendEvent = null
-  for (const p of listPendingApprovals())
-    respondToApproval(p.approvalId, {
+  for (const p of await listPendingApprovals())
+    await respondToApproval(p.approvalId, {
       decision: "rejected",
       respondedBy: "cleanup",
     })
@@ -133,7 +134,7 @@ describe("applyNodeRiskGate", () => {
       node: node("n1", "flow.set"),
       runId: "r1",
     })
-    expect(listPendingApprovals()).toHaveLength(0)
+    await expect(listPendingApprovals()).resolves.toHaveLength(0)
     expect(notifyRequested).not.toHaveBeenCalled()
   })
 
@@ -143,7 +144,7 @@ describe("applyNodeRiskGate", () => {
       node: node("n1", "action.desktop.performAction"),
       runId: "r1",
     })
-    expect(listPendingApprovals()).toHaveLength(0)
+    await expect(listPendingApprovals()).resolves.toHaveLength(0)
   })
 
   it("does not double-gate a node already covered by an approval node", async () => {
@@ -178,7 +179,7 @@ describe("applyNodeRiskGate", () => {
       })
     ).rejects.toThrow(/computer-use/)
     // Fail-closed means it never registered a modal nobody would see.
-    expect(listPendingApprovals()).toHaveLength(0)
+    await expect(listPendingApprovals()).resolves.toHaveLength(0)
   })
 
   it("blocks interactively, then proceeds once approved", async () => {
@@ -188,15 +189,18 @@ describe("applyNodeRiskGate", () => {
       runId: "r1",
     })
     await new Promise((r) => setTimeout(r, 20))
-    const pending = listPendingApprovals()
+    const pending = await listPendingApprovals()
     expect(pending).toHaveLength(1)
     expect(pending[0].message).toMatch(/computer-use/)
     expect(notifyRequested).toHaveBeenCalledTimes(1)
 
-    respondToApproval(pending[0].approvalId, { decision: "approved", respondedBy: "alice" })
+    await respondToApproval(pending[0].approvalId, {
+      decision: "approved",
+      respondedBy: "alice",
+    })
     await expect(p).resolves.toBeUndefined()
     // The entry is always cleaned up.
-    expect(listPendingApprovals()).toHaveLength(0)
+    await expect(listPendingApprovals()).resolves.toHaveLength(0)
   })
 
   it("throws when the human rejects", async () => {
@@ -206,8 +210,11 @@ describe("applyNodeRiskGate", () => {
       runId: "r1",
     })
     await new Promise((r) => setTimeout(r, 20))
-    const pending = listPendingApprovals()
-    respondToApproval(pending[0].approvalId, { decision: "rejected", respondedBy: "alice" })
+    const pending = await listPendingApprovals()
+    await respondToApproval(pending[0].approvalId, {
+      decision: "rejected",
+      respondedBy: "alice",
+    })
     await expect(p).rejects.toThrow(/rejected by alice/)
   })
 
@@ -229,11 +236,11 @@ describe("applyNodeRiskGate", () => {
       runId: "r1",
     })
     await new Promise((r) => setTimeout(r, 20))
-    expect(listPendingApprovals()).toHaveLength(1)
+    await expect(listPendingApprovals()).resolves.toHaveLength(1)
     expect(notifyRequested).not.toHaveBeenCalled()
 
-    const pending = listPendingApprovals()
-    respondToApproval(pending[0].approvalId, { decision: "approved", respondedBy: "bob" })
+    const pending = await listPendingApprovals()
+    await respondToApproval(pending[0].approvalId, { decision: "approved", respondedBy: "bob" })
     await expect(p).resolves.toBeUndefined()
   })
 
@@ -246,8 +253,9 @@ describe("applyNodeRiskGate", () => {
         runId: "r1",
       })
       await new Promise((r) => setTimeout(r, 20))
-      expect(listPendingApprovals()).toHaveLength(1)
-      respondToApproval(listPendingApprovals()[0].approvalId, {
+      const pending = await listPendingApprovals()
+      expect(pending).toHaveLength(1)
+      await respondToApproval(pending[0].approvalId, {
         decision: "approved",
         respondedBy: "alice",
       })
@@ -264,9 +272,10 @@ describe("applyNodeRiskGate", () => {
         runId: "r1",
       })
       await new Promise((r) => setTimeout(r, 20))
-      expect(listPendingApprovals()).toHaveLength(1)
+      const pending = await listPendingApprovals()
+      expect(pending).toHaveLength(1)
       expect(warn).toHaveBeenCalled()
-      respondToApproval(listPendingApprovals()[0].approvalId, {
+      await respondToApproval(pending[0].approvalId, {
         decision: "approved",
         respondedBy: "alice",
       })
@@ -275,7 +284,15 @@ describe("applyNodeRiskGate", () => {
     })
 
     it("rejects when the wait times out", async () => {
-      seam.subscribeWake = () => Promise.reject(new Error("wake bus: timed out after 5ms"))
+      seam.waitForWaitpoint = async (id) => {
+        const result = await decideWorkflowWaitpoint(String(id), {
+          outcome: "timed_out",
+          respondedBy: "timeout",
+          resolvedAt: Date.now(),
+        })
+        if (!result.ok) throw new Error(result.reason)
+        return result.waitpoint
+      }
       await expect(
         applyNodeRiskGate({
           workflow: workflow(),
@@ -283,20 +300,22 @@ describe("applyNodeRiskGate", () => {
           runId: "r1",
         })
       ).rejects.toThrow(/timed out unanswered/)
-      expect(listPendingApprovals()).toHaveLength(0)
+      await expect(listPendingApprovals()).resolves.toHaveLength(0)
     })
 
     it("propagates a non-timeout wake error unchanged (e.g. run cancelled)", async () => {
-      seam.subscribeWake = () => Promise.reject(new Error("wake bus: aborted"))
-      await expect(
-        applyNodeRiskGate({
-          workflow: workflow(),
-          node: node("n1", "action.desktop.performAction"),
-          runId: "r1",
-        })
-      ).rejects.toThrow(/aborted/)
+      const controller = new AbortController()
+      const run = applyNodeRiskGate({
+        workflow: workflow(),
+        node: node("n1", "action.desktop.performAction"),
+        runId: "r1",
+        signal: controller.signal,
+      })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      controller.abort()
+      await expect(run).rejects.toThrow(/cancelled/)
       // An abort is not a rejection — it must not masquerade as one.
-      expect(listPendingApprovals()).toHaveLength(0)
+      await expect(listPendingApprovals()).resolves.toHaveLength(0)
     })
   })
 

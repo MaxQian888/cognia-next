@@ -8,7 +8,7 @@ description: 五类工作流触发器的分类、将每一种触发器汇聚到�
 <Status variant="stable" />
 
 <TLDR>
-Rust 拥有两个问题——"工作流何时启动"（cron 守护进程 + axum webhook 接收器）与"这次运行是否在崩溃中幸存"（SQLite 运行镜像）——而 [runtime-execution](./runtime-execution) 上的 TS 编排器拥有步骤执行。每一类触发器都汇入唯一收口 `dispatchTrigger(event)`（`lib/workflow/runtime/trigger-bridge.ts:43`），它解析 Dexie 工作流、触发插件钩子、调用 `runWorkflow`。跨进程触发依赖单一的 `workflow:trigger` Tauri 事件，由 `src-tauri/src/workflow/mod.rs:40` 发出，由 `tauri-bridge.ts:90` 的 `listenTriggerEvents` 接收。整个 Rust 平面仅限桌面：Web 模式在 `isTauri()` 门后完全空操作（`safeInvoke` 返回 null，`reloadInFlightRuns` 返回 `[]`，监听器空操作）。镜像（`run_mirror.rs`）只是薄影子——Dexie 事件日志仍是权威数据源。
+Rust 负责“何时启动工作流”（cron 守护进程 + axum webhook 接收器）以及“运行或 waitpoint 能否跨崩溃存续”（SQLite 镜像），TS 编排器负责步骤执行。每个正式触发器都汇入 `dispatchTrigger(event)`，再由 Execution Authority 冻结当前 production artifact 后启动编排器。跨进程触发仍通过单一 `workflow:trigger` Tauri 事件；Web 则由 Dexie 承担运行状态与 durable waitpoint fallback。
 </TLDR>
 
 ## 触发器分类
@@ -17,8 +17,8 @@ Rust 拥有两个问题——"工作流何时启动"（cron 守护进程 + axum 
 
 | 类别 | 触发方 | 路径与 file:line |
 | --- | --- | --- |
-| `trigger.manual` | 仅 TS | Run 按钮；IM 点击 `start-from-im.ts:53` -> `runWorkflow`；恢复 `resume-controller.ts:62`。Rust 注册为空操作 `commands.rs:83` |
-| `trigger.cron` | Rust 守护进程 | `cron_daemon.rs:229` `fire()` -> `AppHandleEmitter::emit` `mod.rs:40` -> `workflow:trigger` -> `tauri-bridge.ts:90` `listenTriggerEvents` -> `trigger-bridge.ts:43` `dispatchTrigger` -> `runWorkflow`。注册 `commands.rs:27` `state.cron.upsert` |
+| `trigger.manual` | 仅 TS | 编辑器 Preview/Test 可运行 draft；IM、CLI、MCP、API 与运维入口进入 Execution Authority；崩溃恢复以同一 run id 重入冻结快照。 |
+| `trigger.cron` | Rust 守护进程 | `cron_daemon.rs` -> `workflow:trigger` -> `listenTriggerEvents` -> `dispatchTrigger` -> `executeDeployedWorkflow`。 |
 | `trigger.webhook`（+`trigger.github.webhook`） | Rust axum | `webhook_router.rs:292` `handle_webhook` -> HMAC `L404` -> `state.emitter.emit`（`kind:"trigger.webhook"`）-> `mod.rs:40` -> `workflow:trigger` -> `trigger-bridge.ts:43`。注册 `commands.rs:47` `state.webhook.upsert` |
 | `trigger.connector.inbound` | TS 钩子 | `ConnectorBus` -> `findMatchingWorkflows("trigger.connector.inbound")` -> `dispatchTrigger`。Rust 空操作 `commands.rs:83` |
 | `trigger.chat.message` | TS 钩子 | `lib/db/messages.ts` `findMatchingWorkflows("trigger.chat.message",{characterId,sessionId})` -> `dispatchTrigger`（懒加载导入以避免内存峰值）。Rust 空操作 |
@@ -30,7 +30,7 @@ Rust 拥有两个问题——"工作流何时启动"（cron 守护进程 + axum 
 | 文件 | Symbol:line | 职责 |
 | --- | --- | --- |
 | `trigger-bridge.ts` | `installTriggerBridge:21` | 启动时挂载一次；包装 `listenTriggerEvents`、校验、调用 `dispatchTrigger` |
-| `trigger-bridge.ts` | `dispatchTrigger:43` | 唯一收口——解析 Dexie 工作流、触发插件钩子、调用编排器；所有触发器类别都路由到这里 |
+| `trigger-bridge.ts` | `dispatchTrigger` | 正式触发收口——通过 Execution Authority 准入当前 production deployment |
 | `trigger-bridge.ts` | `isTriggerEvent:61` | 入站 `workflow:trigger` 载荷的形状守卫 |
 | `trigger-subscriptions.ts` | `INDEXED_KINDS:32` | TS 侧触发器节点的内存索引；仅 `connector.inbound` / `chat.message` / `goal.completed`（cron/webhook 被排除——Rust 拥有它们） |
 | `trigger-subscriptions.ts` | `rebuildIndex:45` / `initTriggerSubscriptions:66` | 由对工作流的 Dexie `liveQuery` 重建；幂等、window 守卫 |
@@ -38,21 +38,23 @@ Rust 拥有两个问题——"工作流何时启动"（cron 守护进程 + axum 
 | `webhook-bridge.ts` | `syncWorkflowTriggers:35` / `syncOneTrigger:40` | 过滤 `n.type.startsWith("trigger.")`，逐个急切注册（Rust 处理器幂等，不计算差异） |
 | `tauri-bridge.ts` | `safeInvoke:34` + 6 个命令 `L46-81` | `persistRunState` / `registerTrigger` / `unregisterTrigger` / `reloadInFlightRuns` / `ackRunCompleted` / `getWebhookUrl` |
 | `tauri-bridge.ts` | `listenTriggerEvents:90` / `listenResumeEvents:101` | 订阅 `workflow:trigger` 与 `workflow:resume`；`!isTauri()` 时全部空操作 |
-| `wake-bus.ts` | `subscribeWake:49` / `emitWake:102` | 供 `flow.wait(event)` 步骤的进程内一次性总线，key 为 `${runId}:${stepId}`；无订阅者时 `emitWake` 返回 false（早到事件被丢弃） |
-| `start-from-im.ts` | `startWorkflowFromIM:47` | 水合行、构造 `trigger.manual` 事件、提前生成 `runId`、即发即弃 `void runWorkflow` |
-| `run-status-bridge.ts` | `deriveRunStatusFromEvents:29` / `startRunStatusBridge:67` | 被动观察者；经 `[workflowId+startedAt]` 跟踪最近运行（须匹配 schema v22） |
+| `workflow-waitpoints.ts` / `waitpoint-repository.ts` | durable repository | 审批、风险闸门与事件等待共用的持久检查点；事件先持久化、只消费一次 |
+| `start-from-im.ts` | `startWorkflowFromIM` | 准入 production artifact，并在新运行行持久化后返回 |
+| `run-status-bridge.ts` | 状态观察器 | 通过 Dexie v156 运行索引跟踪最近运行 |
 
 ```ts
 // lib/workflow/runtime/trigger-bridge.ts:43
-export async function dispatchTrigger(event: TriggerEvent): Promise<void> {
-  const workflow = await getWorkflow(event.workflowId)
-  if (!workflow) { console.warn(...); return }
-  getPluginEventHooks().dispatchWorkflowTriggerFired(event.workflowId, event.kind, event.payload)
-  await runWorkflow({ workflow, trigger: event })
-}
+await executeDeployedWorkflow({
+  workflowId: event.workflowId,
+  entrypoint: "trigger",
+  caller: event.kind,
+  triggerKind: event.kind,
+  triggerId: event.triggerId,
+  payload: event.payload,
+})
 ```
 
-`webhook-bridge.ts:40` 将节点配置映射到 Rust 注册形状：`cron` -> `{cron}`；`webhook` -> `{path,method,hmacSecret,responseStatus,responseTemplate}`；`connector` / `chat` / `manual` -> 仅基础字段。`wake-bus` 覆盖进程内等待；跨进程的 Rust->TS 唤醒同样依赖 `workflow:trigger` 事件。注意**恢复不经过 `dispatchTrigger`**——被恢复的运行直接使用 `trigger.manual`，因此插件触发钩子不会重新触发。
+`webhook-bridge.ts` 将节点配置映射到 Rust 注册形状。`flow.wait(event)` 会先持久化事件，再按 key、可选 correlation id 和 run start 边界匹配；未匹配事件 24 小时后过期。**恢复不经过 `dispatchTrigger`**：它复用冻结快照、原 run id、trace、lineage、security context 与已完成步骤缓存，也不会重复触发插件 hook。
 
 ## Rust 后端（src-tauri/src/workflow/）
 
@@ -60,10 +62,10 @@ export async function dispatchTrigger(event: TriggerEvent): Promise<void> {
 | --- | --- | --- |
 | `mod.rs` | `AppHandleEmitter:34` / `impl TriggerEmitter:38` | 唯一的 Rust->TS 发射点：`Emitter::emit(&handle, "workflow:trigger", event)` |
 | `state.rs` | `WorkflowState:14` / `open:25` | 持有 `{mirror, cron, webhook}`；`open(mirror_path, emitter)` 接线三者但不启动循环；`impl Drop:51` 调用 `webhook.stop()` |
-| `types.rs` | `TRIGGER_KINDS:14` / `RunStatus:25` / `TriggerEvent:124` | camelCase serde DTO；`RegisterTriggerInput:91`、`PersistRunStateInput:139`（仅首次持久化带快照）、`InFlightRunRow:156`、`WebhookTriggerPayload:172` |
+| `types.rs` | workflow DTO | camelCase trigger/run DTO，以及 `WorkflowWaitpointRow`、决策输入和 durable wait-event 行 |
 | `commands.rs` | `workflow_register_trigger:21` | 分派 `L26-85`：cron -> `state.cron.upsert`；webhook/github.webhook -> `WebhookEntry` + `state.webhook.upsert`；connector/chat/manual -> 空操作 Ok `L83`；否则报错 |
-| `commands.rs` | 其余 5 个命令 `L91-134` | `unregister`（按 id 清扫 cron + webhook）、`get_webhook_url`、`persist_run_state`、`reload_in_flight_runs`、`ack_completed` |
-| `run_mirror.rs` | `RunMirror:47` / `persist:134` / `list_in_flight:192` / `ack_completed:231` | SQLite 影子；懒 `open:60`，`conn:96` 首次使用时 mkdir+DDL；`default_mirror_path:269` = `<dir>/cognia/workflow-runs.sqlite` |
+| `commands.rs` | run + waitpoint 命令 | 运行镜像命令，以及 waitpoint create/get/list/decide 和 wait event persist/prune |
+| `run_mirror.rs` | `RunMirror` | in-flight run、durable waitpoint、首次决策胜出与 24 小时 wait event 的 SQLite 镜像 |
 | `triggers/cron_daemon.rs` | `CronDaemon:110` / `upsert:127` / `spawn:177` / `fire:229` | 进程内 cron（`cron::Schedule`，含秒的 6-7 字段），只要 Tauri 进程运行就触发，不论 webview 状态 |
 | `triggers/webhook_router.rs` | `WebhookRouter:120` / `start:210` / `handle_webhook:292` / `verify_hmac_signature:404` | 本地 axum 接收器，仅绑 `127.0.0.1`，1 MiB body 上限，HMAC-SHA256 |
 

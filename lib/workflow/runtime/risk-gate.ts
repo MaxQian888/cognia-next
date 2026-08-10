@@ -25,15 +25,13 @@
 import type { VisualWorkflow, WorkflowNode, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { listRunEvents, appendEvent } from "./event-log"
 import { findLatestCheckpoint } from "./long-step-runner"
-import { subscribeWake } from "./wake-bus"
 import {
   approvalId,
-  approvalWakeKey,
   registerPendingApproval,
-  removePendingApproval,
   type ApprovalResponse,
   type PendingApproval,
 } from "./approval-registry"
+import { waitForWorkflowWaitpoint } from "./waitpoint-repository"
 import { notifyApprovalRequested, notifyApprovalResolved } from "./approval-notify"
 import { ancestorsOf } from "./run-single-node"
 import { classifyNodeRisk } from "./node-risk"
@@ -155,54 +153,53 @@ export async function applyNodeRiskGate(input: RiskGateInput): Promise<void> {
     message: `This step touches ${surfaces}. Approve to run it, or reject to stop the run.`,
     requestedAt,
     timeoutAt,
+    kind: "risk_gate",
   }
 
-  registerPendingApproval(entry)
-  try {
-    if (fresh) {
-      try {
-        await appendEvent({
-          runId,
-          stepId: node.id,
-          type: "step.long_running.checkpoint",
-          payload: {
-            checkpointKey: RISK_GATE_CHECKPOINT_KEY,
-            state: { approvalId: id, requestedAt },
-          },
-        })
-      } catch (err) {
-        console.warn("risk gate: checkpoint persistence failed", err)
-      }
-      await notifyApprovalRequested(entry)
-    } else {
-    }
-
-    const remaining = timeoutAt - Date.now()
-    // An unanswered gate is a rejection, never a silent pass.
-    if (remaining <= 0) {
-      throw new RiskGateRejected(node.id, `Risk gate for ${node.id} expired unanswered`)
-    }
-
-    let wake
+  await registerPendingApproval(entry)
+  if (fresh) {
     try {
-      wake = await subscribeWake(approvalWakeKey(runId, node.id), { timeoutMs: remaining, signal })
+      await appendEvent({
+        runId,
+        stepId: node.id,
+        type: "step.long_running.checkpoint",
+        payload: {
+          checkpointKey: RISK_GATE_CHECKPOINT_KEY,
+          state: { approvalId: id, requestedAt },
+        },
+      })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes("timed out")) {
-        throw new RiskGateRejected(node.id, `Risk gate for ${node.id} timed out unanswered`)
-      }
-      throw err
+      console.warn("risk gate: checkpoint persistence failed", err)
     }
+    await notifyApprovalRequested(entry)
+  }
 
-    const response = wake.data as ApprovalResponse
-    void notifyApprovalResolved(entry, response.decision)
-    if (response.decision !== "approved") {
-      throw new RiskGateRejected(
-        node.id,
-        `Risk gate for ${node.id} (${surfaces}) rejected by ${response.respondedBy}`
-      )
-    }
-  } finally {
-    removePendingApproval(id)
+  const remaining = timeoutAt - Date.now()
+  // An unanswered gate is a rejection, never a silent pass.
+  if (remaining <= 0) {
+    throw new RiskGateRejected(node.id, `Risk gate for ${node.id} expired unanswered`)
+  }
+
+  const waitpoint = await waitForWorkflowWaitpoint(id, { signal, cancelOnAbort: true })
+  if (waitpoint.status === "timed_out") {
+    throw new RiskGateRejected(node.id, `Risk gate for ${node.id} timed out unanswered`)
+  }
+  if (waitpoint.status === "cancelled") {
+    throw new RiskGateRejected(node.id, `Risk gate for ${node.id} was cancelled`)
+  }
+  const resolution = waitpoint.resolution
+  if (!resolution || (resolution.outcome !== "approved" && resolution.outcome !== "rejected")) {
+    throw new RiskGateRejected(node.id, `Risk gate for ${node.id} has an invalid decision`)
+  }
+  const response: ApprovalResponse = {
+    decision: resolution.outcome,
+    respondedBy: resolution.respondedBy ?? "unknown",
+  }
+  void notifyApprovalResolved(entry, response.decision)
+  if (response.decision !== "approved") {
+    throw new RiskGateRejected(
+      node.id,
+      `Risk gate for ${node.id} (${surfaces}) rejected by ${response.respondedBy}`
+    )
   }
 }

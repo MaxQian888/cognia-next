@@ -1,6 +1,6 @@
 ---
 title: 数据模型与定义
-description: 权威的 VisualWorkflow 图类型、74 种节点 / 7 大类的分类体系、Zod 加图完整性的校验流水线、8 张工作流 Dexie 表，以及 22 个内置模板。
+description: 权威的 VisualWorkflow 图类型、153 种节点 / 7 大类分类、校验流水线，以及截至 schema v156 的 13 张工作流 Dexie 表。
 ---
 
 # 数据模型与定义
@@ -8,13 +8,13 @@ description: 权威的 VisualWorkflow 图类型、74 种节点 / 7 大类的分�
 <Status variant="stable" />
 
 <TLDR>
-一个工作流就是一张 `VisualWorkflow` 图（`types/workflow/visual.ts:242`），其 `schemaVersion: 1`（`types/workflow/visual.ts:235`），由 `WorkflowNode` 与 `WorkflowEdge` 记录组成。每个节点的 `type` 都是 74 个 `WorkflowNodeKind` 字面量之一（`types/workflow/visual.ts:27-119`），归入 7 大类，其中 `workflowNodeCategory()`（`types/workflow/visual.ts:130-141`）把 `pattern.*` 折叠进 `action`。持久化涉及 8 张 Dexie 表，跨 v22、v35、v42、v52、v56 引入（`lib/db/schema.ts`），CRUD 位于 `lib/db/workflows.ts`。校验先跑 Zod（`lib/workflow/definition/validate.ts:110-129`）再跑图完整性 DFS（`lib/workflow/definition/validate.ts:151-242`），22 个内置模板来自 `seed.ts`、`seed-github.ts` 与四个 `templates/*.ts`。
+一个工作流就是由 `WorkflowNode` 与 `WorkflowEdge` 组成的 `VisualWorkflow` 图。每个节点 `type` 是 153 个 `WorkflowNodeKind` 字面量之一，归入 7 大类。持久化截至 schema v156 涉及 13 张工作流 Dexie 表，包括 immutable version/deployment/invocation 与 durable waitpoint/event。执行前会依次完成 Zod 和图完整性校验。
 </TLDR>
 
 <StatGrid>
-  <Stat label="节点种类" value="74" hint="across 7 categories" />
+  <Stat label="节点种类" value="153" hint="across 7 categories" />
   <Stat label="Schema 版本" value="1" hint="VisualWorkflowSchemaVersion" />
-  <Stat label="Dexie 表" value="8" hint="v22 to v56" />
+  <Stat label="Dexie 表" value="13" hint="v22 to v156" />
   <Stat label="内置模板" value="22" hint="10 + 4 + 8" />
   <Stat label="默认超时" value="600000ms" hint="10 minute run cap" />
   <Stat label="默认重试" value="3" hint="exponential backoff" />
@@ -59,9 +59,9 @@ export interface WorkflowNodeData<TParams> {
 
 `WorkflowNodeData`（`types/workflow/visual.ts:305-323`）刻意声明了一个开放的 `[key: string]: unknown` 索引签名，正是为了让 React Flow v12 能在不引发 TypeScript 摩擦的情况下挂载自己的数据。边是 `WorkflowEdge`（`types/workflow/visual.ts:325-334`），其 `WorkflowEdgeKind`（`types/workflow/visual.ts:336`）取值为 `default | conditional | parallel | loop | error` 之一。
 
-## 74 种节点的分类体系
+## 153 种节点的分类体系
 
-`WorkflowNodeKind` 是 74 个字符串字面量的联合类型（`types/workflow/visual.ts:27-119`），由运行期数组 `WORKFLOW_NODE_KINDS`（`types/workflow/visual.ts:147-222`）镜像。每个种类由 `workflowNodeCategory()` 归入 7 个 `WorkflowNodeCategory` 字面量之一（`types/workflow/visual.ts:121-128`）：它按第一个点切分，并把 `pattern.*` 映射到 `action`（兜底回退则得到 `annotation`）。
+`WorkflowNodeKind` 是 153 个字符串字面量的联合类型，由运行期数组 `WORKFLOW_NODE_KINDS` 镜像。`workflowNodeCategory()` 将每个 kind 归入 7 个分类之一，并把 `pattern.*` 映射到 `action`。
 
 ```ts
 // types/workflow/visual.ts:130-141
@@ -190,7 +190,7 @@ if (cycleNodes.size > 0) {
 
 ## Dexie 表
 
-8 张工作流表跨越五个 schema 版本。v22 声明了最初的四张；v35、v42、v52、v56 各新增一张。v52 重新声明 `workflows` 以加入 `folderId`，并附带一个升级钩子，为旧行回填 `folderId = "root"`（IndexedDB 无法索引 `undefined`）；v22、v35、v42、v56 为纯增量，无升级钩子。
+13 张工作流表覆盖 v22 的原始图/运行存储、v148 的 immutable deployment control plane，以及 v156 的 durable waitpoint store。合并后的索引与兼容升级以 `lib/db/schema.ts` 为准。
 
 | 表 | 版本 | 索引串 |
 | --- | --- | --- |
@@ -202,9 +202,14 @@ if (cycleNodes.size > 0) {
 | `workflowProposalHistory` | v42 | `&id, workflowId, createdAt, [workflowId+createdAt]` |
 | `workflowFolders` | v52 | `&id, name, parentFolderId, [parentFolderId+name], updatedAt, createdAt` |
 | `workflowFanoutSubscriptions` | v56 | `&id, workflowId, [workflowId+enabled], enabled, adapterId, conversationKey, createdAt` |
+| `workflowVersions` | v148 | `&id, workflowId, [workflowId+sequence], digest, createdAt` |
+| `workflowDeployments` | v148 | `&id, &[accountId+workflowId+environment], workflowId, environment, versionId, status, updatedAt` |
+| `workflowInvocations` | v148 | `&id, &[accountId+entrypoint+deploymentId+caller+idempotencyKey], deploymentId, versionId, runId, status, createdAt` |
+| `workflowWaitpoints` | v156 | `&id, status, kind, runId, workflowId, stepId, key, expiresAt, [kind+status], [key+status], [runId+status]` |
+| `workflowWaitEvents` | v156 | `&id, key, correlationId, emittedAt, expiresAt, consumedByWaitpointId, [key+emittedAt]` |
 
 ```ts
-// lib/db/schema.ts:994-1000
+// 原始 v22 bootstrap；后续版本扩展到 v156。
 this.version(22).stores({
   workflows: "&id, name, updatedAt, createdAt, isBuiltIn, isTemplate, *tags, schemaVersion",
   workflowRuns: "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status]",

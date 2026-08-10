@@ -106,6 +106,30 @@ function stringifyJsonForTextarea(value: unknown, fallback: unknown): string {
   }
 }
 
+interface PiiGateFieldProps extends Pick<ConfigProps, "params" | "onChange"> {
+  id: string
+  value: string
+  t: TranslationFn
+  allowOff?: boolean
+}
+
+function PiiGateField({ id, value, params, onChange, t, allowOff }: PiiGateFieldProps) {
+  return (
+    <Field label={t("piiGate.label")} htmlFor={id} hint={t("piiGate.hint")} name="piiGate">
+      <Select value={value} onValueChange={(next) => onChange(patchParam(params, "piiGate", next))}>
+        <SelectTrigger id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {allowOff ? <SelectItem value="off">{t("piiGate.off")}</SelectItem> : null}
+          <SelectItem value="block">{t("piiGate.block")}</SelectItem>
+          <SelectItem value="redact">{t("piiGate.redact")}</SelectItem>
+        </SelectContent>
+      </Select>
+    </Field>
+  )
+}
+
 // ── trigger.manual ────────────────────────────────────────────────────────
 export function ManualTriggerConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.manualTrigger")
@@ -3143,6 +3167,7 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
   const toolsEnabled = readBoolean(params, "toolsEnabled", true)
   const requireTools = readBoolean(params, "requireTools", false)
   const cwd = readString(params, "cwd")
+  const piiGate = readString(params, "piiGate", "block")
   return (
     <FieldGroup>
       <Field label={t("prompt.label")} htmlFor="at-prompt" name="prompt" required>
@@ -3260,6 +3285,7 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       ) : null}
+      <PiiGateField id="at-pii" value={piiGate} params={params} onChange={onChange} t={t} />
       <TypedOutputFields params={params} onChange={onChange} idPrefix="at" />
     </FieldGroup>
   )
@@ -3346,6 +3372,7 @@ export function ConnectorSendConfig({ params, onChange }: ConfigProps) {
   const adapterId = readString(params, "adapterId")
   const conversationKey = readString(params, "conversationKey")
   const content = readString(params, "content")
+  const piiGate = readString(params, "piiGate", "block")
   return (
     <FieldGroup>
       <Field label={t("adapter.label")} htmlFor="cs-adapter" name="adapterId" required>
@@ -3370,6 +3397,7 @@ export function ConnectorSendConfig({ params, onChange }: ConfigProps) {
           rows={4}
         />
       </Field>
+      <PiiGateField id="cs-pii" value={piiGate} params={params} onChange={onChange} t={t} />
       <Field
         label={t("cardJson.label")}
         htmlFor="cs-card-json"
@@ -3590,6 +3618,7 @@ export function ConnectorForwardConfig({ params, onChange }: ConfigProps) {
   const adapterId = readString(params, "adapterId")
   const messageId = readString(params, "messageId")
   const target = readString(params, "targetConversationKey")
+  const piiGate = readString(params, "piiGate", "block")
   return (
     <FieldGroup>
       <Field label={t("adapter.label")} htmlFor="cf-adapter" name="adapterId" required>
@@ -3627,6 +3656,7 @@ export function ConnectorForwardConfig({ params, onChange }: ConfigProps) {
           placeholder={t("target.placeholder")}
         />
       </Field>
+      <PiiGateField id="cf-pii" value={piiGate} params={params} onChange={onChange} t={t} />
     </FieldGroup>
   )
 }
@@ -3732,7 +3762,7 @@ export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
   const mode = (readString(params, "mode") || "explicit") as "explicit" | "routed"
   const routed = v2 && mode === "routed"
   const modelAlias = readString(params, "modelAlias")
-  const piiGate = readString(params, "piiGate") || "off"
+  const piiGate = readString(params, "piiGate") || "block"
   const systemPrompt = readString(params, "systemPrompt")
   const userPrompt = readString(params, "userPrompt")
   const temperature = readNumber(params, "temperature", 0.7)
@@ -3771,18 +3801,14 @@ export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
         <AiExplicitProviderFields params={params} onChange={onChange} t={t} idPrefix="ai" />
       )}
       {v2 ? (
-        <Field label={t("piiGate.label")} htmlFor="ai-pii" hint={t("piiGate.hint")} name="piiGate">
-          <Select value={piiGate} onValueChange={(v) => onChange(patchParam(params, "piiGate", v))}>
-            <SelectTrigger id="ai-pii">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="off">{t("piiGate.off")}</SelectItem>
-              <SelectItem value="block">{t("piiGate.block")}</SelectItem>
-              <SelectItem value="redact">{t("piiGate.redact")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
+        <PiiGateField
+          id="ai-pii"
+          value={piiGate}
+          params={params}
+          onChange={onChange}
+          t={t}
+          allowOff
+        />
       ) : null}
       <Field label={t("systemPrompt.label")} htmlFor="ai-system" name="systemPrompt">
         <ExpressionField
@@ -3875,7 +3901,7 @@ export function AiCouncilConfig({ params, onChange }: ConfigProps) {
   const executionMode = readString(params, "executionMode", "parallel")
   const timeoutMs = readNumber(params, "timeoutMs", 60000)
   const maxConcurrency = readNumber(params, "maxConcurrency", 4)
-  const piiGate = readString(params, "piiGate", "off")
+  const piiGate = readString(params, "piiGate", "block")
   // Raw-first so hand-typing (which transits invalid intermediate JSON) isn't
   // reverted every keystroke — mirrors the headers field's readStringRecordJsonParam.
   const councillorsJson = readArrayJsonParam(
@@ -4001,23 +4027,14 @@ export function AiCouncilConfig({ params, onChange }: ConfigProps) {
           }
         />
       </Field>
-      <Field
-        label={t("piiGate.label")}
-        htmlFor="council-pii"
-        hint={t("piiGate.hint")}
-        name="piiGate"
-      >
-        <Select value={piiGate} onValueChange={(v) => onChange(patchParam(params, "piiGate", v))}>
-          <SelectTrigger id="council-pii">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="off">{t("piiGate.off")}</SelectItem>
-            <SelectItem value="block">{t("piiGate.block")}</SelectItem>
-            <SelectItem value="redact">{t("piiGate.redact")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </Field>
+      <PiiGateField
+        id="council-pii"
+        value={piiGate}
+        params={params}
+        onChange={onChange}
+        t={t}
+        allowOff
+      />
     </FieldGroup>
   )
 }
@@ -4051,7 +4068,7 @@ export function EnsembleConfig({ params, onChange }: ConfigProps) {
   const n = readNumber(params, "n", 3)
   const iterationConcurrency = readNumber(params, "iterationConcurrency", 4)
   const lensText = Array.isArray(params.lens) ? (params.lens as string[]).join("\n") : ""
-  const piiGate = readString(params, "piiGate") || "off"
+  const piiGate = readString(params, "piiGate") || "block"
   const synthesizerAlias = readString(params, "synthesizerAlias")
 
   return (
@@ -4260,18 +4277,14 @@ export function EnsembleConfig({ params, onChange }: ConfigProps) {
         </Field>
       ) : null}
 
-      <Field label={t("piiGate.label")} htmlFor="en-pii" hint={t("piiGate.hint")} name="piiGate">
-        <Select value={piiGate} onValueChange={(v) => onChange(patchParam(params, "piiGate", v))}>
-          <SelectTrigger id="en-pii">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="off">{t("piiGate.off")}</SelectItem>
-            <SelectItem value="block">{t("piiGate.block")}</SelectItem>
-            <SelectItem value="redact">{t("piiGate.redact")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </Field>
+      <PiiGateField
+        id="en-pii"
+        value={piiGate}
+        params={params}
+        onChange={onChange}
+        t={t}
+        allowOff
+      />
     </FieldGroup>
   )
 }
@@ -4463,6 +4476,7 @@ export function HttpRequestConfig({ params, onChange }: ConfigProps) {
   const url = readString(params, "url")
   const body = readString(params, "body")
   const followRedirects = readBoolean(params, "followRedirects", true)
+  const piiGate = readString(params, "piiGate", "block")
   return (
     <FieldGroup>
       <Field label={t("method.label")} htmlFor="http-method" name="method">
@@ -4503,6 +4517,7 @@ export function HttpRequestConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       ) : null}
+      <PiiGateField id="http-pii" value={piiGate} params={params} onChange={onChange} t={t} />
       <div className="flex items-center justify-between gap-3">
         <Field
           label={t("followRedirects.label")}
@@ -5546,17 +5561,7 @@ export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       </div>
-      <Field label={t("piiGate.label")} htmlFor="ms-pii" hint={t("piiGate.hint")} name="piiGate">
-        <Select value={piiGate} onValueChange={(v) => onChange(patchParam(params, "piiGate", v))}>
-          <SelectTrigger id="ms-pii">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="block">{t("piiGate.block")}</SelectItem>
-            <SelectItem value="redact">{t("piiGate.redact")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </Field>
+      <PiiGateField id="ms-pii" value={piiGate} params={params} onChange={onChange} t={t} />
     </FieldGroup>
   )
 }
@@ -5567,6 +5572,7 @@ export function McpInvokeToolConfig({ params, onChange }: ConfigProps) {
   const serverId = readString(params, "serverId")
   const toolName = readString(params, "toolName")
   const argsJson = readString(params, "argsJson", "{}")
+  const piiGate = readString(params, "piiGate", "block")
   return (
     <FieldGroup>
       <Field label={t("serverId.label")} htmlFor="mi-server" name="serverId" required>
@@ -5609,6 +5615,7 @@ export function McpInvokeToolConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
+      <PiiGateField id="mi-pii" value={piiGate} params={params} onChange={onChange} t={t} />
     </FieldGroup>
   )
 }
@@ -5624,6 +5631,7 @@ export function PluginInvokeConfig({ params, onChange }: ConfigProps) {
   const toolName = readString(params, "toolName")
   const taskId = readString(params, "taskId")
   const argsJson = readString(params, "argsJson", "{}")
+  const piiGate = readString(params, "piiGate", "block")
   // Mode inference mirrors the executor: explicit discriminator wins, then
   // whichever target field a persisted node carries; new nodes default to
   // the tool path.
@@ -5749,6 +5757,7 @@ export function PluginInvokeConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
+      <PiiGateField id="pi-pii" value={piiGate} params={params} onChange={onChange} t={t} />
     </FieldGroup>
   )
 }

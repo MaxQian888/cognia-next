@@ -223,6 +223,7 @@ export type GraphIntegrityCode =
   | "danglingTarget"
   | "invalidConnection"
   | "missingTrigger"
+  | "connectorEgressPolicy"
   | "selfParent"
   | "missingParent"
   | "parentNotContainer"
@@ -350,6 +351,43 @@ export function collectGraphIntegrityIssues(wf: VisualWorkflow): GraphIntegrityI
   const triggers = wf.nodes.filter((n) => n.type.startsWith("trigger."))
   if (triggers.length === 0) {
     issues.push({ severity: "warning", code: "missingTrigger" })
+  }
+
+  // Connector payloads may contain personal data. Surface reachable external
+  // sinks still relying on an implicit/default policy before publication.
+  const connectorTriggers = wf.nodes.filter((node) => node.type === "trigger.connector.inbound")
+  const externalSinks = new Set<WorkflowNodeKind>([
+    "action.agent.turn",
+    "action.connector.send",
+    "action.mcp.invokeTool",
+    "action.plugin.invoke",
+    "io.http",
+  ])
+  const outgoing = new Map<string, string[]>()
+  for (const edge of wf.edges) {
+    const next = outgoing.get(edge.source) ?? []
+    next.push(edge.target)
+    outgoing.set(edge.source, next)
+  }
+  const reachableFromConnector = new Set<string>()
+  const queue = connectorTriggers.map((trigger) => trigger.id)
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (reachableFromConnector.has(current)) continue
+    reachableFromConnector.add(current)
+    queue.push(...(outgoing.get(current) ?? []))
+  }
+  for (const node of wf.nodes) {
+    const external = node.type.startsWith("ai.") || externalSinks.has(node.type)
+    if (!external || !reachableFromConnector.has(node.id)) continue
+    const policy = node.data.params.piiGate
+    if (policy === "block" || policy === "redact") continue
+    issues.push({
+      severity: "warning",
+      code: "connectorEgressPolicy",
+      nodeId: node.id,
+      params: { kind: node.type },
+    })
   }
 
   // Loop-body integrity (schemaVersion 2 containers).
@@ -499,6 +537,8 @@ function stringifyIntegrityIssue(issue: GraphIntegrityIssue): string {
       return `Edge ${issue.edgeId} is invalid: ${p.reason}`
     case "missingTrigger":
       return "Workflow has no trigger node; manual run only."
+    case "connectorEgressPolicy":
+      return `Connector-triggered external sink ${issue.nodeId} (${p.kind}) must explicitly choose piiGate=block or piiGate=redact before publishing.`
     case "selfParent":
       return `Node ${issue.nodeId} cannot be its own parent`
     case "missingParent":

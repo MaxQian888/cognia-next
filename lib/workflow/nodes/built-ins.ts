@@ -66,6 +66,7 @@ import {
 } from "@/lib/db/skills"
 import { getSkill as getPluginSkill } from "@/lib/plugin/registries/skill-registry"
 import { invokeMcpTool } from "@/lib/mcp/invoke"
+import { guardWorkflowEgress, WorkflowPiiBlockedError } from "@/lib/workflow/runtime/egress-guard"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
@@ -378,6 +379,7 @@ registerNodeExecutor({
       outputSchema?: Record<string, unknown>
       /** `fail` (default) throws on violation; `soft` keeps the unvalidated value. */
       onSchemaViolation?: "fail" | "soft"
+      piiGate?: "off" | "block" | "redact"
     }
     const apiKey =
       params.apiKey ??
@@ -397,6 +399,12 @@ registerNodeExecutor({
     const systemPrompt = jsonMode
       ? [params.systemPrompt, buildJsonInstruction(schemaHint)].filter(Boolean).join("\n\n")
       : params.systemPrompt
+    const guarded = guardWorkflowEgress({
+      securityContext: ctx.securityContext,
+      sink: "model",
+      requestedMode: params.piiGate,
+      value: { systemPrompt, userPrompt },
+    })
 
     // Shared tail: attach `structured` / `parseError` when JSON mode is on.
     // A declared schema is validated softly here (no retry, never throws) so
@@ -408,7 +416,8 @@ registerNodeExecutor({
       usage: { inputTokens: number; outputTokens: number; totalTokens: number }
       stub: boolean
     }) => {
-      if (!jsonMode) return { output: out }
+      const withPii = guarded.redacted ? { ...out, piiRedacted: true } : out
+      if (!jsonMode) return { output: withPii }
       const parsed = parseStructured(out.completion)
       const schemaFields =
         enforceSchema && !parsed.error
@@ -421,7 +430,7 @@ registerNodeExecutor({
             : {}
       return {
         output: {
-          ...out,
+          ...withPii,
           structured: parsed.value,
           ...(parsed.error ? { parseError: parsed.error } : {}),
           ...schemaFields,
@@ -440,7 +449,7 @@ registerNodeExecutor({
       return finalize({
         provider: params.provider,
         model: params.model,
-        completion: jsonMode ? "{}" : `[ai.prompt stub] ${userPrompt}`,
+        completion: jsonMode ? "{}" : `[ai.prompt stub] ${guarded.value.userPrompt}`,
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         stub: true,
       })
@@ -473,9 +482,9 @@ registerNodeExecutor({
       // One model call; `fix` carries the corrective re-prompt on the auto-fix
       // retry (only reached when an output schema is enforced).
       const runOnce = async (fix?: string) => {
-        const up = fix ? `${userPrompt}\n\n${fix}` : userPrompt
+        const up = fix ? `${guarded.value.userPrompt}\n\n${fix}` : guarded.value.userPrompt
         completion = await client.complete(up, {
-          system: systemPrompt,
+          system: guarded.value.systemPrompt,
           temperature: params.temperature,
         })
         const parsed = parseStructured(completion)
@@ -798,17 +807,14 @@ registerNodeExecutor({
       mode?: string
       durationMs?: number
       eventKey?: string
+      correlationId?: string
       timeoutMs?: number
     }
     const mode = params.mode ?? "duration"
     if (mode !== "duration") {
-      // Event mode: block on the in-process wake bus until an external source
-      // fires the key (approval registry pattern). The default key is run- and
-      // step-scoped so parallel runs never collide; a custom `eventKey` makes
-      // the wait addressable from outside (e.g. the `wf_emit_workflow_event`
-      // agent tool) without knowing the runId. The run-level abort signal and
-      // the optional `timeoutMs` both unblock; a timeout is NON-retryable —
-      // re-waiting would silently double the budget.
+      // Event mode uses the durable waitpoint store. Event sources persist
+      // first and matching consumes once, so emitter/subscriber races and
+      // renderer restarts cannot lose the event.
       const key =
         typeof params.eventKey === "string" && params.eventKey.trim()
           ? params.eventKey.trim()
@@ -819,17 +825,47 @@ registerNodeExecutor({
         "info",
         `flow.wait: waiting for event "${key}"` + (timeoutMs > 0 ? ` (timeout ${timeoutMs}ms)` : "")
       )
-      const { subscribeWake } = await import("@/lib/workflow/runtime/wake-bus")
+      const [{ createWorkflowWaitpoint }, { waitForWorkflowWaitpoint }, { getWorkflowRun }] =
+        await Promise.all([
+          import("@/lib/db/workflow-waitpoints"),
+          import("@/lib/workflow/runtime/waitpoint-repository"),
+          import("@/lib/db/workflows"),
+        ])
       try {
-        const wake = await subscribeWake(key, {
-          ...(timeoutMs > 0 ? { timeoutMs } : {}),
-          signal: ctx.signal,
+        const run = await getWorkflowRun(ctx.runId)
+        const createdAt = Date.now()
+        const waitpoint = await createWorkflowWaitpoint({
+          id: `wpe_${ctx.runId}_${ctx.stepId}`,
+          kind: "event_wait",
+          status: "pending",
+          runId: ctx.runId,
+          workflowId: ctx.workflowId,
+          stepId: ctx.stepId,
+          key,
+          ...(params.correlationId?.trim() ? { correlationId: params.correlationId.trim() } : {}),
+          createdAt,
+          notBefore: run?.startedAt ?? ctx.trigger.originAt ?? createdAt,
+          ...(timeoutMs > 0 ? { expiresAt: createdAt + timeoutMs } : {}),
+          updatedAt: createdAt,
         })
+        const terminal =
+          waitpoint.status === "pending"
+            ? await waitForWorkflowWaitpoint(waitpoint.id, {
+                signal: ctx.signal,
+                cancelOnAbort: true,
+              })
+            : waitpoint
+        if (terminal.status === "timed_out") throw new Error("timed out")
+        if (terminal.status === "cancelled") throw new Error("aborted")
+        const resolution = terminal.resolution
+        if (!resolution || resolution.outcome !== "event") {
+          throw new Error(`invalid event resolution for ${terminal.id}`)
+        }
         return {
           output: {
             event: key,
-            source: wake.source,
-            data: wake.data,
+            source: resolution.respondedBy,
+            data: resolution.data,
             waitedMs: Date.now() - startedAt,
           },
         }
@@ -916,25 +952,36 @@ registerNodeExecutor({
       body?: unknown
       headers?: Record<string, string>
       followRedirects?: boolean
+      piiGate?: "block" | "redact"
     }
     const url = String(params.url ?? "").trim()
     if (!url) throw new Error("io.http requires a non-empty URL")
     const method = (params.method ?? "GET").toUpperCase()
+    const guarded = guardWorkflowEgress({
+      securityContext: ctx.securityContext,
+      sink: "remote-tool",
+      requestedMode: params.piiGate,
+      value: {
+        url,
+        headers: params.headers ?? {},
+        body: params.body,
+      },
+    })
     const headers: Record<string, string> = {
       Accept: "application/json,text/plain,*/*",
-      ...(params.headers ?? {}),
+      ...guarded.value.headers,
     }
     let body: BodyInit | undefined
-    if (method !== "GET" && method !== "HEAD" && params.body !== undefined) {
-      if (typeof params.body === "string") {
-        body = params.body
+    if (method !== "GET" && method !== "HEAD" && guarded.value.body !== undefined) {
+      if (typeof guarded.value.body === "string") {
+        body = guarded.value.body
         if (!headers["Content-Type"]) headers["Content-Type"] = "application/json"
       } else {
-        body = JSON.stringify(params.body)
+        body = JSON.stringify(guarded.value.body)
         headers["Content-Type"] = "application/json"
       }
     }
-    const response = await fetch(url, {
+    const response = await fetch(guarded.value.url, {
       method,
       headers,
       body,
@@ -962,6 +1009,7 @@ registerNodeExecutor({
         statusText: response.statusText,
         headers: Object.fromEntries(response.headers.entries()),
         body: payload,
+        ...(guarded.redacted ? { piiRedacted: true } : {}),
       },
     }
   },
@@ -2146,10 +2194,17 @@ registerNodeExecutor({
       editTargetMessageId?: string
       waitForDelivery?: boolean
       waitTimeoutMs?: number
+      piiGate?: "block" | "redact"
     }
     const adapterId = params.adapterId?.trim()
     const rawConversationKey = params.conversationKey?.trim()
-    const content = params.content ?? ""
+    const guarded = guardWorkflowEgress({
+      securityContext: ctx.securityContext,
+      sink: "connector",
+      requestedMode: params.piiGate,
+      value: { content: params.content ?? "", cardJson: params.cardJson },
+    })
+    const content = guarded.value.content
     if (!adapterId) throw nonRetryable("action.connector.send requires 'adapterId'")
     if (!rawConversationKey) throw nonRetryable("action.connector.send requires 'conversationKey'")
     if (!content) throw nonRetryable("action.connector.send requires non-empty 'content'")
@@ -2183,7 +2238,7 @@ registerNodeExecutor({
     // plain-text mirror so capability-fallback platforms still get text.
     type Segments = Parameters<typeof enqueueOutbound>[0]["request"]["segments"]
     let segments: Segments = [{ type: "text", text: content }]
-    const rawCardJson = params.cardJson?.trim()
+    const rawCardJson = guarded.value.cardJson?.trim()
     if (rawCardJson) {
       let surface: { components?: unknown; rootId?: unknown }
       try {
@@ -2247,6 +2302,7 @@ registerNodeExecutor({
       adapterId,
       conversationKey,
       idempotencyKey,
+      ...(guarded.redacted ? { piiRedacted: true } : {}),
     }
     // Delivery feedback: optionally block until the job settles (or the
     // wait budget elapses) so downstream nodes can branch on the outcome.
@@ -2403,6 +2459,7 @@ registerNodeExecutor({
       messageId?: string
       messageIds?: string[]
       targetConversationKey?: string
+      piiGate?: "block" | "redact"
     }
     const adapterId = params.adapterId?.trim()
     const target = params.targetConversationKey?.trim()
@@ -2413,6 +2470,22 @@ registerNodeExecutor({
     if (!messageId && messageIds.length === 0) {
       throw nonRetryable("action.connector.forward requires 'messageId' or 'messageIds'")
     }
+    const guarded = guardWorkflowEgress({
+      securityContext: ctx.securityContext,
+      sink: "connector",
+      requestedMode: params.piiGate,
+      value: {
+        trigger: ctx.trigger.payload,
+        upstream: ctx.upstream,
+        messageId,
+        messageIds,
+        target,
+      },
+    })
+    // Native forwarding references the original platform message by id. It
+    // cannot replace that content with the redacted projection, so fail closed
+    // instead of claiming redaction while the adapter sends the original.
+    if (guarded.redacted) throw new WorkflowPiiBlockedError("connector")
     const { getBus } = await import("@/lib/connectors/bus")
     const result = await getBus().forwardOutbound(adapterId, {
       ...(messageId ? { messageId } : {}),
@@ -2938,6 +3011,13 @@ registerNodeExecutor({
           depth: parentDepth + 1,
         },
         signal: ctx.signal,
+        traceId: ctx.traceId,
+        lineage: {
+          rootRunId: ctx.lineage?.rootRunId ?? ctx.runId,
+          parentRunId: ctx.runId,
+          parentStepId: ctx.stepId,
+        },
+        securityContext: ctx.securityContext,
       })
     } catch (error) {
       if (error instanceof WorkflowAdmissionError) {
@@ -3907,6 +3987,7 @@ registerNodeExecutor({
       serverId?: string
       toolName?: string
       args?: Record<string, unknown>
+      piiGate?: "block" | "redact"
     }
     const serverId = params.serverId?.trim()
     const toolName = params.toolName?.trim()
@@ -3922,13 +4003,20 @@ registerNodeExecutor({
     const { getMcpServer } = await import("@/lib/db/mcp-servers")
     const server = await getMcpServer(serverId)
     if (!server) throw nonRetryable(`MCP server ${serverId} not found`)
+    const guarded = guardWorkflowEgress({
+      securityContext: ctx.securityContext,
+      sink: server.transport === "stdio" ? "local-tool" : "remote-tool",
+      requestedMode: params.piiGate,
+      value: args,
+    })
+    const safeArgs = guarded.value
 
     const { getPluginEventHooks } = await import("@/lib/plugin")
     const hooks = getPluginEventHooks()
 
     try {
       hooks.dispatchMCPServerConnect(serverId, server.name)
-      hooks.dispatchMCPToolCall(serverId, toolName, args)
+      hooks.dispatchMCPToolCall(serverId, toolName, safeArgs)
       // Shared invoke seam: correct stdio/sse/http split + static headers +
       // (future) OAuth authProvider. Inject the already-resolved server so we
       // don't re-hit Dexie / the preset registry.
@@ -3936,7 +4024,7 @@ registerNodeExecutor({
         {
           serverId,
           toolName,
-          args,
+          args: safeArgs,
           signal: ctx.signal,
           scopeId: `run:${ctx.runId}`,
           surface: "workflow",
@@ -3956,6 +4044,7 @@ registerNodeExecutor({
           isError: result.isError,
           content: result.content,
           structuredContent: result.structuredContent,
+          ...(guarded.redacted ? { piiRedacted: true } : {}),
         },
       }
     } finally {
@@ -3990,6 +4079,7 @@ registerNodeExecutor({
       toolName?: string
       taskId?: string
       args?: Record<string, unknown>
+      piiGate?: "block" | "redact"
     }
     const pluginId = params.pluginId?.trim()
     const toolName = params.toolName?.trim()
@@ -4001,6 +4091,24 @@ registerNodeExecutor({
       unknown
     >
 
+    const { getPlugin } = await import("@/lib/db/plugins")
+    const plugin = await getPlugin(pluginId)
+    if (!plugin) throw nonRetryable(`plugin ${pluginId} not found`)
+    const permissions = Array.isArray(plugin.manifest.permissions)
+      ? plugin.manifest.permissions.filter(
+          (permission): permission is string => typeof permission === "string"
+        )
+      : []
+    const hasNetworkEgress =
+      permissions.includes("network:fetch") || plugin.manifest.networkAccess !== undefined
+    const guarded = guardWorkflowEgress({
+      securityContext: ctx.securityContext,
+      sink: hasNetworkEgress ? "remote-tool" : "local-tool",
+      requestedMode: params.piiGate,
+      value: args,
+    })
+    const safeArgs = guarded.value
+
     if (mode === "tool") {
       if (!toolName) {
         throw nonRetryable("action.plugin.invoke (tool mode) requires 'toolName'")
@@ -4008,12 +4116,18 @@ registerNodeExecutor({
       const { invokePluginTool, PluginToolInvocationError } =
         await import("@/lib/plugin/core/invoke-plugin-tool")
       try {
-        const { result } = await invokePluginTool(pluginId, toolName, args, {
+        const { result } = await invokePluginTool(pluginId, toolName, safeArgs, {
           signal: ctx.signal,
           reason: "workflow:action.plugin.invoke",
         })
         return {
-          output: { pluginId, toolName, ok: true, data: result },
+          output: {
+            pluginId,
+            toolName,
+            ok: true,
+            data: result,
+            ...(guarded.redacted ? { piiRedacted: true } : {}),
+          },
         }
       } catch (err) {
         if (err instanceof PluginToolInvocationError) {
@@ -4034,9 +4148,6 @@ registerNodeExecutor({
 
     if (!taskId) throw nonRetryable("action.plugin.invoke requires 'taskId'")
 
-    const { getPlugin } = await import("@/lib/db/plugins")
-    const plugin = await getPlugin(pluginId)
-    if (!plugin) throw nonRetryable(`plugin ${pluginId} not found`)
     if (!plugin.enabled) {
       throw nonRetryable(`plugin ${pluginId} is not enabled`)
     }
@@ -4061,13 +4172,14 @@ registerNodeExecutor({
           `Plugins must add a workflow.task extension to be invokable.`
       )
     }
-    const data = await candidate.registration.handler(args, ctx.signal)
+    const data = await candidate.registration.handler(safeArgs, ctx.signal)
     return {
       output: {
         pluginId,
         taskId,
         ok: true,
         data,
+        ...(guarded.redacted ? { piiRedacted: true } : {}),
       },
     }
   },

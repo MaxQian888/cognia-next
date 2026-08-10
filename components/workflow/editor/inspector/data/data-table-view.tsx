@@ -11,6 +11,7 @@ import { sampleOf, typeOf } from "@/lib/workflow/editor/node-io-data"
 import type { PathSegment } from "@/lib/workflow/editor/expr-ref"
 import { cn } from "@/lib/utils"
 import { exprDragProps } from "./drag-props"
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 
 export function DataTableView({
   sourceNodeId,
@@ -30,8 +31,8 @@ export function DataTableView({
       return <p className="px-1 py-2 text-xs italic text-muted-foreground">{t("emptyObject")}</p>
     }
     return (
-      <table className="w-full text-xs" data-testid="data-table-view">
-        <tbody>
+      <Table className="text-xs" data-testid="data-table-view">
+        <TableBody>
           {entries.map(([key, value]) => (
             <FieldRow
               key={key}
@@ -42,15 +43,15 @@ export function DataTableView({
               dragTitle={t("dragHint")}
             />
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     )
   }
 
   // Primitive / array item — a single draggable value row.
   return (
-    <table className="w-full text-xs" data-testid="data-table-view">
-      <tbody>
+    <Table className="text-xs" data-testid="data-table-view">
+      <TableBody>
         <FieldRow
           label={t("valueLabel")}
           value={item}
@@ -58,8 +59,8 @@ export function DataTableView({
           segments={basePrefix}
           dragTitle={t("dragHint")}
         />
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   )
 }
 
@@ -77,7 +78,7 @@ function FieldRow({
   dragTitle: string
 }) {
   return (
-    <tr
+    <TableRow
       {...exprDragProps(sourceNodeId, segments)}
       title={dragTitle}
       data-testid="data-field-row"
@@ -86,13 +87,15 @@ function FieldRow({
         "hover:bg-accent/50 active:cursor-grabbing"
       )}
     >
-      <td className="py-1 pr-2 font-mono font-medium text-foreground/80 whitespace-nowrap">
+      <TableCell className="py-1 pr-2 font-mono font-medium text-foreground/80 whitespace-nowrap">
         {label}
-      </td>
-      <td className="py-1 pl-1 text-[10px] uppercase text-muted-foreground whitespace-nowrap">
+      </TableCell>
+      <TableCell className="py-1 pl-1 text-[10px] uppercase text-muted-foreground whitespace-nowrap">
         {typeOf(value)}
-      </td>
-      <td className="py-1 pl-2 font-mono text-muted-foreground break-all">{sampleOf(value)}</td>
-    </tr>
+      </TableCell>
+      <TableCell className="py-1 pl-2 font-mono text-muted-foreground break-all whitespace-normal">
+        {sampleOf(value)}
+      </TableCell>
+    </TableRow>
   )
 }

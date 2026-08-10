@@ -8,27 +8,27 @@ description: n8n-style visual orchestration layer — wire characters, teams, sk
 <Status variant="stable" />
 
 <TLDR>
-  A React Flow v12 editor (Zustand + zundo store, elkjs auto-layout) over **74 node kinds in 7
+  A React Flow v12 editor (Zustand + zundo store, elkjs auto-layout) over **153 node kinds in 7
   categories**, executed by a **hybrid runtime**: Rust owns *when a workflow starts* (cron daemon,
   HMAC webhook receiver) and *whether a run survived a crash* (SQLite mirror); TS owns *how a run
   walks the graph step by step* (`runWorkflow` — validate → topo-sort → step loop → durable event
   log). The graph type is `VisualWorkflow` (`types/workflow/visual.ts:242`, `schemaVersion: 1`);
-  persistence spans **8 Dexie tables** added across schema v22 → v56. An AI co-pilot drafts
+  workflow persistence spans **13 Dexie tables** through schema v156. An AI co-pilot drafts
   Zod-validated batch *proposals* the user previews and applies as a single undo step.
 </TLDR>
 
 <StatGrid>
   <Stat
     label="Node kinds"
-    value="74"
+    value="153"
     hint="7 categories · trigger / action / ai / flow / data / io / annotation (+pattern→action)"
   />
-  <Stat label="Built-in executors" value="34 core" hint="built-ins.ts; +13 desktop, +1 terminal, +13 github (plugin), +6 pattern" />
+  <Stat label="Execution" value="Authority + orchestrator" hint="immutable formal runs · draft preview/test" />
   <Stat label="Built-in templates" value="22" hint="10 seed · 4 advanced pack · 8 GitHub Delivery" />
   <Stat
     label="Dexie tables"
-    value="8"
-    hint="workflows · runs · runEvents · triggers · folders · fanout · bookmarks · proposalHistory"
+    value="13"
+    hint="definitions · runs/events/triggers · versions/deployments/invocations · waitpoints/events · editor auxiliaries"
   />
   <Stat label="lib/workflow" value="~14.7k LOC" hint="editor 4.3k · nodes 4k · runtime 3.2k · definition/library 3k" />
   <Stat label="Rust backend" value="~2.3k LOC" hint="webhook_router 818 · run_mirror 432 · cron_daemon 351" />
@@ -40,7 +40,7 @@ cognia-next uses this layer to compose its mature runtime entities — [characte
 
 > **Rust owns "when does the workflow start" and "did this run survive the crash". TS owns "given a run, how do we walk through the steps one by one".**
 
-Everything else falls out of that split. Cron firing and webhook receipt must work while the webview is minimized to the tray, so they live in Rust (`src-tauri/src/workflow/`). The step-by-step orchestration touches Dexie, the LLM clients, the connector bus, and the agent-team runtime — all of which live in the webview — so it stays in TS (`lib/workflow/runtime/`). The two sides communicate only through Tauri events (`workflow:trigger` / `workflow:resume`) and six IPC commands. In web mode the Rust layer is absent and the TS orchestrator runs standalone — cron only fires while the tab is alive, webhook shows a "desktop only" banner, and the other triggers work unchanged.
+Everything else falls out of that split. Cron firing and webhook receipt must work while the webview is minimized to the tray, so they live in Rust (`src-tauri/src/workflow/`). The step-by-step orchestration touches Dexie, the LLM clients, the connector bus, and the agent-team runtime — all of which live in the webview — so it stays in TS (`lib/workflow/runtime/`). The two sides communicate through Tauri events plus scoped trigger, run-mirror, and durable-waitpoint IPC commands. In web mode, Dexie provides the waitpoint fallback while the TS orchestrator remains available.
 
 ## Architecture
 
@@ -61,17 +61,17 @@ flowchart TB
     Orchestrator["runtime/orchestrator.ts<br/>validate → topo-sort → step loop → persist"]
     Registry["nodes/registry.ts<br/>kind@typeVersion → execute fn"]
     BuiltIns["nodes/built-ins.ts<br/>34 core executors"]
-    TriggerBridge["runtime/trigger-bridge.ts<br/>single fan-in → runWorkflow"]
+    TriggerBridge["runtime/trigger-bridge.ts<br/>single fan-in → Execution Authority"]
     WebhookBridge["runtime/webhook-bridge.ts<br/>syncWorkflowTriggers on save"]
     Resume["runtime/resume-controller.ts<br/>replay in-flight runs on boot"]
   end
 
-  subgraph Storage["🗄️ Dexie (8 tables, v22→v56)"]
+  subgraph Storage["🗄️ Dexie (13 workflow tables, v156)"]
     Workflows[(workflows)]
     Runs[(workflowRuns<br/>frozen snapshot)]
     Events[(workflowRunEvents<br/>append-only log)]
     Triggers[(workflowTriggers)]
-    Aux[(folders · fanout ·<br/>bookmarks · proposalHistory)]
+    Aux[(versions · deployments · invocations<br/>waitpoints · waitEvents<br/>folders · fanout · bookmarks · proposals)]
   end
 
   subgraph UI["🎨 components/workflow/"]
@@ -113,7 +113,7 @@ flowchart TB
 Each card is a documentation page with line-accurate internals. Read the per-module page before any non-trivial change.
 
 <Cards>
-  <Card title="Data model & definitions" href="./data-model" description="VisualWorkflow type, the 74-kind taxonomy, Zod + graph-integrity validation, the 8 Dexie tables, and the 22 built-in templates" />
+  <Card title="Data model & definitions" href="./data-model" description="VisualWorkflow type, the 153-kind taxonomy, validation, and 13 workflow Dexie tables through v156" />
   <Card title="Editor store & canvas mechanics" href="./editor-store" description="The Zustand + zundo store (history 100), React Flow converter, elkjs auto-layout, connection validator, clipboard/align/lasso, WeakMap indexes, perf tiers, viewport bookmarks" />
   <Card title="Expressions & AI co-pilot" href="./expressions-copilot" description="The eval-free {{ }} expression language, CodeMirror highlighting + autocomplete, drag-to-map, and the Zod-validated proposal pipeline with Dexie history" />
   <Card title="Node system & executors" href="./node-system" description="The kind@typeVersion registry, catalog metadata, per-kind Zod param schemas, validation, and the action/flow/data/io built-in executor families" />

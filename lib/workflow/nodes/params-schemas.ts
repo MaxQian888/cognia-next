@@ -184,6 +184,7 @@ const AgentTurnParams = z.object({
   // Typed output (D3): JSON object schema the reply must satisfy.
   outputSchema: z.record(z.string(), z.unknown()).optional(),
   onSchemaViolation: z.enum(["fail", "soft"]).optional(),
+  piiGate: z.enum(["block", "redact"]).optional(),
 })
 
 // ── Actions: goals ─────────────────────────────────────────────────────────
@@ -798,6 +799,7 @@ const ConnectorSendParams = z.object({
   adapterId: requiredString("required"),
   conversationKey: requiredString("required"),
   content: requiredString("required"),
+  piiGate: z.enum(["block", "redact"]).optional(),
   /**
    * Optional A2UI surface JSON (`{components, dataModel, rootId, …}`).
    * When set, the node sends an interactive card (projected per-platform by
@@ -869,6 +871,7 @@ const ConnectorForwardParams = z.object({
    * platform receive id (Lark chat_id / open_id).
    */
   targetConversationKey: requiredString("required"),
+  piiGate: z.enum(["block", "redact"]).optional(),
 })
 
 const ConnectorWaitReplyParams = z.object({
@@ -940,6 +943,7 @@ const McpInvokeToolParams = z.object({
   toolName: requiredString("required"),
   argsJson: optionalString,
   args: z.unknown().optional(),
+  piiGate: z.enum(["block", "redact"]).optional(),
 })
 
 // `taskId` is optional at this layer because tool-mode nodes don't carry
@@ -953,6 +957,7 @@ const PluginInvokeParams = z.object({
   taskId: optionalString,
   argsJson: optionalString,
   args: z.unknown().optional(),
+  piiGate: z.enum(["block", "redact"]).optional(),
 })
 
 // ── Desktop automation ──────────────────────────────────────────────────────
@@ -1444,6 +1449,8 @@ const WaitParams = z.object({
    * the run-scoped default `${runId}:${stepId}` — private to this run.
    */
   eventKey: optionalString,
+  /** Optional routing key when several runs wait on the same event name. */
+  correlationId: optionalString,
   /** Event mode: give up after this long (0 / absent = wait until run abort). */
   timeoutMs: numberRange(0).optional(),
 })
@@ -1573,6 +1580,7 @@ const HttpRequestParams = z.object({
   url: requiredString("required").refine(isHttpUrlOrExpression, "invalidUrl"),
   body: optionalString,
   followRedirects: z.boolean().optional(),
+  piiGate: z.enum(["block", "redact"]).optional(),
 })
 
 const WebCloneParams = z.object({

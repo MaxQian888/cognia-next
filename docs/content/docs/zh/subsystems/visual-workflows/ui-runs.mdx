@@ -8,7 +8,7 @@ description: 可视化工作流子系统的 React UI —— 三栏编辑器外�
 <Status variant="stable" />
 
 <TLDR>
-用户可触达的一切都位于 `components/workflow/` 之下：三栏编辑器外壳在 `canvas.tsx:894` 挂载“每工作流一份 store”，外层包裹 `ReactFlowProvider` + `EditorStoreProvider`，而 `FlowCanvas`（`flow-canvas.tsx:117`）是**唯一**逐帧订阅者，外壳的其余部分（chrome）通过 `getState()` 读取。选中节点驱动 Config/Input/Output 三段式 NDV 检查器（`inspector-panel.tsx:351` + `inspector/data/data-tabs.tsx:20`），其各标签由 `resolveNodeIo` / `useLatestRunOutputs` 供给；6 标签右侧栏（`right-sidebar/index.tsx:272`）在选中时自动切到检查器。文件夹感知的库（`workflow-library.tsx:56`）叠加 `filterWorkflows`/`sortWorkflows`、`@dnd-kit` 文件夹拖放、虚拟化列表行与自动隐藏的统计条。运行历史经纯函数 `buildSpans`（`run-timeline.tsx:172`）渲染甘特图，并提供 `run-detail.tsx:31` 重跑，由四个入口触达（从此处运行 / 运行此步 / NDV 空态 CTA / 整体重跑）。路由位于 `app/workflows/`，并通过 `generateStaticParams [{id:"_"}]` 输出静态导出的 `[id]` 占位页。
+用户可触达的一切都位于 `components/workflow/` 之下：三栏编辑器外壳在 `canvas.tsx:894` 挂载“每工作流一份 store”，外层包裹 `ReactFlowProvider` + `EditorStoreProvider`，而 `FlowCanvas`（`flow-canvas.tsx:117`）是**唯一**逐帧订阅者，外壳的其余部分（chrome）通过 `getState()` 读取。选中节点驱动 Config/Input/Output 三段式 NDV 检查器；运行详情显示甘特图、provenance、lineage、immutable version/deployment，并提供三种由 Execution Authority 驱动的重试。路由位于 `app/workflows/`，并通过 `generateStaticParams [{id:"_"}]` 输出静态导出的 `[id]` 占位页。
 </TLDR>
 
 纯 store/几何辅助函数（`createEditorStore`、对齐数学、`resolveNodeIo`、`flattenSchema`）记录于 [./editor-store](./editor-store) —— 本页仅引用而不重复推导。节点语义见 [./node-system](./node-system)，copilot/表达式面板见 [./expressions-copilot](./expressions-copilot)，执行内部见 [./runtime-execution](./runtime-execution)，schema 见 [./data-model](./data-model)。权威：[../../adr/0034-workflow-editor-completeness-and-plugin-parity](../../adr/0034-workflow-editor-completeness-and-plugin-parity)。
@@ -16,7 +16,7 @@ description: 可视化工作流子系统的 React UI —— 三栏编辑器外�
 <StatGrid>
 - **3** 栏（NodeSearchSidebar 20% / FlowCanvas 56% / RightSidebar 24%）
 - **6** 个右侧栏标签（chat / inspector / runs / templates / settings / changelog）
-- **4** 个运行入口（从此处 / 单步 / NDV CTA / 整体重跑）
+- **6** 个运行操作：三个 draft editor 操作，加原版本、当前 deployment、失败步骤三种重试
 - **~70** 个 NDV 注册表中的按 kind 配置组件
 </StatGrid>
 
@@ -200,7 +200,7 @@ flowchart TD
   RD --> RDI["RunDetailInner<br/>run-detail.tsx:98"]
   RDI --> PILL["RunStatusPill<br/>run-status-pill.tsx:48"]
   RDI --> SPARK["RunDurationSparkline<br/>run-duration-sparkline.tsx:23"]
-  RDI --> RERUN["handleReRun<br/>run-detail.tsx:122"]
+  RDI --> RERUN["retryWorkflowRun<br/>original · current · failed-step"]
   RDI --> RT["RunTimeline<br/>run-timeline.tsx:48"]
   RT --> BS["buildSpans（纯）<br/>run-timeline.tsx:172"]
   RDI --> RSD["RunStepDetail<br/>run-step-detail.tsx:42"]
@@ -209,8 +209,8 @@ flowchart TD
 | 组件 | 行号 | 职责 |
 | --- | --- | --- |
 | `RunDetail` | `run-detail.tsx:31` | 实时联接 run + events；自动选失败/最后步 `:50-61` |
-| `RunDetailInner` | `run-detail.tsx:98` | 头部 pill/时长/触发器/sparkline + 重跑 |
-| `handleReRun` | `run-detail.tsx:122` | 以原始 `triggerPayload` 重新调用 `runWorkflow` |
+| `RunDetailInner` | `run-detail.tsx` | 状态、trigger/caller、version/deployment/revision、trace 与父子/重试导航 |
+| `retryWorkflowRun` | `execution-authority.ts` | 从原版本、当前 production 或失败步骤创建新的 invocation |
 | `RunStepDetail` | `run-step-detail.tsx:42` | params 来自 `step_started.payload.params`，output 来自 `step_completed`，错误+栈 `:163` 可重试 `:175`，可过滤日志 `:202-210` |
 | `RunList` | `run-list.tsx:28` | 整页表格，实时 `[workflowId+startedAt]` 倒序 |
 | `RunStatusPill` | `run-status-pill.tsx:48` | `STATUS_META` `:17` 将 7 种状态映射为颜色+图标；running 旋转 |
@@ -227,12 +227,16 @@ flowchart LR
   B["NDV Output 空态 CTA<br/>data-tabs.tsx:96"] --> RSS["requestRunSingleStep →<br/>requestedRunSingleStepId"]
   C["节点工具条 / 运行此步"] --> RSS
   RSS --> HRS["handleRunSingleStep →<br/>runSingleNode (canvas.tsx:438)"]
-  D["运行历史 重跑"] --> RR["RunDetail.handleReRun<br/>run-detail.tsx:122（原 payload）"]
+  D["运行历史重试"] --> RR["Execution Authority<br/>original · current · failed-step"]
 ```
 
 - **从此处运行** → 节点工具条 / 上下文菜单 → `requestRunFromStep`/`requestedRunFromStepId` → `handleRun({startStepId})`（`canvas.tsx:389`，作用域限定到后代子图）。
 - **运行此步** → `requestRunSingleStep`/`requestedRunSingleStepId` → `handleRunSingleStep` → `runSingleNode`（`canvas.tsx:438`）；NDV Output 空态 CTA 也触发 `requestRunSingleStep`（`data-tabs.tsx:96`）。
-- **整体重跑** → `RunDetail.handleReRun`（`run-detail.tsx:122`）以原始 `triggerPayload` 重新调用 `runWorkflow`。
+- **原版本** → 使用原始 immutable version 与 dependency lock 从头执行。
+- **当前 deployment** → admission 时解析 active production deployment。
+- **失败步骤** → 使用原 immutable version，复用已完成输出、跳过其副作用，从失败/选定步骤恢复。
+
+每次重试都会创建新的 run 与 invocation，并记录 `retryOfRunId`、`retryMode` 和操作者。缺少 immutable binding 的历史 draft run 仍可查看，但不能伪装为正式重试。
 
 ## 路由与设置
 

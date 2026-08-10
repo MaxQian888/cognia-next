@@ -209,6 +209,13 @@ describe("AgentTurnConfig", () => {
     )
     expect(screen.queryByLabelText("Require tools")).toBeNull()
   })
+
+  it("defaults connector-safe PII egress to block", () => {
+    wrap(<AgentTurnConfig params={{}} onChange={jest.fn()} />)
+    expect(screen.getByRole("combobox", { name: "PII egress policy" })).toHaveTextContent(
+      "Block sensitive data"
+    )
+  })
 })
 
 describe("MemoryRecallConfig", () => {

@@ -29,9 +29,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getDb } from "@/lib/db/schema"
-import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
-import { runFromStep } from "@/lib/workflow/runtime/run-from-step"
-import type { TriggerEvent, WorkflowRunEventRow, WorkflowRunRow } from "@/types/workflow/visual"
+import { retryWorkflowRun } from "@/lib/workflow/runtime/execution-authority"
+import type {
+  WorkflowRetryMode,
+  WorkflowRunEventRow,
+  WorkflowRunRow,
+} from "@/types/workflow/visual"
 import { RunStatusPill } from "./run-status-pill"
 import { RunTimeline } from "./run-timeline"
 import { RunStepDetail } from "./run-step-detail"
@@ -132,67 +135,41 @@ function RunDetailInner({
   const t = useTranslations("workflows.runs.detail")
   const tPage = useTranslations("a2ui.interactivePage")
   const tToast = useTranslations("workflows.canvasToast")
+  const router = useRouter()
   const totalDuration = useMemo(
     () => (run.completedAt ? formatDurationMs(run.completedAt - run.startedAt) : t("running")),
     [run.startedAt, run.completedAt, t]
   )
   // Run-level token/cost rollup from step_usage events (LLM-backed steps).
   const usageSummary = useMemo(() => aggregateRunUsage(events), [events])
+  const childRuns = useLiveQuery(
+    async () =>
+      (await getDb().workflowRuns.toArray()).filter(
+        (candidate) => candidate.lineage?.parentRunId === run.id
+      ),
+    [run.id]
+  )
 
-  const handleReRun = async () => {
+  const handleRetry = async (mode: WorkflowRetryMode) => {
     if (busy) return
     setBusy(true)
     let toastId: string | number | undefined
     try {
       toastId = toast.loading(t("rerunning"))
-      const trigger: TriggerEvent = {
-        workflowId: run.workflowId,
-        kind: "trigger.manual",
-        payload: run.triggerPayload,
-        originAt: Date.now(),
-      }
-      const result = await runWorkflow({
-        workflow: run.workflowSnapshot,
-        trigger,
+      const execution = await retryWorkflowRun({
+        runId: run.id,
+        mode,
+        operatedBy: "workflow-runs-ui",
+        ...(mode === "failed-step" && selectedStepId ? { startStepId: selectedStepId } : {}),
       })
+      const result = execution.result
       if (result.status === "succeeded") {
         toast.success(tToast("completed"), { id: toastId })
+        router.push(
+          `/workflows/run?id=${encodeURIComponent(run.workflowId)}&runId=${encodeURIComponent(execution.runId)}`
+        )
       } else {
-        toast.error(`${tToast("runFailed")}: ${result.error?.message ?? "unknown error"}`, {
-          id: toastId,
-        })
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : tToast("runFailed"), {
-        id: toastId,
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleReRunFromStep = async () => {
-    if (busy || !selectedStepId) return
-    setBusy(true)
-    let toastId: string | number | undefined
-    try {
-      toastId = toast.loading(t("rerunning"))
-      const trigger: TriggerEvent = {
-        workflowId: run.workflowId,
-        kind: "trigger.manual",
-        payload: run.triggerPayload,
-        originAt: Date.now(),
-      }
-      const result = await runFromStep({
-        workflow: run.workflowSnapshot,
-        startStepId: selectedStepId,
-        seedFromRunId: run.id,
-        trigger,
-      })
-      if (result.status === "succeeded") {
-        toast.success(tToast("completed"), { id: toastId })
-      } else {
-        toast.error(`${tToast("runFailed")}: ${result.error?.message ?? "unknown error"}`, {
+        toast.error(`${tToast("runFailed")}: ${result.error?.message ?? t("unknownError")}`, {
           id: toastId,
         })
       }
@@ -260,24 +237,84 @@ function RunDetailInner({
         <Button
           variant="outline"
           size="sm"
-          onClick={handleReRunFromStep}
-          disabled={busy || !selectedStepId}
-          title={selectedStepId ? undefined : t("rerunFromStepHint")}
+          onClick={() => void handleRetry("failed-step")}
+          disabled={busy || !selectedStepId || !run.executionBinding}
+          title={
+            !run.executionBinding
+              ? t("formalRetryUnavailable")
+              : selectedStepId
+                ? undefined
+                : t("rerunFromStepHint")
+          }
           data-testid="run-detail-rerun-from-step"
         >
           <StepForwardIcon className="size-4 mr-1.5" />
-          {t("rerunFromStep")}
+          {t("retry.failedStep")}
         </Button>
         <Button
           variant="outline"
           size="sm"
-          onClick={handleReRun}
-          disabled={busy}
-          data-testid="run-detail-rerun"
+          onClick={() => void handleRetry("original-version")}
+          disabled={busy || !run.executionBinding}
+          title={!run.executionBinding ? t("formalRetryUnavailable") : undefined}
+          data-testid="run-detail-rerun-original"
         >
           <RotateCcwIcon className="size-4 mr-1.5" />
-          {busy ? t("rerunning") : t("rerun")}
+          {busy ? t("rerunning") : t("retry.originalVersion")}
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void handleRetry("current-deployment")}
+          disabled={busy || !run.executionBinding}
+          title={!run.executionBinding ? t("formalRetryUnavailable") : undefined}
+          data-testid="run-detail-rerun-current"
+        >
+          <RotateCcwIcon className="size-4 mr-1.5" />
+          {busy ? t("rerunning") : t("retry.currentDeployment")}
+        </Button>
+        <div
+          className="basis-full rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+          data-testid="run-provenance"
+        >
+          <span>{t("provenance.trigger", { value: run.triggerKind })}</span>
+          {run.executionBinding ? (
+            <>
+              <span>{` · ${t("provenance.entrypoint", { value: run.executionBinding.entrypoint })}`}</span>
+              <span>{` · ${t("provenance.caller", { value: run.executionBinding.caller })}`}</span>
+              <span>{` · ${t("provenance.version", { value: run.versionId ?? run.executionBinding.versionId })}`}</span>
+              <span>{` · ${t("provenance.revision", { value: run.deploymentRevision ?? run.executionBinding.deploymentRevision })}`}</span>
+            </>
+          ) : (
+            <span>{` · ${t("provenance.draft")}`}</span>
+          )}
+          {run.traceId ? (
+            <span>{` · ${t("provenance.trace", { value: run.traceId })}`}</span>
+          ) : null}
+          {run.lineage?.parentRunId ? (
+            <span>
+              {" · "}
+              <Link
+                href={`/workflows/run?id=${encodeURIComponent(run.workflowId)}&runId=${encodeURIComponent(run.lineage.parentRunId)}`}
+              >
+                {t("lineage.parent")}
+              </Link>
+            </span>
+          ) : null}
+          {run.lineage?.retryOfRunId ? (
+            <span>
+              {" · "}
+              <Link
+                href={`/workflows/run?id=${encodeURIComponent(run.workflowId)}&runId=${encodeURIComponent(run.lineage.retryOfRunId)}`}
+              >
+                {t("lineage.retryOf")}
+              </Link>
+            </span>
+          ) : null}
+          {(childRuns?.length ?? 0) > 0 ? (
+            <span>{` · ${t("lineage.children", { count: childRuns?.length ?? 0 })}`}</span>
+          ) : null}
+        </div>
       </header>
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
         <div className="min-h-0 flex-1 overflow-hidden">

@@ -4,7 +4,7 @@ import type { StepExecutionContext } from "@/types/workflow/visual"
 
 const COUNCIL_SYS_HEAD = "You are the Council synthesizer"
 
-function makeCtx(params: AiCouncilParams) {
+function makeCtx(params: AiCouncilParams, extra: Partial<StepExecutionContext> = {}) {
   const streamed: string[] = []
   const logs: Array<{ level: string; message: string }> = []
   const ctx = {
@@ -14,6 +14,7 @@ function makeCtx(params: AiCouncilParams) {
     signal: new AbortController().signal,
     log: (level: string, message: string) => logs.push({ level, message }),
     emitStream: (delta: string) => streamed.push(delta),
+    ...extra,
   } as unknown as StepExecutionContext
   return { ctx, streamed, logs }
 }
@@ -105,5 +106,23 @@ describe("executeAiCouncil", () => {
     await expect(executeAiCouncil(ctx, fakeDepsFactory())).rejects.toMatchObject({
       retryable: false,
     })
+  })
+
+  it("enforces the inherited PII policy before creating council dependencies", async () => {
+    const { ctx } = makeCtx(
+      { ...baseParams, prompt: "email a@b.com", piiGate: "off" },
+      {
+        securityContext: {
+          piiEgressRequired: true,
+          sourceTriggerKind: "trigger.connector.inbound",
+        },
+      }
+    )
+    const depsFactory = jest.fn(fakeDepsFactory())
+    await expect(executeAiCouncil(ctx, depsFactory)).rejects.toMatchObject({
+      code: "pii_blocked",
+      retryable: false,
+    })
+    expect(depsFactory).not.toHaveBeenCalled()
   })
 })

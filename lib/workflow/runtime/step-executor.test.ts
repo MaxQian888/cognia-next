@@ -63,6 +63,9 @@ async function buildInput(opts: {
   pinData?: Record<string, unknown>
   iterationMeta?: { loopId: string; iterationIndex: number }
   executionBinding?: RunStepInput["executionBinding"]
+  traceId?: string
+  lineage?: RunStepInput["lineage"]
+  securityContext?: RunStepInput["securityContext"]
 }): Promise<RunStepInput> {
   const runId = "run_1"
   return {
@@ -79,6 +82,9 @@ async function buildInput(opts: {
     honorPinData: opts.honorPinData,
     iterationMeta: opts.iterationMeta,
     executionBinding: opts.executionBinding,
+    traceId: opts.traceId,
+    lineage: opts.lineage,
+    securityContext: opts.securityContext,
   }
 }
 
@@ -114,7 +120,7 @@ describe("runStep pin short-circuit", () => {
     expect(result.output).toEqual({ real: true })
   })
 
-  it("threads loop and formal-run provenance into the executor context", async () => {
+  it("threads loop, trace, security, and formal-run provenance into the executor context", async () => {
     const executionBinding: NonNullable<RunStepInput["executionBinding"]> = {
       versionId: "wfv_parent_1",
       deploymentId: "wfd_parent",
@@ -126,6 +132,12 @@ describe("runStep pin short-circuit", () => {
     const input = await buildInput({
       iterationMeta: { loopId: "loop1", iterationIndex: 2 },
       executionBinding,
+      traceId: "trace-1",
+      lineage: { rootRunId: "root-1", parentRunId: "parent-1" },
+      securityContext: {
+        piiEgressRequired: true,
+        sourceTriggerKind: "trigger.connector.inbound",
+      },
     })
 
     await runStep(input)
@@ -134,6 +146,12 @@ describe("runStep pin short-circuit", () => {
       expect.objectContaining({
         iteration: { loopId: "loop1", iterationIndex: 2 },
         executionBinding,
+        traceId: "trace-1",
+        lineage: { rootRunId: "root-1", parentRunId: "parent-1" },
+        securityContext: {
+          piiEgressRequired: true,
+          sourceTriggerKind: "trigger.connector.inbound",
+        },
       })
     )
   })

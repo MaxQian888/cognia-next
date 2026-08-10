@@ -23,6 +23,11 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => mockIsTauri(),
 }))
 
+const mockIsHeadlessHost = jest.fn(() => false)
+jest.mock("@/lib/platform/detect", () => ({
+  isHeadlessHost: () => mockIsHeadlessHost(),
+}))
+
 jest.mock("@/lib/db/settings", () => ({
   getSettings: jest.fn().mockResolvedValue({
     defaultProvider: "openai",
@@ -54,6 +59,8 @@ function makeCtx(
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockIsTauri.mockReturnValue(false)
+  mockIsHeadlessHost.mockReturnValue(false)
   mockExecuteAgent.mockResolvedValue({
     text: "agent reply",
     finishReason: "stop",
@@ -64,6 +71,28 @@ beforeEach(() => {
 })
 
 describe("runAgentTurn", () => {
+  it("forces connector-origin prompts through the block/redact policy", async () => {
+    const extra = {
+      securityContext: {
+        piiEgressRequired: true,
+        sourceTriggerKind: "trigger.connector.inbound" as const,
+      },
+    }
+    await expect(
+      runAgentTurn(makeCtx({ prompt: "email alice@example.com", piiGate: "off" }, extra))
+    ).rejects.toMatchObject({ code: "pii_blocked", retryable: false })
+    expect(mockExecuteAgent).not.toHaveBeenCalled()
+
+    const result = await runAgentTurn(
+      makeCtx({ prompt: "email alice@example.com", piiGate: "redact" }, extra)
+    )
+    expect(mockExecuteAgent).toHaveBeenCalledWith(
+      expect.not.stringContaining("alice@example.com"),
+      expect.any(Object)
+    )
+    expect(result.output).toMatchObject({ piiRedacted: true })
+  })
+
   it("rejects an empty prompt with a non-retryable error", async () => {
     await expect(runAgentTurn(makeCtx({ prompt: "  " }))).rejects.toThrow(/non-empty 'prompt'/)
     try {
@@ -331,6 +360,16 @@ describe("runAgentTurn", () => {
       expect(output.channel).toBe("sidecar")
       expect(output.degradedReason).toBeUndefined()
       expect(mockRunAgentRail).toHaveBeenCalledTimes(1)
+    })
+
+    it("routes through the agent rail on a headless host", async () => {
+      mockIsHeadlessHost.mockReturnValue(true)
+      const result = await runAgentTurn(makeCtx({ prompt: "go", requireTools: true }))
+      const output = result.output as Record<string, unknown>
+      expect(output.text).toBe("agent rail")
+      expect(output.channel).toBe("sidecar")
+      expect(mockRunAgentRail).toHaveBeenCalledTimes(1)
+      expect(mockRunCompletionRail).not.toHaveBeenCalled()
     })
   })
 })

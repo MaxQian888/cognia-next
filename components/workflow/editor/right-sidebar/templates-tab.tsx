@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { cn } from "@/lib/utils"
 import type { EditorStore, EditorState } from "@/lib/workflow/editor/store"
 import {
@@ -353,19 +354,21 @@ function SlotInput({
           {slot.label.en}
           {slot.required ? <span className="text-destructive"> *</span> : null}
         </Label>
-        <select
+        <NativeSelect
           id={`slot-${slot.key}`}
-          className="h-8 rounded-md border bg-card px-2 text-xs"
+          size="sm"
+          wrapperClassName="w-full"
+          className="bg-card text-xs"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           data-testid={`workflow-templates-slot-${slot.key}`}
         >
           {slot.options.map((opt) => (
-            <option key={opt} value={opt}>
+            <NativeSelectOption key={opt} value={opt}>
               {opt}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
+        </NativeSelect>
       </div>
     )
   }

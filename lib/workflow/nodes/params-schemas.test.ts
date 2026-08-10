@@ -60,6 +60,24 @@ describe("trigger schemas", () => {
     expect(schema.safeParse({ url: "not a url" }).success).toBe(false)
     expect(schema.safeParse({ url: "https://api.example.com/x" }).success).toBe(true)
     expect(schema.safeParse({ url: "{{ $vars.base }}/x" }).success).toBe(true)
+    expect(schema.safeParse({ url: "https://api.example.com/x", piiGate: "redact" }).success).toBe(
+      true
+    )
+    expect(schema.safeParse({ url: "https://api.example.com/x", piiGate: "off" }).success).toBe(
+      false
+    )
+  })
+
+  it("action.connector.forward accepts only governed PII policies", () => {
+    const schema = PARAMS_SCHEMAS["action.connector.forward"]
+    const base = {
+      adapterId: "lark_main",
+      messageId: "om_1",
+      targetConversationKey: "oc_dest",
+    }
+    expect(schema.safeParse({ ...base, piiGate: "block" }).success).toBe(true)
+    expect(schema.safeParse({ ...base, piiGate: "redact" }).success).toBe(true)
+    expect(schema.safeParse({ ...base, piiGate: "off" }).success).toBe(false)
   })
 
   it("action.twin.ingest validates the optional URL when present", () => {
@@ -1061,9 +1079,14 @@ describe("trigger.workflow.completed schema", () => {
 describe("flow.wait event-mode schema", () => {
   const s = PARAMS_SCHEMAS["flow.wait"]
 
-  it("accepts eventKey + timeoutMs alongside event mode", () => {
+  it("accepts eventKey, correlationId, and timeoutMs alongside event mode", () => {
     expect(
-      s.safeParse({ mode: "event", eventKey: "deploy-approved", timeoutMs: 60_000 }).success
+      s.safeParse({
+        mode: "event",
+        eventKey: "deploy-approved",
+        correlationId: "tenant-a",
+        timeoutMs: 60_000,
+      }).success
     ).toBe(true)
   })
 

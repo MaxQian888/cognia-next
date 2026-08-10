@@ -12,8 +12,9 @@
  */
 
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
+import type { WorkflowPiiGateMode } from "@/types/workflow/visual"
 
-export type PiiGateMode = "off" | "block" | "redact"
+export type PiiGateMode = WorkflowPiiGateMode
 
 export interface PiiGateInput {
   system?: string

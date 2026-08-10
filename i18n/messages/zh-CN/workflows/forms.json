@@ -21,6 +21,12 @@
       "hint": "默认使用提供方配置的模型。",
       "label": "模型（可选）"
     },
+    "piiGate": {
+      "block": "阻断敏感数据",
+      "hint": "Connector 触发的正式运行必须启用。脱敏模式会在模型调用前移除检测到的敏感值。",
+      "label": "PII 出站策略",
+      "redact": "脱敏后继续"
+    },
     "prompt": {
       "label": "提示词"
     },
@@ -594,6 +600,12 @@
       "label": "消息 ID",
       "placeholder": "om_..."
     },
+    "piiGate": {
+      "block": "阻断敏感数据",
+      "hint": "转发前检查引用内容。原生转发无法改写原消息，因此即使选择脱敏，检测到 PII 时也会阻断。",
+      "label": "PII 出站策略",
+      "redact": "可脱敏时继续，否则阻断"
+    },
     "target": {
       "hint": "目标会话键（platform:adapterId:chatId）或原始 receive id。",
       "label": "目标会话",
@@ -689,6 +701,12 @@
     "idempotencyKey": {
       "hint": "去重键；默认为运行 ID + 步骤 ID。",
       "label": "幂等键（可选）"
+    },
+    "piiGate": {
+      "block": "阻断敏感数据",
+      "hint": "Connector 触发的正式运行必须启用。脱敏模式会在发送或编辑消息前移除检测到的敏感值。",
+      "label": "PII 出站策略",
+      "redact": "脱敏后继续"
     },
     "replyTo": {
       "hint": "支持回复的平台会引用该消息。",
@@ -1354,6 +1372,12 @@
     "method": {
       "label": "方法"
     },
+    "piiGate": {
+      "block": "阻止敏感数据",
+      "hint": "在网络出站前检查 URL、请求头和请求体。",
+      "label": "PII 出站策略",
+      "redact": "脱敏后继续"
+    },
     "url": {
       "hint": "支持 '{{ }}' 表达式。",
       "label": "URL",
@@ -1511,6 +1535,12 @@
     "argsJson": {
       "hint": "作为工具调用的 arguments 转发。支持表达式。",
       "label": "参数（JSON）"
+    },
+    "piiGate": {
+      "block": "阻断敏感数据",
+      "hint": "应用于网络 MCP Server；本地 stdio Server 不出站，因此不受影响。",
+      "label": "PII 出站策略",
+      "redact": "脱敏后继续"
     },
     "serverId": {
       "label": "MCP 服务器"
@@ -2002,6 +2032,12 @@
         "task": "任务处理器（旧版）",
         "tool": "插件工具"
       }
+    },
+    "piiGate": {
+      "block": "阻断敏感数据",
+      "hint": "插件具备网络访问能力时生效；仅本地运行的插件不受影响。",
+      "label": "PII 出站策略",
+      "redact": "脱敏后继续"
     },
     "pluginId": {
       "label": "插件",

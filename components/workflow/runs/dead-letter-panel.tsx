@@ -5,9 +5,9 @@
  * failed runs. Lists unacknowledged `status: "failed"` runs (via the existing
  * `status` index — no schema change) and offers three reuse-backed actions:
  *
- *   • Replay      → `runWorkflow(snapshot)` — a fresh run from the top.
- *   • Resume      → `runFromStep(snapshot, failedStep, seedFromRunId)` — re-run
- *                   from the failed step, reusing the prior run's upstream.
+ *   • Replay      → Execution Authority against the original immutable version.
+ *   • Resume      → Execution Authority from the failed step, reusing the
+ *                   prior run's completed outputs and skipping side effects.
  *   • Dismiss     → `acknowledgeRun` — hide it from the queue.
  *
  * Replays link back via `markReplayed` so the panel can show "replayed ×N".
@@ -22,23 +22,13 @@ import { AlertTriangleIcon, PlayIcon, RotateCcwIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { acknowledgeRun, listDeadLetters, markReplayed } from "@/lib/db/workflows"
-import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
-import { runFromStep } from "@/lib/workflow/runtime/run-from-step"
+import { retryWorkflowRun } from "@/lib/workflow/runtime/execution-authority"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import { formatRunStartedAt } from "./format"
 
 export interface DeadLetterPanelProps {
   /** Scope to one workflow; omit for a global dead-letter view. */
   workflowId?: string
-}
-
-/**
- * Build the replay trigger. Defined at module scope (not in the component) so
- * the `Date.now()` stamp is outside React's render-purity rule — this only
- * runs from the click handler.
- */
-function manualReplayTrigger(workflowId: string, payload: unknown) {
-  return { workflowId, kind: "trigger.manual" as const, payload, originAt: Date.now() }
 }
 
 export function DeadLetterPanel({ workflowId }: DeadLetterPanelProps) {
@@ -51,9 +41,10 @@ export function DeadLetterPanel({ workflowId }: DeadLetterPanelProps) {
   const replay = async (row: WorkflowRunRow) => {
     setBusyId(row.id)
     try {
-      const result = await runWorkflow({
-        workflow: row.workflowSnapshot,
-        trigger: manualReplayTrigger(row.workflowId, row.triggerPayload),
+      const result = await retryWorkflowRun({
+        runId: row.id,
+        mode: "original-version",
+        operatedBy: "workflow-dead-letter",
       })
       await markReplayed(row.id, result.runId)
       toast.success(t("replayStarted"))
@@ -72,10 +63,11 @@ export function DeadLetterPanel({ workflowId }: DeadLetterPanelProps) {
     }
     setBusyId(row.id)
     try {
-      const result = await runFromStep({
-        workflow: row.workflowSnapshot,
+      const result = await retryWorkflowRun({
+        runId: row.id,
+        mode: "failed-step",
+        operatedBy: "workflow-dead-letter",
         startStepId,
-        seedFromRunId: row.id,
       })
       await markReplayed(row.id, result.runId)
       toast.success(t("resumeStarted"))

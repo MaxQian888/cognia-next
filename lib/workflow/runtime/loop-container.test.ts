@@ -89,6 +89,9 @@ async function run(
     cache?: IdempotencyCache
     runId?: string
     executionBinding?: WorkflowExecutionBinding
+    traceId?: string
+    lineage?: Parameters<typeof runLoopContainer>[0]["lineage"]
+    securityContext?: Parameters<typeof runLoopContainer>[0]["securityContext"]
   } = {}
 ) {
   const runId = opts.runId ?? "run_loop_test"
@@ -104,6 +107,9 @@ async function run(
     secretResolver: NoopSecretResolver,
     logger: createRunLogger(runId),
     executionBinding: opts.executionBinding,
+    traceId: opts.traceId,
+    lineage: opts.lineage,
+    securityContext: opts.securityContext,
   })
 }
 
@@ -122,12 +128,24 @@ describe("forEach mode", () => {
   })
 
   it("threads the formal execution binding into every child iteration", async () => {
-    const contexts: Array<{ iteration?: unknown; executionBinding?: unknown }> = []
+    const contexts: Array<{
+      iteration?: unknown
+      executionBinding?: unknown
+      traceId?: string
+      lineage?: unknown
+      securityContext?: unknown
+    }> = []
     registerNodeExecutor({
       kind: "testplugin.capturebinding" as never,
       typeVersion: 1,
       execute: async (ctx) => {
-        contexts.push({ iteration: ctx.iteration, executionBinding: ctx.executionBinding })
+        contexts.push({
+          iteration: ctx.iteration,
+          executionBinding: ctx.executionBinding,
+          traceId: ctx.traceId,
+          lineage: ctx.lineage,
+          securityContext: ctx.securityContext,
+        })
         return { output: null }
       },
     })
@@ -143,16 +161,32 @@ describe("forEach mode", () => {
       dependencyLock: { workflows: {}, indexes: {} },
     }
 
-    await run(workflow, loopNode, { executionBinding })
+    const lineage = { rootRunId: "root-1", parentRunId: "parent-1" }
+    const securityContext = {
+      piiEgressRequired: true,
+      sourceTriggerKind: "trigger.connector.inbound" as const,
+    }
+    await run(workflow, loopNode, {
+      executionBinding,
+      traceId: "trace-1",
+      lineage,
+      securityContext,
+    })
 
     expect(contexts).toEqual([
       {
         iteration: { loopId: "loop1", iterationIndex: 0 },
         executionBinding,
+        traceId: "trace-1",
+        lineage,
+        securityContext,
       },
       {
         iteration: { loopId: "loop1", iterationIndex: 1 },
         executionBinding,
+        traceId: "trace-1",
+        lineage,
+        securityContext,
       },
     ])
   })

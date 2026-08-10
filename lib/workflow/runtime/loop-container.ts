@@ -40,6 +40,8 @@ import type {
   WorkflowEdge,
   WorkflowNode,
   WorkflowRetryPolicy,
+  WorkflowRunLineage,
+  WorkflowRunSecurityContext,
 } from "@/types/workflow/visual"
 import type { LoopItemError, LoopNodeParams } from "@/types/workflow/visual"
 import type { WorkflowExecutionBinding } from "@/types/workflow/deployment"
@@ -78,6 +80,8 @@ export interface RunLoopContainerInput {
   logger: RunLogger
   honorPinData?: boolean
   traceId?: string
+  lineage?: WorkflowRunLineage
+  securityContext?: WorkflowRunSecurityContext
   executionBinding?: WorkflowExecutionBinding
 }
 
@@ -491,6 +495,8 @@ async function runSubgraph(input: RunSubgraphInput): Promise<SubgraphResult> {
         logger: input.logger,
         honorPinData: input.honorPinData,
         ...(input.traceId ? { traceId: input.traceId } : {}),
+        ...(input.lineage ? { lineage: input.lineage } : {}),
+        ...(input.securityContext ? { securityContext: input.securityContext } : {}),
         ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
         extraUpstream: input.extraUpstream,
         staticData: input.staticData,

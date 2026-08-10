@@ -45,19 +45,12 @@ jest.mock("@/lib/db/workflows", () => ({
   markReplayed: (...a: unknown[]) => markReplayed(...a),
 }))
 
-const runWorkflow = jest.fn(async (..._a: unknown[]) => ({
-  runId: "replay_1",
-  status: "failed" as const,
+const retryWorkflowRun = jest.fn(async (input: { mode: string }) => ({
+  runId: input.mode === "failed-step" ? "resume_1" : "replay_1",
+  result: { status: "succeeded" as const },
 }))
-const runFromStep = jest.fn(async (..._a: unknown[]) => ({
-  runId: "resume_1",
-  status: "succeeded" as const,
-}))
-jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
-  runWorkflow: (...a: unknown[]) => runWorkflow(...a),
-}))
-jest.mock("@/lib/workflow/runtime/run-from-step", () => ({
-  runFromStep: (...a: unknown[]) => runFromStep(...a),
+jest.mock("@/lib/workflow/runtime/execution-authority", () => ({
+  retryWorkflowRun: (...a: [{ mode: string }]) => retryWorkflowRun(...a),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
@@ -88,9 +81,13 @@ describe("DeadLetterPanel", () => {
   it("resume re-runs from the failed step and links the replay", async () => {
     wrap()
     fireEvent.click(screen.getByTestId("dead-letter-resume-run_1"))
-    await waitFor(() => expect(runFromStep).toHaveBeenCalledTimes(1))
-    expect(runFromStep).toHaveBeenCalledWith(
-      expect.objectContaining({ startStepId: "n_fail", seedFromRunId: "run_1" })
+    await waitFor(() => expect(retryWorkflowRun).toHaveBeenCalledTimes(1))
+    expect(retryWorkflowRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run_1",
+        mode: "failed-step",
+        startStepId: "n_fail",
+      })
     )
     expect(markReplayed).toHaveBeenCalledWith("run_1", "resume_1")
   })
@@ -98,7 +95,10 @@ describe("DeadLetterPanel", () => {
   it("replay starts a fresh run and links it", async () => {
     wrap()
     fireEvent.click(screen.getByTestId("dead-letter-replay-run_1"))
-    await waitFor(() => expect(runWorkflow).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(retryWorkflowRun).toHaveBeenCalledTimes(1))
+    expect(retryWorkflowRun).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run_1", mode: "original-version" })
+    )
     expect(markReplayed).toHaveBeenCalledWith("run_1", "replay_1")
   })
 
@@ -112,16 +112,20 @@ describe("DeadLetterPanel", () => {
     currentRows = [makeRow({ error: { message: "boom" }, lastCompletedStepId: "n_ok" })]
     wrap()
     fireEvent.click(screen.getByTestId("dead-letter-resume-run_1"))
-    await waitFor(() => expect(runFromStep).toHaveBeenCalledTimes(1))
-    expect(runFromStep).toHaveBeenCalledWith(expect.objectContaining({ startStepId: "n_ok" }))
+    await waitFor(() => expect(retryWorkflowRun).toHaveBeenCalledTimes(1))
+    expect(retryWorkflowRun).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "failed-step", startStepId: "n_ok" })
+    )
   })
 
   it("resume falls back to a full replay when there's no step to resume from", async () => {
     currentRows = [makeRow({ error: undefined, lastCompletedStepId: undefined })]
     wrap()
     fireEvent.click(screen.getByTestId("dead-letter-resume-run_1"))
-    await waitFor(() => expect(runWorkflow).toHaveBeenCalledTimes(1))
-    expect(runFromStep).not.toHaveBeenCalled()
+    await waitFor(() => expect(retryWorkflowRun).toHaveBeenCalledTimes(1))
+    expect(retryWorkflowRun).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "original-version" })
+    )
   })
 
   it("renders a minimal failed run with no error object or replay history", () => {
@@ -136,7 +140,7 @@ describe("DeadLetterPanel", () => {
 
   it("surfaces a resume failure as an error toast", async () => {
     const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
-    runFromStep.mockRejectedValueOnce(new Error("nope"))
+    retryWorkflowRun.mockRejectedValueOnce(new Error("nope"))
     wrap()
     fireEvent.click(screen.getByTestId("dead-letter-resume-run_1"))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("nope"))
@@ -144,7 +148,7 @@ describe("DeadLetterPanel", () => {
 
   it("surfaces a replay failure as an error toast", async () => {
     const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
-    runWorkflow.mockRejectedValueOnce(new Error("kaboom"))
+    retryWorkflowRun.mockRejectedValueOnce(new Error("kaboom"))
     wrap()
     fireEvent.click(screen.getByTestId("dead-letter-replay-run_1"))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("kaboom"))
@@ -152,7 +156,7 @@ describe("DeadLetterPanel", () => {
 
   it("stringifies a non-Error rejection from resume", async () => {
     const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
-    runFromStep.mockRejectedValueOnce("plain string")
+    retryWorkflowRun.mockRejectedValueOnce("plain string")
     wrap()
     fireEvent.click(screen.getByTestId("dead-letter-resume-run_1"))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("plain string"))
@@ -160,7 +164,7 @@ describe("DeadLetterPanel", () => {
 
   it("stringifies a non-Error rejection from replay", async () => {
     const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
-    runWorkflow.mockRejectedValueOnce(123)
+    retryWorkflowRun.mockRejectedValueOnce(123)
     wrap()
     fireEvent.click(screen.getByTestId("dead-letter-replay-run_1"))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("123"))

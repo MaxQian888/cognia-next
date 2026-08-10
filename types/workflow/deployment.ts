@@ -1,4 +1,5 @@
 import type { VisualWorkflow, WorkflowInterface, WorkflowNodeKind } from "./visual"
+import type { WorkflowRetryMode } from "./visual"
 
 export type WorkflowEnvironment = "production" | "staging" | "development" | (string & {})
 
@@ -59,6 +60,11 @@ export interface WorkflowInvocation {
   runId?: string
   status: "admitted" | "running" | "completed" | "rejected"
   dependencyLock?: WorkflowDependencyLock
+  retryOfRunId?: string
+  retryMode?: WorkflowRetryMode
+  startStepId?: string
+  seedRunId?: string
+  operatedBy?: string
   createdAt: number
   updatedAt: number
 }

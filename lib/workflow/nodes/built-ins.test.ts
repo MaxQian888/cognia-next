@@ -97,6 +97,8 @@ beforeEach(async () => {
   mockAddReaction.mockResolvedValue({ ok: true })
   mockDeleteOutbound.mockReset()
   mockDeleteOutbound.mockResolvedValue({ ok: true })
+  mockForward.mockReset()
+  mockForward.mockResolvedValue({ ok: true })
   mockSubscribeInbound.mockClear()
   inboundObservers.length = 0
 })
@@ -543,14 +545,18 @@ describe("flow.wait", () => {
   })
 
   it("event mode blocks until an external wake fires the custom key", async () => {
-    const { emitWake } = await import("@/lib/workflow/runtime/wake-bus")
+    const { createWorkflowWaitEvent, emitWorkflowWaitEvent } =
+      await import("@/lib/db/workflow-waitpoints")
     const pending = exec(
       "flow.wait",
       makeCtx("flow.wait", { mode: "event", eventKey: "deploy-approved" })
     )
     // Give the executor a tick to subscribe before waking.
     await new Promise((r) => setTimeout(r, 10))
-    expect(emitWake("deploy-approved", { source: "test", data: { ok: 1 } })).toBe(true)
+    const event = await emitWorkflowWaitEvent(
+      createWorkflowWaitEvent({ key: "deploy-approved", source: "test", data: { ok: 1 } })
+    )
+    expect(event.consumedByWaitpointId).toBeDefined()
     const r = await pending
     const out = r.output as Record<string, unknown>
     expect(out.event).toBe("deploy-approved")
@@ -560,11 +566,15 @@ describe("flow.wait", () => {
   })
 
   it("event mode defaults its key to runId:stepId", async () => {
-    const { emitWake } = await import("@/lib/workflow/runtime/wake-bus")
+    const { createWorkflowWaitEvent, emitWorkflowWaitEvent } =
+      await import("@/lib/db/workflow-waitpoints")
     const ctx = makeCtx("flow.wait", { mode: "event" })
     const pending = exec("flow.wait", ctx)
     await new Promise((r) => setTimeout(r, 10))
-    expect(emitWake(`${ctx.runId}:${ctx.stepId}`, { source: "test" })).toBe(true)
+    const event = await emitWorkflowWaitEvent(
+      createWorkflowWaitEvent({ key: `${ctx.runId}:${ctx.stepId}`, source: "test" })
+    )
+    expect(event.consumedByWaitpointId).toBeDefined()
     const r = await pending
     expect((r.output as Record<string, unknown>).event).toBe(`${ctx.runId}:${ctx.stepId}`)
   })
@@ -577,6 +587,33 @@ describe("flow.wait", () => {
     await expect(pending).rejects.toMatchObject({
       message: expect.stringMatching(/timed out/),
       retryable: false,
+    })
+  })
+
+  it("consumes an event emitted before the waitpoint is registered", async () => {
+    const { createWorkflowWaitEvent, emitWorkflowWaitEvent } =
+      await import("@/lib/db/workflow-waitpoints")
+    await emitWorkflowWaitEvent(
+      createWorkflowWaitEvent({
+        key: "already-emitted",
+        correlationId: "release-1",
+        source: "test",
+        data: { ready: true },
+      })
+    )
+
+    const result = await exec(
+      "flow.wait",
+      makeCtx("flow.wait", {
+        mode: "event",
+        eventKey: "already-emitted",
+        correlationId: "release-1",
+      })
+    )
+    expect(result.output).toMatchObject({
+      event: "already-emitted",
+      source: "test",
+      data: { ready: true },
     })
   })
 
@@ -655,6 +692,53 @@ describe("io.http", () => {
       /non-empty URL/
     )
   })
+
+  it("blocks connector-origin PII before making the network request", async () => {
+    global.fetch = jest.fn() as typeof fetch
+    const ctx = {
+      ...makeCtx("io.http", {
+        url: "https://api.example/test",
+        method: "POST",
+        body: JSON.stringify({ email: "alice@example.com" }),
+      }),
+      securityContext: {
+        piiEgressRequired: true,
+        sourceTriggerKind: "trigger.connector.inbound" as const,
+      },
+    }
+
+    await expect(exec("io.http", ctx)).rejects.toMatchObject({
+      code: "pii_blocked",
+      retryable: false,
+    })
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it("redacts connector-origin PII before making the network request", async () => {
+    global.fetch = jest.fn(async () =>
+      makeResponse(JSON.stringify({ ok: true }), {
+        status: 200,
+        contentType: "application/json",
+      })
+    ) as typeof fetch
+    const ctx = {
+      ...makeCtx("io.http", {
+        url: "https://api.example/test",
+        method: "POST",
+        body: JSON.stringify({ email: "alice@example.com" }),
+        piiGate: "redact" as const,
+      }),
+      securityContext: {
+        piiEgressRequired: true,
+        sourceTriggerKind: "trigger.connector.inbound" as const,
+      },
+    }
+
+    const result = await exec("io.http", ctx)
+    const request = (global.fetch as jest.Mock).mock.calls[0]?.[1] as RequestInit
+    expect(String(request.body)).not.toContain("alice@example.com")
+    expect(result.output).toMatchObject({ piiRedacted: true })
+  })
 })
 
 describe("ai.prompt", () => {
@@ -683,6 +767,26 @@ describe("ai.prompt", () => {
       })
     )
     expect((r2.output as { stub: boolean }).stub).toBe(true)
+  })
+
+  it("blocks connector-origin PII before the v1 model path", async () => {
+    const ctx = {
+      ...makeCtx("ai.prompt", {
+        provider: "openai",
+        model: "gpt-test",
+        apiKey: "test-key",
+        userPrompt: "Contact alice@example.com",
+      }),
+      securityContext: {
+        piiEgressRequired: true,
+        sourceTriggerKind: "trigger.connector.inbound" as const,
+      },
+    }
+
+    await expect(exec("ai.prompt", ctx)).rejects.toMatchObject({
+      code: "pii_blocked",
+      retryable: false,
+    })
   })
 })
 
@@ -1705,6 +1809,25 @@ describe("action.skill.upsert", () => {
 })
 
 describe("action.connector.send", () => {
+  it("blocks connector-origin PII before an outbound job is created", async () => {
+    const ctx = {
+      ...makeCtx("action.connector.send", {
+        adapterId: "telegram_main",
+        conversationKey: "tg:chat:42",
+        content: "email alice@example.com",
+      }),
+      securityContext: {
+        piiEgressRequired: true,
+        sourceTriggerKind: "trigger.connector.inbound" as const,
+      },
+    }
+    await expect(exec("action.connector.send", ctx)).rejects.toMatchObject({
+      code: "pii_blocked",
+      retryable: false,
+    })
+    expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+
   it("enqueues an outbound row in the queue", async () => {
     const r = await exec(
       "action.connector.send",
@@ -2058,6 +2181,47 @@ describe("action.connector.forward", () => {
       )
     ).rejects.toThrow(/unsupported/)
   })
+
+  it("blocks connector-origin PII before native forwarding", async () => {
+    const ctx = makeCtx(
+      "action.connector.forward",
+      {
+        adapterId: "lark_main",
+        messageId: "om_1",
+        targetConversationKey: "oc_dest",
+      },
+      { content: "contact alice@example.com" }
+    )
+    ctx.securityContext = {
+      piiEgressRequired: true,
+      sourceTriggerKind: "trigger.connector.inbound",
+    }
+
+    await expect(exec("action.connector.forward", ctx)).rejects.toMatchObject({
+      code: "pii_blocked",
+      retryable: false,
+    })
+    expect(mockForward).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when redaction cannot rewrite the referenced platform message", async () => {
+    await expect(
+      exec(
+        "action.connector.forward",
+        makeCtx(
+          "action.connector.forward",
+          {
+            adapterId: "lark_main",
+            messageId: "om_1",
+            targetConversationKey: "oc_dest",
+            piiGate: "redact",
+          },
+          { content: "contact alice@example.com" }
+        )
+      )
+    ).rejects.toMatchObject({ code: "pii_blocked", retryable: false })
+    expect(mockForward).not.toHaveBeenCalled()
+  })
 })
 
 describe("action.connector.delete", () => {
@@ -2296,10 +2460,23 @@ describe("flow.subworkflow", () => {
       edges: [{ id: "e1", source: "n_start", target: "n_set" }],
     })
     await publishWorkflow(sub.id, 1)
-    const r = await exec("flow.subworkflow", makeCtx("flow.subworkflow", { workflowId: sub.id }))
+    const parent = {
+      ...makeCtx("flow.subworkflow", { workflowId: sub.id }),
+      traceId: "0123456789abcdef0123456789abcdef",
+    }
+    const r = await exec("flow.subworkflow", parent)
     const out = r.output as { runId: string; status: string }
     expect(out.runId).toMatch(/^run_/)
     expect(out.status).toBe("succeeded")
+    const childRun = await (await import("@/lib/db/schema")).getDb().workflowRuns.get(out.runId)
+    expect(childRun).toMatchObject({
+      traceId: parent.traceId,
+      lineage: {
+        rootRunId: parent.runId,
+        parentRunId: parent.runId,
+        parentStepId: parent.stepId,
+      },
+    })
   })
 
   it("uses loop iteration provenance in the child invocation identity", async () => {

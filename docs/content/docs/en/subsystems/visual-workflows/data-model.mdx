@@ -1,6 +1,6 @@
 ---
 title: Data model & definitions
-description: The authoritative VisualWorkflow graph type, the 74-kind / 7-category taxonomy, the Zod plus graph-integrity validation pipeline, the 8 workflow Dexie tables, and the 22 built-in templates.
+description: The authoritative VisualWorkflow graph type, the 153-kind / 7-category taxonomy, validation pipeline, and 13 workflow Dexie tables through schema v156.
 ---
 
 # Data model & definitions
@@ -8,13 +8,13 @@ description: The authoritative VisualWorkflow graph type, the 74-kind / 7-catego
 <Status variant="stable" />
 
 <TLDR>
-A workflow is a `VisualWorkflow` graph (`types/workflow/visual.ts:242`) at `schemaVersion: 1` (`types/workflow/visual.ts:235`) made of `WorkflowNode` plus `WorkflowEdge` records. Every node `type` is one of 74 `WorkflowNodeKind` literals (`types/workflow/visual.ts:27-119`) in 7 categories, with `workflowNodeCategory()` (`types/workflow/visual.ts:130-141`) folding `pattern.*` into `action`. Persistence touches 8 Dexie tables introduced across v22, v35, v42, v52, and v56 (`lib/db/schema.ts`), with CRUD in `lib/db/workflows.ts`. Validation runs Zod (`lib/workflow/definition/validate.ts:110-129`) then graph-integrity DFS (`lib/workflow/definition/validate.ts:151-242`), and 22 built-in templates seed from `seed.ts`, `seed-github.ts`, and four `templates/*.ts`.
+A workflow is a `VisualWorkflow` graph made of `WorkflowNode` plus `WorkflowEdge` records. Every node `type` is one of 153 `WorkflowNodeKind` literals in 7 categories. Persistence touches 13 workflow Dexie tables through schema v156, including immutable versions/deployments/invocations and durable waitpoints/events. Validation runs Zod and graph-integrity checks before execution.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Node kinds" value="74" hint="across 7 categories" />
+  <Stat label="Node kinds" value="153" hint="across 7 categories" />
   <Stat label="Schema version" value="1" hint="VisualWorkflowSchemaVersion" />
-  <Stat label="Dexie tables" value="8" hint="v22 to v56" />
+  <Stat label="Dexie tables" value="13" hint="v22 to v156" />
   <Stat label="Built-in templates" value="22" hint="10 + 4 + 8" />
   <Stat label="Default timeout" value="600000ms" hint="10 minute run cap" />
   <Stat label="Default retries" value="3" hint="exponential backoff" />
@@ -59,9 +59,9 @@ export interface WorkflowNodeData<TParams> {
 
 `WorkflowNodeData` (`types/workflow/visual.ts:305-323`) declares an open `[key: string]: unknown` index signature precisely so React Flow v12 can attach its own data without TypeScript friction. Edges are `WorkflowEdge` (`types/workflow/visual.ts:325-334`) whose `WorkflowEdgeKind` (`types/workflow/visual.ts:336`) is one of `default | conditional | parallel | loop | error`.
 
-## The 74-kind taxonomy
+## The 153-kind taxonomy
 
-`WorkflowNodeKind` is a union of 74 string literals (`types/workflow/visual.ts:27-119`), mirrored by the `WORKFLOW_NODE_KINDS` runtime array (`types/workflow/visual.ts:147-222`). Each kind is bucketed into one of 7 `WorkflowNodeCategory` literals (`types/workflow/visual.ts:121-128`) by `workflowNodeCategory()`, which splits on the first dot and maps `pattern.*` onto `action` (a fallthrough yields `annotation`).
+`WorkflowNodeKind` is a union of 153 string literals, mirrored by the `WORKFLOW_NODE_KINDS` runtime array. `workflowNodeCategory()` buckets each kind into one of 7 categories and maps `pattern.*` onto `action`.
 
 ```ts
 // types/workflow/visual.ts:130-141
@@ -190,7 +190,7 @@ if (cycleNodes.size > 0) {
 
 ## Dexie tables
 
-Eight workflow tables span five schema versions. v22 declares the original four; v35, v42, v52, and v56 add one each. v52 re-declares `workflows` to add `folderId` and ships an upgrade hook backfilling `folderId = "root"` for legacy rows (IndexedDB cannot index `undefined`); v22, v35, v42, and v56 are pure additive with no upgrade hook.
+Thirteen workflow tables span the original v22 graph/run storage through the v148 immutable deployment control plane and v156 durable waitpoint store. `lib/db/schema.ts` is authoritative for the merged index definitions and compatibility upgrades.
 
 | Table | Version | Index string |
 | --- | --- | --- |
@@ -202,9 +202,14 @@ Eight workflow tables span five schema versions. v22 declares the original four;
 | `workflowProposalHistory` | v42 | `&id, workflowId, createdAt, [workflowId+createdAt]` |
 | `workflowFolders` | v52 | `&id, name, parentFolderId, [parentFolderId+name], updatedAt, createdAt` |
 | `workflowFanoutSubscriptions` | v56 | `&id, workflowId, [workflowId+enabled], enabled, adapterId, conversationKey, createdAt` |
+| `workflowVersions` | v148 | `&id, workflowId, [workflowId+sequence], digest, createdAt` |
+| `workflowDeployments` | v148 | `&id, &[accountId+workflowId+environment], workflowId, environment, versionId, status, updatedAt` |
+| `workflowInvocations` | v148 | `&id, &[accountId+entrypoint+deploymentId+caller+idempotencyKey], deploymentId, versionId, runId, status, createdAt` |
+| `workflowWaitpoints` | v156 | `&id, status, kind, runId, workflowId, stepId, key, expiresAt, [kind+status], [key+status], [runId+status]` |
+| `workflowWaitEvents` | v156 | `&id, key, correlationId, emittedAt, expiresAt, consumedByWaitpointId, [key+emittedAt]` |
 
 ```ts
-// lib/db/schema.ts:994-1000
+// Original v22 bootstrap; later versions extend this through v156.
 this.version(22).stores({
   workflows: "&id, name, updatedAt, createdAt, isBuiltIn, isTemplate, *tags, schemaVersion",
   workflowRuns: "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status]",

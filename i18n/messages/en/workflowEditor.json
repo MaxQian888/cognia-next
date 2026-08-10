@@ -172,12 +172,17 @@
       "useTemplate": "Use"
     },
     "publish": {
+      "current": "Current",
+      "deploymentSummary": "Production v{sequence} · revision {revision} · {status}",
       "hint": "Publish this workflow as a typed callable unit — an agent tool, a typed sub-workflow target, and a skill. Save the workflow first. Declare its interface with the Manual trigger's input schema and an Output node.",
       "publish": "Publish",
       "publishedAs": "Published as tool",
       "republish": "Re-publish",
+      "rollback": "Roll back",
       "title": "Publish",
-      "unpublish": "Unpublish"
+      "unpublish": "Unpublish",
+      "versionHistory": "Version history",
+      "versionRow": "v{sequence} · {date}"
     },
     "retry": {
       "attempts": "Attempts",

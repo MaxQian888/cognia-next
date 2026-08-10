@@ -2,20 +2,18 @@
  * Workflow-AI plugin — `wf_emit_workflow_event`: wake a `flow.wait` node that
  * is blocked in event mode (W3.2 of the workflow-linkage remediation).
  *
- * The wait node subscribes to the in-process wake bus under either its
- * user-declared `eventKey` or the run-scoped default `${runId}:${stepId}`;
- * this tool fires that key. It is the agent-reachable wake source — a user
+ * The wait node registers a durable event key; this tool persists an event
+ * before attempting a match. It is the agent-reachable wake source — a user
  * can tell the assistant "the deploy is approved, resume the release
  * workflow" and the waiting run continues with the supplied payload as the
  * wait node's `data` output.
  *
- * Firing a key nobody is waiting on is NOT an error (`delivered: false`) —
- * events that arrive before the subscription are dropped by design; the
- * caller can retry once the workflow reaches its wait step.
+ * Firing a key nobody is waiting on is not an error: the event remains
+ * available for 24 hours and can resolve a later matching waitpoint once.
  */
 
 import type { PluginTool } from "@/types/plugin"
-import { emitWake } from "@/lib/workflow/runtime/wake-bus"
+import { createWorkflowWaitEvent, emitWorkflowWaitEvent } from "@/lib/db/workflow-waitpoints"
 import { formatToolError } from "../store-bridge"
 
 const PLUGIN_ID = "cognia-workflow-ai"
@@ -28,7 +26,7 @@ export function buildWakeTools(): PluginTool[] {
       definition: {
         name: "wf_emit_workflow_event",
         description:
-          "Wake a workflow that is paused on a flow.wait node in event mode. Pass the node's declared event key (or `runId:stepId` for a run-scoped wait). Optional `data` is delivered to the waiting node as its output. Returns delivered:false when nothing is currently waiting on the key — the event is dropped, not queued.",
+          "Emit a durable event for a flow.wait node. Pass the node's declared event key (or `runId:stepId` for a run-scoped wait). Optional data is delivered once; unmatched events are retained for 24 hours.",
         category: "workflow",
         requiresApproval: true,
         parametersSchema: {
@@ -45,6 +43,10 @@ export function buildWakeTools(): PluginTool[] {
               description: "Optional payload surfaced as the wait node's `data` output.",
               additionalProperties: true,
             },
+            correlationId: {
+              type: "string",
+              description: "Optional correlation id used to target one matching run.",
+            },
           },
         },
       },
@@ -57,11 +59,23 @@ export function buildWakeTools(): PluginTool[] {
               error: { code: "invalid-event-key", message: "eventKey is required" },
             }
           }
-          const delivered = emitWake(eventKey, {
-            source: "wf_emit_workflow_event",
-            ...(args.data !== undefined ? { data: args.data } : {}),
-          })
-          return { ok: true, eventKey, delivered }
+          const event = await emitWorkflowWaitEvent(
+            createWorkflowWaitEvent({
+              key: eventKey,
+              ...(typeof args.correlationId === "string" && args.correlationId.trim()
+                ? { correlationId: args.correlationId.trim() }
+                : {}),
+              source: "wf_emit_workflow_event",
+              ...(args.data !== undefined ? { data: args.data } : {}),
+            })
+          )
+          return {
+            ok: true,
+            eventKey,
+            delivered: Boolean(event.consumedByWaitpointId),
+            queued: !event.consumedByWaitpointId,
+            eventId: event.id,
+          }
         } catch (err) {
           return formatToolError(err)
         }

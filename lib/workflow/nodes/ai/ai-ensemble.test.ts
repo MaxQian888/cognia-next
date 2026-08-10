@@ -24,6 +24,8 @@ import type { StepExecutionContext } from "@/types/workflow/visual"
 function makeCtx(params: Record<string, unknown>): StepExecutionContext {
   return {
     runId: "run1",
+    traceId: "trace-1",
+    lineage: { rootRunId: "root-1" },
     workflowId: "wf1",
     stepId: "n1",
     params,
@@ -128,6 +130,10 @@ describe("executeAiEnsemble", () => {
     expect(runSubworkflow).toHaveBeenCalledTimes(2)
     expect(runSubworkflow.mock.calls[0][0].workflowId).toBe("wf_child")
     expect(runSubworkflow.mock.calls[0][0].payload.prompt).toBe("task")
+    expect(runSubworkflow.mock.calls[0][0]).toMatchObject({
+      traceId: "trace-1",
+      lineage: { rootRunId: "root-1", parentRunId: "run1", parentStepId: "n1" },
+    })
     const out = result.output as { result: { score: number } }
     expect(out.result.score).toBe(5)
   })

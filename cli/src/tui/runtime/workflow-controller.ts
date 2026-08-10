@@ -1,8 +1,8 @@
 /**
  * `/workflow` controller — list, run, and inspect visual workflows by reusing
- * the desktop's `runWorkflow` orchestrator and the `lib/db/workflows` CRUD
- * verbatim against the CLI-local Dexie. Each function dispatches TuiActions;
- * the DB + runner seams are injected for tests.
+ * the desktop's Execution Authority and the `lib/db/workflows` CRUD against
+ * the CLI-local Dexie. Formal CLI runs therefore require an active production
+ * deployment; the DB + authority seams are injected for tests.
  */
 import { nanoid } from "nanoid"
 import { getWorkflow, getWorkflowRun, listWorkflows, listWorkflowRuns } from "@/lib/db/workflows"
@@ -13,11 +13,11 @@ import type {
   WorkflowRunEventRow,
   WorkflowRunRow,
 } from "@/types/workflow/visual"
+import type { RunWorkflowResult } from "@/lib/workflow/runtime/orchestrator"
 import {
-  runWorkflow,
-  type RunWorkflowInput,
-  type RunWorkflowResult,
-} from "@/lib/workflow/runtime/orchestrator"
+  executeDeployedWorkflow,
+  type ExecuteDeployedWorkflowInput,
+} from "@/lib/workflow/runtime/execution-authority"
 
 import { ensureCliDb } from "../../db/bootstrap"
 import { errorMessage } from "./shared"
@@ -40,7 +40,7 @@ export interface WorkflowDeps {
   ensureDb?: () => Promise<unknown>
   list?: () => Promise<WorkflowRow[]>
   get?: (id: string) => Promise<WorkflowRow | undefined>
-  run?: (input: RunWorkflowInput) => Promise<RunWorkflowResult>
+  run?: (input: ExecuteDeployedWorkflowInput) => Promise<RunWorkflowResult>
   listRuns?: (query: { workflowId: string }) => Promise<WorkflowRunRow[]>
   /** Fetch a single run row by id (for `/workflow replay`). */
   getRun?: (runId: string) => Promise<WorkflowRunRow | undefined>
@@ -133,14 +133,21 @@ export async function workflowRun(id: string, deps: WorkflowDeps): Promise<void>
     deps.dispatch({ type: "ACTIVITY_END", status: status === "failed" ? "error" : "done" })
   }
 
-  const runner = deps.run ?? runWorkflow
+  const runner =
+    deps.run ??
+    (async (input: ExecuteDeployedWorkflowInput) => (await executeDeployedWorkflow(input)).result)
   try {
     const result = await runner({
-      workflow: wf,
-      runId,
-      trigger: { workflowId: wf.id, kind: "trigger.manual", payload: {}, originAt: 0 },
+      workflowId: wf.id,
+      entrypoint: "cli",
+      caller: "cognia-cli",
+      triggerKind: "trigger.manual",
+      triggerOriginAt: Date.now(),
+      payload: {},
+      requestedRunId: runId,
+      triggeredBy: { source: "api" },
       signal: deps.signal,
-    } as RunWorkflowInput)
+    })
     // Reflect an orchestrator-reported node failure the live fold may have
     // missed (e.g. a fast run where liveQuery never emitted).
     if (result.status === "failed" && result.error?.nodeId) {

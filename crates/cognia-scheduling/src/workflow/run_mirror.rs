@@ -26,7 +26,10 @@ use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value as JsonValue;
 
-use super::types::{InFlightRunRow, PersistRunStateInput, RunStatus};
+use super::types::{
+    InFlightRunRow, PersistRunStateInput, RunStatus, WorkflowWaitEventRow,
+    WorkflowWaitpointDecisionInput, WorkflowWaitpointRow,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum MirrorError {
@@ -40,6 +43,8 @@ pub enum MirrorError {
     InvalidStatus(String),
     #[error("missing snapshot — call persist with snapshot on first write for run '{0}'")]
     MissingSnapshot(String),
+    #[error("invalid waitpoint terminal status '{0}'")]
+    InvalidWaitpointStatus(String),
 }
 
 pub type Result<T> = std::result::Result<T, MirrorError>;
@@ -80,6 +85,19 @@ impl RunMirror {
                 snapshot_json   TEXT NOT NULL,
                 started_at      INTEGER NOT NULL,
                 updated_at      INTEGER NOT NULL
+            );
+            CREATE TABLE workflow_waitpoint (
+                id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL,
+                run_id TEXT NOT NULL, workflow_id TEXT NOT NULL, step_id TEXT NOT NULL,
+                event_key TEXT NOT NULL, correlation_id TEXT, title TEXT, message TEXT,
+                created_at INTEGER NOT NULL, not_before INTEGER NOT NULL, expires_at INTEGER,
+                resolution_json TEXT, notification_sent_at INTEGER,
+                resolution_notification_sent_at INTEGER, updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE workflow_wait_event (
+                id TEXT PRIMARY KEY, event_key TEXT NOT NULL, correlation_id TEXT,
+                source TEXT NOT NULL, data_json TEXT, emitted_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL, consumed_by_waitpoint_id TEXT, consumed_at INTEGER
             );
             "#,
         )?;
@@ -122,6 +140,29 @@ impl RunMirror {
                     ON workflow_run_mirror(status);
                 CREATE INDEX IF NOT EXISTS idx_run_mirror_workflow
                     ON workflow_run_mirror(workflow_id);
+
+                CREATE TABLE IF NOT EXISTS workflow_waitpoint (
+                    id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL,
+                    run_id TEXT NOT NULL, workflow_id TEXT NOT NULL, step_id TEXT NOT NULL,
+                    event_key TEXT NOT NULL, correlation_id TEXT, title TEXT, message TEXT,
+                    created_at INTEGER NOT NULL, not_before INTEGER NOT NULL, expires_at INTEGER,
+                    resolution_json TEXT, notification_sent_at INTEGER,
+                    resolution_notification_sent_at INTEGER, updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_workflow_waitpoint_pending
+                    ON workflow_waitpoint(kind, status, created_at);
+                CREATE INDEX IF NOT EXISTS idx_workflow_waitpoint_event
+                    ON workflow_waitpoint(event_key, status, not_before);
+
+                CREATE TABLE IF NOT EXISTS workflow_wait_event (
+                    id TEXT PRIMARY KEY, event_key TEXT NOT NULL, correlation_id TEXT,
+                    source TEXT NOT NULL, data_json TEXT, emitted_at INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL, consumed_by_waitpoint_id TEXT, consumed_at INTEGER
+                );
+                CREATE INDEX IF NOT EXISTS idx_workflow_wait_event_key
+                    ON workflow_wait_event(event_key, emitted_at);
+                CREATE INDEX IF NOT EXISTS idx_workflow_wait_event_expiry
+                    ON workflow_wait_event(expires_at);
                 "#,
             )?;
             Ok(Mutex::new(conn))
@@ -237,6 +278,141 @@ impl RunMirror {
         Ok(())
     }
 
+    /// Insert a durable checkpoint once and return the originally stored row.
+    /// Retrying creation after a renderer restart must not extend its deadline.
+    pub fn create_waitpoint(
+        &self,
+        waitpoint: &WorkflowWaitpointRow,
+    ) -> Result<WorkflowWaitpointRow> {
+        let resolution_json = waitpoint
+            .resolution
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        let conn = self.conn()?.lock();
+        conn.execute(
+            r#"
+            INSERT OR IGNORE INTO workflow_waitpoint
+                (id, kind, status, run_id, workflow_id, step_id, event_key,
+                 correlation_id, title, message, created_at, not_before, expires_at,
+                 resolution_json, notification_sent_at,
+                 resolution_notification_sent_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                    ?13, ?14, ?15, ?16, ?17)
+            "#,
+            params![
+                waitpoint.id,
+                waitpoint.kind,
+                waitpoint.status,
+                waitpoint.run_id,
+                waitpoint.workflow_id,
+                waitpoint.step_id,
+                waitpoint.key,
+                waitpoint.correlation_id,
+                waitpoint.title,
+                waitpoint.message,
+                waitpoint.created_at,
+                waitpoint.not_before,
+                waitpoint.expires_at,
+                resolution_json,
+                waitpoint.notification_sent_at,
+                waitpoint.resolution_notification_sent_at,
+                waitpoint.updated_at,
+            ],
+        )?;
+        query_waitpoint(&conn, &waitpoint.id)?
+            .ok_or_else(|| MirrorError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+    }
+
+    pub fn get_waitpoint(&self, waitpoint_id: &str) -> Result<Option<WorkflowWaitpointRow>> {
+        let conn = self.conn()?.lock();
+        query_waitpoint(&conn, waitpoint_id)
+    }
+
+    pub fn list_pending_waitpoints(&self) -> Result<Vec<WorkflowWaitpointRow>> {
+        let conn = self.conn()?.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, kind, status, run_id, workflow_id, step_id, event_key,
+                   correlation_id, title, message, created_at, not_before, expires_at,
+                   resolution_json, notification_sent_at,
+                   resolution_notification_sent_at, updated_at
+            FROM workflow_waitpoint
+            WHERE status = 'pending'
+            ORDER BY created_at ASC, id ASC
+            "#,
+        )?;
+        let rows = stmt.query_map([], read_waitpoint_raw)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?.into_waitpoint()?);
+        }
+        Ok(out)
+    }
+
+    /// Resolve a checkpoint with first-writer-wins compare-and-set semantics.
+    pub fn decide_waitpoint(&self, input: &WorkflowWaitpointDecisionInput) -> Result<bool> {
+        if !matches!(
+            input.status.as_str(),
+            "resolved" | "rejected" | "timed_out" | "cancelled"
+        ) {
+            return Err(MirrorError::InvalidWaitpointStatus(input.status.clone()));
+        }
+        let resolution_json = serde_json::to_string(&input.resolution)?;
+        let conn = self.conn()?.lock();
+        let changed = conn.execute(
+            r#"
+            UPDATE workflow_waitpoint
+            SET status = ?2, resolution_json = ?3, updated_at = ?4
+            WHERE id = ?1 AND status = 'pending'
+            "#,
+            params![input.id, input.status, resolution_json, input.updated_at],
+        )?;
+        Ok(changed == 1)
+    }
+
+    pub fn persist_wait_event(&self, event: &WorkflowWaitEventRow) -> Result<()> {
+        let data_json = event.data.as_ref().map(serde_json::to_string).transpose()?;
+        let conn = self.conn()?.lock();
+        conn.execute(
+            r#"
+            INSERT OR IGNORE INTO workflow_wait_event
+                (id, event_key, correlation_id, source, data_json, emitted_at,
+                 expires_at, consumed_by_waitpoint_id, consumed_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "#,
+            params![
+                event.id,
+                event.key,
+                event.correlation_id,
+                event.source,
+                data_json,
+                event.emitted_at,
+                event.expires_at,
+                event.consumed_by_waitpoint_id,
+                event.consumed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn prune_wait_events(&self, now: i64) -> Result<usize> {
+        let conn = self.conn()?.lock();
+        Ok(conn.execute(
+            "DELETE FROM workflow_wait_event WHERE expires_at <= ?1",
+            params![now],
+        )?)
+    }
+
+    #[cfg(test)]
+    fn count_wait_events(&self) -> Result<usize> {
+        let conn = self.conn()?.lock();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM workflow_wait_event", [], |row| {
+            row.get(0)
+        })?;
+        Ok(count.max(0) as usize)
+    }
+
     /// Total mirror row count — used by tests and the diagnostics tab.
     #[allow(dead_code)]
     pub fn count(&self) -> Result<usize> {
@@ -256,6 +432,93 @@ struct MirrorRowRaw {
     started_at: i64,
     #[allow(dead_code)]
     status: String,
+}
+
+struct WaitpointRowRaw {
+    id: String,
+    kind: String,
+    status: String,
+    run_id: String,
+    workflow_id: String,
+    step_id: String,
+    key: String,
+    correlation_id: Option<String>,
+    title: Option<String>,
+    message: Option<String>,
+    created_at: i64,
+    not_before: i64,
+    expires_at: Option<i64>,
+    resolution_json: Option<String>,
+    notification_sent_at: Option<i64>,
+    resolution_notification_sent_at: Option<i64>,
+    updated_at: i64,
+}
+
+impl WaitpointRowRaw {
+    fn into_waitpoint(self) -> Result<WorkflowWaitpointRow> {
+        Ok(WorkflowWaitpointRow {
+            id: self.id,
+            kind: self.kind,
+            status: self.status,
+            run_id: self.run_id,
+            workflow_id: self.workflow_id,
+            step_id: self.step_id,
+            key: self.key,
+            correlation_id: self.correlation_id,
+            title: self.title,
+            message: self.message,
+            created_at: self.created_at,
+            not_before: self.not_before,
+            expires_at: self.expires_at,
+            resolution: self
+                .resolution_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            notification_sent_at: self.notification_sent_at,
+            resolution_notification_sent_at: self.resolution_notification_sent_at,
+            updated_at: self.updated_at,
+        })
+    }
+}
+
+fn read_waitpoint_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<WaitpointRowRaw> {
+    Ok(WaitpointRowRaw {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        status: row.get(2)?,
+        run_id: row.get(3)?,
+        workflow_id: row.get(4)?,
+        step_id: row.get(5)?,
+        key: row.get(6)?,
+        correlation_id: row.get(7)?,
+        title: row.get(8)?,
+        message: row.get(9)?,
+        created_at: row.get(10)?,
+        not_before: row.get(11)?,
+        expires_at: row.get(12)?,
+        resolution_json: row.get(13)?,
+        notification_sent_at: row.get(14)?,
+        resolution_notification_sent_at: row.get(15)?,
+        updated_at: row.get(16)?,
+    })
+}
+
+fn query_waitpoint(conn: &Connection, waitpoint_id: &str) -> Result<Option<WorkflowWaitpointRow>> {
+    let raw = conn
+        .query_row(
+            r#"
+            SELECT id, kind, status, run_id, workflow_id, step_id, event_key,
+                   correlation_id, title, message, created_at, not_before, expires_at,
+                   resolution_json, notification_sent_at,
+                   resolution_notification_sent_at, updated_at
+            FROM workflow_waitpoint
+            WHERE id = ?1
+            "#,
+            params![waitpoint_id],
+            read_waitpoint_raw,
+        )
+        .optional()?;
+    raw.map(WaitpointRowRaw::into_waitpoint).transpose()
 }
 
 fn current_millis() -> i64 {
@@ -429,5 +692,94 @@ mod tests {
             .unwrap();
         let second = mirror.list_in_flight().unwrap()[0].started_at;
         assert_eq!(first, second);
+    }
+
+    fn waitpoint() -> WorkflowWaitpointRow {
+        WorkflowWaitpointRow {
+            id: "wait_1".into(),
+            kind: "approval".into(),
+            status: "pending".into(),
+            run_id: "run_a".into(),
+            workflow_id: "wf_x".into(),
+            step_id: "approve".into(),
+            key: "approval:wait_1".into(),
+            correlation_id: None,
+            title: Some("Approve".into()),
+            message: None,
+            created_at: 100,
+            not_before: 100,
+            expires_at: Some(500),
+            resolution: None,
+            notification_sent_at: None,
+            resolution_notification_sent_at: None,
+            updated_at: 100,
+        }
+    }
+
+    #[test]
+    fn waitpoint_create_is_idempotent_and_preserves_original_deadline() {
+        let mirror = RunMirror::open_in_memory().unwrap();
+        let first = mirror.create_waitpoint(&waitpoint()).unwrap();
+        let mut duplicate = waitpoint();
+        duplicate.expires_at = Some(900);
+        duplicate.updated_at = 200;
+
+        let second = mirror.create_waitpoint(&duplicate).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(second.expires_at, Some(500));
+        assert_eq!(mirror.list_pending_waitpoints().unwrap(), vec![first]);
+    }
+
+    #[test]
+    fn waitpoint_decision_is_compare_and_set() {
+        let mirror = RunMirror::open_in_memory().unwrap();
+        mirror.create_waitpoint(&waitpoint()).unwrap();
+
+        let approved = mirror
+            .decide_waitpoint(&WorkflowWaitpointDecisionInput {
+                id: "wait_1".into(),
+                status: "resolved".into(),
+                resolution: json!({"decision": "approve", "decidedAt": 200}),
+                updated_at: 200,
+            })
+            .unwrap();
+        let rejected = mirror
+            .decide_waitpoint(&WorkflowWaitpointDecisionInput {
+                id: "wait_1".into(),
+                status: "rejected".into(),
+                resolution: json!({"decision": "reject", "decidedAt": 300}),
+                updated_at: 300,
+            })
+            .unwrap();
+
+        assert!(approved);
+        assert!(!rejected);
+        let stored = mirror.get_waitpoint("wait_1").unwrap().unwrap();
+        assert_eq!(stored.status, "resolved");
+        assert_eq!(stored.resolution.unwrap()["decision"], "approve");
+    }
+
+    #[test]
+    fn wait_events_are_durable_and_pruned_after_expiry() {
+        let mirror = RunMirror::open_in_memory().unwrap();
+        mirror
+            .persist_wait_event(&WorkflowWaitEventRow {
+                id: "event_1".into(),
+                key: "invoice.paid".into(),
+                correlation_id: Some("invoice_1".into()),
+                source: "connector".into(),
+                data: Some(json!({"amount": 12})),
+                emitted_at: 100,
+                expires_at: 200,
+                consumed_by_waitpoint_id: None,
+                consumed_at: None,
+            })
+            .unwrap();
+
+        assert_eq!(mirror.count_wait_events().unwrap(), 1);
+        assert_eq!(mirror.prune_wait_events(199).unwrap(), 0);
+        assert_eq!(mirror.prune_wait_events(200).unwrap(), 1);
+        assert_eq!(mirror.count_wait_events().unwrap(), 0);
     }
 }

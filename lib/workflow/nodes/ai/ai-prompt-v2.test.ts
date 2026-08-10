@@ -150,6 +150,35 @@ describe("executeAiPromptV2 — explicit mode", () => {
     )
   })
 
+  it("gates twin context after local enrichment", async () => {
+    injectTwinContextMock.mockResolvedValue({
+      systemPrompt: "Private contact alice@example.com",
+      applied: true,
+    })
+    const ctx = makeCtx(
+      {
+        provider: "openai",
+        model: "gpt-x",
+        apiKey: "k",
+        userPrompt: "hi",
+        characterId: "char_1",
+        piiGate: "redact",
+      },
+      {
+        securityContext: {
+          piiEgressRequired: true,
+          sourceTriggerKind: "trigger.connector.inbound",
+        },
+      }
+    )
+
+    const result = await executeAiPromptV2(ctx)
+
+    const sentSystem = mockComplete.mock.calls[0][1].system as string
+    expect(sentSystem).not.toContain("alice@example.com")
+    expect(result.output).toMatchObject({ piiRedacted: true })
+  })
+
   it("preserves the node systemPrompt + JSON instruction when twin context applies in json mode", async () => {
     injectTwinContextMock.mockResolvedValue({ systemPrompt: "TWIN-WRAPPED", applied: true })
     mockComplete.mockResolvedValue('{"x": 1}')
@@ -388,7 +417,10 @@ describe("executeAiPromptV2 — PII gate", () => {
       userPrompt: "email me at bob@example.com",
       piiGate: "block",
     })
-    await expect(executeAiPromptV2(ctx)).rejects.toThrow(/PII gate blocked/)
+    await expect(executeAiPromptV2(ctx)).rejects.toMatchObject({
+      code: "pii_blocked",
+      retryable: false,
+    })
     expect(mockCreateLlmClient).not.toHaveBeenCalled()
     expect(mockRunRoutedPrompt).not.toHaveBeenCalled()
   })

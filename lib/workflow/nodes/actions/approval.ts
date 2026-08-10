@@ -3,12 +3,11 @@
  * gate. Blocks the step until a human approves or rejects, then routes
  * downstream via the `approved` / `rejected` decision handles.
  *
- * Crash-resume: the first entry appends a `step.long_running.checkpoint`
- * event (key `approval-request`) recording `requestedAt`. A re-entered step
- * (no `step_completed` yet) finds the checkpoint, re-registers the pending
- * approval WITHOUT re-notifying (no duplicate push), and keeps the original
- * timeout budget. Responses only resolve against a live orchestrator — the
- * registry is in-memory by design (see approval-registry.ts).
+ * Crash-resume: the durable waitpoint preserves the first absolute timeout
+ * and accepts a decision while no renderer is running. The checkpoint event
+ * remains an audit/re-notification hint only; the waitpoint row is the source
+ * of truth. Notification-center delivery uses the waitpoint id as its dedupe
+ * key so replay cannot create duplicate approval cards.
  *
  * Not retryable: a retry would re-ask the human a question they may already
  * have answered.
@@ -17,15 +16,13 @@
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
 import { listRunEvents, appendEvent } from "@/lib/workflow/runtime/event-log"
 import { findLatestCheckpoint } from "@/lib/workflow/runtime/long-step-runner"
-import { subscribeWake } from "@/lib/workflow/runtime/wake-bus"
 import {
   approvalId,
-  approvalWakeKey,
   registerPendingApproval,
-  removePendingApproval,
   type ApprovalResponse,
   type PendingApproval,
 } from "@/lib/workflow/runtime/approval-registry"
+import { waitForWorkflowWaitpoint } from "@/lib/workflow/runtime/waitpoint-repository"
 import {
   notifyApprovalRequested,
   notifyApprovalResolved,
@@ -100,56 +97,51 @@ export async function runApprovalRequest(ctx: StepExecutionContext): Promise<Ste
     }
   }
 
-  registerPendingApproval(entry)
-  try {
-    if (fresh) {
-      const state: ApprovalCheckpointState = { approvalId: id, requestedAt }
-      try {
-        await appendEvent({
-          runId: ctx.runId,
-          stepId: ctx.stepId,
-          type: "step.long_running.checkpoint",
-          payload: { checkpointKey: APPROVAL_CHECKPOINT_KEY, state },
-        })
-      } catch (err) {
-        console.warn("approval request: checkpoint persistence failed", err)
-      }
-      await notifyApprovalRequested(entry)
-      ctx.log("info", `Approval requested (${id}); waiting up to ${timeoutMs}ms`)
-    } else {
-      ctx.log("info", `Approval ${id} re-armed after resume; original request preserved`)
-    }
-
-    const remaining = timeoutAt - Date.now()
-    if (remaining <= 0) return timeoutOutcome()
-
-    let wake
+  await registerPendingApproval(entry)
+  if (fresh) {
+    const state: ApprovalCheckpointState = { approvalId: id, requestedAt }
     try {
-      wake = await subscribeWake(approvalWakeKey(ctx.runId, ctx.stepId), {
-        timeoutMs: remaining,
-        signal: ctx.signal,
+      await appendEvent({
+        runId: ctx.runId,
+        stepId: ctx.stepId,
+        type: "step.long_running.checkpoint",
+        payload: { checkpointKey: APPROVAL_CHECKPOINT_KEY, state },
       })
     } catch (err) {
-      // The wake bus rejects with in-repo contract messages: "… timed out
-      // after Nms" for timeouts, "wake bus: aborted" for run cancellation.
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes("timed out")) return timeoutOutcome()
-      throw err
+      console.warn("approval request: checkpoint persistence failed", err)
     }
+    await notifyApprovalRequested(entry)
+    ctx.log("info", `Approval requested (${id}); waiting up to ${timeoutMs}ms`)
+  } else {
+    ctx.log("info", `Approval ${id} re-armed after resume; original request preserved`)
+  }
 
-    const response = wake.data as ApprovalResponse
-    void notifyApprovalResolved(entry, response.decision)
-    ctx.log("info", `Approval ${id} ${response.decision} by ${response.respondedBy}`)
-    return {
-      output: {
-        approvalId: id,
-        decision: response.decision,
-        respondedBy: response.respondedBy,
-        respondedAt: wake.emittedAt,
-      },
+  const remaining = timeoutAt - Date.now()
+  if (remaining <= 0) return timeoutOutcome()
+
+  const waitpoint = await waitForWorkflowWaitpoint(id, {
+    signal: ctx.signal,
+    cancelOnAbort: true,
+  })
+  if (waitpoint.status === "timed_out") return timeoutOutcome()
+  if (waitpoint.status === "cancelled") throw new Error("workflow waitpoint: cancelled")
+  const resolution = waitpoint.resolution
+  if (!resolution || (resolution.outcome !== "approved" && resolution.outcome !== "rejected")) {
+    throw new Error(`action.approval.request: invalid waitpoint resolution for ${id}`)
+  }
+  const response: ApprovalResponse = {
+    decision: resolution.outcome,
+    respondedBy: resolution.respondedBy ?? "unknown",
+  }
+  void notifyApprovalResolved(entry, response.decision)
+  ctx.log("info", `Approval ${id} ${response.decision} by ${response.respondedBy}`)
+  return {
+    output: {
+      approvalId: id,
       decision: response.decision,
-    }
-  } finally {
-    removePendingApproval(id)
+      respondedBy: response.respondedBy,
+      respondedAt: resolution.resolvedAt,
+    },
+    decision: response.decision,
   }
 }

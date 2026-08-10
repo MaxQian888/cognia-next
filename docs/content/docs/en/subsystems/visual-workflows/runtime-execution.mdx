@@ -11,6 +11,10 @@ description: The TypeScript runtime in lib/workflow/runtime that topo-sorts a Vi
 `lib/workflow/runtime/orchestrator.ts:118` `runWorkflow(input)` is the core: it validates, persists a `WorkflowRunRow` (`orchestrator.ts:142`), wires a single run-level `AbortController` plus wall-clock timeout (`orchestrator.ts:165-203`), topo-sorts the `VisualWorkflow` (`topo-sort.ts:23`), then runs a ready-set scheduler loop (`orchestrator.ts:443-471`) that respects an in-run `maxConcurrency` budget. Each step goes through `step-executor.ts:56` `runStep` with cache short-circuit, `resolveDeep` param resolution, a retry-with-backoff loop (`step-executor.ts:142-160`, attempts 3 / exponential / baseMs 1000 / maxMs 30000, no jitter), and per-step timeout (`step-executor.ts:186`). Every transition is appended to `workflowRunEvents` via `event-log.ts:21`, and `IdempotencyCache.hydrate(runId)` (`idempotency.ts:33`) replays only the completed steps of that run, so crash recovery (`resume-controller.ts:29`) re-runs the same `runId` and skips finished work. Trigger bridges and the Rust mirror live on [./triggers-rust](./triggers-rust); UI run views on [./ui-runs](./ui-runs).
 </TLDR>
 
+<Callout type="info" title="Formal execution authority">
+CLI, API, MCP, trigger, IM, run-history, and dead-letter operations first pass through `execution-authority.ts`. It rejects unpublished workflows, pins an immutable version, deployment revision and dependency lock, creates a new invocation/run, and propagates trace, lineage, provenance, and Connector-origin PII policy. Editor Preview/Test remains the intentional draft-only exception. Approval, risk-gate, and event-wait pending state lives in the Dexie v156/SQLite durable waitpoint store, not in the event log.
+</Callout>
+
 <StatGrid>
 - **Core** `runWorkflow` 579 lines, `orchestrator.ts:118-540`
 - **Retry default** attempts 3 / exponential / baseMs 1000 / maxMs 30000, no jitter
@@ -25,6 +29,7 @@ description: The TypeScript runtime in lib/workflow/runtime that topo-sorts a Vi
 | Module | Lines | Role |
 | --- | --- | --- |
 | `orchestrator.ts` | 579 | `runWorkflow` core: validate → persist → schedule → finalize |
+| `execution-authority.ts` | — | Formal admission, immutable version/dependency lock, retry modes, provenance |
 | `topo-sort.ts` | 145 | Deterministic Kahn topo-sort with back-edge removal |
 | `step-executor.ts` | 228 | Per-step run: cache, params, retry/backoff, timeout |
 | `event-log.ts` | 123 | `workflowRunEvents` append/list + `RunLogger` |
@@ -34,6 +39,7 @@ description: The TypeScript runtime in lib/workflow/runtime that topo-sorts a Vi
 | `concurrency-controller.ts` | 53 | Monotone non-increasing in-run node budget |
 | `model-preference-controller.ts` | 55 | One-way model downshift, run-scoped |
 | `long-step-runner.ts` | 265 | Checkpoint/progress long-running steps via event log |
+| `waitpoint-repository.ts` / `db/workflow-waitpoints.ts` | — | Durable approval/risk/event waits, CAS decisions, persisted event matching |
 | `run-single-node.ts` | 87 | Run one node + its ancestors (editor) |
 | `run-cancel-registry.ts` | 46 | Module-singleton `runId → AbortController` |
 | `error-explainer.ts` | 181 | Pure copilot validation / last-run explainers |
@@ -57,6 +63,9 @@ export interface RunWorkflowInput {
   seedOutputs?: Record<string, unknown>
   restrictToStepIds?: string[]
   traceId?: string
+  lineage?: WorkflowRunLineage
+  securityContext?: WorkflowRunSecurityContext
+  executionBinding?: WorkflowExecutionBinding
 }
 // RunWorkflowResult — orchestrator.ts:111-116
 ```
@@ -256,7 +265,7 @@ flowchart LR
 
 ### Long-running steps
 
-`runLongStep` (`long-step-runner.ts:119-211`) piggy-backs checkpoints on `workflowRunEvents` as `step.long_running.checkpoint` / `progress` — **no new Dexie table**. `step_completed` is written only at the end, so until then the step is "not done" and is re-entered on resume via `onResume(latestCheckpoint)`. All writes are best-effort `try/catch`.
+General `runLongStep` progress still rides `workflowRunEvents`. Human approval, workflow risk gates, and `flow.wait(event)` use the separate Dexie v156/SQLite durable waitpoint store so pending state, absolute deadlines, and first-writer-wins decisions survive renderer and process restarts.
 
 ```ts
 // lib/workflow/runtime/long-step-runner.ts:139-148

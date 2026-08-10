@@ -26,8 +26,8 @@ import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { getDb } from "@/lib/db/schema"
 import { deleteAllRunsForWorkflow, deleteWorkflowRun, deleteWorkflowRuns } from "@/lib/db/workflows"
-import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
-import type { RunStatus, TriggerEvent, WorkflowRunRow } from "@/types/workflow/visual"
+import { retryWorkflowRun } from "@/lib/workflow/runtime/execution-authority"
+import type { RunStatus, WorkflowRunRow } from "@/types/workflow/visual"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -156,18 +156,18 @@ export function RunList({ workflowId }: { workflowId: string }) {
     setBusy(true)
     const toastId = toast.loading(t("rerunning"))
     try {
-      const trigger: TriggerEvent = {
-        workflowId: run.workflowId,
-        kind: "trigger.manual",
-        payload: run.triggerPayload,
-        originAt: Date.now(),
-      }
-      const result = await runWorkflow({ workflow: run.workflowSnapshot, trigger })
-      if (result.status === "succeeded") toast.success(tToast("completed"), { id: toastId })
+      const execution = await retryWorkflowRun({
+        runId: run.id,
+        mode: "current-deployment",
+        operatedBy: "workflow-run-history",
+      })
+      if (execution.result.status === "succeeded")
+        toast.success(tToast("completed"), { id: toastId })
       else
-        toast.error(`${tToast("runFailed")}: ${result.error?.message ?? "unknown error"}`, {
-          id: toastId,
-        })
+        toast.error(
+          `${tToast("runFailed")}: ${execution.result.error?.message ?? "unknown error"}`,
+          { id: toastId }
+        )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : tToast("runFailed"), { id: toastId })
     } finally {

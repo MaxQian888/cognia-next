@@ -106,6 +106,38 @@ function buildWorkflow(
 }
 
 describe("runWorkflow — end-to-end happy paths", () => {
+  it("persists a trace and root lineage for every new run", async () => {
+    const workflow = buildWorkflow([], [])
+    const result = await runWorkflow({ workflow, trigger })
+    const row = await getDb().workflowRuns.get(result.runId)
+
+    expect(row?.traceId).toMatch(/^[0-9a-f]{32}$/)
+    expect(row?.lineage).toEqual({ rootRunId: result.runId })
+  })
+
+  it("preserves an inherited trace and parent lineage", async () => {
+    const workflow = buildWorkflow([], [])
+    const result = await runWorkflow({
+      workflow,
+      trigger,
+      traceId: "0123456789abcdef0123456789abcdef",
+      lineage: {
+        rootRunId: "run_root",
+        parentRunId: "run_parent",
+        parentStepId: "step_child",
+      },
+    })
+    const row = await getDb().workflowRuns.get(result.runId)
+
+    expect(row).toMatchObject({
+      traceId: "0123456789abcdef0123456789abcdef",
+      lineage: {
+        rootRunId: "run_root",
+        parentRunId: "run_parent",
+        parentStepId: "step_child",
+      },
+    })
+  })
   it("persists formal dependency and original trigger provenance", async () => {
     const executionBinding: WorkflowExecutionBinding = {
       invocationId: "wfi_test",

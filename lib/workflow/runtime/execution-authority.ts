@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid"
+import { generateTraceId } from "@cognia/logging"
 
-import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { getDb } from "@/lib/db/schema"
 import { migrateWorkflow } from "@/lib/workflow/definition/migrate"
 import {
@@ -8,10 +8,7 @@ import {
   resolveWorkflowDeployment,
 } from "@/lib/db/workflow-deployments"
 import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-validate"
-import {
-  createWorkflowVersion,
-  workflowVersionDigest,
-} from "@/lib/workflow/versioning/version-snapshot"
+import { workflowVersionDigest } from "@/lib/workflow/versioning/version-snapshot"
 import type {
   WorkflowEntrypoint,
   WorkflowDependencyBinding,
@@ -24,11 +21,14 @@ import type {
   TriggerEvent,
   VisualWorkflow,
   WorkflowNodeKind,
+  WorkflowRunLineage,
+  WorkflowRunSecurityContext,
   WorkflowRunRow,
   WorkflowTriggerBinding,
   WorkflowTriggeredFrom,
 } from "@/types/workflow/visual"
 import { runWorkflow, type RunWorkflowResult } from "./orchestrator"
+import { getRunStepOutputs } from "./run-from-step"
 import { isWorkflowDeploymentControlPlaneEnabled } from "./feature-flags"
 
 export class WorkflowAdmissionError extends Error {
@@ -57,6 +57,16 @@ export interface ExecuteDeployedWorkflowInput {
   payload: unknown
   signal?: AbortSignal
   triggeredBy?: WorkflowTriggeredFrom
+  traceId?: string
+  lineage?: WorkflowRunLineage
+  securityContext?: WorkflowRunSecurityContext
+  retry?: {
+    retryOfRunId: string
+    retryMode: import("@/types/workflow/visual").WorkflowRetryMode
+    operatedBy: string
+    startStepId?: string
+    seedRunId?: string
+  }
   /** Server-generated correlation id used by legacy Companion dispatch. */
   requestedRunId?: string
   /** Exact child artifact selected by an already-admitted parent run. */
@@ -188,6 +198,17 @@ export async function executeDeployedWorkflow(
     idempotencyKey: input.idempotencyKey,
   })
   const proposedRunId = input.requestedRunId ?? `run_${nanoid(12)}`
+  const traceId = input.traceId ?? generateTraceId()
+  const lineage: WorkflowRunLineage = input.lineage ?? {
+    rootRunId: proposedRunId,
+    ...(input.retry
+      ? { retryOfRunId: input.retry.retryOfRunId, retryMode: input.retry.retryMode }
+      : {}),
+  }
+  const securityContext: WorkflowRunSecurityContext = input.securityContext ?? {
+    piiEgressRequired: input.triggerKind === "trigger.connector.inbound",
+    sourceTriggerKind: input.triggerKind,
+  }
 
   // Idempotency precedes schema validation. A retry belongs to the original
   // admission even when the deployment pointer has since moved to a version
@@ -237,6 +258,15 @@ export async function executeDeployedWorkflow(
     runId: proposedRunId,
     status: "admitted",
     dependencyLock,
+    ...(input.retry
+      ? {
+          retryOfRunId: input.retry.retryOfRunId,
+          retryMode: input.retry.retryMode,
+          operatedBy: input.retry.operatedBy,
+          ...(input.retry.startStepId ? { startStepId: input.retry.startStepId } : {}),
+          ...(input.retry.seedRunId ? { seedRunId: input.retry.seedRunId } : {}),
+        }
+      : {}),
     createdAt: now,
     updatedAt: now,
   }
@@ -267,6 +297,9 @@ export async function executeDeployedWorkflow(
     workflowSnapshot: resolved.workflow,
     ...(input.triggeredBy ? { triggeredBy: input.triggeredBy } : {}),
     triggeredBySource: input.triggeredBy?.source ?? "ui",
+    traceId,
+    lineage,
+    securityContext,
   }
   let admission: { invocation: WorkflowInvocation; reused: boolean }
   try {
@@ -304,6 +337,11 @@ export async function executeDeployedWorkflow(
     executionBinding,
     signal: input.signal,
     triggeredBy: input.triggeredBy,
+    traceId,
+    lineage,
+    securityContext,
+    startStepId: input.retry?.startStepId,
+    seedRunId: input.retry?.seedRunId,
     onPersisted: input.onPersisted,
   })
   activeInvocations.set(admission.invocation.id, driving)
@@ -326,34 +364,46 @@ async function executeLegacyPublishedWorkflow(
       `Workflow ${input.workflowId} has no legacy publication`
     )
   }
-  const workflow = migrateWorkflow(stored)
-  assertTriggerBinding(workflow, input.triggerId, input.triggerKind)
   const persistedVersion = stored.published.versionId
     ? await getDb().workflowVersions.get(stored.published.versionId)
     : undefined
-  const version =
-    persistedVersion ??
-    createWorkflowVersion({
-      workflow,
-      workflowInterface: workflow.interface ?? {},
-      accountId: getActiveAccountId(),
-      sequence: 0,
-      createdAt: stored.published.at,
-    })
+  if (!persistedVersion) {
+    throw new WorkflowAdmissionError(
+      "publication-version-missing",
+      `Workflow ${input.workflowId} publication has no immutable version artifact`
+    )
+  }
+  const version = persistedVersion
+  const immutableWorkflow = migrateWorkflow(version.definition)
+  assertTriggerBinding(immutableWorkflow, input.triggerId, input.triggerKind)
   const runId = input.requestedRunId ?? `run_${nanoid(12)}`
+  const traceId = input.traceId ?? generateTraceId()
+  const lineage: WorkflowRunLineage = input.lineage ?? {
+    rootRunId: runId,
+    ...(input.retry
+      ? { retryOfRunId: input.retry.retryOfRunId, retryMode: input.retry.retryMode }
+      : {}),
+  }
+  const securityContext: WorkflowRunSecurityContext = input.securityContext ?? {
+    piiEgressRequired: input.triggerKind === "trigger.connector.inbound",
+    sourceTriggerKind: input.triggerKind,
+  }
   const executionBinding: WorkflowExecutionBinding = {
-    versionId: stored.published.versionId ?? version.id,
-    deploymentId: stored.published.deploymentId ?? `legacy:${workflow.id}`,
+    versionId: version.id,
+    deploymentId: stored.published.deploymentId ?? `legacy:${immutableWorkflow.id}`,
     deploymentRevision: stored.published.deploymentRevision ?? 0,
     entrypoint: input.entrypoint,
     caller: input.caller,
     ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
   }
+  const seedOutputs = input.retry?.seedRunId
+    ? await getRunStepOutputs(input.retry.seedRunId)
+    : undefined
   const result = await runWorkflow({
-    workflow,
+    workflow: immutableWorkflow,
     runId,
     trigger: {
-      workflowId: workflow.id,
+      workflowId: immutableWorkflow.id,
       kind: input.triggerKind,
       ...(input.triggerId ? { triggerId: input.triggerId } : {}),
       ...(input.triggerBinding ? { binding: input.triggerBinding } : {}),
@@ -361,6 +411,11 @@ async function executeLegacyPublishedWorkflow(
       originAt: input.triggerOriginAt ?? Date.now(),
     },
     executionBinding,
+    traceId,
+    lineage,
+    securityContext,
+    ...(input.retry?.startStepId ? { startStepId: input.retry.startStepId } : {}),
+    ...(seedOutputs ? { seedOutputs } : {}),
     signal: input.signal,
     triggeredBy: input.triggeredBy,
     onPersisted: (persistedRunId) => {
@@ -386,6 +441,11 @@ interface DriveInvocationInput {
   executionBinding: WorkflowExecutionBinding
   signal?: AbortSignal
   triggeredBy?: WorkflowTriggeredFrom
+  traceId?: string
+  lineage?: WorkflowRunLineage
+  securityContext?: WorkflowRunSecurityContext
+  startStepId?: string
+  seedRunId?: string
   onPersisted?: (runId: string) => void
 }
 
@@ -398,6 +458,7 @@ async function driveInvocation(
     updatedAt: Date.now(),
   })
   try {
+    const seedOutputs = input.seedRunId ? await getRunStepOutputs(input.seedRunId) : undefined
     const result = await runWorkflow({
       workflow: input.workflow,
       trigger: input.trigger,
@@ -405,6 +466,11 @@ async function driveInvocation(
       signal: input.signal,
       triggeredBy: input.triggeredBy,
       executionBinding: input.executionBinding,
+      traceId: input.traceId,
+      lineage: input.lineage,
+      securityContext: input.securityContext,
+      ...(input.startStepId ? { startStepId: input.startStepId } : {}),
+      ...(seedOutputs ? { seedOutputs } : {}),
       onPersisted: input.onPersisted,
     })
     await getDb().workflowInvocations.update(input.invocation.id, {
@@ -480,6 +546,11 @@ async function reuseInvocation(
       trigger,
       executionBinding,
       triggeredBy: existingRun.triggeredBy,
+      traceId: existingRun.traceId,
+      lineage: existingRun.lineage,
+      securityContext: existingRun.securityContext,
+      startStepId: invocation.startStepId,
+      seedRunId: invocation.seedRunId,
     })
     activeInvocations.set(invocation.id, recovery)
     try {
@@ -514,4 +585,103 @@ async function reuseInvocation(
         }
       : { runId, status: "pending" },
   }
+}
+
+export interface ExecuteWorkflowVersionInput extends Omit<
+  ExecuteDeployedWorkflowInput,
+  "lockedDependency"
+> {
+  versionId: string
+  deploymentId: string
+  deploymentRevision: number
+  dependencyLock?: WorkflowDependencyLock
+}
+
+/** Formal execution of one explicitly selected immutable artifact. */
+export function executeWorkflowVersion(
+  input: ExecuteWorkflowVersionInput
+): Promise<ExecuteDeployedWorkflowResult> {
+  const { versionId, deploymentId, deploymentRevision, dependencyLock, ...rest } = input
+  return executeDeployedWorkflow({
+    ...rest,
+    lockedDependency: {
+      workflowId: input.workflowId,
+      versionId,
+      deploymentId,
+      deploymentRevision,
+      ...(dependencyLock ? { dependencyLock } : {}),
+    },
+  })
+}
+
+export interface RetryWorkflowRunInput {
+  runId: string
+  mode: import("@/types/workflow/visual").WorkflowRetryMode
+  operatedBy: string
+  startStepId?: string
+  signal?: AbortSignal
+}
+
+/**
+ * Create a new formal invocation for one of the three operator-visible retry
+ * modes. The seed run is immutable; no history row is overwritten.
+ */
+export async function retryWorkflowRun(
+  input: RetryWorkflowRunInput
+): Promise<ExecuteDeployedWorkflowResult> {
+  const seed = await getDb().workflowRuns.get(input.runId)
+  if (!seed) throw new WorkflowAdmissionError("seed-run-not-found", `Run ${input.runId} not found`)
+  const binding = seed.executionBinding
+  if (!binding || !seed.versionId || !seed.deploymentId) {
+    throw new WorkflowAdmissionError(
+      "seed-run-not-formal",
+      `Run ${input.runId} has no immutable execution binding and can only be replayed in local debug mode`
+    )
+  }
+  const requestedRunId = `run_${nanoid(12)}`
+  const common: ExecuteDeployedWorkflowInput = {
+    workflowId: seed.workflowId,
+    entrypoint: "desktop",
+    caller: input.operatedBy,
+    triggerKind: seed.triggerKind,
+    ...(seed.triggerId ? { triggerId: seed.triggerId } : {}),
+    ...(seed.triggerBinding ? { triggerBinding: seed.triggerBinding } : {}),
+    triggerOriginAt: Date.now(),
+    payload: seed.triggerPayload,
+    signal: input.signal,
+    requestedRunId,
+    ...(seed.traceId ? { traceId: seed.traceId } : {}),
+    triggeredBy: { source: "ui" },
+    lineage: {
+      rootRunId: seed.lineage?.rootRunId ?? seed.id,
+      retryOfRunId: seed.id,
+      retryMode: input.mode,
+    },
+    securityContext: seed.securityContext,
+    retry: {
+      retryOfRunId: seed.id,
+      retryMode: input.mode,
+      operatedBy: input.operatedBy,
+      ...(input.mode === "failed-step"
+        ? {
+            startStepId: input.startStepId ?? seed.error?.nodeId,
+            seedRunId: seed.id,
+          }
+        : {}),
+    },
+  }
+  if (input.mode === "failed-step" && !common.retry?.startStepId) {
+    throw new WorkflowAdmissionError(
+      "failed-step-missing",
+      `Run ${seed.id} has no failed step to continue from`
+    )
+  }
+  if (input.mode === "current-deployment") return executeDeployedWorkflow(common)
+  return executeWorkflowVersion({
+    ...common,
+    versionId: binding.versionId,
+    deploymentId: binding.deploymentId,
+    deploymentRevision: binding.deploymentRevision,
+    dependencyLock: binding.dependencyLock ?? seed.dependencyLock,
+  })
 }

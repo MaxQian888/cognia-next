@@ -4,9 +4,9 @@
  * cleans up via the returned disposer.
  *
  * The Rust side (cron daemon, eventual webhook receiver, connector inbound
- * tap) emits a fully-typed `TriggerEvent`. We resolve the workflow row from
- * Dexie and call `runWorkflow`. Failures are logged and surfaced via the
- * scoped run logger; they don't crash the listener.
+ * tap) emits a fully-typed `TriggerEvent`. The bridge admits the event through
+ * Execution Authority, which pins the active production artifact before the
+ * orchestrator starts. Failures never crash the listener.
  */
 
 import type { TriggerEvent, WorkflowTriggeredFrom } from "@/types/workflow/visual"
@@ -36,8 +36,8 @@ export async function installTriggerBridge(): Promise<TriggerBridgeDisposer> {
 }
 
 /**
- * Resolve the workflow row, then invoke the orchestrator. Exported for
- * tests so they can drive the bridge without going through Tauri.
+ * Admit the trigger against the production deployment. Exported for tests so
+ * they can drive the bridge without going through Tauri.
  */
 export async function dispatchTrigger(
   event: TriggerEvent,

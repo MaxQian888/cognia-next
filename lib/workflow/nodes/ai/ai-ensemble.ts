@@ -13,7 +13,8 @@
  */
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
-import { applyPiiGate, type PiiGateMode } from "./pii-gate"
+import type { PiiGateMode } from "./pii-gate"
+import { guardWorkflowEgress } from "@/lib/workflow/runtime/egress-guard"
 import { runStructuredTurn } from "./structured-turn"
 import {
   runEnsemble,
@@ -67,6 +68,9 @@ export interface AiEnsembleDeps {
     workflowId: string
     payload: Record<string, unknown>
     signal?: AbortSignal
+    traceId?: string
+    lineage?: StepExecutionContext["lineage"]
+    securityContext?: StepExecutionContext["securityContext"]
   }) => Promise<{ object: unknown }>
   runPrompt: (input: {
     modelAlias: string
@@ -157,6 +161,9 @@ export async function defaultAiEnsembleDeps(): Promise<AiEnsembleDeps> {
         triggerKind: "trigger.manual",
         payload: input.payload,
         signal: input.signal,
+        traceId: input.traceId,
+        lineage: input.lineage,
+        securityContext: input.securityContext,
       })
       const result = execution.result
       if (result.status !== "succeeded") {
@@ -188,10 +195,13 @@ export async function executeAiEnsemble(
   }
 
   // PII gate FIRST — the prompt egresses to every sample.
-  const gated = applyPiiGate(params.piiGate, {
-    system: target.systemPrompt,
-    user: params.prompt ?? "",
+  const guarded = guardWorkflowEgress({
+    securityContext: ctx.securityContext,
+    sink: "model",
+    requestedMode: params.piiGate,
+    value: { system: target.systemPrompt, user: params.prompt ?? "" },
   })
+  const gated = { ...guarded.value, redacted: guarded.redacted }
   if (targetKind === "agent.turn" && !gated.user.trim()) {
     throw nonRetryable("ai.ensemble: a non-empty 'prompt' is required for an agent.turn target")
   }
@@ -213,6 +223,13 @@ export async function executeAiEnsemble(
           parentStepId: ctx.stepId,
         },
         signal: ctx.signal,
+        traceId: ctx.traceId,
+        lineage: {
+          rootRunId: ctx.lineage?.rootRunId ?? ctx.runId,
+          parentRunId: ctx.runId,
+          parentStepId: ctx.stepId,
+        },
+        securityContext: ctx.securityContext,
       })
     }
     // agent.turn: a lens steers this sample's perspective.

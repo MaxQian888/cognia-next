@@ -8,7 +8,7 @@ description: The React UI of the Visual Workflows subsystem — the 3-pane edito
 <Status variant="stable" />
 
 <TLDR>
-Everything a user touches lives under `components/workflow/`: the 3-pane editor shell mounts a store-per-workflow at `canvas.tsx:894` wrapping `ReactFlowProvider` + `EditorStoreProvider`, with `FlowCanvas` (`flow-canvas.tsx:117`) as the **only** per-frame subscriber while chrome reads through `getState()`. Selection drives a Config/Input/Output NDV inspector (`inspector-panel.tsx:351` + `inspector/data/data-tabs.tsx:20`) whose tabs are fed by `resolveNodeIo` / `useLatestRunOutputs`, and a 6-tab right sidebar (`right-sidebar/index.tsx:272`) that auto-switches to the inspector on selection. The folder-aware library (`workflow-library.tsx:56`) layers `filterWorkflows`/`sortWorkflows`, `@dnd-kit` folder DnD, virtualized list rows, and a self-hiding stat bar. Run history renders a Gantt via the pure `buildSpans` (`run-timeline.tsx:172`) plus `run-detail.tsx:31` re-run, reached from four entry points (Run from here / Run this step / NDV CTA / whole re-run). Routes live in `app/workflows/` and ship a static-export `[id]` stub via `generateStaticParams [{id:"_"}]`.
+Everything a user touches lives under `components/workflow/`: the 3-pane editor shell mounts a store-per-workflow at `canvas.tsx:894` wrapping `ReactFlowProvider` + `EditorStoreProvider`, with `FlowCanvas` (`flow-canvas.tsx:117`) as the **only** per-frame subscriber while chrome reads through `getState()`. Selection drives a Config/Input/Output NDV inspector (`inspector-panel.tsx:351` + `inspector/data/data-tabs.tsx:20`) whose tabs are fed by `resolveNodeIo` / `useLatestRunOutputs`, and a 6-tab right sidebar (`right-sidebar/index.tsx:272`) that auto-switches to the inspector on selection. The folder-aware library (`workflow-library.tsx:56`) layers `filterWorkflows`/`sortWorkflows`, `@dnd-kit` folder DnD, virtualized list rows, and a self-hiding stat bar. Run history renders a Gantt plus provenance, lineage, immutable version/deployment metadata, and three authority-backed retry actions. Routes live in `app/workflows/` and ship a static-export `[id]` stub via `generateStaticParams [{id:"_"}]`.
 </TLDR>
 
 Pure store/geometry helpers (`createEditorStore`, alignment math, `resolveNodeIo`, `flattenSchema`) are documented on [./editor-store](./editor-store) — this page references them and never re-derives. For node semantics see [./node-system](./node-system), for the copilot/expression panes see [./expressions-copilot](./expressions-copilot), for execution internals see [./runtime-execution](./runtime-execution), and for schemas see [./data-model](./data-model). Authority: [../../adr/0034-workflow-editor-completeness-and-plugin-parity](../../adr/0034-workflow-editor-completeness-and-plugin-parity).
@@ -16,7 +16,7 @@ Pure store/geometry helpers (`createEditorStore`, alignment math, `resolveNodeIo
 <StatGrid>
 - **3** panes (NodeSearchSidebar 20% / FlowCanvas 56% / RightSidebar 24%)
 - **6** right-sidebar tabs (chat / inspector / runs / templates / settings / changelog)
-- **4** run entry points (from-here / single-step / NDV CTA / whole re-run)
+- **6** run actions: three draft editor actions plus original-version, current-deployment, and failed-step retries
 - **~70** per-kind config components in the NDV registry
 </StatGrid>
 
@@ -200,7 +200,7 @@ flowchart TD
   RD --> RDI["RunDetailInner<br/>run-detail.tsx:98"]
   RDI --> PILL["RunStatusPill<br/>run-status-pill.tsx:48"]
   RDI --> SPARK["RunDurationSparkline<br/>run-duration-sparkline.tsx:23"]
-  RDI --> RERUN["handleReRun<br/>run-detail.tsx:122"]
+  RDI --> RERUN["retryWorkflowRun<br/>original · current · failed-step"]
   RDI --> RT["RunTimeline<br/>run-timeline.tsx:48"]
   RT --> BS["buildSpans (pure)<br/>run-timeline.tsx:172"]
   RDI --> RSD["RunStepDetail<br/>run-step-detail.tsx:42"]
@@ -209,8 +209,8 @@ flowchart TD
 | Component | Line | Purpose |
 | --- | --- | --- |
 | `RunDetail` | `run-detail.tsx:31` | joins run + events live; auto-picks failed/last step `:50-61` |
-| `RunDetailInner` | `run-detail.tsx:98` | header pill/duration/trigger/sparkline + Re-run |
-| `handleReRun` | `run-detail.tsx:122` | re-invokes `runWorkflow` with the original `triggerPayload` |
+| `RunDetailInner` | `run-detail.tsx` | status, trigger/caller, version/deployment/revision, trace, parent/child/retry navigation |
+| `retryWorkflowRun` | `execution-authority.ts` | creates a new invocation from the original version, current production, or failed step |
 | `RunStepDetail` | `run-step-detail.tsx:42` | params from `step_started.payload.params`, output from `step_completed`, error+stack `:163` retryable `:175`, filterable logs `:202-210` |
 | `RunList` | `run-list.tsx:28` | full-page table, live `[workflowId+startedAt]` reversed |
 | `RunStatusPill` | `run-status-pill.tsx:48` | `STATUS_META` `:17` maps 7 statuses → color+icon; running spins |
@@ -227,12 +227,16 @@ flowchart LR
   B["NDV Output empty CTA<br/>data-tabs.tsx:96"] --> RSS["requestRunSingleStep →<br/>requestedRunSingleStepId"]
   C["Node toolbar / Run this step"] --> RSS
   RSS --> HRS["handleRunSingleStep →<br/>runSingleNode (canvas.tsx:438)"]
-  D["Run history Re-run"] --> RR["RunDetail.handleReRun<br/>run-detail.tsx:122 (orig payload)"]
+  D["Run history retries"] --> RR["Execution Authority<br/>original · current · failed-step"]
 ```
 
 - **Run from here** → node toolbar / context-menu → `requestRunFromStep`/`requestedRunFromStepId` → `handleRun({startStepId})` (`canvas.tsx:389`, scoped to the descendant subgraph).
 - **Run this step** → `requestRunSingleStep`/`requestedRunSingleStepId` → `handleRunSingleStep` → `runSingleNode` (`canvas.tsx:438`); the NDV Output empty-state CTA also fires `requestRunSingleStep` (`data-tabs.tsx:96`).
-- **Whole re-run** → `RunDetail.handleReRun` (`run-detail.tsx:122`) re-invokes `runWorkflow` with the original `triggerPayload`.
+- **Original version** → starts from the original immutable version and dependency lock.
+- **Current deployment** → resolves the active production deployment at admission time.
+- **Failed step** → uses the original immutable version, seeds completed outputs, skips their side effects, and resumes at the selected/failed step.
+
+Every retry creates a new run and invocation with `retryOfRunId`, `retryMode`, and operator identity. Legacy draft runs without an immutable binding remain inspectable but cannot masquerade as formal retries.
 
 ## Routes & settings
 

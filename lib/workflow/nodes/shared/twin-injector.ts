@@ -40,6 +40,7 @@ export interface TwinInjectionResult {
 
 export async function injectTwinContext(input: TwinInjectionInput): Promise<TwinInjectionResult> {
   const base = input.baseSystemPrompt ?? ""
+  const startedAt = Date.now()
   if (!input.characterId) return { systemPrompt: base, applied: false }
   if (!input.userPrompt.trim()) return { systemPrompt: base, applied: false }
   try {
@@ -51,7 +52,7 @@ export async function injectTwinContext(input: TwinInjectionInput): Promise<Twin
     ])
     const deps = await tryBuildTwinDeps()
     if (!deps) {
-      recordTwinInject({
+      await recordTwinInject({
         ts: Date.now(),
         twinId: character.twinId,
         source: input.source,
@@ -77,7 +78,7 @@ export async function injectTwinContext(input: TwinInjectionInput): Promise<Twin
       deps: deps as unknown as Parameters<typeof applyTwinContext>[0]["deps"],
     })
     if (!result.applied) {
-      recordTwinInject({
+      await recordTwinInject({
         ts: Date.now(),
         twinId: character.twinId,
         source: input.source,
@@ -95,7 +96,7 @@ export async function injectTwinContext(input: TwinInjectionInput): Promise<Twin
       }
     }
     const systemPrompt = result.applied.systemPrompt
-    recordTwinInject({
+    await recordTwinInject({
       ts: Date.now(),
       twinId: character.twinId,
       source: input.source,
@@ -105,6 +106,10 @@ export async function injectTwinContext(input: TwinInjectionInput): Promise<Twin
       chunkCount: result.applied.metadata.retrievedChunkIds.length,
       styleSampleCount: result.applied.metadata.styleSampleIds.length,
       tokensApprox: estimateFallbackTokens(systemPrompt),
+      durationMs: Date.now() - startedAt,
+      chunkIds: result.retrievedChunks.map((chunk) => chunk.id),
+      chunkScores: result.retrievedChunks.map((chunk) => chunk.score),
+      styleSampleIds: result.selectedStyleSamples.map((sample) => sample.id),
     })
     return { systemPrompt, applied: true }
   } catch (err) {

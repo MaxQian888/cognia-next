@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import "fake-indexeddb/auto"
 const mockNotifyRequested = jest.fn(async (..._a: unknown[]) => undefined)
 const mockNotifyResolved = jest.fn(async (..._a: unknown[]) => undefined)
 jest.mock("@/lib/workflow/runtime/approval-notify", () => ({
@@ -24,6 +25,7 @@ import {
 } from "@/lib/workflow/runtime/approval-registry"
 import { _clearWakeBusForTest } from "@/lib/workflow/runtime/wake-bus"
 import type { StepExecutionContext } from "@/types/workflow/visual"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 
 function makeCtx(
   params: Record<string, unknown>,
@@ -44,16 +46,29 @@ function makeCtx(
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 const id = approvalId("run_apr", "n_gate")
+const dbFixture = createDbTestFixture()
 
-beforeEach(() => {
+beforeAll(dbFixture.initialize)
+beforeEach(async () => {
+  await dbFixture.restore()
+  await __resetApprovalRegistryForTesting()
   jest.clearAllMocks()
   mockListRunEvents.mockResolvedValue([])
 })
-
-afterEach(() => {
-  __resetApprovalRegistryForTesting()
+afterEach(async () => {
+  await __resetApprovalRegistryForTesting()
   _clearWakeBusForTest()
 })
+afterAll(dbFixture.dispose)
+
+async function waitUntilPending() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const pending = await getPendingApproval(id)
+    if (pending) return pending
+    await flush()
+  }
+  throw new Error("approval did not become pending")
+}
 
 describe("runApprovalRequest", () => {
   it("requires a title", async () => {
@@ -62,7 +77,7 @@ describe("runApprovalRequest", () => {
 
   it("notifies, waits, and routes an approval to the approved handle", async () => {
     const promise = runApprovalRequest(makeCtx({ title: "Ship it?", message: "v2.0" }))
-    await flush()
+    const pending = await waitUntilPending()
     expect(mockNotifyRequested).toHaveBeenCalledTimes(1)
     expect(mockAppendEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -70,11 +85,11 @@ describe("runApprovalRequest", () => {
         payload: expect.objectContaining({ checkpointKey: APPROVAL_CHECKPOINT_KEY }),
       })
     )
-    expect(getPendingApproval(id)?.title).toBe("Ship it?")
+    expect(pending.title).toBe("Ship it?")
 
-    expect(respondToApproval(id, { decision: "approved", respondedBy: "device:dev-1" })).toEqual({
-      ok: true,
-    })
+    await expect(
+      respondToApproval(id, { decision: "approved", respondedBy: "device:dev-1" })
+    ).resolves.toEqual({ ok: true })
     const result = await promise
     expect(result.decision).toBe("approved")
     expect(result.output).toMatchObject({
@@ -83,14 +98,14 @@ describe("runApprovalRequest", () => {
       respondedBy: "device:dev-1",
     })
     // Registry cleaned up; resolution fanned out.
-    expect(getPendingApproval(id)).toBeUndefined()
+    await expect(getPendingApproval(id)).resolves.toBeUndefined()
     expect(mockNotifyResolved).toHaveBeenCalledWith(expect.anything(), "approved")
   })
 
   it("routes a rejection to the rejected handle", async () => {
     const promise = runApprovalRequest(makeCtx({ title: "Ship it?" }))
-    await flush()
-    respondToApproval(id, { decision: "rejected", respondedBy: "desktop" })
+    await waitUntilPending()
+    await respondToApproval(id, { decision: "rejected", respondedBy: "desktop" })
     const result = await promise
     expect(result.decision).toBe("rejected")
   })
@@ -104,7 +119,7 @@ describe("runApprovalRequest", () => {
     const result = await promise
     expect(result.decision).toBe("rejected")
     expect(result.output).toMatchObject({ respondedBy: "timeout" })
-    expect(getPendingApproval(id)).toBeUndefined()
+    await expect(getPendingApproval(id)).resolves.toBeUndefined()
   }, 10_000)
 
   it("times out as a failure when onTimeout is fail", async () => {
@@ -117,10 +132,10 @@ describe("runApprovalRequest", () => {
   it("rethrows on abort (run cancellation)", async () => {
     const ac = new AbortController()
     const promise = runApprovalRequest(makeCtx({ title: "Ship it?" }, ac.signal))
-    await flush()
+    await waitUntilPending()
     ac.abort()
-    await expect(promise).rejects.toThrow(/aborted/)
-    expect(getPendingApproval(id)).toBeUndefined()
+    await expect(promise).rejects.toThrow(/cancelled/)
+    await expect(getPendingApproval(id)).resolves.toBeUndefined()
   })
 
   it("re-arms after resume without re-notifying and keeps the original budget", async () => {
@@ -137,11 +152,11 @@ describe("runApprovalRequest", () => {
       },
     ])
     const promise = runApprovalRequest(makeCtx({ title: "Ship it?" }))
-    await flush()
+    const pending = await waitUntilPending()
     expect(mockNotifyRequested).not.toHaveBeenCalled()
     expect(mockAppendEvent).not.toHaveBeenCalled()
-    expect(getPendingApproval(id)?.requestedAt).toBe(requestedAt)
-    respondToApproval(id, { decision: "approved", respondedBy: "desktop" })
+    expect(pending.requestedAt).toBe(requestedAt)
+    await respondToApproval(id, { decision: "approved", respondedBy: "desktop" })
     await expect(promise).resolves.toMatchObject({ decision: "approved" })
   })
 

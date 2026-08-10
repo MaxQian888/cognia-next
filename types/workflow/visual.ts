@@ -7,12 +7,17 @@
  * generation. This file is the data model for the visual graph editor and
  * its execution engine.
  *
- * Four Dexie tables back the subsystem (see `lib/db/schema.ts` v22):
+ * Dexie schema v156 backs the definition, immutable deployment, execution,
+ * event-log, and durable checkpoint planes. The core workflow tables are:
  *
  *   • `workflows`         — visual workflow definitions (graph + settings)
  *   • `workflowRuns`      — one row per execution (status, frozen snapshot)
  *   • `workflowRunEvents` — durable per-step event log (live-queried by UI)
  *   • `workflowTriggers`  — registered triggers (cron, webhook, inbound, ...)
+ *   • `workflowVersions` / `workflowDeployments` / `workflowInvocations`
+ *                         — immutable production authority and admission ledger
+ *   • `workflowWaitpoints` / `workflowWaitEvents`
+ *                         — CAS-controlled HITL/risk/event checkpoints
  *
  * The hybrid runtime split (Rust triggers + TS orchestration) is documented in
  * `docs/content/docs/adr/0011-workflows-subsystem.md`. The shapes here are the
@@ -805,6 +810,29 @@ export interface WorkflowRunLease {
   expiresAt: number
 }
 
+export type WorkflowRetryMode = "original-version" | "current-deployment" | "failed-step"
+
+/** Author-selected policy at a workflow egress boundary. */
+export type WorkflowPiiGateMode = "off" | "block" | "redact"
+
+/** Boundary classes covered by the workflow PII egress policy. */
+export type WorkflowEgressSink = "model" | "connector" | "remote-tool" | "local-tool"
+
+/** Immutable relationship metadata shared by nested and retried runs. */
+export interface WorkflowRunLineage {
+  rootRunId: string
+  parentRunId?: string
+  parentStepId?: string
+  retryOfRunId?: string
+  retryMode?: WorkflowRetryMode
+}
+
+/** Security provenance that must survive subflows and crash recovery. */
+export interface WorkflowRunSecurityContext {
+  piiEgressRequired: boolean
+  sourceTriggerKind: WorkflowNodeKind
+}
+
 export interface WorkflowRunRow {
   id: string
   workflowId: string
@@ -815,6 +843,11 @@ export interface WorkflowRunRow {
   deploymentRevision?: number
   /** Formal ingress provenance; draft/editor runs intentionally omit it. */
   executionBinding?: import("./deployment").WorkflowExecutionBinding
+  /** New runs always carry a W3C-compatible 128-bit trace id; legacy rows may omit it. */
+  traceId?: string
+  /** First-class parent/retry relationship; legacy rows may omit it. */
+  lineage?: WorkflowRunLineage
+  securityContext?: WorkflowRunSecurityContext
   /** Immutable child workflow/index versions resolved before formal admission. */
   dependencyLock?: import("./deployment").WorkflowDependencyLock
   /**
@@ -1003,6 +1036,9 @@ export interface StepExecutionContext<TParams = Record<string, unknown>> {
   iteration?: { loopId: string; iterationIndex: number }
   /** Formal run provenance, including the pre-admission dependency lock. */
   executionBinding?: import("./deployment").WorkflowExecutionBinding
+  /** Parent/retry provenance shared with nested node executors. */
+  lineage?: WorkflowRunLineage
+  securityContext?: WorkflowRunSecurityContext
   /**
    * Optional run-scoped agent-trace id. When set (e.g. by the eval workflow
    * target), AI nodes emit their LLM spans under this trace so the run can be

@@ -67,6 +67,7 @@ import {
   ConnectorDeleteConfig,
   ConnectorForwardConfig,
   ConnectorWaitReplyConfig,
+  HttpRequestConfig,
   IntegrationEventTriggerConfig,
   WorkflowCompletedTriggerConfig,
   SubworkflowConfig,
@@ -122,6 +123,37 @@ const messages = {
           label: "Wait for delivery",
         },
         waitTimeoutMs: { hint: "Wait budget in ms.", label: "Delivery wait timeout (ms)" },
+      },
+      connectorForward: {
+        adapter: { label: "Adapter" },
+        messageId: {
+          hint: "Platform message id to forward.",
+          label: "Message id",
+          placeholder: "om_...",
+        },
+        piiGate: {
+          block: "Block sensitive data",
+          hint: "Checks referenced content before forwarding.",
+          label: "PII egress policy",
+          redact: "Redact when possible; otherwise block",
+        },
+        target: {
+          hint: "Destination conversation key.",
+          label: "Target conversation",
+          placeholder: "lark:bot:oc_...",
+        },
+      },
+      httpRequest: {
+        body: { hint: "Sent as application/json.", label: "Body" },
+        followRedirects: { hint: "Follow redirects.", label: "Follow redirects" },
+        method: { label: "Method" },
+        piiGate: {
+          block: "Block sensitive data",
+          hint: "Checks the request before network egress.",
+          label: "PII egress policy",
+          redact: "Redact and continue",
+        },
+        url: { hint: "Request URL.", label: "URL", placeholder: "https://api.example.com" },
       },
       integrationEventTrigger: {
         pluginId: {
@@ -1682,6 +1714,13 @@ describe("ConnectorSendConfig — fine-grained delivery controls", () => {
       expect.objectContaining({ cardJson: '{"rootId":"root"}' })
     )
   })
+
+  it("defaults outbound connector PII handling to block", () => {
+    wrap(<ConnectorSendConfig params={{}} onChange={jest.fn()} />)
+    expect(screen.getByRole("combobox", { name: "PII egress policy" })).toHaveTextContent(
+      "Block sensitive data"
+    )
+  })
 })
 
 describe("ConnectorReactionConfig / ConnectorDeleteConfig", () => {
@@ -1725,6 +1764,34 @@ describe("ConnectorForwardConfig", () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ targetConversationKey: "lark:a1:oc_2" })
     )
+  })
+
+  it("defaults PII handling to block and exposes fail-closed redaction", () => {
+    const onChange = jest.fn()
+    wrap(<ConnectorForwardConfig params={{}} onChange={onChange} />)
+    const policy = screen.getByRole("combobox", {
+      name: /PII egress policy|piiGate\.label/,
+    })
+    expect(policy).toHaveTextContent(/Block sensitive data|piiGate\.block/)
+    fireEvent.click(policy)
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: /Redact when possible; otherwise block|piiGate\.redact/,
+      })
+    )
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ piiGate: "redact" }))
+  })
+})
+
+describe("HttpRequestConfig", () => {
+  it("defaults network PII handling to block and allows explicit redaction", () => {
+    const onChange = jest.fn()
+    wrap(<HttpRequestConfig params={{}} onChange={onChange} />)
+    const policy = screen.getByRole("combobox", { name: "PII egress policy" })
+    expect(policy).toHaveTextContent("Block sensitive data")
+    fireEvent.click(policy)
+    fireEvent.click(screen.getByRole("option", { name: "Redact and continue" }))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ piiGate: "redact" }))
   })
 })
 

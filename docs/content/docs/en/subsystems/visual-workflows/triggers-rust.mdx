@@ -8,7 +8,7 @@ description: The five-way workflow trigger taxonomy, the seven TS runtime bridge
 <Status variant="stable" />
 
 <TLDR>
-Rust owns two questions — "when does a workflow start" (cron daemon + axum webhook receiver) and "did this run survive a crash" (the SQLite run mirror) — while the TS orchestrator on [runtime-execution](./runtime-execution) owns step execution. Every trigger kind fans into ONE chokepoint, `dispatchTrigger(event)` at `lib/workflow/runtime/trigger-bridge.ts:43`, which resolves the Dexie workflow, fires the plugin hook, and calls `runWorkflow`. Cross-process firing rides the single `workflow:trigger` Tauri event emitted from `src-tauri/src/workflow/mod.rs:40` and received by `listenTriggerEvents` at `tauri-bridge.ts:90`. The whole Rust plane is desktop-only: web mode is a total no-op behind the `isTauri()` gate (`safeInvoke` returns null, `reloadInFlightRuns` returns `[]`, listeners no-op). The mirror (`run_mirror.rs`) is a thin shadow — the Dexie event log stays the canonical source of truth.
+Rust owns two questions — "when does a workflow start" (cron daemon + axum webhook receiver) and "did this run or waitpoint survive a crash" (the SQLite mirror) — while the TS orchestrator on [runtime-execution](./runtime-execution) owns step execution. Every formal trigger fans into `dispatchTrigger(event)`, which calls Execution Authority to pin the active production artifact before the plugin hook and orchestrator run. Cross-process firing rides the single `workflow:trigger` Tauri event. Web falls back to Dexie for run state and durable waitpoints.
 </TLDR>
 
 ## Trigger taxonomy
@@ -17,8 +17,8 @@ Five trigger kinds (plus `trigger.goal.completed`) split by who fires them. Rust
 
 | Kind | Fired by | Path & file:line |
 | --- | --- | --- |
-| `trigger.manual` | TS only | Run button; IM tap `start-from-im.ts:53` -> `runWorkflow`; resume `resume-controller.ts:62`. Rust register is a no-op at `commands.rs:83` |
-| `trigger.cron` | Rust daemon | `cron_daemon.rs:229` `fire()` -> `AppHandleEmitter::emit` `mod.rs:40` -> `workflow:trigger` -> `tauri-bridge.ts:90` `listenTriggerEvents` -> `trigger-bridge.ts:43` `dispatchTrigger` -> `runWorkflow`. Register `commands.rs:27` `state.cron.upsert` |
+| `trigger.manual` | TS only | Editor Preview/Test calls the draft orchestrator; IM, CLI, MCP, API, and operational runs enter Execution Authority. Crash resume re-enters the frozen run snapshot with the same run id. |
+| `trigger.cron` | Rust daemon | `cron_daemon.rs` -> `workflow:trigger` -> `listenTriggerEvents` -> `dispatchTrigger` -> `executeDeployedWorkflow`. |
 | `trigger.webhook` (+`trigger.github.webhook`) | Rust axum | `webhook_router.rs:292` `handle_webhook` -> HMAC `L404` -> `state.emitter.emit` (`kind:"trigger.webhook"`) -> `mod.rs:40` -> `workflow:trigger` -> `trigger-bridge.ts:43`. Register `commands.rs:47` `state.webhook.upsert` |
 | `trigger.connector.inbound` | TS hook | `ConnectorBus` -> `findMatchingWorkflows("trigger.connector.inbound")` -> `dispatchTrigger`. Rust no-op `commands.rs:83` |
 | `trigger.chat.message` | TS hook | `lib/db/messages.ts` `findMatchingWorkflows("trigger.chat.message",{characterId,sessionId})` -> `dispatchTrigger` (lazy-imported to avoid memory spikes). Rust no-op |
@@ -30,7 +30,7 @@ Five trigger kinds (plus `trigger.goal.completed`) split by who fires them. Rust
 | File | Symbol:line | Role |
 | --- | --- | --- |
 | `trigger-bridge.ts` | `installTriggerBridge:21` | Mounts once on boot; wraps `listenTriggerEvents`, validates, calls `dispatchTrigger` |
-| `trigger-bridge.ts` | `dispatchTrigger:43` | THE chokepoint — resolves Dexie workflow, fires plugin hook, calls orchestrator; ALL trigger kinds route here |
+| `trigger-bridge.ts` | `dispatchTrigger` | Formal trigger chokepoint — admits the active production deployment through Execution Authority |
 | `trigger-bridge.ts` | `isTriggerEvent:61` | Shape guard for inbound `workflow:trigger` payloads |
 | `trigger-subscriptions.ts` | `INDEXED_KINDS:32` | In-memory index of TS-side trigger nodes; only `connector.inbound` / `chat.message` / `goal.completed` (cron/webhook EXCLUDED — Rust owns them) |
 | `trigger-subscriptions.ts` | `rebuildIndex:45` / `initTriggerSubscriptions:66` | Rebuilt from a Dexie `liveQuery` over workflows; idempotent, window-guarded |
@@ -38,21 +38,23 @@ Five trigger kinds (plus `trigger.goal.completed`) split by who fires them. Rust
 | `webhook-bridge.ts` | `syncWorkflowTriggers:35` / `syncOneTrigger:40` | Filters `n.type.startsWith("trigger.")`, eager-registers each (Rust handlers idempotent, no diff computed) |
 | `tauri-bridge.ts` | `safeInvoke:34` + 6 commands `L46-81` | `persistRunState` / `registerTrigger` / `unregisterTrigger` / `reloadInFlightRuns` / `ackRunCompleted` / `getWebhookUrl` |
 | `tauri-bridge.ts` | `listenTriggerEvents:90` / `listenResumeEvents:101` | Subscribe to `workflow:trigger` and `workflow:resume`; ALL no-op when `!isTauri()` |
-| `wake-bus.ts` | `subscribeWake:49` / `emitWake:102` | In-process oneshot bus for `flow.wait(event)` steps, key `${runId}:${stepId}`; `emitWake` returns false if no subscriber (early events dropped) |
-| `start-from-im.ts` | `startWorkflowFromIM:47` | Hydrates row, builds `trigger.manual` event, generates `runId` up front, fire-and-forget `void runWorkflow` |
-| `run-status-bridge.ts` | `deriveRunStatusFromEvents:29` / `startRunStatusBridge:67` | Passive observer; tracks most-recent run via `[workflowId+startedAt]` (must match schema v22) |
+| `workflow-waitpoints.ts` / `waitpoint-repository.ts` | durable repository | Shared approval, risk-gate, and event-wait checkpoint; events persist before matching and are consumed once |
+| `start-from-im.ts` | `startWorkflowFromIM` | Admits the production artifact and returns after the new run row is durable |
+| `run-status-bridge.ts` | status observer | Tracks the latest run through the Dexie v156 run indexes |
 
 ```ts
 // lib/workflow/runtime/trigger-bridge.ts:43
-export async function dispatchTrigger(event: TriggerEvent): Promise<void> {
-  const workflow = await getWorkflow(event.workflowId)
-  if (!workflow) { console.warn(...); return }
-  getPluginEventHooks().dispatchWorkflowTriggerFired(event.workflowId, event.kind, event.payload)
-  await runWorkflow({ workflow, trigger: event })
-}
+await executeDeployedWorkflow({
+  workflowId: event.workflowId,
+  entrypoint: "trigger",
+  caller: event.kind,
+  triggerKind: event.kind,
+  triggerId: event.triggerId,
+  payload: event.payload,
+})
 ```
 
-`webhook-bridge.ts:40` maps node config into the Rust register shape: `cron` -> `{cron}`; `webhook` -> `{path,method,hmacSecret,responseStatus,responseTemplate}`; `connector` / `chat` / `manual` -> base fields only. `wake-bus` covers in-process waits; cross-process Rust->TS wakes ride the same `workflow:trigger` event. Note that **resume does NOT go through `dispatchTrigger`** — resumed runs use `trigger.manual` directly so the plugin trigger hook does not re-fire.
+`webhook-bridge.ts` maps node config into the Rust register shape. `flow.wait(event)` persists an event before matching by key, optional correlation id, and the run start boundary; unmatched events expire after 24 hours. **Resume does not go through `dispatchTrigger`**: it reuses the frozen snapshot, original run id, trace, lineage, security context, and completed-step cache without firing the trigger hook again.
 
 ## Rust backend (src-tauri/src/workflow/)
 
@@ -60,10 +62,10 @@ export async function dispatchTrigger(event: TriggerEvent): Promise<void> {
 | --- | --- | --- |
 | `mod.rs` | `AppHandleEmitter:34` / `impl TriggerEmitter:38` | The single Rust->TS emit point: `Emitter::emit(&handle, "workflow:trigger", event)` |
 | `state.rs` | `WorkflowState:14` / `open:25` | Holds `{mirror, cron, webhook}`; `open(mirror_path, emitter)` wires all three but does NOT spawn loops; `impl Drop:51` calls `webhook.stop()` |
-| `types.rs` | `TRIGGER_KINDS:14` / `RunStatus:25` / `TriggerEvent:124` | camelCase serde DTOs; `RegisterTriggerInput:91`, `PersistRunStateInput:139` (snapshot only on first persist), `InFlightRunRow:156`, `WebhookTriggerPayload:172` |
+| `types.rs` | workflow DTOs | camelCase trigger/run DTOs plus `WorkflowWaitpointRow`, decision input, and durable wait-event rows |
 | `commands.rs` | `workflow_register_trigger:21` | Dispatch `L26-85`: cron -> `state.cron.upsert`; webhook/github.webhook -> `WebhookEntry` + `state.webhook.upsert`; connector/chat/manual -> no-op Ok `L83`; else error |
-| `commands.rs` | the other 5 commands `L91-134` | `unregister` (sweeps cron + webhook by id), `get_webhook_url`, `persist_run_state`, `reload_in_flight_runs`, `ack_completed` |
-| `run_mirror.rs` | `RunMirror:47` / `persist:134` / `list_in_flight:192` / `ack_completed:231` | SQLite shadow; lazy `open:60`, `conn:96` does mkdir+DDL on first use; `default_mirror_path:269` = `<dir>/cognia/workflow-runs.sqlite` |
+| `commands.rs` | run + waitpoint commands | Run mirror commands plus create/get/list/decide waitpoints and persist/prune wait events |
+| `run_mirror.rs` | `RunMirror` | SQLite shadow for in-flight runs, durable waitpoints, first-writer-wins decisions, and 24-hour wait events |
 | `triggers/cron_daemon.rs` | `CronDaemon:110` / `upsert:127` / `spawn:177` / `fire:229` | In-process cron (`cron::Schedule`, 6-7 field with seconds), fires while the Tauri process runs regardless of webview |
 | `triggers/webhook_router.rs` | `WebhookRouter:120` / `start:210` / `handle_webhook:292` / `verify_hmac_signature:404` | Local axum receiver, binds `127.0.0.1` only, 1 MiB body cap, HMAC-SHA256 |
 

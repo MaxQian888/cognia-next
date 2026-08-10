@@ -8,26 +8,26 @@ description: n8n 风格的可视化编排层 —— 把角色、团队、技能�
 <Status variant="stable" />
 
 <TLDR>
-  基于 React Flow v12 的编辑器（Zustand + zundo store、elkjs 自动布局），覆盖 **7 大类共 74 种节点**，
+  基于 React Flow v12 的编辑器（Zustand + zundo store、elkjs 自动布局），覆盖 **7 大类共 153 种节点**，
   由**混合运行时**执行：Rust 负责*工作流何时启动*（cron 守护进程、HMAC webhook 接收器）以及*某次运行是否
   从崩溃中幸存*（SQLite 镜像）；TS 负责*给定一次运行如何逐步遍历图*（`runWorkflow` —— 校验 → 拓扑排序 →
   步骤循环 → 持久化事件日志）。图类型为 `VisualWorkflow`（`types/workflow/visual.ts:242`，`schemaVersion: 1`）；
-  持久化横跨 **8 张 Dexie 表**，分布在 schema v22 → v56。AI 副驾会起草经 Zod 校验的批量*提案（proposal）*，
+  工作流持久化横跨 **13 张 Dexie 表**，当前 schema 为 v156。AI 副驾会起草经 Zod 校验的批量*提案（proposal）*，
   用户预览后作为单个撤销步骤应用。
 </TLDR>
 
 <StatGrid>
   <Stat
     label="节点种类"
-    value="74"
+    value="153"
     hint="7 大类 · trigger / action / ai / flow / data / io / annotation（pattern→action）"
   />
-  <Stat label="内置执行器" value="34 核心" hint="built-ins.ts；另有 +13 desktop、+1 terminal、+13 github（插件）、+6 pattern" />
+  <Stat label="执行" value="Authority + orchestrator" hint="immutable 正式运行 · draft preview/test" />
   <Stat label="内置模板" value="22" hint="10 seed · 4 进阶包 · 8 GitHub Delivery" />
   <Stat
     label="Dexie 表"
-    value="8"
-    hint="workflows · runs · runEvents · triggers · folders · fanout · bookmarks · proposalHistory"
+    value="13"
+    hint="定义 · runs/events/triggers · versions/deployments/invocations · waitpoints/events · 编辑器辅助表"
   />
   <Stat label="lib/workflow" value="~14.7k 行" hint="editor 4.3k · nodes 4k · runtime 3.2k · definition/library 3k" />
   <Stat label="Rust 后端" value="~2.3k 行" hint="webhook_router 818 · run_mirror 432 · cron_daemon 351" />
@@ -39,7 +39,7 @@ cognia-next 用这一层把它成熟的运行时实体 —— [角色](../../cha
 
 > **Rust 负责"工作流何时启动"与"这次运行是否从崩溃中幸存"。TS 负责"给定一次运行，如何逐步遍历这些步骤"。**
 
-其余一切都由这条划分推导而来。cron 触发与 webhook 接收必须在 webview 最小化到托盘时仍然工作，因此它们位于 Rust（`src-tauri/src/workflow/`）。逐步编排会接触 Dexie、LLM 客户端、连接器总线与智能体团队运行时 —— 它们都位于 webview —— 因此留在 TS（`lib/workflow/runtime/`）。两侧仅通过 Tauri 事件（`workflow:trigger` / `workflow:resume`）与六个 IPC 命令通信。在 Web 模式下 Rust 层不存在，TS 编排器独立运行 —— cron 仅在标签页存活时触发，webhook 显示"仅桌面"横幅，其余触发器照常工作。
+其余一切都由这条划分推导而来。cron 触发与 webhook 接收必须在 webview 最小化到托盘时仍然工作，因此它们位于 Rust（`src-tauri/src/workflow/`）。逐步编排会接触 Dexie、LLM 客户端、连接器总线与智能体团队运行时 —— 它们都位于 webview —— 因此留在 TS（`lib/workflow/runtime/`）。两侧通过 Tauri 事件以及作用域明确的 trigger、run mirror 与 durable waitpoint IPC 命令通信。Web 模式由 Dexie 提供 waitpoint fallback，TS 编排器继续可用。
 
 ## 架构
 
@@ -60,17 +60,17 @@ flowchart TB
     Orchestrator["runtime/orchestrator.ts<br/>validate → topo-sort → step loop → persist"]
     Registry["nodes/registry.ts<br/>kind@typeVersion → execute fn"]
     BuiltIns["nodes/built-ins.ts<br/>34 core executors"]
-    TriggerBridge["runtime/trigger-bridge.ts<br/>single fan-in → runWorkflow"]
+    TriggerBridge["runtime/trigger-bridge.ts<br/>single fan-in → Execution Authority"]
     WebhookBridge["runtime/webhook-bridge.ts<br/>syncWorkflowTriggers on save"]
     Resume["runtime/resume-controller.ts<br/>replay in-flight runs on boot"]
   end
 
-  subgraph Storage["🗄️ Dexie (8 tables, v22→v56)"]
+  subgraph Storage["🗄️ Dexie（13 张工作流表，v156）"]
     Workflows[(workflows)]
     Runs[(workflowRuns<br/>frozen snapshot)]
     Events[(workflowRunEvents<br/>append-only log)]
     Triggers[(workflowTriggers)]
-    Aux[(folders · fanout ·<br/>bookmarks · proposalHistory)]
+    Aux[(versions · deployments · invocations<br/>waitpoints · waitEvents<br/>folders · fanout · bookmarks · proposals)]
   end
 
   subgraph UI["🎨 components/workflow/"]
@@ -112,7 +112,7 @@ flowchart TB
 每张卡片都是一个文档页，包含精确到行的内部实现。任何非平凡改动前请先阅读对应模块页。
 
 <Cards>
-  <Card title="数据模型与定义" href="./data-model" description="VisualWorkflow 类型、74 种节点的分类法、Zod + 图完整性校验、8 张 Dexie 表，以及 22 个内置模板" />
+  <Card title="数据模型与定义" href="./data-model" description="VisualWorkflow 类型、153 种节点分类、校验，以及截至 v156 的 13 张工作流 Dexie 表" />
   <Card title="编辑器 store 与画布机制" href="./editor-store" description="Zustand + zundo store（历史 100）、React Flow 转换器、elkjs 自动布局、连接校验、剪贴板/对齐/套索、WeakMap 索引、性能档位、视口书签" />
   <Card title="表达式与 AI 副驾" href="./expressions-copilot" description="无 eval 的 {{ }} 表达式语言、CodeMirror 高亮 + 自动补全、拖拽映射，以及经 Zod 校验、带 Dexie 历史的提案流水线" />
   <Card title="节点系统与执行器" href="./node-system" description="kind@typeVersion 注册表、catalog 元数据、按种类的 Zod 参数 schema、校验，以及 action/flow/data/io 内置执行器家族" />

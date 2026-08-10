@@ -4,7 +4,7 @@
  * Run-history management coverage: filters, summary stats, bulk + single
  * deletion (with the cascade primitives), clear-history, export, re-run, and
  * "load more" windowing. Uses fake-indexeddb so the live query + real db
- * deletes round-trip; the orchestrator + export side-effects are mocked.
+ * deletes round-trip; the execution authority + export side-effects are mocked.
  */
 import "fake-indexeddb/auto"
 import { render, screen, waitFor } from "@testing-library/react"
@@ -19,13 +19,13 @@ import {
 } from "@/types/workflow/visual"
 import { RunList } from "./run-list"
 
-const runWorkflowMock = jest.fn(async (..._args: unknown[]) => ({
+const retryWorkflowRunMock = jest.fn(async (..._args: unknown[]) => ({
   runId: "r-new",
-  status: "succeeded" as const,
+  result: { status: "succeeded" as const },
 }))
-jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
+jest.mock("@/lib/workflow/runtime/execution-authority", () => ({
   __esModule: true,
-  runWorkflow: (...args: unknown[]) => runWorkflowMock(...args),
+  retryWorkflowRun: (...args: unknown[]) => retryWorkflowRunMock(...args),
 }))
 
 const downloadRunsJsonMock = jest.fn()
@@ -80,7 +80,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-  runWorkflowMock.mockClear()
+  retryWorkflowRunMock.mockClear()
   downloadRunsJsonMock.mockClear()
   downloadRunsCsvMock.mockClear()
 })
@@ -217,7 +217,12 @@ describe("RunList", () => {
     const u = user()
     await u.click(screen.getByTestId("runs-actions-r1"))
     await u.click(await screen.findByText("Re-run"))
-    await waitFor(() => expect(runWorkflowMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(retryWorkflowRunMock).toHaveBeenCalledTimes(1))
+    expect(retryWorkflowRunMock).toHaveBeenCalledWith({
+      runId: "r1",
+      mode: "current-deployment",
+      operatedBy: "workflow-run-history",
+    })
   })
 
   it("exports the filtered runs as JSON", async () => {

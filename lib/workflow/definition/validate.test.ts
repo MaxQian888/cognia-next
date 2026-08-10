@@ -357,6 +357,21 @@ describe("validateGraphIntegrity", () => {
     expect(r.warnings.some((w) => w.includes("no trigger"))).toBe(true)
   })
 
+  it("warns when a connector-triggered external sink has no explicit PII policy", () => {
+    const wf = baseWorkflow()
+    wf.nodes[0].type = "trigger.connector.inbound"
+    wf.nodes[1].type = "action.agent.turn"
+    wf.nodes[1].data.params = { prompt: "{{ $trigger.payload.text }}" }
+
+    const result = validateGraphIntegrity(wf)
+
+    expect(result.warnings).toEqual([
+      expect.stringContaining("must explicitly choose piiGate=block or piiGate=redact"),
+    ])
+    wf.nodes[1].data.params.piiGate = "redact"
+    expect(validateGraphIntegrity(wf).warnings).toEqual([])
+  })
+
   it("rejects a generic cycle", () => {
     const wf = baseWorkflow()
     // Form a cycle n1 → n2 → n1 (no loop/wait node on the path).

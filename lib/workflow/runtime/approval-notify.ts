@@ -41,6 +41,7 @@ export interface ApprovalNotifyDeps {
     title: string
     body?: string
     href: string
+    dedupeKey: string
     directed: true
     sourceRef: { kind: string; id: string }
     actions: Array<{
@@ -74,6 +75,7 @@ export async function notifyApprovalRequested(
       title: `Approval requested: ${entry.title}`,
       ...(entry.message ? { body: entry.message } : {}),
       href: `/workflows/${entry.workflowId}/runs/${entry.runId}`,
+      dedupeKey: entry.approvalId,
       directed: true,
       sourceRef: { kind: "workflow-approval", id: entry.approvalId },
       actions: [
@@ -135,11 +137,11 @@ export async function notifyApprovalResolved(
  * the workflow runtime provider; returns the unregister function.
  */
 export function installApprovalNotificationActions(): () => void {
-  return registerNotificationCommand(APPROVAL_RESPOND_COMMAND, (ctx) => {
+  return registerNotificationCommand(APPROVAL_RESPOND_COMMAND, async (ctx) => {
     const approvalIdArg = ctx.args?.approvalId
     const decision = ctx.args?.decision
     if (typeof approvalIdArg !== "string") return
     if (decision !== "approved" && decision !== "rejected") return
-    respondToApproval(approvalIdArg, { decision, respondedBy: "desktop" })
+    await respondToApproval(approvalIdArg, { decision, respondedBy: "desktop" })
   })
 }

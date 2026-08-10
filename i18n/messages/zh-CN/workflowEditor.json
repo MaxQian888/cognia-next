@@ -172,12 +172,17 @@
       "useTemplate": "使用"
     },
     "publish": {
+      "current": "当前",
+      "deploymentSummary": "生产版本 v{sequence} · 修订 {revision} · {status}",
       "hint": "把该工作流发布为类型化可调用单元——agent 工具、类型化子工作流目标、技能。请先保存工作流。用「手动触发」的输入结构与「输出」节点声明其接口。",
       "publish": "发布",
       "publishedAs": "已发布为工具",
       "republish": "重新发布",
+      "rollback": "回滚",
       "title": "发布",
-      "unpublish": "取消发布"
+      "unpublish": "取消发布",
+      "versionHistory": "版本历史",
+      "versionRow": "v{sequence} · {date}"
     },
     "retry": {
       "attempts": "次数",

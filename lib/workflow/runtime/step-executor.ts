@@ -10,6 +10,8 @@ import type {
   VisualWorkflow,
   WorkflowNode,
   WorkflowRetryPolicy,
+  WorkflowRunLineage,
+  WorkflowRunSecurityContext,
 } from "@/types/workflow/visual"
 import type { WorkflowExecutionBinding } from "@/types/workflow/deployment"
 import { getExecutor } from "@/lib/workflow/nodes/registry"
@@ -44,6 +46,8 @@ export interface RunStepInput {
   honorPinData?: boolean
   /** Run-scoped agent-trace id, threaded onto the step context for AI-node spans. */
   traceId?: string
+  lineage?: WorkflowRunLineage
+  securityContext?: WorkflowRunSecurityContext
   /** Formal-run provenance inherited by every node executor. */
   executionBinding?: WorkflowExecutionBinding
   /**
@@ -204,6 +208,8 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     stepId: node.id,
     ...(input.iterationMeta ? { iteration: input.iterationMeta } : {}),
     ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
+    ...(input.lineage ? { lineage: input.lineage } : {}),
+    ...(input.securityContext ? { securityContext: input.securityContext } : {}),
     params: resolvedParamRecord,
     upstream,
     trigger: input.trigger,

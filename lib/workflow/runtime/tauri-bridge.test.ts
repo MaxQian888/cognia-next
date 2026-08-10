@@ -11,6 +11,12 @@ import {
   reloadInFlightRuns,
   getWebhookUrl,
   unregisterTrigger,
+  createNativeWorkflowWaitpoint,
+  getNativeWorkflowWaitpoint,
+  listNativePendingWorkflowWaitpoints,
+  decideNativeWorkflowWaitpoint,
+  persistNativeWorkflowWaitEvent,
+  pruneNativeWorkflowWaitEvents,
 } from "./tauri-bridge"
 
 describe("tauri-bridge (web mode, no Tauri globals)", () => {
@@ -47,6 +53,41 @@ describe("tauri-bridge (web mode, no Tauri globals)", () => {
 
   it("getWebhookUrl returns null in web mode", async () => {
     await expect(getWebhookUrl("wf", "trg")).resolves.toBeNull()
+  })
+
+  it("durable waitpoint mirror degrades to the web repository outside Tauri", async () => {
+    const waitpoint = {
+      id: "wait_1",
+      kind: "approval" as const,
+      status: "pending" as const,
+      runId: "run_1",
+      workflowId: "wf_1",
+      stepId: "gate",
+      key: "approval:wait_1",
+      createdAt: 1,
+      notBefore: 1,
+      updatedAt: 1,
+    }
+    await expect(createNativeWorkflowWaitpoint(waitpoint)).resolves.toBeNull()
+    await expect(getNativeWorkflowWaitpoint("wait_1")).resolves.toBeNull()
+    await expect(listNativePendingWorkflowWaitpoints()).resolves.toBeNull()
+    await expect(
+      decideNativeWorkflowWaitpoint("wait_1", {
+        outcome: "approved",
+        respondedBy: "test",
+        resolvedAt: 2,
+      })
+    ).resolves.toBeNull()
+    await expect(
+      persistNativeWorkflowWaitEvent({
+        id: "event_1",
+        key: "ready",
+        source: "test",
+        emittedAt: 1,
+        expiresAt: 2,
+      })
+    ).resolves.toBeUndefined()
+    await expect(pruneNativeWorkflowWaitEvents(2)).resolves.toBeNull()
   })
 
   it("listenTriggerEvents returns a no-op unsubscribe in web mode", async () => {

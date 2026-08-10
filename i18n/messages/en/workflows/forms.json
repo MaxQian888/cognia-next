@@ -21,6 +21,12 @@
       "hint": "Defaults to the provider's configured model.",
       "label": "Model (optional)"
     },
+    "piiGate": {
+      "block": "Block sensitive data",
+      "hint": "Required for formal connector-triggered runs. Redaction removes detected sensitive values before the model call.",
+      "label": "PII egress policy",
+      "redact": "Redact and continue"
+    },
     "prompt": {
       "label": "Prompt"
     },
@@ -594,6 +600,12 @@
       "label": "Message id",
       "placeholder": "om_..."
     },
+    "piiGate": {
+      "block": "Block sensitive data",
+      "hint": "Checks referenced content before forwarding. Native forwarding cannot rewrite the original message, so detected PII is blocked even when redaction is selected.",
+      "label": "PII egress policy",
+      "redact": "Redact when possible; otherwise block"
+    },
     "target": {
       "hint": "Destination conversation key (platform:adapterId:chatId) or a raw receive id.",
       "label": "Target conversation",
@@ -689,6 +701,12 @@
     "idempotencyKey": {
       "hint": "Deduplication key; defaults to run id + step id.",
       "label": "Idempotency key (optional)"
+    },
+    "piiGate": {
+      "block": "Block sensitive data",
+      "hint": "Required for formal connector-triggered runs. Redaction removes detected sensitive values before sending or editing the message.",
+      "label": "PII egress policy",
+      "redact": "Redact and continue"
     },
     "replyTo": {
       "hint": "Platforms that support replies quote this message.",
@@ -1354,6 +1372,12 @@
     "method": {
       "label": "Method"
     },
+    "piiGate": {
+      "block": "Block sensitive data",
+      "hint": "Checks the URL, headers, and request body before network egress.",
+      "label": "PII egress policy",
+      "redact": "Redact and continue"
+    },
     "url": {
       "hint": "Supports '{{ }}' expressions.",
       "label": "URL",
@@ -1511,6 +1535,12 @@
     "argsJson": {
       "hint": "Forwarded as the tool call's arguments. Supports expressions.",
       "label": "Arguments (JSON)"
+    },
+    "piiGate": {
+      "block": "Block sensitive data",
+      "hint": "Applied to network MCP servers. Local stdio servers stay local and are not gated.",
+      "label": "PII egress policy",
+      "redact": "Redact and continue"
     },
     "serverId": {
       "label": "MCP server"
@@ -2002,6 +2032,12 @@
         "task": "Task handler (legacy)",
         "tool": "Plugin tool"
       }
+    },
+    "piiGate": {
+      "block": "Block sensitive data",
+      "hint": "Applied when the plugin has network access. Local-only plugins are not gated.",
+      "label": "PII egress policy",
+      "redact": "Redact and continue"
     },
     "pluginId": {
       "label": "Plugin",

@@ -15,6 +15,12 @@
       "tokens": "Token"
     },
     "export": "导出",
+    "formalRetryUnavailable": "该草稿时期的运行没有不可变版本，只能在本地调试模式重放。",
+    "lineage": {
+      "children": "{count} 个子运行",
+      "parent": "父运行",
+      "retryOf": "原始运行"
+    },
     "notFound": {
       "description": "该运行可能已被删除，或链接不正确。",
       "title": "未找到运行记录"
@@ -23,12 +29,27 @@
     "rerunFromStep": "从此步重跑",
     "rerunFromStepHint": "在时间线中选择一个步骤以从该步重跑",
     "rerunning": "正在重跑…",
+    "retry": {
+      "currentDeployment": "运行当前生产版本",
+      "failedStep": "从此步骤继续",
+      "originalVersion": "运行原发布版本"
+    },
     "running": "运行中…",
+    "provenance": {
+      "caller": "调用方 {value}",
+      "draft": "草稿/本地调试",
+      "entrypoint": "入口 {value}",
+      "revision": "部署修订 {value}",
+      "trace": "追踪 {value}",
+      "trigger": "触发源 {value}",
+      "version": "版本 {value}"
+    },
     "sparkline": {
       "title": "时长趋势"
     },
     "totalCost": "{cost} 估算",
-    "totalTokens": "{tokens} tok"
+    "totalTokens": "{tokens} tok",
+    "unknownError": "未知错误"
   },
   "list": {
     "backToEditor": "返回编辑器",
