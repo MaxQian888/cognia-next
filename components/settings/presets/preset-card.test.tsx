@@ -9,8 +9,10 @@ jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 const preset = {
   id: "preset-1",
   name: "Focused",
-  systemPrompt: "Stay focused",
-} as SystemPromptPreset
+  content: "Stay focused",
+  createdAt: 1,
+  updatedAt: 1,
+} satisfies SystemPromptPreset
 
 it("uses a flat row and the shared Button primitive for dragging", () => {
   const { container } = render(

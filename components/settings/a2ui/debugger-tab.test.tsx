@@ -15,7 +15,7 @@ const listEvents = jest.fn(async () => [
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("@/lib/db/a2ui-event-history", () => ({
-  listEvents: (...args: unknown[]) => listEvents(...args),
+  listEvents: () => listEvents(),
   clearEvents: jest.fn(),
   appendEvent: jest.fn(),
 }))
