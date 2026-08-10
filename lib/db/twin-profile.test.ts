@@ -9,6 +9,7 @@
 import "fake-indexeddb/auto"
 import {
   addEntity,
+  addDecision,
   addPlaybook,
   addStyleSample,
   appendDecisions,
@@ -17,19 +18,23 @@ import {
   ensureTwinProfile,
   getTwinProfile,
   removeEntity,
+  removeDecision,
   removePlaybook,
   removeStyleSample,
   setEntityPinned,
+  setDecisionPinned,
   setPlaybookPinned,
   setStyleSamplePinned,
   updateEntity,
+  updateDecision,
   updatePlaybook,
   updateStyleSample,
   upsertEntities,
+  upsertDecisions,
   upsertPlaybooks,
   upsertStyleSamples,
 } from "./twin-profile"
-import type { Playbook, ProfileEntity, StyleSample } from "@/types/twin"
+import type { DecisionRecord, Playbook, ProfileEntity, StyleSample } from "@/types/twin"
 
 const TWIN_ID = "twin-test"
 
@@ -273,8 +278,40 @@ describe("upsertStyleSamples / upsertPlaybooks — re-distill safety (T1.2)", ()
   })
 })
 
-describe("decisions stay untouched by the new API", () => {
-  it("only the four target arrays are mutated", async () => {
+function makeDecision(id: string, overrides: Partial<DecisionRecord> = {}): DecisionRecord {
+  return {
+    id,
+    context: "Choose a queue",
+    choice: "Kafka",
+    rationale: "Durability",
+    sourceChunkIds: ["chunk-1"],
+    timestamp: 1,
+    ...overrides,
+  }
+}
+
+describe("DecisionRecord lifecycle", () => {
+  it("de-dupes normalized context + choice while preserving pinned decisions", async () => {
+    await upsertDecisions(TWIN_ID, [makeDecision("d1")])
+    await setDecisionPinned(TWIN_ID, "d1", true)
+    const profile = await upsertDecisions(TWIN_ID, [
+      makeDecision("d2", { context: "  choose   A queue ", choice: "kafka", rationale: "new" }),
+    ])
+    expect(profile.decisions).toEqual([expect.objectContaining({ id: "d1", pinned: true })])
+  })
+
+  it("supports add, edit, pin, and delete", async () => {
+    await addDecision(TWIN_ID, makeDecision("d1"))
+    await updateDecision(TWIN_ID, "d1", makeDecision("d1", { choice: "NATS" }))
+    await setDecisionPinned(TWIN_ID, "d1", true)
+    expect(await getTwinProfile(TWIN_ID)).toMatchObject({
+      decisions: [expect.objectContaining({ choice: "NATS", pinned: true })],
+    })
+    const removed = await removeDecision(TWIN_ID, "d1")
+    expect(removed.decisions).toEqual([])
+  })
+
+  it("keeps decisions intact when another persona dimension changes", async () => {
     await appendDecisions(TWIN_ID, [
       {
         id: "d1",

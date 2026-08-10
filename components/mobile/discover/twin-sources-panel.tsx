@@ -3,16 +3,15 @@
 /**
  * Mobile Twin Sources panel (Wave 3.2).
  *
- * Lists every TwinSource across every twin (newest-first), plus a fab-style
+ * Lists the selected Twin's sources (newest-first), plus a fab-style
  * "+" button that opens a sub-menu with three ingest paths:
  *
  *   - Paste text  → native `lib/capacitor/dialog.prompt`
  *   - Capture     → `lib/capacitor/camera.pickPhoto({ source: "camera" })`
  *   - File        → web `<input type="file">`
  *
- * Each path enqueues a `twin_ingest_source` outbound job carrying the raw
- * payload; the desktop runs `lib/twin/ingest/runIngestJob` against it
- * once dispatched.
+ * Each path enqueues a `twin_source_create` outbound job. The desktop owns
+ * registration, deduplication, OCR normalization, and ingest scheduling.
  */
 
 import { useRef, useState } from "react"
@@ -44,8 +43,7 @@ import { RedactReviewSheet } from "@/components/mobile/discover/redact-review-sh
 import { pickPhoto } from "@/lib/capacitor/camera"
 import { prompt as nativePrompt } from "@/lib/capacitor/dialog"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import { getDb } from "@/lib/db/schema"
-import { deleteTwinSource, updateTwinSource } from "@/lib/db/twin-sources"
+import { listTwinSourcesByTwin, updateTwinSource } from "@/lib/db/twin-sources"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { TwinSource } from "@/types/twin"
 import { cn } from "@/lib/utils"
@@ -59,12 +57,11 @@ const STATUS_KEY: Record<TwinSource["status"], string> = {
 }
 
 export interface TwinSourcesPanelProps {
-  /** Defaults to "default" — assumes a single-twin install. */
-  twinId?: string
+  twinId: string
   className?: string
 }
 
-export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesPanelProps) {
+export function TwinSourcesPanel({ twinId, className }: TwinSourcesPanelProps) {
   const t = useTranslations("mobile.twinSources")
   const [menuOpen, setMenuOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -75,14 +72,14 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
 
   const sources =
     useLiveQuery<TwinSource[]>(
-      () => getDb().twinSources.orderBy("createdAt").reverse().toArray() as Promise<TwinSource[]>,
-      []
+      () => listTwinSourcesByTwin(twinId) as Promise<TwinSource[]>,
+      [twinId]
     ) ?? []
 
   /** Enqueue a markdown text ingest for the desktop to parse + embed. */
   const enqueueText = async (text: string, label: string) => {
     await enqueue({
-      command: "twin_ingest_source",
+      command: "twin_source_create",
       payload: { twinId, kind: "document", format: "markdown", text },
       label,
     })
@@ -131,8 +128,12 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
 
   const onDelete = async (src: TwinSource) => {
     setEditingSource(null)
-    await deleteTwinSource(src.id)
-    toast.success(t("deleteDone"))
+    await enqueue({
+      command: "twin_source_delete",
+      payload: { id: src.id },
+      label: t("deleteQueueLabel", { title: src.title }),
+    })
+    toast.success(t("deleteQueued"))
   }
 
   const onCamera = async () => {
@@ -150,7 +151,7 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
       return
     }
     await enqueue({
-      command: "twin_ingest_source",
+      command: "twin_source_create",
       payload: {
         twinId,
         kind: "document",
@@ -171,10 +172,9 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
     const bytes = new Uint8Array(buf)
     let binary = ""
     for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-    const base64 =
-      typeof btoa !== "undefined" ? btoa(binary) : Buffer.from(bytes).toString("base64")
+    const base64 = btoa(binary)
     await enqueue({
-      command: "twin_ingest_source",
+      command: "twin_source_create",
       payload: {
         twinId,
         kind: "document",

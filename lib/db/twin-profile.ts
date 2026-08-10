@@ -266,6 +266,32 @@ export async function appendDecisions(
   return merged
 }
 
+function decisionKey(decision: Pick<DecisionRecord, "context" | "choice">): string {
+  const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ")
+  return `${normalize(decision.context)}::${normalize(decision.choice)}`
+}
+
+/** Re-distill-safe Decision writer keyed by normalized context + choice. */
+export async function upsertDecisions(
+  twinId: string,
+  decisions: DecisionRecord[]
+): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const byKey = new Map(profile.decisions.map((decision) => [decisionKey(decision), decision]))
+  for (const decision of decisions) {
+    const key = decisionKey(decision)
+    if (byKey.get(key)?.pinned) continue
+    byKey.set(key, decision)
+  }
+  const merged: TwinProfile = {
+    ...profile,
+    decisions: Array.from(byKey.values()),
+    updatedAt: Date.now(),
+  }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
 export async function deleteTwinProfile(twinId: string): Promise<void> {
   await getDb().twinProfile.delete(twinId)
 }
@@ -467,6 +493,65 @@ export async function setStyleSamplePinned(
   })
   if (!changed) return profile
   const merged: TwinProfile = { ...profile, styleSamples, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function addDecision(twinId: string, decision: DecisionRecord): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const remaining = profile.decisions.filter((item) => item.id !== decision.id)
+  const merged: TwinProfile = {
+    ...profile,
+    decisions: [...remaining, decision],
+    updatedAt: Date.now(),
+  }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function updateDecision(
+  twinId: string,
+  decisionId: string,
+  next: DecisionRecord
+): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  let replaced = false
+  const decisions = profile.decisions.map((decision) => {
+    if (decision.id !== decisionId) return decision
+    replaced = true
+    return next
+  })
+  if (!replaced) decisions.push(next)
+  const merged: TwinProfile = { ...profile, decisions, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function removeDecision(twinId: string, decisionId: string): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const decisions = profile.decisions.filter((decision) => decision.id !== decisionId)
+  if (decisions.length === profile.decisions.length) return profile
+  const merged: TwinProfile = { ...profile, decisions, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function setDecisionPinned(
+  twinId: string,
+  decisionId: string,
+  pinned: boolean
+): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  let changed = false
+  const decisions = profile.decisions.map((decision) => {
+    if (decision.id === decisionId && (decision.pinned ?? false) !== pinned) {
+      changed = true
+      return { ...decision, pinned }
+    }
+    return decision
+  })
+  if (!changed) return profile
+  const merged: TwinProfile = { ...profile, decisions, updatedAt: Date.now() }
   await getDb().twinProfile.put(merged)
   return merged
 }

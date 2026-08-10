@@ -7,6 +7,12 @@ import {
 } from "./host-feature-manifest"
 
 describe("host feature manifest", () => {
+  it("advertises the versioned Twin draft review operation on execution hosts", () => {
+    const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
+
+    expect(supportsHostFeatureOperation(manifest, "twin.runtime", "twin_draft_review")).toBe(true)
+  })
+
   it("reports the protocol limits that remote clients must obey", () => {
     const manifest = buildLocalHostFeatureManifest({
       hostBuildId: "1.2.3",

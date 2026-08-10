@@ -15,7 +15,7 @@
  * `twin.sourceUploader.errors.*`.
  */
 
-import { createTwinSource } from "@/lib/db/twin-sources"
+import { registerTwinSource, sourceFingerprint } from "./source-registration"
 import {
   parseMbox,
   parseEml,
@@ -231,15 +231,6 @@ function stagedFromRaws(
     speakers: speakersOf(raw),
     origin,
   }))
-}
-
-export async function sha256(text: string): Promise<string> {
-  const enc = new TextEncoder()
-  const bytes = enc.encode(text)
-  const digest = await crypto.subtle.digest("SHA-256", bytes)
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
 }
 
 async function readFileAsText(file: File): Promise<string> {
@@ -546,8 +537,8 @@ export async function commitStagedSources(
 ): Promise<number> {
   let count = 0
   for (const item of staged) {
-    const fingerprint = await sha256(item.text)
-    await createTwinSource({
+    const fingerprint = await sourceFingerprint(item.text)
+    const result = await registerTwinSource({
       twinId,
       kind: item.kind,
       format: item.format,
@@ -560,7 +551,7 @@ export async function commitStagedSources(
       ...(item.tags && item.tags.length > 0 ? { tags: item.tags } : {}),
       ...(item.speakers && item.speakers.length > 0 ? { speakers: item.speakers } : {}),
     })
-    count += 1
+    if (result.created || result.revived) count += 1
   }
   return count
 }

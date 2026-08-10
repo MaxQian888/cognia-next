@@ -68,6 +68,29 @@ function mockLlm(response: string): LlmClient {
 }
 
 describe("runSynthesizer", () => {
+  it("blocks an unsafe assembled prompt before calling the LLM", async () => {
+    const llm = mockLlm(`{}`)
+
+    await expect(
+      runSynthesizer(llm, {
+        profile: makeProfile({
+          decisions: [
+            {
+              id: "unsafe",
+              context: "Contact alice@example.com",
+              choice: "Email",
+              rationale: "Direct",
+              sourceChunkIds: [],
+              timestamp: 1,
+            },
+          ],
+        }),
+        recentChunks: [],
+      })
+    ).rejects.toThrow("unredacted PII")
+    expect(llm.complete).not.toHaveBeenCalled()
+  })
+
   it("returns a Character draft when the LLM provides one", async () => {
     const llm = mockLlm(`{
       "character": {
@@ -96,6 +119,28 @@ describe("runSynthesizer", () => {
     expect(c.rationale).toContain("1 style samples")
     expect(c.rationale).toContain("1 playbooks")
     expect(result.voiceSummary).toBe("Terse, code-first.")
+  })
+
+  it("includes recent decisions in the existing synthesizer prompt", async () => {
+    const llm = mockLlm(`{"character":{"name":"Twin"},"skills":[]}`)
+    await runSynthesizer(llm, {
+      profile: makeProfile({
+        decisions: [
+          {
+            id: "d1",
+            context: "Choose an event bus",
+            choice: "Kafka",
+            rationale: "Durability",
+            sourceChunkIds: ["c1"],
+            timestamp: 1,
+          },
+        ],
+      }),
+      recentChunks: [],
+    })
+    expect((llm.complete as jest.Mock).mock.calls[0][0]).toContain(
+      "Choose an event bus → Kafka: Durability"
+    )
   })
 
   it("falls back the character name to 'Twin of <twinId>' when the LLM omits it", async () => {

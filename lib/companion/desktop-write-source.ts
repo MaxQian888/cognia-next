@@ -42,7 +42,11 @@ import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getDb } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import type { AppSettings, StoredMessage } from "@cognia/agent-config-types"
-import { enqueueIngestJob } from "@/lib/twin/ingest"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { enqueueIngestJob, registerTwinSource } from "@/lib/twin/ingest"
+import { stageFile } from "@/lib/twin/ingest/stage"
+import { reviewTwinDraft } from "@/lib/twin/review-draft"
+import { removeTwin, removeTwinSource } from "@/lib/twin/lifecycle"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { isCapabilityId } from "@/lib/platform/capabilities"
 import { recordDeviceCapabilities } from "@/lib/db/paired-devices"
@@ -56,10 +60,8 @@ import {
 } from "@/lib/db/workflows"
 import { createWorkflowSource } from "@/lib/scheduler/sources/workflow-source"
 import { dispatchScheduledTaskRpc, isScheduledTaskRpc } from "@/lib/scheduler/scheduled-task-rpc"
-import { createTwin, deleteTwin, type TwinInput } from "@/lib/db/twins"
+import { createTwin, type TwinInput } from "@/lib/db/twins"
 import {
-  createTwinSource,
-  deleteTwinSource,
   listTwinSourcesByTwin,
   updateTwinSource,
   type TwinSourceDraft,
@@ -259,6 +261,8 @@ export async function dispatchCommand(
       return deviceCapabilitiesReport(payload)
     case "twin_ingest_source":
       return twinIngestSource(payload)
+    case "twin_draft_review":
+      return twinDraftReview(payload)
     // Remote Session Control — attach / detach a remote watcher to a host
     // session so non-foreground `permission_request`s route to the phone
     // instead of being auto-denied. State lives in
@@ -1016,7 +1020,7 @@ async function workflowTriggerManual(payload: Record<string, unknown>): Promise<
 /** Read-only projection of the pending workflow-approval registry (ADR-0061). */
 async function workflowApprovalList(): Promise<{ approvals: unknown[] }> {
   const { listPendingApprovals } = await import("@/lib/workflow/runtime/approval-registry")
-  return { approvals: listPendingApprovals() }
+  return { approvals: await listPendingApprovals() }
 }
 
 /** Resolve a pending `action.approval.request` gate from a paired device.
@@ -1033,7 +1037,7 @@ async function workflowApprovalRespond(
   }
   const deviceId = payload.callerDeviceId as string | undefined
   const { respondToApproval } = await import("@/lib/workflow/runtime/approval-registry")
-  const result = respondToApproval(approvalIdArg, {
+  const result = await respondToApproval(approvalIdArg, {
     decision,
     respondedBy: deviceId ? `device:${deviceId}` : "companion",
   })
@@ -1084,8 +1088,20 @@ async function deviceCapabilitiesReport(payload: Record<string, unknown>): Promi
 /** Enqueue a twin ingest job. The desktop's twin scheduler picks it up
  *  asynchronously and walks the redact → chunk → embed → persist pipeline. */
 async function twinIngestSource(payload: Record<string, unknown>): Promise<{ jobId: string }> {
+  if (payload.kind === "twin_draft_accept" || payload.kind === "twin_draft_reject") {
+    const result = await reviewTwinDraft({
+      action: payload.kind === "twin_draft_accept" ? "accept" : "reject",
+      draftId: String(payload.draftId ?? ""),
+    })
+    return { jobId: result.acceptedAsId ?? `review:${String(payload.draftId ?? "")}` }
+  }
   const twinId = payload.twinId as string | undefined
   if (!twinId) throw new Error("twin_ingest_source.twinId is required")
+  if (typeof payload.text === "string" || typeof payload.base64 === "string") {
+    const registered = await registerInlineTwinSources(payload, twinId)
+    const job = await enqueueIngestJob({ twinId, sourceIds: registered.sourceIds })
+    return { jobId: job.id }
+  }
   // Scope the ingest to the caller-supplied source ids when present; an
   // omitted or empty list means "ingest every source attached to the twin"
   // (the desktop scheduler's default). Reject a malformed `sourceIds` rather
@@ -1179,8 +1195,9 @@ async function workflowScheduleSet(
 async function twinDelete(payload: Record<string, unknown>): Promise<{ result: unknown }> {
   const id = payload.id as string | undefined
   if (!id) throw new Error("twin_delete.id is required")
-  const result = await deleteTwin(id)
-  return { result }
+  const result = await removeTwin(id)
+  if (!result.ok) throw new Error(`twin_delete.${result.stage}: ${result.error}`)
+  return { result: result.value ?? null }
 }
 
 async function twinSourceList(payload: Record<string, unknown>): Promise<{ sources: unknown[] }> {
@@ -1204,7 +1221,8 @@ async function twinSourceUpdate(payload: Record<string, unknown>): Promise<{ sou
 async function twinSourceDelete(payload: Record<string, unknown>): Promise<null> {
   const id = payload.id as string | undefined
   if (!id) throw new Error("twin_source_delete.id is required")
-  await deleteTwinSource(id)
+  const result = await removeTwinSource(id)
+  if (!result.ok) throw new Error(`twin_source_delete.${result.stage}: ${result.error}`)
   return null
 }
 
@@ -1223,16 +1241,146 @@ async function twinCreate(payload: Record<string, unknown>): Promise<{ twin: unk
 
 /** Create a new twin source row (the remote add-path that `twin_ingest_source`
  *  never provided — ingest scopes existing sources but does not create them). */
-async function twinSourceCreate(payload: Record<string, unknown>): Promise<{ source: unknown }> {
+async function twinSourceCreate(
+  payload: Record<string, unknown>
+): Promise<{ source: unknown; jobId?: string; reused: boolean }> {
   const draft = payload.source as TwinSourceDraft | undefined
-  if (!draft || typeof draft !== "object") {
-    throw new Error("twin_source_create.source is required")
+  if (draft && typeof draft === "object") {
+    if (typeof draft.twinId !== "string" || draft.twinId.length === 0) {
+      throw new Error("twin_source_create.source.twinId is required")
+    }
+    const registered = await registerTwinSource(draft)
+    const shouldIngest =
+      payload.enqueueIngest === true && (registered.created || registered.revived)
+    const job = shouldIngest
+      ? await enqueueIngestJob({ twinId: draft.twinId, sourceIds: [registered.source.id] })
+      : undefined
+    return {
+      source: registered.source,
+      ...(job ? { jobId: job.id } : {}),
+      reused: !registered.created && !registered.revived,
+    }
   }
-  if (typeof draft.twinId !== "string" || draft.twinId.length === 0) {
-    throw new Error("twin_source_create.source.twinId is required")
+  const twinId = payload.twinId as string | undefined
+  if (!twinId) throw new Error("twin_source_create.source or twinId is required")
+  const registered = await registerInlineTwinSources(payload, twinId)
+  const job = await enqueueIngestJob({ twinId, sourceIds: registered.sourceIds })
+  return { source: registered.sources[0] ?? null, jobId: job.id, reused: registered.reused }
+}
+
+async function twinDraftReview(payload: Record<string, unknown>): Promise<unknown> {
+  const draftId = payload.draftId as string | undefined
+  const action = payload.action
+  if (!draftId) throw new Error("twin_draft_review.draftId is required")
+  if (action !== "accept" && action !== "reject") {
+    throw new Error("twin_draft_review.action must be accept or reject")
   }
-  const source = await createTwinSource(draft)
-  return { source }
+  return reviewTwinDraft({
+    action,
+    draftId,
+    ...(typeof payload.reviewerNote === "string" ? { reviewerNote: payload.reviewerNote } : {}),
+  })
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return bytes
+}
+
+async function extractImageText(base64: string, mimeType: string): Promise<string> {
+  const [{ detectPlatform }, tauri] = await Promise.all([
+    import("@/lib/platform/detect"),
+    import("@/lib/tauri"),
+  ])
+  const platform = detectPlatform()
+  const call = async <T>(command: string, args?: Record<string, unknown>): Promise<T> => {
+    if (platform === "headless") return tauri.transport.call<T>(command, args)
+    const { invoke } = await import("@tauri-apps/api/core")
+    return invoke<T>(command, args)
+  }
+  const available = await call<string[]>("ocr_list_available_backends")
+  const backend = ["apple-vision", "windows-media-ocr", "ocrs", "paddle-ocr", "tesseract"].find(
+    (candidate) => available.includes(candidate)
+  )
+  if (!backend) throw new Error("No local OCR backend is available")
+  const result = await call<{ text: string }>("ocr_extract_native", {
+    payload: {
+      backend,
+      bytes: Array.from(decodeBase64(base64)),
+      mime_type: mimeType,
+      languages: ["en", "zh"],
+    },
+  })
+  if (!result.text.trim()) throw new Error("OCR returned no text")
+  return result.text
+}
+
+async function registerInlineTwinSources(payload: Record<string, unknown>, twinId: string) {
+  let staged: Array<{
+    kind: TwinSource["kind"]
+    format: TwinSource["format"]
+    title: string
+    text: string
+    bytes: number
+    tags?: string[]
+    speakers?: string[]
+  }> = []
+  if (typeof payload.text === "string") {
+    staged = [
+      {
+        kind: "document",
+        format: "markdown",
+        title: typeof payload.filename === "string" ? payload.filename : "Mobile paste",
+        text: payload.text,
+        bytes: payload.text.length,
+      },
+    ]
+  } else if (typeof payload.base64 === "string") {
+    const filename = typeof payload.filename === "string" ? payload.filename : "Mobile capture.png"
+    const mime = typeof payload.mime === "string" ? payload.mime : "application/octet-stream"
+    if (mime.startsWith("image/")) {
+      const text = await extractImageText(payload.base64, mime)
+      staged = [
+        {
+          kind: "document",
+          format: "markdown",
+          title: filename,
+          text,
+          bytes: decodeBase64(payload.base64).byteLength,
+          tags: ["image", "ocr"],
+        },
+      ]
+    } else {
+      const file = new File([decodeBase64(payload.base64)], filename, { type: mime })
+      const result = await stageFile(file, twinId)
+      if (result.error) throw new Error(`Twin source staging failed: ${result.error.code}`)
+      staged = result.staged
+    }
+  } else {
+    throw new Error("Twin inline source requires text or base64")
+  }
+  const results = await Promise.all(
+    staged.map((item) =>
+      registerTwinSource({
+        twinId,
+        kind: item.kind,
+        format: item.format,
+        source: item.text,
+        title: item.title,
+        bytes: item.bytes,
+        redacted: false,
+        tags: item.tags,
+        speakers: item.speakers,
+      })
+    )
+  )
+  return {
+    sources: results.map((result) => result.source),
+    sourceIds: results.map((result) => result.source.id),
+    reused: results.every((result) => !result.created && !result.revived),
+  }
 }
 
 /**
@@ -1269,24 +1417,36 @@ async function twinProfileUpdate(payload: Record<string, unknown>): Promise<{ pr
     }
     return v
   }
+  const requirePiiSafe = <T>(field: string, value: T): T => {
+    if (!hasNoLeakingPiiDeep(value)) {
+      throw new Error(`twin_profile_update.${field} contains unredacted PII`)
+    }
+    return value
+  }
 
   let profile: unknown
   switch (op) {
     case "setVoiceSummary":
-      profile = await setVoiceSummary(twinId, requireString("voiceSummary"))
+      profile = await setVoiceSummary(
+        twinId,
+        requirePiiSafe("voiceSummary", requireString("voiceSummary"))
+      )
       // setVoiceSummary returns void — re-read for a consistent envelope below.
       break
     case "reset":
       profile = await resetTwinProfile(twinId)
       break
     case "addEntity":
-      profile = await addEntity(twinId, requireObject<ProfileEntity>("entity"))
+      profile = await addEntity(
+        twinId,
+        requirePiiSafe("entity", requireObject<ProfileEntity>("entity"))
+      )
       break
     case "updateEntity":
       profile = await updateEntity(
         twinId,
         requireString("name"),
-        requireObject<ProfileEntity>("entity")
+        requirePiiSafe("entity", requireObject<ProfileEntity>("entity"))
       )
       break
     case "removeEntity":
@@ -1296,13 +1456,16 @@ async function twinProfileUpdate(payload: Record<string, unknown>): Promise<{ pr
       profile = await setEntityPinned(twinId, requireString("name"), requireBool("pinned"))
       break
     case "addPlaybook":
-      profile = await addPlaybook(twinId, requireObject<Playbook>("playbook"))
+      profile = await addPlaybook(
+        twinId,
+        requirePiiSafe("playbook", requireObject<Playbook>("playbook"))
+      )
       break
     case "updatePlaybook":
       profile = await updatePlaybook(
         twinId,
         requireString("playbookId"),
-        requireObject<Playbook>("playbook")
+        requirePiiSafe("playbook", requireObject<Playbook>("playbook"))
       )
       break
     case "removePlaybook":
@@ -1312,13 +1475,16 @@ async function twinProfileUpdate(payload: Record<string, unknown>): Promise<{ pr
       profile = await setPlaybookPinned(twinId, requireString("playbookId"), requireBool("pinned"))
       break
     case "addStyleSample":
-      profile = await addStyleSample(twinId, requireObject<StyleSample>("sample"))
+      profile = await addStyleSample(
+        twinId,
+        requirePiiSafe("sample", requireObject<StyleSample>("sample"))
+      )
       break
     case "updateStyleSample":
       profile = await updateStyleSample(
         twinId,
         requireString("sampleId"),
-        requireObject<StyleSample>("sample")
+        requirePiiSafe("sample", requireObject<StyleSample>("sample"))
       )
       break
     case "removeStyleSample":

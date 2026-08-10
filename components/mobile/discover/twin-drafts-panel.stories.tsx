@@ -10,6 +10,7 @@ import { makeTwinDraft } from "@/lib/storybook/fixtures/mobile-discover"
 const meta = {
   title: "Mobile/Discover/TwinDraftsPanel",
   component: TwinDraftsPanel,
+  args: { twinId: "default" },
   parameters: { layout: "padded" },
   decorators: [
     (Story) => (

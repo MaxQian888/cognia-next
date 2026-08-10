@@ -152,6 +152,20 @@ describe("runIngestJob — pageMap threading", () => {
     }
   })
 
+  it("honours a cooperative cancellation before parsing without marking the source failed", async () => {
+    const controller = new AbortController()
+    controller.abort("cancel")
+
+    await expect(runIngestJob({ ...runInput(), signal: controller.signal })).rejects.toThrow(
+      "interrupted"
+    )
+    expect(mockParseSource).not.toHaveBeenCalled()
+    expect(mockUpdateTwinSource).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: "failed" })
+    )
+  })
+
   it("drops the pageMap when the OCR fallback replaced the text", async () => {
     mockRunTwinPdfOcr.mockResolvedValue("OCR REPLACEMENT TEXT FROM THE SCANNED DOCUMENT")
 

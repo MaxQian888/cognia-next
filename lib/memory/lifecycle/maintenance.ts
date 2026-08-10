@@ -149,6 +149,8 @@ export interface ScheduleMemoryMaintenanceParams {
   provenance: MemoryProvenance
   contaminationState?: MemoryContaminationState
   config: MemoryConfig
+  /** Resolved agent namespace; Twin sessions use `twin:<twinId>`. */
+  agentId?: string
   /** Min assistant turns before a session is worth distilling. Default 2. */
   minAssistantTurns?: number
 }
@@ -181,7 +183,7 @@ export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParam
         sessionId,
         projectId: params.session?.projectId,
         characterId: params.session?.characterId,
-        agentId: config.scopeDefault === "agent" ? params.session?.characterId : undefined,
+        agentId: config.scopeDefault === "agent" ? params.agentId : undefined,
         scope: config.scopeDefault,
         provenance: params.provenance,
         evidenceIds: [],
@@ -212,7 +214,7 @@ export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParam
               scope: config.scopeDefault,
               characterId: params.session?.characterId,
               projectId: params.session?.projectId,
-              agentId: config.scopeDefault === "agent" ? params.session?.characterId : undefined,
+              agentId: config.scopeDefault === "agent" ? params.agentId : undefined,
               provenance: params.provenance,
               contaminationState: params.contaminationState,
               source: { sessionId },

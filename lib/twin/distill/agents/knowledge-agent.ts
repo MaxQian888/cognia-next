@@ -4,7 +4,7 @@
 
 import { extractJson, type LlmClient } from "../llm"
 import { applyTemplate, KNOWLEDGE_AGENT_PROMPT } from "../prompts"
-import type { EntityRole, ProfileEntity, TwinChunk } from "@/types/twin"
+import type { DecisionRecord, EntityRole, ProfileEntity, TwinChunk } from "@/types/twin"
 
 export interface KnowledgeAgentInput {
   chunks: TwinChunk[]
@@ -14,6 +14,7 @@ export interface KnowledgeAgentInput {
 
 export interface KnowledgeAgentResult {
   entities: ProfileEntity[]
+  decisions: DecisionRecord[]
   /** chunkId → entity names; consumed by the orchestrator to backfill `entityTags`. */
   perChunk: Record<string, string[]>
 }
@@ -31,6 +32,14 @@ interface RawPerChunk {
   entityNames?: string[]
 }
 
+interface RawDecision {
+  context?: string
+  choice?: string
+  rationale?: string
+  sourceChunkIds?: string[]
+  timestamp?: number
+}
+
 const VALID_ROLES: ReadonlySet<EntityRole> = new Set([
   "person",
   "team",
@@ -43,13 +52,23 @@ function formatChunksForPrompt(chunks: TwinChunk[]): string {
   return chunks.map((c) => `[${c.id}]\n${c.contentRedacted}`).join("\n\n---\n\n")
 }
 
+function decisionId(context: string, choice: string): string {
+  const input = `${context.trim().toLowerCase()}::${choice.trim().toLowerCase()}`
+  let hash = 2166136261
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `decision_${(hash >>> 0).toString(36)}`
+}
+
 export async function runKnowledgeAgent(
   llm: LlmClient,
   input: KnowledgeAgentInput
 ): Promise<KnowledgeAgentResult> {
   const cap = input.maxChunks ?? 100
   const chunks = input.chunks.slice(0, cap)
-  if (chunks.length === 0) return { entities: [], perChunk: {} }
+  if (chunks.length === 0) return { entities: [], decisions: [], perChunk: {} }
 
   const prompt = applyTemplate(KNOWLEDGE_AGENT_PROMPT, {
     chunks: formatChunksForPrompt(chunks),
@@ -59,9 +78,11 @@ export async function runKnowledgeAgent(
   const parsed = extractJson<{
     entities?: RawEntity[]
     perChunk?: RawPerChunk[]
+    decisions?: RawDecision[]
   }>(response)
   const rawEntities = Array.isArray(parsed.entities) ? parsed.entities : []
   const rawPerChunk = Array.isArray(parsed.perChunk) ? parsed.perChunk : []
+  const rawDecisions = Array.isArray(parsed.decisions) ? parsed.decisions : []
 
   const validChunkIds = new Set(chunks.map((c) => c.id))
 
@@ -95,5 +116,26 @@ export async function runKnowledgeAgent(
     if (names.length > 0) perChunk[row.chunkId] = names
   }
 
-  return { entities, perChunk }
+  const decisions: DecisionRecord[] = rawDecisions.flatMap((raw) => {
+    const context = raw.context?.trim()
+    const choice = raw.choice?.trim()
+    if (!context || !choice) return []
+    const sourceChunkIds = Array.isArray(raw.sourceChunkIds)
+      ? raw.sourceChunkIds.filter((id): id is string => validChunkIds.has(id))
+      : []
+    return [
+      {
+        id: decisionId(context, choice),
+        context,
+        choice,
+        rationale: raw.rationale?.trim() ?? "",
+        sourceChunkIds: sourceChunkIds.length > 0 ? sourceChunkIds : [chunks[0].id],
+        ...(typeof raw.timestamp === "number" && Number.isFinite(raw.timestamp)
+          ? { timestamp: raw.timestamp }
+          : {}),
+      },
+    ]
+  })
+
+  return { entities, decisions, perChunk }
 }

@@ -179,9 +179,15 @@ export function MemoryComposer({ open, onOpenChange, team, mode, initial }: Memo
               {tags.map((tag) => (
                 <Badge key={tag} variant="secondary" className="gap-1 font-mono text-[10px]">
                   {tag}
-                  <button type="button" onClick={() => setTags(tags.filter((x) => x !== tag))}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t("removeTag", { tag })}
+                    onClick={() => setTags(tags.filter((x) => x !== tag))}
+                  >
                     <XIcon className="size-2.5" />
-                  </button>
+                  </Button>
                 </Badge>
               ))}
             </div>

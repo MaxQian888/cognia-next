@@ -127,13 +127,14 @@
     "count": "{count, plural, =0 {0 entries} =1 {1 entry} other {# entries}}",
     "counts": "{chunks} chunks · {samples} samples · ~{tokens} tok",
     "degraded": "degraded",
-    "description": "The last 50 RAG / style-few-shot injections that ran on top of this twin. In-memory only — clears on reload.",
+    "description": "The last 50 RAG / style-few-shot injections that ran on top of this twin. Safe metadata is restored after reload.",
     "emptyHint": "No injections yet — send a message to a character bound to this twin to populate the log.",
     "skipped": "skipped",
     "title": "Runtime injection log"
   },
   "jobs": {
     "attempt": "attempt {n}",
+    "cancelReason": "Cancelled from Twin workbench",
     "deadLetter": "dead-letter",
     "draftsProduced": "{count, plural, =0 {No drafts produced} =1 {1 draft produced} other {# drafts produced}}",
     "emptyHint": "No jobs yet. Add sources, then queue an ingest run; queue a distill once the chunks are indexed.",
@@ -141,11 +142,14 @@
     "headerCount": "Jobs ({count})",
     "partialBadge": "partial",
     "partialTitle": "Some distill steps fell back; the profile may be incomplete:",
+    "pause": "Pause",
     "queueDistill": "Queue distill",
     "queueIngest": "Queue ingest for pending sources",
     "queuedAt": "queued {when}",
     "retry": "Retry",
-    "retryBusy": "Retrying…"
+    "retryBusy": "Retrying…",
+    "resume": "Resume",
+    "cancel": "Cancel"
   },
   "kind": {
     "character": "Character",
@@ -191,14 +195,36 @@
     "badges": {
       "pinned": "Pinned"
     },
+    "benchmark": {
+      "created": "Created an editable benchmark with {count} cases.",
+      "failed": "Could not create benchmark: {message}",
+      "generate": "Generate benchmark"
+    },
+    "countDecisions": "{count, plural, =0 {0 decisions} =1 {1 decision} other {# decisions}}",
     "countEntities": "{count, plural, =0 {0 entities} =1 {1 entity} other {# entities}}",
     "countPlaybooks": "{count, plural, =0 {0 playbooks} =1 {1 playbook} other {# playbooks}}",
     "countStyleSamples": "{count, plural, =0 {0 style samples} =1 {1 style sample} other {# style samples}}",
     "empty": {
+      "decisions": "No decisions yet — distill will extract some, or add one manually.",
       "entities": "No entities yet — distill will produce some, or click Add entity manually.",
       "noMatch": "No matches for your search.",
       "playbooks": "No playbooks yet — distill will produce some, or add one manually.",
       "styleSamples": "No style samples yet — distill will produce some, or add one manually."
+    },
+    "decision": {
+      "add": "Add decision",
+      "choiceLabel": "Choice",
+      "choicePlaceholder": "What was chosen",
+      "contextLabel": "Context",
+      "contextPlaceholder": "Situation or constraint",
+      "deleteConfirmBody": "This decision will be removed from the twin profile.",
+      "deleteConfirmTitle": "Delete this decision?",
+      "description": "Capture a choice and its reasoning. Manual decisions are pinned by default.",
+      "edit": "Edit decision",
+      "piiBlocked": "Cannot save a decision containing unredacted PII.",
+      "rationaleLabel": "Rationale",
+      "rationalePlaceholder": "Why this choice was made",
+      "required": "Context and choice are required."
     },
     "entity": {
       "add": "Add entity",
@@ -260,6 +286,7 @@
       "tonePlaceholder": "Comma-separated (e.g. concise, decisive)"
     },
     "tabs": {
+      "decisions": "Decisions",
       "entities": "Entities",
       "playbooks": "Playbooks",
       "styleSamples": "Style samples"
@@ -290,6 +317,7 @@
     "createDescription": "Pick a name for the new twin. Color and runtime knobs default to sensible values; you can change everything later.",
     "createTitle": "Create new twin",
     "delete": "Delete",
+    "deleteCascadeMissing": "Twin deletion did not return a cascade result",
     "deleteDescription": "Delete \"{name}\" and cascade-remove every source, chunk, draft, and job that belongs to it. This cannot be undone.",
     "deleteTitle": "Delete twin?",
     "guidedCreate": "Guided setup…",

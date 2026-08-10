@@ -9,6 +9,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { listTwins } from "@/lib/db/twins"
 import { DEFAULT_PET_TWIN_AWARENESS, type PetTwinAwarenessSettings } from "@/types/pet"
 import type { PetControlsProps } from "./pet-appearance-controls"
@@ -47,19 +48,21 @@ export function PetTwinAwarenessControls({ pet, patch }: PetControlsProps) {
             {twins && twins.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t("twinAwareness.twinSelect.empty")}</p>
             ) : (
-              <select
+              <NativeSelect
                 id="pet-twin-awareness-twin"
-                className="rounded-md border bg-background px-2 py-1 text-sm"
+                size="sm"
                 value={twinAwareness.twinId ?? ""}
                 onChange={(e) => patchTwinAwareness({ twinId: e.target.value || null })}
               >
-                <option value="">{t("twinAwareness.twinSelect.placeholder")}</option>
+                <NativeSelectOption value="">
+                  {t("twinAwareness.twinSelect.placeholder")}
+                </NativeSelectOption>
                 {(twins ?? []).map((twin) => (
-                  <option key={twin.id} value={twin.id}>
+                  <NativeSelectOption key={twin.id} value={twin.id}>
                     {twin.name}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             )}
           </div>
           <p className="text-xs text-muted-foreground">{t("twinAwareness.privacyNote")}</p>

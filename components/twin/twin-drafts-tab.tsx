@@ -9,14 +9,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { StatusBadge } from "@/components/status-badge"
-import {
-  listTwinDraftsByTwin,
-  markTwinDraftAccepted,
-  markTwinDraftRejected,
-  updateTwinDraftPayload,
-} from "@/lib/db/twin-drafts"
-import { createCharacter } from "@/lib/db/characters"
-import { createSkill } from "@/lib/db/skills"
+import { listTwinDraftsByTwin, updateTwinDraftPayload } from "@/lib/db/twin-drafts"
+import { reviewTwinDraft } from "@/lib/twin/review-draft"
 import { DraftEditorDialog } from "./draft-editor-dialog"
 import { UnredactDialog } from "./unredact-dialog"
 import { assertDraftBodyClean, DraftPiiError } from "@/lib/twin/distill/draft-pii-guard"
@@ -186,34 +180,7 @@ const DraftRow = memo(function DraftRow({ draft }: { draft: TwinDraft }) {
   // the draft payload after any PII restore — fields are re-derived from it so
   // restored originals (not placeholders) land in the created row.
   const finalizeAccept = async (payload: TwinDraftPayload) => {
-    const pData = payload.data as Record<string, unknown>
-    const pName = typeof pData.name === "string" ? pData.name : t("untitled")
-    const pDescription = typeof pData.description === "string" ? pData.description : undefined
-    const pBody =
-      typeof pData.systemPrompt === "string"
-        ? pData.systemPrompt
-        : typeof pData.content === "string"
-          ? pData.content
-          : ""
-    let acceptedId: string
-    if (payload.kind === "character") {
-      const character = await createCharacter({
-        name: pName,
-        description: pDescription,
-        avatarColor: "oklch(0.7 0.15 240)",
-        systemPrompt: pBody,
-        twinId: draft.twinId,
-      })
-      acceptedId = character.id
-    } else {
-      const skill = await createSkill({
-        name: pName,
-        description: pDescription,
-        content: pBody,
-      })
-      acceptedId = skill.id
-    }
-    await markTwinDraftAccepted(draft.id, acceptedId)
+    await reviewTwinDraft({ action: "accept", draftId: draft.id, payload })
   }
 
   // Accept entry point. When the draft still carries restorable PII placeholders
@@ -257,7 +224,7 @@ const DraftRow = memo(function DraftRow({ draft }: { draft: TwinDraft }) {
     setBusy(true)
     setError(null)
     try {
-      await markTwinDraftRejected(draft.id)
+      await reviewTwinDraft({ action: "reject", draftId: draft.id })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

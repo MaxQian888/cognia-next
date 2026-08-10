@@ -12,12 +12,34 @@ import userEvent from "@testing-library/user-event"
 
 jest.mock("motion/react", () => ({
   motion: {
-    li: ({ children, className, ...props }: React.LiHTMLAttributes<HTMLLIElement>) => (
+    li: ({
+      children,
+      className,
+      initial: _initial,
+      animate: _animate,
+      transition: _transition,
+      ...props
+    }: React.LiHTMLAttributes<HTMLLIElement> & {
+      initial?: unknown
+      animate?: unknown
+      transition?: unknown
+    }) => (
       <li className={className} {...props}>
         {children}
       </li>
     ),
-    span: ({ children, className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => (
+    span: ({
+      children,
+      className,
+      initial: _initial,
+      animate: _animate,
+      transition: _transition,
+      ...props
+    }: React.HTMLAttributes<HTMLSpanElement> & {
+      initial?: unknown
+      animate?: unknown
+      transition?: unknown
+    }) => (
       <span className={className} {...props}>
         {children}
       </span>

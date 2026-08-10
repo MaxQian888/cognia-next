@@ -8,6 +8,14 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+let mockTwins = [{ id: "twin-1", name: "Primary Twin", archivedAt: undefined }]
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => mockTwins,
+}))
+jest.mock("@/lib/db/twins", () => ({
+  observeTwins: jest.fn(async () => mockTwins),
+}))
+
 // ─── next-intl ───────────────────────────────────────────────────────────────
 // Simple key-pass-through; the body only calls t("title"), t("createCharacter")
 // and similar single-key lookups — no format interpolation needed in the mock.
@@ -197,10 +205,14 @@ jest.mock("@/components/mobile/discover/plugins-panel", () => ({
   PluginsPanel: () => <div data-testid="stub-plugins-panel" />,
 }))
 jest.mock("@/components/mobile/discover/twin-sources-panel", () => ({
-  TwinSourcesPanel: () => <div data-testid="stub-twin-sources-panel" />,
+  TwinSourcesPanel: ({ twinId }: { twinId: string }) => (
+    <div data-testid="stub-twin-sources-panel" data-twin-id={twinId} />
+  ),
 }))
 jest.mock("@/components/mobile/discover/twin-drafts-panel", () => ({
-  TwinDraftsPanel: () => <div data-testid="stub-twin-drafts-panel" />,
+  TwinDraftsPanel: ({ twinId }: { twinId: string }) => (
+    <div data-testid="stub-twin-drafts-panel" data-twin-id={twinId} />
+  ),
 }))
 jest.mock("@/components/mobile/discover/twin-profile-panel", () => ({
   TwinProfilePanel: ({ twinId }: { twinId?: string }) => (
@@ -385,6 +397,7 @@ function resetNav() {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
+  mockTwins = [{ id: "twin-1", name: "Primary Twin", archivedAt: undefined }]
   resetNav()
   runSyncDownMock.mockClear()
   mockUseDiscoverQuery.mockReset()
@@ -593,12 +606,24 @@ describe("<DiscoverMobileBody />", () => {
       currentSearch = "?category=twinIngest"
       render(<DiscoverMobileBody />)
       expect(screen.getByTestId("stub-twin-sources-panel")).toBeInTheDocument()
+      expect(screen.getByTestId("stub-twin-sources-panel")).toHaveAttribute(
+        "data-twin-id",
+        "twin-1"
+      )
     })
 
     it("twinDrafts category shows the TwinDraftsPanel stub (legacy layout)", () => {
       currentSearch = "?category=twinDrafts"
       render(<DiscoverMobileBody />)
       expect(screen.getByTestId("stub-twin-drafts-panel")).toBeInTheDocument()
+    })
+
+    it("shows guidance and disables Twin writes when the registry is empty", () => {
+      mockTwins = []
+      currentSearch = "?category=twinIngest"
+      render(<DiscoverMobileBody />)
+      expect(screen.getByText("twinRegistry.emptyTitle")).toBeInTheDocument()
+      expect(screen.queryByTestId("stub-twin-sources-panel")).not.toBeInTheDocument()
     })
 
     it("mcpTools grid category does not render any legacy panel", () => {
@@ -674,7 +699,7 @@ describe("<DiscoverMobileBody />", () => {
     it("mounts the twin profile panel above the sources panel on twinIngest", () => {
       currentSearch = "?category=twinIngest"
       render(<DiscoverMobileBody />)
-      expect(screen.getByTestId("stub-twin-profile-panel")).toHaveAttribute("data-twin-id", "default")
+      expect(screen.getByTestId("stub-twin-profile-panel")).toHaveAttribute("data-twin-id", "twin-1")
       expect(screen.getByTestId("stub-twin-sources-panel")).toBeInTheDocument()
     })
 

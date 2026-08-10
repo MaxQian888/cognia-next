@@ -14,6 +14,7 @@ import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-
 import { createEmbeddingCache } from "@cognia/rag/embedding-cache"
 import { generateEmbeddings } from "@cognia/vector/embedding"
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
+import { throwIfTwinJobInterrupted } from "@/lib/twin/job-control"
 
 export interface EmbeddingConfig {
   provider: RagEmbeddingProvider
@@ -50,8 +51,10 @@ function cacheKey(config: EmbeddingConfig, text: string): string {
 
 export async function embedRedactedChunks(
   redactedTexts: string[],
-  config: EmbeddingConfig
+  config: EmbeddingConfig,
+  signal?: AbortSignal
 ): Promise<EmbeddingResult> {
+  throwIfTwinJobInterrupted(signal)
   if (redactedTexts.length === 0) return { embeddings: [], tokensUsed: 0 }
 
   const batchSize = Math.max(1, config.batchSize ?? DEFAULT_BATCH_SIZE)
@@ -77,6 +80,7 @@ export async function embedRedactedChunks(
   // 2. Embed the cache-miss texts in batches; populate cache + resolved map.
   let tokensUsed = 0
   for (let i = 0; i < toEmbed.length; i += batchSize) {
+    throwIfTwinJobInterrupted(signal)
     const batch = toEmbed.slice(i, i + batchSize)
     const result = await generateEmbeddings(
       batch,
@@ -88,6 +92,7 @@ export async function embedRedactedChunks(
       },
       config.apiKey
     )
+    throwIfTwinJobInterrupted(signal)
     // Guard against a provider returning fewer vectors than inputs: without this
     // `result.embeddings[j]` is `undefined`, which would be cached and persisted
     // as a broken vector (and upserted to the remote store). Fail the source

@@ -232,6 +232,12 @@
     "trigger": "排序与筛选"
   },
   "title": "发现",
+  "twinRegistry": {
+    "emptyDescription": "请先在桌面端创建或选择数字孪生，再添加数据源或审核草稿。",
+    "emptyTitle": "未选择数字孪生",
+    "selectAria": "选择当前数字孪生",
+    "selectLabel": "数字孪生"
+  },
   "view": {
     "aria": "视图模式",
     "compact": "紧凑",

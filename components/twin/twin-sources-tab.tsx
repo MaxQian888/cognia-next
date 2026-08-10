@@ -21,8 +21,9 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { StatusBadge } from "@/components/status-badge"
-import { listTwinSourcesByTwin, deleteTwinSource } from "@/lib/db/twin-sources"
+import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
+import { removeTwinSource } from "@/lib/twin/lifecycle"
 import type { TwinSource, TwinSourceStatus } from "@/types/twin"
 import { TwinAddSourceDialog } from "./add-source/add-source-dialog"
 import { TwinSourcePreviewDialog } from "./twin-source-preview-dialog"
@@ -87,7 +88,8 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
     if (!pendingDelete) return
     setDeleting(true)
     try {
-      await deleteTwinSource(pendingDelete.id)
+      const result = await removeTwinSource(pendingDelete.id)
+      if (!result.ok) throw new Error(`${result.stage}: ${result.error}`)
     } catch (error) {
       toast.error(
         t("deleteFailed", { message: error instanceof Error ? error.message : String(error) })

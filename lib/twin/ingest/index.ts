@@ -32,6 +32,7 @@ export { embedRedactedChunks } from "./embed"
 export { persistChunks, vectorCollectionName } from "./persist"
 export { runIngestJob } from "./job-runner"
 export { parseSource } from "./parse"
+export { registerTwinSource, type RegisterTwinSourceResult } from "./source-registration"
 
 /**
  * Queue an ingest job for the worker to pick up. Returns the freshly-

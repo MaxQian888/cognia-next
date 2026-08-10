@@ -29,7 +29,7 @@ describe("runKnowledgeAgent", () => {
   it("short-circuits with no chunks", async () => {
     const llm = mockLlm("{}")
     const result = await runKnowledgeAgent(llm, { chunks: [] })
-    expect(result).toEqual({ entities: [], perChunk: {} })
+    expect(result).toEqual({ entities: [], decisions: [], perChunk: {} })
     expect(llm.complete).not.toHaveBeenCalled()
   })
 
@@ -157,5 +157,31 @@ describe("runKnowledgeAgent", () => {
     const result = await runKnowledgeAgent(llm, { chunks })
     expect(result.entities[0].aliases).toEqual([])
     expect(result.entities[0].relation).toBeUndefined()
+  })
+
+  it("extracts grounded decisions in the existing KnowledgeAgent call", async () => {
+    const chunks = [makeChunk("c1", "We chose Kafka for durability")]
+    const result = await runKnowledgeAgent(
+      mockLlm(`{
+        "entities": [],
+        "decisions": [{
+          "context": "Choose an event bus",
+          "choice": "Kafka",
+          "rationale": "Durability",
+          "sourceChunkIds": ["c1", "missing"],
+          "timestamp": 1735689600000
+        }]
+      }`),
+      { chunks }
+    )
+    expect(result.decisions).toEqual([
+      expect.objectContaining({
+        context: "Choose an event bus",
+        choice: "Kafka",
+        rationale: "Durability",
+        sourceChunkIds: ["c1"],
+        timestamp: 1735689600000,
+      }),
+    ])
   })
 })

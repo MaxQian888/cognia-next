@@ -463,6 +463,7 @@ export async function applyTwinContext(
     voiceSummary: profile?.voiceSummary,
     entities: profile?.entities ?? [],
     playbooks: profile?.playbooks ?? [],
+    decisions: profile?.decisions ?? [],
     retrievedChunks,
     styleSamples,
   })

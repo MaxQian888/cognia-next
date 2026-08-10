@@ -9,10 +9,7 @@ import type { TwinRuntimeSettings } from "@/types/twin"
 export type TwinDepsForBuild = TwinRuntimeDepsForBuild
 
 export type TwinRuntimeAdapterUnavailableReason =
-  | "disabled"
-  | "missing-embedding-credentials"
-  | "incomplete-storage"
-  | "adapter-unavailable"
+  "disabled" | "missing-embedding-credentials" | "incomplete-storage" | "adapter-unavailable"
 
 export type TwinRuntimeAdapterBuildResult =
   | { ready: true; adapters: TwinDepsForBuild }
@@ -21,10 +18,7 @@ export type TwinRuntimeAdapterBuildResult =
 type StoreConfig = Parameters<typeof createVectorStore>[0]
 
 export function deriveTwinVectorStoreConfig(settings: TwinRuntimeSettings): StoreConfig | null {
-  if (
-    embeddingProviderRequiresApiKey(settings.embedding.provider) &&
-    !settings.embedding.apiKey
-  ) {
+  if (embeddingProviderRequiresApiKey(settings.embedding.provider) && !settings.embedding.apiKey) {
     return null
   }
   const storage = settings.storage
@@ -101,13 +95,13 @@ export function deriveTwinVectorStoreConfig(settings: TwinRuntimeSettings): Stor
 
 /** One adapter builder shared by retrieval, background ingest, and lifecycle cleanup. */
 export async function buildTwinRuntimeAdapters(
-  settings: TwinRuntimeSettings
+  settings: TwinRuntimeSettings,
+  options: { requireEnabled?: boolean } = {}
 ): Promise<TwinRuntimeAdapterBuildResult> {
-  if (!settings.workerEnabled) return { ready: false, reason: "disabled" }
-  if (
-    embeddingProviderRequiresApiKey(settings.embedding.provider) &&
-    !settings.embedding.apiKey
-  ) {
+  if ((options.requireEnabled ?? true) && !settings.workerEnabled) {
+    return { ready: false, reason: "disabled" }
+  }
+  if (embeddingProviderRequiresApiKey(settings.embedding.provider) && !settings.embedding.apiKey) {
     return { ready: false, reason: "missing-embedding-credentials" }
   }
   const storeConfig = deriveTwinVectorStoreConfig(settings)

@@ -27,6 +27,29 @@ describe("embedRedactedChunks", () => {
     expect(mockGenerateEmbeddings).not.toHaveBeenCalled()
   })
 
+  it("rejects a pre-aborted job before contacting the embedding provider", async () => {
+    const controller = new AbortController()
+    controller.abort("pause")
+
+    await expect(embedRedactedChunks(["a"], baseConfig, controller.signal)).rejects.toThrow(
+      "interrupted"
+    )
+    expect(mockGenerateEmbeddings).not.toHaveBeenCalled()
+  })
+
+  it("stops between embedding batches when the active job is cancelled", async () => {
+    const controller = new AbortController()
+    mockGenerateEmbeddings.mockImplementationOnce(async () => {
+      controller.abort("cancel")
+      return { embeddings: [[1]], usage: { tokens: 1 } }
+    })
+
+    await expect(
+      embedRedactedChunks(["a", "b"], { ...baseConfig, batchSize: 1 }, controller.signal)
+    ).rejects.toThrow("interrupted")
+    expect(mockGenerateEmbeddings).toHaveBeenCalledTimes(1)
+  })
+
   it("throws when the provider returns fewer vectors than the batch", async () => {
     // Regression: an under-length response used to flow `undefined` vectors into
     // the cache + remote upsert. Fail loudly so the per-source catch isolates it.

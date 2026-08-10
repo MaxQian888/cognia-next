@@ -35,6 +35,7 @@ import {
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
 import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
 import type { MemoryScope } from "@/types/memory/memory"
+import { resolveMemoryAgentNamespace } from "@/lib/memory/twin-namespace"
 
 export interface TurnTranscriptEntry {
   role: string
@@ -85,6 +86,10 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
     const character = sessionRow.characterId
       ? await resolveCharacterById(sessionRow.characterId).catch(() => undefined)
       : undefined
+    const memoryAgentId = resolveMemoryAgentNamespace({
+      twinId: character?.twinId,
+      characterId: sessionRow.characterId,
+    })
     const externalContext = input.externalContext ?? detectMemoryExternalContext(input.transcript)
     const contaminationState = hasUntrustedMemoryContext(externalContext)
       ? "external-context"
@@ -149,7 +154,7 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
         sessionId,
         projectId: sessionRow.projectId,
         characterId: sessionRow.characterId,
-        agentId: automaticScope === "agent" ? sessionRow.characterId : undefined,
+        agentId: automaticScope === "agent" ? memoryAgentId : undefined,
         scope: effectiveConfig.scopeDefault,
         provenance,
         evidenceIds: evidence.map((item) => item.id),
@@ -170,7 +175,7 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
           scope: effectiveConfig.scopeDefault,
           characterId: sessionRow.characterId,
           projectId: sessionRow.projectId,
-          agentId: automaticScope === "agent" ? sessionRow.characterId : undefined,
+          agentId: automaticScope === "agent" ? memoryAgentId : undefined,
           provenance,
           source: { sessionId, messageId: input.assistantMessageId },
           config: effectiveConfig,
@@ -232,6 +237,7 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
       provenance,
       contaminationState,
       config: effectiveConfig,
+      agentId: memoryAgentId,
     })
   } catch (err) {
     if (claimedJobId) {

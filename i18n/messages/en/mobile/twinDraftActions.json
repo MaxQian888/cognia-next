@@ -4,5 +4,6 @@
   "queueAcceptLabel": "Accept twin draft",
   "queueRejectLabel": "Reject twin draft",
   "reject": "Reject",
-  "rejected": "Rejected"
+  "rejected": "Rejected",
+  "upgradeRequired": "Update the connected Host to review Twin drafts."
 }

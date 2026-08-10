@@ -18,6 +18,9 @@ jest.mock("@/lib/db/twin-sources", () => {
     deleteTwinSource: (...args: unknown[]) => mockDeleteTwinSource(...args),
   }
 })
+jest.mock("@/lib/twin/lifecycle", () => ({
+  removeTwinSource: (...args: unknown[]) => mockDeleteTwinSource(...args),
+}))
 
 jest.mock("motion/react", () => {
   const MotionLi = React.forwardRef<HTMLLIElement, React.LiHTMLAttributes<HTMLLIElement>>(
@@ -71,7 +74,10 @@ beforeEach(async () => {
   const actualTwinSources = jest.requireActual(
     "@/lib/db/twin-sources"
   ) as typeof import("@/lib/db/twin-sources")
-  mockDeleteTwinSource.mockReset().mockImplementation(actualTwinSources.deleteTwinSource)
+  mockDeleteTwinSource.mockReset().mockImplementation(async (id: string) => {
+    await actualTwinSources.deleteTwinSource(id)
+    return { ok: true, removed: true }
+  })
   await getDb().delete()
   __resetDbForTesting()
   getDb()

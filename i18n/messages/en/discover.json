@@ -232,6 +232,12 @@
     "trigger": "Sort & filter"
   },
   "title": "Discover",
+  "twinRegistry": {
+    "emptyDescription": "Create or select a Digital Twin on desktop before adding sources or reviewing drafts.",
+    "emptyTitle": "No Digital Twin selected",
+    "selectAria": "Select active Digital Twin",
+    "selectLabel": "Digital Twin"
+  },
   "view": {
     "aria": "View mode",
     "compact": "Compact",

@@ -120,6 +120,21 @@ describe("runTurnMemory", () => {
     expect(mockCompleteJob).toHaveBeenCalledWith("job-1")
   })
 
+  it("learns agent-scoped memory into the shared Twin namespace", async () => {
+    setMemory({ scopeDefault: "agent" })
+    mockResolveCharacter.mockResolvedValue({ id: "c1", twinId: "alice" })
+    await runTurnMemory("s1", INPUT)
+    expect(mockRunExtraction.mock.calls[0][0]).toMatchObject({
+      scope: "agent",
+      agentId: "twin:alice",
+    })
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "agent", agentId: "twin:alice" }),
+      { reuseCompleted: true }
+    )
+    expect(mockSchedule).toHaveBeenCalledWith(expect.objectContaining({ agentId: "twin:alice" }))
+  })
+
   it("forwards assistantMessageId as source.messageId for chip attribution", async () => {
     await runTurnMemory("s1", { ...INPUT, assistantMessageId: "msg-42" })
     const [extractionInput] = mockRunExtraction.mock.calls[0]

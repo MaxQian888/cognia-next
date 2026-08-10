@@ -230,6 +230,34 @@ describe("applySystemPromptTemplate", () => {
     )
   })
 
+  it("injects at most five decisions with pinned items first and per-entry truncation", () => {
+    const decisions = Array.from({ length: 7 }, (_, index) => ({
+      id: `d${index}`,
+      context: index === 0 ? "Pinned context" : `Context ${index}`,
+      choice: index === 0 ? "Pinned choice" : `Choice ${index}`,
+      rationale: index === 1 ? "x".repeat(400) : `Rationale ${index}`,
+      sourceChunkIds: [],
+      timestamp: index,
+      pinned: index === 0,
+    }))
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      decisions,
+      retrievedChunks: [],
+      styleSamples: [],
+    })
+    expect(out.cacheSegments.stable).toContain("## Decisions you have made")
+    expect(out.cacheSegments.stable).toContain("Pinned context → Pinned choice")
+    expect(out.cacheSegments.stable).toContain("Context 6 → Choice 6")
+    expect(out.cacheSegments.stable).not.toContain("Context 2 → Choice 2")
+    const decisionLines = out.cacheSegments.stable
+      .split("\n")
+      .filter((line) => line.startsWith("- "))
+    expect(decisionLines).toHaveLength(5)
+    expect(Math.max(...decisionLines.map((line) => line.length))).toBeLessThanOrEqual(243)
+  })
+
   it("splits cacheSegments at the stable/dynamic boundary", () => {
     const out = applySystemPromptTemplate({
       baseSystemPrompt: "BASE",

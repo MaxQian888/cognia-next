@@ -35,6 +35,9 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "workflow_schedule_resume",
   // Twin subsystem (twin-sources + twin-drafts panels).
   "twin_ingest_source",
+  "twin_source_create",
+  "twin_source_delete",
+  "twin_draft_review",
   // Wave 2 desktop-write mutating RPCs.
   "character_upsert",
   "character_delete",

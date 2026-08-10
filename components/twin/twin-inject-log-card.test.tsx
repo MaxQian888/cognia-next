@@ -7,10 +7,22 @@
 
 import React from "react"
 import { act, render, screen } from "@testing-library/react"
+import "fake-indexeddb/auto"
 
 jest.mock("motion/react", () => ({
   motion: {
-    li: ({ children, className, ...props }: React.LiHTMLAttributes<HTMLLIElement>) => (
+    li: ({
+      children,
+      className,
+      initial: _initial,
+      animate: _animate,
+      transition: _transition,
+      ...props
+    }: React.LiHTMLAttributes<HTMLLIElement> & {
+      initial?: unknown
+      animate?: unknown
+      transition?: unknown
+    }) => (
       <li className={className} {...props}>
         {children}
       </li>
@@ -22,9 +34,11 @@ jest.mock("motion/react", () => ({
 import { TwinInjectLogCard } from "./twin-inject-log-card"
 import {
   recordTwinInject,
+  persistTwinInject,
   __resetTwinInjectLog,
   type TwinInjectLogEntry,
 } from "@/lib/twin/runtime/inject-log"
+import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 
 const entry = (overrides: Partial<TwinInjectLogEntry>): TwinInjectLogEntry => ({
   ts: Date.now(),
@@ -39,7 +53,11 @@ const entry = (overrides: Partial<TwinInjectLogEntry>): TwinInjectLogEntry => ({
   ...overrides,
 })
 
-beforeEach(() => {
+beforeEach(async () => {
+  await getDb().delete()
+  __resetDbForTesting()
+  getDb()
+  await whenSeeded()
   __resetTwinInjectLog()
 })
 
@@ -80,5 +98,14 @@ describe("TwinInjectLogCard", () => {
     })
     expect(await screen.findByTestId("twin-inject-log-row-0")).toBeInTheDocument()
     expect(screen.getByText(/embedding api timeout/i)).toBeInTheDocument()
+  })
+
+  it("restores persisted safe history after a cold start", async () => {
+    await persistTwinInject(entry({ id: "1".repeat(16), ts: 123, chunkCount: 2, tokensApprox: 40 }))
+
+    render(<TwinInjectLogCard twinId="twin_alice" />)
+
+    expect(await screen.findByTestId("twin-inject-log-row-0")).toBeInTheDocument()
+    expect(screen.getByText(/2 chunks/i)).toBeInTheDocument()
   })
 })

@@ -571,6 +571,7 @@
         "piiBlocked": "Write blocked: the value contains PII.",
         "readableBy": "Readable by",
         "readableByAll": "All teammates (leave empty)",
+        "removeTag": "Remove {tag}",
         "submit": "Save entry",
         "tags": "Tags",
         "tagsPlaceholder": "Add a tag and press Enter",

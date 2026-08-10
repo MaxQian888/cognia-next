@@ -15,10 +15,6 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockSources,
 }))
 
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({ twinSources: { orderBy: () => ({ reverse: () => ({ toArray: async () => [] }) }) } }),
-}))
-
 const enqueueMock = jest.fn(async (..._a: unknown[]) => ({}))
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({ enqueue: (...a: unknown[]) => enqueueMock(...a) }))
 
@@ -32,10 +28,9 @@ let mockNoLeak = true
 jest.mock("@cognia/redact", () => ({ hasNoLeakingPii: () => mockNoLeak }))
 
 const updateTwinSourceMock = jest.fn(async (..._a: unknown[]) => undefined)
-const deleteTwinSourceMock = jest.fn(async (..._a: unknown[]) => undefined)
 jest.mock("@/lib/db/twin-sources", () => ({
+  listTwinSourcesByTwin: jest.fn(async () => []),
   updateTwinSource: (...a: unknown[]) => updateTwinSourceMock(...a),
-  deleteTwinSource: (...a: unknown[]) => deleteTwinSourceMock(...a),
 }))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }))
@@ -62,19 +57,18 @@ beforeEach(() => {
   promptMock.mockReset()
   pickPhotoMock.mockReset()
   updateTwinSourceMock.mockClear()
-  deleteTwinSourceMock.mockClear()
 })
 
 describe("<TwinSourcesPanel />", () => {
   it("enqueues clean pasted text directly (no redact sheet)", async () => {
     promptMock.mockResolvedValue({ kind: "submitted", value: "hello world" })
     const user = userEvent.setup()
-    render(<TwinSourcesPanel />)
+    render(<TwinSourcesPanel twinId="twin-1" />)
     await user.click(screen.getByTestId("twin-sources-add"))
     await user.click(screen.getByTestId("twin-sources-paste"))
     await waitFor(() =>
       expect(enqueueMock).toHaveBeenCalledWith(
-        expect.objectContaining({ command: "twin_ingest_source" })
+        expect.objectContaining({ command: "twin_source_create" })
       )
     )
     expect(screen.queryByTestId("stub-redact-sheet")).not.toBeInTheDocument()
@@ -84,7 +78,7 @@ describe("<TwinSourcesPanel />", () => {
     mockNoLeak = false
     promptMock.mockResolvedValue({ kind: "submitted", value: "ssn 123-45-6789" })
     const user = userEvent.setup()
-    render(<TwinSourcesPanel />)
+    render(<TwinSourcesPanel twinId="twin-1" />)
     await user.click(screen.getByTestId("twin-sources-add"))
     await user.click(screen.getByTestId("twin-sources-paste"))
     await waitFor(() => expect(screen.getByTestId("stub-redact-sheet")).toBeInTheDocument())
@@ -94,13 +88,13 @@ describe("<TwinSourcesPanel />", () => {
   it("enqueues a captured image (camera path)", async () => {
     pickPhotoMock.mockResolvedValue({ kind: "captured", base64: "BBBB", format: "png" })
     const user = userEvent.setup()
-    render(<TwinSourcesPanel />)
+    render(<TwinSourcesPanel twinId="twin-1" />)
     await user.click(screen.getByTestId("twin-sources-add"))
     await user.click(screen.getByTestId("twin-sources-camera"))
     await waitFor(() =>
       expect(enqueueMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          command: "twin_ingest_source",
+          command: "twin_source_create",
           payload: expect.objectContaining({ format: "image", base64: "BBBB" }),
         })
       )
@@ -109,7 +103,7 @@ describe("<TwinSourcesPanel />", () => {
 
   it("enqueues a picked file as base64", async () => {
     const user = userEvent.setup()
-    render(<TwinSourcesPanel />)
+    render(<TwinSourcesPanel twinId="twin-1" />)
     await user.click(screen.getByTestId("twin-sources-add"))
     const input = screen.getByTestId("twin-sources-file-input") as HTMLInputElement
     const file = new File(["hello"], "notes.txt", { type: "text/plain" })
@@ -121,7 +115,7 @@ describe("<TwinSourcesPanel />", () => {
     await waitFor(() =>
       expect(enqueueMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          command: "twin_ingest_source",
+          command: "twin_source_create",
           payload: expect.objectContaining({ filename: "notes.txt" }),
         })
       )
@@ -130,7 +124,7 @@ describe("<TwinSourcesPanel />", () => {
 
   it("renders the empty state when there are no sources", () => {
     mockSources = []
-    render(<TwinSourcesPanel />)
+    render(<TwinSourcesPanel twinId="twin-1" />)
     expect(screen.getByText("empty")).toBeInTheDocument()
   })
 
@@ -140,7 +134,7 @@ describe("<TwinSourcesPanel />", () => {
     ]
     promptMock.mockResolvedValue({ kind: "submitted", value: "New title" })
     const user = userEvent.setup()
-    render(<TwinSourcesPanel />)
+    render(<TwinSourcesPanel twinId="twin-1" />)
     await user.click(screen.getByTestId("stub-longpress"))
     await user.click(await screen.findByTestId("twin-source-retitle"))
     await waitFor(() =>
@@ -153,10 +147,14 @@ describe("<TwinSourcesPanel />", () => {
       { id: "s1", title: "Resume", status: "parsed", format: "pdf", bytes: 2048, createdAt: 1 },
     ]
     const user = userEvent.setup()
-    render(<TwinSourcesPanel />)
+    render(<TwinSourcesPanel twinId="twin-1" />)
     await user.click(screen.getByTestId("stub-longpress"))
     expect(await screen.findByTestId("twin-source-edit-sheet")).toBeInTheDocument()
     await user.click(screen.getByTestId("twin-source-delete"))
-    await waitFor(() => expect(deleteTwinSourceMock).toHaveBeenCalledWith("s1"))
+    await waitFor(() =>
+      expect(enqueueMock).toHaveBeenCalledWith(
+        expect.objectContaining({ command: "twin_source_delete", payload: { id: "s1" } })
+      )
+    )
   })
 })

@@ -9,7 +9,13 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/status-badge"
-import { listTwinJobsByTwin, retryFailedJob } from "@/lib/db/twin-jobs"
+import {
+  cancelJob,
+  listTwinJobsByTwin,
+  pauseJob,
+  resumeJob,
+  retryFailedJob,
+} from "@/lib/db/twin-jobs"
 import { listTwinSourcesByTwinAndStatus } from "@/lib/db/twin-sources"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { enqueueDistillJob } from "@/lib/twin/distill"
@@ -90,6 +96,7 @@ const JobRow = memo(function JobRow({ job }: { job: TwinJob }) {
   const tKind = useTranslations("twin.kind")
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState<string | null>(null)
+  const [controlling, setControlling] = useState(false)
   const deadLetter = parseDeadLetter(job.errorMessage)
   const canRetry = job.status === "failed"
 
@@ -102,6 +109,20 @@ const JobRow = memo(function JobRow({ job }: { job: TwinJob }) {
       setRetryError(err instanceof Error ? err.message : String(err))
     } finally {
       setRetrying(false)
+    }
+  }
+
+  const handleControl = async (action: "pause" | "resume" | "cancel") => {
+    setControlling(true)
+    setRetryError(null)
+    try {
+      if (action === "pause") await pauseJob(job.id)
+      if (action === "resume") await resumeJob(job.id)
+      if (action === "cancel") await cancelJob(job.id, t("cancelReason"))
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setControlling(false)
     }
   }
 
@@ -161,22 +182,60 @@ const JobRow = memo(function JobRow({ job }: { job: TwinJob }) {
           </ul>
         </div>
       ) : null}
-      {canRetry ? (
+      {canRetry ||
+      job.status === "queued" ||
+      job.status === "running" ||
+      job.status === "paused" ? (
         <div className="flex items-center justify-end gap-2">
           {retryError ? (
             <span className="text-destructive text-xs" role="alert">
               {retryError}
             </span>
           ) : null}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void handleRetry()}
-            disabled={retrying}
-            data-testid={`twin-job-retry-${job.id}`}
-          >
-            {retrying ? t("retryBusy") : t("retry")}
-          </Button>
+          {job.status === "queued" || job.status === "running" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void handleControl("pause")}
+              disabled={controlling}
+              data-testid={`twin-job-pause-${job.id}`}
+            >
+              {t("pause")}
+            </Button>
+          ) : null}
+          {job.status === "paused" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void handleControl("resume")}
+              disabled={controlling}
+              data-testid={`twin-job-resume-${job.id}`}
+            >
+              {t("resume")}
+            </Button>
+          ) : null}
+          {job.status === "queued" || job.status === "running" || job.status === "paused" ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => void handleControl("cancel")}
+              disabled={controlling}
+              data-testid={`twin-job-cancel-${job.id}`}
+            >
+              {t("cancel")}
+            </Button>
+          ) : null}
+          {canRetry ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void handleRetry()}
+              disabled={retrying}
+              data-testid={`twin-job-retry-${job.id}`}
+            >
+              {retrying ? t("retryBusy") : t("retry")}
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </Card>

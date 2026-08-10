@@ -7,6 +7,8 @@
   },
   "deleteCta": "删除数据源",
   "deleteDone": "已删除数据源。",
+  "deleteQueueLabel": "将数据源删除加入队列",
+  "deleteQueued": "删除已排队——桌面端上线后会清理向量资源。",
   "editSheetDescription": "重命名或删除此数据源。",
   "empty": "暂无孪生数据源。点击 + 添加。",
   "pasteCancelled": "已取消",

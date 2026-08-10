@@ -14,6 +14,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
 import { PlusIcon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 
@@ -42,6 +43,7 @@ import { TwinProfilePanel } from "@/components/mobile/discover/twin-profile-pane
 import { TwinSourcesPanel } from "@/components/mobile/discover/twin-sources-panel"
 import { EmptyState } from "@/components/mobile/empty-state"
 import { Button } from "@/components/ui/button"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { useDiscoverFavorites } from "@/hooks/discover/use-discover-favorites"
 import { useDiscoverHome } from "@/hooks/discover/use-discover-home"
@@ -53,6 +55,7 @@ import { useDiscoverView } from "@/hooks/discover/use-discover-view"
 import { useSearchHotkey } from "@/hooks/discover/use-search-hotkey"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { setSkillStatus } from "@/lib/db/skills"
+import { observeTwins } from "@/lib/db/twins"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import type { Character } from "@cognia/agent-config-types"
 import {
@@ -137,6 +140,10 @@ export function DiscoverMobileBody() {
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
   /** Card whose long-press action sheet (share, …) is open. */
   const [actionItem, setActionItem] = useState<DiscoverItem | null>(null)
+  const [preferredTwinId, setPreferredTwinId] = useState<string | null>(null)
+  const twins = useLiveQuery(() => observeTwins(), [], undefined) ?? []
+  const selectedTwin =
+    twins.find((twin) => twin.id === preferredTwinId) ?? twins.find((twin) => !twin.archivedAt)
 
   const { favoriteKeys } = useDiscoverFavorites()
   const { layout } = useDiscoverLayout()
@@ -379,12 +386,62 @@ export function DiscoverMobileBody() {
 
           {category === "twinIngest" ? (
             <div className="flex flex-col gap-3">
-              <TwinProfilePanel twinId="default" />
-              <TwinSourcesPanel />
+              {selectedTwin ? (
+                <>
+                  <label className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-muted-foreground">{t("twinRegistry.selectLabel")}</span>
+                    <NativeSelect
+                      value={selectedTwin.id}
+                      onChange={(event) => setPreferredTwinId(event.target.value)}
+                      aria-label={t("twinRegistry.selectAria")}
+                      data-testid="mobile-twin-select"
+                    >
+                      {twins.map((twin) => (
+                        <NativeSelectOption key={twin.id} value={twin.id}>
+                          {twin.name}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </label>
+                  <TwinProfilePanel twinId={selectedTwin.id} />
+                  <TwinSourcesPanel twinId={selectedTwin.id} />
+                </>
+              ) : (
+                <EmptyState
+                  title={t("twinRegistry.emptyTitle")}
+                  description={t("twinRegistry.emptyDescription")}
+                />
+              )}
             </div>
           ) : null}
 
-          {category === "twinDrafts" ? <TwinDraftsPanel /> : null}
+          {category === "twinDrafts" ? (
+            selectedTwin ? (
+              <div className="flex flex-col gap-3">
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted-foreground">{t("twinRegistry.selectLabel")}</span>
+                  <NativeSelect
+                    value={selectedTwin.id}
+                    onChange={(event) => setPreferredTwinId(event.target.value)}
+                    aria-label={t("twinRegistry.selectAria")}
+                    data-testid="mobile-twin-select"
+                  >
+                    {twins.map((twin) => (
+                      <NativeSelectOption key={twin.id} value={twin.id}>
+                        {twin.name}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </label>
+                <TwinDraftsPanel twinId={selectedTwin.id} />
+              </div>
+            ) : (
+              <EmptyState
+                title={t("twinRegistry.emptyTitle")}
+                description={t("twinRegistry.emptyDescription")}
+              />
+            )
+          ) : null}
 
           {isGridDriven ? (
             <DiscoverGrid

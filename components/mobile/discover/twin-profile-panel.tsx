@@ -27,10 +27,10 @@ interface TwinProfileResponse {
 }
 
 export interface TwinProfilePanelProps {
-  twinId?: string
+  twinId: string
 }
 
-export function TwinProfilePanel({ twinId = "default" }: TwinProfilePanelProps) {
+export function TwinProfilePanel({ twinId }: TwinProfilePanelProps) {
   const t = useTranslations("mobile.twinProfile")
   const [profile, setProfile] = useState<TwinProfileSummary | null>(null)
   const [error, setError] = useState<string | null>(null)

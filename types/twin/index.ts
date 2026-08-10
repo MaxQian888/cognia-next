@@ -670,6 +670,41 @@ export interface TwinRuntimeSettings {
   extraNameHints: string[]
 }
 
+/** Companion/mobile command contract for the Digital Twin write surface. */
+export type TwinCommand =
+  | {
+      command: "twin_source_create"
+      payload:
+        | {
+            twinId: string
+            text?: string
+            base64?: string
+            filename?: string
+            mime?: string
+            kind?: TwinSource["kind"]
+            format?: TwinSource["format"] | "image" | (string & {})
+          }
+        | {
+            source: Omit<TwinSource, "id" | "status" | "createdAt" | "updatedAt">
+            enqueueIngest?: boolean
+          }
+    }
+  | {
+      command: "twin_ingest_source"
+      payload: { twinId: string; sourceIds: string[] }
+    }
+  | {
+      command: "twin_draft_review"
+      payload: {
+        twinId?: string
+        draftId: string
+        action: "accept" | "reject"
+        reviewerNote?: string
+      }
+    }
+  | { command: "twin_source_delete"; payload: { id: string } }
+  | { command: "twin_delete"; payload: { id: string } }
+
 export const DEFAULT_TWIN_RUNTIME_SETTINGS: TwinRuntimeSettings = {
   workerEnabled: false,
   extraNameHints: [],

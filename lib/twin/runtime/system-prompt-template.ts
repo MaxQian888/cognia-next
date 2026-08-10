@@ -15,7 +15,13 @@
  * sources for this answer".
  */
 
-import type { Playbook, ProfileEntity, RetrievedTwinChunk, StyleSample } from "@/types/twin"
+import type {
+  DecisionRecord,
+  Playbook,
+  ProfileEntity,
+  RetrievedTwinChunk,
+  StyleSample,
+} from "@/types/twin"
 
 export interface ApplyTemplateInput {
   /** The character's existing systemPrompt (may be empty for fresh twins). */
@@ -33,6 +39,8 @@ export interface ApplyTemplateInput {
    * none.
    */
   playbooks?: Playbook[]
+  /** Recent decisions, pinned first, used as stable behavioural context. */
+  decisions?: DecisionRecord[]
   /** Retrieved chunks for THIS turn (already filtered by the RAG step). */
   retrievedChunks: RetrievedTwinChunk[]
   /** Selected style few-shot samples for THIS turn. */
@@ -43,6 +51,8 @@ export interface ApplyTemplateInput {
   maxVoiceSummary?: number
   /** Maximum playbooks to inject (highest-confidence first). Defaults to 5. */
   maxPlaybooksShown?: number
+  /** Maximum decisions to inject. Defaults to 5. */
+  maxDecisionsShown?: number
 }
 
 export interface AppliedTemplate {
@@ -100,6 +110,7 @@ function formatEntityDictionary(entities: ProfileEntity[], maxShown: number): st
 
 /** Per-entry cap so one verbose playbook can't dominate the stable budget. */
 const MAX_PLAYBOOK_ENTRY_LEN = 200
+const MAX_DECISION_ENTRY_LEN = 240
 
 /**
  * Render the high-confidence, not-yet-promoted playbooks as terse
@@ -123,6 +134,25 @@ function formatPlaybooks(playbooks: Playbook[], maxShown: number): string {
       let entry = `When ${p.trigger.trim()}: ${steps}`
       if (entry.length > MAX_PLAYBOOK_ENTRY_LEN) {
         entry = `${entry.slice(0, MAX_PLAYBOOK_ENTRY_LEN).trimEnd()}…`
+      }
+      return `- ${entry}`
+    })
+    .join("\n")
+}
+
+function formatDecisions(decisions: DecisionRecord[], maxShown: number): string {
+  return [...decisions]
+    .sort(
+      (a, b) =>
+        Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) ||
+        (b.timestamp ?? 0) - (a.timestamp ?? 0)
+    )
+    .slice(0, maxShown)
+    .map((decision) => {
+      let entry = `${decision.context.trim()} → ${decision.choice.trim()}`
+      if (decision.rationale.trim()) entry += ` — ${decision.rationale.trim()}`
+      if (entry.length > MAX_DECISION_ENTRY_LEN) {
+        entry = `${entry.slice(0, MAX_DECISION_ENTRY_LEN).trimEnd()}…`
       }
       return `- ${entry}`
     })
@@ -161,6 +191,7 @@ export function applySystemPromptTemplate(input: ApplyTemplateInput): AppliedTem
   const maxVoice = input.maxVoiceSummary ?? 200
   const maxEntities = input.maxEntitiesShown ?? 20
   const maxPlaybooks = input.maxPlaybooksShown ?? 5
+  const maxDecisions = input.maxDecisionsShown ?? 5
 
   // 1. Original character prompt
   const base = input.baseSystemPrompt?.trim()
@@ -192,6 +223,11 @@ export function applySystemPromptTemplate(input: ApplyTemplateInput): AppliedTem
   const playbooksSection = formatPlaybooks(input.playbooks ?? [], maxPlaybooks)
   if (playbooksSection) {
     sections.push(["## How you typically handle situations", playbooksSection].join("\n"))
+  }
+
+  const decisionsSection = formatDecisions(input.decisions ?? [], maxDecisions)
+  if (decisionsSection) {
+    sections.push(["## Decisions you have made", decisionsSection].join("\n"))
   }
 
   // 3. Retrieved knowledge (per-turn)

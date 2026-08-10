@@ -17,12 +17,14 @@ import {
   ensureTwinProfile,
   setVoiceSummary,
   upsertEntities,
+  upsertDecisions,
 } from "@/lib/db/twin-profile"
 import { generateEmbedding } from "@cognia/vector/embedding"
 import type { TwinDraft, TwinJob } from "@/types/twin"
 import type { EmbeddingConfig } from "@/lib/twin/ingest/embed"
 import type { LlmClient } from "./llm"
 import { runOrchestrator } from "./orchestrator"
+import { throwIfTwinJobInterrupted } from "@/lib/twin/job-control"
 
 export interface RunDistillInput {
   job: TwinJob
@@ -38,6 +40,7 @@ export interface RunDistillInput {
    * heuristic. When omitted, samples are persisted without embeddings.
    */
   embedding?: EmbeddingConfig
+  signal?: AbortSignal
 }
 
 export interface RunDistillResult {
@@ -53,9 +56,11 @@ export interface RunDistillResult {
 
 export async function runDistillJob(input: RunDistillInput): Promise<RunDistillResult> {
   const { job, llm } = input
+  throwIfTwinJobInterrupted(input.signal)
   await updateJobProgress(job.id, { phase: "loading-chunks", progress: 5 })
 
   const allChunks = await listTwinChunksByTwin(job.twinId)
+  throwIfTwinJobInterrupted(input.signal)
   if (allChunks.length === 0) {
     return {
       draftIds: [],
@@ -73,13 +78,16 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
 
   await updateJobProgress(job.id, { phase: "loading-profile", progress: 10 })
   const profile = await ensureTwinProfile(job.twinId)
+  throwIfTwinJobInterrupted(input.signal)
 
   // ───── Orchestrate ─────
   const result = await runOrchestrator({
     llm,
     profile,
     chunks,
+    signal: input.signal,
     onProgress: async (phase, ratio) => {
+      throwIfTwinJobInterrupted(input.signal)
       // Stages 1-5 occupy 10% → 85% of the bar; the remainder (85% → 100%)
       // is reserved for persistence.
       const mapped = 10 + Math.round(ratio * 75)
@@ -89,11 +97,13 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
 
   // ───── Persist profile updates ─────
   await updateJobProgress(job.id, { phase: "persisting-profile", progress: 87 })
+  throwIfTwinJobInterrupted(input.signal)
   // Wrap `generateEmbedding` so the style writer can populate
   // `StyleSample.embedding` inline. Failures are swallowed per-sample —
   // the runtime falls back to token-overlap when the field is absent.
   const embeddingFn = input.embedding
     ? async (summary: string): Promise<number[]> => {
+        throwIfTwinJobInterrupted(input.signal)
         const config = input.embedding!
         const result = await generateEmbedding(
           summary,
@@ -105,15 +115,21 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
           },
           config.apiKey
         )
+        throwIfTwinJobInterrupted(input.signal)
         return result.embedding
       }
     : undefined
   // Upsert (not append) so a re-distill de-dupes by content and preserves any
   // user-pinned style sample / playbook instead of multiplying the arrays.
   await upsertStyleSamples(job.twinId, result.styleSamples, { embeddingFn })
+  throwIfTwinJobInterrupted(input.signal)
   await upsertPlaybooks(job.twinId, result.playbooks)
+  throwIfTwinJobInterrupted(input.signal)
   if (result.entities.length > 0) {
     await upsertEntities(job.twinId, result.entities)
+  }
+  if ((result.decisions ?? []).length > 0) {
+    await upsertDecisions(job.twinId, result.decisions ?? [])
   }
   if (result.voiceSummary && result.voiceSummary !== profile.voiceSummary) {
     // The voiceSummary is injected verbatim into the runtime system prompt, so
@@ -134,6 +150,7 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
   // ───── Persist per-chunk entity tags ─────
   await updateJobProgress(job.id, { phase: "tagging-chunks", progress: 92 })
   for (const [chunkId, names] of Object.entries(result.chunkEntityTags)) {
+    throwIfTwinJobInterrupted(input.signal)
     if (names.length > 0) {
       await updateTwinChunk(chunkId, { entityTags: names })
     }
@@ -166,6 +183,7 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
       evaluation: result.evaluations[`tmp_${i}`],
     }))
   )
+  throwIfTwinJobInterrupted(input.signal)
 
   await updateJobProgress(job.id, { phase: "completed", progress: 99 })
 

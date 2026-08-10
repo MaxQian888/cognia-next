@@ -21,6 +21,7 @@ export const HOST_FEATURE_IDS = [
   "ocr.server",
   "notifications.remote",
   "workspace.files",
+  "twin.runtime",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -143,6 +144,10 @@ export function buildLocalHostFeatureManifest({
     }
   }
   if (platform === "tauri" || platform === "headless") {
+    features["twin.runtime"] = {
+      version: 1,
+      operations: ["twin_draft_review"],
+    }
     features["notifications.remote"] = {
       version: 1,
       operations: [

@@ -75,7 +75,9 @@ import type { Project } from "@/types"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
+import { resolveMemoryAgentNamespace } from "@/lib/memory/twin-namespace"
 import { resolveProjectKnowledgeSettings } from "@/types/project-knowledge"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useAgentRuntimeStore } from "@/stores/agent"
@@ -1367,13 +1369,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (character?.twinId && ctx.twinDeps && ctx.twinUserMessage && ctx.twinUserMessage.trim()) {
     try {
       const { applyTwinContext, recordTwinInject } = await import("@/lib/twin/runtime")
+      const twinStartedAt = Date.now()
       const result = await applyTwinContext({
         character,
         userMessage: ctx.twinUserMessage,
         precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
         deps: ctx.twinDeps as Parameters<typeof applyTwinContext>[0]["deps"],
       })
-      if (result.applied) {
+      const twinPromptBlocked = Boolean(
+        result.applied &&
+        !hasNoLeakingPiiDeep(
+          result.applied.cacheSegments ?? { systemPrompt: result.applied.systemPrompt }
+        )
+      )
+      if (result.applied && !twinPromptBlocked) {
         if (cacheOptimizationEnabled && result.applied.cacheSegments?.dynamic) {
           // Stable twin segments (character prompt + identity) stay in the
           // prefix; per-turn RAG chunks + style few-shot move to the tail.
@@ -1389,9 +1398,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // runtime ran (even if degraded) so the UI can show a "no context"
       // indicator instead of staying silent.
       if (
-        result.retrievedChunks.length > 0 ||
-        result.selectedStyleSamples.length > 0 ||
-        result.degraded
+        !twinPromptBlocked &&
+        (result.retrievedChunks.length > 0 ||
+          result.selectedStyleSamples.length > 0 ||
+          result.degraded)
       ) {
         opts.twinContext = {
           twinId: character.twinId,
@@ -1410,18 +1420,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // "Twin injection log" card can confirm this turn used the twin profile.
       // Done last (after prompt assembly) so a logging slip can never undo the
       // injected prompt; diagnostic-only and never blocks the send.
-      recordTwinInject({
+      await recordTwinInject({
         ts: Date.now(),
         twinId: character.twinId,
         source: ctx.twinInjectSource ?? "chat",
-        applied: Boolean(result.applied),
-        degraded: result.degraded ?? false,
-        degradedReason: result.degradedReason ?? null,
+        applied: Boolean(result.applied && !twinPromptBlocked),
+        degraded: twinPromptBlocked || (result.degraded ?? false),
+        degradedReason: twinPromptBlocked ? "prompt-pii-blocked" : (result.degradedReason ?? null),
         chunkCount: result.retrievedChunks?.length ?? 0,
         styleSampleCount: result.selectedStyleSamples?.length ?? 0,
-        tokensApprox: result.applied
-          ? estimateFallbackTokens(result.applied.systemPrompt ?? baseSystem)
-          : 0,
+        tokensApprox:
+          result.applied && !twinPromptBlocked
+            ? estimateFallbackTokens(result.applied.systemPrompt ?? baseSystem)
+            : 0,
+        durationMs: Date.now() - twinStartedAt,
+        chunkIds: result.retrievedChunks.map((chunk) => chunk.id),
+        chunkScores: result.retrievedChunks.map((chunk) => chunk.score),
+        styleSampleIds: result.selectedStyleSamples.map((sample) => sample.id),
+        ...(ctx.session?.id ? { sessionId: ctx.session.id } : {}),
       })
     } catch {
       // Twin runtime failure is non-fatal — keep the original baseSystem.
@@ -1477,7 +1493,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           reader: {
             characterId: character?.id,
             projectId: session?.projectId ?? ctx.activeProject?.id,
-            agentId: ctx.targetAgentId,
+            agentId: resolveMemoryAgentNamespace({
+              targetAgentId: ctx.targetAgentId,
+              twinId: character?.twinId,
+              characterId: character?.id,
+            }),
             branch: ctx.memoryBranch,
             path: ctx.memoryPath,
           },

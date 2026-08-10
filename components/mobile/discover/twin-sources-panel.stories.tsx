@@ -10,6 +10,7 @@ import { seedDb } from "@/lib/storybook/seed-db"
 const meta = {
   title: "Mobile/Discover/TwinSourcesPanel",
   component: TwinSourcesPanel,
+  args: { twinId: "default" },
   parameters: { layout: "fullscreen" },
   decorators: [
     (Story) => (

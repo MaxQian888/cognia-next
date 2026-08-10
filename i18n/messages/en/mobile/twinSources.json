@@ -7,6 +7,8 @@
   },
   "deleteCta": "Delete source",
   "deleteDone": "Source removed.",
+  "deleteQueueLabel": "Queue source deletion",
+  "deleteQueued": "Deletion queued — desktop will clean up vectors when online.",
   "editSheetDescription": "Rename or remove this source.",
   "empty": "No twin sources yet. Tap + to add one.",
   "pasteCancelled": "Cancelled",

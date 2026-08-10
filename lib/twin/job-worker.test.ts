@@ -21,7 +21,7 @@ jest.mock("./ingest/job-runner", () => ({
 
 import { processJob, type JobWorkerConfig } from "./job-worker"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { createTwinJob, getTwinJob } from "@/lib/db/twin-jobs"
+import { cancelJob, createTwinJob, getTwinJob, pauseJob } from "@/lib/db/twin-jobs"
 import type { LlmClient } from "./distill/llm"
 import type { RunDistillResult } from "./distill/job-runner"
 
@@ -111,5 +111,61 @@ describe("processJob — ingest nameHints forwarding", () => {
     expect(mockRunIngest.mock.calls[0][0]).toMatchObject({ nameHints: ["Carol"] })
     const done = await getTwinJob(job.id)
     expect(done?.status).toBe("completed")
+  })
+})
+
+describe("processJob — cooperative running-job control", () => {
+  function waitForAbort(input: { signal: AbortSignal }): Promise<RunDistillResult> {
+    return new Promise((_, reject) => {
+      input.signal.addEventListener("abort", () => reject(input.signal.reason), { once: true })
+    })
+  }
+
+  it("pauses a running distill without completing or retrying it", async () => {
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    mockRunDistill.mockImplementation((input) => {
+      markStarted()
+      return waitForAbort(input)
+    })
+    const job = await createTwinJob({
+      twinId: "twin_alice",
+      kind: "distill",
+      sourceIds: [],
+      status: "running",
+    })
+    const processing = processJob(job.id, baseConfig)
+    await started
+    await pauseJob(job.id)
+    await processing
+    expect(await getTwinJob(job.id)).toMatchObject({ status: "paused", phase: "paused" })
+  })
+
+  it("cancels a running distill with the existing sentinel format", async () => {
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    mockRunDistill.mockImplementation((input) => {
+      markStarted()
+      return waitForAbort(input)
+    })
+    const job = await createTwinJob({
+      twinId: "twin_alice",
+      kind: "distill",
+      sourceIds: [],
+      status: "running",
+    })
+    const processing = processJob(job.id, baseConfig)
+    await started
+    await cancelJob(job.id, "user request")
+    await processing
+    expect(await getTwinJob(job.id)).toMatchObject({
+      status: "failed",
+      phase: "cancelled",
+      errorMessage: "[USER_CANCELLED] user request",
+    })
   })
 })

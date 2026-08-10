@@ -11,6 +11,7 @@
 
 import type { TwinJob, TwinJobKind, TwinJobStatus } from "@/types/twin"
 import { getDb } from "./schema"
+import { interruptActiveTwinJob } from "@/lib/twin/job-control"
 
 function newId(): string {
   return "twj_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -209,6 +210,7 @@ export async function requeueJob(id: string, nextAttemptAt: number): Promise<voi
  * resume later.
  */
 export async function pauseJob(id: string): Promise<void> {
+  interruptActiveTwinJob(id, "pause")
   await getDb().twinJobs.update(id, { status: "paused", phase: "paused" })
 }
 
@@ -231,6 +233,7 @@ export const USER_CANCEL_SENTINEL = "[USER_CANCELLED]"
  * the sentinel for the audit trail.
  */
 export async function cancelJob(id: string, reason?: string): Promise<void> {
+  interruptActiveTwinJob(id, "cancel")
   const message = reason ? `${USER_CANCEL_SENTINEL} ${reason}` : USER_CANCEL_SENTINEL
   await getDb().twinJobs.update(id, {
     status: "failed",

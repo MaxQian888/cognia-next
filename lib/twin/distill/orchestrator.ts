@@ -22,6 +22,7 @@
 
 import type {
   EntityRole,
+  DecisionRecord,
   Playbook,
   ProfileEntity,
   StyleSample,
@@ -40,6 +41,7 @@ import { runEvaluator } from "./agents/evaluator"
 import type { LlmClient } from "./llm"
 import { DEFAULT_AGENT_TIMEOUT_MS, withTimeout, withTimeoutOrFallback } from "./with-timeout"
 import { runWithConcurrency } from "@/lib/plugin/core/concurrency"
+import { throwIfTwinJobInterrupted } from "@/lib/twin/job-control"
 
 /**
  * Thrown when the load-bearing Synthesizer stage times out or fails to produce
@@ -71,6 +73,7 @@ export interface OrchestratorInput {
   onProgress?: (phase: string, progress: number) => Promise<void> | void
   /** Per-agent timeout. Defaults to DEFAULT_AGENT_TIMEOUT_MS (90 s). */
   agentTimeoutMs?: number
+  signal?: AbortSignal
 }
 
 export interface OrchestratorOutput {
@@ -80,6 +83,7 @@ export interface OrchestratorOutput {
   playbooks: Playbook[]
   /** Entities to upsert onto the profile (deduped at write time). */
   entities: ProfileEntity[]
+  decisions: DecisionRecord[]
   /** chunkId → entity name array; persisted as `twinChunks.entityTags`. */
   chunkEntityTags: Record<string, string[]>
   /** Merged voice summary (synthesizer's output overrides if non-empty). */
@@ -96,6 +100,7 @@ export interface OrchestratorOutput {
 
 export async function runOrchestrator(input: OrchestratorInput): Promise<OrchestratorOutput> {
   const { llm, profile, chunks, onProgress } = input
+  throwIfTwinJobInterrupted(input.signal)
   const agentTimeoutMs = input.agentTimeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS
   const partialFailures: Record<string, string> = {}
 
@@ -105,6 +110,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
 
   // ───── Stage 1: KnowledgeAgent (chunk-level, batched, bounded-concurrent) ─────
   const allEntities: ProfileEntity[] = []
+  const allDecisions: DecisionRecord[] = []
   const chunkEntityTags: Record<string, string[]> = {}
   const knowledgeBatches: { batch: TwinChunk[]; label: string }[] = []
   for (let i = 0; i < chunks.length; i += KNOWLEDGE_BATCH_SIZE) {
@@ -115,20 +121,29 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   }
   // Collect per-batch results by index so the merged order stays deterministic
   // regardless of completion order.
-  const batchResults: { entities: ProfileEntity[]; perChunk: Record<string, string[]> }[] =
-    new Array(knowledgeBatches.length)
+  const batchResults: {
+    entities: ProfileEntity[]
+    decisions: DecisionRecord[]
+    perChunk: Record<string, string[]>
+  }[] = new Array(knowledgeBatches.length)
   let processedChunks = 0
   await runWithConcurrency(knowledgeBatches, KNOWLEDGE_CONCURRENCY, async (b, idx) => {
+    throwIfTwinJobInterrupted(input.signal)
     const { value } = await withTimeoutOrFallback(
       () => runKnowledgeAgent(llm, { chunks: b.batch }),
       b.label,
       {
         timeoutMs: agentTimeoutMs,
-        fallback: { entities: [] as ProfileEntity[], perChunk: {} as Record<string, string[]> },
+        fallback: {
+          entities: [] as ProfileEntity[],
+          decisions: [] as DecisionRecord[],
+          perChunk: {} as Record<string, string[]>,
+        },
         onError: recordFailure, // captured into partialFailures
       }
     )
     batchResults[idx] = value
+    throwIfTwinJobInterrupted(input.signal)
     processedChunks += b.batch.length
     if (onProgress) {
       await onProgress("knowledge-agent", processedChunks / chunks.length / 5)
@@ -137,9 +152,11 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   for (const r of batchResults) {
     if (!r) continue
     allEntities.push(...r.entities)
+    allDecisions.push(...r.decisions)
     Object.assign(chunkEntityTags, r.perChunk)
   }
   await onProgress?.("knowledge-agent", 0.2)
+  throwIfTwinJobInterrupted(input.signal)
 
   // ───── Stage 1.5: EntityMergeAgent (cross-batch alias folding) ─────
   // Knowledge batches see different name variants in different windows
@@ -160,6 +177,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       onError: recordFailure,
     }
   )
+  throwIfTwinJobInterrupted(input.signal)
   const mergedEntities = mergeResult.value.merged
   // Build a name → canonical-name map (lowercased keys) so we can remap
   // chunkEntityTags. Every alias on the merged entity points back to its
@@ -197,6 +215,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       onError: recordFailure,
     }),
   ])
+  throwIfTwinJobInterrupted(input.signal)
   await onProgress?.("style-agent", 0.4)
   await onProgress?.("playbook-agent", 0.6)
 
@@ -209,6 +228,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     styleSamples: [...profile.styleSamples, ...styleResult.value.samples],
     playbooks: [...profile.playbooks, ...playbookResult.value.playbooks],
     entities: dedupeEntitiesByName([...profile.entities, ...mergedEntities]),
+    decisions: [...profile.decisions, ...allDecisions],
     updatedAt: Date.now(),
   }
   const recent = chunks.slice(-30)
@@ -223,8 +243,10 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       "synthesizer"
     )
   } catch (err) {
+    throwIfTwinJobInterrupted(input.signal)
     throw new SynthesizerError(err instanceof Error ? err.message : String(err), err)
   }
+  throwIfTwinJobInterrupted(input.signal)
   await onProgress?.("synthesizer", 0.8)
 
   // ───── Stage 5: Evaluator (best-effort) ─────
@@ -247,6 +269,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       onError: recordFailure,
     }
   )
+  throwIfTwinJobInterrupted(input.signal)
   await onProgress?.("evaluator", 1.0)
 
   const usage = llm.getUsageSnapshot?.() ?? { totalTokens: 0 }
@@ -255,6 +278,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     styleSamples: styleResult.value.samples,
     playbooks: playbookResult.value.playbooks,
     entities: mergedEntities,
+    decisions: allDecisions,
     chunkEntityTags: mergedTags,
     voiceSummary: synthResult.voiceSummary,
     synthesizedDrafts: synthResult.drafts,

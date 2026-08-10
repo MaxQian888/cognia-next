@@ -6,6 +6,10 @@ import React from "react"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+jest.mock("@/lib/ai/eval/twin-benchmark", () => ({
+  createTwinBenchmark: jest.fn(async () => ({ datasetId: "dataset-1", caseCount: 3 })),
+}))
+
 // Radix Tabs needs pointer / scroll APIs that jsdom doesn't expose; stub it
 // with a context-backed shim that mirrors the value / onValueChange contract.
 jest.mock("@/components/ui/tabs", () => {
@@ -50,6 +54,7 @@ jest.mock("@/components/ui/tabs", () => {
 })
 
 import { TwinPersonaTab } from "./twin-persona-tab"
+import { createTwinBenchmark } from "@/lib/ai/eval/twin-benchmark"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { addEntity, appendPlaybooks, appendStyleSamples } from "@/lib/db/twin-profile"
 import {
@@ -91,6 +96,12 @@ describe("TwinPersonaTab", () => {
     await waitFor(() => expect(screen.getByTestId("tabpanel-playbooks")).toBeTruthy())
     await userEvent.click(screen.getByTestId("tab-style"))
     await waitFor(() => expect(screen.getByTestId("tabpanel-style")).toBeTruthy())
+  })
+
+  it("creates an editable Eval benchmark from the current Twin", async () => {
+    render(<TwinPersonaTab twinId="twin_empty" />)
+    await userEvent.click(screen.getByTestId("generate-twin-benchmark"))
+    await waitFor(() => expect(createTwinBenchmark).toHaveBeenCalledWith("twin_empty"))
   })
 
   it("reflects live counts after entities + playbooks + styleSamples land", async () => {

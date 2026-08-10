@@ -5,6 +5,7 @@
  */
 
 import { extractJson, type LlmClient } from "../llm"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { applyTemplate, SYNTHESIZER_PROMPT } from "../prompts"
 import type { TwinChunk, TwinDraftPayload, TwinProfile } from "@/types/twin"
 
@@ -78,6 +79,21 @@ function formatProfileForPrompt(profile: TwinProfile): string {
           .join("\n")
     )
   }
+  if (profile.decisions.length > 0) {
+    const decisions = [...profile.decisions]
+      .sort(
+        (a, b) =>
+          Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) ||
+          (b.timestamp ?? 0) - (a.timestamp ?? 0)
+      )
+      .slice(0, 10)
+    parts.push(
+      `Decisions (${profile.decisions.length}):\n` +
+        decisions
+          .map((decision) => `- ${decision.context} → ${decision.choice}: ${decision.rationale}`)
+          .join("\n")
+    )
+  }
   return parts.join("\n\n")
 }
 
@@ -96,6 +112,10 @@ export async function runSynthesizer(
     profile: formatProfileForPrompt(input.profile),
     chunks: formatChunksForPrompt(input.recentChunks),
   })
+
+  if (!hasNoLeakingPii(prompt)) {
+    throw new Error("Synthesizer prompt contains unredacted PII")
+  }
 
   const response = await llm.complete(prompt, { temperature: 0.2, maxTokens: 6000 })
   const parsed = extractJson<RawPayload>(response)

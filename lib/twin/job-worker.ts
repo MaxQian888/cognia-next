@@ -37,6 +37,11 @@ import { claimNextQueuedJob } from "@/lib/db/twin-jobs"
 import { runDistillJob } from "./distill/job-runner"
 import type { LlmClient } from "./distill/llm"
 import { backoffMs, formatDeadLetter, shouldRetry } from "./job-retry"
+import {
+  isTwinJobInterrupted,
+  registerActiveTwinJob,
+  throwIfTwinJobInterrupted,
+} from "./job-control"
 
 const log = loggers.scheduler
 
@@ -114,10 +119,23 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
   }
   if (job.status === "completed" || job.status === "paused") return
 
+  const active = registerActiveTwinJob(job.id)
+  try {
+    await processClaimedJob(job, config, active.signal)
+  } finally {
+    active.release()
+  }
+}
+
+async function processClaimedJob(
+  job: TwinJob,
+  config: JobWorkerConfig,
+  signal: AbortSignal
+): Promise<void> {
   if (job.kind === "ingest") {
     const store = resolveStore(config)
-    const sources = await loadSourcesForJob(job, config.sourceLoader)
     try {
+      const sources = await loadSourcesForJob(job, config.sourceLoader, signal)
       const result = await runIngestJob({
         job,
         rawSources: sources,
@@ -125,6 +143,7 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
         vectorBackend: config.vectorBackend,
         store,
         nameHints: config.nameHints,
+        signal,
       })
       // When every source in the batch failed, upgrade to a job-level failure
       // so the workbench surfaces the run as broken instead of "completed
@@ -134,6 +153,7 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
         await handleJobFailure(job, `all-sources-failed: ${summary}`, config)
         return
       }
+      throwIfTwinJobInterrupted(signal)
       await completeJob(job.id, {
         llmTokensUsed: 0,
         embeddingTokensUsed: result.totalEmbeddingTokens,
@@ -146,6 +166,7 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
         failedSources: result.failureSummary.failureCount,
       })
     } catch (err) {
+      if (isTwinJobInterrupted(err) || signal.aborted) return
       const message = err instanceof Error ? err.message : String(err)
       log.error("twin job-worker: ingest failed", err)
       await handleJobFailure(job, message, config)
@@ -162,13 +183,15 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
     try {
       const result = await runDistillJob({
         job,
-        llm: config.llm,
+        llm: withJobSignal(config.llm, signal),
         maxChunks: config.distillMaxChunks,
         // Forward the worker's embedding config so distill can populate
         // `StyleSample.embedding` inline — runtime few-shot then scores
         // by cosine instead of the token-overlap fallback.
         embedding: config.embedding,
+        signal,
       })
+      throwIfTwinJobInterrupted(signal)
       await completeJob(job.id, {
         outputDraftIds: result.draftIds,
         llmTokensUsed: result.llmTokensUsed,
@@ -189,6 +212,7 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
         llmTokens: result.llmTokensUsed,
       })
     } catch (err) {
+      if (isTwinJobInterrupted(err) || signal.aborted) return
       const message = err instanceof Error ? err.message : String(err)
       log.error("twin job-worker: distill failed", err)
       await handleJobFailure(job, message, config)
@@ -197,6 +221,19 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
   }
 
   await failJob(job.id, `Worker received unknown job kind: ${String(job.kind)}`)
+}
+
+function withJobSignal(llm: LlmClient, signal: AbortSignal): LlmClient {
+  return {
+    complete: (prompt, options) => llm.complete(prompt, { ...options, abortSignal: signal }),
+    ...(llm.stream
+      ? {
+          stream: (prompt: string, options?: Parameters<NonNullable<LlmClient["stream"]>>[1]) =>
+            llm.stream!(prompt, { ...options, abortSignal: signal }),
+        }
+      : {}),
+    ...(llm.getUsageSnapshot ? { getUsageSnapshot: () => llm.getUsageSnapshot!() } : {}),
+  }
 }
 
 function summarizeFailures(
@@ -240,7 +277,11 @@ async function handleJobFailure(
   log.error("twin job-worker: dead-lettered", new Error(deadLetter))
 }
 
-async function loadSourcesForJob(job: TwinJob, loader: SourceLoader): Promise<RawSource[]> {
+async function loadSourcesForJob(
+  job: TwinJob,
+  loader: SourceLoader,
+  signal?: AbortSignal
+): Promise<RawSource[]> {
   // The job stores the sources it covers as `sourceIds`; for an "all-twin"
   // ingest the executor passes an empty array and the worker grabs every
   // pending source for the twin.
@@ -249,7 +290,9 @@ async function loadSourcesForJob(job: TwinJob, loader: SourceLoader): Promise<Ra
   const targets = ids.size === 0 ? allForTwin : allForTwin.filter((row) => ids.has(row.id))
   const raws: RawSource[] = []
   for (const target of targets) {
+    throwIfTwinJobInterrupted(signal)
     raws.push(await loader(target))
+    throwIfTwinJobInterrupted(signal)
   }
   return raws
 }

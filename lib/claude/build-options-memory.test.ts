@@ -181,6 +181,18 @@ describe("resolveSendOptions memory injection", () => {
     })
   })
 
+  it("recalls from the shared Twin namespace when there is no external delegation target", async () => {
+    const loadCandidates = jest.fn(async () => [])
+    await resolveSendOptions({
+      character: { ...baseCharacter, twinId: "alice" },
+      memoryDeps: deps({ loadCandidates }),
+      memoryUserMessage: "queue",
+    })
+    expect(loadCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ characterId: "char_1", agentId: "twin:alice" })
+    )
+  })
+
   it("appends a recall section and stamps opts.memoryContext", async () => {
     const opts = await resolveSendOptions({
       character: baseCharacter,

@@ -52,37 +52,29 @@ jest.mock("./twin-draft-card", () => ({
   ),
 }))
 
-jest.mock("@/lib/db/characters", () => ({
-  createCharacter: jest.fn().mockResolvedValue({ id: "new-char" }),
-}))
-jest.mock("@/lib/db/skills", () => ({
-  createSkill: jest.fn().mockResolvedValue({ id: "new-skill" }),
-}))
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("@/lib/db/twin-drafts", () => ({
   listTwinDraftsByTwinAndStatus: jest.fn(),
-  markTwinDraftAccepted: jest.fn().mockResolvedValue(undefined),
-  markTwinDraftRejected: jest.fn().mockResolvedValue(undefined),
-}))
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({ twinDrafts: { where: jest.fn() } }),
 }))
 jest.mock("sonner", () => ({
   toast: { success: jest.fn(), info: jest.fn(), error: jest.fn() },
 }))
 
+const mockRuntimeSnapshot = {
+  target: null as null | { id: string; kind: "companion" },
+  host: undefined as undefined | { operations: string[] },
+}
+jest.mock("@/hooks/use-runtime-snapshot", () => ({
+  useRuntimeSnapshot: () => mockRuntimeSnapshot,
+}))
+
 import { useLiveQuery } from "dexie-react-hooks"
-import { createCharacter } from "@/lib/db/characters"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import { markTwinDraftAccepted, markTwinDraftRejected } from "@/lib/db/twin-drafts"
 
 const useLiveQueryMock = useLiveQuery as jest.Mock
-const createCharacterMock = createCharacter as jest.Mock
 const enqueueMock = enqueue as jest.Mock
-const markAcceptedMock = markTwinDraftAccepted as jest.Mock
-const markRejectedMock = markTwinDraftRejected as jest.Mock
 
 const mkDraft = (p: Partial<TwinDraft> = {}): TwinDraft =>
   ({
@@ -99,52 +91,66 @@ const mkDraft = (p: Partial<TwinDraft> = {}): TwinDraft =>
 
 beforeEach(() => {
   useLiveQueryMock.mockReset()
-  createCharacterMock.mockClear()
   enqueueMock.mockClear()
-  markAcceptedMock.mockClear()
-  markRejectedMock.mockClear()
+  mockRuntimeSnapshot.target = null
+  mockRuntimeSnapshot.host = undefined
 })
 
 describe("TwinDraftsPanel", () => {
   it("renders the panel container with no cards when empty", () => {
     useLiveQueryMock.mockReturnValue([])
-    render(<TwinDraftsPanel />)
+    render(<TwinDraftsPanel twinId="twin-1" />)
     expect(screen.getByTestId("twin-drafts-panel")).toBeInTheDocument()
     expect(screen.queryByTestId(/^draft-/)).not.toBeInTheDocument()
   })
 
   it("renders a card per pending draft", () => {
     useLiveQueryMock.mockReturnValue([mkDraft({ id: "d1" }), mkDraft({ id: "d2" })])
-    render(<TwinDraftsPanel />)
+    render(<TwinDraftsPanel twinId="twin-1" />)
     expect(screen.getByTestId("draft-d1")).toBeInTheDocument()
     expect(screen.getByTestId("draft-d2")).toBeInTheDocument()
   })
 
-  it("accepts a character draft: persists it, marks accepted, enqueues a mirror", async () => {
+  it("queues a desktop-owned character draft acceptance", async () => {
     useLiveQueryMock.mockReturnValue([mkDraft({ id: "d1", kind: "character" })])
     const user = userEvent.setup()
-    render(<TwinDraftsPanel />)
+    render(<TwinDraftsPanel twinId="twin-1" />)
     await user.click(screen.getByTestId("action-accept"))
-    await waitFor(() => expect(createCharacterMock).toHaveBeenCalled())
-    expect(markAcceptedMock).toHaveBeenCalledWith("d1", "new-char")
-    expect(enqueueMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command: "twin_ingest_source",
-        payload: expect.objectContaining({ kind: "twin_draft_accept", draftId: "d1" }),
-      })
+    await waitFor(() =>
+      expect(enqueueMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: "twin_draft_review",
+          payload: { twinId: "twin-1", draftId: "d1", action: "accept" },
+        })
+      )
     )
   })
 
-  it("rejects a draft: marks rejected and enqueues a mirror", async () => {
+  it("queues a desktop-owned draft rejection", async () => {
     useLiveQueryMock.mockReturnValue([mkDraft({ id: "d1" })])
     const user = userEvent.setup()
-    render(<TwinDraftsPanel />)
+    render(<TwinDraftsPanel twinId="twin-1" />)
     await user.click(screen.getByTestId("action-reject"))
-    await waitFor(() => expect(markRejectedMock).toHaveBeenCalledWith("d1"))
-    expect(enqueueMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ kind: "twin_draft_reject", draftId: "d1" }),
-      })
+    await waitFor(() =>
+      expect(enqueueMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: "twin_draft_review",
+          payload: { twinId: "twin-1", draftId: "d1", action: "reject" },
+        })
+      )
     )
+  })
+
+  it("disables review and prompts for an upgrade on an older Host", () => {
+    mockRuntimeSnapshot.target = { id: "old-host", kind: "companion" }
+    mockRuntimeSnapshot.host = { operations: ["twin_ingest_source"] }
+    useLiveQueryMock.mockReturnValue([mkDraft({ id: "d1" })])
+
+    render(<TwinDraftsPanel twinId="twin-1" />)
+
+    expect(screen.getByRole("alert")).toHaveTextContent("upgradeRequired")
+    expect(screen.queryByTestId("action-accept")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("action-reject")).not.toBeInTheDocument()
+    expect(enqueueMock).not.toHaveBeenCalled()
   })
 })

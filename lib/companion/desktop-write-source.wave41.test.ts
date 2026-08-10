@@ -44,6 +44,14 @@ jest.mock("@/lib/db/twin-jobs", () => ({
   resumeJob: jest.fn(async () => undefined),
   retryDeadLetterJob: jest.fn(async () => undefined),
 }))
+jest.mock("@/lib/twin/lifecycle", () => ({
+  removeTwin: jest.fn(async () => ({
+    ok: true,
+    removed: true,
+    value: { sources: 2, chunks: 5 },
+  })),
+  removeTwinSource: jest.fn(async () => ({ ok: true, removed: true })),
+}))
 jest.mock("@/lib/db/conversation-overrides", () => ({
   upsertByConversationKey: jest.fn(async (input: Record<string, unknown>) => ({
     id: "co1",

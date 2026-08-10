@@ -66,8 +66,8 @@ Chunks (each prefixed with its id in square brackets):
 
 export const KNOWLEDGE_AGENT_PROMPT = `${SHARED_PREAMBLE}
 
-Your job is to extract **named entities** mentioned in the chunks: people,
-teams, projects, systems, abstract concepts. Merge aliases — if multiple
+Your job is to extract **named entities and decisions** mentioned in the chunks.
+Entities include people, teams, projects, systems, and abstract concepts. Merge aliases — if multiple
 chunks call the same project "X-service", "x-svc", and "the X service",
 collapse them into one record with all aliases.
 
@@ -84,6 +84,15 @@ Schema:
   ],
   "perChunk": [
     { "chunkId": "...", "entityNames": ["X-service", "alice"] }
+  ],
+  "decisions": [
+    {
+      "context": "the situation or tradeoff",
+      "choice": "what the user chose",
+      "rationale": "why they chose it",
+      "sourceChunkIds": ["chunkId1"],
+      "timestamp": 1735689600000
+    }
   ]
 }
 

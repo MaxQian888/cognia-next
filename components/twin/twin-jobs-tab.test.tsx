@@ -148,6 +148,32 @@ describe("TwinJobsTab", () => {
     })
   })
 
+  it("pauses and resumes an active job", async () => {
+    await seedJob({ id: "job_control", status: "running", phase: "embedding" })
+    render(<TwinJobsTab twinId="twin_alice" />)
+    await userEvent.click(await screen.findByTestId("twin-job-pause-job_control"))
+    await waitFor(async () => {
+      expect(await getDb().twinJobs.get("job_control")).toMatchObject({ status: "paused" })
+    })
+    await userEvent.click(await screen.findByTestId("twin-job-resume-job_control"))
+    await waitFor(async () => {
+      expect(await getDb().twinJobs.get("job_control")).toMatchObject({ status: "queued" })
+    })
+  })
+
+  it("cancels an active job with a visible cancellation state", async () => {
+    await seedJob({ id: "job_cancel", status: "queued" })
+    render(<TwinJobsTab twinId="twin_alice" />)
+    await userEvent.click(await screen.findByTestId("twin-job-cancel-job_cancel"))
+    await waitFor(async () => {
+      expect(await getDb().twinJobs.get("job_cancel")).toMatchObject({
+        status: "failed",
+        phase: "cancelled",
+      })
+    })
+    expect(await screen.findByText(/USER_CANCELLED/)).toBeInTheDocument()
+  })
+
   it("queue-ingest button picks up pending sources", async () => {
     await createTwinSource({
       twinId: "twin_alice",

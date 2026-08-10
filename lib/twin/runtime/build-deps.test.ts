@@ -1,6 +1,6 @@
 import type { TwinRuntimeSettings } from "@/types/twin"
 import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
-import { tryBuildTwinDeps } from "./build-deps"
+import { buildTwinRuntimeAdapters, tryBuildTwinDeps } from "./build-deps"
 
 jest.mock("@/lib/db/twin-runtime-settings", () => ({
   getTwinRuntimeSettings: jest.fn(),
@@ -248,5 +248,49 @@ describe("tryBuildTwinDeps", () => {
   it("returns undefined on any thrown error", async () => {
     getTwinRuntimeSettings.mockRejectedValue(new Error("boom"))
     expect(await tryBuildTwinDeps()).toBeUndefined()
+  })
+})
+
+describe("buildTwinRuntimeAdapters", () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it("reports disabled unless a cleanup caller explicitly overrides that gate", async () => {
+    const disabled = settings({
+      workerEnabled: false,
+      storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } },
+    })
+
+    await expect(buildTwinRuntimeAdapters(disabled)).resolves.toEqual({
+      ready: false,
+      reason: "disabled",
+    })
+    await expect(
+      buildTwinRuntimeAdapters(disabled, { requireEnabled: false })
+    ).resolves.toMatchObject({ ready: true, adapters: { vectorBackend: "qdrant" } })
+  })
+
+  it("returns explicit readiness reasons for credentials, storage, and adapter failures", async () => {
+    await expect(
+      buildTwinRuntimeAdapters(
+        settings({
+          embedding: { ...DEFAULT_TWIN_RUNTIME_SETTINGS.embedding, apiKey: "" },
+        })
+      )
+    ).resolves.toMatchObject({ ready: false, reason: "missing-embedding-credentials" })
+
+    await expect(
+      buildTwinRuntimeAdapters(settings({ storage: { vectorBackend: "qdrant" } }))
+    ).resolves.toMatchObject({ ready: false, reason: "incomplete-storage" })
+
+    createVectorStore.mockImplementationOnce(() => {
+      throw new Error("native unavailable")
+    })
+    await expect(
+      buildTwinRuntimeAdapters(settings({ storage: { vectorBackend: "native" } }))
+    ).resolves.toMatchObject({
+      ready: false,
+      reason: "adapter-unavailable",
+      error: "native unavailable",
+    })
   })
 })

@@ -18,6 +18,11 @@ jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
 // could use the real impl with fake-indexeddb, but stubbing keeps the
 // test focused on the dispatch contract.
 jest.mock("@/lib/twin/ingest", () => ({
+  registerTwinSource: jest.fn(async (draft: { twinId: string }) => ({
+    source: { id: "src_test_001", twinId: draft.twinId },
+    created: true,
+    revived: false,
+  })),
   enqueueIngestJob: jest.fn(async (draft: { twinId: string }) => ({
     id: "twj_test_001",
     twinId: draft.twinId,
@@ -178,6 +183,20 @@ describe("dispatchCommand: connector_send", () => {
         segments: [{ type: "image", text: "" }],
       })
     ).rejects.toThrow(/no text content/)
+  })
+})
+
+describe("dispatchCommand: Twin profile PII gate", () => {
+  it("rejects unsafe remote profile text before persistence", async () => {
+    await expect(
+      dispatchCommand("twin_profile_update", {
+        twinId: "twin-1",
+        op: "setVoiceSummary",
+        voiceSummary: "Contact alice@example.com",
+      })
+    ).rejects.toThrow("unredacted PII")
+
+    expect(await getDb().twinProfile.get("twin-1")).toBeUndefined()
   })
 })
 
@@ -345,12 +364,12 @@ describe("dispatchCommand: workflow approvals", () => {
   afterEach(async () => {
     const { __resetApprovalRegistryForTesting } =
       await import("@/lib/workflow/runtime/approval-registry")
-    __resetApprovalRegistryForTesting()
+    await __resetApprovalRegistryForTesting()
   })
 
   it("lists pending approvals oldest first", async () => {
     const { registerPendingApproval } = await import("@/lib/workflow/runtime/approval-registry")
-    registerPendingApproval({
+    await registerPendingApproval({
       approvalId: "apr_1",
       runId: "run_1",
       workflowId: "wf_1",
@@ -365,10 +384,9 @@ describe("dispatchCommand: workflow approvals", () => {
   })
 
   it("resolves a pending approval with the caller device identity", async () => {
-    const { registerPendingApproval, approvalWakeKey } =
-      await import("@/lib/workflow/runtime/approval-registry")
-    const { subscribeWake } = await import("@/lib/workflow/runtime/wake-bus")
-    registerPendingApproval({
+    const { registerPendingApproval } = await import("@/lib/workflow/runtime/approval-registry")
+    const { getWorkflowWaitpoint } = await import("@/lib/db/workflow-waitpoints")
+    await registerPendingApproval({
       approvalId: "apr_2",
       runId: "run_2",
       workflowId: "wf_2",
@@ -376,15 +394,15 @@ describe("dispatchCommand: workflow approvals", () => {
       title: "Ship?",
       requestedAt: 5,
     })
-    const wait = subscribeWake(approvalWakeKey("run_2", "n_gate"))
     const result = await dispatchCommand("workflow_approval_respond", {
       approvalId: "apr_2",
       decision: "approved",
       callerDeviceId: "dev-9",
     })
     expect(result).toEqual({ ok: true })
-    await expect(wait).resolves.toMatchObject({
-      data: { decision: "approved", respondedBy: "device:dev-9" },
+    await expect(getWorkflowWaitpoint("apr_2")).resolves.toMatchObject({
+      status: "resolved",
+      resolution: { outcome: "approved", respondedBy: "device:dev-9" },
     })
   })
 
@@ -524,7 +542,7 @@ describe("dispatchCommand: twin_ingest_source", () => {
     expect(result.jobId).toBe("twj_test_001")
     expect(enqueueIngestJob).toHaveBeenCalledTimes(1)
     expect(enqueueIngestJob).toHaveBeenCalledWith(
-      expect.objectContaining({ twinId: "default", sourceIds: [] })
+      expect.objectContaining({ twinId: "default", sourceIds: ["src_test_001"] })
     )
   })
 

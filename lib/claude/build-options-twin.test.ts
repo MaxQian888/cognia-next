@@ -12,6 +12,12 @@ jest.mock("@cognia/provider-embedding/embedding", () => ({
   generateEmbeddings: jest.fn(async () => ({ embeddings: [], usage: undefined })),
 }))
 
+const mockHasNoLeakingPiiDeep = jest.fn(() => true)
+jest.mock("@cognia/redact", () => ({
+  ...jest.requireActual("@cognia/redact"),
+  hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
+}))
+
 import { resolveSendOptions } from "./build-options"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { readTwinInjectLog, __resetTwinInjectLog } from "@/lib/twin/runtime/inject-log"
@@ -24,6 +30,8 @@ beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   await dbFixture.restore()
   __resetTwinInjectLog()
+  mockHasNoLeakingPiiDeep.mockReset()
+  mockHasNoLeakingPiiDeep.mockReturnValue(true)
 })
 
 const baseCharacter: Character = {
@@ -135,6 +143,23 @@ describe("resolveSendOptions twin injection", () => {
     })
     expect(opts.systemPrompt).toContain("BASE_SYSTEM_PROMPT")
     expect(opts.systemPrompt).toContain("You are Twin Alice.")
+  })
+
+  it("suppresses Twin context when the assembled Twin prompt fails the PII gate", async () => {
+    mockHasNoLeakingPiiDeep.mockReturnValueOnce(false)
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      twinDeps: fakeDeps,
+      twinUserMessage: "what would Alice do?",
+    })
+
+    expect(opts.systemPrompt).toBe("BASE_SYSTEM_PROMPT")
+    expect(opts.twinContext).toBeUndefined()
+    expect(readTwinInjectLog()[0]).toMatchObject({
+      applied: false,
+      degraded: true,
+      degradedReason: "prompt-pii-blocked",
+    })
   })
 
   it("falls back to baseSystem if the twin runtime throws", async () => {

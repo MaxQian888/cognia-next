@@ -60,10 +60,10 @@ import {
   archiveTwin,
   cloneTwin,
   createTwin,
-  deleteTwin,
   renameTwin,
   type DeleteTwinResult,
 } from "@/lib/db/twins"
+import { removeTwin } from "@/lib/twin/lifecycle"
 
 export interface TwinSelectorProps {
   twins: Twin[]
@@ -197,8 +197,10 @@ export const TwinSelector = memo(function TwinSelector({
     setModal((prev) => ({ ...prev, busy: true, error: null }))
     try {
       const deletedName = modal.target.name
-      const result = await deleteTwin(modal.target.id)
-      onAfterDelete?.(modal.target.id, result, deletedName)
+      const lifecycle = await removeTwin(modal.target.id)
+      if (!lifecycle.ok) throw new Error(`${lifecycle.stage}: ${lifecycle.error}`)
+      if (!lifecycle.value) throw new Error(t("deleteCascadeMissing"))
+      onAfterDelete?.(modal.target.id, lifecycle.value, deletedName)
       // If we deleted the active one, fall back to the next visible twin.
       if (modal.target.id === activeTwinId) {
         const next = twins.find((tw) => tw.id !== modal.target!.id && !tw.archived)
@@ -208,7 +210,7 @@ export const TwinSelector = memo(function TwinSelector({
     } catch (err) {
       setModal((prev) => ({ ...prev, busy: false, error: String(err) }))
     }
-  }, [modal.target, activeTwinId, twins, onAfterDelete, onSelect, close])
+  }, [modal.target, activeTwinId, twins, onAfterDelete, onSelect, close, t])
 
   const visibleTwins = includeArchived ? twins : twins.filter((tw) => !tw.archived)
   const archivedTwins = includeArchived ? [] : twins.filter((tw) => tw.archived)

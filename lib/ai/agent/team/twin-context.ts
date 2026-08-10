@@ -187,7 +187,7 @@ export async function applyTeammateTwinContext(
       deps: input.twinDeps as unknown as ApplyTwinContextDeps,
     })
     if (!result.applied) {
-      recordTwinInject({
+      await recordTwinInject({
         ts,
         twinId: input.twinId,
         source: input.source,
@@ -205,7 +205,7 @@ export async function applyTeammateTwinContext(
       }
     }
     const systemPrompt = result.applied.systemPrompt
-    recordTwinInject({
+    await recordTwinInject({
       ts,
       twinId: input.twinId,
       source: input.source,
@@ -215,6 +215,10 @@ export async function applyTeammateTwinContext(
       chunkCount: result.applied.metadata.retrievedChunkIds.length,
       styleSampleCount: result.applied.metadata.styleSampleIds.length,
       tokensApprox: estimateFallbackTokens(systemPrompt),
+      durationMs: Date.now() - ts,
+      chunkIds: result.retrievedChunks.map((chunk) => chunk.id),
+      chunkScores: result.retrievedChunks.map((chunk) => chunk.score),
+      styleSampleIds: result.selectedStyleSamples.map((sample) => sample.id),
     })
     return { systemPrompt, applied: true }
   } catch (err) {

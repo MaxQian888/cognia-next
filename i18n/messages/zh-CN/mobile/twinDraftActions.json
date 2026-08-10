@@ -4,5 +4,6 @@
   "queueAcceptLabel": "接受孪生草稿",
   "queueRejectLabel": "拒绝孪生草稿",
   "reject": "拒绝",
-  "rejected": "已拒绝"
+  "rejected": "已拒绝",
+  "upgradeRequired": "请升级已连接的 Host 后再审核数字孪生草稿。"
 }

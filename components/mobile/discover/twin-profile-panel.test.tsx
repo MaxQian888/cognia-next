@@ -79,7 +79,7 @@ describe("TwinProfilePanel", () => {
 
   it("defaults twinId to \"default\" when omitted", () => {
     callMock.mockReturnValue(new Promise(() => {}))
-    render(<TwinProfilePanel />)
+    render(<TwinProfilePanel twinId="default" />)
     expect(callMock).toHaveBeenCalledWith("twin_profile_get", { twinId: "default" })
   })
 

@@ -68,6 +68,9 @@ describe("runOrchestrator", () => {
         ],
         "perChunk": [
           { "chunkId": "c2", "entityNames": ["ProjectX"] }
+        ],
+        "decisions": [
+          { "context": "Choose the incident channel", "choice": "Slack", "rationale": "Fast coordination", "sourceChunkIds": ["c2"], "timestamp": 12 }
         ]
       }`,
       // Style response
@@ -125,6 +128,13 @@ describe("runOrchestrator", () => {
     expect(result.entities).toHaveLength(1)
     expect(result.entities[0].name).toBe("ProjectX")
     expect(result.chunkEntityTags["c2"]).toEqual(["ProjectX"])
+    expect(result.decisions).toEqual([
+      expect.objectContaining({
+        context: "Choose the incident channel",
+        choice: "Slack",
+        rationale: "Fast coordination",
+      }),
+    ])
     expect(result.synthesizedDrafts).toHaveLength(2)
     expect(result.evaluations["tmp_0"].qualityScore).toBe(0.8)
     expect(result.voiceSummary).toBe("Concise.")
@@ -149,6 +159,22 @@ describe("runOrchestrator", () => {
     expect(result.playbooks).toEqual([])
     expect(result.entities).toEqual([])
     expect(result.synthesizedDrafts).toEqual([])
+  })
+
+  it("honours a pre-aborted cooperative job signal before invoking an agent", async () => {
+    const controller = new AbortController()
+    controller.abort("pause")
+    const llm = queuedLlm([])
+
+    await expect(
+      runOrchestrator({
+        llm,
+        profile: emptyProfile(),
+        chunks: [makeChunk("c1")],
+        signal: controller.signal,
+      })
+    ).rejects.toThrow("interrupted")
+    expect(llm.complete).not.toHaveBeenCalled()
   })
 
   it("dedupes entities by lowercase name across knowledge batches", async () => {

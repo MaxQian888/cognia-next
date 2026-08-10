@@ -571,6 +571,7 @@
         "piiBlocked": "写入被拦截：值中包含 PII。",
         "readableBy": "可读成员",
         "readableByAll": "全部队友（留空）",
+        "removeTag": "移除 {tag}",
         "submit": "保存条目",
         "tags": "标签",
         "tagsPlaceholder": "输入标签后按回车",

@@ -8,9 +8,8 @@
  * twin injection (character.twinId triggers it automatically), this
  * panel is the user's only window into "did my twin actually get used?"
  *
- * In-memory only — entries clear on page reload by design (diagnostic
- * surface, not an audit log). The Connector audit log + Bridge audit
- * log are the persistent companions for compliance use cases.
+ * Restores safe historical entries from `agentTraces`; the ring buffer remains
+ * the low-latency subscription cache for new invocations.
  */
 
 import { useEffect, useState } from "react"
@@ -21,6 +20,7 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   readTwinInjectLog,
+  readPersistedTwinInjectLog,
   subscribeTwinInjectLog,
   type TwinInjectLogEntry,
 } from "@/lib/twin/runtime/inject-log"
@@ -31,16 +31,38 @@ export function TwinInjectLogCard({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.injectLog")
   const prefersReducedMotion = useReducedMotion()
   const [entries, setEntries] = useState<TwinInjectLogEntry[]>(() => readTwinInjectLog())
+  const [persisted, setPersisted] = useState<TwinInjectLogEntry[]>([])
 
   useEffect(() => {
-    return subscribeTwinInjectLog(() => {
+    let active = true
+    void readPersistedTwinInjectLog(twinId, VISIBLE)
+      .then((history) => {
+        if (active) setPersisted(history)
+      })
+      .catch(() => {
+        // The ring buffer still provides live diagnostics if Dexie is unavailable.
+      })
+    const unsubscribe = subscribeTwinInjectLog(() => {
       // Refresh the snapshot — cheaper than appending one row given the
       // small buffer size and Radix's table cell churn cost.
       setEntries(readTwinInjectLog())
     })
-  }, [])
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [twinId])
 
-  const filtered = entries.filter((e) => e.twinId === twinId).slice(0, VISIBLE)
+  const filtered = [...entries, ...persisted]
+    .filter((entry) => entry.twinId === twinId)
+    .filter(
+      (entry, index, all) =>
+        all.findIndex((candidate) =>
+          entry.id && candidate.id ? candidate.id === entry.id : candidate.ts === entry.ts
+        ) === index
+    )
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, VISIBLE)
 
   return (
     <Card className="flex flex-col gap-2 p-4" data-testid="twin-inject-log-card">

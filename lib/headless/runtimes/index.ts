@@ -28,6 +28,7 @@
  *   injected host filesystem and the server secret-store auto-key (T-A6).
  * - `plugin-runtime` — boots the canonical Node PluginManager and serially
  *   reconciles native install/restore/uninstall events from cognia-server.
+ * - `twin-job-worker` — drains enabled Twin ingest/distill jobs in a headless brain.
  *
  * ## Deliberately NOT registered (desktop/mobile-UI-only provider effects)
  *
@@ -67,6 +68,7 @@ import "./backup-scheduler"
 import "./plugin-runtime"
 import "./managed-ide-broker"
 import "./memory-job-worker"
+import "./twin-job-worker"
 import "./integration-runtime"
 
 export {}

@@ -107,7 +107,10 @@ export interface DeleteTwinResult {
   detachedCharacterIds: string[]
 }
 
-export async function deleteTwin(id: string): Promise<DeleteTwinResult> {
+export async function deleteTwin(
+  id: string,
+  options: { skipExternalCleanup?: boolean } = {}
+): Promise<DeleteTwinResult> {
   const db = getDb()
   const result: DeleteTwinResult = {
     sources: 0,
@@ -155,6 +158,8 @@ export async function deleteTwin(id: string): Promise<DeleteTwinResult> {
       await db.twins.delete(id)
     }
   )
+
+  if (options.skipExternalCleanup) return result
 
   // Resources that live OUTSIDE the twin Dexie DB can't be part of the
   // transaction above, so clean them up after it commits. Both are best-effort

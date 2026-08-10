@@ -50,14 +50,33 @@ it("keeps main startup light when no optional background work is configured", as
   expect(capabilities).toEqual([])
 })
 
-it("boots knowledge agents for queued Twin work or an enabled Twin worker", async () => {
+it.each(["queued", "running"])(
+  "boots knowledge agents for %s Twin work even when the worker setting is disabled",
+  async (status) => {
+    const capabilities = await probeConfiguredBootCapabilities({
+      getDatabase: () =>
+        ({
+          plugins: { toArray: async () => [] },
+          adapterInstances: { toArray: async () => [] },
+          memoryJobs: { toArray: async () => [] },
+          twinJobs: { toArray: async () => [{ status }] },
+        }) as never,
+      listScheduledTasks: async () => [],
+      getTwinRuntimeSettings: async () => ({ workerEnabled: false }),
+    })
+
+    expect(capabilities).toEqual(["knowledge-agents"])
+  }
+)
+
+it("boots knowledge agents for an enabled Twin worker without queued jobs", async () => {
   const capabilities = await probeConfiguredBootCapabilities({
     getDatabase: () =>
       ({
         plugins: { toArray: async () => [] },
         adapterInstances: { toArray: async () => [] },
         memoryJobs: { toArray: async () => [] },
-        twinJobs: { toArray: async () => [{ status: "queued" }] },
+        twinJobs: { toArray: async () => [] },
       }) as never,
     listScheduledTasks: async () => [],
     getTwinRuntimeSettings: async () => ({ workerEnabled: true }),

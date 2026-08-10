@@ -6,7 +6,39 @@
  * nested in an array/object slipped through.
  */
 
-import { sanitizeDraftPayload } from "./job-runner"
+const mockListTwinChunksByTwin = jest.fn()
+const mockBulkCreateTwinDrafts = jest.fn()
+const mockUpdateJobProgress = jest.fn()
+const mockEnsureTwinProfile = jest.fn()
+const mockUpsertStyleSamples = jest.fn()
+const mockUpsertPlaybooks = jest.fn()
+const mockUpsertEntities = jest.fn()
+const mockUpsertDecisions = jest.fn()
+const mockRunOrchestrator = jest.fn()
+
+jest.mock("@/lib/db/twin-chunks", () => ({
+  listTwinChunksByTwin: (...args: unknown[]) => mockListTwinChunksByTwin(...args),
+  updateTwinChunk: jest.fn(),
+}))
+jest.mock("@/lib/db/twin-drafts", () => ({
+  bulkCreateTwinDrafts: (...args: unknown[]) => mockBulkCreateTwinDrafts(...args),
+}))
+jest.mock("@/lib/db/twin-jobs", () => ({
+  updateJobProgress: (...args: unknown[]) => mockUpdateJobProgress(...args),
+}))
+jest.mock("@/lib/db/twin-profile", () => ({
+  ensureTwinProfile: (...args: unknown[]) => mockEnsureTwinProfile(...args),
+  upsertStyleSamples: (...args: unknown[]) => mockUpsertStyleSamples(...args),
+  upsertPlaybooks: (...args: unknown[]) => mockUpsertPlaybooks(...args),
+  upsertEntities: (...args: unknown[]) => mockUpsertEntities(...args),
+  upsertDecisions: (...args: unknown[]) => mockUpsertDecisions(...args),
+  setVoiceSummary: jest.fn(),
+}))
+jest.mock("./orchestrator", () => ({
+  runOrchestrator: (...args: unknown[]) => mockRunOrchestrator(...args),
+}))
+
+import { runDistillJob, sanitizeDraftPayload } from "./job-runner"
 
 function draft(data: Record<string, unknown>) {
   return { payload: { kind: "knowledge", data } }
@@ -49,4 +81,37 @@ describe("sanitizeDraftPayload", () => {
     )
     expect(out.payload.data).toEqual({ count: 3, enabled: false, missing: null, nested: { n: 1 } })
   })
+})
+
+it("persists decisions returned by the existing orchestration call", async () => {
+  const decision = {
+    id: "decision-1",
+    context: "Choose a queue",
+    choice: "Kafka",
+    rationale: "Durability",
+    sourceChunkIds: ["chunk-1"],
+    timestamp: 1,
+  }
+  mockListTwinChunksByTwin.mockResolvedValueOnce([{ id: "chunk-1" }])
+  mockEnsureTwinProfile.mockResolvedValueOnce({ voiceSummary: "" })
+  mockRunOrchestrator.mockResolvedValueOnce({
+    styleSamples: [],
+    playbooks: [],
+    entities: [],
+    decisions: [decision],
+    voiceSummary: "",
+    chunkEntityTags: {},
+    synthesizedDrafts: [],
+    evaluations: {},
+    llmTokensUsed: 0,
+    partialFailures: {},
+  })
+  mockBulkCreateTwinDrafts.mockResolvedValueOnce([])
+
+  await runDistillJob({
+    job: { id: "job-1", twinId: "twin-1" } as never,
+    llm: { complete: jest.fn() },
+  })
+
+  expect(mockUpsertDecisions).toHaveBeenCalledWith("twin-1", [decision])
 })

@@ -7,6 +7,12 @@
 import "fake-indexeddb/auto"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+
+const mockRemoveTwin = jest.fn()
+jest.mock("@/lib/twin/lifecycle", () => ({
+  removeTwin: (...args: unknown[]) => mockRemoveTwin(...args),
+}))
+
 import { TwinSelector } from "./twin-selector"
 import { createTwin, listTwins } from "@/lib/db/twins"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
@@ -17,6 +23,11 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
+  mockRemoveTwin.mockImplementation(async (id: string) => {
+    const { deleteTwin } = jest.requireActual("@/lib/db/twins") as typeof import("@/lib/db/twins")
+    const value = await deleteTwin(id, { skipExternalCleanup: true })
+    return { ok: true, removed: true, value }
+  })
 })
 
 async function refreshTwins(): Promise<Twin[]> {
