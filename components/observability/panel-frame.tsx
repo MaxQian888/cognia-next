@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * Shared chrome for every dashboard panel: a card with a compact title bar, an
+ * Shared chrome for every dashboard panel: a flat section with a compact title bar, an
  * optional threshold status dot, an optional actions slot, and a drag handle
  * that only appears (and only carries the `.panel-drag-handle` class
  * react-grid-layout grabs) while the grid is in edit mode.
@@ -9,7 +9,6 @@
 
 import type { ReactNode } from "react"
 import { GripVerticalIcon } from "lucide-react"
-import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { ThresholdLevel } from "@/lib/observability/thresholds"
 
@@ -40,8 +39,11 @@ export function PanelFrame({
   "data-testid": testId,
 }: PanelFrameProps) {
   return (
-    <Card
-      className={cn("flex h-full min-h-0 flex-col overflow-hidden py-0 gap-0", className)}
+    <section
+      className={cn(
+        "flex h-full min-h-0 flex-col overflow-hidden border-y bg-background",
+        className
+      )}
       data-testid={testId}
     >
       <div className="flex shrink-0 items-center gap-1.5 border-b px-3 py-2">
@@ -67,6 +69,6 @@ export function PanelFrame({
         {actions}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden p-3">{children}</div>
-    </Card>
+    </section>
   )
 }

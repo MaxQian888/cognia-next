@@ -8,6 +8,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { Button } from "@/components/ui/button"
 import {
   Bar,
   BarChart,
@@ -75,14 +76,16 @@ export function BreakdownBarPanel({
           {onSelectValue && (
             <div className="sr-only">
               {data.map((d) => (
-                <button
+                <Button
                   key={d.key}
                   type="button"
+                  variant="ghost"
+                  size="xs"
                   onClick={() => onSelectValue(d.key)}
                   data-testid={`bar-select-${panel.id}-${d.key}`}
                 >
                   {d.key}
-                </button>
+                </Button>
               ))}
             </div>
           )}

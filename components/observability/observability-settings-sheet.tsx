@@ -31,6 +31,7 @@ import { Separator } from "@/components/ui/separator"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -119,11 +120,13 @@ export function ObservabilitySettingsSheet({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {RANGE_PRESETS.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {tObs(`range.presets.${p}`)}
-                      </SelectItem>
-                    ))}
+                    <SelectGroup>
+                      {RANGE_PRESETS.map((p) => (
+                        <SelectItem key={p} value={p}>
+                          {tObs(`range.presets.${p}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </div>
@@ -241,11 +244,13 @@ export function ObservabilitySettingsSheet({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PRUNE_DAYS.map((d) => (
-                      <SelectItem key={d} value={String(d)}>
-                        {t("data.olderThan", { days: d })}
-                      </SelectItem>
-                    ))}
+                    <SelectGroup>
+                      {PRUNE_DAYS.map((d) => (
+                        <SelectItem key={d} value={String(d)}>
+                          {t("data.olderThan", { days: d })}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
                 <Button

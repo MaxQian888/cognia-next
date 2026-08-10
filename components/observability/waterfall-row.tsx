@@ -9,6 +9,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, ChevronRightIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { WaterfallNode } from "@/lib/observability/trace-rollup"
 import { formatMs, formatTokens, formatUsd } from "@/lib/observability/format-utils"
@@ -41,18 +42,20 @@ export function WaterfallRow({ node, totalMs, color }: WaterfallRowProps) {
       <div className="flex items-center gap-2 py-1 text-xs">
         <div className="flex min-w-0 items-center gap-1" style={{ paddingLeft: node.depth * 14 }}>
           {hasEvents ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => setOpen((o) => !o)}
               aria-expanded={open}
               aria-label={t("toggleEvents")}
               data-testid={`waterfall-toggle-${node.span.spanId}`}
-              className="text-muted-foreground hover:text-foreground"
+              className="size-4 text-muted-foreground hover:text-foreground"
             >
               <ChevronRightIcon
                 className={cn("size-3 transition-transform", open && "rotate-90")}
               />
-            </button>
+            </Button>
           ) : (
             <span className="inline-block w-3" />
           )}

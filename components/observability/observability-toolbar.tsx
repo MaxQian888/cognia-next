@@ -47,13 +47,16 @@ export interface ObservabilityToolbarProps {
 export function ObservabilityToolbar(props: ObservabilityToolbarProps) {
   const t = useTranslations("observability.toolbar")
   return (
-    <div className="flex flex-wrap items-center gap-2" data-testid="observability-toolbar">
+    <div
+      className="flex w-full min-w-0 flex-wrap items-center gap-2"
+      data-testid="observability-toolbar"
+    >
       <VariableFilterBar
         windowSpans={props.windowSpans}
         filters={props.filters}
         onChange={props.onFilters}
       />
-      <div className="ml-auto flex items-center gap-2">
+      <div className="flex w-full min-w-0 flex-wrap items-center gap-2 lg:ml-auto lg:w-auto">
         <RefreshStatus lastUpdated={props.lastUpdated} onRefresh={props.onRefresh} />
         <TimeRangePicker
           preset={props.preset}

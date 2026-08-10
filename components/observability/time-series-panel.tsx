@@ -10,6 +10,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { Button } from "@/components/ui/button"
 import {
   Area,
   AreaChart,
@@ -161,14 +162,16 @@ export function TimeSeriesPanel({ panel, series, editMode, thresholds }: TimeSer
             {cfg.series.map((s) => {
               const isHidden = hidden.has(s.key)
               return (
-                <button
+                <Button
                   key={s.key}
                   type="button"
+                  variant="ghost"
+                  size="xs"
                   onClick={() => toggle(s.key)}
                   aria-pressed={!isHidden}
                   data-testid={`ts-legend-${panel.id}-${s.key}`}
                   className={cn(
-                    "flex items-center gap-1 text-[11px] transition-opacity",
+                    "h-5 items-center gap-1 px-1 text-[11px] transition-opacity",
                     isHidden ? "opacity-40" : "opacity-100"
                   )}
                 >
@@ -178,7 +181,7 @@ export function TimeSeriesPanel({ panel, series, editMode, thresholds }: TimeSer
                     aria-hidden="true"
                   />
                   <span className={cn(isHidden && "line-through")}>{t(s.labelKey)}</span>
-                </button>
+                </Button>
               )
             })}
           </div>

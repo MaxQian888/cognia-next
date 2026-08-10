@@ -11,6 +11,7 @@ import { RefreshCwIcon } from "lucide-react"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -42,11 +43,13 @@ export function RefreshSelect({ value, onChange }: RefreshSelectProps) {
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {REFRESH_OPTIONS.map((ms) => (
-          <SelectItem key={ms} value={String(ms)} data-testid={`refresh-option-${ms}`}>
-            {labelFor(ms, t)}
-          </SelectItem>
-        ))}
+        <SelectGroup>
+          {REFRESH_OPTIONS.map((ms) => (
+            <SelectItem key={ms} value={String(ms)} data-testid={`refresh-option-${ms}`}>
+              {labelFor(ms, t)}
+            </SelectItem>
+          ))}
+        </SelectGroup>
       </SelectContent>
     </Select>
   )

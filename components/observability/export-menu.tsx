@@ -16,9 +16,11 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { DownloadIcon, FileJsonIcon, SheetIcon, UploadIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -93,7 +95,7 @@ export function ExportMenu({ traces, buildConfig, onImportConfig }: ExportMenuPr
 
   return (
     <>
-      <input
+      <Input
         ref={fileRef}
         type="file"
         accept="application/json,.json"
@@ -109,19 +111,26 @@ export function ExportMenu({ traces, buildConfig, onImportConfig }: ExportMenuPr
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={exportCsv} data-testid="export-traces-csv">
-            <SheetIcon className="size-4" />
-            {t("tracesCsv")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={exportJson} data-testid="export-dashboard-json">
-            <FileJsonIcon className="size-4" />
-            {t("dashboardJson")}
-          </DropdownMenuItem>
+          <DropdownMenuGroup>
+            <DropdownMenuItem onClick={exportCsv} data-testid="export-traces-csv">
+              <SheetIcon className="size-4" />
+              {t("tracesCsv")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={exportJson} data-testid="export-dashboard-json">
+              <FileJsonIcon className="size-4" />
+              {t("dashboardJson")}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => fileRef.current?.click()} data-testid="import-dashboard">
-            <UploadIcon className="size-4" />
-            {t("importDashboard")}
-          </DropdownMenuItem>
+          <DropdownMenuGroup>
+            <DropdownMenuItem
+              onClick={() => fileRef.current?.click()}
+              data-testid="import-dashboard"
+            >
+              <UploadIcon className="size-4" />
+              {t("importDashboard")}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
     </>

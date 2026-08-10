@@ -31,6 +31,7 @@ jest.mock("@/components/ui/select", () => ({
   // <select> mock would trip React's DOM-nesting validator, so drop it.
   SelectTrigger: () => null,
   SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SelectGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SelectValue: () => null,
   SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => (
     <option value={value}>{children}</option>

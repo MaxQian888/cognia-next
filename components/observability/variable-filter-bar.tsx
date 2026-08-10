@@ -126,11 +126,13 @@ function FilterDropdown({
               const isSelected = selected.includes(opt)
               return (
                 <li key={opt}>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="sm"
                     onClick={() => onToggle(opt)}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent",
+                      "h-auto w-full justify-start gap-2 rounded-sm px-2 py-1.5 text-left text-xs whitespace-normal",
                       isSelected && "font-medium"
                     )}
                     data-testid={`filter-${dim}-option-${opt}`}
@@ -140,7 +142,7 @@ function FilterDropdown({
                       className={cn("size-3.5 shrink-0", isSelected ? "opacity-100" : "opacity-0")}
                     />
                     <span className="truncate">{opt}</span>
-                  </button>
+                  </Button>
                 </li>
               )
             })}

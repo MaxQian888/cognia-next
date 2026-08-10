@@ -11,6 +11,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
+import { Button } from "@/components/ui/button"
 import { PanelFrame } from "./panel-frame"
 import { BreakdownMetricToggle } from "./breakdown-metric-toggle"
 import type { PanelDef } from "./panel-registry"
@@ -130,18 +131,20 @@ export function DonutPanel({
               return (
                 <li key={d.key} data-testid={`donut-legend-${panel.id}`}>
                   {onSelectValue ? (
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="xs"
                       onClick={() => onSelectValue(d.key)}
                       aria-pressed={isSelected}
                       data-testid={`donut-legend-${panel.id}-${d.key}`}
                       className={cn(
-                        "flex w-full items-center gap-1.5 rounded-sm px-1 py-0.5 text-left hover:bg-accent",
+                        "h-auto w-full justify-start gap-1.5 rounded-sm px-1 py-0.5 text-left text-xs whitespace-normal",
                         isSelected && "bg-accent/60 font-medium"
                       )}
                     >
                       {content}
-                    </button>
+                    </Button>
                   ) : (
                     <span className="flex items-center gap-1.5 px-1 py-0.5">{content}</span>
                   )}

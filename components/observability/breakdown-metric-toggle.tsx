@@ -8,6 +8,7 @@
  */
 
 import { useTranslations } from "next-intl"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { BreakdownMetric } from "@/lib/observability/breakdown"
 
@@ -30,21 +31,23 @@ export function BreakdownMetricToggle({ value, onChange, panelId }: BreakdownMet
       data-testid={`metric-toggle-${panelId}`}
     >
       {METRICS.map((m) => (
-        <button
+        <Button
           key={m}
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={() => onChange(m)}
           aria-pressed={value === m}
           data-testid={`metric-toggle-${panelId}-${m}`}
           className={cn(
-            "rounded-sm px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide transition-colors",
+            "h-5 rounded-sm px-1.5 text-[10px] uppercase tracking-wide",
             value === m
               ? "bg-accent text-accent-foreground"
               : "text-muted-foreground hover:text-foreground"
           )}
         >
           {t(m)}
-        </button>
+        </Button>
       ))}
     </div>
   )
