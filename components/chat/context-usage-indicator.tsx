@@ -41,6 +41,7 @@ import type { SdkContextUsage } from "@cognia/agent-config-types"
 import { resolveModelContextLength } from "@/lib/ai/model-options"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
 import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
+import { useOptionalChatScope } from "@/components/chat/chat-scope-provider"
 import { ContextSourceBreakdown } from "@/components/chat/context-source-breakdown"
 import type { UsageDisplayMode } from "@/types/appearance"
 import {
@@ -303,6 +304,7 @@ export function CompactNowButton({
   usedTokens: number
 }) {
   const t = useTranslations("chat.composer.toolbar")
+  const scope = useOptionalChatScope()
   return (
     <Button
       type="button"
@@ -311,7 +313,9 @@ export function CompactNowButton({
       className="mt-1 h-7 w-full justify-start gap-1.5 text-xs"
       disabled={!sessionId || usedTokens === 0}
       onClick={() => {
-        if (sessionId) void compactSession(sessionId)
+        if (!sessionId) return
+        if (scope?.sessionId === sessionId && scope.compact) void scope.compact()
+        else void compactSession(sessionId)
       }}
       data-testid="compact-now-button"
     >

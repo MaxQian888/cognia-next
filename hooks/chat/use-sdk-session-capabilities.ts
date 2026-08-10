@@ -17,7 +17,11 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { isTauri } from "@/lib/tauri"
-import { getSessionSupportedCommands, getSessionSupportedModels } from "@/lib/claude/ipc"
+import {
+  getSessionSupportedCommands,
+  getSessionSupportedModels,
+  subscribeAgentEvents,
+} from "@/lib/claude/ipc"
 import type { SdkModelInfo, SdkSlashCommand } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 
@@ -62,6 +66,32 @@ export function useSdkSessionCapabilities(
   useEffect(() => {
     if (enabled && sessionId) refresh()
   }, [enabled, sessionId, refresh])
+
+  useEffect(() => {
+    if (!enabled || !sessionId) return
+    let disposed = false
+    let unsubscribe: (() => void) | undefined
+
+    void subscribeAgentEvents((envelope) => {
+      if (
+        !disposed &&
+        envelope.sessionId === sessionId &&
+        envelope.event.kind === "commands-changed"
+      ) {
+        refresh()
+      }
+    })
+      .then((stop) => {
+        if (disposed) stop()
+        else unsubscribe = stop
+      })
+      .catch(() => undefined)
+
+    return () => {
+      disposed = true
+      unsubscribe?.()
+    }
+  }, [enabled, refresh, sessionId])
 
   // The SDK pushes command updates mid-session; re-fetch on a completed turn so
   // a /compact or freshly-discovered skill command isn't stale.

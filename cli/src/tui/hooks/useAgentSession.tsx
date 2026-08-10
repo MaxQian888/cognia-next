@@ -9,6 +9,13 @@ import os from "node:os"
 
 import { transport } from "@/lib/tauri"
 import { compactSession } from "@/lib/claude/ipc"
+import {
+  createAgentExecutionHandle,
+  FrozenModelBindingError,
+  type AgentExecutionHandle,
+} from "@/lib/ai/agent/execution/agent-execution-handle"
+import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
+import { getAgentExecutionFlags } from "@/lib/ai/agent/execution/feature-flags"
 import { WORKFLOW_COPILOT_ALLOWED_TOOLS } from "@/lib/claude/agents/workflow-copilot-prompt"
 
 import {
@@ -44,11 +51,20 @@ export type CreateSession = (params: {
   config: ResolvedConfig
   sessionId?: string
   sessionKind?: import("@cognia/agent-config-types").SessionKind
+  onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void
 }) => AgentSession
 
 /** What a `/rewind` restores: the conversation, the files touched since the
  * checkpoint, or both. */
 export type RewindScope = "conversation" | "files" | "both"
+
+interface NativeCheckpoint {
+  seq: number
+  messageId: string
+  label: string
+  ts: number
+  cellCount: number
+}
 
 export interface AgentSessionApi {
   /** Stream one turn into the transcript. Resolves the captured reply (text +
@@ -87,6 +103,8 @@ export interface AgentSessionApi {
   /** Manually compact the live session's context (`/compact`), both dispatch
    * paths. No-op (with a notice) until a turn has spawned the sidecar. */
   compact(focus?: string): Promise<void>
+  /** Stop one running SDK-native task projected in the existing Agents board. */
+  stopTask(taskId: string): Promise<boolean>
   /** List the rewind checkpoints captured this session (newest-first). */
   listCheckpoints(): {
     seq: number
@@ -212,6 +230,14 @@ export function useAgentSession({
     sessionIdRef.current = sessionId
   }, [sessionId])
   const sessionRef = useRef<AgentSession | null>(null)
+  const executionHandleRef = useRef<AgentExecutionHandle | null>(null)
+  const checkpointAuthorityRef = useRef<{
+    sessionId: string
+    mode: "local" | "native"
+  } | null>(null)
+  const nativeCheckpointsRef = useRef<NativeCheckpoint[]>([])
+  const nativeCheckpointSeqRef = useRef(0)
+  const checkpointCellCountRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   // The live "Allow always" set consulted by the gate's silent auto-approver.
   // Seeded from the persisted store and grown in place when the user picks
@@ -386,6 +412,33 @@ export function useAgentSession({
     [dispatch, hookRunner]
   )
 
+  const captureExecutionSpec = useCallback((spec: ResolvedAgentExecutionSpec) => {
+    if (executionHandleRef.current) return
+    // This TUI session owns the built-in sidecar transport. External ACP
+    // sessions already expose their own live controls on AgentSession; binding
+    // their frozen spec to this handle would incorrectly route those controls
+    // into the built-in sidecar.
+    if (spec.runtimeAdapter !== "claude-agent-sdk") return
+    const sid =
+      spec.identity.sessionId ?? sessionIdRef.current ?? sessionRef.current?.sessionId ?? ""
+    checkpointAuthorityRef.current = {
+      sessionId: sid,
+      mode:
+        spec.runtimeAdapter === "claude-agent-sdk" &&
+        spec.capabilities.effective.includes("checkpoint") &&
+        getAgentExecutionFlags().claudeSdkCheckpoint
+          ? "native"
+          : "local",
+    }
+    executionHandleRef.current = createAgentExecutionHandle(sid, spec, {
+      // TUI session shutdown owns the spawned sidecar lifecycle; reuse it
+      // instead of opening a second controller/registry.
+      closeSession: async () => {
+        await sessionRef.current?.close()
+      },
+    })
+  }, [])
+
   const ensureSession = useCallback((): AgentSession => {
     if (!sessionRef.current) {
       // Bind the session to the app's id (when known) so its transcript file is
@@ -398,13 +451,14 @@ export function useAgentSession({
       sessionRef.current = createSession({
         config: configRef.current,
         ...(boundId ? { sessionId: boundId } : {}),
+        onResolvedExecutionSpec: captureExecutionSpec,
       })
       // A chat session just began — fire SessionStart so hook scripts can seed
       // context / log the session (Claude Code parity).
       hookRunner.onSessionStart(sessionRef.current.sessionId)
     }
     return sessionRef.current
-  }, [createSession, hookRunner])
+  }, [captureExecutionSpec, createSession, hookRunner])
 
   const dropSession = useCallback(async () => {
     // Abort any in-flight turn FIRST. /clear, /resume, fork, and model/provider/
@@ -415,13 +469,19 @@ export function useAgentSession({
     // (recoverable) interrupt path before the reset wipes the old cells.
     abortRef.current?.abort()
     const current = sessionRef.current
-    sessionRef.current = null
     if (current) {
       // The session is being torn down (/clear, /resume, exit) — fire SessionEnd
       // before closing so hook scripts can flush / summarize.
       hookRunner.onSessionEnd(current.sessionId)
-      await current.close()
+      const handle = executionHandleRef.current
+      executionHandleRef.current = null
+      if (handle) await handle.cancel()
+      else await current.close()
     }
+    sessionRef.current = null
+    checkpointAuthorityRef.current = null
+    nativeCheckpointsRef.current = []
+    nativeCheckpointSeqRef.current = 0
   }, [hookRunner])
 
   // ── Workflow Copilot mode ──────────────────────────────────────────────────
@@ -496,7 +556,10 @@ export function useAgentSession({
       onLog(turnLifecycleLog(Date.now(), "started", session.sessionId))
       hookRunner.onPrompt(prompt)
       // Open a rewind checkpoint for this turn (cellCount = state before it ran).
-      checkpoint.beginTurn(getCellCount(), prompt)
+      checkpointCellCountRef.current = getCellCount()
+      if (checkpointAuthorityRef.current?.mode !== "native") {
+        checkpoint.beginTurn(checkpointCellCountRef.current, prompt)
+      }
       const controller = new AbortController()
       abortRef.current = controller
       const { ok, result, recoverable } = await runTurn({
@@ -515,8 +578,33 @@ export function useAgentSession({
         // defaults to for headless/connector runs. `0` disables that wall-clock.
         timeoutMs: 0,
         hooks: hookRunner,
-        onToolCall: (toolName, input) => checkpoint.onToolCall(toolName, input),
+        onToolCall: (toolName, input) => {
+          if (checkpointAuthorityRef.current?.mode !== "native") {
+            checkpoint.onToolCall(toolName, input)
+          }
+        },
+        onCanonicalEnvelope: (envelope) => {
+          if (
+            checkpointAuthorityRef.current?.mode !== "native" ||
+            envelope.event.kind !== "user-replay"
+          ) {
+            return
+          }
+          const messageId = envelope.event.messageId
+          if (nativeCheckpointsRef.current.some((entry) => entry.messageId === messageId)) return
+          nativeCheckpointsRef.current.unshift({
+            seq: nativeCheckpointSeqRef.current++,
+            messageId,
+            label: envelope.event.preview?.trim() || prompt,
+            ts: Date.parse(envelope.timestamp),
+            cellCount: checkpointCellCountRef.current,
+          })
+        },
         showActiveSkills: configRef.current.showActiveSkills,
+        onEnvelopeGap: () => {
+          const handle = executionHandleRef.current
+          if (handle) void handle.reinitialize().catch(() => undefined)
+        },
       })
       abortRef.current = null
       if (!ok) {
@@ -599,7 +687,11 @@ export function useAgentSession({
       // Adopt the prior session id so further turns append to its transcript;
       // its past cells are restored to the view (a fresh sidecar — model
       // context re-injection is the separate `resume` command's job).
-      sessionRef.current = createSession({ config: configRef.current, sessionId })
+      sessionRef.current = createSession({
+        config: configRef.current,
+        sessionId,
+        onResolvedExecutionSpec: captureExecutionSpec,
+      })
       dispatch({ type: "RESET", sessionId })
       dispatch({ type: "LOAD_CELLS", cells })
       // On an external backend the transcript coming back does NOT mean the
@@ -612,7 +704,7 @@ export function useAgentSession({
       )
       if (notice) dispatch({ type: "NOTICE", message: notice })
     },
-    [createSession, dispatch, dropSession, supportsResume]
+    [captureExecutionSpec, createSession, dispatch, dropSession, supportsResume]
   )
 
   const switchModel = useCallback(
@@ -624,6 +716,15 @@ export function useAgentSession({
       // to switch (or the agent has no model selection) do we fall back to the
       // built-in contract below.
       const session = sessionRef.current
+      const handle = executionHandleRef.current
+      if (handle) {
+        try {
+          await handle.setModel(model)
+          return
+        } catch (error) {
+          if (!(error instanceof FrozenModelBindingError)) throw error
+        }
+      }
       if (session?.setModel && (await session.setModel(model))) return
       // Options resolve lazily and are cached per session; recreate so the new
       // model takes effect on the next turn.
@@ -661,8 +762,10 @@ export function useAgentSession({
       // Before a session is live there is nothing to mutate — SET_MODE folds
       // into the first `startSession`'s options.
       const session = sessionRef.current
-      if (session?.isLive?.() && session.setPermissionMode) {
-        await session.setPermissionMode(mode)
+      if (session?.isLive?.()) {
+        const handle = executionHandleRef.current
+        if (handle) await handle.setPermissionMode(mode)
+        else if (session.setPermissionMode) await session.setPermissionMode(mode)
       }
     },
     [dispatch]
@@ -742,7 +845,10 @@ export function useAgentSession({
         sessionId: session.sessionId,
         focus,
         subscribe: subscribeSidecar,
-        compact: requestCompact,
+        compact: (sessionId, compactFocus) => {
+          const handle = executionHandleRef.current
+          return handle ? handle.compact(compactFocus) : requestCompact(sessionId, compactFocus)
+        },
         // Reuse the capture→reducer mapping so the boundary renders exactly like
         // an in-turn (auto) compaction.
         emit: (event) => {
@@ -754,17 +860,31 @@ export function useAgentSession({
     [dispatch, requestCompact, subscribeSidecar]
   )
 
-  const listCheckpoints = useCallback(
-    () =>
-      checkpoint.list().map((cp) => ({
+  const stopTask = useCallback(async (taskId: string): Promise<boolean> => {
+    const handle = executionHandleRef.current
+    if (!handle) return false
+    await handle.stopTask(taskId)
+    return true
+  }, [])
+
+  const listCheckpoints = useCallback(() => {
+    if (checkpointAuthorityRef.current?.mode === "native") {
+      return nativeCheckpointsRef.current.map((cp) => ({
         seq: cp.seq,
         label: cp.label,
         ts: cp.ts,
         cellCount: cp.cellCount,
-        fileCount: cp.files.length,
-      })),
-    [checkpoint]
-  )
+        fileCount: 0,
+      }))
+    }
+    return checkpoint.list().map((cp) => ({
+      seq: cp.seq,
+      label: cp.label,
+      ts: cp.ts,
+      cellCount: cp.cellCount,
+      fileCount: cp.files.length,
+    }))
+  }, [checkpoint])
 
   /**
    * Truncate the conversation to its first `cellCount` cells: rebuild the
@@ -780,15 +900,47 @@ export function useAgentSession({
       const kept = cells.slice(0, cellCount)
       writeTranscript(resolveHome(process.env, os.homedir()), sid, cellsToEntries(kept))
       await dropSession()
-      sessionRef.current = createSession({ config: configRef.current, sessionId: sid })
+      sessionRef.current = createSession({
+        config: configRef.current,
+        sessionId: sid,
+        onResolvedExecutionSpec: captureExecutionSpec,
+      })
       dispatch({ type: "RESET", sessionId: sid })
       dispatch({ type: "LOAD_CELLS", cells: kept })
     },
-    [createSession, dispatch, dropSession]
+    [captureExecutionSpec, createSession, dispatch, dropSession]
   )
 
   const rewind = useCallback(
     async (seq: number, scope: RewindScope, cells: Cell[]) => {
+      if (checkpointAuthorityRef.current?.mode === "native") {
+        const cp = nativeCheckpointsRef.current.find((candidate) => candidate.seq === seq)
+        if (!cp) {
+          dispatch({ type: "NOTICE", message: `Checkpoint #${seq} not found.` })
+          return
+        }
+        if (scope === "conversation") {
+          dispatch({
+            type: "NOTICE",
+            message: "Native checkpoints restore files only; conversation history was not changed.",
+          })
+          return
+        }
+        const handle = executionHandleRef.current
+        if (!handle) {
+          dispatch({ type: "NOTICE", message: "Native checkpoint runtime is unavailable." })
+          return
+        }
+        const result = await handle.rewindFiles(cp.messageId, { dryRun: false })
+        dispatch({
+          type: "NOTICE",
+          message:
+            result.status === "ready"
+              ? `Rewound files to native checkpoint #${seq}; conversation history was not changed.`
+              : result.reason || "Native checkpoint could not rewind files.",
+        })
+        return
+      }
       const cp = checkpoint.list().find((c) => c.seq === seq)
       if (!cp) {
         dispatch({ type: "NOTICE", message: `Checkpoint #${seq} not found.` })
@@ -830,6 +982,7 @@ export function useAgentSession({
     changeCwd,
     invalidate,
     compact,
+    stopTask,
     listCheckpoints,
     rewind,
     forkConversationAt,

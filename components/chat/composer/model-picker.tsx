@@ -25,6 +25,7 @@ import { toast } from "sonner"
 import { useSettingsStore } from "@/stores/settings"
 import { updateSession } from "@/lib/db/sessions"
 import { isTauri } from "@/lib/tauri"
+import { useOptionalChatScope } from "@/components/chat/chat-scope-provider"
 import { setSessionModel, closeSession } from "@/lib/claude/ipc"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { collectModelOptions, type ModelOption } from "@/lib/ai/model-options"
@@ -115,6 +116,7 @@ function groupByProvider(options: ModelOption[]): Array<{
 }
 
 export function ModelPicker({ session, disabled, className }: ModelPickerProps) {
+  const scope = useOptionalChatScope()
   const t = useTranslations("chat.composer.modelPicker")
   const tEffortLevels = useTranslations("settings.general")
   const providerSettings = useSettingsStore((s) => s.settings?.providerSettings)
@@ -206,7 +208,11 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
         // (sidecar `handleControl` routes to whichever the live session
         // exposes). Best-effort — `no_active_session` (session not started yet)
         // is silent; the persisted override above covers that case.
-        setSessionModel(session.id, modelId)
+        const liveSwitch =
+          scope?.sessionId === session.id && scope.setModel
+            ? scope.setModel(modelId)
+            : setSessionModel(session.id, modelId)
+        liveSwitch
           .then(() => toast.success(t("liveSwitched", { model: modelId })))
           .catch((err) => {
             const msg = err instanceof Error ? err.message : String(err)
@@ -219,7 +225,11 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
         // swap can't apply. Close it so the next send re-dispatches on the new
         // provider; the persisted override above selects the new model/provider.
         // Best-effort — a not-yet-started session has nothing to close.
-        void closeSession(session.id).catch(() => undefined)
+        const reset =
+          scope?.sessionId === session.id && scope.resetRuntime
+            ? scope.resetRuntime()
+            : closeSession(session.id)
+        void reset.catch(() => undefined)
       }
     }
   }
@@ -237,7 +247,11 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
       providerOverride: undefined,
     })
     if (isTauri()) {
-      void closeSession(session.id).catch(() => undefined)
+      const reset =
+        scope?.sessionId === session.id && scope.resetRuntime
+          ? scope.resetRuntime()
+          : closeSession(session.id)
+      void reset.catch(() => undefined)
     }
   }
 

@@ -350,6 +350,10 @@ function buildWorkflowSnapshotBlock(
 
 export interface BuildOptionsContext {
   session?: ChatSession | null
+  /** Receives the already-resolved execution spec stamped onto this send. */
+  onResolvedExecutionSpec?: (
+    spec: import("@cognia/agent-config-types/agent-execution").ResolvedAgentExecutionSpec
+  ) => void
   /** Override the resolving character — used by team chat per-member sends. */
   character?: Character | null
   appSettings?: AppSettings | null
@@ -3639,6 +3643,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         const rollout = claudeSdkRolloutOptions(getAgentExecutionFlags())
         if (rollout) opts.claudeAgentSdk = { ...opts.claudeAgentSdk, ...rollout }
       }
+      ctx.onResolvedExecutionSpec?.(spec)
     }
   } catch {
     // Never fail the send over spec stamping.

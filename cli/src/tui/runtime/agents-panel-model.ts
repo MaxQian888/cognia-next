@@ -35,6 +35,8 @@ export interface AgentPanelRow {
   runId?: string
   /** Set when a live-output entry exists — Enter/click opens the live run page. */
   liveId?: string
+  /** Native SDK task id; enables stop through the active execution handle. */
+  runtimeTaskId?: string
   /** Settled background output (result text or error), for the detail view. */
   output?: string
   /** Total tool calls the run has made (live rows only). */
@@ -89,6 +91,7 @@ function liveEntryRow(entry: SubagentLiveEntry, bgRunIds: Set<string>): AgentPan
     status: entry.status,
     startedAt: entry.startedAt,
     liveId: entry.liveId,
+    ...(entry.runtimeTaskId ? { runtimeTaskId: entry.runtimeTaskId } : {}),
     ...(isBackground ? { runId: entry.liveId } : {}),
     ...(entry.text ? { output: entry.text } : {}),
     ...(entry.parentLiveId ? { parentLiveId: entry.parentLiveId } : {}),
@@ -440,4 +443,4 @@ export function agentSummary(rows: AgentPanelRow[]): {
   return { total: rows.length, running, settled: rows.length - running }
 }
 
-export const AGENTS_PANEL_FOOTER = "↑/↓ / click · enter view output · esc close"
+export const AGENTS_PANEL_FOOTER = "↑/↓ / click · enter view · s stop native task · esc close"

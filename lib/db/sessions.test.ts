@@ -83,10 +83,15 @@ async function waitUntil(pred: () => boolean, timeoutMs = 3000): Promise<void> {
 
 describe("createSession — without default preset", () => {
   it("creates a row with caller-supplied fields", async () => {
-    const session = await createSession({ title: "Test", model: "claude-y" })
+    const session = await createSession({
+      title: "Test",
+      model: "claude-y",
+      sdkSessionId: "sdk-native",
+    })
     expect(session.id).toMatch(/^s_/)
     expect(session.title).toBe("Test")
     expect(session.model).toBe("claude-y")
+    expect(session.sdkSessionId).toBe("sdk-native")
     expect(session.systemPrompt).toBeUndefined()
   })
 

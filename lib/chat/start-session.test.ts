@@ -46,12 +46,14 @@ describe("startNewSession", () => {
       title: "Chat with Ada",
       kind: "direct",
       characterId: "c_ada",
+      sdkSessionId: "sdk-ada",
     })
 
     expect(session).toMatchObject({
       title: "Chat with Ada",
       kind: "direct",
       characterId: "c_ada",
+      sdkSessionId: "sdk-ada",
     })
   })
 

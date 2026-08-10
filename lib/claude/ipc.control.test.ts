@@ -116,6 +116,27 @@ describe("sessionControl round-trip", () => {
     )
   })
 
+  it("forwards a caller-owned command id on the correlated request", async () => {
+    const callSpy = jest.spyOn(transport, "call").mockResolvedValue(undefined)
+    const pending = sessionControl("s-command", "reloadSkills", undefined, {
+      commandId: "cmd-stable-1",
+    })
+    await flush()
+    const payload = callSpy.mock.calls[0][1] as { requestId: string }
+    expect(callSpy).toHaveBeenCalledWith(
+      "claude_session_control",
+      expect.objectContaining({ commandId: "cmd-stable-1" })
+    )
+    captured!({
+      type: "control_response",
+      sessionId: "s-command",
+      requestId: payload.requestId,
+      ok: true,
+      method: "reloadSkills",
+    })
+    await expect(pending).resolves.toBeUndefined()
+  })
+
   it("rejects when the underlying transport.call rejects", async () => {
     jest.spyOn(transport, "call").mockRejectedValue(new Error("sidecar not ready"))
     await expect(sessionControl("s5", "getContextUsage")).rejects.toThrow("sidecar not ready")

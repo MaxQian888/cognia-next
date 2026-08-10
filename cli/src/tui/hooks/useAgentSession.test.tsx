@@ -1,12 +1,47 @@
 import { act, renderHook } from "@testing-library/react"
 
 import { sessionRestartNotice, useAgentSession, type CreateSession } from "./useAgentSession"
+import type { SendTurnOptions } from "../../agent/session-runner"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
 import type { HookRunner } from "../runtime/hook-runner"
 import type { TuiAction } from "../state/types"
+import type {
+  AgentEventEnvelope,
+  ResolvedAgentExecutionSpec,
+} from "@cognia/agent-config-types/agent-execution"
+
+let nativeCheckpointFlag = false
+jest.mock("@/lib/ai/agent/execution/feature-flags", () => ({
+  getAgentExecutionFlags: () => ({ claudeSdkCheckpoint: nativeCheckpointFlag }),
+}))
+
+const handleRewindFiles = jest.fn()
+const handleCancel = jest.fn(async () => undefined)
+const createAgentExecutionHandle = jest.fn(
+  (sessionId: string, spec: ResolvedAgentExecutionSpec, _transport?: unknown) => ({
+    sessionId,
+    spec,
+    cancel: handleCancel,
+    compact: jest.fn(async () => undefined),
+    setModel: jest.fn(async () => undefined),
+    setPermissionMode: jest.fn(async () => undefined),
+    stopTask: jest.fn(async () => undefined),
+    reinitialize: jest.fn(async () => undefined),
+    rewindFiles: (messageId: string, options?: { dryRun?: boolean }) =>
+      handleRewindFiles(messageId, options),
+  })
+)
+jest.mock("@/lib/ai/agent/execution/agent-execution-handle", () => ({
+  createAgentExecutionHandle: (
+    sessionId: string,
+    spec: ResolvedAgentExecutionSpec,
+    transport?: unknown
+  ) => createAgentExecutionHandle(sessionId, spec, transport),
+  FrozenModelBindingError: class FrozenModelBindingError extends Error {},
+}))
 
 /** A spyable no-op HookRunner so tests can assert lifecycle-event firing. */
 function spyHookRunner(): jest.Mocked<HookRunner> {
@@ -38,18 +73,29 @@ function harness(
     hooks?: HookRunner
     /** Custom `session.send` — receives the gate responder so a test can simulate
      * a mid-turn tool permission request. */
-    sendImpl?: (prompt: string, o: { gate: (req: unknown) => Promise<unknown> }) => Promise<unknown>
+    sendImpl?: (prompt: string, options: SendTurnOptions) => Promise<unknown>
     /** Make session creation itself fail (e.g. an unknown `--backend` id). */
     createError?: Error
+    resolvedSpec?: ResolvedAgentExecutionSpec
+    canonicalEnvelopes?: AgentEventEnvelope[]
   } = {}
 ) {
   const actions: TuiAction[] = []
   const dispatch = (a: TuiAction) => actions.push(a)
-  const send = jest.fn(opts.sendImpl ?? (async () => result()))
+  let resolveExecution: ((spec: ResolvedAgentExecutionSpec) => void) | undefined
+  const sendImpl: (prompt: string, options: SendTurnOptions) => Promise<unknown> =
+    opts.sendImpl ??
+    (async (_prompt, sendOptions) => {
+      if (opts.resolvedSpec) resolveExecution?.(opts.resolvedSpec)
+      for (const envelope of opts.canonicalEnvelopes ?? []) sendOptions.onEnvelope?.(envelope)
+      return result()
+    })
+  const send = jest.fn(sendImpl)
   const close = jest.fn(async () => {})
   const setPermissionMode = jest.fn(async () => {})
-  const create: CreateSession = jest.fn(() => {
+  const create: CreateSession = jest.fn((params) => {
     if (opts.createError) throw opts.createError
+    resolveExecution = params.onResolvedExecutionSpec
     return {
       sessionId: "s",
       send,
@@ -104,11 +150,59 @@ function harness(
     restore,
     appendMcpLog,
     fireSidecar: (p: unknown) => sidecarHandler?.(p),
+    resolveExecution: (spec: ResolvedAgentExecutionSpec) => resolveExecution?.(spec),
     api: () => hook.current,
   }
 }
 
+function nativeSpec(): ResolvedAgentExecutionSpec {
+  return {
+    specVersion: 2,
+    identity: {
+      sessionId: "s",
+      runId: "run-1",
+      turnId: "turn-1",
+      attemptId: "attempt-1",
+    },
+    executionFingerprint: "fp-native",
+    executionKind: "agent",
+    runtimeAdapter: "claude-agent-sdk",
+    runtimePolicySource: "explicit",
+    modelBindings: { primary: "sonnet" },
+    route: { kind: "direct", routePolicy: "direct" },
+    hostRef: "desktop-sidecar",
+    compatibility: { evidence: "native" },
+    capabilities: {
+      effective: ["checkpoint"],
+      disabledOptional: [],
+      support: { checkpoint: { support: "native", reason: "test" } },
+    },
+  }
+}
+
+function userReplayEnvelope(): AgentEventEnvelope {
+  return {
+    schemaVersion: 1,
+    eventId: "s:turn-1:attempt-1:0",
+    sessionId: "s",
+    runId: "run-1",
+    turnId: "turn-1",
+    attemptId: "attempt-1",
+    sequence: 0,
+    timestamp: "2026-08-10T00:00:00.000Z",
+    hostRef: "desktop-sidecar",
+    runtime: "claude-agent-sdk",
+    event: { kind: "user-replay", messageId: "user-message-1", preview: "Native prompt" },
+  }
+}
+
 describe("useAgentSession", () => {
+  beforeEach(() => {
+    nativeCheckpointFlag = false
+    createAgentExecutionHandle.mockClear()
+    handleCancel.mockClear()
+    handleRewindFiles.mockReset().mockResolvedValue({ status: "ready", paths: ["/a"] })
+  })
   it("send drives a turn and lazily creates the session once", async () => {
     const h = harness()
     await act(async () => {
@@ -136,6 +230,7 @@ describe("useAgentSession", () => {
     expect(h.create).toHaveBeenCalledWith({
       config: expect.anything(),
       sessionId: "app-session-1",
+      onResolvedExecutionSpec: expect.any(Function),
     })
   })
 
@@ -144,7 +239,10 @@ describe("useAgentSession", () => {
     await act(async () => {
       await h.api().send("hi")
     })
-    expect(h.create).toHaveBeenCalledWith({ config: expect.anything() })
+    expect(h.create).toHaveBeenCalledWith({
+      config: expect.anything(),
+      onResolvedExecutionSpec: expect.any(Function),
+    })
   })
 
   it("interactive turns disable the wall-clock cap (timeoutMs: 0)", async () => {
@@ -295,7 +393,14 @@ describe("useAgentSession", () => {
       sendImpl: async (_p, o) => {
         // Simulate the model requesting a tool mid-turn (fire-and-forget; the
         // gate promise resolves when the UI later calls resolvePermission).
-        void o.gate({ toolName: "Bash", input: { command: "ls" } })
+        void o.gate({
+          type: "permission_request",
+          sessionId: "s",
+          requestId: "req-1",
+          toolUseID: "tool-1",
+          toolName: "Bash",
+          input: { command: "ls" },
+        })
         return result()
       },
     })
@@ -456,7 +561,11 @@ describe("useAgentSession", () => {
     await act(async () => {
       await h.api().resume("ses-old", [{ id: "r0", kind: "user", text: "old" }])
     })
-    expect(h.create).toHaveBeenCalledWith({ config: expect.anything(), sessionId: "ses-old" })
+    expect(h.create).toHaveBeenCalledWith({
+      config: expect.anything(),
+      sessionId: "ses-old",
+      onResolvedExecutionSpec: expect.any(Function),
+    })
     expect(h.actions).toContainEqual({ type: "RESET", sessionId: "ses-old" })
     expect(h.actions).toContainEqual({
       type: "LOAD_CELLS",
@@ -725,6 +834,59 @@ describe("useAgentSession", () => {
       await h.api().rewind(99, "both", [])
     })
     expect(h.actions).toContainEqual({ type: "NOTICE", message: "Checkpoint #99 not found." })
+  })
+
+  it("uses native user-replay checkpoints exclusively when the frozen session enables them", async () => {
+    nativeCheckpointFlag = true
+    const h = harness({
+      resolvedSpec: nativeSpec(),
+      canonicalEnvelopes: [userReplayEnvelope()],
+    })
+    await act(async () => {
+      await h.api().send("Native prompt")
+    })
+
+    expect(h.capture.onToolCall).not.toHaveBeenCalled()
+    expect(h.api().listCheckpoints()).toEqual([
+      expect.objectContaining({ seq: 0, label: "Native prompt", fileCount: 0 }),
+    ])
+
+    await act(async () => {
+      await h.api().rewind(0, "both", [])
+    })
+    expect(handleRewindFiles).toHaveBeenCalledWith("user-message-1", { dryRun: false })
+    expect(h.restore).not.toHaveBeenCalled()
+    expect(h.actions).toContainEqual(
+      expect.objectContaining({
+        type: "NOTICE",
+        message: expect.stringContaining("conversation history was not changed"),
+      })
+    )
+  })
+
+  it("freezes the first resolved execution handle for the live session", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("start")
+    })
+    const first = nativeSpec()
+    const changed = { ...first, executionFingerprint: "fp-changed" }
+    act(() => {
+      h.resolveExecution(first)
+      h.resolveExecution(changed)
+    })
+
+    expect(createAgentExecutionHandle).toHaveBeenCalledTimes(1)
+    expect(createAgentExecutionHandle).toHaveBeenCalledWith("s", first, expect.any(Object))
+  })
+
+  it("keeps external-agent controls on the existing AgentSession transport", () => {
+    const h = harness()
+    const externalSpec = { ...nativeSpec(), runtimeAdapter: "external" as const }
+
+    act(() => h.resolveExecution(externalSpec))
+
+    expect(createAgentExecutionHandle).not.toHaveBeenCalled()
   })
 
   it("forkConversationAt truncates to the kept cells and re-mints the session", async () => {

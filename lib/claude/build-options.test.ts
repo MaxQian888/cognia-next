@@ -5142,7 +5142,11 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
 
   it("stamps the frozen, secret-free execution spec when the flag is on (legacy fields intact)", async () => {
     process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
-    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    const onResolvedExecutionSpec = jest.fn()
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      onResolvedExecutionSpec,
+    })
 
     const execution = opts.execution as unknown as Record<string, unknown>
     expect(execution).toBeTruthy()
@@ -5153,6 +5157,12 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
     expect(execution.runtimeAdapter).toBe("claude-agent-sdk")
     expect((execution.route as { kind: string }).kind).toBe("direct")
     expect(execution.executionFingerprint).toEqual(expect.any(String))
+    expect(onResolvedExecutionSpec).toHaveBeenCalledTimes(1)
+    expect(onResolvedExecutionSpec.mock.calls[0][0]).toMatchObject({
+      executionFingerprint: execution.executionFingerprint,
+      runtimeAdapter: execution.runtimeAdapter,
+      capabilities: execution.capabilities,
+    })
 
     // v2 carries per-capability verdicts across the wire so the sidecar can
     // fail closed on its own rather than trusting `effective` alone.

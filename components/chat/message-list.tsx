@@ -44,6 +44,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { PerfBoundary } from "@/lib/perf"
+import type { RewindFilesResult } from "@/lib/claude/ipc"
 
 // Lists at or below this length render in normal document flow (no
 // virtualization): the per-row ResizeObserver churn and the scroll-time
@@ -83,6 +84,11 @@ interface Props {
   onCopy?: () => void
   onRegenerate?: () => void | Promise<void>
   onEditResend?: (messageId: string, newText: string) => void | Promise<void>
+  onRewindFiles?: (
+    sessionId: string,
+    checkpointId: string,
+    dryRun: boolean
+  ) => Promise<RewindFilesResult>
   /** Root used to resolve project-relative links inside rendered messages. */
   projectRoot?: string | null
 }
@@ -95,6 +101,7 @@ export function MessageList({
   onCopy,
   onRegenerate,
   onEditResend,
+  onRewindFiles,
   projectRoot,
 }: Props) {
   const lastIndex = messages.length - 1
@@ -546,6 +553,7 @@ export function MessageList({
           onCopy={onCopy}
           onRegenerate={onRegenerate}
           onEditResend={onEditResend}
+          onRewindFiles={onRewindFiles}
           projectRoot={projectRoot}
         />
       </LongPress>
@@ -558,6 +566,7 @@ export function MessageList({
         onCopy={onCopy}
         onRegenerate={onRegenerate}
         onEditResend={onEditResend}
+        onRewindFiles={onRewindFiles}
         projectRoot={projectRoot}
       />
     )

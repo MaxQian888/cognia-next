@@ -144,6 +144,17 @@ describe("AgentRunPage", () => {
     expect(b.onClose).toHaveBeenCalledTimes(1)
   })
 
+  it("stops a running SDK-native task with s", () => {
+    const onStopTask = jest.fn()
+    const { container } = wrap({
+      getEntry: () => entry({ runtimeTaskId: "task-1" }),
+      onStopTask,
+    })
+    expect(container.textContent).toContain("s stop")
+    key("s")
+    expect(onStopTask).toHaveBeenCalledWith("task-1")
+  })
+
   it("re-reads the live store on the poll interval while running", () => {
     jest.useFakeTimers()
     const live = entry({ timeline: [{ kind: "text", text: "first" }] })

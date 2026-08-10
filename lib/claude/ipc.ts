@@ -95,8 +95,15 @@ export async function subscribeAgentEvents(
   })
 }
 
-export async function interruptSession(sessionId: string): Promise<void> {
-  await transport.call("claude_interrupt", { sessionId })
+export async function interruptSession(
+  sessionId: string,
+  options?: { commandId?: string }
+): Promise<void> {
+  const command = options?.commandId ? "agent_interrupt" : "claude_interrupt"
+  await transport.call(command, {
+    sessionId,
+    ...(options?.commandId ? { commandId: options.commandId } : {}),
+  })
 }
 
 /**
@@ -106,8 +113,17 @@ export async function interruptSession(sessionId: string): Promise<void> {
  * path it pushes a `/compact` turn the Agent SDK intercepts. `focus` is the
  * optional compact-instruction argument (e.g. from `/compact <focus>`).
  */
-export async function compactSession(sessionId: string, focus?: string): Promise<void> {
-  await transport.call("claude_compact", { sessionId, focus })
+export async function compactSession(
+  sessionId: string,
+  focus?: string,
+  options?: { commandId?: string }
+): Promise<void> {
+  const command = options?.commandId ? "agent_compact" : "claude_compact"
+  await transport.call(command, {
+    sessionId,
+    focus,
+    ...(options?.commandId ? { commandId: options.commandId } : {}),
+  })
 }
 
 /**
@@ -134,9 +150,10 @@ export async function restoreSession(sessionId: string, messages: unknown[]): Pr
  */
 export async function setSessionMode(
   sessionId: string,
-  mode: NonNullable<SendOptions["permissionMode"]>
+  mode: NonNullable<SendOptions["permissionMode"]>,
+  options?: { commandId?: string }
 ): Promise<void> {
-  await transport.call("claude_set_mode", { sessionId, mode })
+  await transport.call("claude_set_mode", { sessionId, mode, commandId: options?.commandId })
 }
 
 // ---- Live session introspection & control (SDK Query control methods) ----
@@ -235,11 +252,12 @@ async function sidecarRoundTrip<T>(
 async function sessionControlRequest<T>(
   sessionId: string,
   method: SessionControlMethod,
-  params?: Record<string, unknown>
+  params?: Record<string, unknown>,
+  options?: { commandId?: string }
 ): Promise<T> {
   return sidecarRoundTrip<T>(
     "claude_session_control",
-    (requestId) => ({ sessionId, requestId, method, params }),
+    (requestId) => ({ sessionId, requestId, method, params, commandId: options?.commandId }),
     `control "${method}"`,
     CONTROL_TIMEOUT_MS
   )
@@ -248,12 +266,13 @@ async function sessionControlRequest<T>(
 export async function sessionControl<T = unknown>(
   sessionId: string,
   method: Exclude<SessionControlMethod, "steer">,
-  params?: Record<string, unknown>
+  params?: Record<string, unknown>,
+  options?: { commandId?: string }
 ): Promise<T> {
   if ((method as SessionControlMethod) === "steer") {
     throw new Error("steer must use the PII-gated steerSession wrapper")
   }
-  return sessionControlRequest<T>(sessionId, method, params)
+  return sessionControlRequest<T>(sessionId, method, params, options)
 }
 
 /** Live context-window usage from the SDK (authoritative window + breakdown). */
@@ -299,8 +318,12 @@ export function getSessionSupportedCommands(sessionId: string): Promise<SdkSlash
 }
 
 /** Switch the model on the running query in place (no session restart). */
-export function setSessionModel(sessionId: string, model: string): Promise<void> {
-  return sessionControl<void>(sessionId, "setModel", { model })
+export function setSessionModel(
+  sessionId: string,
+  model: string,
+  options?: { commandId?: string }
+): Promise<void> {
+  return sessionControl<void>(sessionId, "setModel", { model }, options)
 }
 
 /**
@@ -312,16 +335,50 @@ export function setSessionModel(sessionId: string, model: string): Promise<void>
 export async function steerSession(
   sessionId: string,
   prompt: SendContent,
-  sourceMessageId?: string
+  sourceMessageId?: string,
+  options?: { priority?: "now" | "next"; commandId?: string }
 ): Promise<{ accepted: true }> {
   if (!hasNoLeakingPiiDeep(prompt)) {
     throw new Error("live-steer prompt rejected by the renderer PII gate")
   }
-  return sessionControlRequest<{ accepted: true }>(sessionId, "steer", {
-    prompt,
-    priority: "now",
-    ...(sourceMessageId ? { sourceMessageId } : {}),
-  })
+  return sessionControlRequest<{ accepted: true }>(
+    sessionId,
+    "steer",
+    {
+      prompt,
+      priority: options?.priority ?? "now",
+      ...(sourceMessageId ? { sourceMessageId } : {}),
+    },
+    options
+  )
+}
+
+export interface RewindFilesResult {
+  status: "ready" | "unavailable" | "unknown"
+  reason?: string
+  paths: string[]
+}
+
+/** Normalize SDK-version-specific rewind previews at the IPC boundary. */
+export function normalizeRewindFilesResult(value: unknown): RewindFilesResult {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  const candidates = [record.paths, record.files, record.affectedFiles, record.changedFiles]
+  const paths =
+    candidates.find(Array.isArray)?.flatMap((item) => {
+      if (typeof item === "string" && item) return [item]
+      if (!item || typeof item !== "object") return []
+      const row = item as Record<string, unknown>
+      const path = row.path ?? row.filePath ?? row.file_path
+      return typeof path === "string" && path ? [path] : []
+    }) ?? []
+  const reason = typeof record.reason === "string" ? record.reason : undefined
+  const status =
+    record.canRewind === false
+      ? "unavailable"
+      : record.canRewind === true || paths.length > 0
+        ? "ready"
+        : "unknown"
+  return { status, ...(reason ? { reason } : {}), paths: [...new Set(paths)] }
 }
 
 // ---- Session-level SDK functions (the `session_api` frame) ----------------
@@ -634,8 +691,15 @@ export async function toolResultDecision(
   })
 }
 
-export async function closeSession(sessionId: string): Promise<void> {
-  await transport.call("claude_close_session", { sessionId })
+export async function closeSession(
+  sessionId: string,
+  options?: { commandId?: string }
+): Promise<void> {
+  const command = options?.commandId ? "agent_close_session" : "claude_close_session"
+  await transport.call(command, {
+    sessionId,
+    ...(options?.commandId ? { commandId: options.commandId } : {}),
+  })
 }
 
 export async function getSidecarStatus(): Promise<{ ready: boolean }> {

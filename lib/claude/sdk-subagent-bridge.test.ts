@@ -3,6 +3,7 @@
  */
 
 import { applySdkSubagentBridge, __resetSdkSubagentBridge } from "./sdk-subagent-bridge"
+import { requestCancelSubagentRun } from "./agents/subagent-cancel-registry"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 
 const SID = "chat-1"
@@ -41,6 +42,32 @@ describe("applySdkSubagentBridge — lifecycle", () => {
     expect(n.depth).toBe(1)
     expect(n.context?.sessionId).toBe(SID)
     expect(n.task).toBe("go")
+  })
+
+  it("registers SDK-native tasks with the existing cancellation entry point", async () => {
+    const stopTask = jest.fn().mockResolvedValue(undefined)
+    applySdkSubagentBridge(started(), SID, { stopTask })
+
+    expect(requestCancelSubagentRun("T1", "stop")).toBe(true)
+    await Promise.resolve()
+    expect(stopTask).toHaveBeenCalledWith("T1")
+  })
+
+  it("unregisters SDK-native cancellation when the task settles", () => {
+    applySdkSubagentBridge(started(), SID, { stopTask: jest.fn() })
+    applySdkSubagentBridge(
+      {
+        type: "system",
+        subtype: "task_updated",
+        task_id: "T1",
+        patch: { status: "completed" },
+        uuid: "u",
+        session_id: "sdk",
+      } as never,
+      SID
+    )
+
+    expect(requestCancelSubagentRun("T1")).toBe(false)
   })
 
   it("ignores ambient/housekeeping task_started (skip_transcript or no subagent_type)", () => {

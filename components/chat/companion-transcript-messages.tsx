@@ -12,6 +12,7 @@ import { createRemoteTranscriptSource } from "@/lib/chat/transcript/source"
 import { useCharacters } from "@/lib/data-hooks/context"
 import { transport } from "@/lib/tauri/transport-instance"
 import { TranscriptTimelineSurface } from "./transcript-timeline-surface"
+import type { RewindFilesResult } from "@/lib/claude/ipc"
 
 type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
 
@@ -36,6 +37,11 @@ export interface CompanionTranscriptMessagesProps {
   onCopy: () => void
   onRegenerate: () => void | Promise<void>
   onEditResend: (messageId: string, newText: string) => void | Promise<void>
+  onRewindFiles?: (
+    sessionId: string,
+    checkpointId: string,
+    dryRun: boolean
+  ) => Promise<RewindFilesResult>
 }
 
 /**
@@ -52,6 +58,7 @@ export function CompanionTranscriptMessages({
   onCopy,
   onRegenerate,
   onEditResend,
+  onRewindFiles,
 }: CompanionTranscriptMessagesProps) {
   const t = useTranslations("chat.transcript")
   const transcript = useTranscriptController(sessionId, companionTranscriptSource)
@@ -94,6 +101,7 @@ export function CompanionTranscriptMessages({
           onCopy,
           onRegenerate,
           onEditResend,
+          onRewindFiles,
           projectRoot,
           mutableMessageIds,
         }}

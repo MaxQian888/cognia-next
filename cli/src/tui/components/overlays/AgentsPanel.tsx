@@ -28,6 +28,7 @@ export interface AgentsPanelProps {
   rows: AgentPanelRow[]
   /** Open a row's output (settled background runs). */
   onView: (row: AgentPanelRow) => void
+  onStop?: (row: AgentPanelRow) => void
   onCancel: () => void
   /** Re-read the rows from the live sources — called on the 1s tick so the
    * board moves (status / tokens / tool counts) while it is open. */
@@ -42,6 +43,7 @@ export interface AgentsPanelProps {
 export function AgentsPanel({
   rows: rowsProp,
   onView,
+  onStop,
   onCancel,
   refresh,
   now: nowProp,
@@ -117,6 +119,10 @@ export function AgentsPanel({
       }
       if (key.return) {
         if (current) onView(current)
+        return
+      }
+      if (input.toLowerCase() === "s") {
+        if (current?.status === "running" && current.runtimeTaskId) onStop?.(current)
         return
       }
     },

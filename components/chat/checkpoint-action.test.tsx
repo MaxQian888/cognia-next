@@ -5,48 +5,41 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { CheckpointAction } from "./checkpoint-action"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
-const sessionControlMock = jest.fn()
+const rewindFilesMock = jest.fn()
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
-jest.mock("@/lib/claude/ipc", () => ({
-  sessionControl: (...args: unknown[]) => sessionControlMock(...args),
-}))
 jest.mock("@/lib/ai/agent/execution/feature-flags", () => ({
   isAgentExecutionFlagEnabled: () => true,
   subscribeToAgentExecutionFlags: () => () => {},
 }))
 
 describe("CheckpointAction", () => {
-  beforeEach(() => sessionControlMock.mockReset())
+  beforeEach(() => rewindFilesMock.mockReset())
 
   const renderAction = (enabled = true) =>
     render(
       <TooltipProvider>
-        <CheckpointAction checkpointId="u-1" enabled={enabled} sessionId="s-1" />
+        <CheckpointAction checkpointId="u-1" enabled={enabled} rewindFiles={rewindFilesMock} />
       </TooltipProvider>
     )
 
   it("previews with dry-run before performing a confirmed rewind", async () => {
-    sessionControlMock.mockResolvedValueOnce({ files: ["src/a.ts"] }).mockResolvedValueOnce({})
+    rewindFilesMock
+      .mockResolvedValueOnce({ status: "ready", paths: ["src/a.ts"] })
+      .mockResolvedValueOnce({ status: "ready", paths: [] })
     renderAction()
 
     fireEvent.click(screen.getByRole("button", { name: "action" }))
     await screen.findByText(/src\/a\.ts/)
-    expect(sessionControlMock).toHaveBeenNthCalledWith(1, "s-1", "rewindFiles", {
-      userMessageId: "u-1",
-      options: { dryRun: true },
-    })
+    expect(rewindFilesMock).toHaveBeenNthCalledWith(1, "u-1", true)
 
     fireEvent.click(screen.getByRole("button", { name: "confirm" }))
-    await waitFor(() => expect(sessionControlMock).toHaveBeenCalledTimes(2))
-    expect(sessionControlMock).toHaveBeenNthCalledWith(2, "s-1", "rewindFiles", {
-      userMessageId: "u-1",
-      options: { dryRun: false },
-    })
+    await waitFor(() => expect(rewindFilesMock).toHaveBeenCalledTimes(2))
+    expect(rewindFilesMock).toHaveBeenNthCalledWith(2, "u-1", false)
   })
 
   it("surfaces preview failures without enabling confirmation", async () => {
-    sessionControlMock.mockRejectedValue(new Error("unsupported"))
+    rewindFilesMock.mockRejectedValue(new Error("unsupported"))
     renderAction()
 
     fireEvent.click(screen.getByRole("button", { name: "action" }))

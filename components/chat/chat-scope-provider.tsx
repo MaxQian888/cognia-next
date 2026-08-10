@@ -4,18 +4,31 @@ import { createContext, useContext, type ReactNode } from "react"
 
 export interface ChatScopeValue {
   sessionId: string
+  compact?: () => Promise<void>
+  setModel?: (model: string) => Promise<void>
+  resetRuntime?: () => Promise<void>
 }
 
 const ChatScopeContext = createContext<ChatScopeValue | null>(null)
 
 export function ChatScopeProvider({
   sessionId,
+  compact,
+  setModel,
+  resetRuntime,
   children,
 }: {
   sessionId: string
+  compact?: () => Promise<void>
+  setModel?: (model: string) => Promise<void>
+  resetRuntime?: () => Promise<void>
   children: ReactNode
 }) {
-  return <ChatScopeContext.Provider value={{ sessionId }}>{children}</ChatScopeContext.Provider>
+  return (
+    <ChatScopeContext.Provider value={{ sessionId, compact, setModel, resetRuntime }}>
+      {children}
+    </ChatScopeContext.Provider>
+  )
 }
 
 export function useOptionalChatScope(): ChatScopeValue | null {

@@ -79,9 +79,11 @@ import { tagBranchSiblings, tagEditSibling } from "@/lib/chat/branch-regen"
 import {
   approveTool,
   closeSession,
+  compactSession,
   interruptSession,
   onClaudeMessage,
   sendPrompt,
+  setSessionModel,
   toolResultDecision,
 } from "@/lib/claude/ipc"
 import { isEmbeddedSession } from "@/lib/chat/session-exposure"
@@ -145,7 +147,13 @@ import { executeProjectEnvironment } from "@/lib/project-environment/executor"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import {
+  createAgentExecutionHandle,
+  type AgentExecutionHandle,
+} from "@/lib/ai/agent/execution/agent-execution-handle"
+import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
 import { useGitStore } from "@/stores/git/git-store"
+import { refreshGitStatus } from "@/lib/git/load"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
 import {
@@ -762,6 +770,10 @@ export function useClaudeChat() {
   // can cancel the renderer streamText loop (the sidecar path uses
   // `interruptSession` instead).
   const standaloneAbortRef = useRef<Map<string, AbortController>>(new Map())
+  // Session-owned handles live beside the existing coalescing resources. The
+  // resolver callback supplies the exact spec used for the outgoing send, so
+  // this hook never resolves execution a second time.
+  const executionHandlesRef = useRef<Map<string, AgentExecutionHandle>>(new Map())
 
   /**
    * Per-session streaming coalescers. Each open session gets its own
@@ -795,9 +807,11 @@ export function useClaudeChat() {
   // Best-effort flush of every session's pending streaming write on unmount so
   // the last partial isn't lost when the hook tears down mid-turn.
   useEffect(() => {
+    const executionHandles = executionHandlesRef.current
     return () => {
       registry.flushAllPersist()
       registry.clear()
+      executionHandles.clear()
     }
   }, [registry])
 
@@ -820,6 +834,7 @@ export function useClaudeChat() {
           handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef, sendRef, {
             messagesMirrorRef,
             registry,
+            executionHandlesRef,
           })
         )
         .catch((err) => {
@@ -998,8 +1013,12 @@ export function useClaudeChat() {
             // simply falls through to the queue. It takes the whole `content`,
             // so an attachment-only follow-up goes live here too.
             try {
-              const { steerSession } = await import("@/lib/claude/ipc")
-              await steerSession(sessionId, content)
+              const handle = executionHandlesRef.current.get(sessionId)
+              if (handle) await handle.steer(content)
+              else {
+                const { steerSession } = await import("@/lib/claude/ipc")
+                await steerSession(sessionId, content)
+              }
               setSteerMessageState(sessionId, entryId, "accepted")
               return
             } catch (err) {
@@ -1065,7 +1084,12 @@ export function useClaudeChat() {
           : (content.find((b) => b.type === "text") as { text?: string } | undefined)?.text
       let sendOptions: SendOptions
       try {
-        sendOptions = opts ?? (await buildSendOptions(session, userMessageText))
+        sendOptions =
+          opts ??
+          (await buildSendOptions(session, userMessageText, (spec) => {
+            if (executionHandlesRef.current.has(sessionId)) return
+            executionHandlesRef.current.set(sessionId, createAgentExecutionHandle(sessionId, spec))
+          }))
       } catch (err) {
         // RoutingNoCandidatesError (alias matched, every deployment down)
         // and any other resolver failure surface as the chat error instead
@@ -2012,7 +2036,9 @@ export function useClaudeChat() {
           standaloneController.abort()
           standaloneAbortRef.current.delete(sessionId)
         } else {
-          await interruptSession(sessionId)
+          const handle = executionHandlesRef.current.get(sessionId)
+          if (handle) await handle.interrupt()
+          else await interruptSession(sessionId)
         }
       } catch (err) {
         console.error("interrupt failed", err)
@@ -2032,7 +2058,9 @@ export function useClaudeChat() {
     if (queued.length === 0) return
     steerArmed.add(sessionId)
     try {
-      await interruptSession(sessionId)
+      const handle = executionHandlesRef.current.get(sessionId)
+      if (handle) await handle.interrupt()
+      else await interruptSession(sessionId)
     } catch (err) {
       console.error("interrupt(steer) failed", err)
       steerArmed.delete(sessionId)
@@ -2131,11 +2159,16 @@ export function useClaudeChat() {
         }
       }
       try {
-        await approveTool(
-          approval.sessionId,
-          approval.requestId,
-          decision === "allow_always" ? "allow" : decision
-        )
+        const handle = executionHandlesRef.current.get(approval.sessionId)
+        if (handle) {
+          await handle.resolvePermission(approval.requestId, decision)
+        } else {
+          await approveTool(
+            approval.sessionId,
+            approval.requestId,
+            decision === "allow_always" ? "allow" : decision
+          )
+        }
       } finally {
         // Scope the clear to the approval's own session so resolving a gate in
         // one pane never disturbs another pane's pending queue.
@@ -2148,7 +2181,9 @@ export function useClaudeChat() {
   const close = useCallback(
     async (sessionId: string) => {
       try {
-        await closeSession(sessionId)
+        const handle = executionHandlesRef.current.get(sessionId)
+        if (handle) await handle.cancel()
+        else await closeSession(sessionId)
       } catch (err) {
         console.error("close session failed", err)
       } finally {
@@ -2157,6 +2192,7 @@ export function useClaudeChat() {
         chatTurnPerformance.finish(sessionId, "cancelled")
         registry.release(sessionId)
         messagesMirrorRef.current.delete(sessionId)
+        executionHandlesRef.current.delete(sessionId)
         useChatStore.getState().closeSession(sessionId)
         clearSessionGrants(sessionId)
         releaseSkillLoadContext(sessionId)
@@ -2170,6 +2206,41 @@ export function useClaudeChat() {
       }
     },
     [registry]
+  )
+
+  const compact = useCallback(async (sessionId: string) => {
+    const handle = executionHandlesRef.current.get(sessionId)
+    if (handle) await handle.compact()
+    else await compactSession(sessionId)
+  }, [])
+
+  const setModel = useCallback(async (sessionId: string, model: string) => {
+    const handle = executionHandlesRef.current.get(sessionId)
+    if (handle) await handle.setModel(model)
+    else await setSessionModel(sessionId, model)
+  }, [])
+
+  const resetRuntime = useCallback(async (sessionId: string) => {
+    const handle = executionHandlesRef.current.get(sessionId)
+    try {
+      if (handle) await handle.cancel()
+      else await closeSession(sessionId)
+    } finally {
+      executionHandlesRef.current.delete(sessionId)
+    }
+  }, [])
+
+  const rewindFiles = useCallback(
+    async (sessionId: string, checkpointId: string, dryRun: boolean) => {
+      const handle = executionHandlesRef.current.get(sessionId)
+      if (!handle) throw new Error("checkpoint execution handle is unavailable")
+      const result = await handle.rewindFiles(checkpointId, { dryRun })
+      if (!dryRun) {
+        await refreshGitStatus(useGitStore.getState().rootDir).catch(() => undefined)
+      }
+      return result
+    },
+    []
   )
 
   /**
@@ -2291,6 +2362,10 @@ export function useClaudeChat() {
     interruptAndSteer,
     flushSteer,
     respondToApproval,
+    compact,
+    setModel,
+    resetRuntime,
+    rewindFiles,
     close,
     editAndResend,
     regenerate,
@@ -2299,7 +2374,8 @@ export function useClaudeChat() {
 
 async function buildSendOptions(
   session: ChatSession | null | undefined,
-  userMessage?: string
+  userMessage?: string,
+  onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void
 ): Promise<SendOptions> {
   const appSettings = useSettingsStore.getState().settings
   // The composer keeps @-referenced files/folders in the chat store. Hand
@@ -2480,6 +2556,7 @@ async function buildSendOptions(
     // and thus this resolver — is skipped.
     emitTrace: true,
     traceSurface: "chat",
+    onResolvedExecutionSpec,
   })
 }
 
@@ -2499,6 +2576,7 @@ function isTeamSubSession(sessionId: string): boolean {
 interface StreamCoalescing {
   messagesMirrorRef: React.MutableRefObject<Map<string, UIMessage[]>>
   registry: SessionCoalescingRegistry
+  executionHandlesRef: React.MutableRefObject<Map<string, AgentExecutionHandle>>
 }
 
 /**
@@ -2586,7 +2664,7 @@ async function handleEvent(
   sendRef: React.MutableRefObject<SendFn | null>,
   coalescing: StreamCoalescing
 ) {
-  const { messagesMirrorRef, registry } = coalescing
+  const { messagesMirrorRef, registry, executionHandlesRef } = coalescing
   // Skip events for team sub-sessions outright — useTeamChat handles them.
   if (
     (evt.type === "event" ||
@@ -3076,7 +3154,9 @@ async function handleEvent(
           // workflow-editor and direct chat) into the runtime store so they render
           // in the chat subagent tree alongside `dispatch_agent` runs.
           const { applySdkSubagentBridge } = await import("@/lib/claude/sdk-subagent-bridge")
-          applySdkSubagentBridge(env.event, sessionId)
+          const handle = executionHandlesRef.current.get(sessionId)
+          if (handle) applySdkSubagentBridge(env.event, sessionId, handle)
+          else applySdkSubagentBridge(env.event, sessionId)
           // ExitPlanMode capture (ADR-0045): project the SDK plan-mode plan into
           // a structured draft AgentPlan so it can be approved + executed through
           // the unified plan pipeline. Runs once per turn (turnComplete). Lazy

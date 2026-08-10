@@ -642,14 +642,21 @@ pub async fn claude_restore_impl(
     state.write_command(&msg).await
 }
 
-fn build_set_mode_payload(session_id: String, mode: String) -> Result<Value, String> {
+fn build_set_mode_payload(
+    session_id: String,
+    mode: String,
+    command_id: Option<String>,
+) -> Result<Value, String> {
     if !matches!(
         mode.as_str(),
         "default" | "plan" | "acceptEdits" | "bypassPermissions" | "dontAsk" | "auto"
     ) {
         return Err(format!("unsupported permission mode: {mode}"));
     }
-    Ok(json!({ "type": "set_mode", "sessionId": session_id, "mode": mode }))
+    Ok(with_command_id(
+        json!({ "type": "set_mode", "sessionId": session_id, "mode": mode }),
+        command_id,
+    ))
 }
 
 #[tauri::command]
@@ -657,8 +664,9 @@ pub async fn claude_set_mode(
     state: State<'_, SidecarState>,
     session_id: String,
     mode: String,
+    command_id: Option<String>,
 ) -> Result<(), String> {
-    claude_set_mode_impl(&state, session_id, mode).await
+    claude_set_mode_impl_with_id(&state, session_id, mode, command_id).await
 }
 
 pub async fn claude_set_mode_impl(
@@ -666,8 +674,17 @@ pub async fn claude_set_mode_impl(
     session_id: String,
     mode: String,
 ) -> Result<(), String> {
+    claude_set_mode_impl_with_id(state, session_id, mode, None).await
+}
+
+pub async fn claude_set_mode_impl_with_id(
+    state: &SidecarState,
+    session_id: String,
+    mode: String,
+    command_id: Option<String>,
+) -> Result<(), String> {
     state
-        .write_command(&build_set_mode_payload(session_id, mode)?)
+        .write_command(&build_set_mode_payload(session_id, mode, command_id)?)
         .await
 }
 
@@ -741,14 +758,18 @@ fn build_session_control_payload(
     request_id: String,
     method: String,
     params: Option<Value>,
+    command_id: Option<String>,
 ) -> Value {
-    json!({
-        "type": "control",
-        "sessionId": session_id,
-        "requestId": request_id,
-        "method": method,
-        "params": params,
-    })
+    with_command_id(
+        json!({
+            "type": "control",
+            "sessionId": session_id,
+            "requestId": request_id,
+            "method": method,
+            "params": params,
+        }),
+        command_id,
+    )
 }
 
 /// Drive a live SDK `Query` control method on a session. Fire-and-forget over
@@ -763,12 +784,13 @@ pub async fn claude_session_control(
     request_id: String,
     method: String,
     params: Option<Value>,
+    command_id: Option<String>,
 ) -> Result<(), String> {
     bump_deprecated("claude_session_control");
     if !is_allowed_control_method(&method) {
         return Err(format!("unsupported control method: {method}"));
     }
-    let payload = build_session_control_payload(session_id, request_id, method, params);
+    let payload = build_session_control_payload(session_id, request_id, method, params, command_id);
     state.write_command(&payload).await
 }
 
@@ -1238,12 +1260,14 @@ mod tests {
             "req1".into(),
             "setModel".into(),
             Some(json!({ "model": "claude-opus-4-8" })),
+            Some("cmd-1".into()),
         );
         assert_eq!(p["type"], "control");
         assert_eq!(p["sessionId"], "s1");
         assert_eq!(p["requestId"], "req1");
         assert_eq!(p["method"], "setModel");
         assert_eq!(p["params"]["model"], "claude-opus-4-8");
+        assert_eq!(p["commandId"], "cmd-1");
     }
 
     #[test]
@@ -1252,6 +1276,7 @@ mod tests {
             "s1".into(),
             "req2".into(),
             "getContextUsage".into(),
+            None,
             None,
         );
         assert_eq!(p["method"], "getContextUsage");
@@ -1341,12 +1366,14 @@ mod tests {
 
     #[test]
     fn set_mode_payload_accepts_supported_modes_and_rejects_unknown_values() {
-        let payload = build_set_mode_payload("s1".into(), "dontAsk".into()).unwrap();
+        let payload =
+            build_set_mode_payload("s1".into(), "dontAsk".into(), Some("cmd-1".into())).unwrap();
         assert_eq!(payload["type"], "set_mode");
         assert_eq!(payload["sessionId"], "s1");
         assert_eq!(payload["mode"], "dontAsk");
+        assert_eq!(payload["commandId"], "cmd-1");
 
-        let error = build_set_mode_payload("s1".into(), "owner".into()).unwrap_err();
+        let error = build_set_mode_payload("s1".into(), "owner".into(), None).unwrap_err();
         assert!(error.contains("unsupported permission mode"));
     }
 

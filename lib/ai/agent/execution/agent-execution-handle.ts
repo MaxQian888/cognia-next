@@ -6,7 +6,11 @@
 // operations throw a typed `AgentCapabilityError` BEFORE any IPC, and
 // `setModel` accepts only models frozen into the spec's bindings.
 
-import type { AgentPermissionMode, SessionControlMethod } from "@cognia/agent-config-types"
+import type {
+  AgentPermissionMode,
+  SendContent,
+  SessionControlMethod,
+} from "@cognia/agent-config-types"
 import { SESSION_CONTROL_CAPABILITIES } from "@cognia/agent-config-types"
 import type {
   AgentCapabilityId,
@@ -65,6 +69,8 @@ export interface AgentExecutionHandle {
    * basis, since the sidecar forwards the string straight to the SDK.
    */
   setPermissionMode(mode: AgentPermissionMode): Promise<void>
+  /** Queue PII-gated user guidance into the active streaming query. */
+  steer(prompt: SendContent, priority?: "now" | "next"): Promise<{ accepted: true }>
 
   /**
    * Drive any allowlisted SDK `Query` control method on the live session,
@@ -102,7 +108,7 @@ export interface AgentExecutionHandle {
    * restore. Needs `enableFileCheckpointing` on the session — without it the
    * SDK returns `canRewind: false` rather than throwing.
    */
-  rewindFiles(userMessageId: string, options?: { dryRun?: boolean }): Promise<unknown>
+  rewindFiles(userMessageId: string, options?: { dryRun?: boolean }): Promise<ipc.RewindFilesResult>
   /** Read a file through the session's own read-permission rules. */
   readFile(
     path: string,
@@ -145,26 +151,30 @@ export interface AgentExecutionHandle {
   applyFlagSettings(settings: Record<string, unknown>): Promise<void>
 }
 
-interface HandleDeps {
-  ipc: Pick<
-    typeof ipc,
-    | "interruptSession"
-    | "compactSession"
-    | "setSessionMode"
-    | "setSessionModel"
-    | "subscribeAgentEvents"
-    | "sessionControl"
-  > & {
+export interface AgentExecutionTransport {
+  ipc: {
+    interruptSession: (sessionId: string, commandId: string) => Promise<void>
+    compactSession: (
+      sessionId: string,
+      focus: string | undefined,
+      commandId: string
+    ) => Promise<void>
+    setSessionMode: typeof ipc.setSessionMode
+    setSessionModel: typeof ipc.setSessionModel
+    subscribeAgentEvents: typeof ipc.subscribeAgentEvents
+    sessionControl: typeof ipc.sessionControl
+    steerSession: typeof ipc.steerSession
     resolvePermission: (
       sessionId: string,
       requestId: string,
       decision: string,
-      message?: string,
-      updatedInput?: Record<string, unknown>,
-      interrupt?: boolean
+      message: string | undefined,
+      updatedInput: Record<string, unknown> | undefined,
+      interrupt: boolean | undefined,
+      commandId: string
     ) => Promise<void>
   }
-  closeSession: (sessionId: string) => Promise<void>
+  closeSession: (sessionId: string, commandId: string) => Promise<void>
   recordCapabilityOutcome: (
     capability: AgentCapabilityId,
     outcome: "success" | "failure",
@@ -194,9 +204,9 @@ export function nextCommandId(): string {
 export function createAgentExecutionHandle(
   sessionId: string,
   spec: ResolvedAgentExecutionSpec,
-  deps?: Partial<HandleDeps>
+  deps?: Partial<AgentExecutionTransport>
 ): AgentExecutionHandle {
-  const io: HandleDeps = {
+  const io: AgentExecutionTransport = {
     ipc: {
       // Canonical `agent_interrupt`, not the deprecated `claude_interrupt`
       // alias `ipc.interruptSession` calls. Two reasons: the alias bumps the
@@ -205,30 +215,24 @@ export function createAgentExecutionHandle(
       // commands declare `command_id`, so the alias could never be deduped.
       interruptSession:
         deps?.ipc?.interruptSession ??
-        (async (sid) => {
+        (async (sid, commandId) => {
           const { transport } = await import("@/lib/tauri")
-          await transport.call("agent_interrupt", {
-            sessionId: sid,
-            commandId: nextCommandId(),
-          })
+          await transport.call("agent_interrupt", { sessionId: sid, commandId })
         }),
       compactSession:
         deps?.ipc?.compactSession ??
-        (async (sid, focus) => {
+        (async (sid, focus, commandId) => {
           const { transport } = await import("@/lib/tauri")
-          await transport.call("agent_compact", {
-            sessionId: sid,
-            focus,
-            commandId: nextCommandId(),
-          })
+          await transport.call("agent_compact", { sessionId: sid, focus, commandId })
         }),
       setSessionMode: deps?.ipc?.setSessionMode ?? ipc.setSessionMode,
       setSessionModel: deps?.ipc?.setSessionModel ?? ipc.setSessionModel,
       subscribeAgentEvents: deps?.ipc?.subscribeAgentEvents ?? ipc.subscribeAgentEvents,
       sessionControl: deps?.ipc?.sessionControl ?? ipc.sessionControl,
+      steerSession: deps?.ipc?.steerSession ?? ipc.steerSession,
       resolvePermission:
         deps?.ipc?.resolvePermission ??
-        (async (sid, requestId, decision, message, updatedInput, interrupt) => {
+        (async (sid, requestId, decision, message, updatedInput, interrupt, commandId) => {
           const { transport } = await import("@/lib/tauri")
           await transport.call("agent_resolve_permission", {
             sessionId: sid,
@@ -237,15 +241,15 @@ export function createAgentExecutionHandle(
             message,
             updatedInput,
             interrupt,
-            commandId: nextCommandId(),
+            commandId,
           })
         }),
     },
     closeSession:
       deps?.closeSession ??
-      (async (sid) => {
+      (async (sid, commandId) => {
         const { transport } = await import("@/lib/tauri")
-        await transport.call("agent_close_session", { sessionId: sid, commandId: nextCommandId() })
+        await transport.call("agent_close_session", { sessionId: sid, commandId })
       }),
     recordCapabilityOutcome:
       deps?.recordCapabilityOutcome ??
@@ -292,17 +296,21 @@ export function createAgentExecutionHandle(
       return unlisten
     },
     async interrupt() {
-      await io.ipc.interruptSession(sessionId)
+      await io.ipc.interruptSession(sessionId, nextCommandId())
     },
     async cancel() {
-      await io.closeSession(sessionId)
+      await io.closeSession(sessionId, nextCommandId())
     },
     async compact(focus) {
       requireCapability(spec, "compaction", "compact")
-      await runCapabilityCommand("compaction", () => io.ipc.compactSession(sessionId, focus))
+      const commandId = nextCommandId()
+      await runCapabilityCommand("compaction", () =>
+        io.ipc.compactSession(sessionId, focus, commandId)
+      )
     },
     async resolvePermission(requestId, decision, options) {
       requireCapability(spec, "permissions.interrupt-resume", "resolvePermission")
+      const commandId = nextCommandId()
       await runCapabilityCommand("permissions.interrupt-resume", () =>
         io.ipc.resolvePermission(
           sessionId,
@@ -310,7 +318,8 @@ export function createAgentExecutionHandle(
           decision,
           options?.message,
           options?.updatedInput,
-          options?.interrupt
+          options?.interrupt,
+          commandId
         )
       )
     },
@@ -319,20 +328,32 @@ export function createAgentExecutionHandle(
       if (!frozenModels.has(model)) {
         throw new FrozenModelBindingError(model)
       }
-      await runCapabilityCommand("set-model", () => io.ipc.setSessionModel(sessionId, model))
+      const commandId = nextCommandId()
+      await runCapabilityCommand("set-model", () =>
+        io.ipc.setSessionModel(sessionId, model, { commandId })
+      )
     },
     async setPermissionMode(mode) {
       requireCapability(spec, "permissions.set-mode", "setPermissionMode")
+      const commandId = nextCommandId()
       await runCapabilityCommand("permissions.set-mode", () =>
-        io.ipc.setSessionMode(sessionId, mode)
+        io.ipc.setSessionMode(sessionId, mode, { commandId })
+      )
+    },
+    async steer(prompt, priority = "now") {
+      requireCapability(spec, "steer", "steer")
+      const commandId = nextCommandId()
+      return runCapabilityCommand("steer", () =>
+        io.ipc.steerSession(sessionId, prompt, undefined, { priority, commandId })
       )
     },
 
     async control(method, params) {
       requireCapability(spec, SESSION_CONTROL_CAPABILITIES[method], method)
       const capability = SESSION_CONTROL_CAPABILITIES[method]
+      const commandId = nextCommandId()
       return runCapabilityCommand(capability, () =>
-        io.ipc.sessionControl(sessionId, method, params)
+        io.ipc.sessionControl(sessionId, method, params, { commandId })
       )
     },
 
@@ -343,14 +364,15 @@ export function createAgentExecutionHandle(
       return this.control("reloadSkills")
     },
 
-    rewindFiles(userMessageId, options) {
+    async rewindFiles(userMessageId, options) {
       // Default to a preview. See the interface docblock: the SDK writes by
       // default, and a facade whose easiest call rewrites the working tree is
       // the wrong shape for a UI.
-      return this.control("rewindFiles", {
+      const result = await this.control("rewindFiles", {
         userMessageId,
         options: { dryRun: options?.dryRun ?? true },
       })
+      return ipc.normalizeRewindFilesResult(result)
     },
     readFile(path, options) {
       return this.control("readFile", { path, ...(options ? { options } : {}) })

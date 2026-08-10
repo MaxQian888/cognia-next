@@ -14,6 +14,7 @@ import {
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { compactSession } from "@/lib/claude/ipc"
+import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 
 // Echo translation keys (with params appended) so assertions stay stable.
 jest.mock("next-intl", () => ({
@@ -221,6 +222,18 @@ describe("CompactNowButton", () => {
     render(<CompactNowButton sessionId="s1" usedTokens={5000} />)
     fireEvent.click(screen.getByTestId("compact-now-button"))
     expect(mockedCompact).toHaveBeenCalledWith("s1")
+  })
+
+  it("uses the pane-owned handle control when the chat scope matches", () => {
+    const compact = jest.fn(async () => undefined)
+    render(
+      <ChatScopeProvider sessionId="s1" compact={compact}>
+        <CompactNowButton sessionId="s1" usedTokens={5000} />
+      </ChatScopeProvider>
+    )
+    fireEvent.click(screen.getByTestId("compact-now-button"))
+    expect(compact).toHaveBeenCalledTimes(1)
+    expect(mockedCompact).not.toHaveBeenCalled()
   })
 
   it("is disabled with no active session", () => {

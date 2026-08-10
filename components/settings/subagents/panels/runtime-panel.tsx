@@ -8,11 +8,9 @@
  *  - It rendered a flat list, so the nesting the panel above it configures was
  *    invisible. Runs are now shown as the parent→child tree the records
  *    already describe (`runtime-tree.ts`).
- *  - It had no way to stop anything, although `requestCancelSubagentRun` has
- *    existed all along. Cancel is wired per row — and reports honestly when it
- *    misses: only runs dispatched through `dispatch_agent` register an abort
- *    controller, so an SDK-native Task run has nothing to signal and the call
- *    returns false. Saying "cancelled" there would be a lie.
+ *  - It had no way to stop anything. Cancel is wired per row through the same
+ *    entry point Chat uses, whether the runtime registered an AbortController
+ *    or an SDK-native stop-task adapter.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -30,7 +28,7 @@ import { cn } from "@/lib/utils"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
-import { requestCancelSubagentRun } from "@/lib/claude/agents/subagent-cancel-registry"
+import { cancelSubagentRun } from "@/lib/claude/agents/cancel-subagent"
 import { SUB_AGENT_STATUS_CONFIG } from "@/types/agent/sub-agent"
 import type { SubAgent } from "@/types/agent/sub-agent"
 
@@ -78,7 +76,7 @@ export function RuntimePanel() {
 
   const cancel = useCallback(
     (run: SubAgent) => {
-      const signalled = requestCancelSubagentRun(run.id, "Cancelled from settings")
+      const signalled = cancelSubagentRun(run.id, { reason: "Cancelled from settings" })
       if (signalled) toast.success(t("cancelRequested", { name: run.name }))
       else toast.info(t("cancelUnreachable"))
     },

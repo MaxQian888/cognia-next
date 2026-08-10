@@ -45,7 +45,7 @@ const rows: AgentPanelRow[] = [
 ]
 
 function wrap(props: Partial<React.ComponentProps<typeof AgentsPanel>> = {}) {
-  const cb = { onView: jest.fn(), onCancel: jest.fn() }
+  const cb = { onView: jest.fn(), onStop: jest.fn(), onCancel: jest.fn() }
   const result = render(<AgentsPanel rows={rows} now={NOW} {...cb} {...props} />)
   return { ...result, ...cb }
 }
@@ -83,6 +83,21 @@ describe("AgentsPanel", () => {
     const { onCancel } = wrap()
     key("", { escape: true })
     expect(onCancel).toHaveBeenCalled()
+  })
+
+  it("stops only a selected running SDK-native task with s", () => {
+    const native = {
+      id: "live:native",
+      kind: "inflight" as const,
+      name: "native",
+      task: "work",
+      status: "running" as const,
+      liveId: "native",
+      runtimeTaskId: "task-1",
+    }
+    const { onStop } = wrap({ rows: [native] })
+    key("s")
+    expect(onStop).toHaveBeenCalledWith(native)
   })
 
   it("clamps navigation at the list bounds", () => {

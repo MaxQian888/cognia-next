@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { PerfBoundary } from "@/lib/perf"
 import type { TranscriptRenderStatus } from "./transcript-message-list"
 import { MessageRenderer } from "./message-renderer"
+import type { RewindFilesResult } from "@/lib/claude/ipc"
 
 export interface TranscriptTimelineLabels {
   expand: string
@@ -46,6 +47,11 @@ export interface TranscriptTimelineSurfaceProps {
     onCopy?: () => void
     onRegenerate?: () => void | Promise<void>
     onEditResend?: (messageId: string, newText: string) => void | Promise<void>
+    onRewindFiles?: (
+      sessionId: string,
+      checkpointId: string,
+      dryRun: boolean
+    ) => Promise<RewindFilesResult>
     projectRoot?: string | null
     /** Mutations are exposed only for rows present in the caller's writable window. */
     mutableMessageIds?: ReadonlySet<string>
@@ -112,6 +118,7 @@ function renderMessages(
           ? adapters?.onEditResend
           : undefined
       }
+      onRewindFiles={adapters?.onRewindFiles}
       projectRoot={adapters?.projectRoot}
     />
   ))

@@ -28,9 +28,9 @@ jest.mock("@/components/ui/sonner", () => ({
   },
 }))
 
-const requestCancel = jest.fn()
-jest.mock("@/lib/claude/agents/subagent-cancel-registry", () => ({
-  requestCancelSubagentRun: (...a: unknown[]) => requestCancel(...a),
+const cancelSubagentRun = jest.fn()
+jest.mock("@/lib/claude/agents/cancel-subagent", () => ({
+  cancelSubagentRun: (...a: unknown[]) => cancelSubagentRun(...a),
 }))
 
 let subAgents: Record<string, SubAgent> = {}
@@ -74,6 +74,7 @@ const seed = (...runs: SubAgent[]) => {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  cancelSubagentRun.mockReturnValue(true)
   seq = 0
   subAgents = {}
 })
@@ -117,18 +118,18 @@ describe("tree rendering (G4)", () => {
 
 describe("cancel (G3)", () => {
   it("offers cancel on a live run and reports success", async () => {
-    requestCancel.mockReturnValue(true)
+    cancelSubagentRun.mockReturnValue(true)
     seed(run("live", { startedAt: new Date() }))
     render(<RuntimePanel />)
     await userEvent.click(screen.getByTestId("subagent-runtime-cancel-live"))
-    expect(requestCancel).toHaveBeenCalledWith("live", expect.any(String))
+    expect(cancelSubagentRun).toHaveBeenCalledWith("live", { reason: expect.any(String) })
     expect(toastSuccess).toHaveBeenCalled()
   })
 
   it("says so honestly when the run has no abort controller to signal", async () => {
     // Only `dispatch_agent` runs register one; an SDK-native Task run does not.
     // Claiming a cancel there would be a lie.
-    requestCancel.mockReturnValue(false)
+    cancelSubagentRun.mockReturnValue(false)
     seed(run("native", { startedAt: new Date() }))
     render(<RuntimePanel />)
     await userEvent.click(screen.getByTestId("subagent-runtime-cancel-native"))

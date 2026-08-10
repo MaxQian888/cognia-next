@@ -184,6 +184,10 @@ export interface RunTurnOptions {
    * popup's ●/○ badges already show what's active, so the per-turn notice is
    * opt-in to keep the transcript quiet. */
   showActiveSkills?: boolean
+  /** Reinitialize the live runtime after a canonical sequence gap. */
+  onEnvelopeGap?: (envelope: AgentEventEnvelope) => void
+  /** Observe an accepted canonical envelope without projecting a second transcript. */
+  onCanonicalEnvelope?: (envelope: AgentEventEnvelope) => void
 }
 
 /**
@@ -224,7 +228,9 @@ export async function runTurn(
             title: "Event stream gap",
             summary: `Expected sequence ${order.expectedSequence}, received ${order.receivedSequence}`,
           })
+          opts.onEnvelopeGap?.(envelope)
         }
+        opts.onCanonicalEnvelope?.(envelope)
         applyCanonicalTaskEnvelope(envelope)
         const actions = canonicalEnvelopeToActions(envelope)
         for (const action of actions) {

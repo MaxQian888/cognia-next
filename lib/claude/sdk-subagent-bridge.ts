@@ -25,6 +25,10 @@
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubAgent, SubAgentStatus } from "@/types/agent/sub-agent"
 import { createSubAgentNode } from "@/lib/claude/subagent-projection"
+import {
+  registerSubagentCancellation,
+  unregisterSubagentRun,
+} from "@/lib/claude/agents/subagent-cancel-registry"
 import type {
   SDKMessage,
   SDKTaskStartedMessage,
@@ -48,11 +52,18 @@ const toolUseToTask = new Map<string, string>()
  * have no `parent_tool_use_id`), so a depth-1 task correlates to no parent.
  */
 const toolUseOwner = new Map<string, string>()
+const cancellableTaskIds = new Set<string>()
+
+export interface SdkSubagentControls {
+  stopTask(taskId: string): Promise<void>
+}
 
 /** Test seam — clears the cross-frame correlation maps. */
 export function __resetSdkSubagentBridge(): void {
   toolUseToTask.clear()
   toolUseOwner.clear()
+  for (const taskId of cancellableTaskIds) unregisterSubagentRun(taskId)
+  cancellableTaskIds.clear()
 }
 
 function baseNode(
@@ -90,7 +101,11 @@ function mapStatus(s: string | undefined): SubAgentStatus | undefined {
   }
 }
 
-function onTaskStarted(m: SDKTaskStartedMessage, sessionId: string): void {
+function onTaskStarted(
+  m: SDKTaskStartedMessage,
+  sessionId: string,
+  controls?: SdkSubagentControls
+): void {
   // Only genuine Task-tool subagents (skip ambient / local_workflow housekeeping).
   if (!m.subagent_type || m.skip_transcript || m.task_type === "local_workflow") return
   const store = useSubagentRuntimeStore.getState()
@@ -103,6 +118,10 @@ function onTaskStarted(m: SDKTaskStartedMessage, sessionId: string): void {
   store.upsert(
     baseNode(m.task_id, sessionId, m.subagent_type, m.prompt ?? m.description ?? "", parent)
   )
+  if (controls) {
+    registerSubagentCancellation(m.task_id, () => controls.stopTask(m.task_id))
+    cancellableTaskIds.add(m.task_id)
+  }
 }
 
 function onTaskProgress(m: SDKTaskProgressMessage): void {
@@ -129,6 +148,8 @@ function onTaskUpdated(m: SDKTaskUpdatedMessage): void {
   if (!sa) return
   const status = mapStatus(m.patch?.status)
   if (!status) return
+  unregisterSubagentRun(m.task_id)
+  cancellableTaskIds.delete(m.task_id)
   store.upsert({
     ...sa,
     status,
@@ -198,12 +219,16 @@ function onChildFrame(evt: SDKAssistantMessage | SDKUserMessage): void {
  * `claude://message` event for every session kind. No-op for non-subagent
  * frames; never throws.
  */
-export function applySdkSubagentBridge(evt: SDKMessage, sessionId: string): void {
+export function applySdkSubagentBridge(
+  evt: SDKMessage,
+  sessionId: string,
+  controls?: SdkSubagentControls
+): void {
   try {
     if (!evt || typeof evt !== "object") return
     if (evt.type === "system") {
       const sub = (evt as { subtype?: string }).subtype
-      if (sub === "task_started") onTaskStarted(evt as SDKTaskStartedMessage, sessionId)
+      if (sub === "task_started") onTaskStarted(evt as SDKTaskStartedMessage, sessionId, controls)
       else if (sub === "task_progress") onTaskProgress(evt as SDKTaskProgressMessage)
       else if (sub === "task_updated") onTaskUpdated(evt as SDKTaskUpdatedMessage)
       return

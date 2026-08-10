@@ -22,7 +22,7 @@ beforeEach(() => {
 
 describe("cancelSubagentRun", () => {
   it("requests cancel and marks the node cancelled (foreground)", () => {
-    cancelSubagentRun("r1")
+    expect(cancelSubagentRun("r1")).toBe(true)
     expect(requestCancel).toHaveBeenCalledWith("r1")
     expect(cancelBackground).not.toHaveBeenCalled()
     expect(setStatus).toHaveBeenCalledWith("r1", "cancelled")

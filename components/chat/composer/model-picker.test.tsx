@@ -11,6 +11,7 @@ import { updateSession } from "@/lib/db/sessions"
 import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings"
 import enMessages from "@/i18n/messages/en.json"
+import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 
 // The picker persists model switches through the Dexie sessions table —
 // irrelevant for trigger-rendering assertions.
@@ -620,10 +621,19 @@ describe("explicit Auto routing selection", () => {
 })
 
 describe("live model switch", () => {
-  function renderPicker(session: ChatSession) {
+  function renderPicker(
+    session: ChatSession,
+    controls?: { setModel?: (model: string) => Promise<void>; resetRuntime?: () => Promise<void> }
+  ) {
     return render(
       <NextIntlClientProvider locale="en" messages={{}}>
-        <ModelPicker session={session} />
+        {controls ? (
+          <ChatScopeProvider sessionId={session.id} {...controls}>
+            <ModelPicker session={session} />
+          </ChatScopeProvider>
+        ) : (
+          <ModelPicker session={session} />
+        )}
       </NextIntlClientProvider>
     )
   }
@@ -676,6 +686,25 @@ describe("live model switch", () => {
       expect.objectContaining({ model: target, providerOverride: "anthropic" })
     )
     expect(mockSetSessionModel).toHaveBeenCalledWith("ses_live", target)
+    expect(mockCloseSession).not.toHaveBeenCalled()
+  })
+
+  it("uses the pane-owned handle callbacks for model switches and runtime resets", () => {
+    const setModel = jest.fn(async () => undefined)
+    const resetRuntime = jest.fn(async () => undefined)
+    const target = PROVIDERS.anthropic.models.find((m) => m.id !== anthropicSession.model)?.id
+    if (!target) return
+    renderPicker(anthropicSession, { setModel, resetRuntime })
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getAllByText(target)[0])
+    expect(setModel).toHaveBeenCalledWith(target)
+    expect(mockSetSessionModel).not.toHaveBeenCalled()
+
+    const openAiTarget = PROVIDERS.openai.models[0]?.id
+    if (!openAiTarget) return
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getAllByText(openAiTarget)[0])
+    expect(resetRuntime).toHaveBeenCalledTimes(1)
     expect(mockCloseSession).not.toHaveBeenCalled()
   })
 

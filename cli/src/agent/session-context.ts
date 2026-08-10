@@ -24,6 +24,7 @@ import {
   type BuildOptionsContext,
 } from "@/lib/claude/build-options"
 import type { SendContent, SendOptions, SessionKind, McpServer } from "@cognia/agent-config-types"
+import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
 
 import { buildAttachmentContent, type BuiltAttachmentContent } from "./attachments/build"
 import { type ResolvedConfig } from "../config/schema"
@@ -143,6 +144,7 @@ export interface CliContextAssemblerParams {
   resolveAgents?: () => Promise<AgentSummary[]>
   resolveAgentMode?: () => Promise<AgentModeConfig | null>
   fetchTwin?: typeof defaultFetchTwinContext
+  onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void
 }
 
 export interface CliContextAssembler {
@@ -248,6 +250,7 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
       interactive: true,
       now: now(),
     })
+    ctx.onResolvedExecutionSpec = params.onResolvedExecutionSpec
     const sendOptions = withCliDisabledMcpTools(
       withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools()),
       resolveDisabledMcpTools()

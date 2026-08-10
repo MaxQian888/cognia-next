@@ -23,6 +23,7 @@ import {
   hasApiKey,
   interruptSession,
   listSessions,
+  normalizeRewindFilesResult,
   onClaudeMessage,
   readAgentConfig,
   readClaudeUserConfig,
@@ -169,15 +170,19 @@ describe("steerSession", () => {
       return undefined
     })
 
-    await expect(steerSession("session-1", "change direction", "om-steer")).resolves.toEqual({
-      accepted: true,
-    })
+    await expect(
+      steerSession("session-1", "change direction", "om-steer", {
+        priority: "next",
+        commandId: "cmd-steer-1",
+      })
+    ).resolves.toEqual({ accepted: true })
     expect(callSpy).toHaveBeenCalledWith(
       "claude_session_control",
       expect.objectContaining({
         sessionId: "session-1",
         method: "steer",
-        params: { prompt: "change direction", priority: "now", sourceMessageId: "om-steer" },
+        commandId: "cmd-steer-1",
+        params: { prompt: "change direction", priority: "next", sourceMessageId: "om-steer" },
       })
     )
   })
@@ -189,6 +194,22 @@ describe("steerSession", () => {
       sessionControl("session-1", "steer" as never, { prompt: "user@example.com" })
     ).rejects.toThrow(/PII-gated steerSession/)
     expect(callSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe("normalizeRewindFilesResult", () => {
+  it("normalizes status, reason, and affected paths across SDK result shapes", () => {
+    expect(
+      normalizeRewindFilesResult({
+        canRewind: true,
+        affectedFiles: [{ filePath: "src/a.ts" }, { path: "src/b.ts" }],
+      })
+    ).toEqual({ status: "ready", paths: ["src/a.ts", "src/b.ts"] })
+    expect(normalizeRewindFilesResult({ canRewind: false, reason: "checkpoint expired" })).toEqual({
+      status: "unavailable",
+      reason: "checkpoint expired",
+      paths: [],
+    })
   })
 })
 
@@ -287,6 +308,27 @@ describe("Claude session commands", () => {
     callSpy.mockResolvedValueOnce(undefined)
     await interruptSession("sess-2")
     expect(callSpy).toHaveBeenCalledWith("claude_interrupt", { sessionId: "sess-2" })
+  })
+
+  it("routes idempotent lifecycle mutations through canonical commands", async () => {
+    callSpy.mockResolvedValue(undefined)
+    await interruptSession("sess-2", { commandId: "cmd-interrupt" })
+    await compactSession("sess-2", "focus", { commandId: "cmd-compact" })
+    await closeSession("sess-2", { commandId: "cmd-close" })
+
+    expect(callSpy).toHaveBeenNthCalledWith(1, "agent_interrupt", {
+      sessionId: "sess-2",
+      commandId: "cmd-interrupt",
+    })
+    expect(callSpy).toHaveBeenNthCalledWith(2, "agent_compact", {
+      sessionId: "sess-2",
+      focus: "focus",
+      commandId: "cmd-compact",
+    })
+    expect(callSpy).toHaveBeenNthCalledWith(3, "agent_close_session", {
+      sessionId: "sess-2",
+      commandId: "cmd-close",
+    })
   })
 
   it("compactSession forwards the session id and optional focus", async () => {

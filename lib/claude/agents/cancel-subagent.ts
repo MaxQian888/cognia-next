@@ -11,10 +11,16 @@ import { requestCancelSubagentRun } from "./subagent-cancel-registry"
 import { cancelRendererBackgroundRun } from "@/lib/background-tasks/renderer-subagent-registry"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 
-export function cancelSubagentRun(id: string, opts?: { backgrounded?: boolean }): void {
-  requestCancelSubagentRun(id)
-  if (opts?.backgrounded) {
-    cancelRendererBackgroundRun(id)
+export function cancelSubagentRun(
+  id: string,
+  opts?: { backgrounded?: boolean; reason?: string }
+): boolean {
+  const requested = opts?.reason
+    ? requestCancelSubagentRun(id, opts.reason)
+    : requestCancelSubagentRun(id)
+  const backgroundCancelled = opts?.backgrounded ? cancelRendererBackgroundRun(id) : false
+  if (requested || backgroundCancelled) {
+    useSubagentRuntimeStore.getState().setStatus(id, "cancelled")
   }
-  useSubagentRuntimeStore.getState().setStatus(id, "cancelled")
+  return requested || backgroundCancelled
 }

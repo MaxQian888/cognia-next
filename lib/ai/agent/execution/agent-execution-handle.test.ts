@@ -22,6 +22,7 @@ function spec(overrides: Partial<ResolvedAgentExecutionSpec> = {}): ResolvedAgen
     capabilities: {
       effective: [
         "streaming",
+        "steer",
         "compaction",
         "permissions.interrupt-resume",
         "permissions.set-mode",
@@ -47,6 +48,7 @@ function makeDeps() {
       }),
       resolvePermission: jest.fn().mockResolvedValue(undefined),
       sessionControl: jest.fn().mockResolvedValue("control-result"),
+      steerSession: jest.fn().mockResolvedValue({ accepted: true }),
     },
     closeSession: jest.fn().mockResolvedValue(undefined),
     recordCapabilityOutcome: jest.fn().mockResolvedValue(undefined),
@@ -65,18 +67,25 @@ describe("createAgentExecutionHandle", () => {
     await handle.setPermissionMode("plan")
     await handle.cancel()
 
-    expect(deps.ipc.interruptSession).toHaveBeenCalledWith("s1")
-    expect(deps.ipc.compactSession).toHaveBeenCalledWith("s1", "focus")
+    expect(deps.ipc.interruptSession).toHaveBeenCalledWith("s1", expect.stringMatching(/^cmd-\d+-/))
+    expect(deps.ipc.compactSession).toHaveBeenCalledWith(
+      "s1",
+      "focus",
+      expect.stringMatching(/^cmd-\d+-/)
+    )
     expect(deps.ipc.resolvePermission).toHaveBeenCalledWith(
       "s1",
       "req-1",
       "allow",
       "ok",
       undefined,
-      undefined
+      undefined,
+      expect.stringMatching(/^cmd-\d+-/)
     )
-    expect(deps.ipc.setSessionMode).toHaveBeenCalledWith("s1", "plan")
-    expect(deps.closeSession).toHaveBeenCalledWith("s1")
+    expect(deps.ipc.setSessionMode).toHaveBeenCalledWith("s1", "plan", {
+      commandId: expect.stringMatching(/^cmd-\d+-/),
+    })
+    expect(deps.closeSession).toHaveBeenCalledWith("s1", expect.stringMatching(/^cmd-\d+-/))
     expect(deps.recordCapabilityOutcome).toHaveBeenCalledWith("compaction", "success", undefined)
     expect(deps.recordCapabilityOutcome).toHaveBeenCalledWith(
       "permissions.interrupt-resume",
@@ -130,7 +139,9 @@ describe("createAgentExecutionHandle", () => {
     const handle = createAgentExecutionHandle("s1", spec(), deps)
 
     await handle.setModel("claude-haiku-4-5-20251001")
-    expect(deps.ipc.setSessionModel).toHaveBeenCalledWith("s1", "claude-haiku-4-5-20251001")
+    expect(deps.ipc.setSessionModel).toHaveBeenCalledWith("s1", "claude-haiku-4-5-20251001", {
+      commandId: expect.stringMatching(/^cmd-\d+-/),
+    })
 
     await expect(handle.setModel("gpt-4o")).rejects.toThrow(FrozenModelBindingError)
     expect(deps.ipc.setSessionModel).toHaveBeenCalledTimes(1)
@@ -237,7 +248,8 @@ describe("deny interrupt", () => {
       "deny",
       "no",
       undefined,
-      true
+      true,
+      expect.stringMatching(/^cmd-\d+-/)
     )
 
     await handle.resolvePermission("req-2", "deny")
@@ -247,7 +259,8 @@ describe("deny interrupt", () => {
       "deny",
       undefined,
       undefined,
-      undefined
+      undefined,
+      expect.stringMatching(/^cmd-\d+-/)
     )
   })
 })
@@ -255,6 +268,7 @@ describe("deny interrupt", () => {
 describe("session controls", () => {
   const FULL = [
     "streaming",
+    "steer",
     "compaction",
     "permissions.interrupt-resume",
     "permissions.set-mode",
@@ -303,13 +317,38 @@ describe("session controls", () => {
     await handle.applyFlagSettings({ effortLevel: "max" })
 
     expect(deps.ipc.sessionControl.mock.calls).toEqual([
-      ["s1", "reloadPlugins", undefined],
-      ["s1", "readFile", { path: "/a/b", options: { encoding: "base64" } }],
-      ["s1", "seedReadState", { path: "/a/b", mtime: 1234 }],
-      ["s1", "setMcpServers", { servers: { github: { type: "http", url: "https://x" } } }],
-      ["s1", "setMcpPermissionModeOverride", { serverName: "github", mode: "default" }],
-      ["s1", "stopTask", { taskId: "task-9" }],
-      ["s1", "applyFlagSettings", { settings: { effortLevel: "max" } }],
+      ["s1", "reloadPlugins", undefined, { commandId: expect.stringMatching(/^cmd-\d+-/) }],
+      [
+        "s1",
+        "readFile",
+        { path: "/a/b", options: { encoding: "base64" } },
+        { commandId: expect.stringMatching(/^cmd-\d+-/) },
+      ],
+      [
+        "s1",
+        "seedReadState",
+        { path: "/a/b", mtime: 1234 },
+        { commandId: expect.stringMatching(/^cmd-\d+-/) },
+      ],
+      [
+        "s1",
+        "setMcpServers",
+        { servers: { github: { type: "http", url: "https://x" } } },
+        { commandId: expect.stringMatching(/^cmd-\d+-/) },
+      ],
+      [
+        "s1",
+        "setMcpPermissionModeOverride",
+        { serverName: "github", mode: "default" },
+        { commandId: expect.stringMatching(/^cmd-\d+-/) },
+      ],
+      ["s1", "stopTask", { taskId: "task-9" }, { commandId: expect.stringMatching(/^cmd-\d+-/) }],
+      [
+        "s1",
+        "applyFlagSettings",
+        { settings: { effortLevel: "max" } },
+        { commandId: expect.stringMatching(/^cmd-\d+-/) },
+      ],
     ])
   })
 
@@ -321,16 +360,26 @@ describe("session controls", () => {
     const handle = createAgentExecutionHandle("s1", withControls(), deps)
 
     await handle.rewindFiles("u-1")
-    expect(deps.ipc.sessionControl).toHaveBeenLastCalledWith("s1", "rewindFiles", {
-      userMessageId: "u-1",
-      options: { dryRun: true },
-    })
+    expect(deps.ipc.sessionControl).toHaveBeenLastCalledWith(
+      "s1",
+      "rewindFiles",
+      {
+        userMessageId: "u-1",
+        options: { dryRun: true },
+      },
+      { commandId: expect.stringMatching(/^cmd-\d+-/) }
+    )
 
     await handle.rewindFiles("u-1", { dryRun: false })
-    expect(deps.ipc.sessionControl).toHaveBeenLastCalledWith("s1", "rewindFiles", {
-      userMessageId: "u-1",
-      options: { dryRun: false },
-    })
+    expect(deps.ipc.sessionControl).toHaveBeenLastCalledWith(
+      "s1",
+      "rewindFiles",
+      {
+        userMessageId: "u-1",
+        options: { dryRun: false },
+      },
+      { commandId: expect.stringMatching(/^cmd-\d+-/) }
+    )
   })
 
   it("omits toolUseId entirely when backgrounding everything", async () => {
@@ -340,18 +389,42 @@ describe("session controls", () => {
     const handle = createAgentExecutionHandle("s1", withControls(), deps)
 
     await handle.backgroundTasks()
-    expect(deps.ipc.sessionControl).toHaveBeenLastCalledWith("s1", "backgroundTasks", undefined)
+    expect(deps.ipc.sessionControl).toHaveBeenLastCalledWith("s1", "backgroundTasks", undefined, {
+      commandId: expect.stringMatching(/^cmd-\d+-/),
+    })
 
     await handle.backgroundTasks("tu-1")
-    expect(deps.ipc.sessionControl).toHaveBeenLastCalledWith("s1", "backgroundTasks", {
-      toolUseId: "tu-1",
-    })
+    expect(deps.ipc.sessionControl).toHaveBeenLastCalledWith(
+      "s1",
+      "backgroundTasks",
+      { toolUseId: "tu-1" },
+      { commandId: expect.stringMatching(/^cmd-\d+-/) }
+    )
   })
 
   it("exposes the generic control() for methods with no named wrapper", async () => {
     const deps = makeDeps()
     const handle = createAgentExecutionHandle("s1", withControls(), deps)
     await expect(handle.control("getContextUsage")).resolves.toBe("control-result")
-    expect(deps.ipc.sessionControl).toHaveBeenCalledWith("s1", "getContextUsage", undefined)
+    expect(deps.ipc.sessionControl).toHaveBeenCalledWith("s1", "getContextUsage", undefined, {
+      commandId: expect.stringMatching(/^cmd-\d+-/),
+    })
+  })
+
+  it("routes steer only through the named PII-gated transport method", async () => {
+    const deps = makeDeps()
+    const handle = createAgentExecutionHandle("s1", withControls(), deps)
+
+    await expect(handle.steer("change direction", "next")).resolves.toEqual({ accepted: true })
+    expect(deps.ipc.steerSession).toHaveBeenCalledWith("s1", "change direction", undefined, {
+      priority: "next",
+      commandId: expect.stringMatching(/^cmd-\d+-/),
+    })
+    expect(deps.ipc.sessionControl).not.toHaveBeenCalledWith(
+      "s1",
+      "steer",
+      expect.anything(),
+      expect.anything()
+    )
   })
 })

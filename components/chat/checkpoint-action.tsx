@@ -18,15 +18,16 @@ import {
   isAgentExecutionFlagEnabled,
   subscribeToAgentExecutionFlags,
 } from "@/lib/ai/agent/execution/feature-flags"
-import { sessionControl } from "@/lib/claude/ipc"
+import type { RewindFilesResult } from "@/lib/claude/ipc"
+import { Badge } from "@/components/ui/badge"
 
 interface CheckpointActionProps {
   checkpointId: string
-  sessionId: string
   enabled: boolean
+  rewindFiles: (checkpointId: string, dryRun: boolean) => Promise<RewindFilesResult>
 }
 
-export function CheckpointAction({ checkpointId, sessionId, enabled }: CheckpointActionProps) {
+export function CheckpointAction({ checkpointId, enabled, rewindFiles }: CheckpointActionProps) {
   const t = useTranslations("chat.checkpoint")
   const checkpointCapability = useSyncExternalStore(
     subscribeToAgentExecutionFlags,
@@ -35,7 +36,7 @@ export function CheckpointAction({ checkpointId, sessionId, enabled }: Checkpoin
       isAgentExecutionFlagEnabled("claudeSdkCheckpoint"),
     () => false
   )
-  const [preview, setPreview] = useState<unknown>(null)
+  const [preview, setPreview] = useState<RewindFilesResult | null>(null)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -46,10 +47,7 @@ export function CheckpointAction({ checkpointId, sessionId, enabled }: Checkpoin
     setLoading(true)
     setError(null)
     try {
-      const result = await sessionControl(sessionId, "rewindFiles", {
-        userMessageId: checkpointId,
-        options: { dryRun: true },
-      })
+      const result = await rewindFiles(checkpointId, true)
       setPreview(result)
       setOpen(true)
     } catch {
@@ -64,10 +62,7 @@ export function CheckpointAction({ checkpointId, sessionId, enabled }: Checkpoin
     setLoading(true)
     setError(null)
     try {
-      await sessionControl(sessionId, "rewindFiles", {
-        userMessageId: checkpointId,
-        options: { dryRun: false },
-      })
+      await rewindFiles(checkpointId, false)
       setOpen(false)
     } catch {
       setError(t("restoreFailed"))
@@ -99,11 +94,29 @@ export function CheckpointAction({ checkpointId, sessionId, enabled }: Checkpoin
             <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
-          ) : (
-            <pre className="max-h-56 overflow-auto rounded-md bg-muted p-3 text-xs">
-              {JSON.stringify(preview, null, 2)}
-            </pre>
-          )}
+          ) : preview ? (
+            <div className="max-h-56 space-y-3 overflow-auto rounded-md bg-muted p-3 text-xs">
+              <Badge variant="outline">{t(`status.${preview.status}`)}</Badge>
+              {preview.reason ? (
+                <p>
+                  <span className="font-medium">{t("reason")}: </span>
+                  {preview.reason}
+                </p>
+              ) : null}
+              <div>
+                <p className="font-medium">{t("affectedFiles")}</p>
+                {preview.paths.length > 0 ? (
+                  <ul className="mt-1 space-y-1 font-mono">
+                    {preview.paths.map((path) => (
+                      <li key={path}>{path}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-muted-foreground">{t("noAffectedFiles")}</p>
+                )}
+              </div>
+            </div>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction disabled={loading || !!error} onClick={() => void confirm()}>

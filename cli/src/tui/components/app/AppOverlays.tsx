@@ -883,6 +883,9 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               })
             }
           }}
+          onStop={(row) => {
+            if (row.runtimeTaskId) void agent.stopTask(row.runtimeTaskId)
+          }}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
@@ -958,6 +961,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           width={columns}
           viewportRows={viewportRows}
           getEntry={(id) => getLiveSubagent(id, state.sessionId)}
+          onStopTask={(taskId) => void agent.stopTask(taskId)}
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}

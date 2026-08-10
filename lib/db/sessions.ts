@@ -127,6 +127,7 @@ export async function createSession(
     bareMode: partial?.bareMode,
     debugMode: partial?.debugMode,
     briefMode: partial?.briefMode,
+    sdkSessionId: partial?.sdkSessionId,
     forkedFromSdkSessionId: partial?.forkedFromSdkSessionId,
     scratchpad: partial?.scratchpad,
     integrationBinding: partial?.integrationBinding,

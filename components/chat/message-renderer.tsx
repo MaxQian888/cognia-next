@@ -132,6 +132,7 @@ import { useSyncExternalStore } from "react"
 import { PerfBoundary } from "@/lib/perf"
 import { useAgentFileAutoFollow } from "@/hooks/agent/use-agent-file-auto-follow"
 import { CheckpointAction } from "@/components/chat/checkpoint-action"
+import type { RewindFilesResult } from "@/lib/claude/ipc"
 
 interface Props {
   message: UIMessage
@@ -149,6 +150,11 @@ interface Props {
   onCopy?: () => void
   onRegenerate?: () => void | Promise<void>
   onEditResend?: (messageId: string, newText: string) => void | Promise<void>
+  onRewindFiles?: (
+    sessionId: string,
+    checkpointId: string,
+    dryRun: boolean
+  ) => Promise<RewindFilesResult>
   /** Root used to resolve project-relative links in assistant Markdown. */
   projectRoot?: string | null
 }
@@ -185,6 +191,7 @@ function MessageRendererInner({
   onCopy,
   onRegenerate,
   onEditResend,
+  onRewindFiles,
   projectRoot,
 }: Props) {
   useAgentFileAutoFollow({ parts: message.parts, isStreaming, projectRoot })
@@ -714,11 +721,13 @@ function MessageRendererInner({
               </MessageAction>
             )}
 
-            {message.role === "user" && branchSessionId && (
+            {message.role === "user" && branchSessionId && onRewindFiles && (
               <CheckpointAction
                 checkpointId={message.id}
                 enabled={checkpointEnabled}
-                sessionId={branchSessionId}
+                rewindFiles={(checkpointId, dryRun) =>
+                  onRewindFiles(branchSessionId, checkpointId, dryRun)
+                }
               />
             )}
 

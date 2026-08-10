@@ -12,9 +12,11 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
 
 const getSessionSupportedModels = jest.fn()
 const getSessionSupportedCommands = jest.fn()
+const subscribeAgentEvents = jest.fn()
 jest.mock("@/lib/claude/ipc", () => ({
   getSessionSupportedModels: (...a: unknown[]) => getSessionSupportedModels(...a),
   getSessionSupportedCommands: (...a: unknown[]) => getSessionSupportedCommands(...a),
+  subscribeAgentEvents: (...a: unknown[]) => subscribeAgentEvents(...a),
 }))
 
 import { act, renderHook, waitFor } from "@testing-library/react"
@@ -27,6 +29,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockStatus = "idle"
   mockIsTauri.mockReturnValue(true)
+  subscribeAgentEvents.mockResolvedValue(jest.fn())
 })
 
 describe("useSdkSessionCapabilities", () => {
@@ -70,5 +73,23 @@ describe("useSdkSessionCapabilities", () => {
     mockStatus = "idle"
     rerender()
     await waitFor(() => expect(getSessionSupportedCommands).toHaveBeenCalledWith("s1"))
+  })
+
+  it("refreshes the existing capability lists on canonical commands-changed", async () => {
+    getSessionSupportedModels.mockResolvedValue(MODELS)
+    getSessionSupportedCommands.mockResolvedValue(COMMANDS)
+    renderHook(() => useSdkSessionCapabilities("s1"))
+    await waitFor(() => expect(subscribeAgentEvents).toHaveBeenCalled())
+    getSessionSupportedModels.mockClear()
+    getSessionSupportedCommands.mockClear()
+
+    const onEnvelope = subscribeAgentEvents.mock.calls[0]?.[0]
+    act(() => {
+      onEnvelope({ sessionId: "other", event: { kind: "commands-changed" } })
+      onEnvelope({ sessionId: "s1", event: { kind: "commands-changed" } })
+    })
+
+    await waitFor(() => expect(getSessionSupportedModels).toHaveBeenCalledWith("s1"))
+    expect(getSessionSupportedCommands).toHaveBeenCalledWith("s1")
   })
 })

@@ -23,6 +23,7 @@ import type {
   ChatSession,
   SendContent,
 } from "@cognia/agent-config-types"
+import type { RewindFilesResult } from "@/lib/claude/ipc"
 
 export interface ChatPaneGroupProps {
   /** All sessions (for resolving tab titles / character ids). */
@@ -40,6 +41,14 @@ export interface ChatPaneGroupProps {
   steerFlush: (sessionId: string) => Promise<void> | void
   regenerate: (sessionId: string) => Promise<void> | void
   editResend: (messageId: string, content: SendContent, sessionId: string) => Promise<void> | void
+  rewindFiles?: (
+    sessionId: string,
+    checkpointId: string,
+    dryRun: boolean
+  ) => Promise<RewindFilesResult>
+  compact?: (sessionId: string) => Promise<void>
+  setModel?: (sessionId: string, model: string) => Promise<void>
+  resetRuntime?: (sessionId: string) => Promise<void>
   respondToApproval: (
     approval: import("@cognia/agent-config-types").PendingApproval,
     decision: ApprovalDecision
@@ -102,6 +111,10 @@ export function ChatPaneGroup({
   steerFlush,
   regenerate,
   editResend,
+  rewindFiles,
+  compact,
+  setModel,
+  resetRuntime,
   respondToApproval,
   onCreate,
   onUseSample,
@@ -152,6 +165,10 @@ export function ChatPaneGroup({
         onEditResend={(id, content) =>
           Promise.resolve(sessionId ? editResend(id, content, sessionId) : undefined)
         }
+        onRewindFiles={rewindFiles}
+        onCompact={sessionId && compact ? () => compact(sessionId) : undefined}
+        onSetModel={sessionId && setModel ? (model) => setModel(sessionId, model) : undefined}
+        onResetRuntime={sessionId && resetRuntime ? () => resetRuntime(sessionId) : undefined}
         onCreate={onCreate}
         onUseSample={onUseSample}
         onOpenSettings={onOpenSettings}

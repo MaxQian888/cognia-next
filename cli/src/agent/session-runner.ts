@@ -22,6 +22,7 @@ import {
 import { setSessionMode as defaultSetSessionMode } from "@/lib/claude/ipc"
 import type { SendOptions } from "@cognia/agent-config-types"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
+import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
 
 /** A concrete permission mode value (excludes `undefined`). */
 type PermissionModeValue = NonNullable<SendOptions["permissionMode"]>
@@ -143,6 +144,8 @@ export interface AgentSessionParams {
    * without twin grounding. Injected in tests. */
   fetchTwin?: typeof defaultFetchTwinContext
   now?: () => number
+  /** Receives the exact execution spec resolved for this live session. */
+  onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void
 }
 
 /** A model option exposed by the external agent that is currently hosting a session. */
@@ -257,6 +260,9 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     ...(params.resolveAgents ? { resolveAgents: params.resolveAgents } : {}),
     ...(params.resolveAgentMode ? { resolveAgentMode: params.resolveAgentMode } : {}),
     ...(params.fetchTwin ? { fetchTwin: params.fetchTwin } : {}),
+    ...(params.onResolvedExecutionSpec
+      ? { onResolvedExecutionSpec: params.onResolvedExecutionSpec }
+      : {}),
   })
 
   let boot: SidecarBootstrap | null = null

@@ -264,6 +264,7 @@ describe("runTurn", () => {
 
   it("deduplicates canonical delivery and surfaces sequence gaps", async () => {
     const actions: TuiAction[] = []
+    const onEnvelopeGap = jest.fn()
     const base = {
       schemaVersion: 1 as const,
       sessionId: "s",
@@ -299,6 +300,7 @@ describe("runTurn", () => {
       prompt: "go",
       dispatch: (action) => actions.push(action),
       gate: async () => ({ decision: "allow" }),
+      onEnvelopeGap,
     })
 
     expect(actions.filter((action) => action.type === "INFLIGHT_TEXT")).toEqual([
@@ -312,6 +314,7 @@ describe("runTurn", () => {
         summary: "Expected sequence 1, received 2",
       })
     )
+    expect(onEnvelopeGap).toHaveBeenCalledTimes(1)
   })
 
   it("streams capture events into reducer actions and commits", async () => {

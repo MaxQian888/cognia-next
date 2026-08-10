@@ -623,6 +623,10 @@ export function DesktopChatWorkspace() {
                     steerFlush={paneFlush}
                     regenerate={paneRegenerate}
                     editResend={paneEditResend}
+                    rewindFiles={directChat.rewindFiles}
+                    compact={directChat.compact}
+                    setModel={directChat.setModel}
+                    resetRuntime={directChat.resetRuntime}
                     respondToApproval={handleApprovalRespond}
                     onCreate={handleCreate}
                     onUseSample={handleUseSample}

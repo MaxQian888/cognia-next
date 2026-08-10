@@ -1,19 +1,26 @@
 "use client"
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import {
   DatabaseIcon,
+  EyeIcon,
   GitBranchIcon,
   Loader2Icon,
+  MessageSquareIcon,
   PencilIcon,
   RefreshCwIcon,
+  TagsIcon,
   Trash2Icon,
 } from "lucide-react"
+import type { SDKMessage } from "@cognia/agent-config-types"
+import type { UIMessage } from "ai"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { TranscriptMessageList } from "@/components/chat/transcript-message-list"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,10 +43,20 @@ import { SettingsBlock } from "@/components/settings/common/settings-block"
 import {
   deleteSdkSession,
   forkSdkSession,
+  getSdkSessionInfo,
+  getSdkSessionMessages,
+  getSdkSubagentMessages,
   importSdkSessionToStore,
   listSdkSessions,
+  listSdkSubagents,
   renameSdkSession,
+  tagSdkSession,
 } from "@/lib/claude/ipc"
+import { applySdkEvent } from "@/lib/claude/adapter"
+import { listSessions as listChatSessions } from "@/lib/db/sessions"
+import { persistMessages } from "@/lib/db/messages"
+import { startNewSession } from "@/lib/chat/start-session"
+import { useChatStore } from "@/stores/chat"
 import {
   getAgentExecutionFlags,
   isAgentExecutionFlagEnabled,
@@ -58,12 +75,94 @@ interface SdkSessionInfo {
   customTitle?: string
   cwd?: string
   tag?: string
+  gitBranch?: string
+}
+
+interface SdkTranscriptPage {
+  messages: UIMessage[]
+  partial: boolean
+}
+
+function unwrapSdkItems(
+  value: unknown,
+  keys: readonly string[]
+): { items: unknown[]; partial: boolean } {
+  if (Array.isArray(value)) return { items: value, partial: false }
+  if (!value || typeof value !== "object") return { items: [], partial: false }
+  const record = value as Record<string, unknown>
+  for (const key of ["items", ...keys]) {
+    if (Array.isArray(record[key])) {
+      return {
+        items: record[key],
+        partial: Boolean(record.nextCursor ?? record.next_cursor ?? record.hasMore),
+      }
+    }
+  }
+  return { items: [], partial: false }
+}
+
+function historicalUserMessage(event: SDKMessage): UIMessage | null {
+  if (event.type !== "user") return null
+  const record = event as unknown as Record<string, unknown>
+  if (typeof record.uuid !== "string" || !record.message || typeof record.message !== "object") {
+    return null
+  }
+  const content = (record.message as Record<string, unknown>).content
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter(
+              (block): block is Record<string, unknown> =>
+                Boolean(block) && typeof block === "object" && block.type === "text"
+            )
+            .map((block) => (typeof block.text === "string" ? block.text : ""))
+            .join("\n")
+            .trim()
+        : ""
+  if (!text) return null
+  return {
+    id: record.uuid,
+    role: "user",
+    parts: [{ type: "text", text }],
+  }
+}
+
+export function foldSdkSessionMessages(value: unknown): SdkTranscriptPage {
+  const { items, partial } = unwrapSdkItems(value, ["messages"])
+  let messages: UIMessage[] = []
+  for (const item of items) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof (item as { type?: unknown }).type !== "string"
+    ) {
+      continue
+    }
+    const event = item as SDKMessage
+    const userMessage = historicalUserMessage(event)
+    if (userMessage && !messages.some((message) => message.id === userMessage.id)) {
+      messages = [...messages, userMessage]
+    }
+    messages = applySdkEvent(messages, event).messages
+  }
+  return { messages, partial }
+}
+
+function readSdkSubagents(value: unknown): { agentIds: string[]; partial: boolean } {
+  const { items, partial } = unwrapSdkItems(value, ["subagents", "agentIds"])
+  return {
+    agentIds: items.filter((item): item is string => typeof item === "string" && item.length > 0),
+    partial,
+  }
 }
 
 type SdkSessionErrorKey = "errors.loadFailed"
 
 export function SdkSessionManager() {
   const t = useTranslations("settings.agentRuntimeSection.sessions.sdk")
+  const router = useRouter()
   const enabled = useSyncExternalStore(
     subscribeToAgentExecutionFlags,
     () => isAgentExecutionFlagEnabled("claudeSdkParityV1"),
@@ -82,6 +181,17 @@ export function SdkSessionManager() {
   const [renameTarget, setRenameTarget] = useState<SdkSessionInfo | null>(null)
   const [renameDraft, setRenameDraft] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<SdkSessionInfo | null>(null)
+  const [tagTarget, setTagTarget] = useState<SdkSessionInfo | null>(null)
+  const [tagDraft, setTagDraft] = useState("")
+  const [detailsTarget, setDetailsTarget] = useState<SdkSessionInfo | null>(null)
+  const [detailsInfo, setDetailsInfo] = useState<SdkSessionInfo | null>(null)
+  const [detailMessages, setDetailMessages] = useState<UIMessage[]>([])
+  const [detailSubagents, setDetailSubagents] = useState<string[]>([])
+  const [detailTranscriptId, setDetailTranscriptId] = useState<string | null>(null)
+  const [detailsLoading, setDetailsLoading] = useState(false)
+  const [detailsPartial, setDetailsPartial] = useState(false)
+  const [detailsError, setDetailsError] = useState(false)
+  const detailsRequestRef = useRef(0)
 
   const load = useCallback(async () => {
     if (!desktop || !enabled) return
@@ -142,6 +252,110 @@ export function SdkSessionManager() {
       await load()
     } catch {
       toast.error(t("errors.deleteFailed"))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const onTag = async () => {
+    if (!tagTarget) return
+    setBusyId(tagTarget.sessionId)
+    try {
+      await tagSdkSession(tagTarget.sessionId, tagDraft.trim() || null)
+      toast.success(t("tagged"))
+      setTagTarget(null)
+      await load()
+    } catch {
+      toast.error(t("errors.tagFailed"))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const onOpenDetails = async (session: SdkSessionInfo) => {
+    const request = ++detailsRequestRef.current
+    setDetailsTarget(session)
+    setDetailsInfo(session)
+    setDetailMessages([])
+    setDetailSubagents([])
+    setDetailTranscriptId(null)
+    setDetailsLoading(true)
+    setDetailsPartial(false)
+    setDetailsError(false)
+
+    const [infoResult, messagesResult, subagentsResult] = await Promise.allSettled([
+      getSdkSessionInfo<SdkSessionInfo | undefined>(session.sessionId),
+      getSdkSessionMessages(session.sessionId),
+      listSdkSubagents(session.sessionId),
+    ])
+    if (request !== detailsRequestRef.current) return
+
+    if (infoResult.status === "fulfilled" && infoResult.value) setDetailsInfo(infoResult.value)
+    if (messagesResult.status === "fulfilled") {
+      const transcript = foldSdkSessionMessages(messagesResult.value)
+      setDetailMessages(transcript.messages)
+      setDetailsPartial((current) => current || transcript.partial)
+    }
+    if (subagentsResult.status === "fulfilled") {
+      const subagents = readSdkSubagents(subagentsResult.value)
+      setDetailSubagents(subagents.agentIds)
+      setDetailsPartial((current) => current || subagents.partial)
+    }
+    setDetailsError(
+      infoResult.status === "rejected" ||
+        messagesResult.status === "rejected" ||
+        subagentsResult.status === "rejected"
+    )
+    setDetailsLoading(false)
+  }
+
+  const onOpenSubagent = async (agentId: string) => {
+    if (!detailsTarget) return
+    const request = ++detailsRequestRef.current
+    setDetailTranscriptId(agentId)
+    setDetailsLoading(true)
+    setDetailsError(false)
+    try {
+      const transcript = foldSdkSessionMessages(
+        await getSdkSubagentMessages(detailsTarget.sessionId, agentId)
+      )
+      if (request !== detailsRequestRef.current) return
+      setDetailMessages(transcript.messages)
+      setDetailsPartial(transcript.partial)
+    } catch {
+      if (request !== detailsRequestRef.current) return
+      setDetailMessages([])
+      setDetailsError(true)
+    } finally {
+      if (request === detailsRequestRef.current) setDetailsLoading(false)
+    }
+  }
+
+  const onContinueInChat = async (session: SdkSessionInfo) => {
+    setBusyId(session.sessionId)
+    try {
+      const existing = (await listChatSessions()).find(
+        (candidate) => candidate.sdkSessionId === session.sessionId
+      )
+      let chatSessionId = existing?.id
+
+      if (!chatSessionId) {
+        const transcript = foldSdkSessionMessages(await getSdkSessionMessages(session.sessionId))
+        const created = await startNewSession({
+          title: session.customTitle || session.summary,
+          workingDir: session.cwd,
+          sdkSessionId: session.sessionId,
+        })
+        chatSessionId = created.id
+        await persistMessages(chatSessionId, transcript.messages)
+        useChatStore.getState().replaceSessionMessages(chatSessionId, transcript.messages)
+      }
+
+      useChatStore.getState().setActiveSession(chatSessionId)
+      router.push("/")
+      toast.success(t("continued"))
+    } catch {
+      toast.error(t("errors.continueFailed"))
     } finally {
       setBusyId(null)
     }
@@ -211,14 +425,35 @@ export function SdkSessionManager() {
             {sessions.map((session) => (
               <li key={session.sessionId} className="flex items-center justify-between gap-3 p-3">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
-                    {session.customTitle || session.summary}
-                  </p>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="truncate text-sm font-medium">
+                      {session.customTitle || session.summary}
+                    </p>
+                    {session.tag && <Badge variant="outline">{session.tag}</Badge>}
+                  </div>
                   <p className="truncate text-xs text-muted-foreground">
                     {session.cwd || session.sessionId}
                   </p>
                 </div>
                 <div className="flex gap-1">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    disabled={busyId === session.sessionId}
+                    aria-label={t("details")}
+                    onClick={() => void onOpenDetails(session)}
+                  >
+                    <EyeIcon className="size-3.5" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    disabled={busyId === session.sessionId}
+                    aria-label={t("continueInChat")}
+                    onClick={() => void onContinueInChat(session)}
+                  >
+                    <MessageSquareIcon className="size-3.5" />
+                  </Button>
                   <Button
                     size="icon"
                     variant="ghost"
@@ -230,6 +465,18 @@ export function SdkSessionManager() {
                     }}
                   >
                     <PencilIcon className="size-3.5" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    disabled={busyId === session.sessionId}
+                    aria-label={t("editTag")}
+                    onClick={() => {
+                      setTagTarget(session)
+                      setTagDraft(session.tag ?? "")
+                    }}
+                  >
+                    <TagsIcon className="size-3.5" />
                   </Button>
                   <Button
                     size="icon"
@@ -285,6 +532,110 @@ export function SdkSessionManager() {
             </Button>
             <Button disabled={!renameDraft.trim()} onClick={() => void onRename()}>
               {t("save")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={tagTarget !== null} onOpenChange={(open) => !open && setTagTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("tagTitle")}</DialogTitle>
+            <DialogDescription>{t("tagDescription")}</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={tagDraft}
+            onChange={(event) => setTagDraft(event.target.value)}
+            aria-label={t("tagLabel")}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTagTarget(null)}>
+              {t("cancel")}
+            </Button>
+            <Button onClick={() => void onTag()}>{t("save")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={detailsTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            detailsRequestRef.current += 1
+            setDetailsTarget(null)
+          }
+        }}
+      >
+        <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col">
+          <DialogHeader>
+            <DialogTitle>{detailsInfo?.customTitle || detailsInfo?.summary}</DialogTitle>
+            <DialogDescription>{t("detailsDescription")}</DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-wrap gap-2 text-xs">
+            {detailsInfo?.tag && <Badge variant="outline">{detailsInfo.tag}</Badge>}
+            {detailsInfo?.gitBranch && <Badge variant="secondary">{detailsInfo.gitBranch}</Badge>}
+            {detailsInfo?.cwd && (
+              <span className="truncate text-muted-foreground">{detailsInfo.cwd}</span>
+            )}
+          </div>
+
+          {(detailsError || detailsPartial) && (
+            <p className="text-xs text-muted-foreground" role="status">
+              {detailsError ? t("detailsPartialError") : t("detailsPartial")}
+            </p>
+          )}
+
+          {detailSubagents.length > 0 && (
+            <div className="flex flex-wrap gap-1" aria-label={t("subagentTranscripts")}>
+              <Button
+                size="sm"
+                variant={detailTranscriptId === null ? "secondary" : "ghost"}
+                onClick={() => detailsTarget && void onOpenDetails(detailsTarget)}
+              >
+                {t("mainTranscript")}
+              </Button>
+              {detailSubagents.map((agentId) => (
+                <Button
+                  key={agentId}
+                  size="sm"
+                  variant={detailTranscriptId === agentId ? "secondary" : "ghost"}
+                  onClick={() => void onOpenSubagent(agentId)}
+                >
+                  {agentId}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          <div className="flex min-h-72 flex-1 overflow-hidden rounded-md border">
+            {detailsLoading ? (
+              <div className="flex flex-1 items-center justify-center" role="status">
+                <Loader2Icon className="size-5 animate-spin" aria-label={t("loadingDetails")} />
+              </div>
+            ) : detailMessages.length > 0 && detailsTarget ? (
+              <TranscriptMessageList
+                messages={detailMessages}
+                status="idle"
+                sessionId={
+                  detailTranscriptId
+                    ? `${detailsTarget.sessionId}:${detailTranscriptId}`
+                    : detailsTarget.sessionId
+                }
+              />
+            ) : (
+              <p className="m-auto text-sm text-muted-foreground">{t("emptyTranscript")}</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            {detailsTarget && (
+              <Button onClick={() => void onContinueInChat(detailsTarget)}>
+                {t("continueInChat")}
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setDetailsTarget(null)}>
+              {t("close")}
             </Button>
           </DialogFooter>
         </DialogContent>

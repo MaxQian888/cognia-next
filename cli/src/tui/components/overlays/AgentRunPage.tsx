@@ -49,6 +49,7 @@ export interface AgentRunPageProps {
   /** Read the live entry (defaults to the store); App binds it to the owner session. */
   getEntry?: (liveId: string) => SubagentLiveEntry | undefined
   onClose: () => void
+  onStopTask?: (taskId: string) => void
   /** Wall clock for elapsed text; injectable so tests stay deterministic. */
   now?: number
   isActive?: boolean
@@ -93,6 +94,7 @@ export function AgentRunPage({
   task,
   getEntry = getLiveSubagent,
   onClose,
+  onStopTask,
   now: nowProp,
   isActive = true,
   width,
@@ -128,6 +130,10 @@ export function AgentRunPage({
   useModalInput(
     (input, key) => {
       if (key.escape || key.return) return onClose()
+      if (input.toLowerCase() === "s" && status === "running" && entry?.runtimeTaskId) {
+        onStopTask?.(entry.runtimeTaskId)
+        return
+      }
       const mouse = parseMouseEvent(input)
       if (mouse) {
         if (mouse.kind === "wheel")
@@ -184,7 +190,8 @@ export function AgentRunPage({
         )}
       </PanelViewport>
       <Text color={theme.muted} dimColor>
-        {panelFooterHint(scroll.hidden)} · esc close
+        {panelFooterHint(scroll.hidden)}
+        {status === "running" && entry?.runtimeTaskId ? " · s stop" : ""} · esc close
       </Text>
     </Box>
   )

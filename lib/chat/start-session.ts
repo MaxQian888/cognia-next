@@ -22,6 +22,7 @@ export type NewSessionInput = Partial<
     | "characterId"
     | "teamId"
     | "executionContext"
+    | "sdkSessionId"
   >
 >
 

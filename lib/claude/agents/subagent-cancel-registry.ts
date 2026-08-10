@@ -1,7 +1,7 @@
 /**
- * In-memory registry mapping an in-flight subagent `runId` to its
- * `AbortController`, so the chat UI (a `SubagentPart` card's Abort button) can
- * stop a run it did not directly start.
+ * In-memory registry mapping an in-flight subagent `runId` to the cancellation
+ * handler owned by its runtime, so every UI surface uses one cancellation
+ * entry point without assuming every runtime is backed by AbortController.
  *
  * The producer is `dispatch-agent-handler.ts`: it registers a controller right
  * after `recordDispatchStart` and unregisters on every terminal path. The
@@ -12,16 +12,28 @@
  * no React/Zustand coupling, safe to import from any runtime module.
  */
 
-const subagentControllers = new Map<string, AbortController>()
+export type SubagentCancellationHandler = (reason?: string) => void | Promise<void>
+
+const subagentCancellations = new Map<string, SubagentCancellationHandler>()
+
+/** Register a live run's runtime-specific cancellation adapter. */
+export function registerSubagentCancellation(
+  runId: string,
+  handler: SubagentCancellationHandler
+): void {
+  subagentCancellations.set(runId, handler)
+}
 
 /** Register a live subagent run's abort controller. */
 export function registerSubagentRun(runId: string, controller: AbortController): void {
-  subagentControllers.set(runId, controller)
+  registerSubagentCancellation(runId, (reason) => {
+    controller.abort(new Error(reason ?? "Subagent run cancelled by request"))
+  })
 }
 
 /** Drop a subagent run from the registry. Called on every terminal path. */
 export function unregisterSubagentRun(runId: string): void {
-  subagentControllers.delete(runId)
+  subagentCancellations.delete(runId)
 }
 
 /**
@@ -30,14 +42,19 @@ export function unregisterSubagentRun(runId: string): void {
  * in this runtime.
  */
 export function requestCancelSubagentRun(runId: string, reason?: string): boolean {
-  const controller = subagentControllers.get(runId)
-  if (!controller) return false
-  controller.abort(new Error(reason ?? "Subagent run cancelled by request"))
-  subagentControllers.delete(runId)
+  const cancel = subagentCancellations.get(runId)
+  if (!cancel) return false
+  subagentCancellations.delete(runId)
+  try {
+    void Promise.resolve(cancel(reason)).catch(() => undefined)
+  } catch {
+    // The request still reached the registered runtime. Its terminal event or
+    // diagnostics owns surfacing a synchronous adapter failure.
+  }
   return true
 }
 
 /** Test/diagnostic helper — number of live registered subagent runs. */
 export function liveSubagentRunCount(): number {
-  return subagentControllers.size
+  return subagentCancellations.size
 }

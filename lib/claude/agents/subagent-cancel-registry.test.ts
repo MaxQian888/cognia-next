@@ -1,4 +1,5 @@
 import {
+  registerSubagentCancellation,
   registerSubagentRun,
   unregisterSubagentRun,
   requestCancelSubagentRun,
@@ -26,5 +27,15 @@ describe("subagent-cancel-registry", () => {
 
   it("returns false when the run is unknown", () => {
     expect(requestCancelSubagentRun("missing")).toBe(false)
+  })
+
+  it("supports an async cancellation handler adapter", async () => {
+    const cancel = jest.fn().mockResolvedValue(undefined)
+    registerSubagentCancellation("sdk-task", cancel)
+
+    expect(requestCancelSubagentRun("sdk-task", "stop native task")).toBe(true)
+    await Promise.resolve()
+    expect(cancel).toHaveBeenCalledWith("stop native task")
+    expect(liveSubagentRunCount()).toBe(0)
   })
 })

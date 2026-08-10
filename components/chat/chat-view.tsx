@@ -50,6 +50,8 @@ import {
 import { useSettingsStore } from "@/stores/settings"
 import { useCharacter } from "@/lib/data-hooks/context"
 import type { Character, ChatSession, SendContent } from "@cognia/agent-config-types"
+import type { RewindFilesResult } from "@/lib/claude/ipc"
+import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 import { toast } from "sonner"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
@@ -174,6 +176,14 @@ interface ChatPaneProps {
   onSteerFlush?: () => Promise<void> | void
   onRegenerate: () => Promise<void>
   onEditResend: (messageId: string, newContent: SendContent) => Promise<void>
+  onRewindFiles?: (
+    sessionId: string,
+    checkpointId: string,
+    dryRun: boolean
+  ) => Promise<RewindFilesResult>
+  onCompact?: () => Promise<void>
+  onSetModel?: (model: string) => Promise<void>
+  onResetRuntime?: () => Promise<void>
   onCreate: () => void
   onUseSample: (text: string) => void
   onOpenSettings: (tab?: string) => void
@@ -258,6 +268,10 @@ export function ChatPane({
   onSteerFlush,
   onRegenerate,
   onEditResend,
+  onRewindFiles,
+  onCompact,
+  onSetModel,
+  onResetRuntime,
   onCreate,
   onUseSample,
   onOpenSettings,
@@ -625,6 +639,7 @@ export function ChatPane({
                 onCopy={handleCopySuccess}
                 onRegenerate={handleRegenerate}
                 onEditResend={handleEditResend}
+                onRewindFiles={onRewindFiles}
                 useCompanionTranscript={usesCompanionTranscript}
               />
               {boundId && <ComputerUsePictureInPicture sessionId={boundId} />}
@@ -650,7 +665,18 @@ export function ChatPane({
             <WorkspaceChangesCard session={activeSession} />
             {supportPanel}
             {runStatusEl}
-            {composerEl}
+            {boundId ? (
+              <ChatScopeProvider
+                sessionId={boundId}
+                compact={onCompact}
+                setModel={onSetModel}
+                resetRuntime={onResetRuntime}
+              >
+                {composerEl}
+              </ChatScopeProvider>
+            ) : (
+              composerEl
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -671,6 +697,7 @@ function ChatMessages({
   onCopy,
   onRegenerate,
   onEditResend,
+  onRewindFiles,
   useCompanionTranscript,
 }: {
   sessionId: string | null
@@ -679,6 +706,11 @@ function ChatMessages({
   onCopy: () => void
   onRegenerate: () => void
   onEditResend: (messageId: string, newText: string) => void
+  onRewindFiles?: (
+    sessionId: string,
+    checkpointId: string,
+    dryRun: boolean
+  ) => Promise<RewindFilesResult>
   useCompanionTranscript: boolean
 }) {
   const messages = useSessionMessages(sessionId)
@@ -694,6 +726,7 @@ function ChatMessages({
         onCopy={onCopy}
         onRegenerate={onRegenerate}
         onEditResend={onEditResend}
+        onRewindFiles={onRewindFiles}
       />
     )
   }
@@ -707,6 +740,7 @@ function ChatMessages({
       onCopy={onCopy}
       onRegenerate={onRegenerate}
       onEditResend={onEditResend}
+      onRewindFiles={onRewindFiles}
     />
   )
 }
