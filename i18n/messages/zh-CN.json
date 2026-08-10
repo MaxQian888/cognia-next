@@ -2671,6 +2671,7 @@
           "piiBlocked": "写入被拦截：值中包含 PII。",
           "readableBy": "可读成员",
           "readableByAll": "全部队友（留空）",
+          "removeTag": "移除 {tag}",
           "submit": "保存条目",
           "tags": "标签",
           "tagsPlaceholder": "输入标签后按回车",
@@ -3028,6 +3029,7 @@
     "loadingPreview": "正在加载预览...",
     "noChartData": "暂无图表数据",
     "noComponentFound": "未找到组件。请导出名为 App、Component 或 Main 的函数。",
+    "notebookHtmlOutput": "笔记本 HTML 输出",
     "notebookParseError": "Jupyter Notebook 解析失败",
     "previewError": "预览错误",
     "previewFailed": "预览渲染失败",
@@ -5200,7 +5202,9 @@
     "filePreview": {
       "extractedChars": "已提取 {count} 字符",
       "loading": "正在加载 {name}…",
-      "pdfFallback": "无法预览此 PDF。"
+      "pdfFallback": "无法预览此 PDF。",
+      "preview": "预览",
+      "source": "源码"
     },
     "header": {
       "accountSwitcher": {
@@ -5618,6 +5622,11 @@
       },
       "pluginMenu": "插件操作",
       "readAloud": "朗读",
+      "reasoning": {
+        "completed": "思考了几秒",
+        "completedSeconds": "思考了 {duration, number} 秒",
+        "streaming": "正在思考…"
+      },
       "regenerateLabel": "重新生成",
       "regenerateTooltip": "重新生成",
       "shareCardLabel": "分享为卡片",
@@ -5814,6 +5823,16 @@
         "viewSource": "查看源码"
       },
       "table": {
+        "actionFailed": "表格操作失败",
+        "closeFullscreen": "关闭全屏表格",
+        "copy": "复制表格",
+        "copyCsv": "复制为 CSV",
+        "copyMarkdown": "复制为 Markdown",
+        "copyTsv": "复制为 TSV",
+        "download": "下载表格",
+        "downloadCsv": "下载为 CSV",
+        "downloadMarkdown": "下载为 Markdown",
+        "fullscreen": "全屏查看表格",
         "showAllRows": "显示全部行",
         "truncatedNotice": "已显示 {total, number} 行中的前 {shown, number} 行。"
       },
@@ -7988,6 +8007,12 @@
       "trigger": "排序与筛选"
     },
     "title": "发现",
+    "twinRegistry": {
+      "emptyDescription": "请先在桌面端创建或选择数字孪生，再添加数据源或审核草稿。",
+      "emptyTitle": "未选择数字孪生",
+      "selectAria": "选择当前数字孪生",
+      "selectLabel": "数字孪生"
+    },
     "view": {
       "aria": "视图模式",
       "compact": "紧凑",
@@ -8379,6 +8404,7 @@
       "nothingToImport": "没有可导入的内容 —— 请检查列映射。",
       "preview": "已解析 {count} 条用例",
       "previewSample": "预览 {count} 行样本；实际将导入 {total} 条",
+      "progress": "已导入 {done} / {total}",
       "skipped": "跳过 {count} 行",
       "stage": "暂存 {count} 条用例",
       "tabs": {
@@ -8697,6 +8723,7 @@
       "kind": {
         "chat": "聊天",
         "team": "Agent 团队",
+        "twin": "数字孪生",
         "workflow": "工作流"
       },
       "noTargets": "至少添加一个带模型 / 团队 / 工作流 ID 的目标。",
@@ -8711,7 +8738,8 @@
       "targetKind": "目标类型",
       "targetLabel": "标签",
       "targetRef": "模型 / 团队 / 工作流 ID",
-      "targets": "被测目标"
+      "targets": "被测目标",
+      "twinModel": "孪生模型"
     },
     "runDetail": {
       "agentOutput": "模型回答",
@@ -13907,7 +13935,8 @@
       "queueAcceptLabel": "接受孪生草稿",
       "queueRejectLabel": "拒绝孪生草稿",
       "reject": "拒绝",
-      "rejected": "已拒绝"
+      "rejected": "已拒绝",
+      "upgradeRequired": "请升级已连接的 Host 后再审核数字孪生草稿。"
     },
     "twinProfile": {
       "empty": "尚未生成分身画像。请在桌面端添加资料源后再试。",
@@ -13929,6 +13958,8 @@
       },
       "deleteCta": "删除数据源",
       "deleteDone": "已删除数据源。",
+      "deleteQueueLabel": "将数据源删除加入队列",
+      "deleteQueued": "删除已排队——桌面端上线后会清理向量资源。",
       "editSheetDescription": "重命名或删除此数据源。",
       "empty": "暂无孪生数据源。点击 + 添加。",
       "pasteCancelled": "已取消",
@@ -16942,6 +16973,7 @@
       }
     },
     "shared": {
+      "capabilityCount": "{count} 项能力",
       "capabilityOverflow": "+{count} 项",
       "emptyHint": "换个关键词或切换分区再试试。",
       "emptyTitle": "暂无内容",
@@ -17833,13 +17865,17 @@
     "baseURLHint": "使用代理 URL 或自托管端点。留空使用默认值。",
     "baseURLPlaceholder": "https://api.example.com/v1",
     "baseUrl": "服务地址",
+    "batchApiPrice": "批量 API 单价",
     "batchNoEligibleProviders": "当前没有可见且可执行此操作的服务商。",
     "batchOperationRetryFailed": "重试失败项",
     "batchOperationVerifyEnabled": "验证已启用",
     "batchOperationVerifySelected": "验证所选",
+    "batchShort": "批量",
     "bootstrapRetries": "启动重试次数",
     "browseModels": "浏览模型",
     "builtin": "内置",
+    "cachedInputPrice": "缓存输入单价",
+    "cachedInputShort": "缓存",
     "cancel": "取消",
     "capabilityAudio": "音频",
     "capabilityChat": "对话",
@@ -17923,6 +17959,7 @@
       "audioInputPrice": "音频输入单价",
       "audioOutputPrice": "音频输出单价",
       "availability": "可用率",
+      "averagePricePerMillion": "（平均 {price}/百万 Token）",
       "avgLatency": "平均延迟",
       "back": "返回",
       "batchInputPrice": "批量输入单价",
@@ -17944,15 +17981,18 @@
       "maxOutput": "最大输出",
       "maxReached": "最多选择 4 个模型",
       "noPrice": "暂无",
+      "online": "在线",
       "outputPrice": "输出单价",
       "provider": "提供商",
       "reasoning": "推理",
       "recommendation": "推荐",
       "selectModels": "选择最多 4 个模型进行对比",
       "streaming": "流式输出",
+      "supported": "支持",
       "textGen": "文本生成",
       "textGeneration": "文本生成",
       "title": "模型对比",
+      "unsupported": "不支持",
       "video": "视频",
       "vision": "视觉理解"
     },
@@ -32341,13 +32381,15 @@
       "count": "共 {count} 条",
       "counts": "{chunks} 切片 · {samples} 样本 · 约 {tokens} token",
       "degraded": "降级",
-      "description": "本孪生最近 50 次 RAG / 风格少样本注入记录。仅保存在内存中——刷新页面后清空。",
+      "description": "本孪生最近 50 次 RAG / 风格少样本注入记录。刷新后会恢复安全元数据。",
       "emptyHint": "尚无注入记录——给已绑定本孪生的角色发一条消息即可填充日志。",
       "skipped": "已跳过",
       "title": "运行时注入日志"
     },
     "jobs": {
       "attempt": "第 {n} 次尝试",
+      "cancel": "取消",
+      "cancelReason": "已从孪生工作台取消",
       "deadLetter": "死信",
       "draftsProduced": "已生成 {count} 个草稿",
       "emptyHint": "还没有任务。先添加数据源，再排队摄取；切片建立索引后即可排队蒸馏。",
@@ -32355,9 +32397,11 @@
       "headerCount": "任务（{count}）",
       "partialBadge": "部分降级",
       "partialTitle": "部分蒸馏步骤已降级，画像可能不完整：",
+      "pause": "暂停",
       "queueDistill": "排队蒸馏",
       "queueIngest": "为待处理源排队摄取",
       "queuedAt": "入队于 {when}",
+      "resume": "恢复",
       "retry": "重试",
       "retryBusy": "重试中…"
     },
@@ -32405,10 +32449,32 @@
       "badges": {
         "pinned": "已固定"
       },
+      "benchmark": {
+        "created": "已创建包含 {count} 个用例的可编辑基准集。",
+        "failed": "无法创建基准集：{message}",
+        "generate": "生成基准集"
+      },
+      "countDecisions": "{count, plural, =0 {0 个决策} =1 {1 个决策} other {# 个决策}}",
       "countEntities": "{count, plural, =0 {0 个实体} =1 {1 个实体} other {# 个实体}}",
       "countPlaybooks": "{count, plural, =0 {0 个工作流} =1 {1 个工作流} other {# 个工作流}}",
       "countStyleSamples": "{count, plural, =0 {0 个风格样本} =1 {1 个风格样本} other {# 个风格样本}}",
+      "decision": {
+        "add": "新增决策",
+        "choiceLabel": "选择",
+        "choicePlaceholder": "最终选择了什么",
+        "contextLabel": "上下文",
+        "contextPlaceholder": "当时的情境或约束",
+        "deleteConfirmBody": "该决策将从孪生人格画像中移除。",
+        "deleteConfirmTitle": "删除该决策？",
+        "description": "记录选择及其理由。手动添加的决策默认会被固定。",
+        "edit": "编辑决策",
+        "piiBlocked": "无法保存包含未脱敏敏感信息的决策。",
+        "rationaleLabel": "理由",
+        "rationalePlaceholder": "为什么做出这一选择",
+        "required": "上下文和选择不能为空。"
+      },
       "empty": {
+        "decisions": "暂无决策——可由蒸馏自动提取，也可手动添加。",
         "entities": "暂无实体——可由蒸馏自动生成，也可点击「新增实体」手动添加。",
         "noMatch": "没有匹配项。",
         "playbooks": "暂无工作流——可由蒸馏自动生成，也可手动添加。",
@@ -32474,6 +32540,7 @@
         "tonePlaceholder": "用逗号分隔（如：简洁、果断）"
       },
       "tabs": {
+        "decisions": "决策",
         "entities": "实体",
         "playbooks": "工作流",
         "styleSamples": "风格样本"
@@ -32504,6 +32571,7 @@
       "createDescription": "为新孪生取个名字。颜色和运行时参数采用默认值，之后都可以再修改。",
       "createTitle": "新建孪生",
       "delete": "删除",
+      "deleteCascadeMissing": "孪生删除未返回级联结果",
       "deleteDescription": "删除「{name}」并级联清除所有相关的数据源、切片、草稿和任务。此操作不可撤销。",
       "deleteTitle": "删除孪生？",
       "guidedCreate": "引导式设置…",
@@ -33018,12 +33086,17 @@
         "useTemplate": "使用"
       },
       "publish": {
+        "current": "当前",
+        "deploymentSummary": "生产版本 v{sequence} · 修订 {revision} · {status}",
         "hint": "把该工作流发布为类型化可调用单元——agent 工具、类型化子工作流目标、技能。请先保存工作流。用「手动触发」的输入结构与「输出」节点声明其接口。",
         "publish": "发布",
         "publishedAs": "已发布为工具",
         "republish": "重新发布",
+        "rollback": "回滚",
         "title": "发布",
-        "unpublish": "取消发布"
+        "unpublish": "取消发布",
+        "versionHistory": "版本历史",
+        "versionRow": "v{sequence} · {date}"
       },
       "retry": {
         "attempts": "次数",
@@ -33246,6 +33319,7 @@
     "diagnostics": {
       "blockedRunSummary": "运行前需先修复 {count} 个错误。",
       "blockedRunTitle": "无法运行——请先修复错误",
+      "connectorEgressPolicy": "Connector 触发路径上的外部汇点 {kind} 必须在发布前明确选择阻断或脱敏。",
       "containerBoundary": "该连线跨越了循环容器边界（{source} → {target}）。",
       "credentialMissing": "引用了未配置的凭据（{ref}）。",
       "danglingSource": "该连线的起点节点已不存在（{ref}）。",
@@ -33518,6 +33592,12 @@
         "model": {
           "hint": "默认使用提供方配置的模型。",
           "label": "模型（可选）"
+        },
+        "piiGate": {
+          "block": "阻断敏感数据",
+          "hint": "Connector 触发的正式运行必须启用。脱敏模式会在模型调用前移除检测到的敏感值。",
+          "label": "PII 出站策略",
+          "redact": "脱敏后继续"
         },
         "prompt": {
           "label": "提示词"
@@ -34092,6 +34172,12 @@
           "label": "消息 ID",
           "placeholder": "om_..."
         },
+        "piiGate": {
+          "block": "阻断敏感数据",
+          "hint": "转发前检查引用内容。原生转发无法改写原消息，因此即使选择脱敏，检测到 PII 时也会阻断。",
+          "label": "PII 出站策略",
+          "redact": "可脱敏时继续，否则阻断"
+        },
         "target": {
           "hint": "目标会话键（platform:adapterId:chatId）或原始 receive id。",
           "label": "目标会话",
@@ -34187,6 +34273,12 @@
         "idempotencyKey": {
           "hint": "去重键；默认为运行 ID + 步骤 ID。",
           "label": "幂等键（可选）"
+        },
+        "piiGate": {
+          "block": "阻断敏感数据",
+          "hint": "Connector 触发的正式运行必须启用。脱敏模式会在发送或编辑消息前移除检测到的敏感值。",
+          "label": "PII 出站策略",
+          "redact": "脱敏后继续"
         },
         "replyTo": {
           "hint": "支持回复的平台会引用该消息。",
@@ -34852,6 +34944,12 @@
         "method": {
           "label": "方法"
         },
+        "piiGate": {
+          "block": "阻止敏感数据",
+          "hint": "在网络出站前检查 URL、请求头和请求体。",
+          "label": "PII 出站策略",
+          "redact": "脱敏后继续"
+        },
         "url": {
           "hint": "支持 '{{ }}' 表达式。",
           "label": "URL",
@@ -35009,6 +35107,12 @@
         "argsJson": {
           "hint": "作为工具调用的 arguments 转发。支持表达式。",
           "label": "参数（JSON）"
+        },
+        "piiGate": {
+          "block": "阻断敏感数据",
+          "hint": "应用于网络 MCP Server；本地 stdio Server 不出站，因此不受影响。",
+          "label": "PII 出站策略",
+          "redact": "脱敏后继续"
         },
         "serverId": {
           "label": "MCP 服务器"
@@ -35500,6 +35604,12 @@
             "task": "任务处理器（旧版）",
             "tool": "插件工具"
           }
+        },
+        "piiGate": {
+          "block": "阻断敏感数据",
+          "hint": "插件具备网络访问能力时生效；仅本地运行的插件不受影响。",
+          "label": "PII 出站策略",
+          "redact": "脱敏后继续"
         },
         "pluginId": {
           "label": "插件",
@@ -37417,20 +37527,41 @@
           "tokens": "Token"
         },
         "export": "导出",
+        "formalRetryUnavailable": "该草稿时期的运行没有不可变版本，只能在本地调试模式重放。",
+        "lineage": {
+          "children": "{count} 个子运行",
+          "parent": "父运行",
+          "retryOf": "原始运行"
+        },
         "notFound": {
           "description": "该运行可能已被删除，或链接不正确。",
           "title": "未找到运行记录"
+        },
+        "provenance": {
+          "caller": "调用方 {value}",
+          "draft": "草稿/本地调试",
+          "entrypoint": "入口 {value}",
+          "revision": "部署修订 {value}",
+          "trace": "追踪 {value}",
+          "trigger": "触发源 {value}",
+          "version": "版本 {value}"
         },
         "rerun": "重跑",
         "rerunFromStep": "从此步重跑",
         "rerunFromStepHint": "在时间线中选择一个步骤以从该步重跑",
         "rerunning": "正在重跑…",
+        "retry": {
+          "currentDeployment": "运行当前生产版本",
+          "failedStep": "从此步骤继续",
+          "originalVersion": "运行原发布版本"
+        },
         "running": "运行中…",
         "sparkline": {
           "title": "时长趋势"
         },
         "totalCost": "{cost} 估算",
-        "totalTokens": "{tokens} tok"
+        "totalTokens": "{tokens} tok",
+        "unknownError": "未知错误"
       },
       "list": {
         "backToEditor": "返回编辑器",

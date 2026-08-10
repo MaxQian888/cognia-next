@@ -2671,6 +2671,7 @@
           "piiBlocked": "Write blocked: the value contains PII.",
           "readableBy": "Readable by",
           "readableByAll": "All teammates (leave empty)",
+          "removeTag": "Remove {tag}",
           "submit": "Save entry",
           "tags": "Tags",
           "tagsPlaceholder": "Add a tag and press Enter",
@@ -3028,6 +3029,7 @@
     "loadingPreview": "Loading preview...",
     "noChartData": "No chart data",
     "noComponentFound": "No component found. Export an App, Component, or Main function.",
+    "notebookHtmlOutput": "Notebook HTML output",
     "notebookParseError": "Failed to parse notebook",
     "previewError": "Preview error",
     "previewFailed": "Preview failed to render",
@@ -5200,7 +5202,9 @@
     "filePreview": {
       "extractedChars": "{count, plural, =1 {1 char} other {# chars}} extracted",
       "loading": "Loading {name}…",
-      "pdfFallback": "PDF preview is unavailable."
+      "pdfFallback": "PDF preview is unavailable.",
+      "preview": "Preview",
+      "source": "Source"
     },
     "header": {
       "accountSwitcher": {
@@ -5618,6 +5622,11 @@
       },
       "pluginMenu": "Plugin actions",
       "readAloud": "Read aloud",
+      "reasoning": {
+        "completed": "Thought for a few seconds",
+        "completedSeconds": "Thought for {duration, plural, =1 {1 second} other {# seconds}}",
+        "streaming": "Thinking…"
+      },
       "regenerateLabel": "Regenerate",
       "regenerateTooltip": "Regenerate",
       "shareCardLabel": "Share as card",
@@ -5814,6 +5823,16 @@
         "viewSource": "View source"
       },
       "table": {
+        "actionFailed": "Table action failed",
+        "closeFullscreen": "Close fullscreen table",
+        "copy": "Copy table",
+        "copyCsv": "Copy as CSV",
+        "copyMarkdown": "Copy as Markdown",
+        "copyTsv": "Copy as TSV",
+        "download": "Download table",
+        "downloadCsv": "Download as CSV",
+        "downloadMarkdown": "Download as Markdown",
+        "fullscreen": "View table fullscreen",
         "showAllRows": "Show all rows",
         "truncatedNotice": "Showing the first {shown, number} of {total, number} rows."
       },
@@ -7988,6 +8007,12 @@
       "trigger": "Sort & filter"
     },
     "title": "Discover",
+    "twinRegistry": {
+      "emptyDescription": "Create or select a Digital Twin on desktop before adding sources or reviewing drafts.",
+      "emptyTitle": "No Digital Twin selected",
+      "selectAria": "Select active Digital Twin",
+      "selectLabel": "Digital Twin"
+    },
     "view": {
       "aria": "View mode",
       "compact": "Compact",
@@ -8379,6 +8404,7 @@
       "nothingToImport": "Nothing to import — check the column mapping.",
       "preview": "{count, plural, =1 {# case} other {# cases}} parsed",
       "previewSample": "Previewing {count} sample row(s); {total} will be imported",
+      "progress": "Imported {done} of {total}",
       "skipped": "{count} row(s) skipped",
       "stage": "Stage {count} case(s)",
       "tabs": {
@@ -8697,6 +8723,7 @@
       "kind": {
         "chat": "Chat",
         "team": "Agent Team",
+        "twin": "Digital Twin",
         "workflow": "Workflow"
       },
       "noTargets": "Add at least one target with a model / team / workflow id.",
@@ -8711,7 +8738,8 @@
       "targetKind": "Target kind",
       "targetLabel": "Label",
       "targetRef": "Model / team / workflow id",
-      "targets": "Targets"
+      "targets": "Targets",
+      "twinModel": "Twin model"
     },
     "runDetail": {
       "agentOutput": "Agent answer",
@@ -13907,7 +13935,8 @@
       "queueAcceptLabel": "Accept twin draft",
       "queueRejectLabel": "Reject twin draft",
       "reject": "Reject",
-      "rejected": "Rejected"
+      "rejected": "Rejected",
+      "upgradeRequired": "Update the connected Host to review Twin drafts."
     },
     "twinProfile": {
       "empty": "No twin profile yet. Add a source on the desktop to start.",
@@ -13929,6 +13958,8 @@
       },
       "deleteCta": "Delete source",
       "deleteDone": "Source removed.",
+      "deleteQueueLabel": "Queue source deletion",
+      "deleteQueued": "Deletion queued — desktop will clean up vectors when online.",
       "editSheetDescription": "Rename or remove this source.",
       "empty": "No twin sources yet. Tap + to add one.",
       "pasteCancelled": "Cancelled",
@@ -16942,6 +16973,7 @@
       }
     },
     "shared": {
+      "capabilityCount": "{count, plural, one {# capability} other {# capabilities}}",
       "capabilityOverflow": "+{count} more",
       "emptyHint": "Try a different search or section.",
       "emptyTitle": "Nothing here yet",
@@ -17833,13 +17865,17 @@
     "baseURLHint": "Use a proxy URL or self-hosted endpoint. Leave empty for default.",
     "baseURLPlaceholder": "https://api.example.com/v1",
     "baseUrl": "Base URL",
+    "batchApiPrice": "Batch API price",
     "batchNoEligibleProviders": "No visible and eligible providers are available for this operation.",
     "batchOperationRetryFailed": "Retry failed",
     "batchOperationVerifyEnabled": "Verify enabled",
     "batchOperationVerifySelected": "Verify selected",
+    "batchShort": "Batch",
     "bootstrapRetries": "Bootstrap Retries",
     "browseModels": "Browse Models",
     "builtin": "Built-in",
+    "cachedInputPrice": "Cached input price",
+    "cachedInputShort": "Cache",
     "cancel": "Cancel",
     "capabilityAudio": "Audio",
     "capabilityChat": "Chat",
@@ -17923,6 +17959,7 @@
       "audioInputPrice": "Audio Input Price",
       "audioOutputPrice": "Audio Output Price",
       "availability": "Availability",
+      "averagePricePerMillion": "(avg {price}/1M tokens)",
       "avgLatency": "Avg Latency",
       "back": "Back",
       "batchInputPrice": "Batch Input Price",
@@ -17944,15 +17981,18 @@
       "maxOutput": "Max Output",
       "maxReached": "Max 4 models selected",
       "noPrice": "N/A",
+      "online": "Online",
       "outputPrice": "Output Price",
       "provider": "Provider",
       "reasoning": "Reasoning",
       "recommendation": "Recommendation",
       "selectModels": "Select up to 4 models to compare",
       "streaming": "Streaming",
+      "supported": "Supported",
       "textGen": "Text Generation",
       "textGeneration": "Text Generation",
       "title": "Model Comparison",
+      "unsupported": "Unsupported",
       "video": "Video",
       "vision": "Vision"
     },
@@ -32341,13 +32381,15 @@
       "count": "{count, plural, =0 {0 entries} =1 {1 entry} other {# entries}}",
       "counts": "{chunks} chunks · {samples} samples · ~{tokens} tok",
       "degraded": "degraded",
-      "description": "The last 50 RAG / style-few-shot injections that ran on top of this twin. In-memory only — clears on reload.",
+      "description": "The last 50 RAG / style-few-shot injections that ran on top of this twin. Safe metadata is restored after reload.",
       "emptyHint": "No injections yet — send a message to a character bound to this twin to populate the log.",
       "skipped": "skipped",
       "title": "Runtime injection log"
     },
     "jobs": {
       "attempt": "attempt {n}",
+      "cancel": "Cancel",
+      "cancelReason": "Cancelled from Twin workbench",
       "deadLetter": "dead-letter",
       "draftsProduced": "{count, plural, =0 {No drafts produced} =1 {1 draft produced} other {# drafts produced}}",
       "emptyHint": "No jobs yet. Add sources, then queue an ingest run; queue a distill once the chunks are indexed.",
@@ -32355,9 +32397,11 @@
       "headerCount": "Jobs ({count})",
       "partialBadge": "partial",
       "partialTitle": "Some distill steps fell back; the profile may be incomplete:",
+      "pause": "Pause",
       "queueDistill": "Queue distill",
       "queueIngest": "Queue ingest for pending sources",
       "queuedAt": "queued {when}",
+      "resume": "Resume",
       "retry": "Retry",
       "retryBusy": "Retrying…"
     },
@@ -32405,10 +32449,32 @@
       "badges": {
         "pinned": "Pinned"
       },
+      "benchmark": {
+        "created": "Created an editable benchmark with {count} cases.",
+        "failed": "Could not create benchmark: {message}",
+        "generate": "Generate benchmark"
+      },
+      "countDecisions": "{count, plural, =0 {0 decisions} =1 {1 decision} other {# decisions}}",
       "countEntities": "{count, plural, =0 {0 entities} =1 {1 entity} other {# entities}}",
       "countPlaybooks": "{count, plural, =0 {0 playbooks} =1 {1 playbook} other {# playbooks}}",
       "countStyleSamples": "{count, plural, =0 {0 style samples} =1 {1 style sample} other {# style samples}}",
+      "decision": {
+        "add": "Add decision",
+        "choiceLabel": "Choice",
+        "choicePlaceholder": "What was chosen",
+        "contextLabel": "Context",
+        "contextPlaceholder": "Situation or constraint",
+        "deleteConfirmBody": "This decision will be removed from the twin profile.",
+        "deleteConfirmTitle": "Delete this decision?",
+        "description": "Capture a choice and its reasoning. Manual decisions are pinned by default.",
+        "edit": "Edit decision",
+        "piiBlocked": "Cannot save a decision containing unredacted PII.",
+        "rationaleLabel": "Rationale",
+        "rationalePlaceholder": "Why this choice was made",
+        "required": "Context and choice are required."
+      },
       "empty": {
+        "decisions": "No decisions yet — distill will extract some, or add one manually.",
         "entities": "No entities yet — distill will produce some, or click Add entity manually.",
         "noMatch": "No matches for your search.",
         "playbooks": "No playbooks yet — distill will produce some, or add one manually.",
@@ -32474,6 +32540,7 @@
         "tonePlaceholder": "Comma-separated (e.g. concise, decisive)"
       },
       "tabs": {
+        "decisions": "Decisions",
         "entities": "Entities",
         "playbooks": "Playbooks",
         "styleSamples": "Style samples"
@@ -32504,6 +32571,7 @@
       "createDescription": "Pick a name for the new twin. Color and runtime knobs default to sensible values; you can change everything later.",
       "createTitle": "Create new twin",
       "delete": "Delete",
+      "deleteCascadeMissing": "Twin deletion did not return a cascade result",
       "deleteDescription": "Delete \"{name}\" and cascade-remove every source, chunk, draft, and job that belongs to it. This cannot be undone.",
       "deleteTitle": "Delete twin?",
       "guidedCreate": "Guided setup…",
@@ -33018,12 +33086,17 @@
         "useTemplate": "Use"
       },
       "publish": {
+        "current": "Current",
+        "deploymentSummary": "Production v{sequence} · revision {revision} · {status}",
         "hint": "Publish this workflow as a typed callable unit — an agent tool, a typed sub-workflow target, and a skill. Save the workflow first. Declare its interface with the Manual trigger's input schema and an Output node.",
         "publish": "Publish",
         "publishedAs": "Published as tool",
         "republish": "Re-publish",
+        "rollback": "Roll back",
         "title": "Publish",
-        "unpublish": "Unpublish"
+        "unpublish": "Unpublish",
+        "versionHistory": "Version history",
+        "versionRow": "v{sequence} · {date}"
       },
       "retry": {
         "attempts": "Attempts",
@@ -33246,6 +33319,7 @@
     "diagnostics": {
       "blockedRunSummary": "{count} error(s) must be fixed before this workflow can run.",
       "blockedRunTitle": "Can't run — fix errors first",
+      "connectorEgressPolicy": "Connector-triggered external sink {kind} must explicitly choose Block or Redact before publishing.",
       "containerBoundary": "This connection crosses a loop container boundary ({source} → {target}).",
       "credentialMissing": "References a credential that isn't configured ({ref}).",
       "danglingSource": "This connection starts from a node that no longer exists ({ref}).",
@@ -33518,6 +33592,12 @@
         "model": {
           "hint": "Defaults to the provider's configured model.",
           "label": "Model (optional)"
+        },
+        "piiGate": {
+          "block": "Block sensitive data",
+          "hint": "Required for formal connector-triggered runs. Redaction removes detected sensitive values before the model call.",
+          "label": "PII egress policy",
+          "redact": "Redact and continue"
         },
         "prompt": {
           "label": "Prompt"
@@ -34092,6 +34172,12 @@
           "label": "Message id",
           "placeholder": "om_..."
         },
+        "piiGate": {
+          "block": "Block sensitive data",
+          "hint": "Checks referenced content before forwarding. Native forwarding cannot rewrite the original message, so detected PII is blocked even when redaction is selected.",
+          "label": "PII egress policy",
+          "redact": "Redact when possible; otherwise block"
+        },
         "target": {
           "hint": "Destination conversation key (platform:adapterId:chatId) or a raw receive id.",
           "label": "Target conversation",
@@ -34187,6 +34273,12 @@
         "idempotencyKey": {
           "hint": "Deduplication key; defaults to run id + step id.",
           "label": "Idempotency key (optional)"
+        },
+        "piiGate": {
+          "block": "Block sensitive data",
+          "hint": "Required for formal connector-triggered runs. Redaction removes detected sensitive values before sending or editing the message.",
+          "label": "PII egress policy",
+          "redact": "Redact and continue"
         },
         "replyTo": {
           "hint": "Platforms that support replies quote this message.",
@@ -34852,6 +34944,12 @@
         "method": {
           "label": "Method"
         },
+        "piiGate": {
+          "block": "Block sensitive data",
+          "hint": "Checks the URL, headers, and request body before network egress.",
+          "label": "PII egress policy",
+          "redact": "Redact and continue"
+        },
         "url": {
           "hint": "Supports '{{ }}' expressions.",
           "label": "URL",
@@ -35009,6 +35107,12 @@
         "argsJson": {
           "hint": "Forwarded as the tool call's arguments. Supports expressions.",
           "label": "Arguments (JSON)"
+        },
+        "piiGate": {
+          "block": "Block sensitive data",
+          "hint": "Applied to network MCP servers. Local stdio servers stay local and are not gated.",
+          "label": "PII egress policy",
+          "redact": "Redact and continue"
         },
         "serverId": {
           "label": "MCP server"
@@ -35500,6 +35604,12 @@
             "task": "Task handler (legacy)",
             "tool": "Plugin tool"
           }
+        },
+        "piiGate": {
+          "block": "Block sensitive data",
+          "hint": "Applied when the plugin has network access. Local-only plugins are not gated.",
+          "label": "PII egress policy",
+          "redact": "Redact and continue"
         },
         "pluginId": {
           "label": "Plugin",
@@ -37417,20 +37527,41 @@
           "tokens": "Tokens"
         },
         "export": "Export",
+        "formalRetryUnavailable": "This draft-era run has no immutable version and can only be replayed in local debug mode.",
+        "lineage": {
+          "children": "{count, plural, one {# child run} other {# child runs}}",
+          "parent": "Parent run",
+          "retryOf": "Original run"
+        },
         "notFound": {
           "description": "This run may have been deleted, or the URL is incorrect.",
           "title": "Run not found"
+        },
+        "provenance": {
+          "caller": "caller {value}",
+          "draft": "draft/local debug",
+          "entrypoint": "entrypoint {value}",
+          "revision": "deployment revision {value}",
+          "trace": "trace {value}",
+          "trigger": "trigger {value}",
+          "version": "version {value}"
         },
         "rerun": "Re-run",
         "rerunFromStep": "Re-run from step",
         "rerunFromStepHint": "Select a step in the timeline to re-run from it",
         "rerunning": "Re-running…",
+        "retry": {
+          "currentDeployment": "Run current production",
+          "failedStep": "Continue from step",
+          "originalVersion": "Run original version"
+        },
         "running": "Running…",
         "sparkline": {
           "title": "Duration trend"
         },
         "totalCost": "{cost} est.",
-        "totalTokens": "{tokens} tok"
+        "totalTokens": "{tokens} tok",
+        "unknownError": "unknown error"
       },
       "list": {
         "backToEditor": "Back to editor",
