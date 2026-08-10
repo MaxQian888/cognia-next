@@ -284,18 +284,20 @@ function InboundDraftRowView({
   return (
     <li className="px-3 py-2 text-sm" data-testid={`bridge-inbound-row-${draft.id}`}>
       <div className="flex items-start gap-2">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           onClick={onToggle}
           aria-expanded={isExpanded}
           aria-label={t("inbound.detailAria", { title: draft.title })}
-          className="mt-0.5 rounded-sm p-0.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="mt-0.5 size-5 rounded-sm text-muted-foreground hover:bg-muted"
         >
           <ChevronRightIcon
             className={cn("size-3.5 transition-transform", isExpanded && "rotate-90")}
             aria-hidden
           />
-        </button>
+        </Button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="truncate font-medium">{draft.title}</span>

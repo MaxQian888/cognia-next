@@ -407,15 +407,16 @@ export function InspectorTab() {
                       ) : (
                         <div className="divide-y">
                           {visibleNodes.map((node) => (
-                            <button
+                            <Button
                               key={`${node.handle.revision}:${node.handle.index}`}
                               type="button"
+                              variant="ghost"
                               onClick={() => {
                                 setSelected(node)
                                 setExpanded(null)
                               }}
                               className={
-                                "block w-full px-3 py-2 text-left text-xs hover:bg-muted/40 " +
+                                "h-auto w-full justify-start whitespace-normal rounded-none px-3 py-2 text-left text-xs font-normal hover:bg-muted/40 " +
                                 (selected?.handle.index === node.handle.index ? "bg-muted" : "")
                               }
                             >
@@ -437,7 +438,7 @@ export function InspectorTab() {
                                   </span>
                                 )}
                               </span>
-                            </button>
+                            </Button>
                           ))}
                         </div>
                       )}

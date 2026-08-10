@@ -313,11 +313,12 @@ export function ModelCatalogSection() {
                       transform: `translateY(${virtualRow.start}px)`,
                     }}
                   >
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
                       onClick={() => setSelectedId(result.model.id)}
                       className={cn(
-                        "flex size-full items-center justify-between gap-3 px-3 text-left hover:bg-muted/60",
+                        "size-full justify-between gap-3 whitespace-normal rounded-none px-3 text-left font-normal hover:bg-muted/60",
                         selectedId === result.model.id && "bg-muted"
                       )}
                     >
@@ -334,7 +335,7 @@ export function ModelCatalogSection() {
                           </Badge>
                         ))}
                       </span>
-                    </button>
+                    </Button>
                   </div>
                 )
               })}

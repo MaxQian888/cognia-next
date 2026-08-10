@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { CrashLogSettings } from "@/components/settings/system/crash-log-settings"
+import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 
@@ -47,21 +48,23 @@ export function DiagnosticsSection() {
         {TAB_ORDER.map((tab) => {
           const active = activeTab === tab
           return (
-            <button
+            <Button
               key={tab}
               type="button"
               role="tab"
+              variant="ghost"
+              size="sm"
               aria-selected={active}
               onClick={() => setActiveTab(tab)}
               className={cn(
-                "rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors",
+                "h-auto rounded-md px-2.5 py-1 text-xs",
                 active
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-background text-foreground shadow-sm hover:bg-background"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
               {t(TAB_LABEL_KEY[tab])}
-            </button>
+            </Button>
           )
         })}
       </div>

@@ -12,6 +12,7 @@
 
 import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 
@@ -62,19 +63,21 @@ export function RelatedSectionsStrip({ current, targets }: Props) {
         {t("title")}
       </span>
       {visible.map((target) => (
-        <button
+        <Button
           key={`${target.section}:${target.tab ?? ""}`}
           type="button"
+          variant="outline"
+          size="sm"
           onClick={() => goTo(target)}
           className={cn(
-            "inline-flex h-6 items-center rounded-full border bg-background px-2.5 text-[11px] transition-colors",
+            "h-6 rounded-full bg-background px-2.5 text-[11px] font-normal",
             "hover:border-primary/40 hover:bg-accent focus-visible:border-primary/40 focus-visible:bg-accent",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           )}
           data-testid={`related-link-${target.section}${target.tab ? `-${target.tab}` : ""}`}
         >
           {t(target.labelKey)}
-        </button>
+        </Button>
       ))}
     </div>
   )

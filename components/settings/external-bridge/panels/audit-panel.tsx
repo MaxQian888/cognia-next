@@ -209,18 +209,20 @@ function AuditRowView({
     <>
       <TableRow>
         <TableCell className="py-1">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={onToggle}
             aria-expanded={isExpanded}
             aria-label={t("audit.detailAria", { tool: row.tool })}
-            className="rounded-sm p-0.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="size-5 rounded-sm text-muted-foreground hover:bg-muted"
           >
             <ChevronRightIcon
               className={cn("size-3.5 transition-transform", isExpanded && "rotate-90")}
               aria-hidden
             />
-          </button>
+          </Button>
         </TableCell>
         <TableCell className="font-mono text-xs">
           {/* Only genuinely new rows animate — a filter change re-renders the

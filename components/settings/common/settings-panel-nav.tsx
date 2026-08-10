@@ -21,6 +21,7 @@ import type { ComponentType } from "react"
 
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { STAGGER_CHILD, STAGGER_CONTAINER, MOBILE_SPRING } from "@/lib/ui/motion"
 
@@ -155,14 +156,15 @@ function SettingsNavRow<Id extends string>({
           aria-hidden
         />
       ) : null}
-      <button
+      <Button
         type="button"
+        variant="ghost"
         aria-current={isSelected ? "true" : undefined}
         data-testid={`${idPrefix}-nav-item-${id}`}
         data-active={isSelected}
         onClick={() => onSelect(id)}
         className={cn(
-          "relative flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left",
+          "relative h-auto w-full items-start justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left font-normal",
           "transition-[transform,background-color] duration-150",
           "hover:translate-x-0.5 hover:bg-accent/50",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -184,7 +186,7 @@ function SettingsNavRow<Id extends string>({
             <span aria-hidden>{badge.text}</span>
           </Badge>
         ) : null}
-      </button>
+      </Button>
     </motion.div>
   )
 }

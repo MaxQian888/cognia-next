@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronDownIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Switch } from "@/components/ui/switch"
@@ -92,9 +93,10 @@ export function BuiltinHooksCard() {
     >
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger asChild>
-          <button
+          <Button
             type="button"
-            className="flex w-full items-center justify-between gap-2 text-left"
+            variant="ghost"
+            className="h-auto w-full justify-between gap-2 whitespace-normal p-0 text-left font-normal hover:bg-transparent"
             data-testid="builtin-hooks-toggle"
           >
             <div className="min-w-0 space-y-0.5">
@@ -120,7 +122,7 @@ export function BuiltinHooksCard() {
               )}
               aria-hidden
             />
-          </button>
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="space-y-2 pt-3">

@@ -218,14 +218,16 @@ function TagListEditor({
                   <TriangleAlertIcon className="size-3 shrink-0" aria-label={unknownHint} />
                 )}
                 {value}
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={() => remove(value)}
                   aria-label={removeAria(value)}
-                  className="rounded-sm hover:text-destructive"
+                  className="size-4 rounded-sm hover:text-destructive"
                 >
                   <XIcon className="size-3" />
-                </button>
+                </Button>
               </Badge>
             )
           })}

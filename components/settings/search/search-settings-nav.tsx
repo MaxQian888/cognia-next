@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
 import {
@@ -33,13 +34,14 @@ export function SearchSettingsNav({ active, onSelect }: SearchSettingsNavProps) 
       {SEARCH_SECTIONS.map((section) => {
         const isActive = section.id === active
         return (
-          <button
+          <Button
             key={section.id}
             type="button"
+            variant="ghost"
             onClick={() => onSelect(section.id)}
             aria-current={isActive ? "page" : undefined}
             className={cn(
-              "flex items-start gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors",
+              "h-auto items-start justify-start gap-2.5 whitespace-normal rounded-md px-2.5 py-2 text-left font-normal",
               isActive
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -69,7 +71,7 @@ export function SearchSettingsNav({ active, onSelect }: SearchSettingsNavProps) 
                 {t(section.descKey)}
               </span>
             </span>
-          </button>
+          </Button>
         )
       })}
     </nav>

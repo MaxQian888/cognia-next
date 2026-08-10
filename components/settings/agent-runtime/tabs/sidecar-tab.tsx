@@ -298,15 +298,16 @@ interface CountTileProps {
 function CountTile({ label, value, hint, onClick, testId }: CountTileProps) {
   const display = value === null ? (hint ?? "—") : String(value)
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onClick}
-      className="bg-background p-3 text-left transition-colors hover:bg-accent focus:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:-outline-offset-2"
+      className="h-auto justify-start rounded-none bg-background p-3 text-left font-normal hover:bg-accent focus:bg-accent"
       data-testid={testId}
     >
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="mt-0.5 truncate font-mono text-sm">{display}</p>
-    </button>
+    </Button>
   )
 }
 

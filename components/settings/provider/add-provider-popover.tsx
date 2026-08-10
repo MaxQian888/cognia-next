@@ -69,10 +69,12 @@ export function AddProviderPopover({
             {QUICK_ADD_PROVIDERS.map((provider) => {
               const isConfigured = configuredProviderIds.includes(provider.id)
               return (
-                <button
+                <Button
                   key={provider.id}
+                  type="button"
+                  variant="outline"
                   onClick={() => handleSelectProvider(provider.id)}
-                  className={`flex items-center gap-2 rounded-lg border p-2 hover:bg-muted/50 cursor-pointer text-left transition-colors ${isConfigured ? "border-primary/30 bg-primary/5" : ""}`}
+                  className={`h-auto justify-start gap-2 whitespace-normal rounded-lg p-2 text-left font-normal hover:bg-muted/50 ${isConfigured ? "border-primary/30 bg-primary/5" : ""}`}
                 >
                   <span className="text-lg shrink-0">{provider.icon}</span>
                   <div className="min-w-0 flex-1">
@@ -80,7 +82,7 @@ export function AddProviderPopover({
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">{provider.desc}</p>
                   </div>
                   {isConfigured && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-                </button>
+                </Button>
               )
             })}
           </div>
@@ -95,13 +97,15 @@ export function AddProviderPopover({
             <Plus className="h-4 w-4" />
             {t("quickAdd.customProvider")}
           </Button>
-          <button
+          <Button
+            type="button"
+            variant="ghost"
             onClick={handleOpenWizard}
-            className="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            className="h-auto justify-start gap-2 px-2 py-1 text-sm font-normal text-muted-foreground hover:text-foreground"
           >
             <Wand2 className="h-4 w-4" />
             {t("quickAdd.wizard")}
-          </button>
+          </Button>
         </div>
       </PopoverContent>
     </Popover>

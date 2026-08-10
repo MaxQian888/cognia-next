@@ -128,11 +128,13 @@ export function GoalTemplatesManager() {
               className="flex items-start gap-2 rounded-md border bg-card px-3 py-2 text-sm"
               data-testid="goal-template-row"
             >
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 aria-label={t("templates.favorite")}
                 onClick={() => void setTemplateFavorite(tpl.id, !tpl.isFavorite)}
-                className="mt-0.5"
+                className="mt-0.5 size-6"
                 data-testid="goal-template-favorite"
               >
                 <StarIcon
@@ -142,7 +144,7 @@ export function GoalTemplatesManager() {
                   )}
                   aria-hidden
                 />
-              </button>
+              </Button>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate font-medium">{tpl.title}</span>

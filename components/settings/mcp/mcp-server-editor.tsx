@@ -196,13 +196,15 @@ export function McpServerEditor({ initial, onCancel, onSave }: EditorProps) {
 
       <div className="flex items-center justify-between">
         <Label className="text-xs">{t("config")}</Label>
-        <button
+        <Button
           type="button"
-          className="text-[10px] text-muted-foreground hover:text-foreground hover:underline"
+          variant="link"
+          size="sm"
+          className="h-auto p-0 text-[10px] font-normal text-muted-foreground hover:text-foreground"
           onClick={() => (showJson ? switchToForm() : switchToJson())}
         >
           {showJson ? t("showForm") : t("showJson")}
-        </button>
+        </Button>
       </div>
 
       {showJson ? (

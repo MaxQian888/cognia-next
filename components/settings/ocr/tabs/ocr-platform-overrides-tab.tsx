@@ -198,6 +198,7 @@ function SortableEngineRow({
   rank: number
   onRemove: (id: string) => void
 }) {
+  const t = useTranslations()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: engineId,
   })
@@ -215,16 +216,18 @@ function SortableEngineRow({
       )}
       data-testid={`ocr-engine-row-${engineId}`}
     >
-      <button
+      <Button
         type="button"
-        className="flex h-6 w-6 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing"
-        aria-label="drag"
+        variant="ghost"
+        size="icon"
+        className="size-6 cursor-grab text-muted-foreground active:cursor-grabbing"
+        aria-label={t("ocr.platformOverrides.dragHint")}
         data-testid={`ocr-engine-handle-${engineId}`}
         {...attributes}
         {...listeners}
       >
         <GripVerticalIcon className="h-4 w-4" />
-      </button>
+      </Button>
       <span className="text-xs font-mono text-muted-foreground">{rank}.</span>
       <span className="flex-1 text-sm">{engineId}</span>
       <Button
@@ -233,7 +236,7 @@ function SortableEngineRow({
         size="sm"
         className="h-6 px-2"
         onClick={() => onRemove(engineId)}
-        aria-label="remove"
+        aria-label={t("common.remove")}
         data-testid={`ocr-engine-remove-${engineId}`}
       >
         <X className="h-3.5 w-3.5" />

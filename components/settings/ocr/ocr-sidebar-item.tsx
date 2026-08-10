@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 import { BrandIcon, hasBrandIcon } from "@/components/icons/brand-icon"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { topSidebarCapabilities, type OcrCapabilityFields } from "@/lib/ocr/capabilities"
 
@@ -125,15 +126,16 @@ export const OcrSidebarItem = React.memo(function OcrSidebarItem({
   const ariaDisabled = AriaWhen(disabled)
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={handleClick}
       data-testid={`ocr-sidebar-item-${providerId}`}
       data-status={status}
       data-disabled={disabled ? "true" : undefined}
       aria-disabled={ariaDisabled}
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all duration-200",
+        "h-auto w-full justify-start gap-3 whitespace-normal rounded-lg px-3 py-2.5 text-left font-normal transition-all duration-200",
         isSelected
           ? "border-l-2 border-l-primary bg-primary text-primary-foreground"
           : "hover:bg-muted/50",
@@ -181,7 +183,7 @@ export const OcrSidebarItem = React.memo(function OcrSidebarItem({
       {disabled && (
         <AlertTriangle className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
       )}
-    </button>
+    </Button>
   )
 })
 

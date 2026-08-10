@@ -55,14 +55,16 @@ export function ChipInput({
               className="flex items-center gap-1 rounded bg-muted py-1 pl-2 pr-1 font-mono text-xs"
             >
               {entry}
-              <button
+              <Button
                 type="button"
-                className="rounded-sm px-1 text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                variant="ghost"
+                size="icon"
+                className="size-5 rounded-sm text-muted-foreground hover:bg-background hover:text-foreground"
                 aria-label={`${removeLabel} ${entry}`}
                 onClick={() => onCommit(values.filter((e) => e !== entry))}
               >
                 ×
-              </button>
+              </Button>
             </span>
           ))}
         </div>

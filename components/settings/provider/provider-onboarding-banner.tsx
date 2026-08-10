@@ -71,12 +71,14 @@ export function ProviderOnboardingBanner({ onScrollToProvider }: ProviderOnboard
             </Badge>
           ))}
           {/* Quiet catalog refresh — silent on failure, detail in the title. */}
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => void sync()}
             disabled={isSyncing}
             title={catalogSummary}
-            className="ml-1 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary disabled:opacity-60"
+            className="ml-1 h-auto gap-1 p-0 text-xs font-normal text-muted-foreground hover:bg-transparent hover:text-primary disabled:opacity-60"
           >
             {isSyncing ? (
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -84,7 +86,7 @@ export function ProviderOnboardingBanner({ onScrollToProvider }: ProviderOnboard
               <RefreshCw className="h-3 w-3" />
             )}
             {isSyncing ? t("modelsDev.syncing") : t("modelsDev.update")}
-          </button>
+          </Button>
         </div>
       </div>
       <Button

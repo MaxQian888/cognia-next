@@ -272,12 +272,13 @@ function AgentSlotButton({ slot, onClick }: { slot: AgentSlot; onClick: () => vo
       ? t("serversCountOne", { count: slot.draftCount })
       : t("serversCountOther", { count: slot.draftCount })
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "flex w-full items-center gap-3 rounded-md border bg-card p-3 text-left text-xs transition-colors",
+        "h-auto w-full justify-start gap-3 whitespace-normal bg-transparent p-3 text-left text-xs font-normal",
         !disabled && "hover:border-primary/40 hover:bg-accent",
         disabled && "opacity-50"
       )}
@@ -309,7 +310,7 @@ function AgentSlotButton({ slot, onClick }: { slot: AgentSlot; onClick: () => vo
         )}
         {slot.parseError && <p className="text-[10px] text-destructive">{slot.parseError}</p>}
       </div>
-    </button>
+    </Button>
   )
 }
 

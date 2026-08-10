@@ -297,9 +297,10 @@ function PresetCard({
   onPick: (preset: McpPreset) => void
 }) {
   return (
-    <button
+    <Button
       type="button"
-      className="group flex h-full flex-col items-start gap-1 rounded-md border bg-card p-3 text-left text-sm transition-colors hover:border-primary/40 hover:bg-accent disabled:opacity-50"
+      variant="outline"
+      className="group h-full min-h-fit flex-col items-start justify-start gap-1 whitespace-normal bg-transparent p-3 text-left text-sm font-normal hover:border-primary/40 hover:bg-accent disabled:opacity-50"
       onClick={() => onPick(preset)}
       disabled={taken}
     >
@@ -309,7 +310,7 @@ function PresetCard({
         {taken && <span className="text-[10px] text-muted-foreground">{takenLabel}</span>}
       </div>
       <p className="line-clamp-2 text-[11px] text-muted-foreground">{preset.description}</p>
-    </button>
+    </Button>
   )
 }
 
@@ -323,17 +324,19 @@ function TagChip({
   label: string
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="sm"
       onClick={onClick}
       className={cn(
-        "inline-flex h-5 items-center rounded-full border px-2 text-[10px] uppercase tracking-wider transition-colors",
+        "h-5 rounded-full px-2 text-[10px] font-normal uppercase tracking-wider",
         active
           ? "border-primary/40 bg-primary text-primary-foreground"
           : "border-border text-muted-foreground hover:border-primary/40 hover:bg-accent"
       )}
     >
       {label}
-    </button>
+    </Button>
   )
 }

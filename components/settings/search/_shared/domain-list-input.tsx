@@ -66,14 +66,16 @@ export function DomainListInput({
         <Badge key={d} variant="secondary" className="text-xs gap-1 pr-1">
           {badgeIcon}
           {d}
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={() => onRemove(d)}
             aria-label={removeAriaLabel?.(d)}
-            className="ml-1 hover:text-destructive"
+            className="ml-1 size-4 hover:text-destructive"
           >
             <X className="h-3 w-3" />
-          </button>
+          </Button>
         </Badge>
       ))}
     </div>

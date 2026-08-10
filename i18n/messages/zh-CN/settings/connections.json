@@ -444,6 +444,7 @@
     "archivedBadge": "已归档",
     "characterPrefix": "角色：{id}",
     "computerUseBadge": "CU",
+    "computerUseLabel": "计算机操作",
     "computerUseTooltip": "已为该会话开启 Computer Use 工具（ADR-0025 的按通道显式授权）。如需关闭，请编辑覆盖。",
     "deleteOverride": "删除覆盖",
     "editAria": "编辑覆盖",

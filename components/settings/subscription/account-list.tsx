@@ -127,10 +127,12 @@ export function AccountList({ provider, onAdd, secondaryAction, onUpdate }: Acco
                 key={account.id}
                 className="flex items-center gap-2 rounded border bg-card/40 px-2.5 py-1.5 text-sm"
               >
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="icon"
                   aria-label={t("setActive")}
-                  className={`flex size-5 items-center justify-center rounded-full border ${
+                  className={`size-5 rounded-full ${
                     account.id === activeAccountId
                       ? "border-primary bg-primary/15 text-primary"
                       : "border-muted-foreground/40 text-muted-foreground"
@@ -143,7 +145,7 @@ export function AccountList({ provider, onAdd, secondaryAction, onUpdate }: Acco
                   disabled={account.id === activeAccountId}
                 >
                   <RadioIcon className="size-3" />
-                </button>
+                </Button>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">
                     {account.label || account.email || account.id.slice(0, 8)}

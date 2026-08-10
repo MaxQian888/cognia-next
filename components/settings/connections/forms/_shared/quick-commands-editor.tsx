@@ -163,16 +163,18 @@ export function QuickCommandsEditor({
                 <span className="text-muted-foreground">→</span>
                 <span className="rounded bg-muted px-1">{c.action.type}</span>
                 <span className="flex-1 truncate">{c.action.value}</span>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={() => handleRemove(c.triggerKey)}
                   disabled={disabled}
                   aria-label={t("removeAria", { key: c.triggerKey })}
-                  className="rounded-sm hover:bg-muted"
+                  className="size-5 rounded-sm hover:bg-muted"
                   data-testid={`${testIdPrefix}-remove-${c.triggerKey}`}
                 >
                   <XIcon className="h-3 w-3" />
-                </button>
+                </Button>
               </li>
             ))}
           </ul>

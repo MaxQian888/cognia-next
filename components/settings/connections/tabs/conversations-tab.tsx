@@ -179,16 +179,18 @@ export function ConversationsTab() {
                   data-testid={`conversation-row-${row.id}`}
                 >
                   <div className="flex-1 min-w-0 space-y-0.5">
-                    <button
+                    <Button
                       type="button"
-                      className="font-mono text-xs truncate hover:underline text-left"
+                      variant="link"
+                      size="sm"
+                      className="h-auto max-w-full justify-start truncate p-0 text-left font-mono text-xs"
                       onClick={() =>
                         router.push(`/inbox/c?key=${encodeURIComponent(row.conversationKey)}`)
                       }
                       data-testid={`conv-link-${row.id}`}
                     >
                       {row.conversationKey}
-                    </button>
+                    </Button>
                     <div className="flex flex-wrap gap-1">
                       {row.mode && (
                         <Badge variant="outline" className="text-xs">

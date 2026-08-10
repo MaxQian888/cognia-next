@@ -161,11 +161,14 @@ export function OllamaModelManager({
               const isRunning = isModelRunning(model.name)
 
               return (
-                <button
+                <Button
                   key={model.name}
+                  type="button"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => onModelSelect?.(model.name)}
                   className={cn(
-                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium transition-colors",
+                    "h-auto gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
                     isSelected
                       ? "bg-primary text-primary-foreground"
                       : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
@@ -174,7 +177,7 @@ export function OllamaModelManager({
                   {isRunning && <Zap className="h-3 w-3" />}
                   {name}
                   {tag !== "latest" && <span className="opacity-60">:{tag}</span>}
-                </button>
+                </Button>
               )
             })}
           </div>
@@ -214,6 +217,7 @@ export function OllamaModelManager({
             <Server className="mx-auto mb-2 h-8 w-8 opacity-50" />
             <p>{t("ollamaNotRunning")}</p>
             <p className="mt-1 text-xs">
+              {/* i18n-exempt: executable command */}
               {t("ollamaStartHint")} <code className="rounded bg-muted px-1">ollama serve</code>
             </p>
           </div>
@@ -266,14 +270,16 @@ export function OllamaModelManager({
                       const isPullingThis = pullStates.get(model.name)?.isActive
 
                       return (
-                        <button
+                        <Button
                           key={model.name}
+                          type="button"
+                          variant="outline"
                           onClick={() =>
                             !isInstalled && !isPullingThis && handleQuickPull(model.name)
                           }
                           disabled={isInstalled || isPullingThis}
                           className={cn(
-                            "flex flex-col items-start rounded-lg border p-2 text-left text-xs transition-colors",
+                            "h-auto flex-col items-start justify-start whitespace-normal rounded-lg p-2 text-left text-xs font-normal",
                             isInstalled ? "border-green-500/30 bg-green-500/5" : "hover:bg-muted"
                           )}
                         >
@@ -283,7 +289,7 @@ export function OllamaModelManager({
                             {isPullingThis && <Loader2 className="h-3 w-3 animate-spin" />}
                           </div>
                           <span className="text-muted-foreground">{model.size}</span>
-                        </button>
+                        </Button>
                       )
                     })}
                   </div>
@@ -355,9 +361,11 @@ export function OllamaModelManager({
                           isRunning && "border-green-500/30"
                         )}
                       >
-                        <button
+                        <Button
+                          type="button"
+                          variant="ghost"
                           onClick={() => onModelSelect?.(model.name)}
-                          className="flex flex-1 items-center gap-2 text-left"
+                          className="h-auto flex-1 justify-start gap-2 whitespace-normal p-0 text-left font-normal hover:bg-transparent"
                         >
                           <Cpu className="h-4 w-4 text-muted-foreground" />
                           <div className="flex-1 min-w-0">
@@ -388,7 +396,7 @@ export function OllamaModelManager({
                               </span>
                             </div>
                           </div>
-                        </button>
+                        </Button>
 
                         <div className="flex items-center gap-1">
                           {isRunning && (

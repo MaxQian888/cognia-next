@@ -119,7 +119,7 @@ export function OcrSidebar({
       <div
         className="flex-1 overflow-x-hidden overflow-y-auto p-1"
         role="list"
-        aria-label="OCR providers"
+        aria-label={t("ocr.sidebar.mobileTrigger")}
       >
         {/* Compare pinned item */}
         <PinnedRow
@@ -201,12 +201,13 @@ interface PinnedRowProps {
 
 function PinnedRow({ isSelected, onClick, icon, label, subtitle, badge, testId }: PinnedRowProps) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onClick}
       data-testid={testId}
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all duration-200",
+        "h-auto w-full justify-start gap-3 whitespace-normal rounded-lg px-3 py-2.5 text-left font-normal transition-all duration-200",
         isSelected
           ? "border-l-2 border-l-primary bg-primary text-primary-foreground"
           : "hover:bg-muted/50"
@@ -243,7 +244,7 @@ function PinnedRow({ isSelected, onClick, icon, label, subtitle, badge, testId }
           {badge}
         </Badge>
       )}
-    </button>
+    </Button>
   )
 }
 

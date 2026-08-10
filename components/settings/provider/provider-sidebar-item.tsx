@@ -4,6 +4,7 @@ import React, { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { Check, AlertTriangle, X, Circle, Info, Activity } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { hasBrandIcon } from "@/components/icons/brand-icon"
 import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 import { cn } from "@/lib/utils"
@@ -116,12 +117,13 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
   const branded = hasBrandIcon(providerId)
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       id={`provider-${providerId}`}
       onClick={handleClick}
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all duration-200",
+        "h-auto w-full justify-start gap-3 whitespace-normal rounded-lg px-3 py-2.5 text-left font-normal transition-all duration-200",
         isSelected
           ? "border-l-2 border-l-primary bg-primary text-primary-foreground"
           : "hover:bg-muted/50"
@@ -194,6 +196,6 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
         <StatusIcon className="h-3 w-3" />
         <span className="hidden @[16rem]/provider-rail:inline">{statusLabel}</span>
       </Badge>
-    </button>
+    </Button>
   )
 })

@@ -7,6 +7,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { SearchIcon, ServerIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -152,21 +153,23 @@ export function McpPanel({ className }: { className?: string }) {
             {TAB_ORDER.map((tab) => {
               const active = activeTab === tab
               return (
-                <button
+                <Button
                   key={tab}
                   type="button"
                   role="tab"
+                  variant="ghost"
+                  size="sm"
                   aria-selected={active}
                   onClick={() => setActiveTab(tab)}
                   className={cn(
-                    "rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors",
+                    "h-auto rounded-md px-2.5 py-1 text-xs font-medium",
                     active
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
                   {tTabs(TAB_LABEL_KEY[tab])}
-                </button>
+                </Button>
               )
             })}
           </div>

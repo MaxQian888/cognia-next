@@ -275,16 +275,18 @@ export function CommandEditorDialog({ open, onOpenChange, initial, cwd, onSaved 
                 form.allowedTools.map((tool) => (
                   <Badge key={tool} variant="secondary" className="gap-1 pr-1">
                     <span className="font-mono text-[11px]">{tool}</span>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon"
                       onClick={() => removeTool(tool)}
                       disabled={readOnly}
                       aria-label={t("removeTool", { tool })}
-                      className="rounded p-0.5 hover:bg-muted/60"
+                      className="size-5 rounded hover:bg-muted/60"
                       data-testid={`command-editor-remove-tool-${tool}`}
                     >
                       <XIcon className="size-3" />
-                    </button>
+                    </Button>
                   </Badge>
                 ))
               )}

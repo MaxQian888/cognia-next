@@ -252,10 +252,13 @@ export function SearchGlobalSettings({ onConfigureProviders }: SearchGlobalSetti
           })}
           <Dialog open={addSourceOpen} onOpenChange={setAddSourceOpen}>
             <DialogTrigger asChild>
-              <button
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
                 disabled={!searchEnabled}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium border border-dashed transition-colors",
+                  "h-auto gap-1 rounded-full border-dashed px-3 py-1.5 text-xs font-medium",
                   searchEnabled
                     ? "cursor-pointer hover:bg-muted/50 text-muted-foreground"
                     : "opacity-50 cursor-not-allowed text-muted-foreground"
@@ -263,7 +266,7 @@ export function SearchGlobalSettings({ onConfigureProviders }: SearchGlobalSetti
               >
                 <Plus className="h-3 w-3" />
                 <span>{t("addCustomSource")}</span>
-              </button>
+              </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>

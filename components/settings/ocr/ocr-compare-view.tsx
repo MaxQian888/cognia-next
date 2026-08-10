@@ -93,6 +93,8 @@ export function OcrCompareView({
   }
 
   const isPdf = file?.type === "application/pdf"
+  // i18n-exempt: KB is a standard file-size unit and MIME types are protocol values.
+  const fileMetadata = file ? `${(file.size / 1024).toFixed(1)} KB · ${file.type || "unknown"}` : ""
   const estimatedPages = isPdf ? 5 : 1
   const totalCost = useMemo(
     () => selectedIds.reduce((sum, id) => sum + estimateOcrCost(id, estimatedPages), 0),
@@ -241,13 +243,16 @@ export function OcrCompareView({
               data-testid={`ocr-compare-chip-${id}`}
             >
               <span>{provider?.label ?? id}</span>
-              <button
-                className="ml-1 rounded-full p-0.5 hover:bg-muted-foreground/20"
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="ml-1 size-4 rounded-full hover:bg-muted-foreground/20"
                 onClick={() => toggleProvider(id)}
                 aria-label={t("ocr.compare.removeProvider", { provider: provider?.label ?? id })}
               >
                 <X className="h-2.5 w-2.5" />
-              </button>
+              </Button>
             </Badge>
           )
         })}
@@ -274,9 +279,7 @@ export function OcrCompareView({
               <span className="text-sm font-medium" data-testid="ocr-compare-file-name">
                 {file.name}
               </span>
-              <span className="text-xs text-muted-foreground">
-                {(file.size / 1024).toFixed(1)} KB · {file.type || "unknown"}
-              </span>
+              <span className="text-xs text-muted-foreground">{fileMetadata}</span>
               <Button
                 type="button"
                 variant="ghost"

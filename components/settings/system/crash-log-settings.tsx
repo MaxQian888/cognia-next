@@ -114,11 +114,12 @@ function CrashLogRow({
 }) {
   const t = useTranslations("logging")
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={onSelect}
       className={cn(
-        "w-full rounded-lg border border-l-[3px] px-3 py-2.5 text-left transition-colors hover:bg-muted/50",
+        "h-auto w-full justify-start whitespace-normal rounded-lg border-l-[3px] px-3 py-2.5 text-left font-normal hover:bg-muted/50",
         LEVEL_BORDER[item.level] ?? "border-l-slate-300",
         selected && "ring-1 ring-primary bg-muted/40"
       )}
@@ -149,7 +150,7 @@ function CrashLogRow({
           ) : null}
         </div>
       </div>
-    </button>
+    </Button>
   )
 }
 
@@ -185,14 +186,15 @@ function DiagnosticsSection({
 
   return (
     <div className="rounded-lg border">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium hover:bg-muted/50 transition-colors"
+        className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2 text-sm font-medium hover:bg-muted/50"
       >
         <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
         {title}
-      </button>
+      </Button>
       {open && (
         <div className="px-3 pb-3">
           <pre className="overflow-x-auto rounded-md bg-muted/40 p-3 text-xs leading-relaxed">

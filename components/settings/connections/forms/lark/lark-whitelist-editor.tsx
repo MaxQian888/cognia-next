@@ -101,15 +101,17 @@ function ChatList({
               data-testid={`${testId}-item-${id}`}
             >
               <span className="font-mono text-xs">{id}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 onClick={() => onRemove(id)}
                 aria-label={removeAriaTemplate.replace("{id}", id)}
-                className="ml-1 rounded-sm hover:bg-muted"
+                className="ml-1 size-5 rounded-sm hover:bg-muted"
                 data-testid={`${testId}-remove-${id}`}
               >
                 <XIcon className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           ))}
         </div>

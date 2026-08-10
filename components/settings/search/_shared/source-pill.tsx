@@ -1,6 +1,6 @@
 "use client"
 
-import { Check, X } from "lucide-react"
+import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -53,7 +53,7 @@ export function SourcePill({
           onClick={onRemove}
           aria-label={`× ${name}`}
         >
-          <X className="size-3" aria-hidden />
+          <span aria-hidden>×</span>
         </Button>
       )}
     </div>

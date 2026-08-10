@@ -424,10 +424,12 @@ export function OutboundTab({ initialFilter = "all", adapterId }: OutboundTabPro
                 data-testid={`outbound-row-${job.id}`}
               >
                 <div className="flex items-start gap-3">
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon"
                     onClick={() => toggleExpanded(job.id)}
-                    className="mt-0.5 text-muted-foreground hover:text-foreground"
+                    className="mt-0.5 size-5 text-muted-foreground hover:text-foreground"
                     aria-label={
                       expanded
                         ? t("collapseDetailsAria", { id: job.id })
@@ -441,7 +443,7 @@ export function OutboundTab({ initialFilter = "all", adapterId }: OutboundTabPro
                     ) : (
                       <ChevronRightIcon className="h-3.5 w-3.5" />
                     )}
-                  </button>
+                  </Button>
                   <StatusBadge status={job.status} />
                   <DerivedBadge badge={derivedBadge} label={derivedLabel} />
                   <div className="flex-1 min-w-0 space-y-0.5">

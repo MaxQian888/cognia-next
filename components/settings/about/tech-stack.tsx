@@ -16,6 +16,7 @@
 import type { ComponentType } from "react"
 import { LanguagesIcon, LayersIcon } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { openExternal } from "@/lib/tauri/opener"
 
 type MarkProps = { className?: string }
@@ -123,13 +124,14 @@ export function TechStack() {
       role="list"
     >
       {STACK.map(({ name, url, mark: Mark, tint }) => (
-        <button
+        <Button
           key={name}
           type="button"
+          variant="outline"
           role="listitem"
           onClick={() => void openExternal(url)}
           data-testid={`stack-${name}`}
-          className="group flex items-center gap-2.5 rounded-lg border bg-background/40 p-2.5 text-left transition-all duration-200 hover:-translate-y-px hover:border-foreground/20 hover:bg-accent/50 hover:shadow-sm focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="group h-auto justify-start gap-2.5 rounded-lg bg-background/40 p-2.5 text-left font-normal transition-all duration-200 hover:-translate-y-px hover:border-foreground/20 hover:bg-accent/50 hover:shadow-sm"
         >
           <span
             className={`flex size-7 shrink-0 items-center justify-center rounded-md bg-current/10 ${tint}`}
@@ -137,7 +139,7 @@ export function TechStack() {
             <Mark className="size-4" />
           </span>
           <span className="min-w-0 truncate text-xs font-medium">{name}</span>
-        </button>
+        </Button>
       ))}
     </div>
   )

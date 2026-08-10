@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
@@ -111,13 +112,14 @@ export function AddConnectorGrid({
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {items.map(({ kind, label, description, Icon, count }) => (
-                <button
+                <Button
                   key={kind}
                   type="button"
+                  variant="outline"
                   onClick={() => handlePick(kind)}
                   data-testid={`add-connector-card-${kind}`}
                   className={cn(
-                    "group flex items-start gap-3 rounded-lg border bg-card p-3 text-left",
+                    "group h-auto items-start justify-start gap-3 whitespace-normal rounded-lg bg-transparent p-3 text-left font-normal",
                     "transition-colors hover:border-primary/40 hover:bg-muted/40",
                     "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   )}
@@ -140,7 +142,7 @@ export function AddConnectorGrid({
                     </span>
                     <span className="block text-xs text-muted-foreground">{description}</span>
                   </span>
-                </button>
+                </Button>
               ))}
             </div>
           )}

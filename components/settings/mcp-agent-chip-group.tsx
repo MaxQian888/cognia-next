@@ -15,6 +15,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { updateMcpServer } from "@/lib/db/mcp-servers"
@@ -91,14 +92,16 @@ function AgentChip({ status, server, loading }: AgentChipProps) {
           : t("tooltipAdd", { name: agent.displayName })
 
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="sm"
       onClick={() => void onClick()}
       disabled={inert || busy}
       title={tooltip}
       aria-pressed={projected}
       className={cn(
-        "inline-flex h-5 items-center gap-1 rounded-full border px-2 text-[10px] font-medium transition-colors",
+        "h-5 gap-1 rounded-full px-2 text-[10px] font-medium",
         projected
           ? "border-primary/40 bg-primary text-primary-foreground hover:bg-primary/90"
           : "border-border bg-transparent text-muted-foreground",
@@ -110,6 +113,6 @@ function AgentChip({ status, server, loading }: AgentChipProps) {
     >
       {busy && <Loader2Icon className="size-2.5 animate-spin" />}
       {agent.displayName}
-    </button>
+    </Button>
   )
 }

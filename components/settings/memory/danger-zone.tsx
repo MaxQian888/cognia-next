@@ -68,17 +68,18 @@ export function MemoryDangerZone({ defaultOpen = false }: MemoryDangerZoneProps)
 
   return (
     <div className="rounded-lg border border-destructive/30 p-3" data-testid="memory-danger-zone">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 text-left"
+        className="h-auto w-full justify-between gap-2 whitespace-normal p-0 text-left font-normal hover:bg-transparent"
       >
         <span className="text-sm font-medium text-destructive">{t("title")}</span>
         <span className="text-[11px] text-muted-foreground">
           {open ? t("collapse") : t("expand")}
         </span>
-      </button>
+      </Button>
 
       <MotionCollapse open={open}>
         <div className="space-y-3 pt-3">

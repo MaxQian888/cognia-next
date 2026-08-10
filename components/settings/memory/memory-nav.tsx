@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { STAGGER_CHILD, STAGGER_CONTAINER, MOBILE_SPRING } from "@/lib/ui/motion"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { MEMORY_NAV_ITEMS, type MemoryPanelId } from "./nav-config"
 
 export interface MemoryNavProps {
@@ -73,14 +74,15 @@ export function MemoryNav({
                 aria-hidden
               />
             ) : null}
-            <button
+            <Button
               type="button"
+              variant="ghost"
               aria-current={isActive ? "true" : undefined}
               data-testid={`${idPrefix}-nav-item-${id}`}
               data-active={isActive}
               onClick={() => onSelect(id)}
               className={cn(
-                "relative flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left",
+                "relative h-auto w-full items-start justify-start gap-2.5 whitespace-normal rounded-md px-2.5 py-2 text-left font-normal",
                 "transition-[transform,background-color] duration-150",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 "hover:translate-x-0.5 hover:bg-accent/50",
@@ -103,7 +105,7 @@ export function MemoryNav({
                   {badge}
                 </Badge>
               ) : null}
-            </button>
+            </Button>
           </motion.div>
         )
       })}

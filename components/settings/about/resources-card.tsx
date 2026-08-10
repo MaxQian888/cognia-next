@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import {
   COMMUNITY_URL,
   DOCS_URL,
@@ -48,12 +49,13 @@ export function ResourcesCard() {
       contentClassName="grid grid-cols-1 gap-2 sm:grid-cols-2"
     >
       {LINKS.map(({ key, url, icon: Icon }) => (
-        <button
+        <Button
           key={key}
           type="button"
+          variant="outline"
           onClick={() => void openExternal(url)}
           data-testid={`resource-${key}`}
-          className="group flex items-start gap-3 rounded-lg border bg-background/40 p-3 text-left transition-all duration-200 hover:-translate-y-px hover:border-foreground/20 hover:bg-accent/50 hover:shadow-sm focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="group h-auto items-start justify-start gap-3 whitespace-normal rounded-lg bg-background/40 p-3 text-left font-normal transition-all duration-200 hover:-translate-y-px hover:border-foreground/20 hover:bg-accent/50 hover:shadow-sm"
         >
           <span
             aria-hidden
@@ -75,7 +77,7 @@ export function ResourcesCard() {
               {t(`resources.${key}.description`)}
             </span>
           </span>
-        </button>
+        </Button>
       ))}
     </AboutCard>
   )

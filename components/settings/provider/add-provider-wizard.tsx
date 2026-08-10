@@ -369,12 +369,14 @@ export function AddProviderWizard({
               {/* Provider Grid */}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {filteredProviders.map((provider) => (
-                  <button
+                  <Button
                     key={provider.id}
+                    type="button"
+                    variant="outline"
                     onClick={() => handleSelectProvider(provider.id)}
                     className={cn(
-                      "flex items-center gap-2 rounded-lg border p-3 text-left transition-colors",
-                      "hover:bg-accent hover:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                      "h-auto justify-start gap-2 whitespace-normal rounded-lg p-3 text-left font-normal",
+                      "hover:border-primary/50 hover:bg-accent"
                     )}
                   >
                     <span className="text-xl shrink-0">{provider.icon}</span>
@@ -384,7 +386,7 @@ export function AddProviderWizard({
                         {provider.desc}
                       </p>
                     </div>
-                  </button>
+                  </Button>
                 ))}
               </div>
 
@@ -494,17 +496,20 @@ export function AddProviderWizard({
                           </label>
                         </div>
                         {isEnabled && (
-                          <button
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
                             onClick={() => setDefaultModel(model.id)}
                             className={cn(
-                              "text-xs px-2 py-0.5 rounded-full border transition-colors",
+                              "h-auto rounded-full px-2 py-0.5 text-xs font-normal",
                               isDefault
                                 ? "border-primary bg-primary text-primary-foreground"
                                 : "border-muted-foreground/30 text-muted-foreground hover:border-primary hover:text-primary"
                             )}
                           >
                             {isDefault ? t("wizard.default") : t("wizard.setDefault")}
-                          </button>
+                          </Button>
                         )}
                       </div>
                     )

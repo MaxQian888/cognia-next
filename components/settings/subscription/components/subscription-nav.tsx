@@ -8,6 +8,7 @@
 
 import type { ComponentType } from "react"
 import { useTranslations } from "next-intl"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { SubscriptionNavGroup, SubscriptionPanelId } from "../nav-config"
 
@@ -67,14 +68,15 @@ function SubscriptionNavItem({
 }) {
   return (
     <div role="listitem">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         aria-current={isSelected ? "true" : undefined}
         data-testid={`subscription-nav-item-${id}`}
         data-active={isSelected}
         onClick={() => onSelect(id)}
         className={cn(
-          "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition",
+          "h-auto w-full items-start justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left font-normal",
           "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           "data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
         )}
@@ -84,7 +86,7 @@ function SubscriptionNavItem({
           <span className="block truncate text-sm font-medium">{label}</span>
           <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
         </span>
-      </button>
+      </Button>
     </div>
   )
 }

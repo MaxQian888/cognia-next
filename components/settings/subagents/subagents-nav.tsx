@@ -10,7 +10,7 @@
 // Two things this nav does that the Appearance one doesn't:
 //
 //  1. It owns the search + category filter chrome, because the entity groups
-//     are long. The category chips are real `<button aria-pressed>` elements —
+//     are long. The category chips are real pressed buttons —
 //     the previous implementation used `<Badge onClick>`, which is neither
 //     focusable nor announced as a toggle.
 //  2. Every entity row's avatar carries `data-flight-source`, the measurement
@@ -22,6 +22,7 @@ import { useTranslations } from "next-intl"
 import { motion } from "motion/react"
 import { SearchIcon, XIcon } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
@@ -83,15 +84,17 @@ export function SubagentsNav({
             data-testid="subagent-nav-search"
           />
           {search ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
               onClick={() => onSearchChange("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              className="absolute right-1 top-1/2 size-6 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               aria-label={t("clearSearch")}
               data-testid="subagent-nav-search-clear"
             >
               <XIcon className="size-3" />
-            </button>
+            </Button>
           ) : null}
         </div>
         <div className="flex flex-wrap gap-1" data-testid="subagent-category-filter">
@@ -187,13 +190,15 @@ function CategoryChip({
   testId: string
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="sm"
       aria-pressed={pressed}
       onClick={onClick}
       data-testid={testId}
       className={cn(
-        "rounded-full border px-2 py-0.5 text-[10px] transition-colors",
+        "h-auto rounded-full px-2 py-0.5 text-[10px] font-normal",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         pressed
           ? "border-transparent bg-primary text-primary-foreground"
@@ -201,7 +206,7 @@ function CategoryChip({
       )}
     >
       {label}
-    </button>
+    </Button>
   )
 }
 
@@ -274,15 +279,16 @@ function NavRow({
           aria-hidden
         />
       ) : null}
-      <button
+      <Button
         type="button"
+        variant="ghost"
         aria-current={isActive ? "true" : undefined}
         data-testid={`subagent-nav-item-${panelId}`}
         data-active={isActive}
         data-disabled-entry={isDisabled ? "true" : undefined}
         onClick={() => onSelect(panelId)}
         className={cn(
-          "relative flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left",
+          "relative h-auto w-full items-start justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left font-normal",
           "transition-[transform,background-color] duration-150",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           // Dense list: translate on hover instead of scaling, which would
@@ -329,7 +335,7 @@ function NavRow({
             <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
           ) : null}
         </span>
-      </button>
+      </Button>
     </motion.div>
   )
 }

@@ -234,11 +234,13 @@ export function QuickAddProviderDialog({
             <ScrollArea className="h-[380px] pr-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {filteredPresets.map((preset) => (
-                  <button
+                  <Button
                     key={preset.id}
+                    type="button"
+                    variant="outline"
                     onClick={() => handleSelectPreset(preset)}
                     className={cn(
-                      "flex flex-col items-start p-3 rounded-lg border text-left transition-colors",
+                      "h-auto flex-col items-start justify-start whitespace-normal rounded-lg p-3 text-left font-normal",
                       "hover:bg-accent hover:border-primary/50",
                       "focus:outline-none focus:ring-2 focus:ring-primary"
                     )}
@@ -260,7 +262,7 @@ export function QuickAddProviderDialog({
                         {preset.models.length} {t("modelsCount")}
                       </Badge>
                     </div>
-                  </button>
+                  </Button>
                 ))}
                 {filteredPresets.length === 0 && (
                   <div className="col-span-2 py-8 text-center text-sm text-muted-foreground">
