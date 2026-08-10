@@ -112,9 +112,12 @@ const TimelineBucketTile = memo(function TimelineBucketTile({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
           className={cn(
-            "flex-1 min-w-0 transition-all",
+            "h-auto min-w-0 flex-1 rounded-none p-0 transition-all",
             colorClass,
             clickable && "cursor-pointer",
             isSelected && "ring-2 ring-primary ring-inset",

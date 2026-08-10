@@ -8,7 +8,7 @@
  * summary stat cards, error trend detection, and top errors.
  */
 
-import { useMemo } from "react"
+import { useId, useMemo } from "react"
 import { useTranslations, useLocale } from "next-intl"
 import {
   PieChart,
@@ -27,7 +27,6 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -54,6 +53,29 @@ export interface LogStatsDashboardProps {
   nativeLogging?: NativeLoggingReadiness
   onSearchFilter?: (query: string) => void
   className?: string
+}
+
+function DashboardSection({
+  title,
+  children,
+  className,
+}: {
+  title: string
+  children: React.ReactNode
+  className?: string
+}) {
+  const titleId = useId()
+
+  return (
+    <section aria-labelledby={titleId} className={cn("min-w-0 border-y bg-background", className)}>
+      <header className="border-b px-4 py-3">
+        <h3 id={titleId} className="text-sm font-medium">
+          {title}
+        </h3>
+      </header>
+      <div className="p-4">{children}</div>
+    </section>
+  )
 }
 
 /**
@@ -338,11 +360,8 @@ export function LogStatsDashboard({
       </div>
 
       {nativeLogging?.runtime === "tauri" && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("dashboard.platformLogging")}</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+        <DashboardSection title={t("dashboard.platformLogging")}>
+          <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">{t("dashboard.platformBackend")}</p>
               <p className="font-medium">{nativeLogging.platformLogging.backend}</p>
@@ -369,260 +388,235 @@ export function LogStatsDashboard({
                 <p className="text-sm text-destructive">{nativeLogging.platformLogging.error}</p>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </DashboardSection>
       )}
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Level Distribution - Pie Chart */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("dashboard.levelDistribution")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div
-              data-testid="dashboard-chart-pie"
-              className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+        <DashboardSection title={t("dashboard.levelDistribution")}>
+          <div
+            data-testid="dashboard-chart-pie"
+            className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+          >
+            <ResponsiveContainer
+              minWidth={1}
+              minHeight={1}
+              initialDimension={{ width: 320, height: 180 }}
             >
-              <ResponsiveContainer
-                minWidth={1}
-                minHeight={1}
-                initialDimension={{ width: 320, height: 180 }}
-              >
-                <PieChart>
-                  <Pie
-                    data={levelData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    paddingAngle={2}
-                    dataKey="value"
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    label={(props: any) =>
-                      `${String(props.name ?? "")} ${(((props.percent as number) ?? 0) * 100).toFixed(0)}%`
-                    }
-                    labelLine={false}
-                  >
-                    {levelData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={TOOLTIP_STYLE.contentStyle}
-                    labelStyle={TOOLTIP_STYLE.labelStyle}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+              <PieChart>
+                <Pie
+                  data={levelData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={80}
+                  paddingAngle={2}
+                  dataKey="value"
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  label={(props: any) =>
+                    `${String(props.name ?? "")} ${(((props.percent as number) ?? 0) * 100).toFixed(0)}%`
+                  }
+                  labelLine={false}
+                >
+                  {levelData.map((entry) => (
+                    <Cell key={entry.name} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE.contentStyle}
+                  labelStyle={TOOLTIP_STYLE.labelStyle}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </DashboardSection>
 
         {/* Log Volume Timeline - Area Chart */}
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("dashboard.logVolume")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div
-              data-testid="dashboard-chart-area"
-              className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+        <DashboardSection title={t("dashboard.logVolume")} className="lg:col-span-2">
+          <div
+            data-testid="dashboard-chart-area"
+            className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+          >
+            <ResponsiveContainer
+              minWidth={1}
+              minHeight={1}
+              initialDimension={{ width: 320, height: 180 }}
             >
-              <ResponsiveContainer
-                minWidth={1}
-                minHeight={1}
-                initialDimension={{ width: 320, height: 180 }}
-              >
-                <AreaChart data={volumeData} margin={CHART_MARGINS.default}>
-                  <defs>
-                    <linearGradient id="logVolumeInfo" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={themeColors.success} stopOpacity={0.6} />
-                      <stop offset="95%" stopColor={themeColors.success} stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="logVolumeWarn" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={themeColors.warning} stopOpacity={0.6} />
-                      <stop offset="95%" stopColor={themeColors.warning} stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="logVolumeError" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={themeColors.destructive} stopOpacity={0.6} />
-                      <stop offset="95%" stopColor={themeColors.destructive} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis dataKey="time" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={TOOLTIP_STYLE.contentStyle}
-                    labelStyle={TOOLTIP_STYLE.labelStyle}
-                  />
-                  <Legend />
-                  <Area
-                    type="monotone"
-                    dataKey="info"
-                    stackId="1"
-                    stroke={themeColors.success}
-                    fill="url(#logVolumeInfo)"
-                    name={t("levels.info")}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="warn"
-                    stackId="1"
-                    stroke={themeColors.warning}
-                    fill="url(#logVolumeWarn)"
-                    name={t("levels.warn")}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="error"
-                    stackId="1"
-                    stroke={themeColors.destructive}
-                    fill="url(#logVolumeError)"
-                    name={t("levels.error")}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="other"
-                    stackId="1"
-                    stroke={themeColors["muted-foreground"]}
-                    fill={themeColors["muted-foreground"]}
-                    fillOpacity={0.2}
-                    name={t("dashboard.otherSeries")}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+              <AreaChart data={volumeData} margin={CHART_MARGINS.default}>
+                <defs>
+                  <linearGradient id="logVolumeInfo" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={themeColors.success} stopOpacity={0.6} />
+                    <stop offset="95%" stopColor={themeColors.success} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="logVolumeWarn" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={themeColors.warning} stopOpacity={0.6} />
+                    <stop offset="95%" stopColor={themeColors.warning} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="logVolumeError" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={themeColors.destructive} stopOpacity={0.6} />
+                    <stop offset="95%" stopColor={themeColors.destructive} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE.contentStyle}
+                  labelStyle={TOOLTIP_STYLE.labelStyle}
+                />
+                <Legend />
+                <Area
+                  type="monotone"
+                  dataKey="info"
+                  stackId="1"
+                  stroke={themeColors.success}
+                  fill="url(#logVolumeInfo)"
+                  name={t("levels.info")}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="warn"
+                  stackId="1"
+                  stroke={themeColors.warning}
+                  fill="url(#logVolumeWarn)"
+                  name={t("levels.warn")}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="error"
+                  stackId="1"
+                  stroke={themeColors.destructive}
+                  fill="url(#logVolumeError)"
+                  name={t("levels.error")}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="other"
+                  stackId="1"
+                  stroke={themeColors["muted-foreground"]}
+                  fill={themeColors["muted-foreground"]}
+                  fillOpacity={0.2}
+                  name={t("dashboard.otherSeries")}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </DashboardSection>
       </div>
 
       {/* Bottom Row: Module Activity + Top Errors */}
       {errorTrendData.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("dashboard.errorTrend")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div
-              data-testid="dashboard-chart-line"
-              className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+        <DashboardSection title={t("dashboard.errorTrend")}>
+          <div
+            data-testid="dashboard-chart-line"
+            className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+          >
+            <ResponsiveContainer
+              minWidth={1}
+              minHeight={1}
+              initialDimension={{ width: 320, height: 180 }}
             >
-              <ResponsiveContainer
-                minWidth={1}
-                minHeight={1}
-                initialDimension={{ width: 320, height: 180 }}
-              >
-                <LineChart data={errorTrendData} margin={CHART_MARGINS.default}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis dataKey="time" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={TOOLTIP_STYLE.contentStyle}
-                    labelStyle={TOOLTIP_STYLE.labelStyle}
-                  />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="current"
-                    stroke={themeColors.destructive}
-                    strokeWidth={2}
-                    dot={false}
-                    name={t("dashboard.currentPeriod")}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="previous"
-                    stroke={themeColors["muted-foreground"]}
-                    strokeWidth={2}
-                    strokeDasharray="4 4"
-                    dot={false}
-                    name={t("dashboard.previousPeriod")}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+              <LineChart data={errorTrendData} margin={CHART_MARGINS.default}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE.contentStyle}
+                  labelStyle={TOOLTIP_STYLE.labelStyle}
+                />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="current"
+                  stroke={themeColors.destructive}
+                  strokeWidth={2}
+                  dot={false}
+                  name={t("dashboard.currentPeriod")}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="previous"
+                  stroke={themeColors["muted-foreground"]}
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                  dot={false}
+                  name={t("dashboard.previousPeriod")}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </DashboardSection>
       )}
 
       {/* Bottom Row: Module Activity + Top Errors */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Module Activity - Bar Chart */}
         {moduleData.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">{t("dashboard.moduleActivity")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div
-                data-testid="dashboard-chart-bar"
-                className="w-full"
-                style={{
-                  height: `clamp(180px, ${moduleData.length * 32}px, 480px)`,
-                }}
+          <DashboardSection title={t("dashboard.moduleActivity")}>
+            <div
+              data-testid="dashboard-chart-bar"
+              className="w-full"
+              style={{
+                height: `clamp(180px, ${moduleData.length * 32}px, 480px)`,
+              }}
+            >
+              <ResponsiveContainer
+                minWidth={1}
+                minHeight={1}
+                initialDimension={{ width: 320, height: 180 }}
               >
-                <ResponsiveContainer
-                  minWidth={1}
-                  minHeight={1}
-                  initialDimension={{ width: 320, height: 180 }}
+                <BarChart
+                  data={moduleData}
+                  layout="vertical"
+                  margin={{ ...CHART_MARGINS.withYAxis, left: 80 }}
                 >
-                  <BarChart
-                    data={moduleData}
-                    layout="vertical"
-                    margin={{ ...CHART_MARGINS.withYAxis, left: 80 }}
-                  >
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      className="stroke-muted"
-                      horizontal={false}
-                    />
-                    <XAxis type="number" tick={{ fontSize: 11 }} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={75} />
-                    <Tooltip
-                      contentStyle={TOOLTIP_STYLE.contentStyle}
-                      labelStyle={TOOLTIP_STYLE.labelStyle}
-                    />
-                    <Bar
-                      dataKey="count"
-                      fill={themeColors["chart-3"]}
-                      radius={[0, 4, 4, 0]}
-                      name={t("dashboard.logsSeries")}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    className="stroke-muted"
+                    horizontal={false}
+                  />
+                  <XAxis type="number" tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={75} />
+                  <Tooltip
+                    contentStyle={TOOLTIP_STYLE.contentStyle}
+                    labelStyle={TOOLTIP_STYLE.labelStyle}
+                  />
+                  <Bar
+                    dataKey="count"
+                    fill={themeColors["chart-3"]}
+                    radius={[0, 4, 4, 0]}
+                    name={t("dashboard.logsSeries")}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </DashboardSection>
         )}
 
         {/* Top Errors */}
         {topErrors.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">{t("dashboard.topErrors")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {topErrors.map((err, i) => (
-                  <Button
-                    key={i}
-                    variant="ghost"
-                    className="flex items-start gap-2 w-full justify-start px-2 py-1.5 h-auto text-xs font-normal motion-safe:transition-colors"
-                    onClick={() => onSearchFilter?.(err.message)}
-                    data-testid={`top-error-${i}`}
-                  >
-                    <Badge variant="destructive" className="text-[10px] shrink-0 mt-0.5">
-                      {err.count}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground break-words line-clamp-2">
-                      {err.message}
-                    </span>
-                  </Button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <DashboardSection title={t("dashboard.topErrors")}>
+            <div className="space-y-2">
+              {topErrors.map((err, i) => (
+                <Button
+                  key={i}
+                  variant="ghost"
+                  className="flex items-start gap-2 w-full justify-start px-2 py-1.5 h-auto text-xs font-normal motion-safe:transition-colors"
+                  onClick={() => onSearchFilter?.(err.message)}
+                  data-testid={`top-error-${i}`}
+                >
+                  <Badge variant="destructive" className="text-[10px] shrink-0 mt-0.5">
+                    {err.count}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground break-words line-clamp-2">
+                    {err.message}
+                  </span>
+                </Button>
+              ))}
+            </div>
+          </DashboardSection>
         )}
       </div>
     </div>

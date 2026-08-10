@@ -10840,6 +10840,7 @@
           "errors": "错误",
           "inputTokens": "输入 token",
           "loading": "正在加载 Agent 追踪统计…",
+          "modelRuns": "{count} 次运行",
           "outputHint": "输出：{count}",
           "regionLabel": "Agent 追踪统计 — {window}",
           "title": "Agent 追踪",

@@ -4,7 +4,16 @@
 
 import React from "react"
 import { render, screen, fireEvent, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
+
+const mockOpenFile = jest.fn()
+const mockWriteText = jest.fn()
+
+jest.mock("@/stores/terminal/file-viewer-store", () => ({
+  useFileViewerStore: (selector: (state: { openFile: typeof mockOpenFile }) => unknown): unknown =>
+    selector({ openFile: mockOpenFile }),
+}))
 
 jest.mock("@cognia/agent-trace/log-adapter", () => ({
   AGENT_TRACE_MODULE: "agent.trace",
@@ -31,9 +40,10 @@ jest.mock("@cognia/agent-trace/cost-formatter", () => ({
 import { LogDetailPanel } from "./log-detail-panel"
 import type { StructuredLogEntry } from "@cognia/logging"
 
-beforeAll(() => {
+beforeEach(() => {
+  mockWriteText.mockResolvedValue(undefined)
   Object.defineProperty(navigator, "clipboard", {
-    value: { writeText: jest.fn().mockResolvedValue(undefined) },
+    value: { writeText: mockWriteText },
     configurable: true,
   })
 })
@@ -202,6 +212,17 @@ describe("LogDetailPanel — stack trace", () => {
     expect(screen.getByText("boot")).toBeInTheDocument()
     expect(screen.getByText("/src/main.ts:10:5")).toBeInTheDocument()
     expect(screen.getByText("<anonymous>")).toBeInTheDocument()
+  })
+
+  it("opens a parsed stack frame in the file viewer", async () => {
+    const user = userEvent.setup({ writeToClipboard: false })
+    const stack = `Error: boom
+    at boot (/src/main.ts:10:5)`
+    renderPanel({ log: makeLog({ stack }) })
+
+    await user.click(screen.getByRole("button", { name: "/src/main.ts:10:5" }))
+
+    expect(mockOpenFile).toHaveBeenCalledWith("/src/main.ts", 10, 5)
   })
 
   it("parses Firefox-style stack frames", () => {
@@ -417,6 +438,6 @@ describe("LogDetailPanel — lazy JSON copy", () => {
     renderPanel({ log: makeLog({ data }) })
     const copyJson = screen.getByText("Copy JSON").closest("button") as HTMLButtonElement
     fireEvent.click(copyJson)
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(JSON.stringify(data, null, 2))
+    expect(mockWriteText).toHaveBeenCalledWith(JSON.stringify(data, null, 2))
   })
 })

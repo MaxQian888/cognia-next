@@ -15,11 +15,11 @@ import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { isTauri } from "@/lib/tauri"
 import {
@@ -97,15 +97,15 @@ export function NativeLogLevels() {
   const sortedRules = [...rules].sort((a, b) => a.target.localeCompare(b.target))
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
+    <section className="border-y bg-background">
+      <header className="border-b px-4 py-3">
+        <h3 className="flex items-center gap-2 text-base font-medium">
           <Server className="h-4 w-4" />
           {t("settings.nativeLevels.title")}
-        </CardTitle>
-        <CardDescription>{t("settings.nativeLevels.description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
+        </h3>
+        <p className="text-sm text-muted-foreground">{t("settings.nativeLevels.description")}</p>
+      </header>
+      <div className="flex flex-col gap-3 p-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
           <Label className="sm:w-32 text-sm">{t("settings.nativeLevels.defaultLabel")}</Label>
           <Select value={defaultLevel} onValueChange={setDefaultLevel}>
@@ -113,11 +113,13 @@ export function NativeLogLevels() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {NATIVE_LEVELS.map((level) => (
-                <SelectItem key={level} value={level}>
-                  <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {NATIVE_LEVELS.map((level) => (
+                  <SelectItem key={level} value={level}>
+                    <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
@@ -138,11 +140,13 @@ export function NativeLogLevels() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {NATIVE_LEVELS.map((level) => (
-                    <SelectItem key={level} value={level}>
-                      <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
-                    </SelectItem>
-                  ))}
+                  <SelectGroup>
+                    {NATIVE_LEVELS.map((level) => (
+                      <SelectItem key={level} value={level}>
+                        <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
               <Button
@@ -163,6 +167,7 @@ export function NativeLogLevels() {
           <div className="flex-1 space-y-1">
             <Label className="text-xs">{t("settings.nativeLevels.moduleLabel")}</Label>
             <Input
+              // i18n-exempt: tracing target module example
               placeholder="network:lark"
               value={newRule.target}
               onChange={(e) => setNewRule((prev) => ({ ...prev, target: e.target.value }))}
@@ -178,11 +183,13 @@ export function NativeLogLevels() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {NATIVE_LEVELS.map((level) => (
-                  <SelectItem key={level} value={level}>
-                    <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {NATIVE_LEVELS.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>
@@ -205,7 +212,7 @@ export function NativeLogLevels() {
             {t("settings.nativeLevels.apply")}
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }

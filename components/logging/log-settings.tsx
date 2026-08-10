@@ -31,11 +31,11 @@ import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Separator } from "@/components/ui/separator"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -688,15 +688,15 @@ export function LogSettings({ className }: LogSettingsProps) {
           className="mt-0 space-y-4 data-[state=inactive]:hidden"
         >
           {/* Log Level Settings */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
+          <section className="border-y bg-background">
+            <header className="border-b px-4 py-3">
+              <h3 className="flex items-center gap-2 text-base font-medium">
                 <AlertTriangle className="h-4 w-4" />
                 {t("settings.logLevel.title")}
-              </CardTitle>
-              <CardDescription>{t("settings.logLevel.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+              </h3>
+              <p className="text-sm text-muted-foreground">{t("settings.logLevel.description")}</p>
+            </header>
+            <div className="flex flex-col gap-4 p-4">
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                 <Label className="sm:w-32 text-sm">{t("settings.logLevel.minLevel")}</Label>
                 <Select
@@ -707,16 +707,18 @@ export function LogSettings({ className }: LogSettingsProps) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {LOG_LEVELS.map((level) => (
-                      <SelectItem key={level} value={level}>
-                        <div className="flex flex-col">
-                          <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {t(`settings.logLevel.${level}Desc`)}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
+                    <SelectGroup>
+                      {LOG_LEVELS.map((level) => (
+                        <SelectItem key={level} value={level}>
+                          <div className="flex flex-col">
+                            <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {t(`settings.logLevel.${level}Desc`)}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </div>
@@ -752,19 +754,21 @@ export function LogSettings({ className }: LogSettingsProps) {
                   />
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
           {/* Per-Module Levels */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
+          <section className="border-y bg-background">
+            <header className="border-b px-4 py-3">
+              <h3 className="flex items-center gap-2 text-base font-medium">
                 <Radio className="h-4 w-4" />
                 {t("settings.moduleLevels.title")}
-              </CardTitle>
-              <CardDescription>{t("settings.moduleLevels.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                {t("settings.moduleLevels.description")}
+              </p>
+            </header>
+            <div className="flex flex-col gap-3 p-4">
               <datalist id="logging-registered-modules">
                 {registeredModules.map((moduleName) => (
                   <option key={moduleName} value={moduleName} />
@@ -785,11 +789,13 @@ export function LogSettings({ className }: LogSettingsProps) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {LOG_LEVELS.map((lvl) => (
-                          <SelectItem key={lvl} value={lvl}>
-                            <span className="capitalize">{t(`settings.logLevel.${lvl}`)}</span>
-                          </SelectItem>
-                        ))}
+                        <SelectGroup>
+                          {LOG_LEVELS.map((lvl) => (
+                            <SelectItem key={lvl} value={lvl}>
+                              <span className="capitalize">{t(`settings.logLevel.${lvl}`)}</span>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                     <Button
@@ -830,11 +836,13 @@ export function LogSettings({ className }: LogSettingsProps) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {LOG_LEVELS.map((lvl) => (
-                        <SelectItem key={lvl} value={lvl}>
-                          <span className="capitalize">{t(`settings.logLevel.${lvl}`)}</span>
-                        </SelectItem>
-                      ))}
+                      <SelectGroup>
+                        {LOG_LEVELS.map((lvl) => (
+                          <SelectItem key={lvl} value={lvl}>
+                            <span className="capitalize">{t(`settings.logLevel.${lvl}`)}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
                     </SelectContent>
                   </Select>
                 </div>
@@ -843,8 +851,8 @@ export function LogSettings({ className }: LogSettingsProps) {
                   {t("settings.moduleLevels.add")}
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
           {/* Native (Rust) tracing levels — Tauri-only; renders null on web. */}
           <NativeLogLevels />
@@ -858,10 +866,7 @@ export function LogSettings({ className }: LogSettingsProps) {
         >
           {/* Native logging readiness — compact status banner */}
           <div
-            className={cn(
-              "rounded-lg border px-3 py-2 text-sm",
-              nativeStatusToneClasses[nativeStatusTone]
-            )}
+            className={cn("border-y px-3 py-2 text-sm", nativeStatusToneClasses[nativeStatusTone])}
             role="status"
           >
             <div className="flex items-center gap-2 flex-wrap">
@@ -941,15 +946,17 @@ export function LogSettings({ className }: LogSettingsProps) {
           </div>
 
           {/* Transport Settings */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
+          <section className="border-y bg-background">
+            <header className="border-b px-4 py-3">
+              <h3 className="flex items-center gap-2 text-base font-medium">
                 <Database className="h-4 w-4" />
                 {t("settings.transports.title")}
-              </CardTitle>
-              <CardDescription>{t("settings.transports.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                {t("settings.transports.description")}
+              </p>
+            </header>
+            <div className="flex flex-col gap-4 p-4">
               {(
                 [
                   {
@@ -1006,7 +1013,7 @@ export function LogSettings({ className }: LogSettingsProps) {
                       setTransportExpanded((prev) => ({ ...prev, [transportDef.key]: open }))
                     }
                   >
-                    <div className="rounded-lg border p-3 space-y-3">
+                    <div className="flex flex-col gap-3 border-y py-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-start gap-2 flex-1 min-w-0">
                           <Icon className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
@@ -1066,11 +1073,13 @@ export function LogSettings({ className }: LogSettingsProps) {
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {LOG_LEVELS.map((level) => (
-                                    <SelectItem key={level} value={level}>
-                                      {t(`settings.logLevel.${level}`)}
-                                    </SelectItem>
-                                  ))}
+                                  <SelectGroup>
+                                    {LOG_LEVELS.map((level) => (
+                                      <SelectItem key={level} value={level}>
+                                        {t(`settings.logLevel.${level}`)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectGroup>
                                 </SelectContent>
                               </Select>
                             </div>
@@ -1298,11 +1307,13 @@ export function LogSettings({ className }: LogSettingsProps) {
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {LOG_LEVELS.map((level) => (
-                                    <SelectItem key={level} value={level}>
-                                      {t(`settings.logLevel.${level}`)}
-                                    </SelectItem>
-                                  ))}
+                                  <SelectGroup>
+                                    {LOG_LEVELS.map((level) => (
+                                      <SelectItem key={level} value={level}>
+                                        {t(`settings.logLevel.${level}`)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectGroup>
                                 </SelectContent>
                               </Select>
                             </div>
@@ -1384,18 +1395,20 @@ export function LogSettings({ className }: LogSettingsProps) {
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="off">
-                                    {t("panel.agentTraceOtlp.presetOptions.off")}
-                                  </SelectItem>
-                                  <SelectItem value="grafana-cloud">
-                                    {t("panel.agentTraceOtlp.presetOptions.grafanaCloud")}
-                                  </SelectItem>
-                                  <SelectItem value="self-hosted">
-                                    {t("panel.agentTraceOtlp.presetOptions.selfHosted")}
-                                  </SelectItem>
-                                  <SelectItem value="custom">
-                                    {t("panel.agentTraceOtlp.presetOptions.custom")}
-                                  </SelectItem>
+                                  <SelectGroup>
+                                    <SelectItem value="off">
+                                      {t("panel.agentTraceOtlp.presetOptions.off")}
+                                    </SelectItem>
+                                    <SelectItem value="grafana-cloud">
+                                      {t("panel.agentTraceOtlp.presetOptions.grafanaCloud")}
+                                    </SelectItem>
+                                    <SelectItem value="self-hosted">
+                                      {t("panel.agentTraceOtlp.presetOptions.selfHosted")}
+                                    </SelectItem>
+                                    <SelectItem value="custom">
+                                      {t("panel.agentTraceOtlp.presetOptions.custom")}
+                                    </SelectItem>
+                                  </SelectGroup>
                                 </SelectContent>
                               </Select>
                             </div>
@@ -1544,8 +1557,8 @@ export function LogSettings({ className }: LogSettingsProps) {
                   </Collapsible>
                 )
               })}
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         </TabsContent>
 
         {/* Advanced */}
@@ -1554,12 +1567,14 @@ export function LogSettings({ className }: LogSettingsProps) {
           forceMount
           className="mt-0 space-y-4 data-[state=inactive]:hidden"
         >
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t("settings.behaviorTelemetry.title")}</CardTitle>
-              <CardDescription>{t("settings.behaviorTelemetry.disclosure")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <section className="border-y bg-background">
+            <header className="border-b px-4 py-3">
+              <h3 className="text-base font-medium">{t("settings.behaviorTelemetry.title")}</h3>
+              <p className="text-sm text-muted-foreground">
+                {t("settings.behaviorTelemetry.disclosure")}
+              </p>
+            </header>
+            <div className="flex flex-col gap-4 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <Label>{t("settings.behaviorTelemetry.optIn")}</Label>
@@ -1730,18 +1745,18 @@ export function LogSettings({ className }: LogSettingsProps) {
                   {t("settings.behaviorTelemetry.clear")}
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
+          <section className="border-y bg-background">
+            <header className="border-b px-4 py-3">
+              <h3 className="flex items-center gap-2 text-base font-medium">
                 <AlertTriangle className="h-4 w-4" />
                 {t("settings.advanced.title")}
-              </CardTitle>
-              <CardDescription>{t("settings.advanced.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 sm:space-y-6">
+              </h3>
+              <p className="text-sm text-muted-foreground">{t("settings.advanced.description")}</p>
+            </header>
+            <div className="flex flex-col gap-4 p-4 sm:gap-6">
               <div className="space-y-3">
                 <div className="flex items-start sm:items-center justify-between gap-3">
                   <div className="flex-1 min-w-0">
@@ -1851,21 +1866,21 @@ export function LogSettings({ className }: LogSettingsProps) {
                   {t("settings.advanced.diagnosticRateLimitDesc")}
                 </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
+          <section className="border-y bg-background">
+            <header className="border-b px-4 py-3">
+              <h3 className="flex items-center gap-2 text-base font-medium">
                 <Radio className="h-4 w-4" />
                 {t("settings.sampling.title")}
-              </CardTitle>
-              <CardDescription>{t("settings.sampling.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+              </h3>
+              <p className="text-sm text-muted-foreground">{t("settings.sampling.description")}</p>
+            </header>
+            <div className="flex flex-col gap-4 p-4">
               <div className="space-y-3">
                 {sortedSamplingRules.map((rule) => (
-                  <div key={rule.modulePrefix} className="rounded-lg border p-3 space-y-3">
+                  <div key={rule.modulePrefix} className="flex flex-col gap-3 border-y py-3">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-medium font-mono">{rule.modulePrefix}</p>
@@ -1901,7 +1916,7 @@ export function LogSettings({ className }: LogSettingsProps) {
 
               <Separator />
 
-              <div className="rounded-lg border border-dashed p-3 space-y-3">
+              <div className="flex flex-col gap-3 border-y border-dashed py-3">
                 <div className="grid gap-3 sm:grid-cols-[1fr,220px,auto] sm:items-end">
                   <div className="space-y-2">
                     <Label className="text-sm">{t("settings.sampling.modulePrefix")}</Label>
@@ -1937,8 +1952,8 @@ export function LogSettings({ className }: LogSettingsProps) {
                   </Button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         </TabsContent>
 
         {/* Retention & Export */}
@@ -1947,15 +1962,15 @@ export function LogSettings({ className }: LogSettingsProps) {
           forceMount
           className="mt-0 space-y-4 data-[state=inactive]:hidden"
         >
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
+          <section className="border-y bg-background">
+            <header className="border-b px-4 py-3">
+              <h3 className="flex items-center gap-2 text-base font-medium">
                 <Database className="h-4 w-4" />
                 {t("settings.retention.title")}
-              </CardTitle>
-              <CardDescription>{t("settings.retention.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 sm:space-y-6">
+              </h3>
+              <p className="text-sm text-muted-foreground">{t("settings.retention.description")}</p>
+            </header>
+            <div className="flex flex-col gap-4 p-4 sm:gap-6">
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="text-sm">{t("settings.retention.maxEntries")}</Label>
@@ -1997,8 +2012,8 @@ export function LogSettings({ className }: LogSettingsProps) {
                   {t("settings.retention.maxAgeDaysDesc")}
                 </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
           {/* Performance Note */}
           <Alert>

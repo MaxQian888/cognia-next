@@ -55,10 +55,7 @@ export function AgentTraceStatsBarView({
       <div
         role="status"
         aria-label={t("loading")}
-        className={cn(
-          "rounded-md border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground",
-          className
-        )}
+        className={cn("border-y border-dashed p-3 text-xs text-muted-foreground", className)}
       >
         {t("loading")}
       </div>
@@ -115,7 +112,7 @@ export function AgentTraceStatsBarView({
         {cards.map((c) => (
           <div
             key={c.label}
-            className="rounded-md border bg-card p-2.5"
+            className="border-y bg-background p-2.5"
             data-testid={`agent-trace-stats-${slugify(c.label)}`}
           >
             <div className="text-xs text-muted-foreground">{c.label}</div>
@@ -130,10 +127,10 @@ export function AgentTraceStatsBarView({
           data-testid="agent-trace-stats-by-model"
         >
           {modelEntries.map(([model, m]) => (
-            <li key={model} className="rounded border bg-muted/40 px-1.5 py-0.5">
+            <li key={model} className="border-y px-1.5 py-0.5">
               <span className="font-medium text-foreground">{model}</span>
               <span className="ml-1 tabular-nums">{formatUsd(m.costUsd)}</span>
-              <span className="ml-1 text-[10px]">·{formatNumber(m.spans)} runs</span>
+              <span className="ml-1 text-[10px]">·{t("modelRuns", { count: m.spans })}</span>
             </li>
           ))}
         </ul>

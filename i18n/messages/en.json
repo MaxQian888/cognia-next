@@ -10840,6 +10840,7 @@
           "errors": "Errors",
           "inputTokens": "Input tokens",
           "loading": "Loading agent trace stats…",
+          "modelRuns": "{count} runs",
           "outputHint": "Output: {count}",
           "regionLabel": "Agent trace stats — {window}",
           "title": "Agent traces",

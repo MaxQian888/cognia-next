@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -153,11 +154,13 @@ export function LogPanelStatsBar({
           <SelectValue />
         </SelectTrigger>
         <SelectContent align="start">
-          {pageSizeOptions.map((opt) => (
-            <SelectItem key={opt} value={String(opt)} className="text-xs">
-              {opt}
-            </SelectItem>
-          ))}
+          <SelectGroup>
+            {pageSizeOptions.map((opt) => (
+              <SelectItem key={opt} value={String(opt)} className="text-xs">
+                {opt}
+              </SelectItem>
+            ))}
+          </SelectGroup>
         </SelectContent>
       </Select>
 
@@ -262,14 +265,16 @@ function TransportHealthTile({
   const now = useNow()
   const relative = formatRelativeTime(lastEventAt, now)
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="xs"
       data-testid={`transport-tile-${label}`}
       data-tone={tone}
       aria-label={ariaLabel}
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 h-6 px-2 rounded-md border text-[10px] leading-none motion-safe:transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "h-6 gap-1.5 px-2 text-[10px] leading-none motion-safe:transition-colors",
         TRANSPORT_TILE_TONE_CLASSES[tone]
       )}
     >
@@ -300,7 +305,7 @@ function TransportHealthTile({
         {relative}
       </span>
       <span className="sr-only">{t("statusSr", { status })}</span>
-    </button>
+    </Button>
   )
 }
 
@@ -360,14 +365,16 @@ function TransportHealthTileGroup({
       {overflow.length > 0 && (
         <Popover>
           <PopoverTrigger asChild>
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="xs"
               data-testid="transport-tile-overflow"
               aria-label={`${overflowLabel} (+${overflow.length})`}
-              className="inline-flex items-center gap-1 h-6 px-2 rounded-md border border-border bg-muted/30 text-[10px] text-muted-foreground hover:bg-muted/40 motion-safe:transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="h-6 gap-1 px-2 text-[10px] text-muted-foreground motion-safe:transition-colors"
             >
               +{overflow.length}
-            </button>
+            </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-auto p-2">
             <div className="flex flex-col gap-1.5">

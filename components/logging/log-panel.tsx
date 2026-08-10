@@ -913,7 +913,7 @@ export function LogPanel({
   return (
     <LogPanelHeaderContext.Provider value={headerContextValue}>
       <div
-        className={cn("flex flex-col border rounded-lg bg-background h-full", className)}
+        className={cn("flex h-full flex-col border-y bg-background", className)}
         style={maxHeight ? { maxHeight } : undefined}
       >
         {headerSlot}

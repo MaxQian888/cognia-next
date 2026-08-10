@@ -54,6 +54,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -61,6 +62,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
@@ -454,80 +456,90 @@ function LogPanelToolbarImpl({
           <DropdownMenuContent align="end" className="w-52">
             <DropdownMenuLabel>{t("panel.exportAs")}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onExport("json")}>
-              <FileJson className="h-4 w-4 mr-2" />
-              {/* i18n-exempt: file-format name, not UI prose */}
-              JSON
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onExport("csv")}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              {/* i18n-exempt: file-format name, not UI prose */}
-              CSV
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onExport("ndjson")}>
-              <FileJson className="h-4 w-4 mr-2" />
-              {/* i18n-exempt: file-format name, not UI prose */}
-              NDJSON
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onExport("text")}>
-              <FileText className="h-4 w-4 mr-2" />
-              {t("panel.exportText")}
-            </DropdownMenuItem>
-            <DropdownMenuItem data-testid="log-panel-copy-share-url" onClick={handleCopyShareUrl}>
-              <LinkIcon className="h-4 w-4 mr-2" />
-              {t("panel.copyShareUrl")}
-            </DropdownMenuItem>
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={() => onExport("json")}>
+                <FileJson className="h-4 w-4 mr-2" />
+                {/* i18n-exempt: file-format name, not UI prose */}
+                JSON
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onExport("csv")}>
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                {/* i18n-exempt: file-format name, not UI prose */}
+                CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onExport("ndjson")}>
+                <FileJson className="h-4 w-4 mr-2" />
+                {/* i18n-exempt: file-format name, not UI prose */}
+                NDJSON
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onExport("text")}>
+                <FileText className="h-4 w-4 mr-2" />
+                {t("panel.exportText")}
+              </DropdownMenuItem>
+              <DropdownMenuItem data-testid="log-panel-copy-share-url" onClick={handleCopyShareUrl}>
+                <LinkIcon className="h-4 w-4 mr-2" />
+                {t("panel.copyShareUrl")}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => clearLogs()}>
-              <Trash2 className="h-4 w-4 mr-2" />
-              {t("panel.clear")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setShowDetailPanel(!showDetailPanel)}>
-              <PanelRightClose className="h-4 w-4 mr-2" />
-              {showDetailPanel ? t("panel.closeDetails") : t("panel.openDetailsPanel")}
-            </DropdownMenuItem>
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={() => clearLogs()}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                {t("panel.clear")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowDetailPanel(!showDetailPanel)}>
+                <PanelRightClose className="h-4 w-4 mr-2" />
+                {showDetailPanel ? t("panel.closeDetails") : t("panel.openDetailsPanel")}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>{t("panel.scrollMenuLabel")}</DropdownMenuLabel>
-            <DropdownMenuItem onClick={scrollToTop}>
-              <ChevronsUp className="h-4 w-4 mr-2" />
-              {t("panel.scrollToTop")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setAutoScroll(!autoScroll)}>
-              {autoScroll ? (
-                <>
-                  <Pause className="h-4 w-4 mr-2" />
-                  {t("panel.pauseAutoScroll")}
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4 mr-2" />
-                  {t("panel.resumeAutoScroll")}
-                </>
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={scrollToBottom}>
-              <ChevronsDown className="h-4 w-4 mr-2" />
-              {t("panel.scrollToBottom")}
-            </DropdownMenuItem>
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={scrollToTop}>
+                <ChevronsUp className="h-4 w-4 mr-2" />
+                {t("panel.scrollToTop")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setAutoScroll(!autoScroll)}>
+                {autoScroll ? (
+                  <>
+                    <Pause className="h-4 w-4 mr-2" />
+                    {t("panel.pauseAutoScroll")}
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 mr-2" />
+                    {t("panel.resumeAutoScroll")}
+                  </>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={scrollToBottom}>
+                <ChevronsDown className="h-4 w-4 mr-2" />
+                {t("panel.scrollToBottom")}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>{t("panel.densityMenuLabel")}</DropdownMenuLabel>
-            {(["compact", "comfortable", "spacious"] as Density[]).map((d) => (
-              <DropdownMenuItem
-                key={d}
-                data-testid={`log-panel-density-${d}`}
-                onClick={() => setDensity(d)}
-                className={cn(density === d && "bg-accent/40 font-medium")}
-              >
-                <Rows3 className="h-4 w-4 mr-2" />
-                <span className="flex-1">{t(`panel.density.${d}`)}</span>
-                {density === d && <Check className="h-3.5 w-3.5" />}
-              </DropdownMenuItem>
-            ))}
+            <DropdownMenuGroup>
+              {(["compact", "comfortable", "spacious"] as Density[]).map((d) => (
+                <DropdownMenuItem
+                  key={d}
+                  data-testid={`log-panel-density-${d}`}
+                  onClick={() => setDensity(d)}
+                  className={cn(density === d && "bg-accent/40 font-medium")}
+                >
+                  <Rows3 className="h-4 w-4 mr-2" />
+                  <span className="flex-1">{t(`panel.density.${d}`)}</span>
+                  {density === d && <Check className="h-3.5 w-3.5" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setShowShortcutsDialog(true)}>
-              <Keyboard className="h-4 w-4 mr-2" />
-              {t("panel.keyboardShortcuts")}
-            </DropdownMenuItem>
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={() => setShowShortcutsDialog(true)}>
+                <Keyboard className="h-4 w-4 mr-2" />
+                {t("panel.keyboardShortcuts")}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -553,14 +565,16 @@ function LogPanelToolbarImpl({
             >
               <span className="text-muted-foreground">{t("panel.filterChip.sourceLabel")}</span>
               <span>{t(`panel.sources.${sourceFilter}`)}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setSourceFilter("all")}
-                className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="ml-0.5 size-4 rounded p-0.5"
                 aria-label={t("panel.filterChip.clearSource", { value: sourceFilter })}
               >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           {sessionFilter.trim() !== "" && (
@@ -571,14 +585,16 @@ function LogPanelToolbarImpl({
             >
               <span className="text-muted-foreground">{t("panel.filterChip.sessionLabel")}</span>
               <span className="font-mono truncate max-w-[120px]">{sessionFilter}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setSessionFilter("")}
-                className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="ml-0.5 size-4 rounded p-0.5"
                 aria-label={t("panel.filterChip.clearSession")}
               >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           {moduleFilter !== "all" && (
@@ -591,14 +607,16 @@ function LogPanelToolbarImpl({
               <span className="truncate max-w-[140px]">
                 {moduleFilter === AGENT_TRACE_MODULE ? t("panel.agentTraceModule") : moduleFilter}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setModuleFilter("all")}
-                className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="ml-0.5 size-4 rounded p-0.5"
                 aria-label={t("panel.filterChip.clearModule")}
               >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           {timeRange !== "all" && (
@@ -609,14 +627,16 @@ function LogPanelToolbarImpl({
             >
               <CalendarIcon className="h-3 w-3" />
               <span>{timeRange}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setTimeRange("all")}
-                className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="ml-0.5 size-4 rounded p-0.5"
                 aria-label={t("panel.filterChip.clearTimeRange")}
               >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           {customRangeLabel && (
@@ -628,17 +648,19 @@ function LogPanelToolbarImpl({
               <CalendarRange className="h-3 w-3" />
               <span className="text-muted-foreground">{t("panel.customTimeRangeChipPrefix")}</span>
               <span>{customRangeLabel}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => {
                   setCustomTimeRange(null)
                   setPendingRange(undefined)
                 }}
-                className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="ml-0.5 size-4 rounded p-0.5"
                 aria-label={t("panel.customTimeRangeClear")}
               >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           {traceFocusId && (
@@ -649,14 +671,16 @@ function LogPanelToolbarImpl({
             >
               <Crosshair className="h-3 w-3" />
               <span>{t("panel.filterChip.traceLabel")}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setTraceFocusId(null)}
-                className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="ml-0.5 size-4 rounded p-0.5"
                 aria-label={t("panel.filterChip.clearTrace")}
               >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           {diagnosticTransportFilter && (
@@ -667,14 +691,16 @@ function LogPanelToolbarImpl({
             >
               <span className="text-muted-foreground">{t("panel.filterChip.transportLabel")}</span>
               <span>{diagnosticTransportFilter}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setDiagnosticTransportFilter(null)}
-                className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="ml-0.5 size-4 rounded p-0.5"
                 aria-label={t("panel.filterChip.clearTransport")}
               >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
         </div>
@@ -770,12 +796,14 @@ function LogPanelToolbarImpl({
               <SelectValue placeholder={t("panel.modulePlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">{t("panel.allModules")}</SelectItem>
-              {augmentedModules.map((mod) => (
-                <SelectItem key={mod} value={mod}>
-                  {mod === AGENT_TRACE_MODULE ? t("panel.agentTraceModule") : mod}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                <SelectItem value="all">{t("panel.allModules")}</SelectItem>
+                {augmentedModules.map((mod) => (
+                  <SelectItem key={mod} value={mod}>
+                    {mod === AGENT_TRACE_MODULE ? t("panel.agentTraceModule") : mod}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
 
@@ -788,12 +816,14 @@ function LogPanelToolbarImpl({
               <SelectValue placeholder={t("panel.allSources")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">{t("panel.allSources")}</SelectItem>
-              {allowedSources.map((source) => (
-                <SelectItem key={source} value={source}>
-                  {t(`panel.sources.${source}`)}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                <SelectItem value="all">{t("panel.allSources")}</SelectItem>
+                {allowedSources.map((source) => (
+                  <SelectItem key={source} value={source}>
+                    {t(`panel.sources.${source}`)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
 
@@ -831,15 +861,17 @@ function LogPanelToolbarImpl({
               <SelectValue placeholder={t("panel.timePlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">{t("panel.timeRangeAll")}</SelectItem>
-              <SelectItem value="15m">{t("panel.timeRange15m")}</SelectItem>
-              <SelectItem value="1h">{t("panel.timeRange1h")}</SelectItem>
-              <SelectItem value="6h">{t("panel.timeRange6h")}</SelectItem>
-              <SelectItem value="24h">{t("panel.timeRange24h")}</SelectItem>
-              <SelectItem value="7d">{t("panel.timeRange7d")}</SelectItem>
-              <SelectItem value="custom" data-testid="log-panel-time-range-custom">
-                {t("panel.customTimeRange")}
-              </SelectItem>
+              <SelectGroup>
+                <SelectItem value="all">{t("panel.timeRangeAll")}</SelectItem>
+                <SelectItem value="15m">{t("panel.timeRange15m")}</SelectItem>
+                <SelectItem value="1h">{t("panel.timeRange1h")}</SelectItem>
+                <SelectItem value="6h">{t("panel.timeRange6h")}</SelectItem>
+                <SelectItem value="24h">{t("panel.timeRange24h")}</SelectItem>
+                <SelectItem value="7d">{t("panel.timeRange7d")}</SelectItem>
+                <SelectItem value="custom" data-testid="log-panel-time-range-custom">
+                  {t("panel.customTimeRange")}
+                </SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
 
@@ -911,12 +943,14 @@ function LogPanelToolbarImpl({
                 <SelectValue placeholder={t("panel.presets")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={EMPTY_PRESET_VALUE}>{t("panel.noPreset")}</SelectItem>
-                {presets.map((preset) => (
-                  <SelectItem key={preset.id} value={preset.id}>
-                    {preset.name}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  <SelectItem value={EMPTY_PRESET_VALUE}>{t("panel.noPreset")}</SelectItem>
+                  {presets.map((preset) => (
+                    <SelectItem key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           )}
@@ -1152,10 +1186,12 @@ function SearchWithHistory({
                     }}
                   >
                     <span className="flex-1 text-sm truncate">{item}</span>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       tabIndex={-1}
-                      className="ml-2 text-muted-foreground hover:text-foreground shrink-0 rounded p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      className="ml-2 shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
                       onMouseDown={(e) => {
                         e.preventDefault()
                         removeSearchHistoryItem(item)
@@ -1163,7 +1199,7 @@ function SearchWithHistory({
                       aria-label={t("panel.recentSearches.removeAria", { query: item })}
                     >
                       <X className="h-3 w-3" />
-                    </button>
+                    </Button>
                   </CommandItem>
                 ))}
               </CommandGroup>

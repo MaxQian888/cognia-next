@@ -17,11 +17,20 @@ import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 import { LEVEL_THEME } from "@cognia/logging/level-theme"
 import type { LogLevel } from "@/types/logging"
@@ -72,20 +81,26 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
 
   if (available === false) {
     return (
-      <div
+      <Empty
         className={cn(
-          "flex flex-col items-center justify-center gap-2 rounded-md border border-dashed p-8 text-center",
+          "flex flex-col items-center justify-center gap-2 border-y border-dashed p-8 text-center",
           className
         )}
       >
-        <ServerOffIcon className="h-8 w-8 text-muted-foreground" aria-hidden />
-        <p className="text-sm font-medium">{t("unavailableTitle")}</p>
-        <p className="text-xs text-muted-foreground">{t("unavailableDescription")}</p>
-        <Button size="sm" variant="outline" onClick={() => void refresh()}>
-          <RefreshCwIcon className="h-3.5 w-3.5 mr-1.5" aria-hidden />
-          {t("retry")}
-        </Button>
-      </div>
+        <EmptyMedia variant="icon">
+          <ServerOffIcon className="size-8 text-muted-foreground" aria-hidden />
+        </EmptyMedia>
+        <EmptyHeader>
+          <EmptyTitle className="text-sm">{t("unavailableTitle")}</EmptyTitle>
+          <EmptyDescription className="text-xs">{t("unavailableDescription")}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button size="sm" variant="outline" onClick={() => void refresh()}>
+            <RefreshCwIcon className="mr-1.5 size-3.5" aria-hidden />
+            {t("retry")}
+          </Button>
+        </EmptyContent>
+      </Empty>
     )
   }
 
@@ -100,8 +115,10 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="structured">{t("fileStructured")}</SelectItem>
-            <SelectItem value="plain">{t("filePlain")}</SelectItem>
+            <SelectGroup>
+              <SelectItem value="structured">{t("fileStructured")}</SelectItem>
+              <SelectItem value="plain">{t("filePlain")}</SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
         <Select
@@ -119,11 +136,13 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {LEVEL_OPTIONS.map((level) => (
-              <SelectItem key={level} value={level}>
-                {level === "all" ? t("levelAll") : level}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              {LEVEL_OPTIONS.map((level) => (
+                <SelectItem key={level} value={level}>
+                  {level === "all" ? t("levelAll") : level}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
         <Input
@@ -168,11 +187,13 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
           <Skeleton className="h-6 w-2/3" />
         </div>
       ) : entries.length === 0 ? (
-        <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-          {t("empty")}
-        </p>
+        <Empty className="border-y border-dashed p-6">
+          <EmptyHeader>
+            <EmptyDescription>{t("empty")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <ul className="flex max-h-[420px] flex-col gap-px overflow-y-auto rounded-md border font-mono text-xs">
+        <ul className="flex max-h-[420px] flex-col gap-px overflow-y-auto border-y font-mono text-xs">
           {entries.map((entry, index) => (
             <li
               key={`${entry.timestamp}-${index}`}

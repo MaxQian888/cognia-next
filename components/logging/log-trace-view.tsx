@@ -125,13 +125,14 @@ const TraceRow = memo(function TraceRow({
   })
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       data-testid={`log-trace-row-${summary.traceId}`}
       onClick={() => onSelect(summary.traceId)}
       className={cn(
-        "flex w-full flex-col gap-1 rounded-md border bg-card px-3 py-2 text-left",
-        "hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "h-auto w-full flex-col items-stretch gap-1 rounded-none border-y bg-background px-3 py-2 text-left whitespace-normal",
+        "hover:bg-accent/30",
         "motion-safe:transition-colors"
       )}
     >
@@ -183,7 +184,7 @@ const TraceRow = memo(function TraceRow({
           />
         ))}
       </svg>
-    </button>
+    </Button>
   )
 })
 

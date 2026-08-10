@@ -3,7 +3,8 @@
  */
 
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 // Replace Recharts with a tree of testable stubs — jsdom can't render SVG charts.
 jest.mock("recharts", () => {
@@ -124,6 +125,14 @@ describe("LogStatsDashboard", () => {
     expect(screen.getByText("Unique Traces")).toBeInTheDocument()
   })
 
+  it("exposes each dashboard section as a named region", () => {
+    render(<LogStatsDashboard logs={buildLogs(30)} />)
+
+    expect(screen.getByRole("region", { name: "Level Distribution" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Log Volume Over Time" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Module Activity" })).toBeInTheDocument()
+  })
+
   it("hides logRate sub-label when logRate is 0", () => {
     render(<LogStatsDashboard logs={buildLogs(10)} logRate={0} />)
     // 'Log Rate' card still renders the label and a "-" placeholder.
@@ -204,17 +213,16 @@ describe("LogStatsDashboard", () => {
     expect(screen.getByTestId("series-Previous Period")).toBeInTheDocument()
   })
 
-  it("renders top-errors block with shadcn Button rows", () => {
+  it("filters by a top error when its row is activated", async () => {
+    const user = userEvent.setup({ skipHover: true })
     const onSearchFilter = jest.fn()
     const errorLogs = Array.from({ length: 8 }, (_, i) =>
       makeLog("error", "auth", "Connection refused — retrying", i * 1000)
     )
     render(<LogStatsDashboard logs={errorLogs} onSearchFilter={onSearchFilter} />)
     expect(screen.getByText("Top Errors")).toBeInTheDocument()
-    const first = screen.getByTestId("top-error-0")
-    expect(first.tagName.toLowerCase()).toBe("button")
-    expect(first).toHaveAttribute("data-slot", "button")
-    fireEvent.click(first)
+    const first = screen.getByRole("button", { name: /Connection refused/ })
+    await user.click(first)
     expect(onSearchFilter).toHaveBeenCalledWith("Connection refused — retrying")
   })
 

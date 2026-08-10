@@ -467,7 +467,7 @@ export function TraceGroup({
   const hasWarnings = logs.some((l) => l.level === "warn")
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="border rounded-lg mb-2">
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mb-2 border-y">
       <CollapsibleTrigger className="flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50">
         {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         <Clock className="h-4 w-4 text-muted-foreground" />

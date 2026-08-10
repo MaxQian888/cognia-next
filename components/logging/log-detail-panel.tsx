@@ -17,7 +17,6 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  ExternalLink,
   Tag,
   Clock,
   Layers,
@@ -39,8 +38,20 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { parseStackTrace } from "@/lib/terminal/stack-trace"
+import {
+  StackTrace,
+  StackTraceActions,
+  StackTraceContent,
+  StackTraceCopyButton,
+  StackTraceError,
+  StackTraceErrorMessage,
+  StackTraceErrorType,
+  StackTraceExpandButton,
+  StackTraceFrames,
+  StackTraceHeader,
+} from "@/components/ai-elements/stack-trace"
 import { cn } from "@/lib/utils"
+import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
 import {
   AGENT_TRACE_MODULE,
   getAgentTraceLogData,
@@ -387,6 +398,7 @@ export function LogDetailPanel({
 }: LogDetailPanelProps) {
   const t = useTranslations("logging")
   const locale = useLocale()
+  const openFile = useFileViewerStore((state) => state.openFile)
 
   const timestamp = new Date(log.timestamp)
   const timeStr = timestamp.toLocaleString(locale, {
@@ -399,11 +411,6 @@ export function LogDetailPanel({
     second: "2-digit",
     fractionalSecondDigits: 3,
   })
-
-  const stackFrames = useMemo(() => {
-    if (!log.stack) return []
-    return parseStackTrace(log.stack)
-  }, [log.stack])
 
   const filteredRelated = useMemo(() => {
     return relatedLogs.filter((r) => r.id !== log.id).slice(0, 20)
@@ -634,45 +641,27 @@ export function LogDetailPanel({
             <>
               <Separator />
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t("panel.stackTrace")}
-                  </span>
-                  <CopyButton text={log.stack} label={t("detail.copyStack")} />
-                </div>
-
-                {stackFrames.length > 0 ? (
-                  <div className="space-y-0.5">
-                    {stackFrames.map((frame, i) => (
-                      <div
-                        key={i}
-                        className={cn(
-                          "flex items-start gap-2 px-2 py-1.5 rounded text-xs font-mono",
-                          i === 0
-                            ? "bg-destructive/10 text-destructive"
-                            : "bg-muted/30 text-muted-foreground"
-                        )}
-                      >
-                        <ChevronRight className="h-3 w-3 mt-0.5 shrink-0" />
-                        <div className="min-w-0">
-                          <span className="font-semibold">{frame.fn}</span>
-                          <div className="flex items-center gap-1 text-[11px] opacity-75">
-                            <ExternalLink className="h-2.5 w-2.5" />
-                            <span className="truncate">
-                              {frame.file}:{frame.line ?? "?"}:{frame.col ?? "?"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <ScrollArea className="max-h-40 rounded-md bg-destructive/10">
-                    <pre className="text-xs font-mono whitespace-pre-wrap p-3 text-destructive">
-                      {log.stack}
-                    </pre>
-                  </ScrollArea>
-                )}
+                <StackTrace
+                  trace={log.stack}
+                  defaultOpen
+                  onFilePathClick={(path, line, column) =>
+                    openFile(path, line ?? null, column ?? null)
+                  }
+                >
+                  <StackTraceHeader aria-label={t("panel.stackTrace")}>
+                    <StackTraceError>
+                      <StackTraceErrorType />
+                      <StackTraceErrorMessage />
+                    </StackTraceError>
+                    <StackTraceActions aria-label={t("detail.copyStack")}>
+                      <StackTraceCopyButton aria-label={t("detail.copyStack")} />
+                      <StackTraceExpandButton aria-label={t("panel.stackTrace")} />
+                    </StackTraceActions>
+                  </StackTraceHeader>
+                  <StackTraceContent maxHeight={320}>
+                    <StackTraceFrames showRawWhenEmpty />
+                  </StackTraceContent>
+                </StackTrace>
               </div>
             </>
           )}

@@ -36,8 +36,17 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -50,6 +59,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -201,7 +211,7 @@ export function DiagnosticsWorkspace() {
 
   return (
     <div
-      className="flex h-full min-h-0 flex-1 flex-col"
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
       data-testid="diagnostics-workspace"
       data-density={density}
     >
@@ -238,9 +248,11 @@ export function DiagnosticsWorkspace() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="compact">{t("density.compact")}</SelectItem>
-              <SelectItem value="comfortable">{t("density.comfortable")}</SelectItem>
-              <SelectItem value="spacious">{t("density.spacious")}</SelectItem>
+              <SelectGroup>
+                <SelectItem value="compact">{t("density.compact")}</SelectItem>
+                <SelectItem value="comfortable">{t("density.comfortable")}</SelectItem>
+                <SelectItem value="spacious">{t("density.spacious")}</SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
         }
@@ -461,34 +473,38 @@ function HealthView({ incidentCount, loading }: { incidentCount: number; loading
           <h2 className="text-lg font-semibold">{t("health.title")}</h2>
           <p className="text-sm text-muted-foreground">{t("health.description")}</p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <ItemGroup className="grid gap-3 sm:grid-cols-2">
           {cards.map(({ id, icon: Icon, status }) => (
-            <Card key={id}>
-              <CardHeader className="space-y-3 pb-3">
-                <div className="flex items-center justify-between">
-                  <Icon className="size-5 text-primary" />
+            <Item key={id} role="listitem" className="min-w-0 items-start border-y px-0">
+              <ItemMedia variant="icon">
+                <Icon className="size-5 text-primary" />
+              </ItemMedia>
+              <ItemContent className="min-w-0">
+                <div className="flex w-full flex-wrap items-center justify-between gap-2">
+                  <ItemTitle className="min-w-0">{t(`health.cards.${id}.title`)}</ItemTitle>
                   <Badge variant="outline">{t(`health.status.${status}`)}</Badge>
                 </div>
-                <CardTitle className="text-base">{t(`health.cards.${id}.title`)}</CardTitle>
-                <CardDescription>{t(`health.cards.${id}.description`)}</CardDescription>
-              </CardHeader>
-            </Card>
+                <ItemDescription className="line-clamp-none">
+                  {t(`health.cards.${id}.description`)}
+                </ItemDescription>
+              </ItemContent>
+            </Item>
           ))}
-        </div>
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("health.localIncidents")}</CardTitle>
-            <CardDescription>{t("health.localIncidentsDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center gap-3">
+        </ItemGroup>
+        <Item className="border-y px-0">
+          <ItemContent>
+            <ItemTitle>{t("health.localIncidents")}</ItemTitle>
+            <ItemDescription>{t("health.localIncidentsDescription")}</ItemDescription>
+          </ItemContent>
+          <ItemMedia>
             {loading ? (
               <Loader2Icon className="size-5 animate-spin" />
             ) : (
               <CircleDotIcon className="size-5" />
             )}
             <span className="text-2xl font-semibold tabular-nums">{incidentCount}</span>
-          </CardContent>
-        </Card>
+          </ItemMedia>
+        </Item>
       </div>
     </ScrollArea>
   )
@@ -504,35 +520,35 @@ function RecoveryView() {
           <h2 className="text-lg font-semibold">{t("recovery.title")}</h2>
           <p className="text-sm text-muted-foreground">{t("recovery.description")}</p>
         </div>
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("recovery.normalTitle")}</CardTitle>
-            <CardDescription>{t("recovery.normalDescription")}</CardDescription>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("recovery.checkpointsTitle")}</CardTitle>
-            <CardDescription>{t("recovery.checkpointsDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <Item className="border-y px-0">
+          <ItemContent>
+            <ItemTitle>{t("recovery.normalTitle")}</ItemTitle>
+            <ItemDescription>{t("recovery.normalDescription")}</ItemDescription>
+          </ItemContent>
+        </Item>
+        <section className="flex flex-col gap-3 border-y py-4">
+          <div>
+            <h3 className="font-medium">{t("recovery.checkpointsTitle")}</h3>
+            <p className="text-sm text-muted-foreground">{t("recovery.checkpointsDescription")}</p>
+          </div>
+          <ItemGroup>
             {checkpoints.map((checkpoint, index) => (
-              <div key={checkpoint} className="flex items-center gap-3 rounded-lg border p-3">
-                <Badge variant="secondary" className="size-6 justify-center rounded-full p-0">
-                  {index + 1}
-                </Badge>
-                <div>
-                  <div className="text-sm font-medium">
-                    {t(`recovery.checkpoints.${checkpoint}.title`)}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
+              <Item key={checkpoint} role="listitem" size="sm" className="border-y px-0">
+                <ItemMedia>
+                  <Badge variant="secondary" className="size-6 justify-center rounded-full p-0">
+                    {index + 1}
+                  </Badge>
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{t(`recovery.checkpoints.${checkpoint}.title`)}</ItemTitle>
+                  <ItemDescription className="text-xs">
                     {t(`recovery.checkpoints.${checkpoint}.description`)}
-                  </div>
-                </div>
-              </div>
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
             ))}
-          </CardContent>
-        </Card>
+          </ItemGroup>
+        </section>
       </div>
     </ScrollArea>
   )
@@ -544,15 +560,13 @@ function AdvancedView() {
     <ScrollArea className="flex-1">
       <div className="mx-auto grid w-full max-w-5xl gap-4 p-4 md:grid-cols-2 md:p-6">
         {(["capabilities", "queues", "symbols", "schema"] as const).map((section) => (
-          <Card key={section}>
-            <CardHeader>
-              <CardTitle>{t(`advanced.${section}.title`)}</CardTitle>
-              <CardDescription>{t(`advanced.${section}.description`)}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Badge variant="outline">{t(`advanced.${section}.status`)}</Badge>
-            </CardContent>
-          </Card>
+          <Item key={section} className="border-y px-0">
+            <ItemContent>
+              <ItemTitle>{t(`advanced.${section}.title`)}</ItemTitle>
+              <ItemDescription>{t(`advanced.${section}.description`)}</ItemDescription>
+            </ItemContent>
+            <Badge variant="outline">{t(`advanced.${section}.status`)}</Badge>
+          </Item>
         ))}
       </div>
     </ScrollArea>
@@ -603,13 +617,18 @@ function IncidentWorkspace({
             value={activeSource}
             onValueChange={(value) => onSourceChange(value as LogWorkspaceSource)}
           >
-            <SelectTrigger className="h-8 w-[150px]" aria-label={t("filters.sourceLabel")}>
+            <SelectTrigger
+              className="h-8 w-full sm:w-[150px]"
+              aria-label={t("filters.sourceLabel")}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">{t("filters.sources.all")}</SelectItem>
-              <SelectItem value="desktop">{t("filters.sources.desktop")}</SelectItem>
-              <SelectItem value="mobile">{t("filters.sources.mobile")}</SelectItem>
+              <SelectGroup>
+                <SelectItem value="all">{t("filters.sources.all")}</SelectItem>
+                <SelectItem value="desktop">{t("filters.sources.desktop")}</SelectItem>
+                <SelectItem value="mobile">{t("filters.sources.mobile")}</SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
           {!receiptsOnly && (
@@ -617,22 +636,27 @@ function IncidentWorkspace({
               value={incidentStateFilter}
               onValueChange={(value) => onStateChange(value as IncidentStateFilter)}
             >
-              <SelectTrigger className="h-8 w-[170px]" aria-label={t("filters.stateLabel")}>
+              <SelectTrigger
+                className="h-8 w-full sm:w-[170px]"
+                aria-label={t("filters.stateLabel")}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {INCIDENT_STATES.map((state) => (
-                  <SelectItem key={state} value={state}>
-                    {t(`states.${state}`)}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {INCIDENT_STATES.map((state) => (
+                    <SelectItem key={state} value={state}>
+                      {t(`states.${state}`)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           )}
           <Button
             variant="outline"
             size="sm"
-            className="ml-auto h-8"
+            className="h-8 w-full sm:ml-auto sm:w-auto"
             onClick={onRefresh}
             disabled={loading}
           >
@@ -641,36 +665,35 @@ function IncidentWorkspace({
           </Button>
         </div>
         <ScrollArea className="flex-1">
-          <div className="space-y-2 p-3" data-testid="incident-list">
+          <div className="w-full min-w-0 space-y-2 p-3" data-testid="incident-list">
             {error ? (
-              <Card className="border-destructive/40">
-                <CardContent className="p-4 text-sm text-destructive">
-                  {t("incidents.error")}
-                </CardContent>
-              </Card>
+              <Alert variant="destructive">
+                <AlertDescription>{t("incidents.error")}</AlertDescription>
+              </Alert>
             ) : loading && incidents.length === 0 ? (
               <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
                 <Loader2Icon className="size-4 animate-spin" />
                 {t("incidents.loading")}
               </div>
             ) : incidents.length === 0 ? (
-              <Card>
-                <CardContent className="p-8 text-center">
-                  <div className="font-medium">
+              <Empty className="w-full min-w-0 border-y py-8">
+                <EmptyHeader className="w-full min-w-0">
+                  <EmptyTitle className="text-base">
                     {t(receiptsOnly ? "receipts.emptyTitle" : "incidents.emptyTitle")}
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
+                  </EmptyTitle>
+                  <EmptyDescription>
                     {t(receiptsOnly ? "receipts.emptyDescription" : "incidents.emptyDescription")}
-                  </p>
-                </CardContent>
-              </Card>
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               incidents.map((incident) => (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   key={`${incident.runtime}:${incident.id}`}
                   className={cn(
-                    "w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/60",
+                    "h-auto w-full justify-start rounded-none border-y p-3 text-left whitespace-normal",
                     selected?.id === incident.id && "border-primary/50 bg-muted"
                   )}
                   onClick={() => onSelect(incident)}
@@ -694,7 +717,7 @@ function IncidentWorkspace({
                       <span className="font-mono">{incident.receiptCode}</span>
                     )}
                   </div>
-                </button>
+                </Button>
               ))
             )}
           </div>
