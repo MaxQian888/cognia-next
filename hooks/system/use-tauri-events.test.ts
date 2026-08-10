@@ -376,6 +376,13 @@ describe("useTauriEvents", () => {
       expect(routerPush).toHaveBeenCalledWith("/scheduler")
     })
 
+    it("workflow run deep link opens the exact run detail", async () => {
+      await fireDeepLinks(["cognia://workflow-run/wf-42/run-9"])
+
+      expect(routerPush).toHaveBeenCalledWith("/workflows/run?id=wf-42&runId=run-9")
+      expect(toastMessage).not.toHaveBeenCalled()
+    })
+
     it("settings deep link forwards the tab parameter", async () => {
       await fireDeepLinks(["cognia://settings?tab=advanced"])
       expect(requestOpenSettings).toHaveBeenCalledWith("advanced")

@@ -85,6 +85,18 @@ describe("dispatchRoute", () => {
     expect(navs.redeemPair).not.toHaveBeenCalled()
   })
 
+  it.each(["open_im", "open_scheduler_task", "open_settings", "open_workspace"] as const)(
+    "leaves desktop-owned %s routes to the desktop shell",
+    (kind) => {
+      const navs = makeNavigators()
+      dispatchRoute({ kind, raw: `cognia://${kind}` }, navs)
+      expect(navs.pushSession).not.toHaveBeenCalled()
+      expect(navs.openShareTarget).not.toHaveBeenCalled()
+      expect(navs.redeemPair).not.toHaveBeenCalled()
+      expect(navs.openWorkflowRun).not.toHaveBeenCalled()
+    }
+  )
+
   it("does nothing for unknown routes (just logs)", () => {
     const navs = makeNavigators()
     dispatchRoute({ kind: "unknown", raw: "cognia://nope" }, navs)

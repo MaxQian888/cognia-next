@@ -51,6 +51,12 @@ export function dispatchRoute(route: DeeplinkRoute, navigators: DeeplinkNavigato
     case "oauth_callback":
       // Resolved by lib/oauth/mobile-flow.ts:awaitCallback — no nav.
       return
+    case "open_im":
+    case "open_scheduler_task":
+    case "open_settings":
+    case "open_workspace":
+      // Desktop-owned routes; the mobile shell intentionally has no action.
+      return
     case "unknown":
       log.warn("deeplink-router: unknown route", { raw: route.raw })
       return

@@ -25,6 +25,7 @@ import {
   toggleAutostartAction,
 } from "@/lib/tray/tray-actions"
 import type { TrayActionPayload } from "@/lib/tray/types"
+import { parseCogniaDeeplink } from "@/lib/navigation/cognia-deeplink"
 
 function relaySchedulerEvent(
   eventType: "job:exited" | "monitor:fired",
@@ -34,64 +35,6 @@ function relaySchedulerEvent(
     return transport.call("scheduled_task_emit_event", { eventType, data })
   }
   return emitSchedulerEvent(eventType, data)
-}
-
-interface ParsedDeepLink {
-  kind: "chat" | "im" | "scheduler" | "settings" | "workspace" | "unknown"
-  chatId?: string
-  conversationKey?: string
-  taskId?: string
-  workspacePath?: string
-  settingsTab?: string
-}
-
-/**
- * Parse a single `cognia://` URL into the action it should drive.
- *
- *   cognia://chat/<id>            → open that session
- *   cognia://im?conversationKey=… → open the session bound to an IM conversation
- *   cognia://scheduler/task/<id>   → open a scheduled task and its run history
- *   cognia://settings[?tab=xyz]   → open settings (optionally on a tab)
- *   cognia://workspace?path=…     → create/activate a workspace for that path
- */
-function parseDeepLink(raw: string): ParsedDeepLink {
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    return { kind: "unknown" }
-  }
-  if (url.protocol !== "cognia:") return { kind: "unknown" }
-
-  // For custom schemes, `host` holds the first segment after `://`.
-  const head = url.host || url.pathname.replace(/^\/+/, "").split("/")[0] || ""
-  if (head === "chat") {
-    const id =
-      url.pathname.replace(/^\/+/, "").split("/").filter(Boolean)[0] ||
-      url.searchParams.get("id") ||
-      ""
-    return { kind: "chat", chatId: id || undefined }
-  }
-  if (head === "im") {
-    return {
-      kind: "im",
-      conversationKey: url.searchParams.get("conversationKey") ?? undefined,
-    }
-  }
-  if (head === "scheduler") {
-    const segments = url.pathname.replace(/^\/+/, "").split("/").filter(Boolean)
-    return {
-      kind: "scheduler",
-      taskId: segments[0] === "task" ? segments[1] : url.searchParams.get("taskId") || undefined,
-    }
-  }
-  if (head === "settings") {
-    return { kind: "settings", settingsTab: url.searchParams.get("tab") ?? undefined }
-  }
-  if (head === "workspace") {
-    return { kind: "workspace", workspacePath: url.searchParams.get("path") ?? undefined }
-  }
-  return { kind: "unknown" }
 }
 
 /**
@@ -127,16 +70,16 @@ export function useTauriEvents(): void {
 
     const handleDeepLinks = (urls: string[]) => {
       for (const raw of urls) {
-        const action = parseDeepLink(raw)
+        const action = parseCogniaDeeplink(raw)
         switch (action.kind) {
-          case "chat": {
-            if (action.chatId) {
-              useChatStore.getState().setActiveSession(action.chatId)
+          case "open_session": {
+            if (action.sessionId) {
+              useChatStore.getState().setActiveSession(action.sessionId)
               useUIStore.getState().setSelectedGuild({ kind: "dm" })
             }
             break
           }
-          case "im": {
+          case "open_im": {
             if (action.conversationKey) {
               void import("@/lib/connectors/session-bindings")
                 .then(({ findActiveSessionForConversation }) =>
@@ -151,7 +94,7 @@ export function useTauriEvents(): void {
             }
             break
           }
-          case "scheduler": {
+          case "open_scheduler_task": {
             if (action.taskId) {
               void import("@/stores/scheduler/scheduler-store").then(({ useSchedulerStore }) => {
                 useSchedulerStore.getState().selectTask(action.taskId!)
@@ -160,14 +103,29 @@ export function useTauriEvents(): void {
             }
             break
           }
-          case "settings": {
+          case "open_settings": {
             useUIStore.getState().requestOpenSettings(action.settingsTab)
             break
           }
-          case "workspace": {
+          case "open_workspace": {
             // Unified flow: create/activate a real workspace Project for the
             // deep-linked path (consistent with the File menu / switcher).
             if (action.workspacePath) openPathAsWorkspace(action.workspacePath)
+            break
+          }
+          case "open_workflow_run": {
+            if (action.workflowId && action.runId) {
+              router.push(
+                `/workflows/run?id=${encodeURIComponent(action.workflowId)}&runId=${encodeURIComponent(action.runId)}`
+              )
+            }
+            break
+          }
+          case "oauth_callback":
+          case "pair_qr":
+          case "share_target": {
+            // Mobile-owned routes are parsed here for parity but handled by
+            // the Capacitor router when this hook runs in the Tauri shell.
             break
           }
           default: {

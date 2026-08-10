@@ -1,6 +1,7 @@
 "use client"
 
 import { makeDefaultLoader } from "./_shared"
+import { parseCogniaDeeplink, type CogniaDeeplinkRoute } from "@/lib/navigation/cognia-deeplink"
 
 /**
  * Deep-link bridge over `@capacitor/app`. Capacitor doesn't ship a dedicated
@@ -13,24 +14,7 @@ import { makeDefaultLoader } from "./_shared"
  *   3. Falls back to a no-op subscription when running on web.
  */
 
-export type DeeplinkRoute =
-  | {
-      kind: "oauth_callback"
-      provider: string
-      code: string | null
-      state: string | null
-      raw: string
-    }
-  | { kind: "pair_qr"; payload: string; raw: string }
-  | { kind: "open_session"; sessionId: string; raw: string }
-  | { kind: "share_target"; text?: string; url?: string; raw: string }
-  | {
-      kind: "open_workflow_run"
-      workflowId: string
-      runId: string
-      raw: string
-    }
-  | { kind: "unknown"; raw: string }
+export type DeeplinkRoute = CogniaDeeplinkRoute
 
 interface AppShape {
   addListener(
@@ -44,63 +28,8 @@ export type AppLoader = () => Promise<AppShape>
 
 const defaultLoader: AppLoader = makeDefaultLoader<AppShape>("@capacitor/app", "App")
 
-const SCHEME = "cognia"
-
 export function parseDeeplink(rawUrl: string): DeeplinkRoute {
-  let url: URL
-  try {
-    url = new URL(rawUrl)
-  } catch {
-    return { kind: "unknown", raw: rawUrl }
-  }
-
-  if (url.protocol !== `${SCHEME}:`) return { kind: "unknown", raw: rawUrl }
-
-  const host = url.hostname || url.pathname.replace(/^\/+/, "").split("/")[0] || ""
-  // Trim the leading slash from the path. For URLs like cognia://oauth/claude
-  // the URL parser treats `oauth` as host and `/claude` as path, so `path`
-  // here is just `claude`.
-  const path = url.pathname.replace(/^\/+/, "")
-  const params = url.searchParams
-
-  if (host === "oauth") {
-    const provider = path || params.get("provider") || "default"
-    return {
-      kind: "oauth_callback",
-      provider,
-      code: params.get("code"),
-      state: params.get("state"),
-      raw: rawUrl,
-    }
-  }
-  if (host === "pair") {
-    const payload = params.get("payload") ?? path
-    return { kind: "pair_qr", payload, raw: rawUrl }
-  }
-  if (host === "session") {
-    const sessionId = path || params.get("id") || ""
-    return { kind: "open_session", sessionId, raw: rawUrl }
-  }
-  if (host === "share") {
-    return {
-      kind: "share_target",
-      text: params.get("text") ?? undefined,
-      url: params.get("url") ?? undefined,
-      raw: rawUrl,
-    }
-  }
-  // cognia://workflow-run/<workflowId>/<runId>
-  // Emitted by `buildFinalSurface` so the IM user can jump from a terminal
-  // status card straight to the Workflows tab's run-detail view. On the
-  // mobile shell the URL pushes the same client-side route; on web /
-  // Tauri the OS hands the deep link to the running renderer.
-  if (host === "workflow-run") {
-    const parts = path.split("/").filter(Boolean)
-    const workflowId = parts[0] ?? params.get("workflowId") ?? ""
-    const runId = parts[1] ?? params.get("runId") ?? ""
-    return { kind: "open_workflow_run", workflowId, runId, raw: rawUrl }
-  }
-  return { kind: "unknown", raw: rawUrl }
+  return parseCogniaDeeplink(rawUrl)
 }
 
 export type DeeplinkHandler = (route: DeeplinkRoute) => void
