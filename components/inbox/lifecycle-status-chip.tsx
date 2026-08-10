@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
@@ -74,27 +75,33 @@ export function LifecycleStatusChip({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => void apply("open")}>{t("status.open")}</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void apply("pending")}>
-          {t("status.pending")}
-        </DropdownMenuItem>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>{t("status.snoozed")}</DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            {SNOOZE_OPTIONS.map((o) => (
-              <DropdownMenuItem
-                key={o.key}
-                onClick={() => void apply("snoozed", Date.now() + o.ms)}
-              >
-                {t(`snooze.${o.key}`)}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={() => void apply("open")}>{t("status.open")}</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void apply("pending")}>
+            {t("status.pending")}
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>{t("status.snoozed")}</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuGroup>
+                {SNOOZE_OPTIONS.map((o) => (
+                  <DropdownMenuItem
+                    key={o.key}
+                    onClick={() => void apply("snoozed", Date.now() + o.ms)}
+                  >
+                    {t(`snooze.${o.key}`)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => void apply("resolved")}>
-          {t("status.resolved")}
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={() => void apply("resolved")}>
+            {t("status.resolved")}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )

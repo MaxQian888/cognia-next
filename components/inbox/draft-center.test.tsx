@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 
 beforeAll(() => {
   if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
@@ -72,11 +72,15 @@ describe("DraftCenter", () => {
 
   it("groups drafts by conversation and renders an editor per draft", () => {
     render(<DraftCenter />)
-    expect(screen.getByTestId("draft-group-slack:a1:C1")).toBeInTheDocument()
-    expect(screen.getByTestId("draft-group-lark:a2:U9")).toBeInTheDocument()
+    const multiDraftGroup = screen.getByTestId("draft-group-slack:a1:C1")
+    const singleDraftGroup = screen.getByTestId("draft-group-lark:a2:U9")
+    expect(multiDraftGroup).toBeInTheDocument()
+    expect(singleDraftGroup).toBeInTheDocument()
     expect(screen.getByTestId("editor-d1")).toBeInTheDocument()
     expect(screen.getByTestId("editor-d2")).toBeInTheDocument()
     expect(screen.getByTestId("editor-d3")).toBeInTheDocument()
+    expect(within(multiDraftGroup).getAllByRole("listitem")).toHaveLength(2)
+    expect(within(singleDraftGroup).getAllByRole("listitem")).toHaveLength(1)
   })
 
   it("derives the platform badge from the conversationKey", () => {

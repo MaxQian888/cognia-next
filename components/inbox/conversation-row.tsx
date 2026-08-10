@@ -14,14 +14,16 @@
  *
  * Extracted from `conversation-list.tsx` so it can carry its own test and keep
  * the list component focused on querying/sorting. The click target stays a
- * single `<button>` with the per-row plugin actions kept *outside* it to avoid
- * nested-interactive a11y violations.
+ * single shadcn Button with the per-row plugin actions kept *outside* it to
+ * avoid nested-interactive a11y violations.
  */
 
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import { PinIcon } from "lucide-react"
 import type { ConversationStatus } from "@/lib/db/conversation-overrides"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -95,9 +97,10 @@ export function ConversationRow({
       )}
       data-testid={`conversation-row-${ck}`}
     >
-      <button
+      <Button
         type="button"
-        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+        variant="ghost"
+        className="h-auto min-w-0 flex-1 justify-start gap-2.5 rounded-none p-0 text-left hover:bg-transparent"
         onClick={() => onSelect(ck)}
         aria-current={isActive ? "true" : undefined}
         aria-label={t("openConversation", { name })}
@@ -105,13 +108,14 @@ export function ConversationRow({
       >
         {/* Deterministic glyph avatar + platform corner badge */}
         <span className="relative shrink-0">
-          <span
-            className="flex size-9 items-center justify-center rounded-full text-xs font-medium text-white"
-            style={{ backgroundColor: avatarColor({ name }) }}
-            aria-hidden
-          >
-            {avatarGlyph({ name })}
-          </span>
+          <Avatar className="size-9" aria-hidden>
+            <AvatarFallback
+              className="text-xs font-medium text-white"
+              style={{ backgroundColor: avatarColor({ name }) }}
+            >
+              {avatarGlyph({ name })}
+            </AvatarFallback>
+          </Avatar>
           <span className="absolute -bottom-1 -end-1 rounded-full bg-background p-0.5 leading-none">
             <PlatformBadge platform={platform} iconOnly />
           </span>
@@ -179,7 +183,7 @@ export function ConversationRow({
             </span>
           </div>
         </div>
-      </button>
+      </Button>
 
       {/* Plugin contributions: per-row actions (archive, mute, transfer to
        * workflow, …). Hidden when no plugin contributes.

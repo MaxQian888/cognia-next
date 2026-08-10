@@ -27,9 +27,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { InboxShell } from "@/components/inbox/inbox-shell"
 import { DraftApprovalPanel } from "@/components/mobile/connector/draft-approval-panel"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { listAllPendingDrafts } from "@/lib/db/connector-drafts"
-import { cn } from "@/lib/utils"
 
 export type MobileInboxTab = "messages" | "drafts"
 
@@ -43,74 +42,50 @@ export function MobileInboxBody({ initialTab = "messages" }: MobileInboxBodyProp
   const draftCount = useLiveQuery(async () => (await listAllPendingDrafts()).length, []) ?? 0
 
   return (
-    <div className="flex h-[100dvh] flex-col safe-area-pt" data-testid="mobile-inbox-body">
+    <Tabs
+      value={tab}
+      onValueChange={(value) => setTab(value as MobileInboxTab)}
+      className="h-[100dvh] gap-0 safe-area-pt"
+      data-testid="mobile-inbox-body"
+    >
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
         <h1 className="text-sm font-semibold">{t("title")}</h1>
-        <div
-          role="tablist"
+        <TabsList
           aria-label={t("tabsAria")}
-          className="ml-auto flex items-center gap-1 rounded-lg bg-muted p-0.5"
+          className="ml-auto h-8"
         >
-          <TabChip
-            id="messages"
-            active={tab === "messages"}
-            label={t("tabs.messages")}
-            onSelect={() => setTab("messages")}
-          />
-          <TabChip
-            id="drafts"
-            active={tab === "drafts"}
-            label={t("tabs.drafts")}
-            badge={draftCount}
-            onSelect={() => setTab("drafts")}
-          />
-        </div>
+          <TabsTrigger
+            value="messages"
+            className="h-7 px-3 text-xs"
+            data-testid="mobile-inbox-tab-messages"
+          >
+            {t("tabs.messages")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="drafts"
+            className="h-7 px-3 text-xs"
+            data-testid="mobile-inbox-tab-drafts"
+          >
+            {t("tabs.drafts")}
+            {draftCount > 0 ? (
+              <Badge
+                variant="secondary"
+                className="h-4 min-w-4 justify-center px-1 text-[10px] leading-none"
+                data-testid="mobile-inbox-tab-drafts-badge"
+              >
+                {draftCount > 99 ? t("tabs.draftCountOverflow") : draftCount}
+              </Badge>
+            ) : null}
+          </TabsTrigger>
+        </TabsList>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {tab === "drafts" ? (
-          <DraftApprovalPanel />
-        ) : (
-          <InboxShell view="all" />
-        )}
-      </div>
-    </div>
-  )
-}
-
-interface TabChipProps {
-  id: MobileInboxTab
-  active: boolean
-  label: string
-  badge?: number
-  onSelect: () => void
-}
-
-function TabChip({ id, active, label, badge, onSelect }: TabChipProps) {
-  return (
-    <Button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      variant="ghost"
-      size="sm"
-      onClick={onSelect}
-      data-testid={`mobile-inbox-tab-${id}`}
-      className={cn(
-        "h-7 gap-1.5 rounded-md px-3 text-xs",
-        active ? "bg-background shadow-sm" : "text-muted-foreground"
-      )}
-    >
-      <span>{label}</span>
-      {badge ? (
-        <Badge
-          variant="secondary"
-          className="h-4 min-w-4 justify-center px-1 text-[10px] leading-none"
-          data-testid={`mobile-inbox-tab-${id}-badge`}
-        >
-          {badge > 99 ? "99+" : badge}
-        </Badge>
-      ) : null}
-    </Button>
+      <TabsContent value="messages" className="min-h-0 overflow-hidden">
+        <InboxShell view="all" />
+      </TabsContent>
+      <TabsContent value="drafts" className="min-h-0 overflow-hidden">
+        <DraftApprovalPanel />
+      </TabsContent>
+    </Tabs>
   )
 }

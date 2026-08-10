@@ -21,6 +21,9 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item"
+import { UserRoundXIcon } from "lucide-react"
 import { getByPlatformUser, unmergeIdentity } from "@/lib/db/platform-identities"
 import type { PlatformIdentityRow } from "@/lib/db/connector-types"
 import { parseConversationKey } from "@/types/connectors/event"
@@ -79,12 +82,15 @@ export function ContactProfileDrawer({
         </SheetHeader>
 
         {!contact ? (
-          <p
-            className="px-4 py-6 text-center text-sm text-muted-foreground"
-            data-testid="contact-profile-empty"
-          >
-            {t("empty")}
-          </p>
+          <Empty className="rounded-none border-0 px-4 py-6" data-testid="contact-profile-empty">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <UserRoundXIcon aria-hidden />
+              </EmptyMedia>
+              <EmptyTitle>{t("title")}</EmptyTitle>
+              <EmptyDescription>{t("empty")}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <div className="space-y-4 px-4 py-2" data-testid="contact-profile">
             <div className="space-y-1">
@@ -110,25 +116,29 @@ export function ContactProfileDrawer({
             {contact.merged.length > 0 && (
               <div className="space-y-1">
                 <p className="text-xs font-medium">{t("mergedTitle")}</p>
-                <ul className="divide-y rounded-md border">
+                <ItemGroup className="divide-y border-y">
                   {contact.merged.map((m) => (
-                    <li key={m.id} className="flex items-center gap-2 px-2 py-1.5 text-xs">
-                      <span className="flex-1 truncate">
-                        {m.displayName ?? m.remoteUserId}
-                        <span className="ml-1 text-muted-foreground">({m.platform})</span>
-                      </span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 px-2 text-xs"
-                        onClick={() => void handleUnmerge(m.id)}
-                      >
-                        {t("unmerge")}
-                      </Button>
-                    </li>
+                    <Item key={m.id} role="listitem" size="sm" className="rounded-none px-0">
+                      <ItemContent>
+                        <ItemTitle className="block max-w-full truncate text-xs">
+                          {m.displayName ?? m.remoteUserId}
+                          <span className="ml-1 text-muted-foreground">({m.platform})</span>
+                        </ItemTitle>
+                      </ItemContent>
+                      <ItemActions>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => void handleUnmerge(m.id)}
+                        >
+                          {t("unmerge")}
+                        </Button>
+                      </ItemActions>
+                    </Item>
                   ))}
-                </ul>
+                </ItemGroup>
               </div>
             )}
           </div>

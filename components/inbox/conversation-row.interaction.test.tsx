@@ -55,7 +55,7 @@ const ROW = { name: /Open conversation: Acme Corp/i }
 
 describe("ConversationRow — interaction (story-fixture reuse)", () => {
   it("fires onSelect with the conversationKey on a real user click", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ skipHover: true })
     const onSelect = jest.fn()
     // Reuse the story's `item` fixture; override only the callback.
     renderRow(<ConversationRow {...argsOf(stories.Default)} onSelect={onSelect} />)
@@ -74,7 +74,7 @@ describe("ConversationRow — interaction (story-fixture reuse)", () => {
   })
 
   it("composes several story states into one list and renders each faithfully", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ skipHover: true })
     const onSelect = jest.fn()
 
     // A realistic Inbox slice — plain, unread, pinned, and drafts+computer-use —

@@ -21,12 +21,13 @@ import { useLiveQuery } from "dexie-react-hooks"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { getDb } from "@/lib/db/schema"
 import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
 import type { AppSettings } from "@cognia/agent-config-types"
@@ -146,47 +147,52 @@ export function ProviderModelSwitcher({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           disabled={pending}
           data-testid="provider-model-switcher-trigger"
           aria-label={t("aria")}
+          className="h-6 max-w-48 px-2 font-mono text-xs"
         >
-          <Badge variant="outline" className="cursor-pointer select-none font-mono">
-            {label}
-          </Badge>
-        </button>
+          <span className="truncate">{label}</span>
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-[60vh] overflow-y-auto">
-        <DropdownMenuLabel>{t("title")}</DropdownMenuLabel>
-        <DropdownMenuItem
-          onClick={() =>
-            void handleSelect({ providerOverride: undefined, modelOverride: undefined })
-          }
-          data-testid="provider-model-option-default"
-        >
-          {t("clearOverride")}
-        </DropdownMenuItem>
-        {options.length > 0 && <DropdownMenuSeparator />}
-        {options.map((opt) => (
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{t("title")}</DropdownMenuLabel>
           <DropdownMenuItem
-            key={`${opt.providerId}:${opt.modelId}`}
             onClick={() =>
-              void handleSelect({
-                providerOverride: opt.providerId,
-                modelOverride: opt.modelId,
-              })
+              void handleSelect({ providerOverride: undefined, modelOverride: undefined })
             }
-            data-testid={`provider-model-option-${opt.providerId}-${opt.modelId}`}
+            data-testid="provider-model-option-default"
           >
-            {opt.label}
+            {t("clearOverride")}
           </DropdownMenuItem>
-        ))}
-        {options.length === 0 && (
-          <DropdownMenuItem disabled data-testid="provider-model-option-empty">
-            {t("noProvidersConfigured")}
-          </DropdownMenuItem>
-        )}
+        </DropdownMenuGroup>
+        {options.length > 0 && <DropdownMenuSeparator />}
+        <DropdownMenuGroup>
+          {options.map((opt) => (
+            <DropdownMenuItem
+              key={`${opt.providerId}:${opt.modelId}`}
+              onClick={() =>
+                void handleSelect({
+                  providerOverride: opt.providerId,
+                  modelOverride: opt.modelId,
+                })
+              }
+              data-testid={`provider-model-option-${opt.providerId}-${opt.modelId}`}
+            >
+              {opt.label}
+            </DropdownMenuItem>
+          ))}
+          {options.length === 0 && (
+            <DropdownMenuItem disabled data-testid="provider-model-option-empty">
+              {t("noProvidersConfigured")}
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )

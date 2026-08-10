@@ -20,6 +20,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -77,26 +78,30 @@ export function ConversationListFilterMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuLabel className="text-xs">{t("aria")}</DropdownMenuLabel>
-        {CONVERSATION_FILTER_CHIPS.map((chip) => (
-          <DropdownMenuCheckboxItem
-            key={chip}
-            checked={active.has(chip)}
-            // Without this the menu closes after each pick, so combining two
-            // filters would take two trips.
-            onSelect={(e) => e.preventDefault()}
-            onCheckedChange={() => onToggle(chip)}
-            data-testid={`conversation-filter-${chip}`}
-          >
-            {t(chip)}
-          </DropdownMenuCheckboxItem>
-        ))}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs">{t("aria")}</DropdownMenuLabel>
+          {CONVERSATION_FILTER_CHIPS.map((chip) => (
+            <DropdownMenuCheckboxItem
+              key={chip}
+              checked={active.has(chip)}
+              // Without this the menu closes after each pick, so combining two
+              // filters would take two trips.
+              onSelect={(e) => e.preventDefault()}
+              onCheckedChange={() => onToggle(chip)}
+              data-testid={`conversation-filter-${chip}`}
+            >
+              {t(chip)}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
         {active.size > 0 && (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={onClear} data-testid="conversation-filter-clear">
-              {t("clear")}
-            </DropdownMenuItem>
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={onClear} data-testid="conversation-filter-clear">
+                {t("clear")}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
           </>
         )}
       </DropdownMenuContent>

@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -79,25 +80,33 @@ export function AssigneeChip({ conversationKey, sessionId, assignee }: AssigneeC
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => void apply({ kind: "human" })}>{t("me")}</DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={() => void apply({ kind: "human" })}>
+            {t("me")}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
         {characters.length > 0 && (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              {t("character")}
-            </DropdownMenuLabel>
-            {characters.map((c) => (
-              <DropdownMenuItem
-                key={c.id}
-                onClick={() => void apply({ kind: "character", id: c.id, label: c.name })}
-              >
-                {c.name}
-              </DropdownMenuItem>
-            ))}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                {t("character")}
+              </DropdownMenuLabel>
+              {characters.map((c) => (
+                <DropdownMenuItem
+                  key={c.id}
+                  onClick={() => void apply({ kind: "character", id: c.id, label: c.name })}
+                >
+                  {c.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
           </>
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => void apply(null)}>{t("unassign")}</DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={() => void apply(null)}>{t("unassign")}</DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )

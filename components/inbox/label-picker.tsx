@@ -16,6 +16,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -65,33 +66,37 @@ export function LabelPicker({ conversationKey, sessionId, selectedIds }: LabelPi
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuLabel className="text-xs text-muted-foreground">
-            {t("pickerTitle")}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {catalog.length === 0 ? (
-            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-              {t("empty")}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              {t("pickerTitle")}
             </DropdownMenuLabel>
-          ) : (
-            catalog.map((l) => (
-              <DropdownMenuCheckboxItem
-                key={l.id}
-                checked={selected.has(l.id)}
-                onCheckedChange={(next) => void toggle(l.id, next === true)}
-                onSelect={(e) => e.preventDefault()}
-              >
-                <span className="flex items-center gap-1.5">
-                  <span
-                    aria-hidden
-                    className="size-2 shrink-0 rounded-full border"
-                    style={l.color ? { backgroundColor: l.color } : undefined}
-                  />
-                  {l.name}
-                </span>
-              </DropdownMenuCheckboxItem>
-            ))
-          )}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            {catalog.length === 0 ? (
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                {t("empty")}
+              </DropdownMenuLabel>
+            ) : (
+              catalog.map((l) => (
+                <DropdownMenuCheckboxItem
+                  key={l.id}
+                  checked={selected.has(l.id)}
+                  onCheckedChange={(next) => void toggle(l.id, next === true)}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className="size-2 shrink-0 rounded-full border"
+                      style={l.color ? { backgroundColor: l.color } : undefined}
+                    />
+                    {l.name}
+                  </span>
+                </DropdownMenuCheckboxItem>
+              ))
+            )}
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

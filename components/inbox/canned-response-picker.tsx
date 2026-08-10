@@ -15,7 +15,14 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { MessageSquareTextIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { usePromptInputController } from "@/components/ai-elements/prompt-input"
 import { useCannedResponses } from "@/hooks/connectors/use-canned-responses"
@@ -36,8 +43,8 @@ export function CannedResponsePicker({ context }: CannedResponsePickerProps) {
   const [query, setQuery] = useState("")
 
   const filtered = query.trim()
-    ? canned.filter((c) =>
-        `${c.title} ${c.body} ${c.shortcut ?? ""}`
+    ? canned.filter((response) =>
+        `${response.title} ${response.body} ${response.shortcut ?? ""}`
           .toLowerCase()
           .includes(query.trim().toLowerCase())
       )
@@ -67,33 +74,33 @@ export function CannedResponsePicker({ context }: CannedResponsePickerProps) {
           <MessageSquareTextIcon className="size-4" aria-hidden />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 p-2">
-        <Input
-          autoFocus
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("searchPlaceholder")}
-          className="mb-2 h-8"
-          data-testid="canned-response-search"
-        />
-        <div className="max-h-60 space-y-0.5 overflow-y-auto" role="list">
-          {filtered.length === 0 ? (
-            <p className="px-2 py-3 text-center text-xs text-muted-foreground">{t("empty")}</p>
-          ) : (
-            filtered.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                role="listitem"
-                onClick={() => pick(c.id, c.body)}
-                className="block w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
-              >
-                <span className="font-medium">{c.title}</span>
-                <span className="block truncate text-xs text-muted-foreground">{c.body}</span>
-              </button>
-            ))
-          )}
-        </div>
+      <PopoverContent align="start" className="w-72 p-0">
+        <Command shouldFilter={false}>
+          <CommandInput
+            autoFocus
+            value={query}
+            onValueChange={setQuery}
+            placeholder={t("searchPlaceholder")}
+            data-testid="canned-response-search"
+          />
+          <CommandList className="max-h-60">
+            <CommandEmpty>{t("empty")}</CommandEmpty>
+            <CommandGroup>
+              {filtered.map((c) => (
+                <CommandItem
+                  key={c.id}
+                  value={`${c.title} ${c.body} ${c.shortcut ?? ""}`}
+                  onSelect={() => pick(c.id, c.body)}
+                  className="flex-col items-start gap-0.5"
+                  data-testid={`canned-response-${c.id}`}
+                >
+                  <span className="font-medium">{c.title}</span>
+                  <span className="w-full truncate text-xs text-muted-foreground">{c.body}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
       </PopoverContent>
     </Popover>
   )

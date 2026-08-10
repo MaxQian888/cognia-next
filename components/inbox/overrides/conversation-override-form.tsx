@@ -18,6 +18,7 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { InfoIcon, ShieldAlertIcon, XIcon } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
@@ -27,6 +28,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -334,10 +336,8 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-md bg-muted/30 px-3 py-2 text-xs font-mono text-muted-foreground">
-        {conversationKey}
-      </div>
+    <div className="flex flex-col gap-5">
+      <div className="border-b pb-3 text-xs font-mono text-muted-foreground">{conversationKey}</div>
 
       <div className="space-y-2">
         <Label htmlFor="conv-override-mode">{t("fields.mode")}</Label>
@@ -346,16 +346,18 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {MODES.map((m) => (
-              <SelectItem key={m.value} value={m.value}>
-                {t(`fields.modeOptions.${m.key}`)}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              {MODES.map((m) => (
+                <SelectItem key={m.value} value={m.value}>
+                  {t(`fields.modeOptions.${m.key}`)}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
       </div>
 
-      <div className="grid gap-3 rounded-md border bg-muted/20 p-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 border-b pb-5 sm:grid-cols-3">
         <div className="space-y-2">
           <Label htmlFor="conv-override-activation-policy">
             {t("fields.activationPolicy.label")}
@@ -373,13 +375,15 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(
-                ["inherit", "mention_activates", "mention_each", "always", "direct_only"] as const
-              ).map((value) => (
-                <SelectItem key={value} value={value}>
-                  {t(`fields.activationPolicy.options.${value}`)}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {(
+                  ["inherit", "mention_activates", "mention_each", "always", "direct_only"] as const
+                ).map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {t(`fields.activationPolicy.options.${value}`)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
@@ -396,11 +400,13 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(["inherit", "queue", "steer"] as const).map((value) => (
-                <SelectItem key={value} value={value}>
-                  {t(`fields.dispatchMode.options.${value}`)}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {(["inherit", "queue", "steer"] as const).map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {t(`fields.dispatchMode.options.${value}`)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
@@ -454,7 +460,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         <p className="text-[11px] text-muted-foreground">{t("fields.workflowBindingHelp")}</p>
       </div>
 
-      <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+      <div className="flex flex-col gap-4 border-b pb-5">
         <div className="flex items-start gap-2">
           <ShieldAlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
           <div className="flex-1 space-y-1">
@@ -475,8 +481,8 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         {/* v49 — Per-conversation opt-in for self-driving `/goal` on
          * IM channels. Off by default so a goal loop cannot auto-reply
          * without operator review. */}
-        <div className="flex items-start gap-3 rounded-md border border-border bg-card p-3">
-          <ShieldAlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <div className="flex items-start gap-3 border-t pt-4">
+          <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
           <div className="flex-1 space-y-1">
             <div className="flex items-center justify-between">
               <Label htmlFor="conv-override-goal" className="cursor-pointer">
@@ -493,8 +499,8 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingPlatform")}</p>
           </div>
         </div>
-        <div className="flex items-start gap-3 rounded-md border border-border bg-card p-3">
-          <ShieldAlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <div className="flex items-start gap-3 border-t pt-4">
+          <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
           <div className="flex-1 space-y-1">
             <div className="flex items-center justify-between">
               <Label htmlFor="conv-override-schedule-tools" className="cursor-pointer">
@@ -512,7 +518,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="conv-override-provider">{t("fields.providerOverride")}</Label>
           <Input
@@ -552,7 +558,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
 
       {/* Proactive IM push opt-in (control-plane notifications). Off by default
        * so a customer-facing channel never gets surprise pushes. */}
-      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-start gap-3 border-b pb-5">
         <div className="flex-1 space-y-1">
           <div className="flex items-center justify-between">
             <Label htmlFor="conv-override-proactive" className="cursor-pointer">
@@ -572,7 +578,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
       {/* Live activity card opt-OUT (control-plane visibility). DEFAULT ON —
        * the live "the agent is working" card surfaces tool count / elapsed /
        * file edits during a turn. Flip OFF to suppress on noisy channels. */}
-      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-start gap-3 border-b pb-5">
         <div className="flex-1 space-y-1">
           <div className="flex items-center justify-between">
             <Label htmlFor="conv-override-live-activity" className="cursor-pointer">
@@ -592,7 +598,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
       {/* Append-mode activity opt-OUT for adapters WITHOUT edit() (workflow⇄IM
        * visibility parity). DEFAULT ON — such adapters get one compact progress
        * line per boundary during a turn. Flip OFF to suppress on noisy channels. */}
-      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-start gap-3 border-b pb-5">
         <div className="flex-1 space-y-1">
           <div className="flex items-center justify-between">
             <Label htmlFor="conv-override-append-activity" className="cursor-pointer">
@@ -609,8 +615,8 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex items-center justify-between rounded-md border px-3 py-2">
+      <div className="grid grid-cols-1 gap-3 border-b pb-5 sm:grid-cols-2">
+        <div className="flex items-center justify-between">
           <Label htmlFor="conv-override-pinned" className="cursor-pointer">
             {t("fields.pinned")}
           </Label>
@@ -621,7 +627,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             data-testid="conv-override-pinned"
           />
         </div>
-        <div className="flex items-center justify-between rounded-md border px-3 py-2">
+        <div className="flex items-center justify-between">
           <Label htmlFor="conv-override-archived" className="cursor-pointer">
             {t("fields.archived")}
           </Label>
@@ -636,7 +642,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
 
       {/* Per-conversation outbound mute — same defer semantics as the
        * adapter-level mute, scoped to this conversation only. */}
-      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-start gap-3 border-b pb-5">
         <div className="flex-1 space-y-1">
           <div className="flex items-center justify-between">
             <Label htmlFor="conv-override-muted" className="cursor-pointer">
@@ -655,7 +661,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
 
       {/* Quiet hours — per-conversation override that beats the adapter
        * default in `outbound-runner`. */}
-      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+      <div className="flex flex-col gap-2 border-b pb-5">
         <div className="flex items-center justify-between">
           <Label htmlFor="conv-override-quiet-enabled" className="cursor-pointer">
             {t("fields.quietHours.enabled")}
@@ -668,7 +674,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           />
         </div>
         {quietHours.enabled && (
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <div className="space-y-1">
               <Label className="text-xs" htmlFor="conv-override-quiet-from">
                 {t("fields.quietHours.from")}
@@ -715,7 +721,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
        * whitelist branch. Inherit falls back to the adapter / global
        * defaults; "all" opens every registered skill (still subject to
        * HITL routing). */}
-      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+      <div className="flex flex-col gap-2 border-b pb-5">
         <Label className="cursor-pointer">{t("fields.allowedSkills.label")}</Label>
         <RadioGroup
           value={skillMode}
@@ -779,15 +785,17 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
                 {skillIds.map((id) => (
                   <Badge key={id} variant="secondary" className="gap-1 pr-1 text-[11px]">
                     <span className="font-mono">{id}</span>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon"
                       onClick={() => removeSkill(id)}
                       aria-label={t("fields.allowedSkills.remove", { id })}
                       data-testid={`conv-override-skills-remove-${id}`}
-                      className="rounded-sm p-0.5 hover:bg-muted"
+                      className="size-4"
                     >
-                      <XIcon className="h-2.5 w-2.5" aria-hidden />
-                    </button>
+                      <XIcon className="size-2.5" aria-hidden />
+                    </Button>
                   </Badge>
                 ))}
               </div>
@@ -799,9 +807,9 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
 
       {/* HITL guard on write-tier skills (defaults true). Off makes the
        * channel "trusted" so write skills don't pop a confirm card. */}
-      <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-        <div className="flex items-start gap-2">
-          <ShieldAlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+      <Alert variant="destructive" className="rounded-none border-x-0 bg-transparent">
+        <ShieldAlertIcon aria-hidden />
+        <AlertDescription>
           <div className="flex-1 space-y-1">
             <div className="flex items-center justify-between">
               <Label htmlFor="conv-override-hitl" className="cursor-pointer">
@@ -816,18 +824,18 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             </div>
             <p className="text-xs text-muted-foreground">{t("fields.requireHitlForWrites.help")}</p>
           </div>
-        </div>
-      </div>
+        </AlertDescription>
+      </Alert>
 
-      <div
-        className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/40 px-3 py-2 text-xs text-muted-foreground dark:border-amber-800 dark:bg-amber-950/20"
+      <Alert
+        className="rounded-none border-x-0 bg-transparent text-xs"
         data-testid="conv-override-quiet-hours-notice"
       >
-        <InfoIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <span>{t("fields.advancedJsonHelp")}</span>
-      </div>
+        <InfoIcon aria-hidden />
+        <AlertDescription>{t("fields.advancedJsonHelp")}</AlertDescription>
+      </Alert>
 
-      <div className="flex items-center justify-between gap-2 pt-2">
+      <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           {initialRow && (
             <Button
@@ -840,7 +848,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             </Button>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             onClick={onApplyToAdapter}

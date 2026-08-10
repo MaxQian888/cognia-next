@@ -15,6 +15,7 @@ import { useEffect, useId, useState } from "react"
 // `react-hooks/set-state-in-effect`.
 import { useTranslations } from "next-intl"
 import { SearchIcon, XIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 
@@ -90,15 +91,17 @@ export function ConversationSearchInput({
         className="h-8 ps-7 pe-7 text-xs md:text-xs [&::-webkit-search-cancel-button]:hidden"
       />
       {text.length > 0 && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           onClick={clear}
           aria-label={t("clear")}
           data-testid="conversation-search-clear"
-          className="absolute end-1.5 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="absolute end-1.5 top-1/2 size-5 -translate-y-1/2 text-muted-foreground"
         >
           <XIcon className="size-3" aria-hidden />
-        </button>
+        </Button>
       )}
     </div>
   )

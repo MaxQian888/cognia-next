@@ -11,6 +11,7 @@ jest.mock("next-intl", () => ({
     const map: Record<string, string> = {
       title: "Inbox",
       tabsAria: "Inbox sections",
+      "tabs.draftCountOverflow": "99+",
       "tabs.messages": "Messages",
       "tabs.drafts": "Drafts",
     }
@@ -60,6 +61,19 @@ describe("<MobileInboxBody />", () => {
     expect(screen.getByTestId("stub-draft-panel")).toBeInTheDocument()
     await user.click(screen.getByTestId("mobile-inbox-tab-messages"))
     expect(screen.getByTestId("stub-inbox-shell")).toBeInTheDocument()
+  })
+
+  it("switches tabs with the standard arrow-key interaction", async () => {
+    const user = userEvent.setup()
+    render(<MobileInboxBody />)
+    const messagesTab = screen.getByTestId("mobile-inbox-tab-messages")
+    await user.click(messagesTab)
+    await user.keyboard("{ArrowRight}")
+    expect(screen.getByTestId("stub-draft-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-inbox-tab-drafts")).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
   })
 
   it("renders the pending-draft badge when there are drafts", () => {

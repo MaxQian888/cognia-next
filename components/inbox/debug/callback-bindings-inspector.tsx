@@ -32,7 +32,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getDb } from "@/lib/db/schema"
 import { getBus } from "@/lib/connectors/bus"
@@ -143,105 +146,116 @@ export function CallbackBindingsInspector({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[420px] sm:max-w-md flex flex-col gap-3">
+      <SheetContent side="right" className="flex w-full flex-col gap-3 sm:max-w-md">
         <SheetHeader>
           <SheetTitle>{t("title")}</SheetTitle>
           <SheetDescription>{t("subtitle", { count: rows.length })}</SheetDescription>
         </SheetHeader>
         {failureCount > 0 && (
-          <div
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs"
+          <Alert
+            variant="destructive"
+            className="rounded-none border-x-0 bg-transparent"
             data-testid="bindings-failures-banner"
           >
-            <p className="font-medium text-destructive">{t("failures", { count: failureCount })}</p>
-            <ul className="mt-1 space-y-0.5">
-              {(failures ?? []).slice(0, 5).map((row) => (
-                <li key={row.id} className="font-mono text-[11px] text-destructive/80">
-                  {row.kind}
-                  {row.reason ? ` — ${row.reason}` : ""}
-                </li>
-              ))}
-            </ul>
-          </div>
+            <AlertTitle>{t("failures", { count: failureCount })}</AlertTitle>
+            <AlertDescription>
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {(failures ?? []).slice(0, 5).map((row) => (
+                  <li key={row.id} className="font-mono text-[11px] text-destructive/80">
+                    {row.kind}
+                    {row.reason ? ` — ${row.reason}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
         )}
         <ScrollArea className="flex-1" data-testid="bindings-scroll">
-          <ul className="space-y-2 pr-2">
+          <ItemGroup role={rows.length === 0 ? undefined : "list"} className="divide-y pr-2">
             {rows.length === 0 ? (
-              <li className="rounded border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
-                {t("empty")}
-              </li>
+              <Empty className="rounded-none border-0 px-3 py-6">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <CopyIcon aria-hidden />
+                  </EmptyMedia>
+                  <EmptyTitle>{t("title")}</EmptyTitle>
+                  <EmptyDescription>{t("empty")}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               rows.map((row) => (
-                <li
+                <Item
                   key={row.id}
-                  className="rounded-md border bg-muted/20 px-3 py-2"
+                  role="listitem"
+                  size="sm"
+                  className="rounded-none px-0"
                   data-testid={`binding-row-${row.actionId}`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-mono text-xs">{row.actionId}</p>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                        <Badge variant="outline" className="text-[10px]">
-                          {row.kind}
+                  <ItemContent>
+                    <ItemTitle className="max-w-full truncate font-mono text-xs">
+                      {row.actionId}
+                    </ItemTitle>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                      <Badge variant="outline" className="text-[10px]">
+                        {row.kind}
+                      </Badge>
+                      {row.componentId && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          {row.componentId}
                         </Badge>
-                        {row.componentId && (
-                          <Badge variant="secondary" className="text-[10px]">
-                            {row.componentId}
-                          </Badge>
+                      )}
+                      <span
+                        className={cn(
+                          "text-[10px]",
+                          row.expiresAt && row.expiresAt < now
+                            ? "text-destructive"
+                            : "text-muted-foreground"
                         )}
-                        <span
-                          className={cn(
-                            "text-[10px]",
-                            row.expiresAt && row.expiresAt < now
-                              ? "text-destructive"
-                              : "text-muted-foreground"
-                          )}
-                        >
-                          {new Date(row.createdAt).toLocaleString()}
-                        </span>
-                      </div>
+                      >
+                        {new Date(row.createdAt).toLocaleString()}
+                      </span>
                     </div>
-                    <div className="flex shrink-0 gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => void onCopy(row.actionId)}
-                        aria-label={t("copyAria", { id: row.actionId })}
-                        data-testid={`binding-copy-${row.actionId}`}
-                      >
-                        <CopyIcon className="h-3 w-3" aria-hidden />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => void onTest(row)}
-                        disabled={busyId === row.id}
-                        aria-label={t("testAria", { id: row.actionId })}
-                        data-testid={`binding-test-${row.actionId}`}
-                      >
-                        <PlayIcon className="h-3 w-3" aria-hidden />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-destructive"
-                        onClick={() => void onDelete(row.id)}
-                        aria-label={t("deleteAria", { id: row.actionId })}
-                        data-testid={`binding-delete-${row.actionId}`}
-                      >
-                        <Trash2Icon className="h-3 w-3" aria-hidden />
-                      </Button>
-                    </div>
-                  </div>
-                </li>
+                  </ItemContent>
+                  <ItemActions className="gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => void onCopy(row.actionId)}
+                      aria-label={t("copyAria", { id: row.actionId })}
+                      data-testid={`binding-copy-${row.actionId}`}
+                    >
+                      <CopyIcon className="h-3 w-3" aria-hidden />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => void onTest(row)}
+                      disabled={busyId === row.id}
+                      aria-label={t("testAria", { id: row.actionId })}
+                      data-testid={`binding-test-${row.actionId}`}
+                    >
+                      <PlayIcon className="h-3 w-3" aria-hidden />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-destructive"
+                      onClick={() => void onDelete(row.id)}
+                      aria-label={t("deleteAria", { id: row.actionId })}
+                      data-testid={`binding-delete-${row.actionId}`}
+                    >
+                      <Trash2Icon className="h-3 w-3" aria-hidden />
+                    </Button>
+                  </ItemActions>
+                </Item>
               ))
             )}
-          </ul>
+          </ItemGroup>
         </ScrollArea>
       </SheetContent>
     </Sheet>

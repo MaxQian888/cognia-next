@@ -16,6 +16,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import { Item, ItemContent, ItemTitle } from "@/components/ui/item"
 import { useDraftApproval } from "@/hooks/use-draft-approval"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
@@ -41,31 +42,33 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
   })
 
   return (
-    <div className="space-y-3" data-testid="draft-editor">
-      <div className="space-y-2">
+    <div className="flex flex-col gap-3" data-testid="draft-editor">
+      <div className="flex flex-col divide-y">
         {segments.map((seg, i) => {
           if (seg.type === "text") {
             return (
-              <Textarea
-                key={i}
-                value={seg.text}
-                onChange={(e) => setSegment(i, e.target.value)}
-                className="min-h-[80px] text-sm"
-                placeholder={t("textPlaceholder")}
-                data-testid={`draft-segment-text-${i}`}
-              />
+              <div key={i} className="py-3 first:pt-0 last:pb-0">
+                <Textarea
+                  value={seg.text}
+                  onChange={(e) => setSegment(i, e.target.value)}
+                  className="min-h-[80px] text-sm"
+                  placeholder={t("textPlaceholder")}
+                  data-testid={`draft-segment-text-${i}`}
+                />
+              </div>
             )
           }
           if (seg.type === "markdown") {
             return (
-              <Textarea
-                key={i}
-                value={seg.md}
-                onChange={(e) => setSegment(i, e.target.value)}
-                className="min-h-[80px] font-mono text-sm"
-                placeholder={t("markdownPlaceholder")}
-                data-testid={`draft-segment-markdown-${i}`}
-              />
+              <div key={i} className="py-3 first:pt-0 last:pb-0">
+                <Textarea
+                  value={seg.md}
+                  onChange={(e) => setSegment(i, e.target.value)}
+                  className="min-h-[80px] font-mono text-sm"
+                  placeholder={t("markdownPlaceholder")}
+                  data-testid={`draft-segment-markdown-${i}`}
+                />
+              </div>
             )
           }
           if (seg.type === "a2ui") {
@@ -77,41 +80,47 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
             // we keep the draft editor lightweight + non-editable for
             // assistant-generated surfaces.
             return (
-              <div
+              <Item
                 key={i}
-                className="space-y-2 rounded-md border bg-muted/40 px-3 py-2 text-xs"
+                size="sm"
+                className="rounded-none px-0 py-3"
                 data-testid={`draft-segment-a2ui-${i}`}
               >
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Badge variant="outline">{t("a2uiBadge")}</Badge>
-                  <span className="truncate font-mono">{seg.surfaceId}</span>
-                </div>
-                <pre className="whitespace-pre-wrap break-words font-mono text-xs">
-                  {seg.plainTextMirror || t("a2uiEmptyMirror")}
-                </pre>
-              </div>
+                <ItemContent>
+                  <ItemTitle className="max-w-full text-xs text-muted-foreground">
+                    <Badge variant="outline">{t("a2uiBadge")}</Badge>
+                    <span className="truncate font-mono">{seg.surfaceId}</span>
+                  </ItemTitle>
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs">
+                    {seg.plainTextMirror || t("a2uiEmptyMirror")}
+                  </pre>
+                </ItemContent>
+              </Item>
             )
           }
           return (
-            <div
+            <Item
               key={i}
-              className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs text-muted-foreground"
+              size="sm"
+              className="rounded-none px-0 py-3 text-xs text-muted-foreground"
               data-testid={`draft-segment-readonly-${i}`}
             >
               <Badge variant="outline">{seg.type}</Badge>
-              <span className="truncate">
-                {seg.type === "image" || seg.type === "video" || seg.type === "voice"
-                  ? seg.url
-                  : seg.type === "file"
-                    ? seg.name
-                    : "[segment]"}
-              </span>
-            </div>
+              <ItemContent>
+                <span className="truncate">
+                  {seg.type === "image" || seg.type === "video" || seg.type === "voice"
+                    ? seg.url
+                    : seg.type === "file"
+                      ? seg.name
+                      : t("segmentFallback")}
+                </span>
+              </ItemContent>
+            </Item>
           )
         })}
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
           onClick={() => void approve()}

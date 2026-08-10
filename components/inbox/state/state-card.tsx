@@ -27,8 +27,9 @@ import {
   LoaderIcon,
   RefreshCwIcon,
 } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
@@ -43,15 +44,18 @@ export interface StateCardEmptyProps {
 function StateCardEmpty({ title, description, icon, className }: StateCardEmptyProps) {
   const t = useTranslations("inbox.state.empty")
   return (
-    <Card className={cn("border-dashed bg-transparent", className)} data-testid="state-card-empty">
-      <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
-        <span className="text-muted-foreground">{icon ?? <InboxIcon className="h-6 w-6" />}</span>
-        <p className="text-sm font-medium">{title ?? t("title")}</p>
+    <Empty
+      className={cn("rounded-none border-0 p-4 md:p-6", className)}
+      data-testid="state-card-empty"
+    >
+      <EmptyHeader>
+        <EmptyMedia variant="icon">{icon ?? <InboxIcon className="size-6" />}</EmptyMedia>
+        <EmptyTitle className="text-sm">{title ?? t("title")}</EmptyTitle>
         {description !== "" && (
-          <p className="text-xs text-muted-foreground">{description ?? t("description")}</p>
+          <EmptyDescription className="text-xs">{description ?? t("description")}</EmptyDescription>
         )}
-      </CardContent>
-    </Card>
+      </EmptyHeader>
+    </Empty>
   )
 }
 
@@ -103,21 +107,18 @@ function StateCardError({
   }
 
   return (
-    <Card
-      className={cn("border-destructive/40 bg-destructive/5", className)}
+    <Alert
+      variant="destructive"
+      className={cn("rounded-none border-x-0 bg-transparent", className)}
       data-testid="state-card-error"
     >
-      <CardContent className="flex flex-col gap-3 py-6">
-        <div className="flex items-start gap-3">
-          <AlertOctagonIcon className="mt-0.5 h-5 w-5 shrink-0 text-destructive" aria-hidden />
-          <div className="flex-1 space-y-1">
-            <p className="text-sm font-medium text-destructive">{title ?? t("title")}</p>
-            <p className="text-xs text-muted-foreground" data-testid="state-card-error-body">
-              {description ?? t("description")}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+      <AlertOctagonIcon aria-hidden />
+      <AlertTitle>{title ?? t("title")}</AlertTitle>
+      <AlertDescription>
+        <p className="text-xs" data-testid="state-card-error-body">
+          {description ?? t("description")}
+        </p>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           {onRetry && (
             <Button
               type="button"
@@ -126,7 +127,7 @@ function StateCardError({
               onClick={onRetry}
               data-testid="state-card-error-retry"
             >
-              <RefreshCwIcon className="mr-1 h-3 w-3" aria-hidden />
+              <RefreshCwIcon className="size-3" aria-hidden />
               {t("retry")}
             </Button>
           )}
@@ -140,16 +141,16 @@ function StateCardError({
               aria-live="polite"
             >
               {copied ? (
-                <ClipboardCheckIcon className="mr-1 h-3 w-3" aria-hidden />
+                <ClipboardCheckIcon className="size-3" aria-hidden />
               ) : (
-                <ClipboardIcon className="mr-1 h-3 w-3" aria-hidden />
+                <ClipboardIcon className="size-3" aria-hidden />
               )}
               {copied ? t("copiedToast") : t("copyStack")}
             </Button>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </AlertDescription>
+    </Alert>
   )
 }
 

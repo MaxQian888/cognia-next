@@ -19,10 +19,11 @@ import { invoke } from "@tauri-apps/api/core"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { isTauri } from "@/lib/tauri"
 import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
 import type { ConnectorMode } from "@/types/connectors/policy"
@@ -76,27 +77,30 @@ export function ModeSwitcher({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           disabled={pending}
           data-testid="mode-switcher-trigger"
           aria-label={t("aria")}
+          className="h-6 px-2 text-xs"
         >
-          <Badge variant="secondary" className="cursor-pointer select-none">
-            {t(`modes.${currentMode}`)}
-          </Badge>
-        </button>
+          {t(`modes.${currentMode}`)}
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        {ALL_MODES.map((mode) => (
-          <DropdownMenuItem
-            key={mode}
-            onClick={() => void handleSelect(mode)}
-            data-testid={`mode-option-${mode}`}
-          >
-            {t(`modes.${mode}`)}
-          </DropdownMenuItem>
-        ))}
+        <DropdownMenuGroup>
+          {ALL_MODES.map((mode) => (
+            <DropdownMenuItem
+              key={mode}
+              onClick={() => void handleSelect(mode)}
+              data-testid={`mode-option-${mode}`}
+            >
+              {t(`modes.${mode}`)}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )

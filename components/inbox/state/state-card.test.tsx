@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
 import { StateCard } from "./state-card"
@@ -66,6 +66,7 @@ describe("StateCard.Error", () => {
   it("renders the default title + description", () => {
     wrap(<StateCard.Error />)
     expect(screen.getByTestId("state-card-error")).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toBeInTheDocument()
   })
 
   it("shows the Retry button only when onRetry is provided", () => {
@@ -89,7 +90,7 @@ describe("StateCard.Error", () => {
     expect(handler).toHaveBeenCalled()
   })
 
-  it("Copy button is wired (click does not throw and toggles label state)", () => {
+  it("Copy button is wired (click does not throw and toggles label state)", async () => {
     // jsdom's navigator.clipboard interaction is brittle across versions
     // (the polyfill is partially read-only), so the unit test asserts the
     // click pathway is wired without relying on a real clipboard mock —
@@ -98,7 +99,7 @@ describe("StateCard.Error", () => {
     wrap(<StateCard.Error stackTrace="boom\n  at x" />)
     const button = screen.getByTestId("state-card-error-copy")
     expect(() => fireEvent.click(button)).not.toThrow()
-    expect(button).toBeInTheDocument()
+    await waitFor(() => expect(button).toHaveTextContent(/copied/i))
   })
 })
 

@@ -12,7 +12,7 @@
  * The mobile counterpart is `components/mobile/connector/draft-approval-panel`.
  */
 
-import { useMemo } from "react"
+import { Fragment, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -21,6 +21,7 @@ import { InboxIcon } from "lucide-react"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Item, ItemContent, ItemGroup, ItemSeparator } from "@/components/ui/item"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getDb } from "@/lib/db/schema"
 import { STAGGER_CONTAINER, STAGGER_CHILD } from "@/lib/ui/motion"
@@ -104,7 +105,7 @@ export function DraftCenter() {
             <motion.section
               key={ck}
               variants={STAGGER_CHILD}
-              className="overflow-hidden rounded-lg border"
+              className="border-b last:border-b-0"
               data-testid={`draft-group-${ck}`}
             >
               <header className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
@@ -123,17 +124,22 @@ export function DraftCenter() {
                   {t("open")}
                 </Button>
               </header>
-              <div className="flex flex-col gap-3 p-3">
-                {rows.map((row) => (
-                  <div
-                    key={row.id}
-                    className="rounded-md border bg-muted/20 p-3"
-                    data-testid={`draft-card-${row.id}`}
-                  >
-                    <DraftEditor draft={row} onClose={() => {}} />
-                  </div>
+              <ItemGroup>
+                {rows.map((row, index) => (
+                  <Fragment key={row.id}>
+                    <Item
+                      role="listitem"
+                      className="rounded-none px-3 py-4"
+                      data-testid={`draft-card-${row.id}`}
+                    >
+                      <ItemContent>
+                        <DraftEditor draft={row} onClose={() => {}} />
+                      </ItemContent>
+                    </Item>
+                    {index < rows.length - 1 && <ItemSeparator role="presentation" />}
+                  </Fragment>
                 ))}
-              </div>
+              </ItemGroup>
             </motion.section>
           )
         })}
