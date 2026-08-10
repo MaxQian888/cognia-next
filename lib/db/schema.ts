@@ -125,6 +125,7 @@ import type {
   WorkflowRunEventRow,
   WorkflowTriggerRow,
 } from "@/types/workflow/visual"
+import type { WorkflowWaitEvent, WorkflowWaitpoint } from "@/types/workflow/waitpoint"
 import type {
   WorkflowDeployment,
   WorkflowInvocation,
@@ -303,8 +304,8 @@ function accountIdFromDatabaseName(databaseName: string): string | null {
  * when creating a FRESH database — it builds the latest schema directly. The
  * only tests this would break are the ones that deliberately seed an
  * older-version database and open CogniaDB over it to exercise upgrade hooks;
- * those opt out by setting `globalThis.__COGNIA_DB_FULL_SCHEMA__ = true` at
- * the top of the suite (before the first construction).
+ * those opt out by setting `globalThis.__COGNIA_DB_FULL_SCHEMA__ = true`
+ * around the individual migration test (before constructing CogniaDB).
  *
  * Production never enters this path: it is gated on JEST_WORKER_ID.
  */
@@ -551,6 +552,9 @@ export class CogniaDB extends Dexie {
   workflowVersions!: Table<WorkflowVersion, string>
   workflowDeployments!: Table<WorkflowDeployment, string>
   workflowInvocations!: Table<WorkflowInvocation, string>
+  // v156 — Durable workflow pause/resume state and persist-before-match events.
+  workflowWaitpoints!: Table<WorkflowWaitpoint, string>
+  workflowWaitEvents!: Table<WorkflowWaitEvent, string>
   // v52 — Workflow library folders (ADR-0011 library upgrade). See
   // `types/workflow/folder.ts`.
   workflowFolders!: Table<WorkflowFolder, string>
@@ -3693,6 +3697,16 @@ export class CogniaDB extends Dexie {
     this.version(155).stores({
       sessionPeerMessages:
         "&id, senderSessionId, receiverSessionId, status, expiresAt, [receiverSessionId+status], [senderSessionId+createdAt], [receiverSessionId+createdAt]",
+    })
+
+    // v156 — One CAS-controlled checkpoint table for authored approvals,
+    // automatic risk gates, and event waits. Events are persisted before
+    // matching so an emitter racing a subscriber cannot be lost.
+    this.version(156).stores({
+      workflowWaitpoints:
+        "&id, status, kind, runId, workflowId, stepId, key, expiresAt, [kind+status], [key+status], [runId+status]",
+      workflowWaitEvents:
+        "&id, key, correlationId, emittedAt, expiresAt, consumedByWaitpointId, [key+emittedAt]",
     })
 
     // First full-chain construction under Jest: cache the merged spec so every
