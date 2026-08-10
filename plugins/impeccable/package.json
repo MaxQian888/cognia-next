@@ -1,0 +1,19 @@
+{
+  "name": "cognia-impeccable",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Impeccable design skill v4.0.4 for frontend critique, audit, refinement, and design direction.",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js --external:@cognia/plugin-sdk --log-level=info",
+    "test": "jest --config jest.config.cjs --runInBand",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "^5.6.0"
+  }
+}

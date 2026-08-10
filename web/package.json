@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start -p 3002",
     "typecheck": "tsc --noEmit",
+    "design:audit": "node ../plugins/impeccable/skills/impeccable/scripts/detect.mjs app components hooks lib",
     "evidence": "node scripts/build-evidence.mjs",
     "test:scripts": "node --test scripts/*.test.mjs",
     "capture": "node scripts/capture-product.mjs",

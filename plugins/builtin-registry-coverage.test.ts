@@ -44,6 +44,8 @@ const INTENTIONALLY_UNBUNDLED: Readonly<Record<string, string>> = Object.freeze(
   "cognia-external-agent-adapter-example":
     "Author reference plugin — copy-paste template for contributing a new external-agent protocol, not a default.",
   "cognia-character-seeds": "Copy-paste character-pack template for plugin authors (ADR-0030).",
+  "cognia-impeccable":
+    "Installable desktop skill bundle — discovered from the on-disk plugin directory and deliberately blocked in browser/mobile shells.",
 })
 
 /** Walk `plugins/` and return every direct child that owns a plugin.json. */

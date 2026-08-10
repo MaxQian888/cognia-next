@@ -27,6 +27,13 @@ const eslintConfig = defineConfig([
     "packages/**/dist/**",
     "crates/**/dist/**",
     "crates/**/extension/out/**",
+    // Cognia plugins may vendor upstream skill assets and SDK declaration
+    // snapshots. They are validated by the plugin CLI/package checks rather
+    // than the host app's lint rules; dist/ and target/ are generated output.
+    "plugins/**/skills/**",
+    "plugins/**/types/**",
+    "plugins/**/dist/**",
+    "plugins/**/target/**",
     "next-env.d.ts",
     "docs/.next/**",
     "docs/.source/**",
