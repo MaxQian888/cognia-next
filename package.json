@@ -431,7 +431,7 @@
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
     "@commitlint/cli": "^20.5.3",
-    "@commitlint/config-conventional": "^20.5.3",
+    "@commitlint/config-conventional": "^21.2.0",
     "@playwright/test": "^1.62.1",
     "@redocly/cli": "^2.45.0",
     "@storybook/addon-docs": "^10.5.5",
