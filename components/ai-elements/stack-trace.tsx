@@ -20,6 +20,7 @@ import {
 // Regex patterns for parsing stack traces
 const STACK_FRAME_WITH_PARENS_REGEX = /^at\s+(.+?)\s+\((.+):(\d+):(\d+)\)$/
 const STACK_FRAME_WITHOUT_FN_REGEX = /^at\s+(.+):(\d+):(\d+)$/
+const FIREFOX_STACK_FRAME_REGEX = /^(.*?)@(.+):(\d+):(\d+)$/
 const ERROR_TYPE_REGEX = /^(\w+Error|Error):\s*(.*)$/
 const AT_PREFIX_REGEX = /^at\s+/
 
@@ -89,7 +90,25 @@ const parseStackFrame = (line: string): StackFrame => {
     return {
       columnNumber: colNum ? Number.parseInt(colNum, 10) : null,
       filePath: filePath ?? null,
-      functionName: null,
+      functionName: "<anonymous>",
+      isInternal,
+      lineNumber: lineNum ? Number.parseInt(lineNum, 10) : null,
+      raw: trimmed,
+    }
+  }
+
+  // Firefox / Safari: functionName@filePath:line:column
+  const firefoxMatch = trimmed.match(FIREFOX_STACK_FRAME_REGEX)
+  if (firefoxMatch) {
+    const [, functionName, filePath, lineNum, colNum] = firefoxMatch
+    const isInternal =
+      (filePath?.includes("node_modules") ?? false) ||
+      (filePath?.startsWith("node:") ?? false) ||
+      (filePath?.includes("internal/") ?? false)
+    return {
+      columnNumber: colNum ? Number.parseInt(colNum, 10) : null,
+      filePath: filePath ?? null,
+      functionName: functionName || "<anonymous>",
       isInternal,
       lineNumber: lineNum ? Number.parseInt(lineNum, 10) : null,
       raw: trimmed,
@@ -133,8 +152,7 @@ const parseStackTrace = (trace: string): ParsedStackTrace => {
 
   // Parse stack frames (lines starting with "at")
   const frames = lines
-    .slice(1)
-    .filter((line) => line.trim().startsWith("at "))
+    .filter((line) => line.trim().startsWith("at ") || FIREFOX_STACK_FRAME_REGEX.test(line.trim()))
     .map(parseStackFrame)
 
   return {
@@ -388,6 +406,7 @@ export const StackTraceContent = memo(
 export type StackTraceFramesProps = ComponentProps<"div"> & {
   showInternalFrames?: boolean
   emptyLabel?: string
+  showRawWhenEmpty?: boolean
 }
 
 interface FilePathButtonProps {
@@ -407,11 +426,10 @@ const FilePathButton = memo(({ frame, onFilePathClick }: FilePathButtonProps) =>
   }, [frame, onFilePathClick])
 
   return (
-    <button
-      className={cn(
-        "underline decoration-dotted hover:text-primary",
-        onFilePathClick && "cursor-pointer"
-      )}
+    <Button
+      variant="link"
+      size="xs"
+      className="h-auto px-0 py-0 font-mono text-xs font-normal"
       disabled={!onFilePathClick}
       onClick={handleClick}
       type="button"
@@ -419,7 +437,7 @@ const FilePathButton = memo(({ frame, onFilePathClick }: FilePathButtonProps) =>
       {frame.filePath}
       {frame.lineNumber !== null && `:${frame.lineNumber}`}
       {frame.columnNumber !== null && `:${frame.columnNumber}`}
-    </button>
+    </Button>
   )
 })
 
@@ -430,9 +448,10 @@ export const StackTraceFrames = memo(
     className,
     showInternalFrames = true,
     emptyLabel = "No stack frames",
+    showRawWhenEmpty = false,
     ...props
   }: StackTraceFramesProps) => {
-    const { trace, onFilePathClick } = useStackTrace()
+    const { trace, raw, onFilePathClick } = useStackTrace()
 
     const framesToShow = showInternalFrames
       ? trace.frames
@@ -466,7 +485,10 @@ export const StackTraceFrames = memo(
             )}
           </div>
         ))}
-        {framesToShow.length === 0 && (
+        {framesToShow.length === 0 && showRawWhenEmpty && (
+          <pre className="whitespace-pre-wrap text-xs text-destructive">{raw}</pre>
+        )}
+        {framesToShow.length === 0 && !showRawWhenEmpty && (
           <div className="text-muted-foreground text-xs">{emptyLabel}</div>
         )}
       </div>
