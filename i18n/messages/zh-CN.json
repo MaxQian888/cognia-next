@@ -10164,7 +10164,14 @@
       "dialogTitle": "会话覆盖设置",
       "fields": {
         "activationPolicy": {
-          "label": "激活策略"
+          "label": "激活策略",
+          "options": {
+            "always": "始终激活",
+            "direct_only": "仅私聊消息",
+            "inherit": "继承适配器默认",
+            "mention_activates": "提及后临时激活",
+            "mention_each": "每次都需要提及"
+          }
         },
         "activationTtl": {
           "label": "激活有效期（小时）",
@@ -10199,7 +10206,12 @@
         "characterPlaceholder": "（无）",
         "cooldownMs": "机器人回复后冷却时间 (ms)",
         "dispatchMode": {
-          "label": "调度模式"
+          "label": "调度模式",
+          "options": {
+            "inherit": "继承适配器默认",
+            "queue": "当前运行结束后排队处理",
+            "steer": "引导当前运行"
+          }
         },
         "liveActivity": "实时活动卡片",
         "liveActivityHint": "助手工作时在对话中显示实时进度卡片（工具数、用时、当前操作、文件编辑）。默认开启；频道消息过多时可关闭。",
@@ -10281,6 +10293,7 @@
       "cancel": "取消",
       "markdownPlaceholder": "草稿 Markdown…",
       "reject": "拒绝",
+      "segmentFallback": "[消息片段]",
       "textPlaceholder": "草稿文本…"
     },
     "extensionPoints": {
@@ -12927,6 +12940,7 @@
     },
     "inbox": {
       "tabs": {
+        "draftCountOverflow": "99+",
         "drafts": "草稿",
         "messages": "消息"
       },
@@ -29554,6 +29568,9 @@
       "export": "导出为 SKILL.md",
       "open": "打开",
       "selectAria": "选择 {name}",
+      "syncCurrent": "已同步",
+      "syncError": "同步失败",
+      "syncPending": "未同步",
       "usageCount": "已用 {count} 次"
     },
     "category": {

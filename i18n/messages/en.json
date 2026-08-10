@@ -10164,7 +10164,14 @@
       "dialogTitle": "Conversation settings",
       "fields": {
         "activationPolicy": {
-          "label": "Activation policy"
+          "label": "Activation policy",
+          "options": {
+            "always": "Always active",
+            "direct_only": "Direct messages only",
+            "inherit": "Use adapter default",
+            "mention_activates": "Mention activates temporarily",
+            "mention_each": "Require a mention each time"
+          }
         },
         "activationTtl": {
           "label": "Activation TTL (hours)",
@@ -10199,7 +10206,12 @@
         "characterPlaceholder": "(none)",
         "cooldownMs": "Cooldown after bot reply (ms)",
         "dispatchMode": {
-          "label": "Dispatch mode"
+          "label": "Dispatch mode",
+          "options": {
+            "inherit": "Use adapter default",
+            "queue": "Queue until the active run finishes",
+            "steer": "Steer the active run"
+          }
         },
         "liveActivity": "Live activity card",
         "liveActivityHint": "Show a live progress card in chat while the assistant is working (tool count, elapsed time, current action, file edits). On by default; turn off for noisy channels.",
@@ -10281,6 +10293,7 @@
       "cancel": "Cancel",
       "markdownPlaceholder": "Draft markdown…",
       "reject": "Reject",
+      "segmentFallback": "[segment]",
       "textPlaceholder": "Draft text…"
     },
     "extensionPoints": {
@@ -12927,6 +12940,7 @@
     },
     "inbox": {
       "tabs": {
+        "draftCountOverflow": "99+",
         "drafts": "Drafts",
         "messages": "Messages"
       },
@@ -29554,6 +29568,9 @@
       "export": "Export as SKILL.md",
       "open": "Open",
       "selectAria": "Select {name}",
+      "syncCurrent": "Synced",
+      "syncError": "Sync failed",
+      "syncPending": "Not synced",
       "usageCount": "Used {count}×"
     },
     "category": {
