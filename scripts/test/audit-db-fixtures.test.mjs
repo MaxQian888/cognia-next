@@ -41,6 +41,44 @@ test("rejects lifecycle-sensitive operations in a fast-fixture suite", () => {
   )
 })
 
+test("does not confuse a blocked domain status with an IndexedDB lifecycle assertion", () => {
+  const result = analyzeDbTestSource(`
+    import { createDbTestFixture } from "./test-fixture"
+    const fixture = createDbTestFixture()
+    expect((await getAgentTask("task"))?.status).toBe("blocked")
+  `)
+
+  assert.equal(result.usesFastFixture, true)
+  assert.deepEqual(result.forbiddenReasons, [])
+})
+
+test("recognizes concrete IndexedDB lifecycle APIs", () => {
+  const result = analyzeDbTestSource(`
+    import { createDbTestFixture } from "./test-fixture"
+    const fixture = createDbTestFixture()
+    db.on("blocked").fire({ oldVersion: 1, newVersion: 2 })
+    indexedDB.deleteDatabase("cognia-claude")
+  `)
+
+  assert.deepEqual(
+    result.forbiddenReasons.map((entry) => entry.code),
+    ["connection-lifecycle"]
+  )
+})
+
+test("rejects fake timers in a fast-fixture suite", () => {
+  const result = analyzeDbTestSource(`
+    import { createDbTestFixture } from "./test-fixture"
+    const fixture = createDbTestFixture()
+    jest.useFakeTimers()
+  `)
+
+  assert.deepEqual(
+    result.forbiddenReasons.map((entry) => entry.code),
+    ["fake-timers"]
+  )
+})
+
 test("accepts an ordinary CRUD suite using the full-database fixture", () => {
   const result = analyzeDbTestSource(`
     import { createDbTestFixture } from "./test-fixture"

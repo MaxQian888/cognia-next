@@ -81,7 +81,16 @@ export function createDbTestFixture(options: DbTestFixtureOptions = {}): DbTestF
   const runCleanups = async () => {
     const pending = [...cleanups].reverse()
     cleanups.clear()
-    for (const cleanup of pending) await cleanup()
+    const errors: unknown[] = []
+    for (const cleanup of pending) {
+      try {
+        await cleanup()
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length > 1) throw new AggregateError(errors, "Database test fixture cleanup failed")
   }
 
   const deleteCurrentDatabase = async () => {
@@ -140,8 +149,21 @@ export function createDbTestFixture(options: DbTestFixtureOptions = {}): DbTestF
     async dispose() {
       if (!releaseRuntime) return
       try {
-        await runCleanups()
-        await deleteCurrentDatabase()
+        const errors: unknown[] = []
+        try {
+          await runCleanups()
+        } catch (error) {
+          errors.push(error)
+        }
+        try {
+          await deleteCurrentDatabase()
+        } catch (error) {
+          errors.push(error)
+        }
+        if (errors.length === 1) throw errors[0]
+        if (errors.length > 1) {
+          throw new AggregateError(errors, "Database test fixture disposal failed")
+        }
       } finally {
         snapshots = null
         poisoned = null

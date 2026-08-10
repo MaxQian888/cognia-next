@@ -95,6 +95,62 @@ describe("createDbTestFixture", () => {
     await fixture.dispose()
   })
 
+  it("runs every cleanup and deletes the database when disposal cleanup fails", async () => {
+    const fixture = createDbTestFixture()
+    await fixture.initialize()
+    const databaseName = getDb().name
+    const trailingCleanup = jest.fn()
+    fixture.registerCleanup(trailingCleanup)
+    fixture.registerCleanup(() => {
+      throw new Error("late writer did not stop")
+    })
+
+    await expect(fixture.dispose()).rejects.toThrow("late writer did not stop")
+
+    expect(trailingCleanup).toHaveBeenCalledTimes(1)
+    expect((await indexedDB.databases()).some(({ name }) => name === databaseName)).toBe(false)
+    expect(() => getDb()).toThrow("getDb() called on the server — wrap usage in a client component")
+  })
+
+  it("aggregates multiple cleanup failures after running every cleanup", async () => {
+    const fixture = createDbTestFixture()
+    await fixture.initialize()
+    fixture.registerCleanup(() => {
+      throw new Error("first cleanup failed")
+    })
+    fixture.registerCleanup(() => {
+      throw new Error("second cleanup failed")
+    })
+
+    const disposal = fixture.dispose()
+
+    await expect(disposal).rejects.toMatchObject({
+      message: "Database test fixture cleanup failed",
+      errors: [expect.objectContaining({ message: "second cleanup failed" }), expect.any(Error)],
+    })
+  })
+
+  it("aggregates cleanup and database deletion failures", async () => {
+    const fixture = createDbTestFixture()
+    await fixture.initialize()
+    const db = getDb()
+    jest.spyOn(db, "delete").mockRejectedValueOnce(new Error("database deletion failed"))
+    fixture.registerCleanup(() => {
+      throw new Error("cleanup failed")
+    })
+
+    const disposal = fixture.dispose()
+
+    await expect(disposal).rejects.toMatchObject({
+      message: "Database test fixture disposal failed",
+      errors: [
+        expect.objectContaining({ message: "cleanup failed" }),
+        expect.objectContaining({ message: "database deletion failed" }),
+      ],
+    })
+    await db.delete()
+  })
+
   it("supports an entirely empty baseline", async () => {
     const fixture = createDbTestFixture({ seeded: false })
     await fixture.initialize()

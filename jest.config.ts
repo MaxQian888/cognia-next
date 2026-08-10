@@ -96,6 +96,21 @@ const NODE_ENV_TEST_REGEXES = [
   "<rootDir>/(?:lib|stores|cli|packages|types|plugins|i18n)/.*(?:/|\\.)(?:spec|test)\\.[mc]?ts$",
 ]
 
+const reporters: Config["reporters"] = ["default"]
+if (process.env.CI || process.env.JEST_JUNIT_OUTPUT_NAME) {
+  reporters.push([
+    "jest-junit",
+    {
+      outputDirectory: "coverage",
+      outputName: "junit.xml",
+      classNameTemplate: "{classname}",
+      titleTemplate: "{title}",
+      ancestorSeparator: " › ",
+      usePathForSuiteName: true,
+    },
+  ])
+}
+
 // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped.
 // `/sidecar/` is excluded because the sidecar's `.mjs` tests use Node's
 // built-in `--test` runner (see `pnpm sidecar:test`), not Jest. The two test
@@ -351,6 +366,12 @@ const projectCommon: Config = {
 
 // Global (non-project) options: coverage, workers, reporters.
 const globalConfig: Config = {
+  // Jest's default sharding hashes paths, which keeps suite counts equal but
+  // placed recent CI shards between 10 and 27 minutes. Use the previous run's
+  // unified timing manifest to distribute long suites with LPT scheduling;
+  // new suites fall back to a bounded file-size estimate.
+  testSequencer: join(CONFIG_DIR, "scripts/test/jest-timing-sequencer.cjs"),
+
   // Indicates whether the coverage information should be collected while executing the test
   collectCoverage: false, // Set to false by default, enable with --coverage flag
 
@@ -633,20 +654,9 @@ const globalConfig: Config = {
   workerIdleMemoryLimit: isCoverage ? "768MB" : fastRoomy ? "2GB" : "1GB",
 
   // Use this configuration option to add custom reporters to Jest
-  reporters: [
-    "default",
-    [
-      "jest-junit",
-      {
-        outputDirectory: "coverage",
-        outputName: "junit.xml",
-        classNameTemplate: "{classname}",
-        titleTemplate: "{title}",
-        ancestorSeparator: " › ",
-        usePathForSuiteName: true,
-      },
-    ],
-  ],
+  // CI and the sharded coverage runner consume JUnit. Targeted local runs do
+  // not, so avoid accumulating and serializing thousands of suite records.
+  reporters,
 }
 
 // next/jest wraps each *project* (it injects the SWC transform, CSS/image

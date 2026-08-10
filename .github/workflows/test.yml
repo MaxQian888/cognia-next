@@ -73,6 +73,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # All four shards must restore the same completed-run manifest. Letting
+      # matrix jobs save independently would produce different assignments and
+      # risk duplicate/missing suites, so only coverage-merge saves the unified
+      # history after it has downloaded every shard result.
+      - name: Restore Jest suite timing history
+        uses: actions/cache/restore@v5
+        with:
+          path: .cache/jest/timings.json
+          key: ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-
+
       # Thresholds are intentionally disabled per shard (see header comment);
       # the json reporter emits the raw istanbul map for the merge job.
       - name: Run Jest shard with coverage
@@ -82,6 +94,7 @@ jobs:
         env:
           JEST_COVERAGE: "1"
           JEST_JUNIT_OUTPUT_NAME: junit-shard-${{ matrix.shard }}.xml
+          JEST_TIMING_OUTPUT: coverage/jest-timings.json
 
       - name: Upload shard coverage + junit
         uses: actions/upload-artifact@v7
@@ -91,6 +104,7 @@ jobs:
           path: |
             coverage/coverage-final.json
             coverage/junit-shard-${{ matrix.shard }}.xml
+            coverage/jest-timings.json
           retention-days: 7
 
   coverage-merge:
@@ -128,13 +142,31 @@ jobs:
       # node --test suites first so a broken script fails loudly, not by
       # silently passing a bad merge.
       - name: Test the coverage tooling
-        run: pnpm test:coverage:merge:test && pnpm test:coverage:changed:test && pnpm e2e:serve:test
+        run: >-
+          pnpm test:coverage:merge:test &&
+          pnpm test:coverage:changed:test &&
+          node --test scripts/test/jest-timing-sequencer.test.mjs &&
+          pnpm e2e:serve:test
 
       - name: Download shard artifacts
         uses: actions/download-artifact@v7
         with:
           pattern: jest-shard-*
           path: shards/
+
+      - name: Merge Jest suite timing history
+        if: needs.test.result == 'success'
+        run: >-
+          node scripts/test/merge-jest-timings.mjs
+          --out .cache/jest/timings.json
+          shards/jest-shard-*/jest-timings.json
+
+      - name: Save Jest suite timing history
+        if: needs.test.result == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/jest/timings.json
+          key: ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-${{ github.run_id }}
 
       # Skip the gate when a shard failed — its coverage map is incomplete
       # and thresholds would report phantom regressions on top of the real
@@ -460,14 +492,10 @@ jobs:
           name: e2e-blob-${{ matrix.project }}-${{ matrix.shard }}
           path: blob-report/
           retention-days: 7
-
-      - name: Upload Playwright trace + screenshots
-        uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: playwright-traces-${{ matrix.project }}-${{ matrix.shard }}
-          path: test-results/
-          retention-days: 14
+          # Blob reports already contain traces, screenshots, and videos. These
+          # payloads are pre-compressed, so avoid duplicating them and spending
+          # CPU trying to recompress the archive.
+          compression-level: 0
 
   e2e-report:
     name: E2E Merged Report
@@ -502,19 +530,13 @@ jobs:
           path: all-blob-reports/
           merge-multiple: true
 
-      - name: Merge into HTML report + annotations
-        run: pnpm exec playwright merge-reports --reporter html,github ./all-blob-reports
-
       # The blob reports carry per-attempt results, which is the only place a
-      # flake is visible: `retries: 1` means a test that fails once and then
-      # passes is reported green and vanishes. The JSON render is what
-      # report.yml reads to surface those.
-      - name: Merge into a machine-readable JSON report
-        if: always()
+      # flake is visible. Render HTML, annotations, and JSON in one traversal.
+      - name: Merge Playwright reports
         run: |
           mkdir -p playwright-json
           PLAYWRIGHT_JSON_OUTPUT_NAME=playwright-json/report.json \
-            pnpm exec playwright merge-reports --reporter json ./all-blob-reports
+            pnpm exec playwright merge-reports --reporter html,github,json ./all-blob-reports
 
       - name: Upload merged Playwright HTML report
         uses: actions/upload-artifact@v7
@@ -523,6 +545,7 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 14
+          compression-level: 0
 
       - name: Upload merged Playwright JSON report
         uses: actions/upload-artifact@v7
@@ -696,6 +719,7 @@ jobs:
   cargo-test-windows:
     name: Rust Tests (Windows)
     runs-on: windows-latest
+    needs: build
 
     permissions:
       contents: read
@@ -705,25 +729,23 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-      - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
-        with:
-          node-version: 26.x
-          cache: "pnpm"
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "src-tauri -> target"
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      # `tauri::generate_context!()` needs the static export (../out) to exist
-      # at compile time, so produce it before compiling the Rust crate.
-      - name: Build Next.js static export
-        run: pnpm build
+          # src-tauri is a member of the root Cargo workspace and writes to the
+          # root target/, not src-tauri/target/.
+          workspaces: ". -> target"
+          cache-on-failure: true
+      # `tauri::generate_context!()` only needs ../out at compile time. Reuse
+      # the already-gated Linux build instead of installing Node and rebuilding
+      # the entire frontend on Windows.
+      - name: Download Next.js static export
+        uses: actions/download-artifact@v7
+        with:
+          name: nextjs-build
+          path: out/
       - name: Run Rust tests
         working-directory: src-tauri
         run: cargo test --locked
@@ -756,6 +778,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
+          cache-on-failure: true
       # Every workspace member EXCEPT `cognia-next` (the src-tauri crate),
       # which is covered by `cargo-test-windows` above — its
       # `tauri::generate_context!()` needs the Next.js static export to exist

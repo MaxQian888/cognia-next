@@ -39,7 +39,12 @@ const FORBIDDEN_RULES = [
   {
     code: "connection-lifecycle",
     reason: "asserts IndexedDB connection lifecycle behavior",
-    pattern: /\b(?:versionchange|blocked|deleteDatabase)\b/,
+    pattern: /\b(?:versionchange|deleteDatabase|onblocked)\b|\.on\(\s*["']blocked["']/,
+  },
+  {
+    code: "fake-timers",
+    reason: "uses fake timers that can stall fake IndexedDB reopening",
+    pattern: /\bjest\.useFakeTimers\s*\(/,
   },
   {
     code: "auto-increment-table",

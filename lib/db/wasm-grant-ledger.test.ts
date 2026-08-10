@@ -4,14 +4,28 @@ import "fake-indexeddb/auto"
 import Dexie from "dexie"
 import { CogniaDB, __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
-// The pre-v88 upgrade test needs the real version chain — opt out of the
-// Jest collapsed-schema fast path (which declares only the latest version).
-;(globalThis as { __COGNIA_DB_FULL_SCHEMA__?: boolean }).__COGNIA_DB_FULL_SCHEMA__ = true
 import {
   clearWasmGrantRecords,
   listWasmGrantRecords,
   replaceWasmGrantRecords,
 } from "./wasm-grant-ledger"
+
+const schemaTestRuntime = globalThis as { __COGNIA_DB_FULL_SCHEMA__?: boolean }
+
+function fullSchemaIt(name: string, run: () => Promise<void>, timeout = 30_000): void {
+  it(
+    name,
+    async () => {
+      schemaTestRuntime.__COGNIA_DB_FULL_SCHEMA__ = true
+      try {
+        await run()
+      } finally {
+        delete schemaTestRuntime.__COGNIA_DB_FULL_SCHEMA__
+      }
+    },
+    timeout
+  )
+}
 
 beforeEach(async () => {
   await getDb().delete()
@@ -37,7 +51,7 @@ describe("wasmGrantLedger schema", () => {
     ])
   })
 
-  it("opens a pre-v88 database and upgrades it with the ledger table", async () => {
+  fullSchemaIt("opens a pre-v88 database and upgrades it with the ledger table", async () => {
     const name = `cognia-wasm-ledger-upgrade-${Date.now()}`
     const legacy = new Dexie(name)
     legacy.version(87).stores({
