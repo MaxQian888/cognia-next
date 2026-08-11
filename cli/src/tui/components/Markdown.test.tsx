@@ -122,17 +122,26 @@ describe("Markdown", () => {
     })
   })
 
-  it("differentiates heading levels (markers retained, incl. h4–h6)", () => {
+  it("renders heading levels as styled Ink blocks without leaking markdown markers", () => {
     const { container } = render(
       <Markdown raw={"# H1\n\n## H2\n\n### H3\n\n#### H4\n\n##### H5\n\n###### H6"} />
     )
     const text = container.textContent ?? ""
-    expect(text).toContain("# H1")
-    expect(text).toContain("## H2")
-    expect(text).toContain("### H3")
-    expect(text).toContain("#### H4")
-    expect(text).toContain("##### H5")
-    expect(text).toContain("###### H6")
+    expect(text).toContain("H1")
+    expect(text).toContain("H6")
+    expect(text).not.toMatch(/#{1,6} H[1-6]/)
+  })
+
+  it("keeps headings and paragraphs in separate Ink layout blocks", () => {
+    const { container } = render(<Markdown raw={"Intro.\n\n# Findings\n\nDetails."} />)
+    const root = container.querySelector('[data-ink="box"]')
+    expect(root).not.toBeNull()
+    expect(Array.from(root!.children).map((child) => child.textContent)).toEqual([
+      "Intro.",
+      " ",
+      "Findings",
+      "Details.",
+    ])
   })
 
   it("renders an empty document without crashing", () => {

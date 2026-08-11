@@ -21,11 +21,12 @@ import { getBuiltinTheme } from "../theme/builtins"
 import { stringWidth, truncateToWidth } from "../markdown/width"
 import type { ThemePalette } from "../theme/palette"
 import {
-  cacheHitRatio,
+  cacheSummary,
   contextPercent,
   contextTokens,
   formatCost,
   formatTokens,
+  hasCacheTelemetry,
   shortenCwd,
 } from "./usage"
 import { tightestRemainingPct, type RateLimitSnapshot } from "./rate-limits"
@@ -203,9 +204,11 @@ function segmentText(
     case "cache":
       // Prefix-cache hit rate. Hidden until a turn reports prompt tokens — a
       // "0%" before the first turn would just be noise in the footer.
-      return usage && contextTokens(usage) > 0
-        ? `⚡ ${Math.round(cacheHitRatio(usage) * 100)}%`
-        : null
+      if (!usage || contextTokens(usage) <= 0 || !hasCacheTelemetry(usage)) return null
+      const cache = cacheSummary(usage)
+      return `⚡ ${Math.round(cache.hitRate * 100)}%${
+        cache.reusedTokens > 0 ? ` · ${formatTokens(cache.reusedTokens)} reused` : ""
+      }`
     case "cost":
       // Same reason as `ctx`: the cost would be this session's tokens priced
       // with the built-in model's rate card, which is not what ran.

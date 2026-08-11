@@ -65,26 +65,78 @@ function scrollKey(field: "upArrow" | "downArrow"): Key {
   return { [field]: true } as unknown as Key
 }
 
-/** One timeline segment, rendered in transcript order. */
-function TimelineSegment({ segment }: { segment: SubagentTimelineSegment }) {
+function countLabel(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`
+}
+
+/** One timeline segment, rendered in transcript order with enough context to
+ * understand what happened without opening a second inspector. */
+function TimelineSegment({
+  segment,
+  runStartedAt,
+  now,
+}: {
+  segment: SubagentTimelineSegment
+  runStartedAt?: number
+  now: number
+}) {
   const theme = useTheme()
   if (segment.kind === "thinking") {
     return (
-      <Text color={theme.muted} dimColor>
-        {segment.text}
-      </Text>
+      <Box flexDirection="column" marginBottom={1}>
+        <Text color={theme.secondary}>◇ Reasoning</Text>
+        <Text color={theme.muted} dimColor>
+          {"  "}
+          {segment.text}
+        </Text>
+      </Box>
     )
   }
   if (segment.kind === "text") {
-    return <Text>{segment.text}</Text>
+    return (
+      <Box flexDirection="column" marginBottom={1}>
+        <Text color={theme.info}>● Response</Text>
+        <Text>
+          {"  "}
+          {segment.text}
+        </Text>
+      </Box>
+    )
   }
   const badge = agentRowBadge(segment.status)
+  const timing = [segment.status]
+  if (runStartedAt !== undefined && segment.startedAt !== undefined) {
+    timing.push(`+${formatElapsed(segment.startedAt - runStartedAt)}`)
+  }
+  if (segment.startedAt !== undefined) {
+    timing.push(formatElapsed((segment.settledAt ?? now) - segment.startedAt))
+  }
+  const resultMeta: string[] = []
+  if (segment.resultLines !== undefined) resultMeta.push(countLabel(segment.resultLines, "line"))
+  if (segment.resultChars !== undefined) resultMeta.push(countLabel(segment.resultChars, "char"))
+  if (segment.resultPreview) resultMeta.push(segment.resultPreview)
   return (
-    <Text>
-      <Text color={theme[badge.token]}>{badge.glyph}</Text>{" "}
-      <Text color={theme.accent}>{toolDisplayName(segment.name)}</Text>
-      {segment.summary ? <Text color={theme.muted}>({segment.summary})</Text> : null}
-    </Text>
+    <Box flexDirection="column" marginBottom={1}>
+      <Text>
+        <Text color={theme[badge.token]}>{badge.glyph}</Text>{" "}
+        <Text color={theme.accent}>{toolDisplayName(segment.name)}</Text>
+        <Text color={theme.muted}> · {timing.join(" · ")}</Text>
+      </Text>
+      <Text color={theme.muted} dimColor>
+        {"  input · "}
+        {segment.summary || "arguments not captured"}
+      </Text>
+      {resultMeta.length > 0 ? (
+        <Text color={segment.status === "error" ? theme.danger : theme.muted} dimColor>
+          {"  result · "}
+          {resultMeta.join(" · ")}
+        </Text>
+      ) : segment.status === "running" ? (
+        <Text color={theme.muted} dimColor>
+          {"  result · awaiting tool completion"}
+        </Text>
+      ) : null}
+    </Box>
   )
 }
 
@@ -173,7 +225,7 @@ export function AgentRunPage({
       </Text>
       {task ? (
         <Text color={theme.muted} dimColor>
-          {task.replace(/\s+/g, " ").slice(0, 200)}
+          Task · {task.replace(/\s+/g, " ").slice(0, 200)}
         </Text>
       ) : null}
       <PanelViewport viewportRows={viewport} scroll={scroll}>
@@ -186,12 +238,24 @@ export function AgentRunPage({
             waiting for first output…
           </Text>
         ) : (
-          timeline.map((segment, i) => <TimelineSegment key={i} segment={segment} />)
+          <>
+            <Text color={theme.muted} dimColor>
+              Timeline · {countLabel(timeline.length, "event")}
+            </Text>
+            {timeline.map((segment, i) => (
+              <TimelineSegment
+                key={segment.kind === "tool" && segment.id ? segment.id : i}
+                segment={segment}
+                runStartedAt={entry.startedAt}
+                now={now}
+              />
+            ))}
+          </>
         )}
       </PanelViewport>
       <Text color={theme.muted} dimColor>
         {panelFooterHint(scroll.hidden)}
-        {status === "running" && entry?.runtimeTaskId ? " · s stop" : ""} · esc close
+        {status === "running" && entry?.runtimeTaskId ? " · s stop" : ""}
       </Text>
     </Box>
   )

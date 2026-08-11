@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import React from "react"
 import { act, render, waitFor } from "@testing-library/react"
-import { __fireInput, __resetInk } from "ink"
+import { __fireInput, __resetInk, __suspendTerminal } from "ink"
 
 // Stub the durable history store so submitting in these tests never touches the
 // real `~/.cognia/history.json` (most cases render without an injected `home`).
@@ -444,7 +444,7 @@ describe("App", () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(container.textContent).not.toContain("Allow ls"))
-    expect(container.textContent).toContain("Interrupted")
+    expect(container.textContent).toContain("Turn stopped by user")
   })
 
   it("persists an 'Allow always' choice and invalidates options", async () => {
@@ -501,7 +501,7 @@ describe("App", () => {
           type: "tool-result",
           toolName: "bash",
           input: { command: "ls" },
-          result: "SENTINEL_TOOL_OUTPUT",
+          result: "SENTINEL_TOOL_PREVIEW\nSENTINEL_TOOL_DETAIL",
         })
         return result("done")
       },
@@ -513,12 +513,13 @@ describe("App", () => {
       submit()
       await Promise.resolve()
     })
-    // The tool cell renders, but its result is collapsed (hidden) by default.
+    // Collapsed tools keep one useful preview line without exposing the full body.
     await waitFor(() => expect(container.textContent).toContain("bash"))
-    expect(container.textContent).not.toContain("SENTINEL_TOOL_OUTPUT")
+    expect(container.textContent).toContain("SENTINEL_TOOL_PREVIEW")
+    expect(container.textContent).not.toContain("SENTINEL_TOOL_DETAIL")
     // Ctrl+T reveals all tool output (Ctrl+R now opens history search).
     act(() => __fireInput("t", { ctrl: true }))
-    await waitFor(() => expect(container.textContent).toContain("SENTINEL_TOOL_OUTPUT"))
+    await waitFor(() => expect(container.textContent).toContain("SENTINEL_TOOL_DETAIL"))
   })
 
   it("runs /clear to reset the transcript and wipe the terminal", async () => {
@@ -616,8 +617,12 @@ describe("App", () => {
     render(
       <App config={config} sessionId="s1" createSession={create} onExit={onExit} now={() => 5000} />
     )
-    act(() => __fireInput("c", { ctrl: true }))
-    act(() => __fireInput("c", { ctrl: true }))
+    // Real terminals can deliver both bytes before React commits the first
+    // CTRL_C state update; the synchronous guard must still exit on press two.
+    act(() => {
+      __fireInput("c", { ctrl: true })
+      __fireInput("c", { ctrl: true })
+    })
     await waitFor(() => expect(onExit).toHaveBeenCalled())
   })
 
@@ -676,7 +681,7 @@ describe("App", () => {
     act(interrupt)
 
     await waitFor(() => expect(capturedSignal?.aborted).toBe(true))
-    await waitFor(() => expect(container.textContent).toContain("Interrupted."))
+    await waitFor(() => expect(container.textContent).toContain("Turn stopped by user"))
   })
 
   it("clears the composer draft on the first Ctrl+C instead of arming the exit ladder", () => {
@@ -1127,6 +1132,62 @@ describe("App", () => {
     expect(persistConfig).not.toHaveBeenCalledWith("provider", "openai")
   })
 
+  it("opens masked credential management for an already-configured provider", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const persistCredential = jest.fn().mockReturnValue(true)
+    const configured: ResolvedConfig = {
+      ...config,
+      provider: "deepseek",
+      model: "deepseek-chat",
+      providers: { deepseek: { apiKey: "sk-existing", model: "deepseek-chat" } },
+    }
+    const { container } = render(
+      <App
+        config={configured}
+        sessionId="s1"
+        createSession={create}
+        persistConfig={persistConfig}
+        persistCredential={persistCredential}
+      />
+    )
+
+    type("/provider")
+    submit()
+    act(() => __fireInput("", { return: true }))
+
+    expect(container.textContent).toContain("Manage API key for DeepSeek")
+    expect(container.textContent).not.toContain("sk-existing")
+    act(() => __fireInput("r", { ctrl: true }))
+    expect(container.textContent).toContain("sk-existing")
+
+    act(() => __fireInput("u", { ctrl: true }))
+    type("sk-replacement")
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    expect(persistCredential).toHaveBeenCalledWith("deepseek", "sk-replacement", "apiKey")
+    expect(persistConfig).toHaveBeenCalledWith("provider", "deepseek")
+  })
+
+  it("returns from credential management to the provider picker on Escape", () => {
+    const { create } = fakeSession()
+    const configured: ResolvedConfig = {
+      ...config,
+      provider: "deepseek",
+      providers: { deepseek: { apiKey: "sk-existing" } },
+    }
+    const { container } = render(<App config={configured} sessionId="s1" createSession={create} />)
+
+    type("/provider")
+    submit()
+    act(() => __fireInput("", { return: true }))
+    expect(container.textContent).toContain("Manage API key for DeepSeek")
+    act(() => __fireInput("", { escape: true }))
+    expect(container.textContent).toContain("Switch provider")
+  })
+
   it("saves the entered key and switches to the provider", async () => {
     const { create } = fakeSession()
     const persistConfig = jest.fn().mockReturnValue(true)
@@ -1303,6 +1364,81 @@ describe("App", () => {
     expect(container.textContent).toContain("Switch provider")
   })
 
+  it("returns to settings after switching providers and can edit the active credential", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const persistCredential = jest.fn().mockReturnValue(true)
+    const configured: ResolvedConfig = {
+      ...config,
+      providers: {
+        anthropic: { apiKey: "sk-ant", model: "claude-x" },
+        openai: { apiKey: "sk-openai" },
+      },
+    }
+    const { container } = render(
+      <App
+        config={configured}
+        sessionId="s1"
+        createSession={create}
+        persistConfig={persistConfig}
+        persistCredential={persistCredential}
+      />
+    )
+
+    type("/settings")
+    submit()
+    act(() => __fireInput("", { return: true }))
+    act(() => __fireInput("", { downArrow: true }))
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain("Manage API key for OpenAI")
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain("Settings")
+    expect(container.textContent).toContain("openai")
+    expect(container.textContent).toContain("Credential")
+
+    act(() => __fireInput("", { downArrow: true }))
+    act(() => __fireInput("", { return: true }))
+    expect(container.textContent).toContain("Manage API key for OpenAI")
+
+    act(() => __fireInput("u", { ctrl: true }))
+    type("sk-replacement")
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    expect(persistCredential).toHaveBeenCalledWith("openai", "sk-replacement", "apiKey")
+    expect(container.textContent).toContain("Settings")
+    expect(container.textContent).toContain("API key configured")
+  })
+
+  it("opens an auth-token credential from settings without exposing it", () => {
+    const { create } = fakeSession()
+    const configured: ResolvedConfig = {
+      ...config,
+      provider: "anthropic",
+      providers: { anthropic: { authToken: "token-existing", model: "claude-x" } },
+    }
+    const { container } = render(
+      <App config={configured} sessionId="s1" createSession={create} persistConfig={() => true} />
+    )
+
+    type("/settings")
+    submit()
+    act(() => __fireInput("", { downArrow: true }))
+    act(() => __fireInput("", { return: true }))
+
+    expect(container.textContent).toContain("Manage token for Anthropic")
+    expect(container.textContent).not.toContain("token-existing")
+  })
+
   it("routes /goal with no objective to a usage notice", async () => {
     const { create } = fakeSession()
     const { container } = render(
@@ -1407,24 +1543,20 @@ describe("App", () => {
     await waitFor(() => expect(container.textContent).toContain("(background)"))
   })
 
-  it("routes a plain line into a running foreground !command's stdin (not the model)", async () => {
+  it("routes a plain line into a line-oriented foreground !command's stdin", async () => {
     const { create, prompts } = fakeSession()
     const writes: string[] = []
-    // A never-resolving interactive command that exposes a stdin writer.
+    // A never-resolving captured command that exposes a stdin writer.
     const runShell = jest.fn((_cmd: string, opts: RunShellOpts): Promise<ShellResult> => {
       opts.registerInput?.((d) => writes.push(d))
       return new Promise(() => {})
     })
-    const { container } = render(
-      <App config={config} sessionId="s1" createSession={create} runShell={runShell} />
-    )
-    type("!ssh example.com")
+    render(<App config={config} sessionId="s1" createSession={create} runShell={runShell} />)
+    type("!read answer")
     await act(async () => {
       submit()
       await Promise.resolve()
     })
-    // The interactive notice primes the user.
-    await waitFor(() => expect(container.textContent).toContain("Interactive command"))
     // A subsequent plain line is fed to the command's stdin, not sent to the model.
     type("my-passphrase")
     await act(async () => {
@@ -1433,6 +1565,51 @@ describe("App", () => {
     })
     expect(writes).toEqual(["my-passphrase\n"])
     expect(prompts).toHaveLength(0)
+  })
+
+  it("suspends Ink and gives a full-screen !command the inherited terminal", async () => {
+    const { create } = fakeSession()
+    const runShell = jest.fn().mockResolvedValue({ stdout: "wrong runner", stderr: "", code: 0 })
+    const runInteractiveShell = jest.fn().mockResolvedValue({ stdout: "", stderr: "", code: 0 })
+    let resumeTerminal: (() => Promise<void>) | undefined
+    __suspendTerminal.mockImplementationOnce(
+      (callback) =>
+        new Promise<void>((resolve) => {
+          resumeTerminal = async () => {
+            await callback?.()
+            resolve()
+          }
+        })
+    )
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        runShell={runShell}
+        runInteractiveShell={runInteractiveShell}
+      />
+    )
+
+    type("!top")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+
+    expect(runShell).not.toHaveBeenCalled()
+    expect(__suspendTerminal).toHaveBeenCalledTimes(1)
+    expect(runInteractiveShell).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await resumeTerminal?.()
+    })
+
+    expect(runInteractiveShell).toHaveBeenCalledWith(
+      "top",
+      expect.objectContaining({ cwd: "/work", signal: expect.anything() })
+    )
+    await waitFor(() => expect(container.textContent).toContain("Interactive terminal opened"))
   })
 
   it("/analyze sends the last failed !command to the agent", async () => {

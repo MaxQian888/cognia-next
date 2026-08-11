@@ -51,12 +51,12 @@ describe("cellToTerminalBlock", () => {
       toolName: "Read",
       input: { path: "a.txt" },
       status: "done",
-      result: "SECRET",
+      result: "VISIBLE\nSECRET",
       collapsed: true,
     }
-    expect(cellToTerminalBlock(cell, { width: 80, verbose: false }).plainText).not.toContain(
-      "SECRET"
-    )
+    const collapsed = cellToTerminalBlock(cell, { width: 80, verbose: false }).plainText
+    expect(collapsed).toContain("↳ VISIBLE")
+    expect(collapsed).not.toContain("SECRET")
     expect(cellToTerminalBlock(cell, { width: 80, verbose: true }).plainText).toContain("SECRET")
   })
 

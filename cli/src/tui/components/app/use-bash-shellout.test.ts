@@ -239,7 +239,7 @@ describe("useBashShellout", () => {
       return new Promise<ShellResult>(() => {})
     })
     const { result } = renderHook(() => useBashShellout(run, "/repo", dispatch))
-    act(() => result.current.runBash("ssh host"))
+    act(() => result.current.runBash("read answer"))
     act(() => {
       expect(result.current.sendInputToForeground("yes")).toBe(true)
     })
@@ -268,7 +268,48 @@ describe("useBashShellout", () => {
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "NOTICE",
-        message: expect.stringContaining("Interactive command"),
+        message: expect.stringContaining("Interactive terminal"),
+      })
+    )
+  })
+
+  it("routes a full-screen command through the interactive runner, never the captured shell", async () => {
+    const dispatch = jest.fn()
+    const run = jest.fn(() => new Promise<ShellResult>(() => {}))
+    const runInteractive = jest.fn().mockResolvedValue(ok)
+    const { result } = renderHook(() => useBashShellout(run, "/repo", dispatch, runInteractive))
+
+    await act(async () => {
+      result.current.runBash("top")
+      await flush()
+    })
+
+    expect(run).not.toHaveBeenCalled()
+    expect(runInteractive).toHaveBeenCalledWith(
+      "top",
+      expect.objectContaining({ cwd: "/repo", signal: expect.anything() })
+    )
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "BASH_RESULT", status: "done", id: "bash-1" })
+    )
+  })
+
+  it("fails explicitly instead of capturing a full-screen command when no interactive runner exists", async () => {
+    const dispatch = jest.fn()
+    const run = jest.fn(() => new Promise<ShellResult>(() => {}))
+    const { result } = renderHook(() => useBashShellout(run, "/repo", dispatch))
+
+    await act(async () => {
+      result.current.runBash("top")
+      await flush()
+    })
+
+    expect(run).not.toHaveBeenCalled()
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "BASH_RESULT",
+        status: "error",
+        output: expect.stringContaining("Interactive terminal runner is unavailable"),
       })
     )
   })

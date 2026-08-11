@@ -146,4 +146,20 @@ describe("BottomRegion", () => {
     )
     expect(container.textContent).not.toContain("⚙ /settings")
   })
+
+  it("keeps the interrupt status on the left and moves the pet to the right", () => {
+    const state = baseState({ turnStatus: "streaming" })
+    const { container } = wrap(
+      <BottomRegion {...baseProps({ state, streamStartedAt: Date.now() })} />
+    )
+    const text = container.textContent ?? ""
+    const statusAt = text.indexOf("esc to interrupt")
+    const petAt = text.indexOf("ʕ")
+    expect(statusAt).toBeGreaterThanOrEqual(0)
+    expect(petAt).toBeGreaterThanOrEqual(0)
+    expect(statusAt).toBeLessThan(petAt)
+    const petSlot = container.querySelector('[data-testid="mascot-right-slot"]')
+    expect(petSlot).toHaveAttribute("data-width", "100%")
+    expect(petSlot).toHaveAttribute("data-justify-content", "flex-end")
+  })
 })

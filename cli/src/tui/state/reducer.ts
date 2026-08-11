@@ -133,7 +133,7 @@ const USAGE_HISTORY_LIMIT = 60
 
 /** Append one turn's total tokens (prompt incl. cache + output) to the history. */
 function pushUsageHistory(history: number[], usage: UsageInfo): number[] {
-  const next = [...history, contextTokens(usage) + (usage.outputTokens ?? 0)]
+  const next = [...history, contextTokens(usage)]
   return next.length > USAGE_HISTORY_LIMIT ? next.slice(next.length - USAGE_HISTORY_LIMIT) : next
 }
 
@@ -155,6 +155,28 @@ function bumpToolStat(
 ): Record<string, ToolStat> {
   const prev = stats[toolName] ?? { calls: 0, errors: 0 }
   return { ...stats, [toolName]: { ...prev, [field]: prev[field] + 1 } }
+}
+
+/** Canonical assistant snapshots can repeat the same tool call while its JSON
+ * input is still being assembled. Compare the merged payload structurally so
+ * an exact repeat remains a reducer no-op (and does not bump stream activity). */
+function sameToolInput(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
+
+/** A terminal turn must never leave an hourglass in static history. */
+function settleRunningTools(
+  tools: ToolCell[],
+  status: "error" | "cancelled",
+  result: string
+): ToolCell[] {
+  return tools.map((tool) =>
+    tool.status === "running" ? { ...tool, status, result, isError: status === "error" } : tool
+  )
 }
 
 /** Max composer-history entries kept in memory (matches the persisted cap). */
@@ -512,14 +534,50 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         // Malformed input (no usable plan body): fall through to render it as a
         // normal tool cell rather than swallowing the call.
       }
-      // Defensive dedup: if the most recent running tool in inflight has the same
-      // callKey, this is a repeated emission for the same invocation (assistant
-      // snapshots echo completed tool_use blocks). Ignore it so we don't
-      // re-commit inflight text and stack duplicate cells.
-      const runningTools = state.inflight.tools.filter((t) => t.status === "running")
-      const lastRunning = runningTools[runningTools.length - 1]
-      if (lastRunning && lastRunning.callKey === action.callKey) {
-        return state
+      // Canonical snapshots repeat tool_use blocks as streamed input becomes
+      // available. Treat every repeat of the same stable callKey as an in-place
+      // refinement — running OR already settled — so it cannot create another
+      // ordering boundary/card. This also upgrades the initial `{}` input to the
+      // final structured payload used by the detail panel.
+      const refine = (tool: ToolCell): ToolCell => ({
+        ...tool,
+        toolName: action.toolName || tool.toolName,
+        ...(action.displayTitle ? { displayTitle: action.displayTitle } : {}),
+        input: { ...tool.input, ...action.input },
+      })
+      const inflightDuplicate = state.inflight.tools.findIndex(
+        (tool) => tool.callKey === action.callKey
+      )
+      if (inflightDuplicate >= 0) {
+        const prior = state.inflight.tools[inflightDuplicate]
+        const next = refine(prior)
+        if (
+          next.toolName === prior.toolName &&
+          next.displayTitle === prior.displayTitle &&
+          sameToolInput(next.input, prior.input)
+        ) {
+          return state
+        }
+        const tools = [...state.inflight.tools]
+        tools[inflightDuplicate] = next
+        return { ...state, inflight: { ...state.inflight, tools } }
+      }
+      const committedDuplicate = state.cells.findIndex(
+        (cell) => cell.kind === "tool" && cell.callKey === action.callKey
+      )
+      if (committedDuplicate >= 0) {
+        const prior = state.cells[committedDuplicate] as ToolCell
+        const next = refine(prior)
+        if (
+          next.toolName === prior.toolName &&
+          next.displayTitle === prior.displayTitle &&
+          sameToolInput(next.input, prior.input)
+        ) {
+          return state
+        }
+        const cells = [...state.cells]
+        cells[committedDuplicate] = next
+        return { ...state, cells }
       }
       // ── flush completed tools → cells (in original order) ─────────────────
       // Tools that already resolved stay in inflight.tools so they re-render live
@@ -886,8 +944,12 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     case "TURN_ERROR": {
       // Flush tools before the trailing text (see TURN_COMMIT) so an interrupted
       // turn's finished tool cards stay above the partial answer, not below it.
-      const baseCells =
-        state.inflight.tools.length > 0 ? [...state.cells, ...state.inflight.tools] : state.cells
+      const terminalTools = settleRunningTools(
+        state.inflight.tools,
+        "error",
+        `Turn ended before this tool completed: ${action.message}`
+      )
+      const baseCells = terminalTools.length > 0 ? [...state.cells, ...terminalTools] : state.cells
       const committed = commitInflight(baseCells, state.inflight, state.seq)
       const finalCells = committed.cells
       finalCells.push({
@@ -909,11 +971,26 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     case "TURN_ABORTED": {
       // Flush tools before the trailing text (see TURN_COMMIT) so an aborted
       // turn's finished tool cards stay above the partial answer, not below it.
-      const baseCells =
-        state.inflight.tools.length > 0 ? [...state.cells, ...state.inflight.tools] : state.cells
+      const terminalTools = settleRunningTools(
+        state.inflight.tools,
+        "cancelled",
+        "Cancelled by user."
+      )
+      // The key handler adds an immediate interruption boundary so a blocked
+      // permission/tool call acknowledges the keypress synchronously. Move that
+      // boundary behind the settled tools/partial reply instead of duplicating it.
+      const lastCell = state.cells.at(-1)
+      const pendingInterruption = lastCell?.kind === "notice" && lastCell.tone === "interrupted"
+      const priorCells = pendingInterruption ? state.cells.slice(0, -1) : state.cells
+      const baseCells = terminalTools.length > 0 ? [...priorCells, ...terminalTools] : priorCells
       const committed = commitInflight(baseCells, state.inflight, state.seq)
       const finalCells = committed.cells
-      finalCells.push({ id: makeId(committed.seq), kind: "error", message: "Interrupted." })
+      finalCells.push({
+        id: makeId(committed.seq),
+        kind: "notice",
+        message: "Turn stopped by user.",
+        tone: "interrupted",
+      })
       return {
         ...state,
         cells: finalCells,
@@ -1148,7 +1225,12 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     case "NOTICE": {
       const cells = [
         ...state.cells,
-        { id: makeId(state.seq), kind: "notice" as const, message: action.message },
+        {
+          id: makeId(state.seq),
+          kind: "notice" as const,
+          message: action.message,
+          ...(action.tone ? { tone: action.tone } : {}),
+        },
       ]
       // When flagged, also surface a transient toast so the message isn't lost in
       // scrollback (uses a second seq tick for a stable, unique toast id).

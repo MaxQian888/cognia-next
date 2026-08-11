@@ -18,6 +18,8 @@ export interface ProviderKeyOverlayProps {
   /** Which credential is being collected — labels the field ("API key" vs "token"). */
   credentialKind: "apiKey" | "authToken"
   value: string
+  /** The field contains a stored credential being inspected or replaced. */
+  existing?: boolean
   /** Show the raw key instead of the masked bullets. */
   reveal: boolean
   /** Where the user obtains a key, when the catalog knows (shown as a hint). */
@@ -39,6 +41,7 @@ export function ProviderKeyOverlay({
   providerName,
   credentialKind,
   value,
+  existing = false,
   reveal,
   keyUrl,
   error,
@@ -59,6 +62,10 @@ export function ProviderKeyOverlay({
       // Ctrl+R for "show me more"); it must win before the printable branch so
       // the "r" isn't inserted into the key.
       if (key.ctrl && (input === "r" || input === "R")) return onToggleReveal()
+      // Clearing an existing masked value character-by-character is both slow
+      // and error-prone. Ctrl+U starts a clean replacement without ever echoing
+      // the old secret into scrollback.
+      if (key.ctrl && (input === "u" || input === "U")) return onInput("")
       if (key.backspace || key.delete) return onInput(value.slice(0, -1))
       // Printable input (including a pasted key, which arrives as one chunk).
       // Skip control chords and raw mouse escape sequences so neither corrupts
@@ -74,7 +81,7 @@ export function ProviderKeyOverlay({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
       <Text bold color={theme.accent}>
-        {`Add ${label} for ${providerName}`}
+        {`${existing ? "Manage" : "Add"} ${label} for ${providerName}`}
       </Text>
       <Text>
         {"❯ "}
@@ -92,7 +99,7 @@ export function ProviderKeyOverlay({
       ) : null}
       {error ? <Text color={theme.danger}>{error}</Text> : null}
       <Text color={theme.muted} dimColor>
-        {`Enter save · Ctrl+R ${reveal ? "hide" : "reveal"} · Esc cancel`}
+        {`Enter save${existing ? " & switch" : ""} · Ctrl+R ${reveal ? "hide" : "reveal"}${existing ? " · Ctrl+U replace" : ""} · Esc back`}
       </Text>
     </Box>
   )

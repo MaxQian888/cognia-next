@@ -2,7 +2,7 @@ import { tokenizeCached } from "../markdown/render-cache"
 import type { MdLine, MdSpan } from "../markdown/types"
 import { formatEditDiff } from "../markdown/diff"
 import { resultToText } from "../format/result-render"
-import { isDiffTool, summarizeToolCall, toolDisplayName } from "../format/tools"
+import { isDiffTool, resultPreview, summarizeToolCall, toolDisplayName } from "../format/tools"
 import type { Cell } from "../state/types"
 import {
   buildTerminalBlock,
@@ -136,20 +136,30 @@ function cellText(
         style: "muted",
       }
     case "tool": {
-      const icon = cell.status === "done" ? "✓" : cell.status === "error" ? "✗" : "⏳"
+      const icon =
+        cell.status === "done"
+          ? "✓"
+          : cell.status === "error"
+            ? "✗"
+            : cell.status === "cancelled"
+              ? "■"
+              : "⏳"
       const summary = summarizeToolCall(cell.toolName, cell.input)
       const details: string[] = []
       if (isDiffTool(cell.toolName)) {
         details.push(...formatEditDiff(cell.toolName, cell.input).map((line) => line.text))
       } else if ((verbose || !cell.collapsed) && cell.result !== undefined) {
         details.push(safeResult(cell.result))
+      } else if (cell.collapsed && cell.result !== undefined) {
+        const preview = resultPreview(cell.result)
+        if (preview) details.push(`  ↳ ${preview}`)
       }
       return {
         text: [
           `${icon} ${cell.displayTitle ?? toolDisplayName(cell.toolName)}${summary ? ` ${summary}` : ""}`,
           ...details,
         ].join("\n"),
-        style: cell.status === "error" ? "danger" : "plain",
+        style: cell.status === "error" ? "danger" : cell.status === "cancelled" ? "muted" : "plain",
       }
     }
     case "todo":

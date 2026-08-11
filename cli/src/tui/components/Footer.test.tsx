@@ -32,6 +32,33 @@ describe("Footer", () => {
     expect(text).toContain("⚙ /settings")
   })
 
+  it("shows current-window context while keeping cumulative billed tokens separate", () => {
+    const cfg: ResolvedConfig = {
+      ...config,
+      statusBar: { segments: ["tokens", "ctx", "cache"] },
+    }
+    const { container } = render(
+      <Footer
+        config={cfg}
+        usage={{
+          inputTokens: 423_000,
+          outputTokens: 5_000,
+          contextInputTokens: 96_000,
+          cacheReadInputTokens: 90_000,
+        }}
+        contextWindow={1_000_000}
+        turnStatus="idle"
+        columns={200}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("428k tok")
+    expect(text).toContain("19% ctx")
+    expect(text).toContain("⚡ 48% · 90k reused")
+    expect(text).not.toContain("51% ctx")
+    expect(text).not.toContain("⚡ 17%")
+  })
+
   it("hides the discoverability hint while busy (it lives in BottomStatus now)", () => {
     const { container } = render(<Footer config={config} turnStatus="streaming" columns={200} />)
     const text = container.textContent ?? ""

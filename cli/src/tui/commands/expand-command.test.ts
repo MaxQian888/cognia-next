@@ -64,6 +64,28 @@ describe("formatToolResultBody", () => {
     )
   })
 
+  it("shows bash invocation metadata separately from its output", () => {
+    const cell = tool("1", "bash", "command rejected", true)
+    cell.status = "error"
+    cell.input = {
+      command: "curl -fsS https://example.com >/dev/null",
+      description: "Check service health",
+      workdir: "/repo",
+      timeout: 5000,
+      run_in_background: false,
+    }
+
+    const body = formatToolResultBody(cell)
+    expect(body).toContain("## Invocation")
+    expect(body).toContain("Status: error")
+    expect(body).toContain("Mode: foreground")
+    expect(body).toContain("Workdir: /repo")
+    expect(body).toContain("Timeout: 5000 ms")
+    expect(body).toContain("Description: Check service health")
+    expect(body).toContain("```bash\ncurl -fsS https://example.com >/dev/null\n```")
+    expect(body).toContain("## Output\n\n```text\ncommand rejected\n```")
+  })
+
   it("renders a string result verbatim when no language can be inferred", () => {
     // grep has no detectable result language → no fence, body verbatim.
     expect(formatToolResultBody(tool("1", "grep", "match\nhere"))).toBe("# grep\n\nmatch\nhere")

@@ -71,7 +71,7 @@ export interface ThinkingCell {
   collapsed: boolean
 }
 
-export type ToolStatus = "running" | "done" | "error"
+export type ToolStatus = "running" | "done" | "error" | "cancelled"
 
 export interface ToolCell {
   id: string
@@ -123,6 +123,8 @@ export interface NoticeCell {
   id: string
   kind: "notice"
   message: string
+  /** Visual treatment for notices that close a turn without reporting an error. */
+  tone?: "neutral" | "interrupted"
 }
 
 export interface CommentaryCell {
@@ -580,7 +582,13 @@ export type Overlay =
   // `/provider` switcher. `query` is the live typeahead filter (the shared
   // catalog runs to dozens of ids), and `index` points into the FILTERED view —
   // same contract as `model`, so navigation always tracks what's on screen.
-  | { kind: "provider"; options: ProviderOption[]; index: number; query?: string }
+  | {
+      kind: "provider"
+      options: ProviderOption[]
+      index: number
+      query?: string
+      returnToSettings?: { section: number; index: number }
+    }
   // Inline API-key prompt shown when a key-required provider is picked with no
   // stored credential (Working "prompt for a key" flow). `value` is the typed
   // secret (masked unless `reveal`); on submit it lands in credentials.json and
@@ -592,9 +600,18 @@ export type Overlay =
       credentialKind: CredentialKind
       value: string
       reveal: boolean
+      /** True when `value` is a stored credential being inspected/replaced. */
+      existing?: boolean
       model?: string
       keyUrl?: string
       error?: string
+      returnToSettings?: { section: number; index: number }
+      /** Restore the provider picker when credential editing is cancelled. */
+      returnToProvider?: {
+        index: number
+        query?: string
+        returnToSettings?: { section: number; index: number }
+      }
     }
   | { kind: "config"; rows: ConfigMenuRow[]; index: number }
   | { kind: "sessions"; items: SessionSummary[]; index: number; query?: string }
@@ -1121,7 +1138,13 @@ export type TuiAction =
   // A one-line system notice → permanent NoticeCell. When `toast` is set it ALSO
   // raises a transient toast (severity defaults to "info"), so a single dispatch
   // can both archive to scrollback and surface an ephemeral alert.
-  | { type: "NOTICE"; message: string; severity?: ToastSeverity; toast?: boolean }
+  | {
+      type: "NOTICE"
+      message: string
+      tone?: NoticeCell["tone"]
+      severity?: ToastSeverity
+      toast?: boolean
+    }
   // Raise a transient toast only (no scrollback cell). For otherwise-silent
   // events — sidecar death, rate-limit warnings, MCP load failures, hook errors.
   | { type: "TOAST_PUSH"; severity: ToastSeverity; message: string; hint?: string }

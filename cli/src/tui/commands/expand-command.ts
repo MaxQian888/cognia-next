@@ -11,6 +11,44 @@ import { resultToText, toolResultLang } from "../format/result-render"
 import type { ToolCell } from "../state/types"
 import type { CommandContext, CommandDescriptor, CommandEffect } from "./types"
 
+function markdownFence(text: string, language: string): string {
+  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length))
+  const fence = "`".repeat(Math.max(3, longestRun + 1))
+  return `${fence}${language}\n${text}\n${fence}`
+}
+
+function singleLine(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.replace(/\s+/g, " ").trim() : undefined
+}
+
+function formatBashResultBody(cell: ToolCell, header: string): string | null {
+  const command = typeof cell.input.command === "string" ? cell.input.command : undefined
+  if (!command) return null
+
+  const mode = cell.input.run_in_background
+    ? cell.input.detach
+      ? "background (detached)"
+      : "background"
+    : "foreground"
+  const metadata = [`Status: ${cell.isError ? "error" : cell.status}`, `Mode: ${mode}`]
+  const workdir = singleLine(cell.input.workdir)
+  const description = singleLine(cell.input.description)
+  if (workdir) metadata.push(`Workdir: ${workdir}`)
+  if (typeof cell.input.timeout === "number") metadata.push(`Timeout: ${cell.input.timeout} ms`)
+  if (description) metadata.push(`Description: ${description}`)
+
+  const output = cell.result == null ? "(no result)" : resultToText(cell.result)
+  return [
+    header,
+    "## Invocation",
+    metadata.map((line) => `- ${line}`).join("\n"),
+    "### Command",
+    markdownFence(command, "bash"),
+    "## Output",
+    markdownFence(output, "text"),
+  ].join("\n\n")
+}
+
 /**
  * Render a tool cell's result for the pager as a markdown document. File/code
  * and shell results are wrapped in a fenced block tagged with the detected
@@ -19,13 +57,17 @@ import type { CommandContext, CommandDescriptor, CommandEffect } from "./types"
  */
 export function formatToolResultBody(cell: ToolCell): string {
   const header = `# ${cell.toolName}${cell.isError ? " (error)" : ""}`
+  if (cell.toolName.toLowerCase() === "bash") {
+    const detailed = formatBashResultBody(cell, header)
+    if (detailed) return detailed
+  }
   const r = cell.result
   if (r == null) return `${header}\n\n(no result)`
   if (typeof r !== "string") {
     return `${header}\n\n\`\`\`json\n${resultToText(r)}\n\`\`\``
   }
   const lang = toolResultLang(cell.toolName, cell.input)
-  if (lang) return `${header}\n\n\`\`\`${lang}\n${r}\n\`\`\``
+  if (lang) return `${header}\n\n${markdownFence(r, lang)}`
   return `${header}\n\n${r}`
 }
 

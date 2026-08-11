@@ -145,7 +145,58 @@ describe("AppOverlays", () => {
     expect(text).not.toContain("Anthropic")
   })
 
-  it("does not send a chat-provider default model to a hosted external agent", () => {
+  it("returns from the provider picker to the originating settings row", () => {
+    const props = propsFor({
+      kind: "provider",
+      options: [
+        {
+          id: "anthropic",
+          name: "Anthropic",
+          configured: true,
+          auth: "api key",
+          requiresKey: true,
+        },
+      ],
+      index: 0,
+      query: "",
+      returnToSettings: { section: 2, index: 3 },
+    })
+    wrap(<AppOverlays {...props} />)
+
+    act(() => __fireInput("", { escape: true }))
+
+    expect(props.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "OVERLAY_OPEN",
+        overlay: expect.objectContaining({ kind: "settings", section: 2, index: 3 }),
+      })
+    )
+  })
+
+  it("returns from a settings credential editor to the originating settings row", () => {
+    const props = propsFor({
+      kind: "providerKey",
+      providerId: "deepseek",
+      providerName: "DeepSeek",
+      credentialKind: "apiKey",
+      value: "sk-existing",
+      reveal: false,
+      existing: true,
+      returnToSettings: { section: 0, index: 1 },
+    })
+    wrap(<AppOverlays {...props} />)
+
+    act(() => __fireInput("", { escape: true }))
+
+    expect(props.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "OVERLAY_OPEN",
+        overlay: expect.objectContaining({ kind: "settings", section: 0, index: 1 }),
+      })
+    )
+  })
+
+  it("saves a built-in provider preference without restarting a hosted external agent", () => {
     ;(agent.switchProvider as jest.Mock).mockClear()
     const overlay = {
       kind: "provider" as const,
@@ -168,7 +219,47 @@ describe("AppOverlays", () => {
     }
     wrap(<AppOverlays {...props} />)
     act(() => __fireInput("", { return: true }))
-    expect(agent.switchProvider).toHaveBeenCalledWith("ollama", undefined)
+    expect(agent.switchProvider).not.toHaveBeenCalled()
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "SET_PROVIDER", provider: "ollama" })
+    expect(props.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "NOTICE",
+        message: expect.stringContaining("active codex backend is unchanged"),
+      })
+    )
+  })
+
+  it("saves a DeepSeek credential without restarting the active Claude Code backend", () => {
+    ;(agent.switchProvider as jest.Mock).mockClear()
+    const props = propsFor({
+      kind: "providerKey",
+      providerId: "deepseek",
+      providerName: "DeepSeek",
+      credentialKind: "apiKey",
+      value: "sk-deepseek",
+      reveal: false,
+      existing: true,
+    })
+    props.state = {
+      ...props.state,
+      config: {
+        ...props.state.config,
+        agentBackend: "claude-code",
+        providers: { ...props.state.config.providers, deepseek: { apiKey: "sk-deepseek" } },
+      },
+    }
+
+    wrap(<AppOverlays {...props} />)
+    act(() => __fireInput("", { return: true }))
+
+    expect(agent.switchProvider).not.toHaveBeenCalled()
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "SET_PROVIDER", provider: "deepseek" })
+    expect(props.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "NOTICE",
+        message: expect.stringContaining("active claude-code backend is unchanged"),
+      })
+    )
   })
 
   it("renders the inline provider key prompt, masked", () => {

@@ -10,7 +10,13 @@ import type { UsageInfo } from "@/lib/claude/adapter"
 import type { SdkContextUsage } from "@cognia/agent-config-types"
 
 import { describeBuiltinTools } from "./builtins"
-import { cacheHitRatio, contextComposition, contextTokens, formatTokens } from "../format/usage"
+import {
+  cacheSummary,
+  contextComposition,
+  contextTokens,
+  formatTokens,
+  hasCacheTelemetry,
+} from "../format/usage"
 import { markedGauge, stackedBar } from "../format/charts"
 import { backendContextWindow, backendIdentity } from "../runtime/backend-identity"
 import type { ResolvedConfig } from "../../config/schema"
@@ -62,27 +68,34 @@ export function buildContextReport(
   }
   // Once a turn has reported usage, surface the prefix-cache efficiency and the
   // prompt-side composition (reused / newly-cached / fresh) as a monochrome
-  // segmented bar — the cost lever the harness-design notes highlight.
+  // segmented bar. Providers that omit cache fields are labelled honestly
+  // instead of being presented as a real 0% hit rate.
   if (usage) {
-    const comp = contextComposition(usage)
-    const hitPct = Math.round(cacheHitRatio(usage) * 100)
-    const bar = stackedBar(
-      [
-        { value: comp.cacheRead, char: "█" },
-        { value: comp.cacheCreation, char: "▓" },
-        { value: comp.fresh, char: "░" },
-      ],
-      20
-    )
-      .map((r) => r.text)
-      .join("")
-    lines.push(
-      `  Cache hit:       ${hitPct}%`,
-      `  Composition:     ${bar}`,
-      `    █ reused ${formatTokens(comp.cacheRead)}  ▓ new ${formatTokens(
-        comp.cacheCreation
-      )}  ░ fresh ${formatTokens(comp.fresh)}`
-    )
+    if (!hasCacheTelemetry(usage)) {
+      lines.push("  Cache telemetry: not reported by provider")
+    } else {
+      const comp = contextComposition(usage)
+      const cache = cacheSummary(usage)
+      const bar = stackedBar(
+        [
+          { value: comp.cacheRead, char: "█" },
+          { value: comp.cacheCreation, char: "▓" },
+          { value: comp.fresh, char: "░" },
+        ],
+        20
+      )
+        .map((r) => r.text)
+        .join("")
+      lines.push(
+        `  Cache hit:       ${Math.round(cache.hitRate * 100)}% · ${formatTokens(cache.reusedTokens)} reused`,
+        `  Cache write:     ${Math.round(cache.writeRate * 100)}% · ${formatTokens(cache.createdTokens)} new`,
+        `  Fresh input:     ${Math.round(cache.freshRate * 100)}% · ${formatTokens(cache.freshTokens)} uncached`,
+        `  Composition:     ${bar}`,
+        `    █ reused ${formatTokens(comp.cacheRead)}  ▓ new ${formatTokens(
+          comp.cacheCreation
+        )}  ░ fresh ${formatTokens(comp.fresh)}`
+      )
+    }
   }
   lines.push(`  ${describeBuiltinTools(config.builtinTools)}`)
   return lines.join("\n")

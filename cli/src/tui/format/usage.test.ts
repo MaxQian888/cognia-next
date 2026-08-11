@@ -5,6 +5,7 @@ import {
   accumulateModelTotals,
   accumulateUsage,
   cacheHitRatio,
+  cacheSummary,
   contextComposition,
   contextPercent,
   contextTokens,
@@ -14,7 +15,9 @@ import {
   formatElapsed,
   formatFooter,
   formatTokens,
+  hasCacheTelemetry,
   modelUsageRows,
+  sessionCacheSummary,
   shortenCwd,
   usagePanelRows,
 } from "./usage"
@@ -37,6 +40,15 @@ describe("contextTokens", () => {
         contextTokens: 120_000,
       })
     ).toBe(120_000)
+  })
+  it("uses the last AI SDK leg instead of cumulative billed input for window occupancy", () => {
+    expect(
+      contextTokens({
+        inputTokens: 423_000,
+        contextInputTokens: 96_000,
+        cacheReadInputTokens: 90_000,
+      })
+    ).toBe(186_000)
   })
 })
 
@@ -201,6 +213,15 @@ describe("usagePanelRows", () => {
   it("shows an em dash for missing duration and tolerates absent usage", () => {
     const rows = usagePanelRows(undefined, undefined)
     expect(rows.find((r) => r.label === "Duration")?.value).toBe("—")
+    expect(rows.find((r) => r.label === "Cache hit")?.value).toBe("not reported")
+  })
+
+  it("distinguishes explicitly reported zero cache usage from missing telemetry", () => {
+    const rows = usagePanelRows(
+      { inputTokens: 100, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+      undefined
+    )
+    expect(rows.find((r) => r.label === "Cache hit")?.value).toBe("0%")
   })
 
   it("adds a Reasoning row right after Output only when reasoning tokens are reported", () => {
@@ -259,6 +280,19 @@ describe("usagePanelRows", () => {
     expect(rows.find((r) => r.label === "Session cost")?.value).toBe("$0.250")
     expect(rows.find((r) => r.label === "Duration")?.value).toBe("3.0s")
   })
+
+  it("shows cumulative prompt and cache efficiency when cache telemetry exists", () => {
+    const rows = usagePanelRows({ inputTokens: 10, cacheReadInputTokens: 0 }, "claude-x", {
+      costUsd: 0.25,
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 300,
+      cacheCreationTokens: 100,
+      durationMs: 3000,
+    })
+    expect(rows.find((r) => r.label === "Session prompt")?.value).toBe("500")
+    expect(rows.find((r) => r.label === "Session cache hit")?.value).toBe("60%")
+  })
 })
 
 describe("cacheHitRatio", () => {
@@ -270,6 +304,69 @@ describe("cacheHitRatio", () => {
   it("is 0 for an empty prompt or undefined usage", () => {
     expect(cacheHitRatio(undefined)).toBe(0)
     expect(cacheHitRatio({ outputTokens: 10 })).toBe(0)
+  })
+  it("uses prompt composition rather than an external context occupancy override", () => {
+    expect(
+      cacheHitRatio({
+        inputTokens: 100,
+        cacheReadInputTokens: 300,
+        cacheCreationInputTokens: 100,
+        contextTokens: 10_000,
+      })
+    ).toBeCloseTo(0.6, 6)
+  })
+})
+
+describe("cache summaries", () => {
+  it("distinguishes missing telemetry from an explicitly reported zero", () => {
+    expect(hasCacheTelemetry({ inputTokens: 100 })).toBe(false)
+    expect(hasCacheTelemetry({ inputTokens: 100, cacheReadInputTokens: 0 })).toBe(true)
+  })
+
+  it("summarizes per-turn prompt reuse, creation, and fresh input", () => {
+    expect(
+      cacheSummary({
+        inputTokens: 100,
+        cacheReadInputTokens: 300,
+        cacheCreationInputTokens: 100,
+      })
+    ).toEqual({
+      promptTokens: 500,
+      reusedTokens: 300,
+      createdTokens: 100,
+      freshTokens: 100,
+      hitRate: 0.6,
+      writeRate: 0.2,
+      freshRate: 0.2,
+    })
+  })
+
+  it("uses the last AI SDK leg for current-window cache composition", () => {
+    expect(
+      cacheSummary({
+        inputTokens: 423_000,
+        contextInputTokens: 96_000,
+        cacheReadInputTokens: 90_000,
+      })
+    ).toMatchObject({
+      promptTokens: 186_000,
+      reusedTokens: 90_000,
+      freshTokens: 96_000,
+      hitRate: 90_000 / 186_000,
+    })
+  })
+
+  it("summarizes cumulative session cache totals", () => {
+    expect(
+      sessionCacheSummary({
+        costUsd: 0,
+        inputTokens: 200,
+        outputTokens: 50,
+        cacheReadTokens: 600,
+        cacheCreationTokens: 200,
+        durationMs: 0,
+      })
+    ).toMatchObject({ promptTokens: 1000, reusedTokens: 600, hitRate: 0.6 })
   })
 })
 
@@ -291,6 +388,15 @@ describe("contextComposition", () => {
       fresh: 0,
       output: 0,
     })
+  })
+  it("uses current-window fresh input when multi-leg billing totals are present", () => {
+    expect(
+      contextComposition({
+        inputTokens: 423_000,
+        contextInputTokens: 96_000,
+        cacheReadInputTokens: 90_000,
+      }).fresh
+    ).toBe(96_000)
   })
 })
 
@@ -442,6 +548,7 @@ describe("modelUsageRows", () => {
       output: "271k",
       cacheRead: "64.8M",
       cacheWrite: "1.2M",
+      cacheHit: "98%",
       cost: "$51.18",
     })
     expect(rows[1].cost).toBe("$0.550")

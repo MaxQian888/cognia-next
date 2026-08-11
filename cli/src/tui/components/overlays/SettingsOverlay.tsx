@@ -113,7 +113,8 @@ export function SettingsOverlay({
         const c = current.control
         if (c.type === "enum") onAdjust(current, 1)
         else if (c.type === "boolean") onToggle(current)
-        else if (c.type === "delegate" || c.type === "form") onActivate(current)
+        else if (c.type === "delegate" || c.type === "form" || c.type === "credential")
+          onActivate(current)
       }
     },
     { isActive }

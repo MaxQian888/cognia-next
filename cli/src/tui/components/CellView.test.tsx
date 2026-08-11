@@ -193,6 +193,111 @@ describe("CellView", () => {
     expect(text).not.toContain("more detail")
   })
 
+  it("shows a result preview when a completed tool supplied no useful input summary", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "git_status",
+      input: {},
+      status: "done",
+      result: "On branch main\nworking tree clean",
+      collapsed: true,
+    })
+    expect(text).toContain("On branch main")
+  })
+
+  it("pairs a collapsed tool call with its result preview even when the call has a summary", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "pwd" },
+      status: "done",
+      result: "/workspace\n",
+      collapsed: true,
+    })
+    expect(text).toContain("pwd")
+    expect(text).toContain("↳ /workspace")
+  })
+
+  it("makes a parallel subagent batch and a cancelled dispatch explicit", () => {
+    const batch = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "batch",
+      toolName: "dispatch_agent",
+      input: {
+        dispatches: [
+          { subagentId: "frontend", prompt: "review UI" },
+          { subagentId: "backend", prompt: "review runtime" },
+        ],
+      },
+      status: "running",
+      collapsed: true,
+    })
+    expect(batch).toContain("2 agents")
+    expect(batch).toContain("parallel batch · 2 agents · running")
+
+    const cancelled = renderCell({
+      id: "2",
+      kind: "tool",
+      callKey: "cancelled",
+      toolName: "dispatch_agent",
+      input: { subagentId: "reviewer", prompt: "review" },
+      status: "cancelled",
+      result: "Cancelled by user.",
+      collapsed: true,
+    })
+    expect(cancelled).toContain("○")
+    expect(cancelled).toContain("stopped")
+    expect(cancelled).not.toContain("Cancelled by user.")
+    expect(cancelled).not.toContain("expand")
+  })
+
+  it("renders a generic cancelled tool as one quiet terminal row", () => {
+    const cancelled = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "cancelled",
+      toolName: "mcp__cognia_tools__dispatch_agent",
+      displayTitle: "dispatch_agent",
+      input: {},
+      status: "cancelled",
+      result: "Cancelled by user.",
+      collapsed: true,
+    })
+    expect(cancelled).toContain("○")
+    expect(cancelled).toContain("stopped")
+    expect(cancelled).not.toContain("↳ Cancelled by user.")
+    expect(cancelled).not.toContain("expand")
+  })
+
+  it("explains terminal tool events that supplied no result details", () => {
+    const done = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "done",
+      toolName: "read",
+      input: {},
+      status: "done",
+      collapsed: true,
+    })
+    const failed = renderCell({
+      id: "2",
+      kind: "tool",
+      callKey: "failed",
+      toolName: "git_log",
+      input: {},
+      status: "error",
+      isError: true,
+      collapsed: true,
+    })
+    expect(done).toContain("completed · no details")
+    expect(failed).toContain("failed · no error details")
+  })
+
   it("renders an expanded non-diff tool result", () => {
     const text = renderCell({
       id: "1",
@@ -378,6 +483,18 @@ describe("CellView", () => {
   it("renders error and notice cells", () => {
     expect(renderCell({ id: "1", kind: "error", message: "boom" })).toContain("boom")
     expect(renderCell({ id: "1", kind: "notice", message: "fyi" })).toContain("fyi")
+  })
+
+  it("renders an interrupted turn as a deliberate quiet boundary", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "notice",
+      message: "Turn stopped by user.",
+      tone: "interrupted",
+    } as Cell)
+    expect(text).toContain("──")
+    expect(text).toContain("Turn stopped")
+    expect(text).not.toContain("•")
   })
 
   it("renders a running bash cell with the kill/background hint", () => {

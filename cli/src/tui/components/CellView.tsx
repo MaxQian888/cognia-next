@@ -35,7 +35,12 @@ import {
   toolFilePath,
   toolKind,
 } from "../format/tools"
-import { isSubagentTool, subagentName, subagentTask } from "../format/subagent"
+import {
+  isSubagentTool,
+  subagentDispatchCount,
+  subagentName,
+  subagentTask,
+} from "../format/subagent"
 import { planStats, planTitle } from "../runtime/plan"
 import { fileUri } from "../runtime/editor"
 import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
@@ -96,6 +101,13 @@ const STATUS_ICON: Record<ToolCell["status"], string> = {
   running: "⏳",
   done: "✓",
   error: "✗",
+  cancelled: "○",
+}
+
+/** Generic cancellation text is lifecycle metadata, not useful tool output. */
+function isUserCancellationResult(cell: ToolCell): boolean {
+  if (cell.status !== "cancelled" || typeof cell.result !== "string") return false
+  return /^cancell?ed by user\.?$/i.test(cell.result.trim())
 }
 
 /** The leading status glyph for a tool/subagent card: an animated spinner while
@@ -159,8 +171,10 @@ function ToolView({ cell }: { cell: ToolCell }) {
     running: theme.statusRunning,
     done: theme.statusDone,
     error: theme.statusError,
+    cancelled: theme.muted,
   }
   const summary = summarizeToolCall(cell.toolName, cell.input)
+  const hasUsefulResult = cell.result != null && !isUserCancellationResult(cell)
   // Make the file path a clickable OSC-8 hyperlink so a Ctrl/Cmd-click opens it
   // in the editor (vscode://file inside a VS Code terminal, else file://). Only
   // on terminals with confirmed OSC-8 support — the link bytes are zero-width, so
@@ -172,13 +186,13 @@ function ToolView({ cell }: { cell: ToolCell }) {
   // Result magnitude for the collapsed-card hint — only meaningful once a
   // (non-diff) result has landed and the card is still collapsed.
   const size =
-    cell.collapsed && diff.length === 0 && cell.result != null
+    cell.collapsed && diff.length === 0 && hasUsefulResult
       ? summarizeResult(cell.result)
       : { lines: 0, bytes: 0 }
   // A tool-specific count ("12 matches", "3 files") reads better than a raw line
   // count for search-shaped tools; falls back to the line count otherwise.
   const countLabel =
-    cell.collapsed && diff.length === 0 && cell.result != null
+    cell.collapsed && diff.length === 0 && hasUsefulResult
       ? resultCountLabel(cell.toolName, cell.result)
       : undefined
   // An errored, collapsed tool shows a one-line error preview in the header so
@@ -186,6 +200,25 @@ function ToolView({ cell }: { cell: ToolCell }) {
   const errorPreview =
     cell.collapsed && cell.status === "error" && cell.result != null
       ? resultPreview(cell.result)
+      : ""
+  // Some protocol adapters provide no useful raw input (so `summary` is empty)
+  // but do return a descriptive result. Show its first line instead of reducing
+  // a completed card to a bare tool name.
+  const successPreview =
+    cell.collapsed && cell.status === "done" && cell.result != null
+      ? resultPreview(cell.result)
+      : ""
+  const missingDetails =
+    cell.collapsed &&
+    (cell.status === "done" || cell.status === "error") &&
+    !summary &&
+    !errorPreview &&
+    !successPreview &&
+    !countLabel &&
+    size.lines === 0
+      ? cell.status === "error"
+        ? "failed · no error details"
+        : "completed · no details"
       : ""
   return (
     <Box flexDirection="column">
@@ -196,15 +229,11 @@ function ToolView({ cell }: { cell: ToolCell }) {
             `cell.toolName` still drives every formatter above. */}
         <Text bold>{cell.displayTitle ?? toolDisplayName(cell.toolName)}</Text>
         {summary ? <Text color={theme.muted}> {summaryDisplay}</Text> : null}
+        {cell.status === "cancelled" ? <Text color={theme.muted}> · stopped</Text> : null}
         {stat.added > 0 ? <Text color={theme.diffAdded}> +{stat.added}</Text> : null}
         {stat.removed > 0 ? <Text color={theme.diffRemoved}> -{stat.removed}</Text> : null}
         <ElapsedHint status={cell.status} />
-        {errorPreview ? (
-          <Text color={theme.danger} dimColor>
-            {" "}
-            · {errorPreview}
-          </Text>
-        ) : countLabel ? (
+        {countLabel ? (
           <Text color={theme.muted} dimColor>
             {" "}
             · {countLabel}
@@ -214,8 +243,13 @@ function ToolView({ cell }: { cell: ToolCell }) {
             {" "}
             · {size.lines} line{size.lines === 1 ? "" : "s"}
           </Text>
+        ) : missingDetails ? (
+          <Text color={cell.status === "error" ? theme.danger : theme.muted} dimColor>
+            {" "}
+            · {missingDetails}
+          </Text>
         ) : null}
-        {cell.collapsed && cell.result != null ? (
+        {cell.collapsed && hasUsefulResult ? (
           <Text color={theme.accent} dimColor>
             {" "}
             ▸ expand: /inspect
@@ -227,8 +261,15 @@ function ToolView({ cell }: { cell: ToolCell }) {
           </Text>
         ) : null}
       </Box>
+      {cell.collapsed && (errorPreview || successPreview) ? (
+        <Box paddingLeft={2}>
+          <Text color={errorPreview ? theme.danger : theme.muted} dimColor>
+            ↳ {errorPreview || successPreview}
+          </Text>
+        </Box>
+      ) : null}
       {diff.length > 0 && <DiffView diff={diff} lang={diffLang} />}
-      {!cell.collapsed && diff.length === 0 && cell.result != null && (
+      {!cell.collapsed && diff.length === 0 && hasUsefulResult && (
         <ToolResult result={cell.result} lang={toolResultLang(cell.toolName, cell.input)} />
       )}
     </Box>
@@ -333,6 +374,7 @@ const SUBAGENT_STATUS_LABEL: Record<ToolCell["status"], string> = {
   running: "running",
   done: "done",
   error: "failed",
+  cancelled: "stopped",
 }
 
 /**
@@ -348,13 +390,20 @@ function SubagentView({ cell }: { cell: ToolCell }) {
     running: theme.statusRunning,
     done: theme.statusDone,
     error: theme.statusError,
+    cancelled: theme.muted,
   }
   const name = subagentName(cell.input)
   const task = subagentTask(cell.input)
+  const dispatchCount = subagentDispatchCount(cell.input)
+  const hasUsefulResult = cell.result != null && !isUserCancellationResult(cell)
   const size =
-    cell.collapsed && cell.result != null ? summarizeResult(cell.result) : { lines: 0, bytes: 0 }
+    cell.collapsed && hasUsefulResult ? summarizeResult(cell.result) : { lines: 0, bytes: 0 }
   const errorPreview =
     cell.collapsed && cell.status === "error" && cell.result != null
+      ? resultPreview(cell.result)
+      : ""
+  const successPreview =
+    cell.collapsed && cell.status === "done" && cell.result != null
       ? resultPreview(cell.result)
       : ""
   return (
@@ -364,23 +413,19 @@ function SubagentView({ cell }: { cell: ToolCell }) {
         <Text color={theme.accent} bold>
           ◆ {name}
         </Text>
-        <Text color={theme.muted} dimColor>
+        <Text color={theme.muted} dimColor={cell.status !== "cancelled"}>
           {" "}
-          subagent · {SUBAGENT_STATUS_LABEL[cell.status]}
+          {dispatchCount > 1 ? `parallel batch · ${dispatchCount} agents` : "subagent"} ·{" "}
+          {SUBAGENT_STATUS_LABEL[cell.status]}
         </Text>
         <ElapsedHint status={cell.status} />
-        {errorPreview ? (
-          <Text color={theme.danger} dimColor>
-            {" "}
-            · {errorPreview}
-          </Text>
-        ) : size.lines > 0 ? (
+        {size.lines > 0 ? (
           <Text color={theme.muted} dimColor>
             {" "}
             · {size.lines} line{size.lines === 1 ? "" : "s"}
           </Text>
         ) : null}
-        {cell.collapsed && cell.result != null ? (
+        {cell.collapsed && hasUsefulResult ? (
           <Text color={theme.accent} dimColor>
             {" "}
             ▸ expand: /inspect
@@ -397,7 +442,14 @@ function SubagentView({ cell }: { cell: ToolCell }) {
           <Text color={theme.muted}>{task}</Text>
         </Box>
       ) : null}
-      {!cell.collapsed && cell.result != null && (
+      {cell.collapsed && (errorPreview || successPreview) ? (
+        <Box paddingLeft={2}>
+          <Text color={errorPreview ? theme.danger : theme.muted} dimColor>
+            ↳ {errorPreview || successPreview}
+          </Text>
+        </Box>
+      ) : null}
+      {!cell.collapsed && hasUsefulResult && (
         <Box paddingLeft={2}>
           <ToolResult result={cell.result} />
         </Box>
@@ -480,6 +532,15 @@ function ErrorView({ cell }: { cell: ErrorCell }) {
 
 function NoticeView({ cell }: { cell: NoticeCell }) {
   const theme = useTheme()
+  if (cell.tone === "interrupted") {
+    return (
+      <Text>
+        <Text color={theme.muted}>── </Text>
+        <Text color={theme.warning}>Turn stopped by user</Text>
+        <Text color={theme.muted}> ──</Text>
+      </Text>
+    )
+  }
   return (
     <Text color={theme.muted} dimColor>
       • {cell.message}

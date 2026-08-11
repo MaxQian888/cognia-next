@@ -216,6 +216,23 @@ describe("canonicalEnvelopeToActions", () => {
     expect(canonicalEnvelopeToActions(envelope({ kind: "text-delta", delta: "hello" }))).toEqual([
       { type: "INFLIGHT_TEXT", delta: "hello" },
     ])
+    expect(
+      canonicalEnvelopeToActions(
+        envelope({
+          kind: "tool-call",
+          toolCallId: "tu-1",
+          toolName: "Read",
+          input: { path: "README.md" },
+        })
+      )
+    ).toEqual([
+      {
+        type: "TOOL_CALL",
+        callKey: "tu-1",
+        toolName: "Read",
+        input: { path: "README.md" },
+      },
+    ])
   })
 
   it("upserts and removes structured content parts by stable id", () => {

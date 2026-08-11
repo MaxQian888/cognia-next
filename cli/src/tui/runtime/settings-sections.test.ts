@@ -103,6 +103,31 @@ describe("settingsSections", () => {
     }
   })
 
+  it("exposes a credential editor for the active provider without revealing its secret", () => {
+    const missing = findRow(cfg({ provider: "openai" }), "model", "credential")!
+    expect(missing).toMatchObject({
+      label: "Credential",
+      value: "not configured",
+      control: { type: "credential" },
+    })
+
+    const configured = findRow(
+      cfg({ provider: "openai", providers: { openai: { apiKey: "sk-secret" } } }),
+      "model",
+      "credential"
+    )!
+    expect(configured.value).toBe("API key configured")
+    expect(JSON.stringify(configured)).not.toContain("sk-secret")
+
+    const tokenConfigured = findRow(
+      cfg({ provider: "anthropic", providers: { anthropic: { authToken: "token-secret" } } }),
+      "model",
+      "credential"
+    )!
+    expect(tokenConfigured.value).toBe("token configured")
+    expect(JSON.stringify(tokenConfigured)).not.toContain("token-secret")
+  })
+
   it("renders every row with an explicitly-set (non-default) config value", () => {
     // Exercises the value-present side of each row's `?? default` fallback so the
     // panel model is proven against a fully-customized config, not just an empty one.
@@ -195,8 +220,8 @@ describe("settingsSections", () => {
   })
 
   it("delegates provider/model/mode/thinking/subagent-models to existing commands", () => {
-    const rows = settingsSections(cfg())[0].rows
-    expect(rows.map((r) => (r.control as { command?: string }).command)).toEqual([
+    const rows = settingsSections(cfg())[0].rows.filter((row) => row.control.type === "delegate")
+    expect(rows.map((r) => (r.control as { command: string }).command)).toEqual([
       "/provider",
       "/model",
       "/mode",

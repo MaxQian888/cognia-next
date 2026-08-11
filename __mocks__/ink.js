@@ -42,6 +42,8 @@ function __fireInput(input, key = {}) {
 
 function __resetInk() {
   inputHandlers.clear()
+  suspendTerminalFn.mockReset()
+  suspendTerminalFn.mockImplementation(defaultSuspendTerminal)
 }
 
 // ── Components ────────────────────────────────────────────────────────────────
@@ -78,6 +80,9 @@ function passthroughTestProps(props) {
     if (props["data-testid"]) out["data-testid"] = props["data-testid"]
     if (props.flexGrow !== undefined) out["data-flex-grow"] = String(props.flexGrow)
     if (props.flexShrink !== undefined) out["data-flex-shrink"] = String(props.flexShrink)
+    if (props.justifyContent !== undefined)
+      out["data-justify-content"] = String(props.justifyContent)
+    if (props.width !== undefined) out["data-width"] = String(props.width)
     if (props.id) out.id = props.id
   }
   return out
@@ -118,8 +123,14 @@ function useInput(handler, options = {}) {
 }
 
 const exitFn = jest.fn()
+// Real Ink resolves `suspendTerminal(callback)` with void; it waits for the
+// callback but deliberately does not forward its return value.
+async function defaultSuspendTerminal(callback) {
+  await callback?.()
+}
+const suspendTerminalFn = jest.fn(defaultSuspendTerminal)
 function useApp() {
-  return { exit: exitFn }
+  return { exit: exitFn, suspendTerminal: suspendTerminalFn }
 }
 
 function useStdin() {
@@ -193,4 +204,5 @@ module.exports = {
   // Test helpers (not part of ink's public API).
   __fireInput,
   __resetInk,
+  __suspendTerminal: suspendTerminalFn,
 }

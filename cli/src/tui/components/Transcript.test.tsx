@@ -83,7 +83,7 @@ describe("Transcript", () => {
     expect(text).not.toContain("BANNER")
   })
 
-  it("still honors verbose in live mode", () => {
+  it("shows only the result preview unless live mode is verbose", () => {
     const cells: Cell[] = [
       {
         id: "t1",
@@ -92,11 +92,12 @@ describe("Transcript", () => {
         toolName: "read",
         input: { path: "f" },
         status: "done",
-        result: "LIVE_SECRET_BODY",
+        result: "preview\nLIVE_SECRET_BODY",
         collapsed: true,
       },
     ]
     const collapsed = render(<Transcript cells={cells} mode="live" />)
+    expect(collapsed.container.textContent ?? "").toContain("preview")
     expect(collapsed.container.textContent ?? "").not.toContain("LIVE_SECRET_BODY")
     const verbose = render(<Transcript cells={cells} mode="live" verbose />)
     expect(verbose.container.textContent ?? "").toContain("LIVE_SECRET_BODY")
@@ -157,7 +158,7 @@ describe("Transcript", () => {
     expect(text).toContain("beta")
   })
 
-  it("hides a collapsed tool result by default but reveals it in verbose mode", () => {
+  it("bounds a collapsed tool result to a preview but reveals it in verbose mode", () => {
     const cells: Cell[] = [
       {
         id: "t1",
@@ -166,11 +167,12 @@ describe("Transcript", () => {
         toolName: "read",
         input: { path: "f" },
         status: "done",
-        result: "SECRET_FILE_BODY",
+        result: "preview\nSECRET_FILE_BODY",
         collapsed: true,
       },
     ]
     const collapsed = render(<Transcript cells={cells} />)
+    expect(collapsed.container.textContent ?? "").toContain("preview")
     expect(collapsed.container.textContent ?? "").not.toContain("SECRET_FILE_BODY")
     const verbose = render(<Transcript cells={cells} verbose />)
     expect(verbose.container.textContent ?? "").toContain("SECRET_FILE_BODY")

@@ -20,7 +20,9 @@ import {
   contextComposition,
   formatCost,
   formatTokens,
+  hasCacheTelemetry,
   modelUsageRows,
+  sessionCacheSummary,
   usagePanelRows,
 } from "../../format/usage"
 import { contentRows } from "../../layout/terminal-layout"
@@ -120,6 +122,45 @@ function Composition({ usage }: { usage?: UsageInfo }) {
   )
 }
 
+function SessionCache({ totals, reported }: { totals?: SessionTotals; reported: boolean }) {
+  const theme = useTheme()
+  if (!totals || !reported) return null
+  const cache = sessionCacheSummary(totals)
+  if (cache.promptTokens <= 0) return null
+  const runs = stackedBar(
+    [
+      { value: cache.reusedTokens, color: theme.success },
+      { value: cache.createdTokens, color: theme.warning },
+      { value: cache.freshTokens, color: theme.info },
+    ],
+    30
+  )
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color={theme.muted}>Session cache</Text>
+      <Text>
+        <Text color={theme.success}>{Math.round(cache.hitRate * 100)}% hit</Text>
+        <Text dimColor>
+          {" · "}
+          {formatTokens(cache.reusedTokens)} reused / {formatTokens(cache.promptTokens)} prompt
+        </Text>
+      </Text>
+      <Text>
+        {runs.map((run, i) => (
+          <Text key={i} color={run.color}>
+            {run.text}
+          </Text>
+        ))}
+      </Text>
+      <Text dimColor>
+        <Text color={theme.success}>{formatTokens(cache.reusedTokens)} reused</Text>
+        <Text color={theme.warning}> {formatTokens(cache.createdTokens)} new</Text>
+        <Text color={theme.info}> {formatTokens(cache.freshTokens)} fresh</Text>
+      </Text>
+    </Box>
+  )
+}
+
 /**
  * Per-model cumulative breakdown — Claude Code's `/usage` "Usage by model"
  * section. One model per block: the id, then a dim detail line of input /
@@ -140,7 +181,7 @@ function UsageByModel({ modelTotals }: { modelTotals: Record<string, SessionTota
           <Text dimColor>
             {"  "}
             {row.input} in · {row.output} out · {row.cacheRead} cache r · {row.cacheWrite} cache w ·{" "}
-            <Text color={theme.success}>{row.cost}</Text>
+            {row.cacheHit} hit · <Text color={theme.success}>{row.cost}</Text>
           </Text>
         </Box>
       ))}
@@ -224,6 +265,13 @@ export function UsagePanel({
             {row.value}
           </Text>
         ))}
+        <SessionCache
+          totals={totals}
+          reported={
+            hasCacheTelemetry(usage) ||
+            (totals !== undefined && (totals.cacheReadTokens > 0 || totals.cacheCreationTokens > 0))
+          }
+        />
         <UsageByModel modelTotals={modelTotals} />
         <TokenTrend history={usageHistory} />
         <CostTrend history={costHistory} />

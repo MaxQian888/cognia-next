@@ -171,6 +171,19 @@ describe("buildStatusBar", () => {
     expect(Object.fromEntries(overridden.map((s) => [s.id, s])).ctx.text).toBe("10% ctx")
   })
 
+  it("uses current-window input rather than cumulative multi-leg billing in ctx", () => {
+    const segs = buildStatusBar({
+      config: base,
+      usage: {
+        inputTokens: 423_000,
+        contextInputTokens: 96_000,
+        cacheReadInputTokens: 90_000,
+      },
+      contextWindow: 1_000_000,
+    })
+    expect(Object.fromEntries(segs.map((s) => [s.id, s])).ctx.text).toBe("19% ctx")
+  })
+
   it("drops the git segment when not in a repo", () => {
     const segs = buildStatusBar({ config: withSB({ segments: ["git", "model"] }), git: null })
     expect(segs.map((s) => s.id)).toEqual(["model"])
@@ -320,7 +333,22 @@ describe("buildStatusBar", () => {
       config: withSB({ segments: ["cache"] }),
       usage: { inputTokens: 1000, cacheReadInputTokens: 1000 },
     })
-    expect(segs[0].text).toBe("⚡ 50%")
+    expect(segs[0].text).toBe("⚡ 50% · 1.0k reused")
+  })
+
+  it("hides unreported cache telemetry but shows an explicit zero hit rate", () => {
+    expect(
+      buildStatusBar({
+        config: withSB({ segments: ["cache"] }),
+        usage: { inputTokens: 1000 },
+      })
+    ).toEqual([])
+    expect(
+      buildStatusBar({
+        config: withSB({ segments: ["cache"] }),
+        usage: { inputTokens: 1000, cacheReadInputTokens: 0 },
+      })[0].text
+    ).toBe("⚡ 0%")
   })
 
   it("uses session totals for tokens + cost when given", () => {

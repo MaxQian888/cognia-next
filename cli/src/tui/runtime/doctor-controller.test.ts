@@ -151,13 +151,13 @@ describe("runDoctor", () => {
   })
 
   it("reports whether the configured external backend command is available", async () => {
-    const checkExternalCommand = jest.fn(async (command: string) => command === "npx")
+    const checkExternalCommand = jest.fn(async (command: string) => command === "claude-agent-acp")
     const actions = await run({ agentBackend: "claude-code" }, { checkExternalCommand })
-    expect(checkExternalCommand).toHaveBeenCalledWith("npx")
+    expect(checkExternalCommand).toHaveBeenCalledWith("claude-agent-acp")
     if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
       expect(actions[0].overlay.report).toMatchObject({
         agentBackend: "claude-code",
-        externalAgentCommand: "npx",
+        externalAgentCommand: "claude-agent-acp",
         externalAgentAvailable: true,
         externalAgentHooksActive: false,
         externalAgentTerminalActive: false,

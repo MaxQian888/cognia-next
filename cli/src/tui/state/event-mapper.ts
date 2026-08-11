@@ -336,7 +336,12 @@ export function canonicalEnvelopeToActions(envelope: AgentEventEnvelope): TuiAct
     case "tool-call":
       return [
         {
-          type: "TOOL_UPDATE",
+          // A canonical tool-call is still a real ordering boundary. Mapping it
+          // to TOOL_UPDATE left the preceding assistant text in `inflight`, so
+          // every tool card rendered first and all prose was committed at turn
+          // end. The reducer makes repeated snapshots idempotent by callKey and
+          // enriches their input in place.
+          type: "TOOL_CALL",
           callKey: event.toolCallId ?? toolCallKey(event.toolName, event.input),
           toolName: event.toolName,
           input: event.input,

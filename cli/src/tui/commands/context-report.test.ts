@@ -54,10 +54,35 @@ describe("buildContextReport", () => {
     }
     const report = buildContextReport(usage, config)
     // 120k reused of 200k prompt tokens = 60%.
-    expect(report).toContain("Cache hit:       60%")
+    expect(report).toContain("Cache hit:       60% · 120k reused")
+    expect(report).toContain("Cache write:     20% · 40k new")
+    expect(report).toContain("Fresh input:     20% · 40k uncached")
     expect(report).toContain("Composition:")
     expect(report).toContain("█ reused")
     expect(report).toContain("░ fresh")
+  })
+
+  it("keeps multi-leg cache composition within the current context window", () => {
+    const report = buildContextReport(
+      {
+        inputTokens: 423_000,
+        contextInputTokens: 96_000,
+        cacheReadInputTokens: 90_000,
+        cacheCreationInputTokens: 0,
+      },
+      config,
+      1_000_000
+    )
+    expect(report).toContain("Used:            186k / 1.0M (19%)")
+    expect(report).toContain("Cache hit:       48% · 90k reused")
+    expect(report).toContain("░ fresh 96k")
+    expect(report).not.toContain("░ fresh 423k")
+  })
+
+  it("labels missing cache telemetry instead of presenting it as a zero hit rate", () => {
+    const report = buildContextReport({ inputTokens: 100_000 }, config)
+    expect(report).toContain("Cache telemetry: not reported by provider")
+    expect(report).not.toContain("Cache hit:")
   })
 
   it("omits the cache/composition lines when there is no usage", () => {

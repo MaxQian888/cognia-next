@@ -121,15 +121,22 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
   // Owned here (not shared with App): clears the Ctrl+C double-press window after
   // the hint expires, so a single press doesn't linger waiting for a second.
   const ctrlCTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Mirror the armed timestamp synchronously. React may batch two terminal input
+  // events before the CTRL_C action re-renders App; consulting state alone then
+  // treats both presses as the first one and wrongly requires a third Ctrl+C.
+  const lastCtrlCAtRef = useRef<number | null>(deps.state.lastCtrlCAt ?? null)
   // Armed leader-chord prefix (OpenCode-style `"ctrl+x n"` bindings) + when it
   // was armed; lapses after LEADER_TIMEOUT_MS.
   const chordPrefixRef = useRef<{ prefix: string; at: number } | null>(null)
+  const escapeInterruptsOverlay =
+    deps.state.overlay.kind === "permission" || deps.state.overlay.kind === "askUser"
 
   const interruptConversation = (): void => {
     if (ctrlCTimer.current) {
       clearTimeout(ctrlCTimer.current)
       ctrlCTimer.current = null
     }
+    lastCtrlCAtRef.current = null
     if (deps.state.lastCtrlCAt) deps.dispatch({ type: "CLEAR_CTRL_C" })
     deps.agent.abort()
     deps.abortRuntime()
@@ -138,7 +145,14 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       deps.askUser.resolve({ selected: [], text: "", cancelled: true })
     }
     deps.disarmBacktrack()
-    deps.dispatch({ type: "NOTICE", message: "Interrupted" })
+    // A blocked permission/tool call may take time to unwind. Show the boundary
+    // immediately; TURN_ABORTED later moves this same marker behind any partial
+    // reply instead of appending a duplicate.
+    deps.dispatch({
+      type: "NOTICE",
+      message: "Turn stopped by user.",
+      tone: "interrupted",
+    })
   }
 
   useCriticalInput(
@@ -158,6 +172,7 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
             clearTimeout(ctrlCTimer.current)
             ctrlCTimer.current = null
           }
+          lastCtrlCAtRef.current = null
           if (deps.state.lastCtrlCAt) deps.dispatch({ type: "CLEAR_CTRL_C" })
           return
         }
@@ -166,23 +181,28 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
             clearTimeout(ctrlCTimer.current)
             ctrlCTimer.current = null
           }
+          lastCtrlCAtRef.current = null
           if (deps.state.lastCtrlCAt) deps.dispatch({ type: "CLEAR_CTRL_C" })
           deps.killForegroundBash()
           return
         }
         const at = deps.now()
-        if (deps.state.lastCtrlCAt && at - deps.state.lastCtrlCAt < DOUBLE_CTRL_C_MS) {
+        const previousAt = lastCtrlCAtRef.current
+        if (previousAt !== null && at - previousAt < DOUBLE_CTRL_C_MS) {
           if (ctrlCTimer.current) {
             clearTimeout(ctrlCTimer.current)
             ctrlCTimer.current = null
           }
+          lastCtrlCAtRef.current = null
           deps.doExit()
         } else {
+          lastCtrlCAtRef.current = at
           deps.dispatch({ type: "CTRL_C", at })
           deps.dispatch({ type: "NOTICE", message: "Press Ctrl+C again to exit" })
           if (ctrlCTimer.current) clearTimeout(ctrlCTimer.current)
           ctrlCTimer.current = setTimeout(() => {
             ctrlCTimer.current = null
+            lastCtrlCAtRef.current = null
             deps.dispatch({ type: "CLEAR_CTRL_C" })
           }, 3000)
         }
@@ -196,7 +216,7 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
         deps.cancelBackendInstall()
         return
       }
-      if (key.escape && deps.busy && deps.overlayOpen) interruptConversation()
+      if (key.escape && deps.busy && escapeInterruptsOverlay) interruptConversation()
     },
     {
       shouldHandle: (input, key) =>
@@ -204,7 +224,7 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
         (key.escape &&
           (deps.state.phase === "connecting" ||
             deps.state.phase === "installing" ||
-            (deps.busy && deps.overlayOpen))),
+            (deps.busy && escapeInterruptsOverlay))),
     }
   )
 
@@ -251,7 +271,6 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
         keybindings,
         renderPrefs,
         now,
-        agent,
         abortRuntime,
         hasForegroundRun,
         backgroundForegroundBash,
@@ -460,6 +479,29 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
               return
             }
           }
+          // A mapped transcript card is an interactive target, so it gets the
+          // first chance at a plain press before the selection controller turns
+          // that same press into a drag anchor. Empty transcript rows still fall
+          // through to normal text selection.
+          if (
+            mouse.kind === "click" &&
+            fullscreen &&
+            renderPrefs.clickToExpand &&
+            scrollContentRef.current
+          ) {
+            const contentPos = absoluteTopLeft(scrollContentRef.current)
+            if (contentPos) {
+              const contentHeight = measureElement(scrollContentRef.current).height || 0
+              const contentRow = mouse.row - 1 - contentPos.top
+              if (contentRow >= 0 && contentRow < contentHeight) {
+                const cellId = cursor.cellIdAtContentRow(contentRow)
+                if (cellId) {
+                  dispatch({ type: "TOGGLE_COLLAPSE", id: cellId })
+                  return
+                }
+              }
+            }
+          }
           // In-app text selection owns drags (and the repeat press of a double /
           // triple click). It deliberately declines a first plain press, so every
           // single-click behaviour below is untouched.
@@ -539,19 +581,6 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
                   const cmd = footerSegmentCommand(id)
                   if (cmd) runCommandLine(cmd)
                 }
-              }
-            }
-            // A click on a collapsed tool/thinking card toggles just that cell
-            // (the global Ctrl+T toggles all). Opt-in + fullscreen only: the row
-            // map needs per-cell heights, which are only measured when the
-            // click-to-expand pref keeps `cursor` measuring. The content box's
-            // `marginTop={-offset}` already encodes the scroll position, so the
-            // click row maps straight onto a content row.
-            if (fullscreen && renderPrefs.clickToExpand && scrollContentRef.current) {
-              const contentPos = absoluteTopLeft(scrollContentRef.current)
-              if (contentPos) {
-                const cellId = cursor.cellIdAtContentRow(mouse.row - 1 - contentPos.top)
-                if (cellId) dispatch({ type: "TOGGLE_COLLAPSE", id: cellId })
               }
             }
           }
@@ -753,9 +782,11 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
         // A live turn / background run: Esc interrupts (existing behaviour) and
         // cancels any half-armed backtrack.
         if (busy || state.activity) {
-          if (busy) agent.abort()
-          abortRuntime()
-          disarmBacktrack()
+          if (busy) interruptConversation()
+          else {
+            abortRuntime()
+            disarmBacktrack()
+          }
           return
         }
         // Idle: double-Esc enters backtrack-to-edit selection. Skip while the

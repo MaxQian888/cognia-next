@@ -3,7 +3,7 @@
  * context-window occupancy. Reuses the desktop's per-model context-window table
  * (`getModelContextWindow`) so the CLI and app agree.
  */
-import { getModelContextWindow } from "@/lib/claude/usage"
+import { getModelContextWindow, tokensInWindow } from "@/lib/claude/usage"
 import { costFromTokensUsd } from "@/lib/usage/pricing"
 import type { ModelPricing } from "@cognia/provider-types/provider"
 
@@ -94,13 +94,7 @@ export function accumulateModelTotals(
 
 /** Tokens currently occupying the context window (the prompt side of a turn). */
 export function contextTokens(usage: UsageInfo | undefined): number {
-  if (!usage) return 0
-  if (usage.contextTokens !== undefined) return usage.contextTokens
-  return (
-    (usage.inputTokens ?? 0) +
-    (usage.cacheReadInputTokens ?? 0) +
-    (usage.cacheCreationInputTokens ?? 0)
-  )
+  return usage ? tokensInWindow(usage) : 0
 }
 
 /**
@@ -120,16 +114,60 @@ export function contextPercent(
   return Math.max(0, Math.min(100, pct))
 }
 
+/** Whether the provider explicitly reported prefix-cache usage for this turn. */
+export function hasCacheTelemetry(usage: UsageInfo | undefined): boolean {
+  return usage?.cacheReadInputTokens !== undefined || usage?.cacheCreationInputTokens !== undefined
+}
+
+/** Prompt-side cache efficiency, shared by turn and session presentations. */
+export interface CacheSummary {
+  promptTokens: number
+  reusedTokens: number
+  createdTokens: number
+  freshTokens: number
+  hitRate: number
+  writeRate: number
+  freshRate: number
+}
+
+function buildCacheSummary(fresh: number, reused: number, created: number): CacheSummary {
+  const freshTokens = Math.max(0, fresh)
+  const reusedTokens = Math.max(0, reused)
+  const createdTokens = Math.max(0, created)
+  const promptTokens = freshTokens + reusedTokens + createdTokens
+  const ratio = (tokens: number) => (promptTokens > 0 ? tokens / promptTokens : 0)
+  return {
+    promptTokens,
+    reusedTokens,
+    createdTokens,
+    freshTokens,
+    hitRate: ratio(reusedTokens),
+    writeRate: ratio(createdTokens),
+    freshRate: ratio(freshTokens),
+  }
+}
+
+/** Summarize one turn's prompt cache composition. */
+export function cacheSummary(usage: UsageInfo | undefined): CacheSummary {
+  return buildCacheSummary(
+    usage?.contextInputTokens ?? usage?.inputTokens ?? 0,
+    usage?.cacheReadInputTokens ?? 0,
+    usage?.cacheCreationInputTokens ?? 0
+  )
+}
+
+/** Summarize the cumulative prompt cache composition for a session. */
+export function sessionCacheSummary(totals: SessionTotals): CacheSummary {
+  return buildCacheSummary(totals.inputTokens, totals.cacheReadTokens, totals.cacheCreationTokens)
+}
+
 /**
  * Fraction (0–1) of the prompt served from the prefix cache — the prefix-cache
  * hit rate the harness-design notes call out as the key cost lever. 0 when the
  * prompt side is empty.
  */
 export function cacheHitRatio(usage: UsageInfo | undefined): number {
-  if (!usage) return 0
-  const promptTotal = contextTokens(usage)
-  if (promptTotal <= 0) return 0
-  return (usage.cacheReadInputTokens ?? 0) / promptTotal
+  return cacheSummary(usage).hitRate
 }
 
 /** Token breakdown of a turn for the composition bar (prompt side + output). */
@@ -149,7 +187,7 @@ export function contextComposition(usage: UsageInfo | undefined): ContextComposi
   return {
     cacheRead: usage?.cacheReadInputTokens ?? 0,
     cacheCreation: usage?.cacheCreationInputTokens ?? 0,
-    fresh: usage?.inputTokens ?? 0,
+    fresh: usage?.contextInputTokens ?? usage?.inputTokens ?? 0,
     output: usage?.outputTokens ?? 0,
   }
 }
@@ -275,6 +313,7 @@ export function usagePanelRows(
   const window =
     windowOverride && windowOverride > 0 ? windowOverride : getModelContextWindow(modelId)
   const costKnown = hasBaseRate(pricing)
+  const cacheReported = hasCacheTelemetry(usage)
   const rows: UsageRow[] = [
     { label: "Model", value: modelId || "default" },
     { label: "Input", value: formatTokens(u.inputTokens) },
@@ -288,20 +327,47 @@ export function usagePanelRows(
       label: "Total",
       value: formatTokens((u.inputTokens ?? 0) + (u.outputTokens ?? 0)),
     },
-    { label: "Cache read", value: formatTokens(u.cacheReadInputTokens) },
-    { label: "Cache write", value: formatTokens(u.cacheCreationInputTokens) },
-    { label: "Cache hit", value: `${Math.round(cacheHitRatio(usage) * 100)}%` },
+    {
+      label: "Cache read",
+      value: cacheReported ? formatTokens(u.cacheReadInputTokens) : "not reported",
+    },
+    {
+      label: "Cache write",
+      value: cacheReported ? formatTokens(u.cacheCreationInputTokens) : "not reported",
+    },
+    {
+      label: "Cache hit",
+      value: cacheReported ? `${Math.round(cacheHitRatio(usage) * 100)}%` : "not reported",
+    },
     {
       label: "Context",
       value: `${contextPercent(usage, modelId, window)}% of ${formatTokens(window)}`,
     },
   ]
   if (totals) {
+    const sessionCache = sessionCacheSummary(totals)
+    const sessionCacheReported =
+      cacheReported || totals.cacheReadTokens > 0 || totals.cacheCreationTokens > 0
     rows.push(
       { label: "Session input", value: formatTokens(totals.inputTokens) },
       { label: "Session output", value: formatTokens(totals.outputTokens) },
-      { label: "Session cache r", value: formatTokens(totals.cacheReadTokens) },
-      { label: "Session cache w", value: formatTokens(totals.cacheCreationTokens) },
+      {
+        label: "Session cache r",
+        value: sessionCacheReported ? formatTokens(totals.cacheReadTokens) : "not reported",
+      },
+      {
+        label: "Session cache w",
+        value: sessionCacheReported ? formatTokens(totals.cacheCreationTokens) : "not reported",
+      },
+      ...(sessionCacheReported
+        ? [
+            { label: "Session prompt", value: formatTokens(sessionCache.promptTokens) },
+            {
+              label: "Session cache hit",
+              value: `${Math.round(sessionCache.hitRate * 100)}%`,
+            },
+          ]
+        : []),
       { label: "Session tokens", value: formatTokens(totals.inputTokens + totals.outputTokens) },
       { label: "Session cost", value: formatCostKnown(totals.costUsd, costKnown) },
       {
@@ -326,6 +392,7 @@ export interface ModelUsageRow {
   output: string
   cacheRead: string
   cacheWrite: string
+  cacheHit: string
   cost: string
   /** Raw cost for sorting/sharing — heaviest model first. */
   costUsd: number
@@ -342,16 +409,23 @@ export interface ModelUsageRow {
  */
 export function modelUsageRows(modelTotals: Record<string, SessionTotals>): ModelUsageRow[] {
   return Object.entries(modelTotals)
-    .map(([model, t]) => ({
-      model,
-      input: formatTokens(t.inputTokens),
-      output: formatTokens(t.outputTokens),
-      cacheRead: formatTokens(t.cacheReadTokens),
-      cacheWrite: formatTokens(t.cacheCreationTokens),
-      cost: formatCost(t.costUsd),
-      costUsd: t.costUsd,
-      totalTokens: t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheCreationTokens,
-    }))
+    .map(([model, t]) => {
+      const cache = sessionCacheSummary(t)
+      return {
+        model,
+        input: formatTokens(t.inputTokens),
+        output: formatTokens(t.outputTokens),
+        cacheRead: formatTokens(t.cacheReadTokens),
+        cacheWrite: formatTokens(t.cacheCreationTokens),
+        cacheHit:
+          t.cacheReadTokens > 0 || t.cacheCreationTokens > 0
+            ? `${Math.round(cache.hitRate * 100)}%`
+            : "—",
+        cost: formatCost(t.costUsd),
+        costUsd: t.costUsd,
+        totalTokens: t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheCreationTokens,
+      }
+    })
     .filter((r) => r.totalTokens > 0)
     .sort(
       (a, b) =>

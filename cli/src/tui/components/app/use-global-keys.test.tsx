@@ -20,6 +20,7 @@ import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { AskUserOverlayApi } from "../../hooks/use-ask-user-overlay"
 import type { SelectionController } from "../../selection/selection-controller"
 import { TuiInputProvider, useModalInput } from "../../input/input-router"
+import { AgentRunPage } from "../overlays/AgentRunPage"
 
 jest.mock("../../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
 const mockPos = absoluteTopLeft as jest.Mock
@@ -121,6 +122,20 @@ describe("useGlobalKeys", () => {
     expect(deps.doExit).toHaveBeenCalled()
   })
 
+  it("exits on two Ctrl+C events even when React batches them before a re-render", () => {
+    let now = 1000
+    const deps = buildDeps({ now: () => now })
+    render(<Harness deps={deps} />)
+
+    act(() => {
+      __fireInput("c", { ctrl: true })
+      now = 1500
+      __fireInput("c", { ctrl: true })
+    })
+
+    expect(deps.doExit).toHaveBeenCalledTimes(1)
+  })
+
   it("kills a foreground bash run on Ctrl+C", () => {
     const deps = buildDeps({
       hasForegroundRun: jest.fn(() => true),
@@ -156,6 +171,11 @@ describe("useGlobalKeys", () => {
     act(() => __fireInput("", { escape: true }))
     expect(deps.agent.abort).toHaveBeenCalled()
     expect(deps.abortRuntime).toHaveBeenCalled()
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "NOTICE",
+      message: "Turn stopped by user.",
+      tone: "interrupted",
+    })
   })
 
   it("interrupts a live turn on Ctrl+C even when the composer has a draft", () => {
@@ -211,6 +231,62 @@ describe("useGlobalKeys", () => {
     act(() => __fireInput("", { escape: true }))
     expect(deps.agent.abort).toHaveBeenCalled()
     expect(deps.dispatch).toHaveBeenCalledWith({ type: "OVERLAY_CLOSE" })
+  })
+
+  it("lets an agent-run modal consume Esc without interrupting either run", () => {
+    const initial = createInitialState(config, "s1", true, [])
+    const deps = buildDeps({
+      busy: true,
+      overlayOpen: true,
+      state: {
+        ...initial,
+        turnStatus: "streaming",
+        overlay: {
+          kind: "agentRun",
+          liveId: "live-1",
+          name: "reviewer",
+          task: "review the input router",
+        },
+      } as TuiState,
+    })
+    const onClose = jest.fn()
+    const onStopTask = jest.fn()
+    render(
+      <TuiInputProvider>
+        <Harness deps={deps} />
+        <AgentRunPage
+          liveId="live-1"
+          name="reviewer"
+          task="review the input router"
+          now={2_000}
+          getEntry={() => ({
+            liveId: "live-1",
+            name: "reviewer",
+            task: "review the input router",
+            sessionId: "s1",
+            status: "running",
+            startedAt: 1_000,
+            runtimeTaskId: "runtime-1",
+            text: "",
+            thinking: "",
+            tools: [],
+            timeline: [],
+            toolUseCount: 0,
+            approxChars: 0,
+            version: 0,
+          })}
+          onClose={onClose}
+          onStopTask={onStopTask}
+        />
+      </TuiInputProvider>
+    )
+
+    act(() => __fireInput("", { escape: true }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onStopTask).not.toHaveBeenCalled()
+    expect(deps.agent.abort).not.toHaveBeenCalled()
+    expect(deps.abortRuntime).not.toHaveBeenCalled()
   })
 
   it("toggles all collapse on the collapseAll chord (Ctrl+T)", () => {
@@ -331,6 +407,25 @@ function fakeSelection(over: Partial<SelectionController> = {}) {
 }
 
 describe("useGlobalKeys — text selection", () => {
+  it("lets a tool-card click expand before the selection controller consumes it", () => {
+    mockPos.mockReturnValue({ top: 0, left: 0 })
+    const selection = fakeSelection({ handleMouse: jest.fn(() => true) })
+    const deps = buildDeps({
+      fullscreen: true,
+      renderPrefs: { ...resolveRenderConfig(undefined), clickToExpand: true },
+      selectionMode: "auto-copy",
+      selection: { current: selection },
+      scrollContentRef: { current: {} as never },
+      cursor: {
+        state: { find: null },
+        cellIdAtContentRow: jest.fn(() => "tool-1"),
+      } as unknown as TranscriptCursor,
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("[<0;5;3M"))
+    expect(deps.dispatch).toHaveBeenCalledWith({ type: "TOGGLE_COLLAPSE", id: "tool-1" })
+  })
+
   it("routes mouse events to the selection controller and stops when it consumes one", () => {
     const selection = fakeSelection({ handleMouse: jest.fn(() => true) })
     const deps = buildDeps({

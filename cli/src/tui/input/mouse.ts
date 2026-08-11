@@ -73,7 +73,13 @@ export function parseMouseEvent(input: string): MouseEvent | null {
   if (!m) return null
   const button = Number(m[1])
   if ((button & WHEEL_BIT) !== 0) {
-    return { kind: "wheel", dir: (button & DIR_BIT) === 0 ? "up" : "down" }
+    const direction = button & BUTTON_MASK
+    // SGR uses 64/65 for vertical up/down and 66/67 for horizontal left/right.
+    // A trackpad routinely emits small horizontal momentum alongside a vertical
+    // gesture; mapping 66/67 through bit 0 turns that jitter into alternating
+    // up/down events and makes the viewport visibly rebound.
+    if (direction > DIR_BIT) return { kind: "other" }
+    return { kind: "wheel", dir: direction === 0 ? "up" : "down" }
   }
   const col = Number(m[2])
   const row = Number(m[3])

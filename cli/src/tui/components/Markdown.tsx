@@ -272,15 +272,11 @@ export function MarkdownLine({
   )
   switch (line.kind) {
     case "heading": {
-      // Render the level marker and the inline spans as sibling <Text> nodes.
-      // Mixing a raw string ("### ") directly with the styled span array inside
-      // one colored <Text> could drop the heading's inline content in some
-      // terminals; an all-element child list renders reliably.
-      //
       // Differentiate all six levels so a long reply's structure reads at a
       // glance: h1 cyan + underline, h2 blue, h3 magenta, all bold; h4 keeps the
-      // h3 colour but turns italic; h5/h6 drop to dim muted. The `#` markers are
-      // dimmed so the text dominates.
+      // h3 colour but turns italic; h5/h6 drop to dim muted. The parser already
+      // identified this as a heading, so rendering the source `#` marker again
+      // makes valid markdown look unparsed in the terminal.
       const color =
         line.level === 1
           ? theme.heading1
@@ -298,7 +294,6 @@ export function MarkdownLine({
             underline={line.level === 1}
             dimColor={line.level >= 5}
           >
-            <Text dimColor>{"#".repeat(line.level)} </Text>
             {spansText(line.spans)}
           </Text>
         </Box>

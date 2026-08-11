@@ -11,4 +11,7 @@ export {}
 declare module "ink" {
   export function __fireInput(input: string, key?: Record<string, boolean>): void
   export function __resetInk(): void
+  export const __suspendTerminal: jest.MockedFunction<
+    (callback?: () => void | Promise<void>) => Promise<void>
+  >
 }

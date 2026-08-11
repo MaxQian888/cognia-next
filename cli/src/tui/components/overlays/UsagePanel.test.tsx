@@ -76,7 +76,32 @@ describe("UsagePanel", () => {
     expect(text).toContain("claude-opus-4-8")
     expect(text).toContain("claude-haiku-4-5")
     expect(text).toContain("64.8M cache r")
+    expect(text).toContain("98% hit")
     expect(text).toContain("$51.18")
+  })
+
+  it("renders cumulative session cache efficiency and composition", () => {
+    const { container } = render(
+      <UsagePanel
+        usage={{ inputTokens: 10, cacheReadInputTokens: 0 }}
+        totals={{
+          costUsd: 0,
+          inputTokens: 100,
+          outputTokens: 25,
+          cacheReadTokens: 300,
+          cacheCreationTokens: 100,
+          durationMs: 0,
+        }}
+        onClose={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("Session cache")
+    expect(text).toContain("60% hit")
+    expect(text).toContain("300 reused")
+    expect(text).toContain("100 new")
+    expect(text).toContain("100 fresh")
+    expect(text).toContain("500 prompt")
   })
 
   it("hides the per-model breakdown when only one model has run", () => {

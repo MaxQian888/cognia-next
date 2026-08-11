@@ -88,6 +88,7 @@ function BottomStatusImpl({
   sessionId,
   getLiveEntries = listLiveSubagents,
   agentTreeRef,
+  suppressAgentTree = false,
 }: {
   turnStatus: TurnStatus
   activity?: ActivityState
@@ -123,6 +124,9 @@ function BottomStatusImpl({
   getLiveEntries?: (owner?: string) => SubagentLiveEntry[]
   /** Published hit-test state for clicks on the running-agents tree. */
   agentTreeRef?: React.MutableRefObject<AgentTreeHit | null>
+  /** A modal agents panel already owns this information; keep the turn status
+   * visible there without painting a duplicate live tree underneath it. */
+  suppressAgentTree?: boolean
 }) {
   const theme = useTheme()
   const busy = turnStatus !== "idle"
@@ -177,7 +181,10 @@ function BottomStatusImpl({
       clearInterval(id)
     }
   }, [treePolling, sessionId, getLiveEntries])
-  const visibleTree = React.useMemo(() => treeRows.slice(0, TREE_MAX_AGENTS), [treeRows])
+  const visibleTree = React.useMemo(
+    () => (suppressAgentTree ? [] : treeRows.slice(0, TREE_MAX_AGENTS)),
+    [suppressAgentTree, treeRows]
+  )
   const hiddenTree = treeRows.length - visibleTree.length
 
   // Publish the hit-test state for the App-level mouse handler. Written in an

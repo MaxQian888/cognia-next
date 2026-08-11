@@ -2,6 +2,7 @@ import {
   inflightSubagentRows,
   isSubagentTool,
   runningSubagents,
+  subagentDispatchCount,
   subagentName,
   subagentTask,
 } from "./subagent"
@@ -24,6 +25,7 @@ describe("isSubagentTool", () => {
     expect(isSubagentTool("dispatch_agent")).toBe(true)
     expect(isSubagentTool("Agent")).toBe(true)
     expect(isSubagentTool("DISPATCH_AGENT")).toBe(true)
+    expect(isSubagentTool("mcp__cognia_tools__dispatch_agent")).toBe(true)
   })
 
   it("rejects ordinary tools", () => {
@@ -49,6 +51,19 @@ describe("subagentName", () => {
   it("falls back to a generic label and truncates long ids", () => {
     expect(subagentName({})).toBe("agent")
     expect(subagentName({ subagent_type: "x".repeat(60) })).toHaveLength(40)
+  })
+
+  it("labels one batched dispatch by its real parallel width", () => {
+    const input = {
+      dispatches: [
+        { subagentId: "frontend", prompt: "review UI" },
+        { subagentId: "backend", prompt: "review runtime" },
+        { subagentId: "tests", prompt: "review tests" },
+      ],
+    }
+    expect(subagentDispatchCount(input)).toBe(3)
+    expect(subagentName(input)).toBe("3 agents")
+    expect(subagentTask(input)).toBe("frontend · backend · tests")
   })
 })
 
@@ -77,6 +92,22 @@ describe("runningSubagents", () => {
       tool({ id: "c", toolName: "dispatch_agent", input: { subagentId: "planner" } }),
     ])
     expect(result).toEqual({ name: "planner", count: 2 })
+  })
+
+  it("counts every sibling represented by a parallel batch", () => {
+    const result = runningSubagents([
+      tool({
+        toolName: "dispatch_agent",
+        input: {
+          dispatches: [
+            { subagentId: "a", prompt: "a" },
+            { subagentId: "b", prompt: "b" },
+            { subagentId: "c", prompt: "c" },
+          ],
+        },
+      }),
+    ])
+    expect(result).toEqual({ name: "3 agents", count: 3 })
   })
 })
 

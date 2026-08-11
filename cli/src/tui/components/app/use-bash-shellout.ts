@@ -6,6 +6,10 @@ import type { ShellResult, RunShellOpts } from "../../../agent/run-shell"
 import { detectInteractiveCommand } from "@/lib/claude/permissions/interactive-command"
 
 type RunShell = (command: string, opts: RunShellOpts) => Promise<ShellResult>
+type RunInteractiveShell = (
+  command: string,
+  opts: Pick<RunShellOpts, "cwd" | "signal">
+) => Promise<ShellResult>
 
 /** A captured foreground `!command` failure, fed to `/analyze`. */
 export interface BashFailure {
@@ -73,7 +77,8 @@ interface LiveRun {
 export function useBashShellout(
   runShell: RunShell,
   cwd: string,
-  dispatch: Dispatch<TuiAction>
+  dispatch: Dispatch<TuiAction>,
+  runInteractiveShell?: RunInteractiveShell
 ): BashShellout {
   // Registry of every live run keyed by cell id. Entries are added by `runBash`
   // and removed when the process settles (result or spawn error) — so the map
@@ -164,29 +169,35 @@ export function useBashShellout(
       runsRef.current.set(id, { command, controller, startedAt: Date.now(), background: false })
       foregroundIdRef.current = id
       dispatch({ type: "BASH_START", command, id })
-      // A `!command` has no TTY here; if it needs one, tell the user they can
-      // still drive line-based prompts (y/n, passphrase) via the composer.
-      if (detectInteractiveCommand(command).interactive) {
+      const interactive = detectInteractiveCommand(command).interactive
+      if (interactive) {
         dispatch({
           type: "NOTICE",
-          message: "Interactive command — type input + Enter to send it; Ctrl+C to kill",
+          message: "Interactive terminal opened · use the program's native exit key or Ctrl+C",
         })
       }
-      void Promise.resolve(
-        runShell(command, {
-          cwd,
-          signal: controller.signal,
-          // Stream output live into the cell; the final BASH_RESULT reflows it to
-          // the clean formatted form (trim + exit note) once the process exits.
-          onChunk: (chunk) => dispatch({ type: "BASH_APPEND", chunk, id }),
-          // Hand back a stdin writer so a submitted composer line can reach this
-          // run while it holds the foreground.
-          registerInput: (write) => {
-            const run = runsRef.current.get(id)
-            if (run) run.writeInput = write
-          },
-        })
-      )
+      const task = interactive
+        ? runInteractiveShell
+          ? runInteractiveShell(command, { cwd, signal: controller.signal })
+          : Promise.resolve<ShellResult>({
+              stdout: "",
+              stderr: "Interactive terminal runner is unavailable",
+              code: 1,
+            })
+        : runShell(command, {
+            cwd,
+            signal: controller.signal,
+            // Stream output live into the cell; the final BASH_RESULT reflows it to
+            // the clean formatted form (trim + exit note) once the process exits.
+            onChunk: (chunk) => dispatch({ type: "BASH_APPEND", chunk, id }),
+            // Hand back a stdin writer so a submitted composer line can reach this
+            // run while it holds the foreground.
+            registerInput: (write) => {
+              const run = runsRef.current.get(id)
+              if (run) run.writeInput = write
+            },
+          })
+      void Promise.resolve(task)
         .then((r) => {
           const wasForeground = foregroundIdRef.current === id
           if (wasForeground) foregroundIdRef.current = null
@@ -223,7 +234,7 @@ export function useBashShellout(
           })
         })
     },
-    [runShell, cwd, dispatch, backgroundForegroundBash]
+    [runShell, cwd, dispatch, backgroundForegroundBash, runInteractiveShell]
   )
 
   const hasForegroundRun = useCallback(() => foregroundIdRef.current !== null, [])

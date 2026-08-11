@@ -296,6 +296,20 @@ describe("BottomStatus running-agents tree", () => {
     )
     expect(container.textContent ?? "").toContain("◆ reviewer×2")
   })
+
+  it("hides the duplicated running-agent tree while the agents panel is open", () => {
+    const { container } = renderWithTree(
+      <BottomStatus
+        turnStatus="streaming"
+        since={Date.now()}
+        sessionId="s1"
+        suppressAgentTree
+        getLiveEntries={() => [liveEntry()]}
+      />
+    )
+    expect(container.textContent ?? "").not.toContain("Running 1 agent…")
+    expect(container.textContent ?? "").toContain("esc to interrupt")
+  })
 })
 
 describe("agentTreeRowTarget", () => {

@@ -16,6 +16,12 @@ const sections: SettingsSectionView[] = [
         value: "anthropic",
         control: { type: "delegate", command: "/provider" },
       },
+      {
+        id: "credential",
+        label: "Credential",
+        value: "API key configured",
+        control: { type: "credential" },
+      },
     ],
   },
   {
@@ -123,6 +129,12 @@ describe("SettingsOverlay", () => {
     const { onActivate } = setup({ section: 0, index: 0 })
     __fireInput("", { return: true })
     expect(onActivate).toHaveBeenCalledWith(sections[0].rows[0])
+  })
+
+  it("Enter activates a credential row", () => {
+    const { onActivate } = setup({ section: 0, index: 1 })
+    __fireInput("", { return: true })
+    expect(onActivate).toHaveBeenCalledWith(sections[0].rows[1])
   })
 
   it("Enter cycles an enum row forward", () => {

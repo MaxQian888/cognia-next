@@ -81,7 +81,7 @@ import { listCliBackgroundRuns } from "../../../agent/subagent-background-tasks"
 import { refreshAgentPanelRows } from "../../runtime/agents-panel-model"
 import { buildConvDetail } from "../../runtime/agent-stats-model"
 import { formatToolResultBody } from "../../commands/expand-command"
-import { cycleEnum, applyTargetDefault } from "../../runtime/settings-sections"
+import { cycleEnum, applyTargetDefault, settingsSections } from "../../runtime/settings-sections"
 import { EFFORT_SLIDER_LEVELS, PERMISSION_MODES } from "../../../config/schema"
 import { deriveEffortSliderState, modelSupportsEffort } from "../../../config/thinking"
 import { bufferFromText } from "../../input/buffer"
@@ -159,6 +159,64 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
   } = props
   const theme = useTheme()
   const itemRows = Math.max(1, contentRows(viewportRows, OVERLAY_CHROME_ROWS))
+  const openReturnedSettings = (
+    target: { section: number; index: number } | undefined,
+    config: TuiState["config"]
+  ) => {
+    if (!target) return
+    dispatch({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "settings",
+        sections: settingsSections(config, state.backendCapabilities),
+        section: target.section,
+        index: target.index,
+      },
+    })
+  }
+  const openReturnedProvider = (
+    target: {
+      index: number
+      query?: string
+      returnToSettings?: { section: number; index: number }
+    },
+    config: TuiState["config"]
+  ) => {
+    dispatch({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "provider",
+        options: collectProviderOptions(config),
+        index: target.index,
+        query: target.query ?? "",
+        ...(target.returnToSettings ? { returnToSettings: target.returnToSettings } : {}),
+      },
+    })
+  }
+  const activateProvider = async (
+    providerId: string,
+    model: string | undefined,
+    returnToSettings: { section: number; index: number } | undefined,
+    nextConfig: TuiState["config"]
+  ) => {
+    persist("provider", providerId)
+    if (!isBuiltinBackend(state.config.agentBackend)) {
+      // `provider` belongs to Cognia's built-in runtime. External agents such
+      // as Claude Code own their provider/model connection; tearing their live
+      // ACP session down for this unrelated preference can make the next prompt
+      // resume a cancelled protocol session (`-32603`). Save the preference for
+      // the next built-in session, but leave the hosted agent untouched.
+      dispatch({ type: "SET_PROVIDER", provider: providerId })
+      dispatch({
+        type: "NOTICE",
+        message: `Saved built-in provider "${providerId}"; active ${state.config.agentBackend} backend is unchanged.`,
+      })
+      openReturnedSettings(returnToSettings, nextConfig)
+      return
+    }
+    await agent.switchProvider(providerId, model)
+    openReturnedSettings(returnToSettings, nextConfig)
+  }
 
   // MCP rows are projected into the unified view at READ time rather than being
   // mirrored into `state.logs` at ingest, so nothing is stored twice and the
@@ -328,12 +386,15 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           // model so no stale id bleeds across providers. While an external
           // agent hosts, provider selection must not inject that chat default
           // into the hosted agent; its model lives in the backend namespace.
-          const activate = (p: ProviderOption) => {
+          const activate = async (p: ProviderOption) => {
             const defaultModel = isBuiltinBackend(state.config.agentBackend)
               ? (state.config.providers[p.id]?.model ?? catalogModelIds(p.id)[0])
               : undefined
-            persist("provider", p.id)
-            void agent.switchProvider(p.id, defaultModel)
+            await activateProvider(p.id, defaultModel, providerOverlay.returnToSettings, {
+              ...state.config,
+              provider: p.id,
+              ...(defaultModel ? { model: defaultModel } : {}),
+            })
           }
           return (
             <SelectList
@@ -354,15 +415,18 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               onSelect={(i) => {
                 const picked = filtered[i]
                 if (!picked) return
-                // Already-credentialed providers, and those that authenticate
-                // without a metered key (local runtimes, OAuth/subscription),
-                // just switch. Only a key-required provider with no credential
-                // opens the inline key prompt — so the session never lands on a
-                // provider it can't authenticate to.
-                if (picked.configured || !picked.requiresKey) {
-                  activate(picked)
+                // Key-less providers switch directly. A credentialed provider
+                // opens the same masked editor used to add a key, so selecting
+                // it never becomes a dead-end "skip" action: the user can reveal
+                // or replace the stored value before switching.
+                if (!picked.configured && !picked.requiresKey) {
+                  void activate(picked)
                   return
                 }
+                const configured = state.config.providers[picked.id]
+                const credentialKind =
+                  configured?.authToken && !configured.apiKey ? "authToken" : "apiKey"
+                const existingSecret = configured?.[credentialKind] ?? ""
                 const defaultModel = isBuiltinBackend(state.config.agentBackend)
                   ? (state.config.providers[picked.id]?.model ?? catalogModelIds(picked.id)[0])
                   : undefined
@@ -372,15 +436,30 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
                     kind: "providerKey",
                     providerId: picked.id,
                     providerName: picked.name,
-                    credentialKind: "apiKey",
-                    value: "",
+                    credentialKind,
+                    value: existingSecret,
                     reveal: false,
+                    ...(existingSecret ? { existing: true } : {}),
                     ...(defaultModel ? { model: defaultModel } : {}),
                     ...(picked.keyUrl ? { keyUrl: picked.keyUrl } : {}),
+                    returnToProvider: {
+                      index: i,
+                      query,
+                      ...(providerOverlay.returnToSettings
+                        ? { returnToSettings: providerOverlay.returnToSettings }
+                        : {}),
+                    },
+                    ...(providerOverlay.returnToSettings
+                      ? { returnToSettings: providerOverlay.returnToSettings }
+                      : {}),
                   },
                 })
               }}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+              onCancel={() => {
+                if (providerOverlay.returnToSettings)
+                  openReturnedSettings(providerOverlay.returnToSettings, state.config)
+                else dispatch({ type: "OVERLAY_CLOSE" })
+              }}
             />
           )
         })()}
@@ -393,11 +472,18 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               credentialKind={keyOverlay.credentialKind}
               value={keyOverlay.value}
               reveal={keyOverlay.reveal}
+              existing={keyOverlay.existing}
               {...(keyOverlay.keyUrl ? { keyUrl: keyOverlay.keyUrl } : {})}
               {...(keyOverlay.error ? { error: keyOverlay.error } : {})}
               onInput={(value) => dispatch({ type: "OVERLAY_PROVIDER_KEY_INPUT", value })}
               onToggleReveal={() => dispatch({ type: "OVERLAY_PROVIDER_KEY_REVEAL" })}
-              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+              onCancel={() => {
+                if (keyOverlay.returnToProvider)
+                  openReturnedProvider(keyOverlay.returnToProvider, state.config)
+                else if (keyOverlay.returnToSettings)
+                  openReturnedSettings(keyOverlay.returnToSettings, state.config)
+                else dispatch({ type: "OVERLAY_CLOSE" })
+              }}
               onSubmit={() => {
                 const secret = keyOverlay.value.trim()
                 if (!secret) {
@@ -428,8 +514,23 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
                   credentialKind: keyOverlay.credentialKind,
                   secret,
                 })
-                persist("provider", keyOverlay.providerId)
-                void agent.switchProvider(keyOverlay.providerId, keyOverlay.model)
+                void activateProvider(
+                  keyOverlay.providerId,
+                  keyOverlay.model,
+                  keyOverlay.returnToSettings,
+                  {
+                    ...state.config,
+                    provider: keyOverlay.providerId,
+                    ...(keyOverlay.model ? { model: keyOverlay.model } : {}),
+                    providers: {
+                      ...state.config.providers,
+                      [keyOverlay.providerId]: {
+                        ...state.config.providers[keyOverlay.providerId],
+                        [keyOverlay.credentialKind]: secret,
+                      },
+                    },
+                  }
+                )
                 dispatch({
                   type: "NOTICE",
                   message: `Saved ${keyOverlay.credentialKind === "authToken" ? "token" : "API key"} and switched to "${keyOverlay.providerName}".`,

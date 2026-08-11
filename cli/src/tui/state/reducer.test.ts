@@ -649,10 +649,54 @@ describe("tuiReducer", () => {
     expect(s.turnStatus).toBe("idle")
   })
 
-  it("TURN_ABORTED appends an Interrupted error cell", () => {
-    const s = reduce(base(), { type: "INFLIGHT_TEXT", delta: "partial" }, { type: "TURN_ABORTED" })
-    expect(s.cells.map((c) => c.kind)).toEqual(["assistant", "error"])
-    expect(s.cells.at(-1)).toMatchObject({ message: "Interrupted." })
+  it("TURN_ABORTED cancels running tools and appends a neutral interruption notice", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "agent", toolName: "dispatch_agent", input: {} },
+      { type: "INFLIGHT_TEXT", delta: "partial" },
+      { type: "TURN_ABORTED" }
+    )
+    expect(s.cells.map((c) => c.kind)).toEqual(["tool", "assistant", "notice"])
+    expect(s.cells[0]).toMatchObject({
+      kind: "tool",
+      status: "cancelled",
+      result: "Cancelled by user.",
+    })
+    expect(s.cells.at(-1)).toMatchObject({
+      message: "Turn stopped by user.",
+      tone: "interrupted",
+    })
+  })
+
+  it("moves an immediate interruption marker behind the settled partial turn", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "agent", toolName: "dispatch_agent", input: {} },
+      {
+        type: "NOTICE",
+        message: "Turn stopped by user.",
+        tone: "interrupted",
+      },
+      { type: "INFLIGHT_TEXT", delta: "partial" },
+      { type: "TURN_ABORTED" }
+    )
+    expect(s.cells.map((cell) => cell.kind)).toEqual(["tool", "assistant", "notice"])
+    expect(s.cells.filter((cell) => cell.kind === "notice")).toHaveLength(1)
+    expect(s.cells.at(-1)).toMatchObject({ tone: "interrupted" })
+  })
+
+  it("TURN_ERROR never commits a still-running tool", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "read", toolName: "read", input: {} },
+      { type: "TURN_ERROR", message: "provider disconnected" }
+    )
+    expect(s.cells[0]).toMatchObject({
+      kind: "tool",
+      status: "error",
+      isError: true,
+      result: "Turn ended before this tool completed: provider disconnected",
+    })
   })
 
   it("TOGGLE_COLLAPSE flips tool and thinking cells but ignores others", () => {
@@ -690,6 +734,52 @@ describe("tuiReducer", () => {
     s = reduce(s, { type: "TOOL_CALL", callKey: "ls:.", toolName: "ls", input: { path: "." } })
     expect(s.inflight.tools.length).toBe(toolCount)
     expect(s.cells.filter((c) => c.kind === "assistant").length).toBe(1)
+  })
+
+  it("TOOL_CALL enriches a repeated canonical snapshot without adding another card", () => {
+    let s = reduce(base(), {
+      type: "TOOL_CALL",
+      callKey: "tu-1",
+      toolName: "Read",
+      input: {},
+    })
+    s = reduce(s, {
+      type: "TOOL_CALL",
+      callKey: "tu-1",
+      toolName: "Read",
+      input: { path: "README.md" },
+      displayTitle: "Read README.md",
+    })
+
+    expect(s.inflight.tools).toHaveLength(1)
+    expect(s.inflight.tools[0]).toMatchObject({
+      callKey: "tu-1",
+      input: { path: "README.md" },
+      displayTitle: "Read README.md",
+      status: "running",
+    })
+  })
+
+  it("TOOL_CALL ignores a repeated snapshot after the correlated result settled", () => {
+    let s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "tu-1", toolName: "Read", input: {} },
+      { type: "TOOL_RESULT", callKey: "tu-1", toolName: "Read", result: "done" }
+    )
+    s = reduce(s, {
+      type: "TOOL_CALL",
+      callKey: "tu-1",
+      toolName: "Read",
+      input: { path: "README.md" },
+    })
+
+    expect(s.inflight.tools).toHaveLength(1)
+    expect(s.inflight.tools[0]).toMatchObject({
+      callKey: "tu-1",
+      input: { path: "README.md" },
+      status: "done",
+      result: "done",
+    })
   })
 
   it("TOOL_CALL flushes completed tools to cells, preserving text→tool→text order", () => {

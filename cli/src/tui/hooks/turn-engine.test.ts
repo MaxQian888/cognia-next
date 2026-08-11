@@ -3,9 +3,16 @@
  */
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
+import type {
+  AgentEventEnvelope,
+  CanonicalAgentEvent,
+} from "@cognia/agent-config-types/agent-execution"
 
 import { createGateController, runTurn, type TurnSession } from "./turn-engine"
 import type { TuiAction } from "../state/types"
+import { createInitialState } from "../state/initial"
+import { tuiReducer } from "../state/reducer"
+import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import { CliDbSnapshotError } from "../../db/bootstrap"
 import { resetRenderDiagnostics, snapshotRenderDiagnostics } from "../runtime/render-diagnostics"
 import { __clearLiveSubagentsForTesting, listLiveSubagents } from "../../agent/subagent-live-output"
@@ -212,7 +219,7 @@ describe("runTurn", () => {
     })
 
     expect(actions).toContainEqual(
-      expect.objectContaining({ type: "TOOL_UPDATE", toolName: "Read", input: { path: "a.ts" } })
+      expect.objectContaining({ type: "TOOL_CALL", toolName: "Read", input: { path: "a.ts" } })
     )
     expect(actions).toContainEqual(
       expect.objectContaining({ type: "CANONICAL_EVENT_NOTICE", title: "Rejected content part" })
@@ -220,6 +227,65 @@ describe("runTurn", () => {
     expect(captures).toContain("tool-call")
     expect(toolCalls).toEqual([["Read", { path: "a.ts" }]])
     expect(snapshotRenderDiagnostics({}).unknownParts).toBe(1)
+  })
+
+  it("commits canonical multi-round prose between its tool call and result cells", async () => {
+    let state = createInitialState(DEFAULT_RESOLVED_CONFIG, "s-order")
+    const events: CanonicalAgentEvent[] = [
+      { kind: "text-delta", delta: "I will inspect the project." },
+      { kind: "tool-call", toolCallId: "t1", toolName: "Read", input: {} },
+      { kind: "tool-call", toolCallId: "t1", toolName: "Read", input: { path: "README.md" } },
+      { kind: "tool-result", toolCallId: "t1", toolName: "Read", result: "readme" },
+      { kind: "text-delta", delta: "Next I will inspect the package." },
+      { kind: "tool-call", toolCallId: "t2", toolName: "Read", input: { path: "package.json" } },
+      { kind: "tool-result", toolCallId: "t2", toolName: "Read", result: "package" },
+      { kind: "text-delta", delta: "# Findings\n\nEverything is wired." },
+    ]
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        events.forEach((event, sequence) => {
+          const envelope: AgentEventEnvelope = {
+            schemaVersion: 1,
+            eventId: `s-order:t1:a1:${sequence}`,
+            sequence,
+            sessionId: "s-order",
+            runId: "r1",
+            turnId: "t1",
+            attemptId: "a1",
+            hostRef: "desktop-sidecar",
+            runtime: "builtin",
+            timestamp: "2026-08-11T00:00:00.000Z",
+            event,
+          }
+          opts.onEnvelope?.(envelope)
+        })
+        return okResult({ text: "# Findings\n\nEverything is wired." })
+      },
+    }
+
+    await runTurn({
+      session,
+      prompt: "inspect",
+      dispatch: (action) => {
+        state = tuiReducer(state, action)
+      },
+      gate: async () => ({ decision: "allow" }),
+    })
+
+    expect(
+      state.cells.map((cell) => {
+        if (cell.kind === "assistant") return `assistant:${cell.raw}`
+        if (cell.kind === "tool") return `tool:${cell.callKey}:${JSON.stringify(cell.input)}`
+        return cell.kind
+      })
+    ).toEqual([
+      "user",
+      "assistant:I will inspect the project.",
+      'tool:t1:{"path":"README.md"}',
+      "assistant:Next I will inspect the package.",
+      'tool:t2:{"path":"package.json"}',
+      "assistant:# Findings\n\nEverything is wired.",
+    ])
   })
 
   it("projects canonical SDK tasks into the existing agents board registry", async () => {

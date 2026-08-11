@@ -77,6 +77,17 @@ describe("ProviderKeyOverlay", () => {
     expect(onInput).not.toHaveBeenCalled()
   })
 
+  it("labels existing credentials for management and clears them for replacement", () => {
+    const onInput = jest.fn()
+    const { container } = wrap(
+      <ProviderKeyOverlay {...baseProps} value="sk-existing" existing onInput={onInput} />
+    )
+
+    expect(container.textContent ?? "").toContain("Manage API key for OpenAI")
+    __fireInput("u", { ctrl: true })
+    expect(onInput).toHaveBeenCalledWith("")
+  })
+
   it("submits on Enter and cancels on Escape", () => {
     const onSubmit = jest.fn()
     const onCancel = jest.fn()

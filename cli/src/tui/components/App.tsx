@@ -79,7 +79,9 @@ import { buildAgents, discoverAgentFiles } from "../../agent/discover-agents"
 import { parseBang } from "../commands/bash-shellout"
 import { parseHashMemory } from "../input/hash-memory"
 import {
+  runInteractiveShell as defaultRunInteractiveShell,
   runShell as defaultRunShell,
+  type RunInteractiveShellOpts,
   type ShellResult,
   type RunShellOpts,
 } from "../../agent/run-shell"
@@ -142,6 +144,7 @@ import {
 } from "../../config/mutate"
 import { openInEditor, detectEditor } from "../runtime/editor"
 import { resolveKeybindings } from "../input/keybindings"
+import { collectProviderOptions } from "../commands/provider-options"
 import {
   DEFAULT_MOUSE_MODE,
   DEFAULT_SELECTION_MODE,
@@ -313,6 +316,9 @@ export interface AppProps {
   persistDb?: () => void
   /** Run a `!command` shell-out; defaults to the real local shell. */
   runShell?: (command: string, opts: RunShellOpts) => Promise<ShellResult>
+  /** Run an interactive `!command` with inherited terminal I/O while Ink is
+   * suspended. Injected in tests so no full-screen child process is launched. */
+  runInteractiveShell?: (command: string, opts: RunInteractiveShellOpts) => Promise<ShellResult>
   /** Persist an "Allow always" tool choice; defaults to the real
    * `tool-approvals.json` writer. Injected as a no-op by tests. */
   persistToolApproval?: (home: string, toolName: string) => void
@@ -451,6 +457,7 @@ export function App({
       .catch(() => {})
   },
   runShell = defaultRunShell,
+  runInteractiveShell = defaultRunInteractiveShell,
   persistToolApproval = addToolApproval,
   trusted = true,
   trustFolderFn = defaultTrustFolder,
@@ -494,7 +501,7 @@ export function App({
   titleOut,
   titleEnv,
 }: AppProps) {
-  const { exit } = useApp()
+  const { exit, suspendTerminal } = useApp()
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
     createInitialState(config, sessionId, trusted, initialHistory)
   )
@@ -712,6 +719,18 @@ export function App({
   }, [])
   const getRuntimeAbort = useCallback(() => runtimeAbort.current, [])
 
+  const runSuspendedInteractiveShell = useCallback(
+    async (command: string, opts: RunInteractiveShellOpts) => {
+      let result: ShellResult | undefined
+      await suspendTerminal(async () => {
+        result = await runInteractiveShell(command, opts)
+      })
+      if (!result) throw new Error("Interactive shell exited without a result")
+      return result
+    },
+    [runInteractiveShell, suspendTerminal]
+  )
+
   // The `!command` shell-out cluster (live cells + foreground/background lifecycle
   // + last-failure capture for `/analyze`). `runBash` is consumed by `applyEffect`
   // and `handleSubmit`; the kill/background entry points by the key handler.
@@ -724,7 +743,7 @@ export function App({
     hasForegroundRun,
     sendInputToForeground,
     takeLastFailedBash,
-  } = useBashShellout(runShell, state.config.cwd, dispatch)
+  } = useBashShellout(runShell, state.config.cwd, dispatch, runSuspendedInteractiveShell)
 
   // Double-Esc backtrack-to-edit selection (armed/disarmed state + timer).
   const { backtrackArmed, backtrackArmedRef, armBacktrack, disarmBacktrack } = useBacktrack()
@@ -1973,7 +1992,50 @@ export function App({
     (row: SettingsRow) => {
       const c = row.control
       if (c.type === "delegate") {
+        if (c.command === "/provider" && state.overlay.kind === "settings") {
+          dispatch({
+            type: "OVERLAY_OPEN",
+            overlay: {
+              kind: "provider",
+              options: collectProviderOptions(state.config),
+              index: 0,
+              query: "",
+              returnToSettings: {
+                section: state.overlay.section,
+                index: state.overlay.index,
+              },
+            },
+          })
+          return
+        }
         runCommandLine(c.command)
+        return
+      }
+      if (c.type === "credential" && state.overlay.kind === "settings") {
+        const provider = collectProviderOptions(state.config).find(
+          (option) => option.id === state.config.provider
+        )
+        if (!provider) return
+        const current = state.config.providers[provider.id]
+        const credentialKind = current?.authToken && !current.apiKey ? "authToken" : "apiKey"
+        const secret = current?.[credentialKind] ?? ""
+        dispatch({
+          type: "OVERLAY_OPEN",
+          overlay: {
+            kind: "providerKey",
+            providerId: provider.id,
+            providerName: provider.name,
+            credentialKind,
+            value: secret,
+            reveal: false,
+            ...(secret ? { existing: true } : {}),
+            ...(provider.keyUrl ? { keyUrl: provider.keyUrl } : {}),
+            returnToSettings: {
+              section: state.overlay.section,
+              index: state.overlay.index,
+            },
+          },
+        })
         return
       }
       if (c.type !== "form") return
@@ -2007,7 +2069,7 @@ export function App({
         },
       })
     },
-    [state.config, runCommandLine, applyEffect]
+    [state.config, state.overlay, runCommandLine, applyEffect]
   )
 
   // `/agents models` panel edit: persist one subagent's provider/model override

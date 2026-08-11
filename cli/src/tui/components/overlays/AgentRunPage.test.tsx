@@ -78,12 +78,58 @@ describe("AgentRunPage", () => {
           }),
       }).container.textContent ?? ""
     expect(text).toContain("let me think")
-    expect(text).toContain("read(lib/foo.ts)")
-    expect(text).toContain("bash(npm test)")
+    expect(text).toContain("read · done")
+    expect(text).toContain("input · lib/foo.ts")
+    expect(text).toContain("bash · running")
+    expect(text).toContain("input · npm test")
     expect(text).toContain("here is the answer")
     // Chronological: thinking precedes the tools, text comes last.
-    expect(text.indexOf("let me think")).toBeLessThan(text.indexOf("read("))
-    expect(text.indexOf("bash(")).toBeLessThan(text.indexOf("here is the answer"))
+    expect(text.indexOf("let me think")).toBeLessThan(text.indexOf("read · done"))
+    expect(text.indexOf("bash · running")).toBeLessThan(text.indexOf("here is the answer"))
+  })
+
+  it("renders tool input, timing, result size, and preview instead of only its name", () => {
+    const text =
+      wrap({
+        getEntry: () =>
+          entry({
+            timeline: [
+              {
+                kind: "tool",
+                id: "a",
+                name: "bash",
+                summary: "pnpm test",
+                status: "done",
+                startedAt: NOW - 7_000,
+                settledAt: NOW - 5_500,
+                resultPreview: "PASS 12 tests",
+                resultChars: 13,
+                resultLines: 1,
+              },
+            ],
+          }),
+      }).container.textContent ?? ""
+
+    expect(text).toContain("Timeline · 1 event")
+    expect(text).toContain("bash · done · +1s · 1s")
+    expect(text).toContain("input · pnpm test")
+    expect(text).toContain("result · 1 line · 13 chars · PASS 12 tests")
+  })
+
+  it("labels reasoning and response segments so mixed output stays scannable", () => {
+    const text =
+      wrap({
+        getEntry: () =>
+          entry({
+            timeline: [
+              { kind: "thinking", text: "inspect the routes" },
+              { kind: "text", text: "the routing layer is sound" },
+            ],
+          }),
+      }).container.textContent ?? ""
+    expect(text).toContain("Reasoning")
+    expect(text).toContain("Response")
+    expect(text.indexOf("Reasoning")).toBeLessThan(text.indexOf("Response"))
   })
 
   it("collapses a namespaced tool name and omits an empty summary", () => {

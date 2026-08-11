@@ -111,6 +111,8 @@ export type SettingsControl =
   | { type: "delegate"; command: string }
   /** Enter opens a single-/multi-field editor for a previously file-only field. */
   | { type: "form"; field: SettingsFormField }
+  /** Enter sets or replaces the active provider's credential. */
+  | { type: "credential" }
   /** Display-only (e.g. working dir, auth). */
   | { type: "readonly" }
 
@@ -226,6 +228,17 @@ export function settingsSections(
         value: config.provider,
         control: { type: "delegate", command: "/provider" },
         description: "Which AI provider serves this session (opens the provider picker).",
+      },
+      {
+        id: "credential",
+        label: "Credential",
+        value: config.providers[config.provider]?.apiKey
+          ? "API key configured"
+          : config.providers[config.provider]?.authToken
+            ? "token configured"
+            : "not configured",
+        control: { type: "credential" },
+        description: "Set or replace the active provider's API key or subscription token.",
       },
       {
         id: "model",

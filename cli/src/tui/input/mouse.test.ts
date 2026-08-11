@@ -22,6 +22,14 @@ describe("parseMouseEvent", () => {
     expect(parseMouseEvent("[<69;3;3M")).toEqual({ kind: "wheel", dir: "down" })
   })
 
+  it("swallows horizontal trackpad wheel reports instead of reversing vertical scroll", () => {
+    // SGR 66/67 are wheel-left/right. Treating bit 0 as the vertical direction
+    // maps them to up/down, so small horizontal momentum on a Mac trackpad makes
+    // the transcript appear to rebound.
+    expect(parseMouseEvent("[<66;10;5M")).toEqual({ kind: "other" })
+    expect(parseMouseEvent("[<67;10;5M")).toEqual({ kind: "other" })
+  })
+
   it("decodes a left-button press as a click with 1-based col/row", () => {
     expect(parseMouseEvent("[<0;4;2M")).toEqual({ kind: "click", col: 4, row: 2, mods: NO_MODS })
   })

@@ -124,6 +124,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
         chipRowRef={subagentChipRef}
         sessionId={state.sessionId}
         agentTreeRef={agentTreeRef}
+        suppressAgentTree={overlayOpen}
       />
       {cursor.state.find && (
         <FindBar
@@ -160,10 +161,16 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
         })()}
       {!overlayOpen && !cursor.state.find && (
         <Box flexDirection="column" flexShrink={0}>
-          {/* A zero-height adornment keeps the mascot attached above the
-              composer's right edge without consuming a terminal row. */}
+          {/* Keep the mascot on its own right-aligned row. The former zero-height
+              adornment shared the status row and could overwrite the interrupt
+              hint instead of reserving real layout space. */}
           {layout.showMascot ? (
-            <Box height={0} alignItems="flex-end" paddingRight={2}>
+            <Box
+              data-testid="mascot-right-slot"
+              width="100%"
+              justifyContent="flex-end"
+              paddingRight={2}
+            >
               <Mascot
                 mood={selectMascotMood({
                   turnStatus: state.turnStatus,

@@ -10,7 +10,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Box, Text, useCursor, type DOMElement } from "ink"
+import { Box, Text, type DOMElement } from "ink"
 
 import { SlashPalette } from "./SlashPalette"
 import { MentionPalette, orderByGroup } from "./MentionPalette"
@@ -25,7 +25,6 @@ import { composerPopupRowAtClick } from "../input/composer-popup-click"
 import { absoluteTopLeft } from "../input/element-position"
 import { useComposerInput } from "../input/input-router"
 import { nextGraphemeBoundary } from "../text/graphemes"
-import { stringWidth } from "../markdown/width"
 import { composerViewport } from "../input/composer-viewport"
 import { windowList } from "./list-window"
 import { buildMentionView } from "./mention-view"
@@ -122,7 +121,10 @@ const LineView = React.memo(function LineView({
   if (cursorCol < 0 || disabled) return <HighlightedLine line={line} />
   const before = line.slice(0, cursorCol)
   const afterCursor = nextGraphemeBoundary(line, cursorCol)
-  const at = line.slice(cursorCol, afterCursor) || " "
+  // Ink trims styling from a trailing blank cell, which makes an inverse-space
+  // caret disappear at the end of an empty line. A block glyph survives Ink's
+  // render pass while preserving the same single-cell visual caret.
+  const at = line.slice(cursorCol, afterCursor) || "█"
   const after = line.slice(afterCursor)
   return (
     <Text>
@@ -225,8 +227,6 @@ function InputImpl({
   // candidate it lands on (select + accept), instead of falling through to the
   // buffer cursor logic below.
   const popupBoxRef = useRef<DOMElement | null>(null)
-  const [cursorOrigin, setCursorOrigin] = useState<{ top: number; left: number } | null>(null)
-  const { setCursorPosition } = useCursor()
   const composerWidth = typeof width === "number" ? width : 80
   const viewport = useMemo(
     () =>
@@ -237,35 +237,6 @@ function InputImpl({
       ),
     [buffer, composerWidth, composerRows]
   )
-  const visibleCursorRow = viewport.rows.findIndex((row) => row.cursorCol !== null)
-
-  // Yoga positions can change after any commit (popup open/close, async rows,
-  // resize). The equality guard prevents an update loop while keeping IME exact.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const next = absoluteTopLeft(linesRef.current)
-    setCursorOrigin((current) =>
-      current?.top === next?.top && current?.left === next?.left ? current : next
-    )
-  })
-
-  setCursorPosition(
-    !disabled && cursorOrigin && visibleCursorRow >= 0
-      ? {
-          x:
-            cursorOrigin.left +
-            PROMPT_WIDTH +
-            stringWidth(
-              viewport.rows[visibleCursorRow].text.slice(
-                0,
-                viewport.rows[visibleCursorRow].cursorCol ?? 0
-              )
-            ),
-          y: cursorOrigin.top + visibleCursorRow,
-        }
-      : undefined
-  )
-
   // Derive the active popup from the buffer.
   const sQuery = slashQuery(text)
   const slashMatches = sQuery !== null ? matchSlash(sQuery, { history: input.history.entries }) : []

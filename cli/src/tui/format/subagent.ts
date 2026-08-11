@@ -13,7 +13,17 @@ const SUBAGENT_TOOLS = new Set(["task", "dispatch_agent", "agent"])
 
 /** Whether a tool name is a sub-agent dispatch (`task` / `dispatch_agent` / `agent`). */
 export function isSubagentTool(toolName: string): boolean {
-  return SUBAGENT_TOOLS.has(toolName.toLowerCase())
+  const normalized = toolName.toLowerCase().split("__").at(-1) ?? ""
+  return SUBAGENT_TOOLS.has(normalized)
+}
+
+/** Number of sibling agents represented by one dispatch tool call. */
+export function subagentDispatchCount(input: Record<string, unknown>): number {
+  if (!Array.isArray(input.dispatches)) return 1
+  const count = input.dispatches.filter(
+    (item) => item !== null && typeof item === "object" && !Array.isArray(item)
+  ).length
+  return Math.max(1, count)
 }
 
 /** First non-empty string among the candidate keys, trimmed to `max` chars. */
@@ -30,11 +40,27 @@ function pick(input: Record<string, unknown>, keys: string[], max: number): stri
 
 /** The dispatched agent's id/type, or "agent". */
 export function subagentName(input: Record<string, unknown>): string {
+  const count = subagentDispatchCount(input)
+  if (count > 1) return `${count} agents`
   return pick(input, ["subagent_type", "subagentId", "subagent_id", "agent", "name"], 40) ?? "agent"
 }
 
 /** The task handed to the sub-agent — its `description`, falling back to the prompt. */
 export function subagentTask(input: Record<string, unknown>): string {
+  if (Array.isArray(input.dispatches)) {
+    const names = input.dispatches
+      .map((item) =>
+        item !== null && typeof item === "object" && !Array.isArray(item)
+          ? pick(
+              item as Record<string, unknown>,
+              ["subagentId", "subagent_id", "subagent_type"],
+              24
+            )
+          : undefined
+      )
+      .filter((name): name is string => Boolean(name))
+    if (names.length > 0) return names.join(" · ")
+  }
   return pick(input, ["description", "prompt"], 120) ?? ""
 }
 
@@ -46,7 +72,10 @@ export function subagentTask(input: Record<string, unknown>): string {
 export function runningSubagents(tools: ToolCell[]): { name: string; count: number } | null {
   const running = tools.filter((t) => t.status === "running" && isSubagentTool(t.toolName))
   if (running.length === 0) return null
-  return { name: subagentName(running[running.length - 1].input), count: running.length }
+  return {
+    name: subagentName(running[running.length - 1].input),
+    count: running.reduce((sum, tool) => sum + subagentDispatchCount(tool.input), 0),
+  }
 }
 
 /** One in-turn sub-agent dispatch still running, distilled for the agents panel. */
