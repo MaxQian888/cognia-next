@@ -7,7 +7,7 @@
  * `Field`/`FieldGroup`/`patchParam` helpers, and string fields that accept
  * `{{ }}` expressions use `ExpressionField`. The param shape matches
  * `WebCloneParams` in `lib/workflow/nodes/params-schemas.ts` and the executor in
- * `lib/workflow/nodes/web-clone.ts`.
+ * `lib/workflow/nodes/automation/web-clone.ts`.
  */
 
 import { useTranslations } from "next-intl"

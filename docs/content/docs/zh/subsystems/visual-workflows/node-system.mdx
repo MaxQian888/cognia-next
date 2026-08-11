@@ -221,7 +221,7 @@ execute: async (ctx) => {
 
 `ai.*` 内部机制与 6 个仅合成器使用的 `pattern.*` 节点见 <a href="./ai-pattern-nodes">AI 与 pattern 节点</a>。
 
-## Desktop 节点（`lib/workflow/nodes/desktop.ts`)
+## Desktop 节点（`lib/workflow/nodes/automation/desktop.ts`)
 
 注册 12 个 desktop 执行器 + `trigger.desktop.event`，每个都包裹来自 `@/lib/automation/client` 的一个 desktop 客户端方法，并打上 `surface: "workflow"`，从而让 Rust gate 评估 **workflow** 策略。执行器同时接受直接 automation 参数（`locator`、`elementRef`、`target`、`rect`）与 inspector convenience 字段（`selector`、`clickCount`、`width`/`height`）。`callCtx` 在 `target.connectionId` 存在时路由到 cua 沙箱（ADR-0020），否则本地。
 

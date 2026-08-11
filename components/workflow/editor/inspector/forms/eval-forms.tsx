@@ -3,7 +3,7 @@
 /**
  * Inspector forms for the eval nodes (`eval.run`, `eval.gate`). Param shapes
  * match `lib/workflow/nodes/params-schemas.ts` and the executors in
- * `lib/workflow/nodes/eval.ts`. Pattern mirrors `git-ocr-forms.tsx`: shared
+ * `lib/workflow/nodes/evaluation/index.ts`. Pattern mirrors `git-ocr-forms.tsx`: shared
  * `Field`/`FieldGroup`/`patchParam` helpers, `ExpressionField` for
  * expression-capable strings.
  */

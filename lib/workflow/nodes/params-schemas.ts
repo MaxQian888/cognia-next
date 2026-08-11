@@ -1489,7 +1489,7 @@ const SystemTerminalParams = z.object({
 })
 
 // ── Terminal: persistent sessions ───────────────────────────────────────────
-// Executors at `lib/workflow/nodes/terminal-session.ts`.
+// Executors at `lib/workflow/nodes/terminal/session.ts`.
 const TerminalSessionOpenParams = z.object({
   cwd: optionalString,
   shell: optionalString,
@@ -1511,7 +1511,7 @@ const TerminalSessionCloseParams = z.object({
 })
 
 // Run a script file under its detected (or overridden) interpreter.
-// Executor at `lib/workflow/nodes/terminal-script.ts`.
+// Executor at `lib/workflow/nodes/terminal/script.ts`.
 const TerminalScriptParams = z.object({
   scriptPath: requiredString("required"),
   interpreter: optionalString,

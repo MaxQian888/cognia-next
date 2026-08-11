@@ -221,7 +221,7 @@ execute: async (ctx) => {
 
 See <a href="./ai-pattern-nodes">AI &amp; pattern nodes</a> for `ai.*` internals and the 6 synthesizer-only `pattern.*` nodes.
 
-## Desktop nodes (`lib/workflow/nodes/desktop.ts`)
+## Desktop nodes (`lib/workflow/nodes/automation/desktop.ts`)
 
 Registers 12 desktop executors + `trigger.desktop.event`, each wrapping a desktop client method from `@/lib/automation/client` and tagging `surface: "workflow"` so the Rust gate evaluates **workflow** policy. The executor accepts both direct automation params (`locator`, `elementRef`, `target`, `rect`) and inspector convenience fields (`selector`, `clickCount`, `width`/`height`). `callCtx` routes to a cua sandbox (ADR-0020) when `target.connectionId` is present, else local.
 
