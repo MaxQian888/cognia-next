@@ -4,11 +4,13 @@ import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   ArchiveRestoreIcon,
+  ArrowLeftIcon,
   BoxesIcon,
   CloudCogIcon,
   DatabaseBackupIcon,
   FilterIcon,
   KeyRoundIcon,
+  LogOutIcon,
   RefreshCwIcon,
   RocketIcon,
   RotateCcwIcon,
@@ -16,6 +18,9 @@ import {
   ShieldCheckIcon,
 } from "lucide-react"
 
+import { Message, MessageContent } from "@/components/ai-elements/message"
+import { StructuredConfigEditor } from "@/components/common/structured-config-editor"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,12 +33,29 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Empty as EmptyState, EmptyDescription } from "@/components/ui/empty"
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemSeparator,
+  ItemTitle,
+} from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
 import {
   Sheet,
   SheetContent,
@@ -42,14 +64,16 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Switch } from "@/components/ui/switch"
 import type {
   Operation,
+  ProviderCapabilities,
   RecoveryPoint,
   ServerDetail,
   ServerHealth,
   ServerLogEntry,
 } from "@/lib/server-ops/client"
-import type { DeploymentTarget } from "@/lib/server-ops/deployment-target"
+import { parseDeploymentTarget, type DeploymentTarget } from "@/lib/server-ops/deployment-target"
 import { cn } from "@/lib/utils"
 
 export interface ServerOperationsCenterProps {
@@ -58,10 +82,15 @@ export interface ServerOperationsCenterProps {
   backups: RecoveryPoint[]
   logs: ServerLogEntry[]
   operations: Operation[]
+  capabilities: ProviderCapabilities | null
+  controllerUrl: string
+  targetId: string
+  eventStreamConnected: boolean
   offline: boolean
   loading: boolean
   onSelectServer: (id: string) => void
   onRefresh: () => void
+  onDisconnect: () => void
   onBackup: (id: string) => void
   onRestore: (id: string, recoveryPointId: string) => void
   onRollback: (id: string) => void
@@ -82,6 +111,7 @@ export function ServerOperationsCenter(props: ServerOperationsCenterProps) {
   const [filterOpen, setFilterOpen] = useState(false)
   const [healthFilter, setHealthFilter] = useState<ServerHealth | "all">("all")
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null)
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const filteredServers = useMemo(
     () =>
       healthFilter === "all"
@@ -106,6 +136,10 @@ export function ServerOperationsCenter(props: ServerOperationsCenterProps) {
     if (confirmation.kind === "rotate-key") props.onRotateKey(server.id, confirmation.keyVersion)
     setConfirmation(null)
   }
+  const selectServer = (id: string) => {
+    props.onSelectServer(id)
+    setMobileDetailOpen(true)
+  }
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
@@ -114,9 +148,23 @@ export function ServerOperationsCenter(props: ServerOperationsCenterProps) {
           <div>
             <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
             <p className="text-sm text-muted-foreground">{t("description")}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>{props.controllerUrl}</span>
+              <Separator orientation="vertical" className="h-3" />
+              <span>{props.targetId}</span>
+              <Badge variant="outline">
+                {props.eventStreamConnected
+                  ? t("connection.eventsConnected")
+                  : t("connection.eventsReconnecting")}
+              </Badge>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {props.offline && <Badge variant="outline">{t("offline")}</Badge>}
+            <Button variant="outline" size="sm" onClick={() => setFilterOpen(true)}>
+              <FilterIcon className="size-4" />
+              {t("filters.title")}
+            </Button>
             <Button variant="outline" size="sm" onClick={props.onRefresh} disabled={props.loading}>
               <RefreshCwIcon className={cn("size-4", props.loading && "animate-spin")} />
               {t("actions.refresh")}
@@ -124,6 +172,10 @@ export function ServerOperationsCenter(props: ServerOperationsCenterProps) {
             <Button size="sm" onClick={() => setDeploymentOpen(true)}>
               <RocketIcon className="size-4" />
               {t("actions.deploy")}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={props.onDisconnect}>
+              <LogOutIcon className="size-4" />
+              {t("connection.disconnect")}
             </Button>
           </div>
         </div>
@@ -143,7 +195,7 @@ export function ServerOperationsCenter(props: ServerOperationsCenterProps) {
                 <ServerList
                   servers={filteredServers}
                   selectedId={props.selectedServer?.id ?? null}
-                  onSelect={props.onSelectServer}
+                  onSelect={selectServer}
                 />
               </ResizablePanel>
               <ResizableHandle withHandle />
@@ -154,36 +206,41 @@ export function ServerOperationsCenter(props: ServerOperationsCenterProps) {
           </div>
 
           <ScrollArea className="h-full lg:hidden">
-            <div className="space-y-3 p-3 md:p-4">
-              <div className="sticky top-0 z-10 flex items-center justify-between rounded-lg border bg-background/95 p-2 backdrop-blur md:static">
-                <span className="text-sm font-medium">
-                  {props.selectedServer
-                    ? t("healthSummary", { label: props.selectedServer.label })
-                    : t("selectServer")}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="md:hidden"
-                  onClick={() => setFilterOpen(true)}
-                >
-                  <FilterIcon className="size-4" />
-                  {t("filters.title")}
-                </Button>
-              </div>
-              <div className="grid gap-2 md:grid-cols-2">
-                {filteredServers.map((server) => (
-                  <ServerCard
-                    key={server.id}
-                    server={server}
-                    selected={server.id === props.selectedServer?.id}
-                    onSelect={() => props.onSelectServer(server.id)}
-                  />
-                ))}
-              </div>
-              <div className="min-h-[34rem] rounded-xl border bg-card">
-                <ServerWorkspace {...props} onConfirm={setConfirmation} />
-              </div>
+            <div className="p-3 md:p-4">
+              {mobileDetailOpen ? (
+                <div className="min-h-[34rem]">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mb-2"
+                    onClick={() => setMobileDetailOpen(false)}
+                  >
+                    <ArrowLeftIcon className="size-4" />
+                    {t("actions.backToServers")}
+                  </Button>
+                  <ServerWorkspace {...props} onConfirm={setConfirmation} />
+                </div>
+              ) : (
+                <>
+                  <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/95 p-2 backdrop-blur md:static">
+                    <span className="text-sm font-medium">
+                      {props.selectedServer
+                        ? t("healthSummary", { label: props.selectedServer.label })
+                        : t("selectServer")}
+                    </span>
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {filteredServers.map((server) => (
+                      <ServerCard
+                        key={server.id}
+                        server={server}
+                        selected={server.id === props.selectedServer?.id}
+                        onSelect={() => selectServer(server.id)}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </ScrollArea>
         </main>
@@ -220,6 +277,7 @@ export function ServerOperationsCenter(props: ServerOperationsCenterProps) {
         open={deploymentOpen}
         onOpenChange={setDeploymentOpen}
         onValidate={props.onValidateTarget}
+        capabilities={props.capabilities}
       />
       <FilterSheet
         open={filterOpen}
@@ -256,8 +314,8 @@ function Kpi({
   icon: typeof ServerIcon
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2">
-      <div className="rounded-md bg-primary/10 p-2 text-primary">
+    <div className="flex items-center gap-3 border-l px-3 py-2 first:border-l-0">
+      <div className="text-primary">
         <Icon className="size-4" />
       </div>
       <div>
@@ -282,16 +340,18 @@ function ServerList({
     <div className="flex h-full flex-col">
       <div className="border-b px-4 py-3 text-sm font-semibold">{t("instances.title")}</div>
       <ScrollArea className="flex-1">
-        <div className="space-y-2 p-3">
+        <ItemGroup className="p-2">
           {servers.map((server) => (
-            <ServerCard
-              key={server.id}
-              server={server}
-              selected={server.id === selectedId}
-              onSelect={() => onSelect(server.id)}
-            />
+            <div key={server.id}>
+              <ServerCard
+                server={server}
+                selected={server.id === selectedId}
+                onSelect={() => onSelect(server.id)}
+              />
+              <ItemSeparator />
+            </div>
           ))}
-        </div>
+        </ItemGroup>
       </ScrollArea>
     </div>
   )
@@ -308,26 +368,25 @@ function ServerCard({
 }) {
   const t = useTranslations("servers")
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cn(
-        "w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/60",
-        selected && "border-primary bg-primary/5"
-      )}
-      aria-current={selected ? "true" : undefined}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <span className="font-medium">{server.label}</span>
+    <Item asChild size="sm" className={cn("rounded-none", selected && "bg-primary/5")}>
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={onSelect}
+        className="h-auto w-full justify-start whitespace-normal px-3 py-3 text-left"
+        aria-current={selected ? "true" : undefined}
+      >
+        <ItemContent>
+          <ItemTitle>{server.label}</ItemTitle>
+          <ItemDescription>
+            {t(`topology.${server.topology}`)} · {server.id}
+          </ItemDescription>
+        </ItemContent>
         <Badge variant={server.health === "healthy" ? "default" : "secondary"}>
           {t(`health.${server.health}`)}
         </Badge>
-      </div>
-      <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-        <span>{t(`topology.${server.topology}`)}</span>
-        <span>{server.id}</span>
-      </div>
-    </button>
+      </Button>
+    </Item>
   )
 }
 
@@ -407,44 +466,51 @@ function ServerWorkspace(
           {props.backups.length === 0 ? (
             <Empty text={t("backups.empty")} />
           ) : (
-            props.backups.map((backup) => (
-              <Card key={backup.id}>
-                <CardContent className="flex items-center justify-between gap-3 p-3">
-                  <div>
-                    <div className="text-sm font-medium">{backup.id}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {formatDate(backup.createdAt)} · {formatBytes(backup.sizeBytes)}
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => props.onConfirm({ kind: "restore", recoveryPointId: backup.id })}
-                  >
-                    <ArchiveRestoreIcon className="size-4" />
-                    {t("actions.restore")}
-                  </Button>
-                </CardContent>
-              </Card>
-            ))
+            <ItemGroup className="border-y">
+              {props.backups.map((backup, index) => (
+                <div key={backup.id}>
+                  <Item className="rounded-none px-0">
+                    <ItemContent>
+                      <ItemTitle>{backup.id}</ItemTitle>
+                      <ItemDescription>
+                        {formatDate(backup.createdAt)} · {formatBytes(backup.sizeBytes)}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          props.onConfirm({ kind: "restore", recoveryPointId: backup.id })
+                        }
+                      >
+                        <ArchiveRestoreIcon className="size-4" />
+                        {t("actions.restore")}
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                  {index < props.backups.length - 1 && <ItemSeparator />}
+                </div>
+              ))}
+            </ItemGroup>
           )}
         </TabsContent>
         <TabsContent value="logs" className="p-4">
           {props.logs.length === 0 ? (
             <Empty text={t("logs.empty")} />
           ) : (
-            <div className="space-y-1 font-mono text-xs">
+            <div className="space-y-3 font-mono text-xs">
               {props.logs.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="grid grid-cols-[auto_auto_1fr] gap-2 rounded border px-2 py-1.5"
-                >
-                  <span className="text-muted-foreground">{formatDate(entry.timestamp)}</span>
-                  <Badge variant="outline">{entry.level}</Badge>
-                  <span className="break-all">
-                    [{entry.component}] {entry.message}
-                  </span>
-                </div>
+                <Message key={entry.id} from="assistant" className="max-w-full border-b pb-3">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>{formatDate(entry.timestamp)}</span>
+                    <Badge variant="outline">{entry.level}</Badge>
+                    <span>{entry.component}</span>
+                  </div>
+                  <MessageContent className="w-full font-mono break-all">
+                    {entry.message}
+                  </MessageContent>
+                </Message>
               ))}
             </div>
           )}
@@ -492,58 +558,44 @@ function Overview({
   const t = useTranslations("servers")
   return (
     <>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("overview.health")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Badge>{t(`health.${server.health}`)}</Badge>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("overview.production")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Badge variant={server.productionCertified ? "default" : "secondary"}>
-              {server.productionCertified ? t("certified") : t("notCertified")}
-            </Badge>
-          </CardContent>
-        </Card>
+      <div className="grid divide-y border-y sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+        <section className="space-y-2 p-4">
+          <h3 className="text-sm font-medium">{t("overview.health")}</h3>
+          <Badge>{t(`health.${server.health}`)}</Badge>
+        </section>
+        <section className="space-y-2 p-4">
+          <h3 className="text-sm font-medium">{t("overview.production")}</h3>
+          <Badge variant={server.productionCertified ? "default" : "secondary"}>
+            {server.productionCertified ? t("certified") : t("notCertified")}
+          </Badge>
+        </section>
       </div>
       {latestBackup && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("overview.latestRecoveryPoint")}</CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-medium">{latestBackup.id}</div>
-              <div className="text-xs text-muted-foreground">
-                {formatDate(latestBackup.createdAt)}
-              </div>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => onRestore(latestBackup.id)}>
-              <ArchiveRestoreIcon className="size-4" />
-              {t("actions.restore")}
-            </Button>
-          </CardContent>
-        </Card>
+        <section className="border-y py-3">
+          <h3 className="mb-2 text-sm font-medium">{t("overview.latestRecoveryPoint")}</h3>
+          <Item className="rounded-none px-0">
+            <ItemContent>
+              <ItemTitle>{latestBackup.id}</ItemTitle>
+              <ItemDescription>{formatDate(latestBackup.createdAt)}</ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Button variant="outline" size="sm" onClick={() => onRestore(latestBackup.id)}>
+                <ArchiveRestoreIcon className="size-4" />
+                {t("actions.restore")}
+              </Button>
+            </ItemActions>
+          </Item>
+        </section>
       )}
       {server.certificationIssues.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">{t("overview.issues")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
-              {server.certificationIssues.map((issue) => (
-                <li key={issue}>{issue}</li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <section className="border-y py-3">
+          <h3 className="mb-2 text-sm font-medium">{t("overview.issues")}</h3>
+          <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
+            {server.certificationIssues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        </section>
       )}
     </>
   )
@@ -551,9 +603,9 @@ function Overview({
 
 function KeyValueGrid({ items }: { items: Array<[string, string]> }) {
   return (
-    <dl className="grid gap-3 sm:grid-cols-2">
+    <dl className="grid border-y sm:grid-cols-2">
       {items.map(([label, value]) => (
-        <div key={label} className="rounded-lg border p-3">
+        <div key={label} className="border-b p-3 sm:border-r">
           <dt className="text-xs text-muted-foreground">{label}</dt>
           <dd className="mt-1 break-all text-sm font-medium">{value}</dd>
         </div>
@@ -563,15 +615,15 @@ function KeyValueGrid({ items }: { items: Array<[string, string]> }) {
 }
 function Empty({ text }: { text: string }) {
   return (
-    <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-      {text}
-    </div>
+    <EmptyState className="rounded-none border-y">
+      <EmptyDescription>{text}</EmptyDescription>
+    </EmptyState>
   )
 }
 function OperationRow({ operation, compact = false }: { operation: Operation; compact?: boolean }) {
   const t = useTranslations("servers")
   return (
-    <div className={cn("rounded-lg border bg-card p-3", compact && "min-w-56")}>
+    <div className={cn("border-l p-3", compact && "min-w-56")}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">{t(`operationKinds.${operation.kind}`)}</span>
         <Badge variant="outline">{t(`operationStates.${operation.state}`)}</Badge>
@@ -624,15 +676,20 @@ interface WizardState {
   label: string
   topology: "compose" | "kubernetes"
   controllerUrl: string
+  controllerCredentialRef: string
   publicUrl: string
   oidcIssuer: string
   oidcAudience: string
   tenantClaim: string
+  scopeRead: string
+  scopeOperate: string
+  scopeAdmin: string
   objectStoreEndpoint: string
   objectStoreRegion: string
   objectStoreBucket: string
+  objectStorePathStyle: boolean
   objectStoreCredentialRef: string
-  snapshotProvider: "kubernetes-csi" | "external-command"
+  snapshotProvider: "kubernetes-csi" | "external-command" | "none"
   snapshotRef: string
   secretProvider: "file" | "kubernetes" | "vault" | "aws-secrets-manager"
   secretRootRef: string
@@ -653,13 +710,18 @@ const INITIAL_WIZARD: WizardState = {
   label: "",
   topology: "kubernetes",
   controllerUrl: "",
+  controllerCredentialRef: "ops-controller/staging",
   publicUrl: "",
   oidcIssuer: "",
   oidcAudience: "",
   tenantClaim: "organization_id",
+  scopeRead: "servers:read",
+  scopeOperate: "servers:operate",
+  scopeAdmin: "servers:admin",
   objectStoreEndpoint: "",
   objectStoreRegion: "auto",
   objectStoreBucket: "cognia-backups",
+  objectStorePathStyle: false,
   objectStoreCredentialRef: "backups/staging",
   snapshotProvider: "kubernetes-csi",
   snapshotRef: "cognia-snapshots",
@@ -682,22 +744,28 @@ function DeploymentWizard({
   open,
   onOpenChange,
   onValidate,
+  capabilities,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onValidate: (target: DeploymentTarget) => Promise<void>
+  capabilities: ProviderCapabilities | null
 }) {
   const t = useTranslations("servers")
   const [state, setState] = useState(INITIAL_WIZARD)
   const [submitting, setSubmitting] = useState(false)
-  const update = (key: keyof WizardState, value: string) =>
+  const [error, setError] = useState<string | null>(null)
+  const update = <K extends keyof WizardState>(key: K, value: WizardState[K]) =>
     setState((current) => ({ ...current, [key]: value }))
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     setSubmitting(true)
+    setError(null)
     try {
-      await onValidate(buildDeploymentTarget(state))
+      await onValidate(parseDeploymentTarget(buildDeploymentTarget(state)))
       onOpenChange(false)
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : t("wizard.invalid"))
     } finally {
       setSubmitting(false)
     }
@@ -706,10 +774,18 @@ function DeploymentWizard({
     ["id", "wizard.targetId", "wizard.placeholders.targetId"],
     ["label", "wizard.label", "wizard.placeholders.label"],
     ["controllerUrl", "wizard.controllerUrl", "wizard.placeholders.controllerUrl"],
+    [
+      "controllerCredentialRef",
+      "wizard.controllerCredentialRef",
+      "wizard.placeholders.controllerCredentialRef",
+    ],
     ["publicUrl", "wizard.publicUrl", "wizard.placeholders.publicUrl"],
     ["oidcIssuer", "wizard.oidcIssuer", "wizard.placeholders.oidcIssuer"],
     ["oidcAudience", "wizard.oidcAudience", "wizard.placeholders.oidcAudience"],
     ["tenantClaim", "wizard.tenantClaim", "wizard.placeholders.tenantClaim"],
+    ["scopeRead", "wizard.scopeRead", "wizard.placeholders.scopeRead"],
+    ["scopeOperate", "wizard.scopeOperate", "wizard.placeholders.scopeOperate"],
+    ["scopeAdmin", "wizard.scopeAdmin", "wizard.placeholders.scopeAdmin"],
     [
       "objectStoreEndpoint",
       "wizard.objectStoreEndpoint",
@@ -733,6 +809,26 @@ function DeploymentWizard({
       "wizard.placeholders.workspaceRuntimeImage",
     ],
   ]
+  const topologyOptions = supportedOptions(
+    capabilities?.topologies,
+    ["compose", "kubernetes"],
+    state.topology
+  )
+  const snapshotOptions = supportedOptions(
+    capabilities?.snapshotProviders,
+    ["kubernetes-csi", "external-command", "none"],
+    state.snapshotProvider
+  )
+  const secretOptions = supportedOptions(
+    capabilities?.secretProviders,
+    ["file", "kubernetes", "vault", "aws-secrets-manager"],
+    state.secretProvider
+  )
+  const tlsOptions = supportedOptions(
+    capabilities?.tlsProviders,
+    ["ingress", "existing", "acme-http01", "acme-dns01"],
+    state.tlsProvider
+  )
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
@@ -741,134 +837,183 @@ function DeploymentWizard({
           <SheetDescription>{t("wizard.description")}</SheetDescription>
         </SheetHeader>
         <form onSubmit={submit} className="space-y-5 px-4 pb-8">
-          <fieldset className="grid gap-3 sm:grid-cols-2">
-            <legend className="mb-2 text-sm font-semibold">{t("wizard.targetSection")}</legend>
-            <SelectField
-              label={t("wizard.topology")}
-              value={state.topology}
-              onChange={(value) => update("topology", value)}
-              options={["compose", "kubernetes"]}
-              t={t}
-            />
-            {textFields.slice(0, 4).map(([key, label, placeholder]) => (
-              <TextField
-                key={key}
-                label={t(label)}
-                value={state[key]}
-                placeholder={t(placeholder)}
-                onChange={(value) => update(key, value)}
-              />
-            ))}
-          </fieldset>
-          <fieldset className="grid gap-3 sm:grid-cols-2">
-            <legend className="mb-2 text-sm font-semibold">{t("wizard.identitySection")}</legend>
-            {textFields.slice(4, 7).map(([key, label, placeholder]) => (
-              <TextField
-                key={key}
-                label={t(label)}
-                value={state[key]}
-                placeholder={t(placeholder)}
-                onChange={(value) => update(key, value)}
-              />
-            ))}
-          </fieldset>
-          <fieldset className="grid gap-3 sm:grid-cols-2">
-            <legend className="mb-2 text-sm font-semibold">{t("wizard.storageSection")}</legend>
-            {textFields.slice(7, 11).map(([key, label, placeholder]) => (
-              <TextField
-                key={key}
-                label={t(label)}
-                value={state[key]}
-                placeholder={t(placeholder)}
-                onChange={(value) => update(key, value)}
-              />
-            ))}
-            <SelectField
-              label={t("wizard.snapshotProvider")}
-              value={state.snapshotProvider}
-              onChange={(value) => update("snapshotProvider", value)}
-              options={["kubernetes-csi", "external-command"]}
-              t={t}
-            />
-            <TextField
-              label={t("wizard.snapshotRef")}
-              value={state.snapshotRef}
-              onChange={(value) => update("snapshotRef", value)}
-            />
-            <SelectField
-              label={t("wizard.secretProvider")}
-              value={state.secretProvider}
-              onChange={(value) => update("secretProvider", value)}
-              options={["file", "kubernetes", "vault", "aws-secrets-manager"]}
-              t={t}
-            />
-            <TextField
-              label={t("wizard.secretRootRef")}
-              value={state.secretRootRef}
-              onChange={(value) => update("secretRootRef", value)}
-            />
-            <SelectField
-              label={t("wizard.tlsProvider")}
-              value={state.tlsProvider}
-              onChange={(value) => update("tlsProvider", value)}
-              options={["ingress", "existing", "acme-http01", "acme-dns01"]}
-              t={t}
-            />
-            <TextField
-              label={t("wizard.tlsRef")}
-              value={state.tlsRef}
-              onChange={(value) => update("tlsRef", value)}
-            />
-          </fieldset>
-          <fieldset className="grid gap-3 sm:grid-cols-2">
-            <legend className="mb-2 text-sm font-semibold">{t("wizard.platformSection")}</legend>
-            {state.topology === "kubernetes" ? (
-              <>
-                {[
-                  ["namespace", "wizard.namespace"],
-                  ["ingressClassName", "wizard.ingressClass"],
-                  ["storageClassName", "wizard.storageClass"],
-                  ["runtimeClassName", "wizard.runtimeClass"],
-                ].map(([key, label]) => (
+          <Tabs defaultValue="guided">
+            <TabsList variant="line" className="w-full justify-start">
+              <TabsTrigger value="guided">{t("wizard.guided")}</TabsTrigger>
+              <TabsTrigger value="custom">{t("wizard.custom")}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="guided" className="space-y-6 pt-4">
+              <fieldset className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+                <legend className="mb-2 text-sm font-semibold">{t("wizard.targetSection")}</legend>
+                <SelectField
+                  label={t("wizard.topology")}
+                  value={state.topology}
+                  onChange={(value) => update("topology", value)}
+                  options={topologyOptions}
+                  t={t}
+                />
+                {textFields.slice(0, 5).map(([key, label, placeholder]) => (
                   <TextField
                     key={key}
                     label={t(label)}
-                    value={state[key as keyof WizardState]}
-                    onChange={(value) => update(key as keyof WizardState, value)}
+                    value={state[key]}
+                    placeholder={t(placeholder)}
+                    onChange={(value) => update(key, value)}
                   />
                 ))}
-              </>
-            ) : (
-              <>
-                {[
-                  ["projectName", "wizard.projectName"],
-                  ["deploymentRoot", "wizard.deploymentRoot"],
-                ].map(([key, label]) => (
+              </fieldset>
+              <fieldset className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+                <legend className="mb-2 text-sm font-semibold">
+                  {t("wizard.identitySection")}
+                </legend>
+                {textFields.slice(5, 11).map(([key, label, placeholder]) => (
                   <TextField
                     key={key}
                     label={t(label)}
-                    value={state[key as keyof WizardState]}
-                    onChange={(value) => update(key as keyof WizardState, value)}
+                    value={state[key]}
+                    placeholder={t(placeholder)}
+                    onChange={(value) => update(key, value)}
                   />
                 ))}
-              </>
-            )}
-          </fieldset>
-          <fieldset className="grid gap-3">
-            <legend className="mb-2 text-sm font-semibold">{t("wizard.imagesSection")}</legend>
-            {textFields.slice(14).map(([key, label, placeholder]) => (
-              <TextField
-                key={key}
-                label={t(label)}
-                value={state[key]}
-                placeholder={t(placeholder)}
-                onChange={(value) => update(key, value)}
+              </fieldset>
+              <fieldset className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+                <legend className="mb-2 text-sm font-semibold">{t("wizard.storageSection")}</legend>
+                {textFields.slice(11, 15).map(([key, label, placeholder]) => (
+                  <TextField
+                    key={key}
+                    label={t(label)}
+                    value={state[key]}
+                    placeholder={t(placeholder)}
+                    onChange={(value) => update(key, value)}
+                  />
+                ))}
+                <Field orientation="horizontal" className="sm:col-span-2">
+                  <FieldContent>
+                    <FieldLabel htmlFor="server-object-store-path-style">
+                      {t("wizard.objectStorePathStyle")}
+                    </FieldLabel>
+                    <FieldDescription>{t("wizard.objectStorePathStyleHelp")}</FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    id="server-object-store-path-style"
+                    checked={state.objectStorePathStyle}
+                    onCheckedChange={(checked) => update("objectStorePathStyle", checked)}
+                  />
+                </Field>
+                <SelectField
+                  label={t("wizard.snapshotProvider")}
+                  value={state.snapshotProvider}
+                  onChange={(value) => update("snapshotProvider", value)}
+                  options={snapshotOptions}
+                  t={t}
+                />
+                {state.snapshotProvider !== "none" && (
+                  <TextField
+                    label={t("wizard.snapshotRef")}
+                    value={state.snapshotRef}
+                    onChange={(value) => update("snapshotRef", value)}
+                  />
+                )}
+                <SelectField
+                  label={t("wizard.secretProvider")}
+                  value={state.secretProvider}
+                  onChange={(value) => update("secretProvider", value)}
+                  options={secretOptions}
+                  t={t}
+                />
+                <TextField
+                  label={t("wizard.secretRootRef")}
+                  value={state.secretRootRef}
+                  onChange={(value) => update("secretRootRef", value)}
+                />
+                <SelectField
+                  label={t("wizard.tlsProvider")}
+                  value={state.tlsProvider}
+                  onChange={(value) => update("tlsProvider", value)}
+                  options={tlsOptions}
+                  t={t}
+                />
+                {state.tlsProvider !== "acme-http01" && (
+                  <TextField
+                    label={t("wizard.tlsRef")}
+                    value={state.tlsRef}
+                    onChange={(value) => update("tlsRef", value)}
+                  />
+                )}
+              </fieldset>
+              <fieldset className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+                <legend className="mb-2 text-sm font-semibold">
+                  {t("wizard.platformSection")}
+                </legend>
+                {state.topology === "kubernetes" ? (
+                  <>
+                    {[
+                      ["namespace", "wizard.namespace"],
+                      ["ingressClassName", "wizard.ingressClass"],
+                      ["storageClassName", "wizard.storageClass"],
+                      ["runtimeClassName", "wizard.runtimeClass"],
+                    ].map(([key, label]) => (
+                      <TextField
+                        key={key}
+                        label={t(label)}
+                        value={state[key as keyof WizardState]}
+                        onChange={(value) => update(key as keyof WizardState, value)}
+                      />
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    {[
+                      ["projectName", "wizard.projectName"],
+                      ["deploymentRoot", "wizard.deploymentRoot"],
+                    ].map(([key, label]) => (
+                      <TextField
+                        key={key}
+                        label={t(label)}
+                        value={state[key as keyof WizardState]}
+                        onChange={(value) => update(key as keyof WizardState, value)}
+                      />
+                    ))}
+                  </>
+                )}
+              </fieldset>
+              <fieldset className="grid gap-3 border-t pt-4">
+                <legend className="mb-2 text-sm font-semibold">{t("wizard.imagesSection")}</legend>
+                {textFields.slice(18).map(([key, label, placeholder]) => (
+                  <TextField
+                    key={key}
+                    label={t(label)}
+                    value={state[key]}
+                    placeholder={t(placeholder)}
+                    onChange={(value) => update(key, value)}
+                  />
+                ))}
+              </fieldset>
+            </TabsContent>
+            <TabsContent value="custom" className="pt-4">
+              <StructuredConfigEditor
+                value={buildDeploymentTarget(state)}
+                validate={parseDeploymentTarget}
+                onApply={(target) => setState(wizardStateFromTarget(target))}
+                filename={`${state.id || "deployment-target"}.deployment-target`}
+                disabled={submitting}
               />
-            ))}
-          </fieldset>
-          <p className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">
+            </TabsContent>
+          </Tabs>
+          <p className="border-l-2 border-primary bg-muted/50 p-3 text-xs text-muted-foreground">
             {t("wizard.credentialsNotice")}
           </p>
+          {capabilities?.requiresProviderCredentials && (
+            <p className="border-l-2 border-amber-500 p-3 text-xs text-muted-foreground">
+              {t("wizard.providerCredentialsRequired")}
+            </p>
+          )}
+          {error && (
+            <Alert variant="destructive">
+              <AlertTitle>{t("wizard.invalid")}</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {t("wizard.cancel")}
@@ -924,18 +1069,18 @@ function SelectField({
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
-      <NativeSelect
-        id={id}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        wrapperClassName="w-full"
-      >
-        {options.map((option) => (
-          <NativeSelectOption key={option} value={option}>
-            {t(`options.${option}`)}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger id={id} className="w-full" aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {t(`options.${option}`)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   )
 }
@@ -948,9 +1093,11 @@ function buildDeploymentTarget(state: WizardState): DeploymentTarget {
         ? { provider: state.tlsProvider, credentialRef: state.tlsRef }
         : { provider: state.tlsProvider }
   const snapshots =
-    state.snapshotProvider === "kubernetes-csi"
-      ? { provider: state.snapshotProvider, className: state.snapshotRef }
-      : { provider: state.snapshotProvider, adapterRef: state.snapshotRef }
+    state.snapshotProvider === "none"
+      ? { provider: state.snapshotProvider }
+      : state.snapshotProvider === "kubernetes-csi"
+        ? { provider: state.snapshotProvider, className: state.snapshotRef }
+        : { provider: state.snapshotProvider, adapterRef: state.snapshotRef }
   const target = {
     apiVersion: "deploy.cognia.dev/v1alpha1",
     kind: "DeploymentTarget",
@@ -968,20 +1115,20 @@ function buildDeploymentTarget(state: WizardState): DeploymentTarget {
             },
           }
         : { compose: { projectName: state.projectName, deploymentRoot: state.deploymentRoot } }),
-      controller: { url: state.controllerUrl, credentialRef: `ops-controller/${state.id}` },
+      controller: { url: state.controllerUrl, credentialRef: state.controllerCredentialRef },
       identity: {
         provider: "oidc",
         issuer: state.oidcIssuer,
         audience: state.oidcAudience,
         tenantClaim: state.tenantClaim,
-        scopes: { read: "servers:read", operate: "servers:operate", admin: "servers:admin" },
+        scopes: { read: state.scopeRead, operate: state.scopeOperate, admin: state.scopeAdmin },
       },
       objectStore: {
         provider: "s3-compatible",
         endpoint: state.objectStoreEndpoint,
         region: state.objectStoreRegion,
         bucket: state.objectStoreBucket,
-        pathStyle: false,
+        pathStyle: state.objectStorePathStyle,
         credentialRef: state.objectStoreCredentialRef,
       },
       snapshots,
@@ -995,6 +1142,66 @@ function buildDeploymentTarget(state: WizardState): DeploymentTarget {
     },
   }
   return target as DeploymentTarget
+}
+
+function wizardStateFromTarget(target: DeploymentTarget): WizardState {
+  const snapshots = target.spec.snapshots
+  const tls = target.spec.tls
+  return {
+    id: target.metadata.id,
+    label: target.metadata.label,
+    topology: target.spec.topology,
+    controllerUrl: target.spec.controller.url,
+    controllerCredentialRef: target.spec.controller.credentialRef,
+    publicUrl: target.spec.publicUrl,
+    oidcIssuer: target.spec.identity.issuer,
+    oidcAudience: target.spec.identity.audience,
+    tenantClaim: target.spec.identity.tenantClaim,
+    scopeRead: target.spec.identity.scopes.read,
+    scopeOperate: target.spec.identity.scopes.operate,
+    scopeAdmin: target.spec.identity.scopes.admin,
+    objectStoreEndpoint: target.spec.objectStore.endpoint,
+    objectStoreRegion: target.spec.objectStore.region,
+    objectStoreBucket: target.spec.objectStore.bucket,
+    objectStorePathStyle: target.spec.objectStore.pathStyle,
+    objectStoreCredentialRef: target.spec.objectStore.credentialRef,
+    snapshotProvider: snapshots.provider,
+    snapshotRef:
+      snapshots.provider === "kubernetes-csi"
+        ? snapshots.className
+        : snapshots.provider === "external-command"
+          ? snapshots.adapterRef
+          : "",
+    secretProvider: target.spec.secrets.provider,
+    secretRootRef: target.spec.secrets.rootRef,
+    tlsProvider: tls.provider,
+    tlsRef:
+      tls.provider === "ingress" || tls.provider === "existing"
+        ? tls.secretRef
+        : tls.provider === "acme-dns01"
+          ? tls.credentialRef
+          : "",
+    serverImage: target.spec.images.server,
+    runnerImage: target.spec.images.runner,
+    workspaceRuntimeImage: target.spec.images.workspaceRuntime,
+    namespace: target.spec.kubernetes?.namespace ?? INITIAL_WIZARD.namespace,
+    ingressClassName: target.spec.kubernetes?.ingressClassName ?? INITIAL_WIZARD.ingressClassName,
+    storageClassName: target.spec.kubernetes?.storageClassName ?? INITIAL_WIZARD.storageClassName,
+    runtimeClassName: target.spec.kubernetes?.runtimeClassName ?? "",
+    projectName: target.spec.compose?.projectName ?? INITIAL_WIZARD.projectName,
+    deploymentRoot: target.spec.compose?.deploymentRoot ?? INITIAL_WIZARD.deploymentRoot,
+  }
+}
+
+function supportedOptions<T extends string>(
+  supported: string[] | undefined,
+  fallback: readonly T[],
+  current: T
+): T[] {
+  const available = supported?.length
+    ? fallback.filter((option) => supported.includes(option))
+    : [...fallback]
+  return available.includes(current) ? available : [current, ...available]
 }
 
 function formatDate(value: string | null): string {

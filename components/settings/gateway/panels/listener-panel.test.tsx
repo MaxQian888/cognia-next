@@ -40,6 +40,8 @@ function setup(config: Partial<GatewayConfig> = {}, statusOver?: GatewayStatus |
         config: { ...DEFAULT_GATEWAY_CONFIG, ...config },
         status: statusOver === undefined ? status() : statusOver,
         persist,
+        replace: jest.fn(),
+        restartRequired: false,
       }}
       onRestarted={onRestarted}
     />

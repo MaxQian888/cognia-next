@@ -56,12 +56,15 @@ import { GatewayUpstreamPanel } from "./panels/upstream-panel"
 import { GatewayExposurePanel } from "./panels/exposure-panel"
 import { GatewayLogViewer } from "./gateway-log-viewer"
 import { GatewayRouteTicketsPanel } from "./panels/route-tickets-panel"
+import { GatewayCustomPanel } from "./panels/custom-panel"
 
 /** Shared handles every config-editing panel needs. */
 export interface GatewayPanelContext {
   config: GatewayConfig
   status: GatewayStatus | null
   persist: (patch: Partial<GatewayConfig>) => Promise<void>
+  replace: (config: GatewayConfig) => Promise<void>
+  restartRequired: boolean
 }
 
 /** How often the cooldown list is refetched so the nav badge stays honest. */
@@ -78,6 +81,7 @@ export function GatewaySection() {
   const [cooldowns, setCooldowns] = useState<GatewayKeyCooldown[]>([])
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const [starting, setStarting] = useState(false)
+  const [restartRequired, setRestartRequired] = useState(false)
 
   const activePanel = resolveGatewayPanel(searchParams.get(GATEWAY_PANEL_PARAM))
 
@@ -88,6 +92,12 @@ export function GatewaySection() {
         .catch(() => {}),
     []
   )
+
+  const refreshConfigAndStatus = useCallback(async () => {
+    const [nextConfig, nextStatus] = await Promise.all([gatewayGetConfig(), gatewayGetStatus()])
+    setConfig(nextConfig)
+    setStatus(nextStatus)
+  }, [])
 
   const refreshCooldowns = useCallback(
     () =>
@@ -131,14 +141,66 @@ export function GatewaySection() {
   // eslint-disable-next-line react-hooks/refs -- sync during render so `persist` reads the config of the render it was called from; the same ref-tracked-async-state pattern as `components/settings/shortcuts-section.tsx`.
   configRef.current = config
 
-  const persist = useCallback(async (patch: Partial<GatewayConfig>) => {
-    const next: GatewayConfig = { ...configRef.current, ...patch }
-    configRef.current = next
-    setConfig(next)
-    await gatewayUpdateConfig(next).catch((e) =>
-      toast.error(e instanceof Error ? e.message : String(e))
-    )
-  }, [])
+  const persist = useCallback(
+    async (patch: Partial<GatewayConfig>) => {
+      const previous = configRef.current
+      const next: GatewayConfig = { ...previous, ...patch }
+      try {
+        await gatewayUpdateConfig(next)
+        configRef.current = next
+        setConfig(next)
+        if (
+          status?.running &&
+          next.enabled &&
+          (next.port !== previous.port ||
+            next.bindInterface !== previous.bindInterface ||
+            next.allowlist.join("\n") !== previous.allowlist.join("\n"))
+        ) {
+          setRestartRequired(true)
+        }
+      } catch (e) {
+        await refreshConfigAndStatus().catch(() => {})
+        toast.error(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [refreshConfigAndStatus, status]
+  )
+
+  const replace = useCallback(
+    async (next: GatewayConfig) => {
+      const previous = configRef.current
+      if (next.enabled && !status?.hasToken) {
+        const error = new Error(t("requiresKey"))
+        toast.error(error.message)
+        throw error
+      }
+      try {
+        await gatewayUpdateConfig(next)
+        if (next.enabled !== Boolean(status?.running)) {
+          if (next.enabled) await gatewayStart()
+          else await gatewayStop()
+        }
+        configRef.current = next
+        setConfig(next)
+        if (
+          status?.running &&
+          next.enabled &&
+          (next.port !== previous.port ||
+            next.bindInterface !== previous.bindInterface ||
+            next.allowlist.join("\n") !== previous.allowlist.join("\n"))
+        ) {
+          setRestartRequired(true)
+        }
+        await refreshConfigAndStatus()
+        toast.success(t("customApplied"))
+      } catch (e) {
+        await refreshConfigAndStatus().catch(() => {})
+        toast.error(e instanceof Error ? e.message : String(e))
+        throw e
+      }
+    },
+    [refreshConfigAndStatus, status, t]
+  )
 
   const onToggleEnabled = useCallback(
     async (nextEnabled: boolean) => {
@@ -150,14 +212,14 @@ export function GatewaySection() {
       try {
         if (nextEnabled) await gatewayStart()
         else await gatewayStop()
-        await refreshStatus()
+        await refreshConfigAndStatus()
       } catch (e) {
         toast.error(e instanceof Error ? e.message : String(e))
       } finally {
         setStarting(false)
       }
     },
-    [status?.hasToken, refreshStatus, t]
+    [status?.hasToken, refreshConfigAndStatus, t]
   )
 
   const onSelect = useCallback(
@@ -188,8 +250,20 @@ export function GatewaySection() {
         ariaLabel: t("nav.badgeParkedKeysAria", { count: cooldowns.length }),
       }
     }
+    if (restartRequired) {
+      result.listener = {
+        text: "!",
+        variant: "destructive",
+        ariaLabel: t("nav.badgeRestartRequiredAria"),
+      }
+      result.custom = {
+        text: "!",
+        variant: "destructive",
+        ariaLabel: t("nav.badgeRestartRequiredAria"),
+      }
+    }
     return result
-  }, [status, cooldowns, t])
+  }, [status, cooldowns, restartRequired, t])
 
   if (!desktop) {
     return (
@@ -200,7 +274,7 @@ export function GatewaySection() {
     )
   }
 
-  const panelContext: GatewayPanelContext = { config, status, persist }
+  const panelContext: GatewayPanelContext = { config, status, persist, replace, restartRequired }
 
   const navNode = (
     <GatewayNav
@@ -277,6 +351,10 @@ export function GatewaySection() {
                 onToggleEnabled={onToggleEnabled}
                 refreshStatus={refreshStatus}
                 refreshCooldowns={refreshCooldowns}
+                onRestarted={async () => {
+                  setRestartRequired(false)
+                  await refreshConfigAndStatus()
+                }}
               />
             </PanelTransition>
           </div>
@@ -294,6 +372,7 @@ interface RenderArgs {
   onToggleEnabled: (next: boolean) => Promise<void>
   refreshStatus: () => Promise<void>
   refreshCooldowns: () => Promise<void>
+  onRestarted: () => Promise<void>
 }
 
 function GatewayPanelBody(args: RenderArgs) {
@@ -305,6 +384,7 @@ function GatewayPanelBody(args: RenderArgs) {
     onToggleEnabled,
     refreshStatus,
     refreshCooldowns,
+    onRestarted,
   } = args
   switch (panel) {
     case "overview":
@@ -317,7 +397,7 @@ function GatewayPanelBody(args: RenderArgs) {
         />
       )
     case "listener":
-      return <GatewayListenerPanel ctx={panelContext} onRestarted={refreshStatus} />
+      return <GatewayListenerPanel ctx={panelContext} onRestarted={onRestarted} />
     case "keys":
       return <GatewayKeysCard onChanged={() => void refreshStatus()} />
     case "reliability":
@@ -336,5 +416,7 @@ function GatewayPanelBody(args: RenderArgs) {
       return <GatewayLogViewer />
     case "tickets":
       return <GatewayRouteTicketsPanel />
+    case "custom":
+      return <GatewayCustomPanel ctx={panelContext} />
   }
 }

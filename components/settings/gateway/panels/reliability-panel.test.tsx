@@ -11,7 +11,15 @@ jest.mock("next-intl", () => ({
 function setup() {
   const persist = jest.fn().mockResolvedValue(undefined)
   render(
-    <GatewayReliabilityPanel ctx={{ config: DEFAULT_GATEWAY_CONFIG, status: null, persist }} />
+    <GatewayReliabilityPanel
+      ctx={{
+        config: DEFAULT_GATEWAY_CONFIG,
+        status: null,
+        persist,
+        replace: jest.fn(),
+        restartRequired: false,
+      }}
+    />
   )
   return { persist }
 }
@@ -24,6 +32,9 @@ describe("GatewayReliabilityPanel", () => {
     ["connectTimeout", "15", { connectTimeoutSecs: 15 }],
     ["requestTimeout", "0", { requestTimeoutSecs: 0 }],
     ["maxRetries", "3", { maxRetries: 3 }],
+    ["retryBackoffBase", "400", { retryBackoffBaseMs: 400 }],
+    ["retryBackoffMax", "5000", { retryBackoffMaxMs: 5000 }],
+    ["maxRetryWait", "45000", { maxRetryWaitMs: 45000 }],
   ])("persists the %s number field", (label, typed, expected) => {
     const { persist } = setup()
 
@@ -71,5 +82,15 @@ describe("GatewayReliabilityPanel", () => {
   it("marks itself as applying without a restart", () => {
     setup()
     expect(screen.getByText("liveBadge")).toBeInTheDocument()
+  })
+
+  it("persists retry-header and local-routing switches", () => {
+    const { persist } = setup()
+
+    fireEvent.click(screen.getByRole("switch", { name: "respectRetryAfter" }))
+    fireEvent.click(screen.getByRole("switch", { name: "gatewayLocalRoutingV2" }))
+
+    expect(persist).toHaveBeenCalledWith({ respectRetryAfter: false })
+    expect(persist).toHaveBeenCalledWith({ gatewayLocalRoutingV2: false })
   })
 })

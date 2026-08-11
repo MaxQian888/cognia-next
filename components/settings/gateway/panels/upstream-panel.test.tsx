@@ -15,7 +15,13 @@ function setup(cooldowns: GatewayKeyCooldown[] = []) {
   const onRefreshCooldowns = jest.fn().mockResolvedValue(undefined)
   render(
     <GatewayUpstreamPanel
-      ctx={{ config: DEFAULT_GATEWAY_CONFIG, status: null, persist }}
+      ctx={{
+        config: DEFAULT_GATEWAY_CONFIG,
+        status: null,
+        persist,
+        replace: jest.fn(),
+        restartRequired: false,
+      }}
       cooldowns={cooldowns}
       onRefreshCooldowns={onRefreshCooldowns}
     />

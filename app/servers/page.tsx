@@ -6,9 +6,9 @@ import { toast } from "sonner"
 
 import { ServerOperationsCenter } from "@/components/servers/server-operations-center"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { createKeyringStore } from "@/lib/credentials/keyring-store"
 import {
   OpsClient,
@@ -16,11 +16,13 @@ import {
   loadCachedServerList,
   saveCachedServerList,
   type Operation,
+  type ProviderCapabilities,
   type RecoveryPoint,
   type ServerDetail,
   type ServerLogEntry,
   type ServerSummary,
 } from "@/lib/server-ops/client"
+import { followOperationStream } from "@/lib/server-ops/operation-stream"
 import { parseDeploymentTarget, type DeploymentTarget } from "@/lib/server-ops/deployment-target"
 import { useAccountStore } from "@/stores/account/account-store"
 
@@ -45,6 +47,8 @@ export default function ServersPage() {
   const [backups, setBackups] = useState<RecoveryPoint[]>([])
   const [logs, setLogs] = useState<ServerLogEntry[]>([])
   const [operations, setOperations] = useState<Operation[]>([])
+  const [capabilities, setCapabilities] = useState<ProviderCapabilities | null>(null)
+  const [eventStreamConnected, setEventStreamConnected] = useState(false)
   const [loading, setLoading] = useState(false)
   const [offline, setOffline] = useState(false)
 
@@ -106,6 +110,20 @@ export default function ServersPage() {
   }, [client, refresh])
 
   useEffect(() => {
+    if (!client) return
+    let cancelled = false
+    void client.capabilities().then(
+      (next) => !cancelled && setCapabilities(next),
+      (error) =>
+        !cancelled &&
+        toast.error(t("errors.capabilities"), { description: localizedError(t, error) })
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [client, t])
+
+  useEffect(() => {
     if (!client || !selectedId || offline) {
       // Clear remote-only detail when switching to the isolated offline view.
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -137,7 +155,7 @@ export default function ServersPage() {
         baseUrl: controllerUrl,
         accessToken: () => Promise.resolve(accessToken),
       })
-      await candidate.capabilities()
+      const nextCapabilities = await candidate.capabilities()
       const next = { controllerUrl, targetId }
       await tokenStore.save(tokenKey(accountId, targetId), accessToken)
       localStorage.setItem(
@@ -145,6 +163,7 @@ export default function ServersPage() {
         JSON.stringify(next)
       )
       setConnection(next)
+      setCapabilities(nextCapabilities)
       setConnected(true)
       setAccessToken("")
       toast.success(t("connection.connected"))
@@ -155,9 +174,33 @@ export default function ServersPage() {
     }
   }
 
-  const recordOperation = (operation: Operation) => {
+  const recordOperation = useCallback((operation: Operation) => {
     setOperations((current) => [operation, ...current.filter((item) => item.id !== operation.id)])
-  }
+  }, [])
+
+  useEffect(() => {
+    if (!client) return
+    const controller = new AbortController()
+    void Promise.resolve().then(() => {
+      if (!controller.signal.aborted) setEventStreamConnected(true)
+    })
+    void followOperationStream(client, {
+      signal: controller.signal,
+      onOperation: (operation) => {
+        setEventStreamConnected(true)
+        recordOperation(operation)
+        if (
+          ["succeeded", "failed", "rolled_back", "rollback_failed", "cancelled"].includes(
+            operation.state
+          )
+        ) {
+          void refresh()
+        }
+      },
+      onError: () => setEventStreamConnected(false),
+    })
+    return () => controller.abort()
+  }, [client, recordOperation, refresh])
   const run = async (action: () => Promise<Operation>) => {
     try {
       const operation = await action()
@@ -173,8 +216,31 @@ export default function ServersPage() {
     action: (lease: string, idempotencyKey: string) => Promise<Operation>
   ) => {
     if (!client) return
-    const lease = await client.createAdminLease(serverId, kind, crypto.randomUUID())
-    await run(() => action(lease.token, crypto.randomUUID()))
+    await run(async () => {
+      const lease = await client.createAdminLease(serverId, kind, crypto.randomUUID())
+      return action(lease.token, crypto.randomUUID())
+    })
+  }
+
+  const disconnect = async () => {
+    if (!accountId || !connection) return
+    try {
+      await tokenStore.delete(tokenKey(accountId, connection.targetId))
+    } catch (error) {
+      toast.error(t("connection.disconnectFailed"), { description: localizedError(t, error) })
+      return
+    }
+    localStorage.removeItem(`${CONNECTION_PREFIX}.${encodeURIComponent(accountId)}`)
+    setConnection(null)
+    setConnected(false)
+    setCapabilities(null)
+    setEventStreamConnected(false)
+    setServers([])
+    setSelectedId(null)
+    setBackups([])
+    setLogs([])
+    setOperations([])
+    toast.success(t("connection.disconnected"))
   }
 
   if (!accountId) {
@@ -188,15 +254,17 @@ export default function ServersPage() {
   if (!client) {
     return (
       <div className="grid h-full w-full place-items-center overflow-y-auto p-4">
-        <Card className="w-full max-w-lg">
-          <CardHeader>
-            <CardTitle>{t("connection.title")}</CardTitle>
-            <CardDescription>{t("connection.description")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={connect} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="ops-controller-url">{t("connection.controllerUrl")}</Label>
+        <section className="w-full max-w-lg border-y py-6">
+          <div className="px-1">
+            <h1 className="text-xl font-semibold">{t("connection.title")}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{t("connection.description")}</p>
+          </div>
+          <form onSubmit={connect} className="mt-6 space-y-5">
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="ops-controller-url">
+                  {t("connection.controllerUrl")}
+                </FieldLabel>
                 <Input
                   id="ops-controller-url"
                   type="url"
@@ -205,18 +273,18 @@ export default function ServersPage() {
                   onChange={(event) => setControllerUrl(event.target.value)}
                   placeholder={t("connection.controllerPlaceholder")}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ops-target-id">{t("connection.targetId")}</Label>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="ops-target-id">{t("connection.targetId")}</FieldLabel>
                 <Input
                   id="ops-target-id"
                   required
                   value={targetId}
                   onChange={(event) => setTargetId(event.target.value)}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ops-access-token">{t("connection.accessToken")}</Label>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="ops-access-token">{t("connection.accessToken")}</FieldLabel>
                 <Input
                   id="ops-access-token"
                   type="password"
@@ -225,19 +293,22 @@ export default function ServersPage() {
                   value={accessToken}
                   onChange={(event) => setAccessToken(event.target.value)}
                 />
-                <p className="text-xs text-muted-foreground">{t("connection.tokenNotice")}</p>
-              </div>
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? t("connection.connecting") : t("connection.connect")}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+                <FieldDescription>{t("connection.tokenNotice")}</FieldDescription>
+              </Field>
+            </FieldGroup>
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading && <Spinner />}
+              {loading ? t("connection.connecting") : t("connection.connect")}
+            </Button>
+          </form>
+        </section>
       </div>
     )
   }
 
   const selectedServer = servers.find((server) => server.id === selectedId) ?? null
+  const activeControllerUrl = connection.controllerUrl
+  const activeTargetId = connection.targetId
   return (
     <ServerOperationsCenter
       servers={servers}
@@ -245,10 +316,15 @@ export default function ServersPage() {
       backups={backups}
       logs={logs}
       operations={operations}
+      capabilities={capabilities}
+      controllerUrl={activeControllerUrl}
+      targetId={activeTargetId}
+      eventStreamConnected={eventStreamConnected}
       offline={offline}
       loading={loading}
       onSelectServer={setSelectedId}
       onRefresh={() => void refresh()}
+      onDisconnect={() => void disconnect()}
       onBackup={(id) => void run(() => client.createBackup(id, crypto.randomUUID()))}
       onRestore={(id, recoveryPointId) =>
         void withAdminLease(id, "restore", (lease, key) =>

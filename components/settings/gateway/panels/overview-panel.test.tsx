@@ -40,7 +40,13 @@ function setup(statusOver: GatewayStatus | null = status(), starting = false) {
   const onRefreshStatus = jest.fn().mockResolvedValue(undefined)
   render(
     <GatewayOverviewPanel
-      ctx={{ config: DEFAULT_GATEWAY_CONFIG, status: statusOver, persist }}
+      ctx={{
+        config: DEFAULT_GATEWAY_CONFIG,
+        status: statusOver,
+        persist,
+        replace: jest.fn(),
+        restartRequired: false,
+      }}
       starting={starting}
       onToggleEnabled={onToggleEnabled}
       onRefreshStatus={onRefreshStatus}
@@ -127,7 +133,13 @@ describe("GatewayOverviewPanel", () => {
   it("labels legacy routing and handles a missing policy revision", () => {
     const { rerender } = render(
       <GatewayOverviewPanel
-        ctx={{ config: DEFAULT_GATEWAY_CONFIG, status: status(), persist: jest.fn() }}
+        ctx={{
+          config: DEFAULT_GATEWAY_CONFIG,
+          status: status(),
+          persist: jest.fn(),
+          replace: jest.fn(),
+          restartRequired: false,
+        }}
         starting={false}
         onToggleEnabled={jest.fn()}
         onRefreshStatus={jest.fn()}
@@ -141,6 +153,8 @@ describe("GatewayOverviewPanel", () => {
           config: DEFAULT_GATEWAY_CONFIG,
           status: status({ localRoutingEnabled: true, routingPolicyRevision: null }),
           persist: jest.fn(),
+          replace: jest.fn(),
+          restartRequired: false,
         }}
         starting={false}
         onToggleEnabled={jest.fn()}

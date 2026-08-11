@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import type {
   Operation,
@@ -13,6 +14,14 @@ import { ServerOperationsCenter } from "./server-operations-center"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${JSON.stringify(values)}` : key,
+}))
+jest.mock("@/components/ai-elements/code-block", () => ({
+  CodeBlock: ({ code }: { code: string }) => <pre>{code}</pre>,
+  CodeBlockActions: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CodeBlockCopyButton: () => <button type="button">copy</button>,
+  CodeBlockFilename: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
+  CodeBlockHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CodeBlockTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
 const server: ServerDetail = {
@@ -28,9 +37,9 @@ const server: ServerDetail = {
   certificationIssues: [],
   capabilities: {
     topologies: ["compose", "kubernetes"],
-    snapshotProviders: ["kubernetes-csi", "external-command"],
+    snapshotProviders: ["kubernetes-csi", "external-command", "none"],
     secretProviders: ["file", "kubernetes", "vault"],
-    tlsProviders: ["ingress", "existing"],
+    tlsProviders: ["ingress", "existing", "acme-http01", "acme-dns01"],
     objectStoreProtocols: ["s3-compatible"],
     requiresProviderCredentials: false,
   },
@@ -77,10 +86,15 @@ function renderCenter(
     backups: [recoveryPoint],
     logs: [log],
     operations: [operation],
+    capabilities: server.capabilities,
+    controllerUrl: "https://ops.example.com",
+    targetId: "default",
+    eventStreamConnected: true,
     offline: false,
     loading: false,
     onSelectServer: jest.fn(),
     onRefresh: jest.fn(),
+    onDisconnect: jest.fn(),
     onBackup: jest.fn(),
     onRestore: jest.fn(),
     onRollback: jest.fn(),
@@ -200,6 +214,20 @@ it("renders offline, loading, empty, and uncertified states", () => {
   expect(screen.getAllByText("logs.empty").length).toBeGreaterThan(0)
 })
 
+it("renders reconnecting streams, unrestricted provider fallbacks, and large backups", () => {
+  renderCenter({
+    capabilities: null,
+    eventStreamConnected: false,
+    backups: [{ ...recoveryPoint, sizeBytes: 5 * 1024 ** 3 }],
+  })
+
+  expect(screen.getByText("connection.eventsReconnecting")).toBeInTheDocument()
+  selectTab("tabs.backups")
+  expect(screen.getByText(/5\.0 GiB/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "actions.deploy" }))
+  expect(screen.getByRole("combobox", { name: "wizard.topology" })).toBeInTheDocument()
+})
+
 it("gates key rotation and all recovery point entry points", () => {
   const props = renderCenter()
 
@@ -284,17 +312,17 @@ it("builds a complete Kubernetes target from the deployment wizard", async () =>
 })
 
 it("builds a Compose target with external snapshot and ACME DNS contracts", async () => {
+  const user = userEvent.setup()
   const onValidateTarget = jest.fn().mockResolvedValue(undefined)
   renderCenter({ onValidateTarget })
   fireEvent.click(screen.getByRole("button", { name: "actions.deploy" }))
 
-  fireEvent.change(screen.getByLabelText("wizard.topology"), { target: { value: "compose" } })
-  fireEvent.change(screen.getByLabelText("wizard.snapshotProvider"), {
-    target: { value: "external-command" },
-  })
-  fireEvent.change(screen.getByLabelText("wizard.tlsProvider"), {
-    target: { value: "acme-dns01" },
-  })
+  await user.click(screen.getByRole("combobox", { name: "wizard.topology" }))
+  await user.click(screen.getByRole("option", { name: "options.compose" }))
+  await user.click(screen.getByRole("combobox", { name: "wizard.snapshotProvider" }))
+  await user.click(screen.getByRole("option", { name: "options.external-command" }))
+  await user.click(screen.getByRole("combobox", { name: "wizard.tlsProvider" }))
+  await user.click(screen.getByRole("option", { name: "options.acme-dns01" }))
   fireEvent.change(screen.getByLabelText("wizard.snapshotRef"), {
     target: { value: "zfs-cognia" },
   })
@@ -307,6 +335,19 @@ it("builds a Compose target with external snapshot and ACME DNS contracts", asyn
   fireEvent.change(screen.getByLabelText("wizard.deploymentRoot"), {
     target: { value: "/srv/cognia" },
   })
+  for (const [label, value] of Object.entries({
+    "wizard.label": "Production Compose",
+    "wizard.controllerUrl": "https://ops.example.com",
+    "wizard.publicUrl": "https://compose.example.com",
+    "wizard.oidcIssuer": "https://auth.example.com/oidc",
+    "wizard.oidcAudience": "https://compose.example.com/api",
+    "wizard.objectStoreEndpoint": "https://s3.example.com",
+    "wizard.serverImage": `server@sha256:${"a".repeat(64)}`,
+    "wizard.runnerImage": `runner@sha256:${"b".repeat(64)}`,
+    "wizard.workspaceRuntimeImage": `runtime@sha256:${"c".repeat(64)}`,
+  })) {
+    fireEvent.change(screen.getByLabelText(label), { target: { value } })
+  }
   fireEvent.submit(screen.getByRole("button", { name: "wizard.validate" }).closest("form")!)
 
   await waitFor(() => expect(onValidateTarget).toHaveBeenCalledTimes(1))
@@ -318,4 +359,146 @@ it("builds a Compose target with external snapshot and ACME DNS contracts", asyn
       tls: { provider: "acme-dns01", credentialRef: "dns/provider" },
     })
   )
+}, 15000)
+
+it("exposes every deployment contract field and applies advanced values", async () => {
+  const user = userEvent.setup()
+  const onValidateTarget = jest.fn().mockResolvedValue(undefined)
+  renderCenter({ onValidateTarget })
+  fireEvent.click(screen.getByRole("button", { name: "actions.deploy" }))
+
+  for (const label of [
+    "wizard.controllerCredentialRef",
+    "wizard.scopeRead",
+    "wizard.scopeOperate",
+    "wizard.scopeAdmin",
+    "wizard.objectStorePathStyle",
+  ]) {
+    expect(screen.getByLabelText(label)).toBeInTheDocument()
+  }
+
+  fireEvent.change(screen.getByLabelText("wizard.controllerCredentialRef"), {
+    target: { value: "controllers/production" },
+  })
+  fireEvent.change(screen.getByLabelText("wizard.scopeRead"), {
+    target: { value: "fleet:read" },
+  })
+  await user.click(screen.getByRole("switch", { name: "wizard.objectStorePathStyle" }))
+  await user.click(screen.getByRole("combobox", { name: "wizard.snapshotProvider" }))
+  await user.click(screen.getByRole("option", { name: "options.none" }))
+
+  expect(screen.queryByLabelText("wizard.snapshotRef")).not.toBeInTheDocument()
+})
+
+it("offers a strict JSON/YAML custom target editor without credential values", async () => {
+  renderCenter()
+  fireEvent.click(screen.getByRole("button", { name: "actions.deploy" }))
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "wizard.custom" }), {
+    button: 0,
+    ctrlKey: false,
+  })
+  fireEvent.click(screen.getByRole("tab", { name: "wizard.custom" }))
+
+  expect(screen.getByLabelText("editorLabel")).toBeInTheDocument()
+  expect(screen.getByText("import")).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "download" })).toBeInTheDocument()
+  expect((screen.getByLabelText("editorLabel") as HTMLTextAreaElement).value).not.toMatch(
+    /accessToken|secretKey|kubeconfig/i
+  )
+})
+
+it("round-trips a complete custom target into the guided deployment contract", async () => {
+  const user = userEvent.setup()
+  const onValidateTarget = jest.fn().mockResolvedValue(undefined)
+  renderCenter({ onValidateTarget })
+  fireEvent.click(screen.getByRole("button", { name: "actions.deploy" }))
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "wizard.custom" }), {
+    button: 0,
+    ctrlKey: false,
+  })
+  fireEvent.click(screen.getByRole("tab", { name: "wizard.custom" }))
+
+  const target = {
+    apiVersion: "deploy.cognia.dev/v1alpha1",
+    kind: "DeploymentTarget",
+    metadata: { id: "custom-compose", label: "Custom Compose" },
+    spec: {
+      topology: "compose",
+      compose: { projectName: "custom", deploymentRoot: "/srv/custom" },
+      controller: { url: "https://ops.example.com", credentialRef: "controllers/custom" },
+      publicUrl: "https://custom.example.com",
+      identity: {
+        provider: "oidc",
+        issuer: "https://auth.example.com/oidc",
+        audience: "https://custom.example.com/api",
+        tenantClaim: "organization_id",
+        scopes: { read: "servers:read", operate: "servers:operate", admin: "servers:admin" },
+      },
+      objectStore: {
+        provider: "s3-compatible",
+        endpoint: "https://s3.example.com",
+        region: "auto",
+        bucket: "custom-backups",
+        pathStyle: true,
+        credentialRef: "backups/custom",
+      },
+      snapshots: { provider: "none" },
+      tls: { provider: "acme-http01" },
+      secrets: { provider: "vault", rootRef: "cognia/custom" },
+      images: {
+        server: `server@sha256:${"a".repeat(64)}`,
+        runner: `runner@sha256:${"b".repeat(64)}`,
+        workspaceRuntime: `runtime@sha256:${"c".repeat(64)}`,
+      },
+    },
+  }
+  fireEvent.change(screen.getByLabelText("editorLabel"), {
+    target: { value: JSON.stringify(target) },
+  })
+  await user.click(screen.getByRole("button", { name: "apply" }))
+
+  const kubernetesTarget = {
+    ...target,
+    metadata: { id: "custom-kubernetes", label: "Custom Kubernetes" },
+    spec: {
+      ...target.spec,
+      topology: "kubernetes",
+      compose: undefined,
+      kubernetes: {
+        namespace: "custom",
+        ingressClassName: "nginx",
+        storageClassName: "fast-rwo",
+      },
+      snapshots: { provider: "kubernetes-csi", className: "fast-snapshots" },
+      tls: { provider: "ingress", secretRef: "custom-tls" },
+    },
+  }
+  await waitFor(() =>
+    expect((screen.getByLabelText("editorLabel") as HTMLTextAreaElement).value).toContain(
+      "custom-compose"
+    )
+  )
+  fireEvent.change(screen.getByLabelText("editorLabel"), {
+    target: { value: JSON.stringify(kubernetesTarget) },
+  })
+  await user.click(screen.getByRole("button", { name: "apply" }))
+  fireEvent.submit(screen.getByRole("button", { name: "wizard.validate" }).closest("form")!)
+
+  await waitFor(() => expect(onValidateTarget).toHaveBeenCalledWith(kubernetesTarget))
+})
+
+it("keeps the deployment wizard open and reports non-Error validation failures", async () => {
+  const onValidateTarget = jest.fn().mockRejectedValue("invalid target")
+  renderCenter({ onValidateTarget })
+  fireEvent.click(screen.getByRole("button", { name: "actions.deploy" }))
+  fireEvent.submit(screen.getByRole("button", { name: "wizard.validate" }).closest("form")!)
+
+  expect(await screen.findByText("wizard.invalid")).toBeInTheDocument()
+  expect(screen.getByRole("dialog")).toBeInTheDocument()
+})
+
+it("disconnects the controller from the workspace header", () => {
+  const props = renderCenter()
+  fireEvent.click(screen.getByRole("button", { name: "connection.disconnect" }))
+  expect(props.onDisconnect).toHaveBeenCalledTimes(1)
 })

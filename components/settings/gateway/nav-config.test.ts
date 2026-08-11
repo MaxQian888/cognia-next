@@ -11,11 +11,12 @@ describe("gateway nav-config", () => {
     expect(GATEWAY_NAV_ITEMS.map((i) => i.id)).toEqual(grouped)
   })
 
-  it("covers all eight panels exactly once", () => {
+  it("covers all nine panels exactly once", () => {
     const ids = GATEWAY_NAV_ITEMS.map((i) => i.id)
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids.sort()).toEqual(
       [
+        "custom",
         "exposure",
         "keys",
         "listener",
@@ -30,6 +31,7 @@ describe("gateway nav-config", () => {
 
   it("resolves a known deep link", () => {
     expect(resolveGatewayPanel("upstream")).toBe("upstream")
+    expect(resolveGatewayPanel("custom")).toBe("custom")
   })
 
   it("falls back to the default for unknown, empty and absent values", () => {

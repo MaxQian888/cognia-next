@@ -12,7 +12,13 @@ function setup(over: Partial<GatewayConfig> = {}) {
   const persist = jest.fn().mockResolvedValue(undefined)
   render(
     <GatewayExposurePanel
-      ctx={{ config: { ...DEFAULT_GATEWAY_CONFIG, ...over }, status: null, persist }}
+      ctx={{
+        config: { ...DEFAULT_GATEWAY_CONFIG, ...over },
+        status: null,
+        persist,
+        replace: jest.fn(),
+        restartRequired: false,
+      }}
     />
   )
   return { persist }

@@ -10,7 +10,9 @@
 
 import { useTranslations } from "next-intl"
 
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 
 import { ChipInput } from "../shared/chip-input"
 import { NumberRow } from "../../common/number-row"
@@ -68,6 +70,56 @@ export function GatewayReliabilityPanel({ ctx }: GatewayReliabilityPanelProps) {
         max={20}
         onCommit={(v) => void persist({ maxRetries: v })}
       />
+      <NumberRow
+        id="gw-retry-backoff-base"
+        label={t("retryBackoffBase")}
+        help={t("retryBackoffBaseHelp")}
+        value={config.retryBackoffBaseMs}
+        min={0}
+        max={4294967295}
+        onCommit={(v) => void persist({ retryBackoffBaseMs: v })}
+      />
+      <NumberRow
+        id="gw-retry-backoff-max"
+        label={t("retryBackoffMax")}
+        help={t("retryBackoffMaxHelp")}
+        value={config.retryBackoffMaxMs}
+        min={0}
+        max={4294967295}
+        onCommit={(v) => void persist({ retryBackoffMaxMs: v })}
+      />
+      <NumberRow
+        id="gw-max-retry-wait"
+        label={t("maxRetryWait")}
+        help={t("maxRetryWaitHelp")}
+        value={config.maxRetryWaitMs}
+        min={0}
+        max={4294967295}
+        onCommit={(v) => void persist({ maxRetryWaitMs: v })}
+      />
+
+      <Field orientation="horizontal">
+        <FieldContent>
+          <FieldLabel htmlFor="gw-respect-retry-after">{t("respectRetryAfter")}</FieldLabel>
+          <FieldDescription>{t("respectRetryAfterHelp")}</FieldDescription>
+        </FieldContent>
+        <Switch
+          id="gw-respect-retry-after"
+          checked={config.respectRetryAfter}
+          onCheckedChange={(checked) => void persist({ respectRetryAfter: checked })}
+        />
+      </Field>
+      <Field orientation="horizontal">
+        <FieldContent>
+          <FieldLabel htmlFor="gw-local-routing-v2">{t("gatewayLocalRoutingV2")}</FieldLabel>
+          <FieldDescription>{t("gatewayLocalRoutingV2Help")}</FieldDescription>
+        </FieldContent>
+        <Switch
+          id="gw-local-routing-v2"
+          checked={config.gatewayLocalRoutingV2}
+          onCheckedChange={(checked) => void persist({ gatewayLocalRoutingV2: checked })}
+        />
+      </Field>
 
       <div className="space-y-2">
         <Label>{t("retryStatusCodes")}</Label>

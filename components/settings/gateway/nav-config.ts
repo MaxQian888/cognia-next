@@ -13,6 +13,7 @@
 import {
   ActivityIcon,
   EyeIcon,
+  FileSlidersIcon,
   GaugeIcon,
   KeyRoundIcon,
   RadioIcon,
@@ -28,7 +29,15 @@ import type {
 } from "@/components/settings/common/settings-panel-nav"
 
 export type GatewayPanelId =
-  "overview" | "listener" | "keys" | "reliability" | "upstream" | "exposure" | "logs" | "tickets"
+  | "overview"
+  | "listener"
+  | "keys"
+  | "reliability"
+  | "upstream"
+  | "exposure"
+  | "logs"
+  | "tickets"
+  | "custom"
 
 export type GatewayNavGroupId = "serviceGroup" | "routingGroup" | "observabilityGroup"
 
@@ -60,6 +69,7 @@ export const GATEWAY_NAV_GROUPS: readonly GatewayNavGroup[] = [
     items: [
       { id: "logs", icon: ScrollTextIcon },
       { id: "tickets", icon: TicketIcon },
+      { id: "custom", icon: FileSlidersIcon },
     ],
   },
 ]
