@@ -4,6 +4,95 @@
  */
 
 import DOMPurify from "dompurify"
+import type { ArtifactRendererProfile } from "@/types"
+
+export const DIAGRAM_DESIGN_THEME_KEYS = [
+  "--background",
+  "--card",
+  "--foreground",
+  "--muted-foreground",
+  "--primary",
+  "--primary-foreground",
+  "--border",
+  "--info",
+  "--chart-1",
+  "--chart-2",
+  "--chart-3",
+  "--chart-4",
+  "--chart-5",
+] as const
+
+export type DiagramDesignThemeVariable = (typeof DIAGRAM_DESIGN_THEME_KEYS)[number]
+export type ArtifactThemeVariables = Partial<Record<DiagramDesignThemeVariable, string>>
+
+export const DIAGRAM_DESIGN_THEME_DEFAULTS: Record<DiagramDesignThemeVariable, string> = {
+  "--background": "#ffffff",
+  "--card": "#ffffff",
+  "--foreground": "#171717",
+  "--muted-foreground": "#737373",
+  "--primary": "#2563eb",
+  "--primary-foreground": "#ffffff",
+  "--border": "#e5e7eb",
+  "--info": "#0284c7",
+  "--chart-1": "#e76e50",
+  "--chart-2": "#2a9d8f",
+  "--chart-3": "#264653",
+  "--chart-4": "#e9c46a",
+  "--chart-5": "#f4a261",
+}
+
+interface SanitizeHTMLOptions {
+  wholeDocument?: boolean
+  rendererProfile?: ArtifactRendererProfile
+}
+
+interface RenderHTMLOptions extends SanitizeHTMLOptions {
+  themeVariables?: ArtifactThemeVariables
+}
+
+const SAFE_EMBEDDED_URL =
+  /^(?:#|url\(\s*#[^)]+\s*\)$|data:image\/(?:avif|gif|jpeg|png|svg\+xml|webp);)/i
+const CSS_IMPORT_PATTERN = /@import\s+(?:url\(\s*)?(?:["'][^"']+["']|[^;)\s]+)\s*\)?\s*;?/gi
+const CSS_URL_PATTERN = /url\(\s*(["']?)(.*?)\1\s*\)/gi
+
+function stripNetworkCss(css: string): string {
+  return css
+    .replace(CSS_IMPORT_PATTERN, "")
+    .replace(CSS_URL_PATTERN, (match, _quote: string, url: string) =>
+      SAFE_EMBEDDED_URL.test(url.trim()) ? match : "none"
+    )
+}
+
+function prepareDiagramHTMLForSanitization(content: string): string {
+  return stripNetworkCss(content).replace(/<(?:link|base)\b[^>]*>/gi, "")
+}
+
+function enforceDiagramNoNetworkPolicy(content: string, wholeDocument: boolean): string {
+  const parsed = new DOMParser().parseFromString(content, "text/html")
+
+  parsed.querySelectorAll("link, base").forEach((element) => element.remove())
+  parsed.querySelectorAll("style").forEach((element) => {
+    element.textContent = stripNetworkCss(element.textContent || "")
+  })
+
+  parsed.querySelectorAll("*").forEach((element) => {
+    const style = element.getAttribute("style")
+    if (style) element.setAttribute("style", stripNetworkCss(style))
+
+    element.removeAttribute("srcset")
+  })
+
+  if (!wholeDocument) return parsed.body.innerHTML
+
+  const csp = parsed.createElement("meta")
+  csp.setAttribute("http-equiv", "Content-Security-Policy")
+  csp.setAttribute(
+    "content",
+    "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:"
+  )
+  parsed.head.prepend(csp)
+  return `<!DOCTYPE html>\n${parsed.documentElement.outerHTML}`
+}
 
 /**
  * Escape HTML special characters
@@ -25,26 +114,55 @@ export function escapeHtml(text: string): string {
  */
 export function sanitizeHTML(
   content: string,
-  { wholeDocument = true }: { wholeDocument?: boolean } = {}
+  { wholeDocument = true, rendererProfile }: SanitizeHTMLOptions = {}
 ): string {
-  return DOMPurify.sanitize(content, {
-    WHOLE_DOCUMENT: wholeDocument,
-    ADD_TAGS: ["style", "link", "meta"],
-    ADD_ATTR: ["target", "rel", "class", "id", "style"],
-    ALLOW_DATA_ATTR: true,
-    FORBID_ATTR: ["http-equiv"],
-    FORBID_TAGS: ["script", "form", "input", "button", "textarea", "select", "option"],
-  })
+  const isDiagramDesign = rendererProfile === "diagram-design-v1"
+  const sanitized = DOMPurify.sanitize(
+    isDiagramDesign ? prepareDiagramHTMLForSanitization(content) : content,
+    {
+      WHOLE_DOCUMENT: wholeDocument,
+      ADD_TAGS: isDiagramDesign ? ["style", "meta"] : ["style", "link", "meta"],
+      ADD_ATTR: ["target", "rel", "class", "id", "style"],
+      ALLOW_DATA_ATTR: true,
+      ...(isDiagramDesign ? { ALLOWED_URI_REGEXP: SAFE_EMBEDDED_URL } : {}),
+      FORBID_ATTR: ["http-equiv"],
+      FORBID_TAGS: [
+        "script",
+        "form",
+        "input",
+        "button",
+        "textarea",
+        "select",
+        "option",
+        ...(isDiagramDesign ? ["link", "base", "iframe", "object", "embed"] : []),
+      ],
+    }
+  )
+
+  return isDiagramDesign ? enforceDiagramNoNetworkPolicy(sanitized, wholeDocument) : sanitized
+}
+
+export function applyArtifactThemeVariables(
+  doc: Document,
+  themeVariables: ArtifactThemeVariables
+): void {
+  for (const key of DIAGRAM_DESIGN_THEME_KEYS) {
+    const value = themeVariables[key]
+    if (value) doc.documentElement.style.setProperty(key, value)
+  }
 }
 
 /**
  * Render sanitized HTML content into an iframe document
  */
-export function renderHTML(doc: Document, content: string): void {
-  const sanitized = sanitizeHTML(content)
+export function renderHTML(doc: Document, content: string, options: RenderHTMLOptions = {}): void {
+  const sanitized = sanitizeHTML(content, options)
   doc.open()
   doc.write(sanitized)
   doc.close()
+  if (options.rendererProfile === "diagram-design-v1" && options.themeVariables) {
+    applyArtifactThemeVariables(doc, options.themeVariables)
+  }
 }
 
 /**

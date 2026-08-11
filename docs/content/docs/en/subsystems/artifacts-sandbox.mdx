@@ -146,6 +146,17 @@ jupyter: [/"cells"\s*:\s*\[/, /"cell_type"\s*:\s*"(code|markdown)"/, /"nbformat"
 
 When a chat message arrives, `useChatStore` routes code blocks and inline content to `useArtifactStore`. A detection hit creates an artifact automatically. `ALWAYS_CREATE_TYPES` forces creation (e.g. mermaid, chart) regardless of line count; other types have a minimum line threshold.
 
+### Diagram Design renderer profile
+
+HTML fences containing `<meta name="cognia-renderer" content="diagram-design-v1">` remain normal `html` artifacts, but detection persists `metadata.rendererProfile = "diagram-design-v1"`. The field is additive, so existing and unmarked HTML artifacts need no migration; unknown markers receive no special behavior.
+
+The profile adds two preview guarantees:
+
+- `ArtifactPreview` mirrors the active `background`, `card`, `foreground`, `muted-foreground`, `primary`, `primary-foreground`, `border`, `info`, and `chart-1` through `chart-5` CSS variables into the iframe. Theme and custom-theme changes update only the iframe root variables; the generated HTML is not rewritten.
+- The sanitizer removes `<link>`, CSS `@import`, and network-capable `src`, `href`, `srcset`, `poster`, `background`, `data`, and `url()` values. Fragment URLs such as `url(#arrow)` / `url(#shadow)` and safe `data:image/*` values remain available for inline SVG.
+
+The bundled `Diagram Design` Skill produces this profile as complete HTML with inline SVG. It is enabled for compact implicit discovery by default, while its full instructions and 27 type references remain behind `load_skill` / `load_skill_resource`.
+
 ## HTML / SVG Security
 
 `lib/artifacts/preview-utils.ts:renderHTML` and `renderSVG`:

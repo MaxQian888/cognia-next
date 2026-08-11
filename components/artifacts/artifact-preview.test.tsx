@@ -88,6 +88,37 @@ describe("ArtifactPreview", () => {
     expect(container.querySelector("iframe")).not.toBeNull()
   })
 
+  it("updates diagram theme variables without regenerating iframe content", async () => {
+    document.documentElement.style.setProperty("--primary", "#3366ff")
+    const { container } = render(
+      <ArtifactPreview
+        artifact={dummy({
+          type: "html",
+          content: "<html><body><p id='diagram-node'>diagram</p></body></html>",
+          metadata: { rendererProfile: "diagram-design-v1" },
+        })}
+      />
+    )
+    const iframe = container.querySelector("iframe") as HTMLIFrameElement
+
+    await waitFor(() =>
+      expect(iframe.contentDocument?.documentElement.style.getPropertyValue("--primary")).toBe(
+        "#3366ff"
+      )
+    )
+    const diagramNode = iframe.contentDocument?.getElementById("diagram-node")
+
+    document.documentElement.style.setProperty("--primary", "#ff3366")
+
+    await waitFor(() =>
+      expect(iframe.contentDocument?.documentElement.style.getPropertyValue("--primary")).toBe(
+        "#ff3366"
+      )
+    )
+    expect(iframe.contentDocument?.getElementById("diagram-node")).toBe(diagramNode)
+    document.documentElement.style.removeProperty("--primary")
+  })
+
   it("uses a React iframe shell for react artifacts", async () => {
     const { container } = render(
       <ArtifactPreview artifact={dummy({ type: "react", content: "function App(){}" })} />

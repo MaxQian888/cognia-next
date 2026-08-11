@@ -42,6 +42,8 @@ import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities
 import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { UIMessage } from "ai"
+import { useLiveQuery } from "dexie-react-hooks"
+import { countPendingSessionRunLearningProposals } from "@/lib/db/run-retrospectives"
 
 /**
  * The activity that carries the dock's unread dot, per surface.
@@ -280,6 +282,14 @@ export function ArtifactContextWorkbench({
   const hasArtifactTabs = useOpenArtifactTabs().length > 0
   // DockWorkspace only distinguishes touch from pointer density.
   const workspaceLayout = hostLayout === "mobile" ? "mobile" : "desktop"
+  const pendingRunLearningCount = useLiveQuery(
+    () =>
+      activeSessionId
+        ? countPendingSessionRunLearningProposals(activeSessionId)
+        : Promise.resolve(0),
+    [activeSessionId],
+    0
+  )
 
   useEffect(() => {
     const handleSelection = (event: Event) => {
@@ -320,6 +330,7 @@ export function ArtifactContextWorkbench({
     workspaceAvailable,
     pendingReview,
     unresolvedCommentCount,
+    pendingRunLearningCount,
     textSelection,
     pendingSelectionComment,
     onPendingSelectionComment: setPendingSelectionComment,
@@ -452,6 +463,14 @@ export function SessionContextWorkbench({
   // reading, or coming back to a conversation whose active tab was evicted. The
   // strip used to vanish entirely there, stranding every other open artifact.
   const hasArtifactTabs = useOpenArtifactTabs().length > 0
+  const pendingRunLearningCount = useLiveQuery(
+    () =>
+      activeSessionId
+        ? countPendingSessionRunLearningProposals(activeSessionId)
+        : Promise.resolve(0),
+    [activeSessionId],
+    0
+  )
 
   const panels = useSessionSurfacePanels({
     activeSessionId,
@@ -462,6 +481,7 @@ export function SessionContextWorkbench({
     workspaceLayout,
     workspaceAvailable,
     unresolvedCommentCount,
+    pendingRunLearningCount,
     scopeKey,
     onWidthHint: dockWidthHint,
   })

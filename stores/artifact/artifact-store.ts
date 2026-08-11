@@ -1251,19 +1251,22 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         const createdArtifacts: Artifact[] = []
 
         for (const item of detected) {
-          const metadata = buildArtifactSourceMetadata({
-            sessionId,
-            messageId,
-            type: item.type,
-            content: item.content,
-            language: item.language,
-            sourceOrigin: "auto",
-            userInitiated: false,
-            sourceRange: {
-              startIndex: item.startIndex,
-              endIndex: item.endIndex,
-            },
-          })
+          const metadata = {
+            ...buildArtifactSourceMetadata({
+              sessionId,
+              messageId,
+              type: item.type,
+              content: item.content,
+              language: item.language,
+              sourceOrigin: "auto",
+              userInitiated: false,
+              sourceRange: {
+                startIndex: item.startIndex,
+                endIndex: item.endIndex,
+              },
+            }),
+            ...(item.rendererProfile ? { rendererProfile: item.rendererProfile } : {}),
+          }
 
           if (
             isDuplicateArtifactSource({

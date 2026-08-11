@@ -625,6 +625,20 @@ describe("workspace filters", () => {
 })
 
 describe("autoCreateFromContent", () => {
+  it("persists the Diagram Design renderer profile from detected HTML", async () => {
+    const html = [
+      "<!doctype html>",
+      '<html><head><meta name="cognia-renderer" content="diagram-design-v1"></head>',
+      '<body><svg viewBox="0 0 100 100"></svg></body></html>',
+    ].join("\n")
+    const [created] = await useArtifactStore.getState().autoCreateFromContent({
+      sessionId: "s",
+      messageId: "diagram-message",
+      content: `\`\`\`html\n${html}\n\`\`\``,
+    })
+    expect(created.metadata?.rendererProfile).toBe("diagram-design-v1")
+  })
+
   it("creates artifacts from a multi-line code block", async () => {
     const md = "```js\n" + "console.log(1)\n".repeat(15) + "```"
     const out = await useArtifactStore.getState().autoCreateFromContent({

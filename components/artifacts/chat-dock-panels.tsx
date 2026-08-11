@@ -33,6 +33,7 @@ import {
   InfoIcon,
   GlobeIcon,
   CornerUpLeftIcon,
+  ListChecksIcon,
 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -60,6 +61,7 @@ import { MemoryWorkbenchPanel } from "@/components/context-workbench/panels/memo
 import { SourceControlWorkbenchPanel } from "@/components/context-workbench/panels/source-control-workbench-panel"
 import { LogsWorkbenchPanel } from "@/components/context-workbench/panels/logs-workbench-panel"
 import { AgentStatusWorkbenchPanel } from "@/components/context-workbench/panels/agent-status-workbench-panel"
+import { RunContextPanel } from "@/components/context-workbench/panels/run-context-panel"
 import type {
   ContextPanelDefinition,
   ContextPanelMode,
@@ -90,6 +92,8 @@ export interface ArtifactSurfacePanelsInput {
   workspaceAvailable: boolean
   pendingReview: CanvasPendingReview | null
   unresolvedCommentCount: number
+  /** Session-level proposals remain visible while an artifact is active. */
+  pendingRunLearningCount?: number
   textSelection: TextSelectionCoordinates | undefined
   pendingSelectionComment: string | null
   onPendingSelectionComment: (comment: string | null) => void
@@ -98,7 +102,7 @@ export interface ArtifactSurfacePanelsInput {
   onWidthHint: (mode: ContextPanelMode, panelId?: string) => void
 }
 
-/** The nine panels of the dock's artifact surface. */
+/** The dock's artifact-surface panel catalogue. */
 export function useArtifactSurfacePanels({
   artifactId,
   artifact,
@@ -109,6 +113,7 @@ export function useArtifactSurfacePanels({
   workspaceAvailable,
   pendingReview,
   unresolvedCommentCount,
+  pendingRunLearningCount = 0,
   textSelection,
   pendingSelectionComment,
   onPendingSelectionComment,
@@ -246,6 +251,18 @@ export function useArtifactSurfacePanels({
         ),
       },
       {
+        id: "run-context",
+        activity: "inspect",
+        labelKey: "contextWorkbench.runContext.title",
+        icon: ListChecksIcon,
+        order: 37,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        scope: "session",
+        getBadge: () => pendingRunLearningCount,
+        renderer: () => (activeSessionId ? <RunContextPanel sessionId={activeSessionId} /> : null),
+      },
+      {
         id: "metadata",
         activity: "inspect",
         labelKey: "contextWorkbench.metadata.artifactTitle",
@@ -339,6 +356,7 @@ export function useArtifactSurfacePanels({
       hostLayout,
       workspaceLayout,
       pendingReview,
+      pendingRunLearningCount,
       pendingSelectionComment,
       onPendingSelectionComment,
       sessionProject,
@@ -364,6 +382,8 @@ export interface SessionSurfacePanelsInput {
   sourceCount?: number
   /** Number of uncommitted file changes in the project workspace. */
   uncommittedChangeCount?: number
+  /** Number of run-learning proposals awaiting an explicit user decision. */
+  pendingRunLearningCount?: number
   scopeKey: string
   onWidthHint: (mode: ContextPanelMode, panelId?: string) => void
 }
@@ -380,6 +400,7 @@ export function useSessionSurfacePanels({
   unresolvedCommentCount,
   sourceCount = 0,
   uncommittedChangeCount = 0,
+  pendingRunLearningCount = 0,
   scopeKey,
   onWidthHint,
 }: SessionSurfacePanelsInput): ContextPanelDefinition[] {
@@ -535,6 +556,18 @@ export function useSessionSurfacePanels({
           ) : null,
       },
       {
+        id: "run-context",
+        activity: "inspect",
+        labelKey: "contextWorkbench.runContext.title",
+        icon: ListChecksIcon,
+        order: 44,
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        scope: "session",
+        getBadge: () => pendingRunLearningCount,
+        renderer: () => (activeSessionId ? <RunContextPanel sessionId={activeSessionId} /> : null),
+      },
+      {
         id: "session-sources",
         activity: "inspect",
         labelKey: "contextWorkbench.sessionSources.title",
@@ -617,6 +650,7 @@ export function useSessionSurfacePanels({
     [
       activeSessionId,
       onWidthHint,
+      pendingRunLearningCount,
       messageCount,
       session,
       sessionMessages,

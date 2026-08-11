@@ -12,7 +12,16 @@ import { AlertCircle, RefreshCw, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
-import { renderHTML, renderSVG, getReactShellHtml, escapeHtml } from "@/lib/artifacts"
+import {
+  applyArtifactThemeVariables,
+  DIAGRAM_DESIGN_THEME_DEFAULTS,
+  DIAGRAM_DESIGN_THEME_KEYS,
+  renderHTML,
+  renderSVG,
+  getReactShellHtml,
+  escapeHtml,
+} from "@/lib/artifacts"
+import { useThemeCssVars } from "@/lib/appearance/use-theme-css-vars"
 import { loggers } from "@cognia/logging"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { ArtifactRuntimeHealth } from "@/types/artifact/artifact"
@@ -111,6 +120,11 @@ function RuntimeHealthBadge({ state }: { state: ArtifactRuntimeHealth }) {
 export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   const t = useTranslations("artifactPreview")
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const diagramThemeVariables = useThemeCssVars(
+    DIAGRAM_DESIGN_THEME_KEYS,
+    DIAGRAM_DESIGN_THEME_DEFAULTS
+  )
+  const diagramThemeVariablesRef = useRef(diagramThemeVariables)
   const [error, setError] = useState<string | null>(null)
   const [key, setKey] = useState(0)
   const adapter = getArtifactRuntimeAdapter(artifact.type)
@@ -131,6 +145,10 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
         : "ready"
   const setArtifactRuntimeHealth = useArtifactStore((state) => state.setArtifactRuntimeHealth)
 
+  useEffect(() => {
+    diagramThemeVariablesRef.current = diagramThemeVariables
+  }, [diagramThemeVariables])
+
   // Persist only settled outcomes, so "which artifacts are broken?" survives a
   // reload and the workspace runtime filter has something to match. `loading`
   // is never written — it is a property of this render, not of the artifact.
@@ -138,6 +156,14 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
     if (runtimeHealth === "loading") return
     setArtifactRuntimeHealth(artifact.id, runtimeHealth, error ?? undefined)
   }, [artifact.id, error, runtimeHealth, setArtifactRuntimeHealth])
+
+  useEffect(() => {
+    if (artifact.type !== "html" || artifact.metadata?.rendererProfile !== "diagram-design-v1") {
+      return
+    }
+    const doc = iframeRef.current?.contentDocument
+    if (doc) applyArtifactThemeVariables(doc, diagramThemeVariables)
+  }, [artifact.metadata?.rendererProfile, artifact.type, diagramThemeVariables])
   const widgetMetadata = artifact.metadata?.widget
   const effectiveIframeHeight =
     widgetMetadata?.sizing === "content-height" ? iframeHeight : undefined
@@ -176,7 +202,10 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
           case "html": {
             const doc = iframe.contentDocument
             if (!doc) return
-            renderHTML(doc, artifact.content)
+            renderHTML(doc, artifact.content, {
+              rendererProfile: artifact.metadata?.rendererProfile,
+              themeVariables: diagramThemeVariablesRef.current,
+            })
             break
           }
           case "svg": {
@@ -217,7 +246,15 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       cancelAnimationFrame(rafId)
       clearTimeout(timer)
     }
-  }, [artifact.id, artifact.content, artifact.type, key, needsIframe, t])
+  }, [
+    artifact.id,
+    artifact.content,
+    artifact.metadata?.rendererProfile,
+    artifact.type,
+    key,
+    needsIframe,
+    t,
+  ])
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {

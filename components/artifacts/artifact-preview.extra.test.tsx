@@ -5,9 +5,16 @@
 import { render, screen, act, fireEvent } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, string>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
+  useTranslations: () => (key: string, vars?: Record<string, string>) => {
+    if (key === "previewFailed" || key === "loadingPreview") return ""
+    return vars ? `${key}:${JSON.stringify(vars)}` : key
+  },
 }))
+
+jest.mock("@/lib/artifacts", () => {
+  const actual = jest.requireActual<typeof import("@/lib/artifacts")>("@/lib/artifacts")
+  return { ...actual, renderHTML: jest.fn(actual.renderHTML) }
+})
 
 jest.mock("./artifact-renderers", () => {
   const React = jest.requireActual<typeof import("react")>("react")
@@ -15,19 +22,31 @@ jest.mock("./artifact-renderers", () => {
     "@/lib/artifacts/renderer-registry"
   )
   return {
-    ArtifactRenderer: ({ type }: { type: string }) => (
-      <div data-testid={`artifact-renderer-${type}`} />
-    ),
+    ArtifactRenderer: ({ type, content }: { type: string; content: string }) => {
+      if (content === "__throw__") throw new Error("inner preview failure")
+      return <div data-testid={`artifact-renderer-${type}`} />
+    },
     PluginArtifactRendererHost: ({
+      renderer,
       onRuntimeStateChange,
     }: {
-      onRuntimeStateChange?: (state: "ready" | "loading" | "error", err?: string) => void
+      renderer: { id: string }
+      onRuntimeStateChange?: (
+        state: "ready" | "loading" | "error" | "unsupported",
+        err?: string
+      ) => void
     }) => {
       React.useEffect(() => {
+        if (renderer.id === "unsupported") {
+          onRuntimeStateChange?.("unsupported")
+          return
+        }
         onRuntimeStateChange?.("loading")
         onRuntimeStateChange?.("error", "boom")
+        onRuntimeStateChange?.("error")
+        onRuntimeStateChange?.("unsupported")
         onRuntimeStateChange?.("ready")
-      }, [onRuntimeStateChange])
+      }, [onRuntimeStateChange, renderer.id])
       return <div data-testid="plugin-host" />
     },
     resolveArtifactRenderPlan: (artifact: { type: string }) => {
@@ -69,6 +88,7 @@ import {
   clearRegisteredArtifactRenderers,
   type PluginArtifactRenderer,
 } from "@/lib/artifacts/renderer-registry"
+import { renderHTML } from "@/lib/artifacts"
 import type { Artifact } from "@/types"
 
 const dummy = (overrides: Partial<Artifact> = {}): Artifact => ({
@@ -126,6 +146,30 @@ describe("ArtifactPreview — extra coverage", () => {
     expect(screen.getByTestId("plugin-host")).toBeInTheDocument()
   })
 
+  it("surfaces an unsupported plugin runtime state", async () => {
+    const renderer: PluginArtifactRenderer = {
+      id: "unsupported",
+      kind: "test/unsupported",
+      mount: () => ({ dispose() {} }),
+    }
+    registerArtifactRenderer(renderer.id, renderer)
+    render(
+      <ArtifactPreview
+        artifact={dummy({
+          type: "html",
+          metadata: {
+            plugin: { kind: renderer.kind, schemaVersion: 1, ownerPluginId: "test" },
+          },
+        })}
+      />
+    )
+
+    expect(await screen.findByTestId("runtime-health-badge")).toHaveAttribute(
+      "data-state",
+      "unsupported"
+    )
+  })
+
   it("renders a React-typed iframe (separate sandbox path)", () => {
     const { container } = render(
       <ArtifactPreview
@@ -136,7 +180,7 @@ describe("ArtifactPreview — extra coverage", () => {
   })
 
   it("postMessage handler accepts size + ready + error", async () => {
-    render(
+    const { container } = render(
       <ArtifactPreview
         artifact={dummy({
           type: "html",
@@ -145,33 +189,47 @@ describe("ArtifactPreview — extra coverage", () => {
         })}
       />
     )
-    // Simulate the iframe contentWindow posting messages back to the parent.
-    // The handler is registered on `window`; we fire equivalent message events.
+    const iframe = container.querySelector("iframe") as HTMLIFrameElement
+    const postMessage = jest.fn()
+    Object.defineProperty(iframe, "contentWindow", {
+      value: { postMessage },
+      configurable: true,
+    })
+    const dispatchFromIframe = (data: Record<string, unknown>) => {
+      const event = new MessageEvent("message", { data })
+      Object.defineProperty(event, "source", { value: iframe.contentWindow })
+      window.dispatchEvent(event)
+    }
+
     await act(async () => {
-      // Without a matching contentWindow the handler short-circuits, which
-      // exercises the early-return branch.
       window.dispatchEvent(
         new MessageEvent("message", { data: { type: "artifact-preview-ready" } })
       )
-      window.dispatchEvent(
-        new MessageEvent("message", {
-          data: { type: "artifact-preview-error", message: "x" },
-        })
-      )
-      window.dispatchEvent(
-        new MessageEvent("message", {
-          data: { type: "artifact-preview-resize", height: 240 },
-        })
-      )
+      dispatchFromIframe({ type: "artifact-preview-ready" })
+      dispatchFromIframe({ type: "artifact-preview-resize", height: 240 })
+      dispatchFromIframe({ type: "artifact-preview-resize", height: 0 })
+      dispatchFromIframe({ type: "artifact-preview-resize", height: "240" })
+      dispatchFromIframe({ type: "artifact-preview-error", message: "x" })
+      dispatchFromIframe({ type: "artifact-preview-error" })
     })
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "artifact-preview-parent-context" }),
+      "*"
+    )
+    expect(iframe).toHaveStyle({ height: "240px" })
+    const alert = screen.getByRole("alert")
+    fireEvent.click(alert.querySelector("button")!)
+    expect(container.querySelector("iframe")).not.toBe(iframe)
   })
 
-  it("error handler on iframe fires onError", async () => {
+  it("error handler on iframe fires onError", () => {
     const { container } = render(
       <ArtifactPreview artifact={dummy({ type: "html", content: "<html></html>" })} />
     )
     const iframe = container.querySelector("iframe")!
-    fireEvent.error(iframe)
+    act(() => {
+      fireEvent.error(iframe)
+    })
   })
 
   it("iframe renders fire after the 100ms timer for html/svg/react/code", async () => {
@@ -207,6 +265,27 @@ describe("ArtifactPreview — extra coverage", () => {
     }
   })
 
+  it.each([
+    [new Error("render exploded"), "render exploded"],
+    ["non-error failure", "previewError"],
+  ])("surfaces a scheduled HTML render failure", (failure, expectedMessage) => {
+    jest.useFakeTimers()
+    try {
+      jest.mocked(renderHTML).mockImplementationOnce(() => {
+        throw failure
+      })
+      render(<ArtifactPreview artifact={dummy({ type: "html", content: "<html></html>" })} />)
+
+      act(() => {
+        jest.advanceTimersByTime(150)
+      })
+
+      expect(screen.getByRole("alert")).toHaveTextContent(expectedMessage)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("iframe onLoad path posts the React render message", async () => {
     jest.useFakeTimers()
     try {
@@ -235,15 +314,12 @@ describe("ArtifactPreview — extra coverage", () => {
   })
 
   it("PreviewErrorBoundary surfaces an alert when a child throws", () => {
-    const ThrowChild = () => {
-      throw new Error("inner")
-    }
-    // Tap the boundary by mounting a misbehaving child via an internal test —
-    // we bypass the public component by re-using its internals through the
-    // public ArtifactPreview's PreviewErrorBoundary via an injected child.
-    // The simplest way is to render the runtime-iframe path with an
-    // unsupported type, which triggers the default doc.body.innerHTML path.
-    render(<ArtifactPreview artifact={dummy({ type: "html", content: "<html></html>" })} />)
-    void ThrowChild
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation()
+    render(<ArtifactPreview artifact={dummy({ type: "code", content: "__throw__" })} />)
+
+    expect(screen.getByRole("alert")).toHaveTextContent("inner preview failure")
+    fireEvent.click(screen.getByRole("button", { name: "Retry preview" }))
+    expect(screen.getByRole("alert")).toBeInTheDocument()
+    consoleSpy.mockRestore()
   })
 })

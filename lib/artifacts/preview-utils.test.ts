@@ -2,7 +2,14 @@
  * @jest-environment jsdom
  */
 
-import { escapeHtml, renderHTML, renderSVG, getReactShellHtml, sanitizeHTML } from "./preview-utils"
+import {
+  applyArtifactThemeVariables,
+  escapeHtml,
+  renderHTML,
+  renderSVG,
+  getReactShellHtml,
+  sanitizeHTML,
+} from "./preview-utils"
 
 describe("escapeHtml", () => {
   it("escapes the canonical HTML special characters", () => {
@@ -52,6 +59,58 @@ describe("renderHTML / renderSVG", () => {
     expect(sanitizeHTML("<strong>safe</strong>", { wholeDocument: false })).toBe(
       "<strong>safe</strong>"
     )
+  })
+
+  it("removes network-capable resources for the diagram renderer profile", () => {
+    const sanitized = sanitizeHTML(
+      `<!doctype html><html><head>
+        <link rel="stylesheet" href="https://cdn.example/theme.css">
+        <style>
+          @import url("https://cdn.example/import.css");
+          .remote { background-image: url(https://cdn.example/paper.png); }
+          .marker { marker-end: url(#arrow); }
+          .embedded { background-image: url(data:image/png;base64,AA==); }
+        </style>
+      </head><body>
+        <img id="remote" src="https://cdn.example/image.png">
+        <img id="embedded" src="data:image/png;base64,AA==">
+        <a id="remote-link" href="https://example.com">remote</a>
+        <svg><defs><filter id="shadow"><feGaussianBlur stdDeviation="2" /></filter></defs>
+          <path marker-end="url(#arrow)" filter="url(#shadow)" />
+        </svg>
+      </body></html>`,
+      { rendererProfile: "diagram-design-v1" }
+    )
+
+    expect(sanitized).not.toMatch(/<link|@import|https:\/\/cdn\.example|href="https:/i)
+    expect(sanitized).toContain("url(#arrow)")
+    expect(sanitized).toContain("url(#shadow)")
+    expect(sanitized).toContain("data:image/png;base64,AA==")
+    expect(sanitized).toContain("feGaussianBlur")
+  })
+
+  it("keeps ordinary HTML resource behavior unchanged", () => {
+    const sanitized = sanitizeHTML(
+      '<link rel="stylesheet" href="https://cdn.example/theme.css"><img src="https://cdn.example/image.png">'
+    )
+
+    expect(sanitized).toContain("<link")
+    expect(sanitized).toContain("https://cdn.example/image.png")
+  })
+
+  it("applies and updates renderer theme variables without rewriting content", () => {
+    const doc = newDocument()
+    renderHTML(doc, "<html><body><p>diagram</p></body></html>", {
+      rendererProfile: "diagram-design-v1",
+      themeVariables: { "--primary": "#3366ff", "--background": "#ffffff" },
+    })
+
+    expect(doc.documentElement.style.getPropertyValue("--primary")).toBe("#3366ff")
+    expect(doc.body.textContent).toContain("diagram")
+
+    applyArtifactThemeVariables(doc, { "--primary": "#ff3366" })
+    expect(doc.documentElement.style.getPropertyValue("--primary")).toBe("#ff3366")
+    expect(doc.body.textContent).toContain("diagram")
   })
 
   it("renders SVG inside a wrapper page", () => {

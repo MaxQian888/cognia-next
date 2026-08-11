@@ -122,6 +122,12 @@ jest.mock("@/components/browser/browser-preview-pane", () => ({
   ),
 }))
 
+jest.mock("@/components/context-workbench/panels/run-context-panel", () => ({
+  RunContextPanel: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="run-context" data-session={sessionId} />
+  ),
+}))
+
 jest.mock("./artifact-panel-content", () => ({
   ArtifactPanelContent: ({ panelMode }: { panelMode: string }) => (
     <div data-testid="preview" data-mode={panelMode} />
@@ -210,6 +216,7 @@ function artifactInput(
     workspaceAvailable: true,
     pendingReview: null,
     unresolvedCommentCount: 2,
+    pendingRunLearningCount: 4,
     textSelection: { kind: "text", start: 4, end: 9 },
     pendingSelectionComment: null,
     onPendingSelectionComment: jest.fn(),
@@ -231,6 +238,7 @@ function sessionInput(
     workspaceLayout: "desktop",
     workspaceAvailable: true,
     unresolvedCommentCount: 5,
+    pendingRunLearningCount: 3,
     scopeKey: "scope::session:s1",
     onWidthHint,
     ...overrides,
@@ -280,7 +288,7 @@ beforeEach(() => {
 })
 
 describe("useArtifactSurfacePanels", () => {
-  it("offers exactly the ten artifact-surface panels, in a stable order", () => {
+  it("offers exactly the eleven artifact-surface panels, in a stable order", () => {
     // The rail's group button opens the lowest-ordered panel of an activity, so
     // these numbers are behaviour, not decoration.
     const panels = collect(useArtifactSurfacePanels, artifactInput())
@@ -291,6 +299,7 @@ describe("useArtifactSurfacePanels", () => {
       ["preview", "preview-run", 10],
       ["browser", "preview-run", 11],
       ["artifacts", "review", 15],
+      ["run-context", "inspect", 37],
       ["metadata", "inspect", 35],
       ["memory", "inspect", 36],
       [PROJECT_OVERVIEW_PANEL_ID, "workspace", 25],
@@ -324,6 +333,15 @@ describe("useArtifactSurfacePanels", () => {
 
     const without = collect(useArtifactSurfacePanels, artifactInput())
     expect(panelById(without, "proposal-review").getBadge?.(ARTIFACT_RESOURCE)).toBe(0)
+  })
+
+  it("keeps the session run context available while an artifact is active", () => {
+    const panels = collect(useArtifactSurfacePanels, artifactInput())
+    const panel = panelById(panels, "run-context")
+    expect(panel.scope).toBe("session")
+    expect(panel.getBadge?.(ARTIFACT_RESOURCE)).toBe(4)
+    renderPanel(panel, ARTIFACT_RESOURCE)
+    expect(screen.getByTestId("run-context")).toHaveAttribute("data-session", "s1")
   })
 
   it("hands the artifact's own content to the resource chat", () => {
@@ -499,7 +517,7 @@ describe("the selection composer inside the resource chat", () => {
 })
 
 describe("useSessionSurfacePanels", () => {
-  it("offers exactly the twelve session-surface panels, in a stable order", () => {
+  it("offers exactly the thirteen session-surface panels, in a stable order", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     expect(panels.map((p) => [p.id, p.activity, p.order])).toEqual([
       ["artifacts", "review", 10],
@@ -509,6 +527,7 @@ describe("useSessionSurfacePanels", () => {
       [WORKSPACE_PANEL_ID, "workspace", 30],
       ["source-control", "workspace", 35],
       ["comments", "comments", 40],
+      ["run-context", "inspect", 44],
       ["session-sources", "inspect", 45],
       ["metadata", "inspect", 50],
       ["memory", "inspect", 55],
@@ -604,6 +623,15 @@ describe("useSessionSurfacePanels", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     renderPanel(panelById(panels, "session-sources"), SESSION_RESOURCE)
     expect(screen.getByTestId("sources")).toHaveAttribute("data-count", "1")
+  })
+
+  it("opens the session run context and badges pending learning proposals", () => {
+    const panels = collect(useSessionSurfacePanels, sessionInput())
+    const panel = panelById(panels, "run-context")
+    expect(panel.getBadge?.(SESSION_RESOURCE)).toBe(3)
+    expect(panel.scope).toBe("session")
+    renderPanel(panel, SESSION_RESOURCE)
+    expect(screen.getByTestId("run-context")).toHaveAttribute("data-session", "s1")
   })
 
   it("routes the overview's hand-off to the workspace panel and widens for it", () => {

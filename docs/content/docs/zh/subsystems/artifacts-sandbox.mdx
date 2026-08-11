@@ -128,6 +128,17 @@ jupyter: [/"cells"\s*:\s*\[/, /"cell_type"\s*:\s*"(code|markdown)"/, /"nbformat"
 检测命中 → 自动建 artifact。`ALWAYS_CREATE_TYPES` 强制创建（如 mermaid、chart）
 不论行数；其他类型有最小行阈值。
 
+### Diagram Design renderer profile
+
+当 HTML fence 包含 `<meta name="cognia-renderer" content="diagram-design-v1">` 时，它仍然是普通 `html` artifact，但检测器会持久化 `metadata.rendererProfile = "diagram-design-v1"`。这是纯增量字段：历史 HTML 和无 marker 的 HTML 不需要迁移，未知 marker 也不会触发特殊行为。
+
+该 profile 为预览增加两项保证：
+
+- `ArtifactPreview` 把活动主题的 `background`、`card`、`foreground`、`muted-foreground`、`primary`、`primary-foreground`、`border`、`info` 以及 `chart-1` 到 `chart-5` CSS 变量同步进 iframe。明暗和自定义主题变化时只更新 iframe 根变量，不重写生成的 HTML。
+- sanitizer 会移除 `<link>`、CSS `@import`，以及可访问网络的 `src`、`href`、`srcset`、`poster`、`background`、`data` 和 `url()`。`url(#arrow)` / `url(#shadow)` 这类 fragment URL 与安全的 `data:image/*` 仍可用于内联 SVG。
+
+内置 `Diagram Design` Skill 会生成这种完整 HTML + 内联 SVG。它默认启用精简的隐式发现，但完整指令与 27 类参考仍通过 `load_skill` / `load_skill_resource` 按需读取。
+
 ## HTML / SVG 安全
 
 `lib/artifacts/preview-utils.ts:renderHTML` 与 `renderSVG`：

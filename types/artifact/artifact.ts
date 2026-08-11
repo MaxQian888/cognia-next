@@ -40,6 +40,8 @@ export type ArtifactLanguage =
 
 export type ArtifactRuntimeHealth = "ready" | "loading" | "error" | "unsupported"
 
+export type ArtifactRendererProfile = "diagram-design-v1"
+
 /**
  * The subset worth remembering between sessions. `loading` is a property of
  * the preview that is on screen right now, not of the artifact — persisting it
@@ -210,6 +212,7 @@ export interface ArtifactMetadata {
   // For HTML/React previews
   previewable?: boolean
   sandboxed?: boolean
+  rendererProfile?: ArtifactRendererProfile
 
   // For routed rich output
   outputProfileId?: string
@@ -579,6 +582,7 @@ export interface ArtifactDetectionConfig {
 export interface DetectedArtifact {
   type: ArtifactType
   language?: ArtifactLanguage
+  rendererProfile?: ArtifactRendererProfile
   content: string
   title: string
   startIndex: number
