@@ -5,9 +5,26 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { SparklesIcon, Trash2Icon } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldSeparator,
+  FieldTitle,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item"
 import { Textarea } from "@/components/ui/textarea"
 import {
   addPetSpritePack,
@@ -130,15 +147,14 @@ export function PetSpritePackManager({ settings, onPatch }: PetSpritePackManager
   const errorMessageKey = IMPORT_ERROR_KEY[status]
 
   return (
-    <div className="space-y-4" data-testid="pet-sprite-pack-manager">
+    <FieldGroup data-testid="pet-sprite-pack-manager">
       {isTauri() && (
-        <div className="space-y-2 rounded-lg border p-3">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <SparklesIcon className="size-4" aria-hidden />
-            {t("createTitle")}
-          </div>
-          <p className="text-xs text-muted-foreground">{t("createDescription")}</p>
-          <Label htmlFor="pet-sprite-concept">{t("conceptLabel")}</Label>
+        <Field>
+          <FieldTitle className="gap-2">
+            <SparklesIcon className="size-4" aria-hidden /> {t("createTitle")}
+          </FieldTitle>
+          <FieldDescription>{t("createDescription")}</FieldDescription>
+          <FieldLabel htmlFor="pet-sprite-concept">{t("conceptLabel")}</FieldLabel>
           <Textarea
             id="pet-sprite-concept"
             value={concept}
@@ -149,11 +165,12 @@ export function PetSpritePackManager({ settings, onPatch }: PetSpritePackManager
           <Button type="button" size="sm" onClick={() => void openAgentTask()} disabled={busy}>
             {t("create")}
           </Button>
-        </div>
+        </Field>
       )}
 
-      <div className="space-y-2">
-        <Label htmlFor="pet-sprite-import">{t("import")}</Label>
+      <FieldSeparator />
+      <Field>
+        <FieldLabel htmlFor="pet-sprite-import">{t("import")}</FieldLabel>
         <Input
           id="pet-sprite-import"
           type="file"
@@ -164,54 +181,62 @@ export function PetSpritePackManager({ settings, onPatch }: PetSpritePackManager
             if (event.currentTarget.files) void importFiles(event.currentTarget.files)
           }}
         />
-        <p className="text-xs text-muted-foreground">{t("importHint")}</p>
-        {status === "installed" && <p className="text-sm text-emerald-600">{t("installed")}</p>}
+        <FieldDescription>{t("importHint")}</FieldDescription>
+        {status === "installed" ? (
+          <Alert>
+            <AlertDescription>{t("installed")}</AlertDescription>
+          </Alert>
+        ) : null}
         {errorMessageKey && (
-          <p className="text-sm text-destructive" role="alert">
-            {t(errorMessageKey)}
-          </p>
+          <Alert variant="destructive">
+            <AlertDescription>{t(errorMessageKey)}</AlertDescription>
+          </Alert>
         )}
-      </div>
+      </Field>
 
-      <div className="space-y-2">
+      <FieldSeparator />
+      <Field>
         {packs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("empty")}</p>
+          <Empty className="py-6">
+            <EmptyDescription>{t("empty")}</EmptyDescription>
+          </Empty>
         ) : (
-          packs.map((pack) => {
-            const active = settings.activeSpritePackId === pack.id
-            return (
-              <div
-                key={pack.id}
-                className="flex items-center justify-between gap-3 rounded-md border p-2"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{pack.displayName}</p>
-                  <p className="truncate text-xs text-muted-foreground">{pack.description}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={active ? "secondary" : "outline"}
-                    onClick={() => onPatch({ skinId: "sprite-v2", activeSpritePackId: pack.id })}
-                  >
-                    {active ? t("active") : t("activate")}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={t("delete", { name: pack.displayName })}
-                    onClick={() => void remove(pack.id)}
-                  >
-                    <Trash2Icon className="size-4" aria-hidden />
-                  </Button>
-                </div>
-              </div>
-            )
-          })
+          <ItemGroup>
+            {packs.map((pack) => {
+              const active = settings.activeSpritePackId === pack.id
+              return (
+                <Item key={pack.id} className="min-w-0 px-0">
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="max-w-full truncate">{pack.displayName}</ItemTitle>
+                    {pack.description ? (
+                      <ItemDescription>{pack.description}</ItemDescription>
+                    ) : null}
+                  </ItemContent>
+                  <ItemActions className="shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={active ? "secondary" : "outline"}
+                      onClick={() => onPatch({ skinId: "sprite-v2", activeSpritePackId: pack.id })}
+                    >
+                      {active ? t("active") : t("activate")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t("delete", { name: pack.displayName })}
+                      onClick={() => void remove(pack.id)}
+                    >
+                      <Trash2Icon className="size-4" aria-hidden />
+                    </Button>
+                  </ItemActions>
+                </Item>
+              )
+            })}
+          </ItemGroup>
         )}
-      </div>
-    </div>
+      </Field>
+    </FieldGroup>
   )
 }

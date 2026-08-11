@@ -7,9 +7,38 @@
 
 "use client"
 
-import { useState, useSyncExternalStore } from "react"
+import { useState, useSyncExternalStore, type ComponentType } from "react"
 import { useTranslations } from "next-intl"
+import {
+  BookOpenIcon,
+  HeartIcon,
+  LibraryIcon,
+  MenuIcon,
+  MessageCircleIcon,
+  PaletteIcon,
+  PlugIcon,
+  ScanLineIcon,
+  ShoppingBagIcon,
+  TrophyIcon,
+  UsersIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+} from "@/components/ui/empty"
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { usePet } from "@/hooks/pet/use-pet"
 import { useSettingsStore } from "@/stores/settings"
@@ -41,9 +70,32 @@ import { JournalTab } from "./journal-tab"
 import { AchievementsTab } from "./achievements-tab"
 import { BindingTab } from "./binding-tab"
 import { RadarPanel } from "./radar-panel"
-import { CaptureSettingsCard } from "@/components/capture/capture-settings-card"
+import { CaptureSettingsPanel } from "@/components/capture/capture-settings-panel"
 
 const TABS: readonly PetConsoleTab[] = PET_CONSOLE_TABS
+
+const TAB_ICONS: Record<PetConsoleTab, ComponentType<{ className?: string }>> = {
+  nurture: HeartIcon,
+  chat: MessageCircleIcon,
+  shop: ShoppingBagIcon,
+  customize: PaletteIcon,
+  binding: UsersIcon,
+  insights: ScanLineIcon,
+  journal: BookOpenIcon,
+  dex: LibraryIcon,
+  achievements: TrophyIcon,
+  plugins: PlugIcon,
+}
+
+const NAV_GROUPS: readonly {
+  id: "nurture" | "personalize" | "records" | "extensions"
+  tabs: readonly PetConsoleTab[]
+}[] = [
+  { id: "nurture", tabs: ["nurture", "chat", "shop"] },
+  { id: "personalize", tabs: ["customize", "binding"] },
+  { id: "records", tabs: ["insights", "journal", "dex", "achievements"] },
+  { id: "extensions", tabs: ["plugins"] },
+]
 
 export interface PetConsoleProps {
   /** Initial tab (deep link `?tab=` / bridge navigation). Default "nurture". */
@@ -150,83 +202,167 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
         </div>
       </header>
 
-      <nav
-        className="mt-3 flex items-center gap-1 overflow-x-auto border-b bg-background/80 px-2 py-2 backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        role="tablist"
-      >
-        {visibleTabs.map((id) => (
-          <Button
-            key={id}
-            size="sm"
-            variant={tab === id ? "secondary" : "ghost"}
-            role="tab"
-            aria-selected={tab === id}
-            data-tab={id}
-            onClick={() => setTab(id)}
-            className={cn("shrink-0", tab === id && "font-medium")}
-          >
-            {t(`console.tabs.${id}`)}
-          </Button>
-        ))}
-      </nav>
+      <div className="mt-3 flex items-center gap-2 border-y px-3 py-2 md:hidden">
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              className="min-w-0 flex-1 justify-start"
+              data-testid="pet-console-mobile-nav-trigger"
+              aria-label={t("console.openNavigation")}
+            >
+              <MenuIcon className="size-4" />
+              <span className="truncate">{t(`console.tabs.${tab}`)}</span>
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="left" className="w-[min(20rem,88vw)] gap-0 p-0">
+            <SheetHeader className="border-b">
+              <SheetTitle>{t("console.navigation")}</SheetTitle>
+              <SheetDescription>{t("console.navigationDescription")}</SheetDescription>
+            </SheetHeader>
+            <nav
+              className="min-h-0 flex-1 overflow-y-auto p-3"
+              aria-label={t("console.navigation")}
+            >
+              {NAV_GROUPS.map((group) => {
+                const tabs = group.tabs.filter((id) => visibleTabs.includes(id))
+                if (tabs.length === 0) return null
+                return (
+                  <div key={group.id} className="mb-5 flex flex-col gap-1 last:mb-0">
+                    <p className="px-2 text-xs font-medium text-muted-foreground">
+                      {t(`console.groups.${group.id}`)}
+                    </p>
+                    {tabs.map((id) => {
+                      const Icon = TAB_ICONS[id]
+                      return (
+                        <SheetClose key={id} asChild>
+                          <Button
+                            type="button"
+                            variant={tab === id ? "secondary" : "ghost"}
+                            className="w-full justify-start"
+                            aria-current={tab === id ? "page" : undefined}
+                            data-mobile-tab={id}
+                            onClick={() => setTab(id)}
+                          >
+                            <Icon className="size-4" />
+                            <span className="truncate">{t(`console.tabs.${id}`)}</span>
+                          </Button>
+                        </SheetClose>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </nav>
+          </SheetContent>
+        </Sheet>
+      </div>
 
-      <div className="@container/pet-pane min-h-0 flex-1 overflow-auto p-4">
-        {tab === "nurture" &&
-          (profile.soul ? (
-            <NurtureTab
-              profile={profile}
-              view={view}
-              skinId={effectiveSkin}
-              selection={selection}
-              onFeed={feed}
-              onPlay={play}
-              onPet={petStroke}
-              onTalk={talk}
-              onSleep={sleep}
-              onClean={clean}
-              onTreat={treat}
-              onOpenShop={() => setTab("shop")}
-            />
-          ) : (
-            <div data-testid="pet-hatch" className="flex flex-col items-center gap-3 py-8">
-              <PetRenderer
-                bones={view.effectiveBones}
-                stage="egg"
-                state="idle"
-                size={120}
+      <div className="grid min-h-0 flex-1 md:grid-cols-[13rem_minmax(0,1fr)]">
+        <nav
+          data-testid="pet-console-nav"
+          className="hidden min-h-0 overflow-y-auto border-r p-3 md:block"
+          role="tablist"
+          aria-label={t("console.navigation")}
+          aria-orientation="vertical"
+        >
+          {NAV_GROUPS.map((group) => {
+            const tabs = group.tabs.filter((id) => visibleTabs.includes(id))
+            if (tabs.length === 0) return null
+            return (
+              <div key={group.id} className="mb-5 flex flex-col gap-1 last:mb-0">
+                <p className="px-2 text-xs font-medium text-muted-foreground">
+                  {t(`console.groups.${group.id}`)}
+                </p>
+                {tabs.map((id) => {
+                  const Icon = TAB_ICONS[id]
+                  return (
+                    <Button
+                      key={id}
+                      type="button"
+                      size="sm"
+                      variant={tab === id ? "secondary" : "ghost"}
+                      role="tab"
+                      aria-selected={tab === id}
+                      data-tab={id}
+                      onClick={() => setTab(id)}
+                      className={cn("w-full justify-start", tab === id && "font-medium")}
+                    >
+                      <Icon className="size-4" />
+                      <span className="truncate">{t(`console.tabs.${id}`)}</span>
+                    </Button>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </nav>
+
+        <main className="@container/pet-pane min-h-0 min-w-0 overflow-auto p-4">
+          {tab === "nurture" &&
+            (profile.soul ? (
+              <NurtureTab
+                profile={profile}
+                view={view}
                 skinId={effectiveSkin}
                 selection={selection}
-                renderPriority="console"
+                onFeed={feed}
+                onPlay={play}
+                onPet={petStroke}
+                onTalk={talk}
+                onSleep={sleep}
+                onClean={clean}
+                onTreat={treat}
+                onOpenShop={() => setTab("shop")}
               />
-              <p className="text-sm text-muted-foreground">{t("console.hatchPrompt")}</p>
-              <Button onClick={() => void hatch()}>{t("console.hatch")}</Button>
+            ) : (
+              <Empty data-testid="pet-hatch" className="py-8">
+                <EmptyHeader>
+                  <EmptyMedia>
+                    <PetRenderer
+                      bones={view.effectiveBones}
+                      stage="egg"
+                      state="idle"
+                      size={120}
+                      skinId={effectiveSkin}
+                      selection={selection}
+                      renderPriority="console"
+                    />
+                  </EmptyMedia>
+                  <EmptyDescription>{t("console.hatchPrompt")}</EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button onClick={() => void hatch()}>{t("console.hatch")}</Button>
+                </EmptyContent>
+              </Empty>
+            ))}
+          {tab === "chat" && <ChatTab profile={profile} view={view} />}
+          {tab === "shop" && <ShopTab />}
+          {tab === "customize" && <CustomizeTab />}
+          {tab === "insights" && (
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+              <RadarPanel />
+              <CaptureSettingsPanel />
             </div>
-          ))}
-        {tab === "chat" && <ChatTab profile={profile} view={view} />}
-        {tab === "shop" && <ShopTab />}
-        {tab === "customize" && <CustomizeTab />}
-        {tab === "insights" && (
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-            <RadarPanel />
-            <CaptureSettingsCard />
-          </div>
-        )}
-        {tab === "journal" && <JournalTab />}
-        {tab === "dex" && <DexTab bones={view.bones} />}
-        {tab === "achievements" && <AchievementsTab />}
-        {tab === "binding" && <BindingTab />}
-        {tab === "plugins" && (
-          <PluginExtensionSlot
-            point="pet.console.tab"
-            className="mx-auto flex w-full max-w-3xl flex-col gap-4"
-            context={{
-              level: profile.level,
-              stage: profile.stage,
-              mood: view.mood,
-              condition: view.condition,
-            }}
-          />
-        )}
+          )}
+          {tab === "journal" && <JournalTab />}
+          {tab === "dex" && <DexTab bones={view.bones} />}
+          {tab === "achievements" && <AchievementsTab />}
+          {tab === "binding" && <BindingTab />}
+          {tab === "plugins" && (
+            <PluginExtensionSlot
+              point="pet.console.tab"
+              className="mx-auto flex w-full max-w-3xl flex-col gap-4"
+              context={{
+                level: profile.level,
+                stage: profile.stage,
+                mood: view.mood,
+                condition: view.condition,
+              }}
+            />
+          )}
+        </main>
       </div>
     </div>
   )

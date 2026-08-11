@@ -52,4 +52,10 @@ describe("PetVitalsCard", () => {
       expect(bar).toHaveTextContent(String(value))
     }
   })
+
+  it("supports a flat page variant", () => {
+    render(<PetVitalsCard xp={0} needs={{ energy: 80, mood: 60, bond: 40 }} variant="flat" />)
+    expect(screen.getByTestId("pet-vitals-card")).toHaveAttribute("data-variant", "flat")
+    expect(screen.getByTestId("pet-vitals-card")).not.toHaveClass("border")
+  })
 })

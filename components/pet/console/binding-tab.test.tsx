@@ -1,4 +1,5 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({ characters: { toArray: () => [] } }) }))
@@ -43,29 +44,32 @@ describe("BindingTab", () => {
     expect(screen.getByTestId("pet-binding-empty")).toBeInTheDocument()
   })
 
-  it("lists characters and writes a binding on species select", () => {
+  it("lists characters and writes a binding on species select", async () => {
+    const user = userEvent.setup()
     mockQueries([{ id: "c1", name: "Coder" }])
     render(<BindingTab />)
     const select = screen.getByRole("combobox", { name: /species.*coder/i })
-    fireEvent.change(select, { target: { value: "owl" } })
+    await user.click(select)
+    await user.click(screen.getByRole("option", { name: /owl/i }))
     expect(upsertPetBinding).toHaveBeenCalledWith(
       expect.objectContaining({ characterId: "c1", species: "owl" })
     )
   })
 
-  it("clears a binding when 'use global' is chosen", () => {
+  it("clears a binding when 'use global' is chosen", async () => {
+    const user = userEvent.setup()
     mockQueries(
       [{ id: "c1", name: "Coder" }],
       [{ characterId: "c1", species: "owl", updatedAt: "" }]
     )
     render(<BindingTab />)
-    fireEvent.change(screen.getByRole("combobox", { name: /species.*coder/i }), {
-      target: { value: "" },
-    })
+    await user.click(screen.getByRole("combobox", { name: /species.*coder/i }))
+    await user.click(screen.getByRole("option", { name: /global/i }))
     expect(deletePetBinding).toHaveBeenCalledWith("c1")
   })
 
-  it("offers SVG, Live2D, and Sprite overrides and preserves the species binding", () => {
+  it("offers SVG, Live2D, and Sprite overrides and preserves the species binding", async () => {
+    const user = userEvent.setup()
     mockQueries(
       [{ id: "c1", name: "Coder" }],
       [{ characterId: "c1", species: "owl", updatedAt: "old" }],
@@ -75,9 +79,10 @@ describe("BindingTab", () => {
     render(<BindingTab />)
 
     const skinSelect = screen.getByRole("combobox", { name: /skin.*coder/i })
-    expect(skinSelect).toHaveTextContent("Hiyori")
-    expect(skinSelect).toHaveTextContent("Momo")
-    fireEvent.change(skinSelect, { target: { value: "live2d:hiyori" } })
+    await user.click(skinSelect)
+    expect(screen.getByRole("option", { name: /Hiyori/i })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /Momo/i })).toBeInTheDocument()
+    await user.click(screen.getByRole("option", { name: /Hiyori/i }))
 
     expect(upsertPetBinding).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -88,7 +93,8 @@ describe("BindingTab", () => {
     )
   })
 
-  it("clears only the skin override when the character still overrides species", () => {
+  it("clears only the skin override when the character still overrides species", async () => {
+    const user = userEvent.setup()
     mockQueries(
       [{ id: "c1", name: "Coder" }],
       [
@@ -104,9 +110,8 @@ describe("BindingTab", () => {
     )
     render(<BindingTab />)
 
-    fireEvent.change(screen.getByRole("combobox", { name: /skin.*coder/i }), {
-      target: { value: "" },
-    })
+    await user.click(screen.getByRole("combobox", { name: /skin.*coder/i }))
+    await user.click(screen.getByRole("option", { name: /inherit/i }))
     expect(upsertPetBinding).toHaveBeenCalledWith(
       expect.objectContaining({ characterId: "c1", species: "owl", skin: undefined })
     )

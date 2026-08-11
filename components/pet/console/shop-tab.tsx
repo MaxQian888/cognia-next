@@ -11,6 +11,16 @@ import { useLocale, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CoinsIcon, FlameIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
 import { cn } from "@/lib/utils"
 import { getPetProfile, listPetInventory } from "@/lib/db/pet"
 import { listAllPetItems } from "@/lib/pet/economy/item-catalog"
@@ -34,21 +44,22 @@ export function ShopTab() {
 
   return (
     <div data-testid="pet-shop-tab" className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-      <div className="flex items-center gap-3 rounded-lg border p-3">
-        <CoinsIcon className="size-5 text-primary" />
-        <span data-testid="pet-shop-balance" className="text-sm font-medium tabular-nums">
-          {t("shop.balance", { coins })}
-        </span>
+      <Item size="sm" className="px-0">
+        <ItemMedia>
+          <CoinsIcon className="size-5 text-primary" />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle data-testid="pet-shop-balance" className="tabular-nums">
+            {t("shop.balance", { coins })}
+          </ItemTitle>
+        </ItemContent>
         {streak.days > 0 && (
-          <span
-            data-testid="pet-shop-streak"
-            className="ml-auto flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"
-          >
+          <Badge data-testid="pet-shop-streak" variant="secondary" className="ml-auto">
             <FlameIcon className="size-3.5 text-primary" />
             {t("shop.streak", { days: streak.days })}
-          </span>
+          </Badge>
         )}
-      </div>
+      </Item>
 
       {CATEGORIES.map((category) => {
         const items = catalog.filter((i) => i.category === category)
@@ -58,7 +69,7 @@ export function ShopTab() {
             <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {t(`shop.categories.${category}`)}
             </h3>
-            <div className="grid gap-2 @md/pet-pane:grid-cols-2">
+            <ItemGroup className="grid gap-1 @md/pet-pane:grid-cols-2">
               {items.map((item) => {
                 const Icon = petItemIcon(item.icon)
                 const owned = ownedQty.get(item.id) ?? 0
@@ -71,26 +82,22 @@ export function ShopTab() {
                   ? pluginText.description
                   : t(`shop.items.${item.i18nKey}.description`)
                 return (
-                  <div
-                    key={item.id}
-                    data-shop-item={item.id}
-                    className="flex items-center gap-3 rounded-lg border p-3"
-                  >
-                    <Icon className="size-5 shrink-0 text-primary" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 text-sm font-medium">
+                  <Item key={item.id} data-shop-item={item.id} className="min-w-0 px-0">
+                    <ItemMedia>
+                      <Icon className="size-5 text-primary" />
+                    </ItemMedia>
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="max-w-full">
                         <span className="truncate">{title}</span>
                         {owned > 0 && (
-                          <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums">
+                          <Badge variant="secondary" className="tabular-nums">
                             {t("shop.owned", { qty: owned })}
-                          </span>
+                          </Badge>
                         )}
-                      </div>
-                      {description && (
-                        <div className="truncate text-xs text-muted-foreground">{description}</div>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      </ItemTitle>
+                      {description ? <ItemDescription>{description}</ItemDescription> : null}
+                    </ItemContent>
+                    <ItemActions className="shrink-0 flex-col items-end">
                       <Button
                         size="sm"
                         variant="secondary"
@@ -114,11 +121,11 @@ export function ShopTab() {
                           {item.consumable ? t("shop.use") : t("shop.apply")}
                         </Button>
                       )}
-                    </div>
-                  </div>
+                    </ItemActions>
+                  </Item>
                 )
               })}
-            </div>
+            </ItemGroup>
           </section>
         )
       })}

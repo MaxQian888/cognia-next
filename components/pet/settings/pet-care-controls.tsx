@@ -4,37 +4,43 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { Label } from "@/components/ui/label"
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import type { PetControlsProps } from "./pet-appearance-controls"
 
 export function PetCareControls({ pet, patch }: PetControlsProps) {
   const t = useTranslations("settings.pet")
   return (
-    <>
-      <div className="flex items-center justify-between gap-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="pet-low-power">{t("lowPower.label")}</Label>
-          <p className="text-sm text-muted-foreground">{t("lowPower.description")}</p>
-        </div>
+    <FieldGroup>
+      <Field orientation="responsive">
+        <FieldContent>
+          <FieldLabel htmlFor="pet-low-power">{t("lowPower.label")}</FieldLabel>
+          <FieldDescription>{t("lowPower.description")}</FieldDescription>
+        </FieldContent>
         <Switch
           id="pet-low-power"
           checked={pet.lowPower ?? false}
           onCheckedChange={(v) => patch({ lowPower: v })}
         />
-      </div>
+      </Field>
 
-      <div className="flex items-center justify-between gap-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="pet-care-alerts">{t("careAlerts.label")}</Label>
-          <p className="text-sm text-muted-foreground">{t("careAlerts.description")}</p>
-        </div>
+      <Field orientation="responsive">
+        <FieldContent>
+          <FieldLabel htmlFor="pet-care-alerts">{t("careAlerts.label")}</FieldLabel>
+          <FieldDescription>{t("careAlerts.description")}</FieldDescription>
+        </FieldContent>
         <Switch
           id="pet-care-alerts"
           checked={pet.careAlerts !== false}
           onCheckedChange={(v) => patch({ careAlerts: v })}
         />
-      </div>
-    </>
+      </Field>
+    </FieldGroup>
   )
 }

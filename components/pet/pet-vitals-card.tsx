@@ -8,6 +8,8 @@
 import { useTranslations } from "next-intl"
 import { HeartPulseIcon, SmileIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
 import { levelProgress } from "@/lib/pet/xp/leveling"
 import type { PetCondition, PetMood } from "@/types/pet"
 import { NeedBar } from "./need-bar"
@@ -21,37 +23,43 @@ export interface PetVitalsCardProps {
   /** Care condition — an "unwell" badge appears when it isn't "well". */
   condition?: PetCondition
   className?: string
+  variant?: "outlined" | "flat"
 }
 
-export function PetVitalsCard({ xp, needs, mood, condition, className }: PetVitalsCardProps) {
+export function PetVitalsCard({
+  xp,
+  needs,
+  mood,
+  condition,
+  className,
+  variant = "outlined",
+}: PetVitalsCardProps) {
   const t = useTranslations("pet")
   const progress = levelProgress(xp)
 
   return (
     <div
       data-testid="pet-vitals-card"
-      className={cn("flex flex-col gap-2 rounded-lg border p-3", className)}
+      data-variant={variant}
+      className={cn(
+        "flex flex-col gap-2",
+        variant === "outlined" && "rounded-lg border p-3",
+        className
+      )}
     >
       {(mood || condition === "unwell") && (
         <div className="flex flex-wrap items-center gap-1.5">
           {mood && (
-            <span
-              data-testid="pet-mood-chip"
-              data-mood={mood}
-              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium"
-            >
+            <Badge data-testid="pet-mood-chip" data-mood={mood} variant="secondary">
               <SmileIcon className="size-3" />
               {t(`mood.${mood}`)}
-            </span>
+            </Badge>
           )}
           {condition === "unwell" && (
-            <span
-              data-testid="pet-condition-chip"
-              className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive"
-            >
+            <Badge data-testid="pet-condition-chip" variant="destructive">
               <HeartPulseIcon className="size-3" />
               {t("condition.unwell")}
-            </span>
+            </Badge>
           )}
         </div>
       )}
@@ -63,12 +71,7 @@ export function PetVitalsCard({ xp, needs, mood, condition, className }: PetVita
             {progress.intoLevel}/{progress.span}
           </span>
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-[width] duration-500"
-            style={{ width: `${Math.round(progress.fraction * 100)}%` }}
-          />
-        </div>
+        <Progress value={Math.round(progress.fraction * 100)} className="h-1.5" />
       </div>
 
       <div className="flex flex-col gap-2 border-t pt-2">

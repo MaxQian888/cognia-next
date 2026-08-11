@@ -209,6 +209,7 @@
       "rateLimited": "Give me a moment to catch my breath…"
     },
     "empty": "Say hi to your pet — it can chat back now.",
+    "emptyTitle": "Start a pet conversation",
     "enableCta": {
       "action": "Enable chat",
       "body": "Let your pet actually talk back using your configured model. It stays playful and never sends personal data.",
@@ -218,16 +219,26 @@
     "openPanel": "Chat",
     "petFallbackName": "Pet",
     "sending": "{name} is thinking…",
+    "scrollToBottom": "Scroll to the latest pet message",
     "you": "You"
   },
   "condition": {
     "unwell": "Needs care"
   },
   "console": {
+    "groups": {
+      "extensions": "Extensions",
+      "nurture": "Care",
+      "personalize": "Personalization",
+      "records": "Records"
+    },
     "hatch": "Hatch",
     "hatchPrompt": "Your egg is ready to hatch.",
     "live2dFallback": "Live2D is unavailable right now — showing the built-in mascot.",
     "loading": "Waking up your pet…",
+    "navigation": "Pet navigation",
+    "navigationDescription": "Choose a pet workspace.",
+    "openNavigation": "Open pet navigation",
     "subtitle": "Raise it, dress it, grow together.",
     "tabs": {
       "achievements": "Achievements",
@@ -318,6 +329,9 @@
       "descriptionSprite": "Preview your active AI-generated v2 sprite pet.",
       "spriteManagedBelow": "Create, import, and switch v2 sprite pets in the Appearance section below.",
       "title": "Look"
+    },
+    "preview": {
+      "unavailable": "Hatch your pet to see the live preview."
     },
     "openSettings": "Open full pet settings",
     "sound": {

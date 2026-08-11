@@ -119,12 +119,8 @@ describe("PetDesktopControls", () => {
     expect(patch).toHaveBeenCalledWith({
       desktopPet: expect.objectContaining({ size: expect.any(Number) }),
     })
-    fireEvent.change(document.getElementById("pet-wander-frequency") as HTMLSelectElement, {
-      target: { value: "lively" },
-    })
-    fireEvent.change(document.getElementById("pet-wander-range") as HTMLSelectElement, {
-      target: { value: "near" },
-    })
+    fireEvent.click(screen.getByRole("radio", { name: /lively/i }))
+    fireEvent.click(screen.getByRole("radio", { name: /nearby|near/i }))
     fireEvent.click(document.getElementById("pet-wander-after-interaction") as HTMLButtonElement)
     fireEvent.click(document.getElementById("pet-wander-climb") as HTMLButtonElement)
     expect(patch).toHaveBeenCalledWith({

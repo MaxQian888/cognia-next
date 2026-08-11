@@ -1,40 +1,76 @@
-// Motion-mapping tab of the per-model Live2D config dialog. One row per
-// mappable key (12 resting states + 10 namespaced one-shots): pick a motion
-// group (default convention / explicit engine default / a real group), an
-// index within the group (random or fixed), and an expression. Unset rows are
-// OMITTED from the override table so the naming-convention resolver keeps
-// governing them; "engine default" persists an empty entry.
-
 "use client"
 
 import { useTranslations } from "next-intl"
-import { Button } from "@/components/ui/button"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { PlayIcon } from "lucide-react"
+
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ALL_MAPPING_ROWS, type MappingRow } from "@/lib/pet/live2d/state-keys"
 import type { Live2dMotionOverride, Live2dMotionOverrides } from "@/types/pet"
 
-/** Sentinel select values that are not real group/expression names. */
 const SENTINEL_DEFAULT = "__default"
 const SENTINEL_ENGINE = "__engine"
 const SENTINEL_RANDOM = "__random"
 const SENTINEL_NO_EXPRESSION = "__none"
 
 export interface PetModelMotionEditorProps {
-  /** The model's real capabilities (drives the select options). */
   motionGroups: string[]
   expressionIds: string[]
-  /** Motion count per group when known — sizes the index dropdown. */
   motionGroupCounts: Record<string, number>
   value: Live2dMotionOverrides
   onChange: (next: Live2dMotionOverrides) => void
-  /** Plays the row's key in the dialog preview. */
   onTest: (row: MappingRow) => void
 }
 
 function groupSelectValue(entry: Live2dMotionOverride | undefined): string {
   if (entry === undefined) return SENTINEL_DEFAULT
   return entry.motionGroup ?? SENTINEL_ENGINE
+}
+
+function MappingSelect({
+  label,
+  testId,
+  value,
+  disabled,
+  options,
+  onValueChange,
+}: {
+  label: string
+  testId: string
+  value: string
+  disabled?: boolean
+  options: { value: string; label: string }[]
+  onValueChange: (value: string) => void
+}) {
+  return (
+    <Select value={value} disabled={disabled} onValueChange={onValueChange}>
+      <SelectTrigger
+        size="sm"
+        aria-label={label}
+        data-testid={testId}
+        className="w-full @xl/pet-motion-editor:w-36"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectGroup>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  )
 }
 
 export function PetModelMotionEditor({
@@ -61,31 +97,31 @@ export function PetModelMotionEditor({
       setEntry(row.key, undefined)
       return
     }
-    const prev = value[row.key]
+    const previous = value[row.key]
     if (selected === SENTINEL_ENGINE) {
-      // Engine default: drop the motion fields, keep a chosen expression.
-      setEntry(row.key, prev?.expressionId !== undefined ? { expressionId: prev.expressionId } : {})
+      setEntry(
+        row.key,
+        previous?.expressionId !== undefined ? { expressionId: previous.expressionId } : {}
+      )
       return
     }
-    // Switching groups resets the index to random (counts differ per group).
     setEntry(row.key, {
-      ...(prev?.expressionId !== undefined ? { expressionId: prev.expressionId } : {}),
+      ...(previous?.expressionId !== undefined ? { expressionId: previous.expressionId } : {}),
       motionGroup: selected,
     })
   }
 
   const handleIndexChange = (row: MappingRow, selected: string) => {
-    const prev = value[row.key]
-    if (prev?.motionGroup === undefined) return
-    const next: Live2dMotionOverride = { ...prev }
+    const previous = value[row.key]
+    if (previous?.motionGroup === undefined) return
+    const next: Live2dMotionOverride = { ...previous }
     if (selected === SENTINEL_RANDOM) delete next.motionIndex
     else next.motionIndex = Number(selected)
     setEntry(row.key, next)
   }
 
   const handleExpressionChange = (row: MappingRow, selected: string) => {
-    const prev = value[row.key] ?? {}
-    const next: Live2dMotionOverride = { ...prev }
+    const next: Live2dMotionOverride = { ...(value[row.key] ?? {}) }
     if (selected === SENTINEL_NO_EXPRESSION) delete next.expressionId
     else next.expressionId = selected
     setEntry(row.key, next)
@@ -94,8 +130,8 @@ export function PetModelMotionEditor({
   const label = (row: MappingRow) => (row.kind === "state" ? tStates(row.id) : tShots(row.id))
 
   return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-2 text-xs text-muted-foreground">
+    <div className="@container/pet-motion-editor flex min-w-0 flex-col">
+      <div className="hidden grid-cols-[minmax(7rem,1fr)_9rem_7rem_9rem_2rem] items-center gap-2 border-b pb-2 text-xs text-muted-foreground @xl/pet-motion-editor:grid">
         <span>{t("columnKey")}</span>
         <span>{t("motionGroup")}</span>
         <span>{t("motionIndex")}</span>
@@ -110,71 +146,58 @@ export function PetModelMotionEditor({
           <div
             key={row.key}
             data-testid={`pet-mapping-row-${row.key}`}
-            className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-2"
+            className="grid min-w-0 gap-2 border-b py-3 last:border-b-0 @xl/pet-motion-editor:grid-cols-[minmax(7rem,1fr)_9rem_7rem_9rem_2rem] @xl/pet-motion-editor:items-center"
           >
-            <span className="truncate text-sm" title={label(row)}>
-              {label(row)}
-              {row.kind === "oneShot" && (
-                <span className="ml-1 rounded bg-secondary px-1 py-0.5 text-[10px]">
-                  {t("oneShotTag")}
-                </span>
-              )}
-            </span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm" title={label(row)}>
+                {label(row)}
+              </span>
+              {row.kind === "oneShot" ? <Badge variant="secondary">{t("oneShotTag")}</Badge> : null}
+            </div>
 
-            <NativeSelect
-              aria-label={t("motionGroup")}
-              data-testid={`pet-mapping-group-${row.key}`}
-              className="text-sm"
+            <MappingSelect
+              label={t("motionGroup")}
+              testId={`pet-mapping-group-${row.key}`}
               value={groupSelectValue(entry)}
-              onChange={(e) => handleGroupChange(row, e.target.value)}
-            >
-              <NativeSelectOption value={SENTINEL_DEFAULT}>{t("optionDefault")}</NativeSelectOption>
-              <NativeSelectOption value={SENTINEL_ENGINE}>{t("optionEngine")}</NativeSelectOption>
-              {motionGroups.map((g) => (
-                <NativeSelectOption key={g} value={g}>
-                  {g}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-
-            <NativeSelect
-              aria-label={t("motionIndex")}
-              data-testid={`pet-mapping-index-${row.key}`}
-              className="text-sm"
-              disabled={group === undefined}
+              onValueChange={(selected) => handleGroupChange(row, selected)}
+              options={[
+                { value: SENTINEL_DEFAULT, label: t("optionDefault") },
+                { value: SENTINEL_ENGINE, label: t("optionEngine") },
+                ...motionGroups.map((motionGroup) => ({ value: motionGroup, label: motionGroup })),
+              ]}
+            />
+            <MappingSelect
+              label={t("motionIndex")}
+              testId={`pet-mapping-index-${row.key}`}
               value={entry?.motionIndex === undefined ? SENTINEL_RANDOM : String(entry.motionIndex)}
-              onChange={(e) => handleIndexChange(row, e.target.value)}
-            >
-              <NativeSelectOption value={SENTINEL_RANDOM}>{t("indexRandom")}</NativeSelectOption>
-              {Array.from({ length: count }, (_, i) => (
-                <NativeSelectOption key={i} value={String(i)}>
-                  {i}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-
-            <NativeSelect
-              aria-label={t("expression")}
-              data-testid={`pet-mapping-expression-${row.key}`}
-              className="text-sm"
-              disabled={entry === undefined}
+              disabled={group === undefined}
+              onValueChange={(selected) => handleIndexChange(row, selected)}
+              options={[
+                { value: SENTINEL_RANDOM, label: t("indexRandom") },
+                ...Array.from({ length: count }, (_, index) => ({
+                  value: String(index),
+                  label: String(index),
+                })),
+              ]}
+            />
+            <MappingSelect
+              label={t("expression")}
+              testId={`pet-mapping-expression-${row.key}`}
               value={entry?.expressionId ?? SENTINEL_NO_EXPRESSION}
-              onChange={(e) => handleExpressionChange(row, e.target.value)}
-            >
-              <NativeSelectOption value={SENTINEL_NO_EXPRESSION}>
-                {t("optionNoExpression")}
-              </NativeSelectOption>
-              {expressionIds.map((id) => (
-                <NativeSelectOption key={id} value={id}>
-                  {id}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-
+              disabled={entry === undefined}
+              onValueChange={(selected) => handleExpressionChange(row, selected)}
+              options={[
+                { value: SENTINEL_NO_EXPRESSION, label: t("optionNoExpression") },
+                ...expressionIds.map((expressionId) => ({
+                  value: expressionId,
+                  label: expressionId,
+                })),
+              ]}
+            />
             <Button
               variant="ghost"
-              size="icon"
-              aria-label={t("test")}
+              size="icon-sm"
+              aria-label={`${t("test")}: ${label(row)}`}
               data-testid={`pet-mapping-test-${row.key}`}
               onClick={() => onTest(row)}
             >
@@ -183,7 +206,7 @@ export function PetModelMotionEditor({
           </div>
         )
       })}
-      <Button variant="outline" size="sm" onClick={() => onChange({})}>
+      <Button className="mt-3 w-fit" variant="outline" size="sm" onClick={() => onChange({})}>
         {t("resetMappings")}
       </Button>
     </div>

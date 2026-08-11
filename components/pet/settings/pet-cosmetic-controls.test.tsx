@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("../pet-renderer", () => ({ PetRenderer: () => <div data-testid="pet-preview" /> }))
 const patchPetProfile = jest.fn()
@@ -50,31 +51,29 @@ describe("PetCosmeticControls", () => {
     expect(screen.getByText(/hatch your pet first/i)).toBeInTheDocument()
   })
 
-  it("applies a palette preset and overrides hat/eyes/body", () => {
+  it("applies a palette preset and overrides hat/eyes/body", async () => {
+    const user = userEvent.setup()
     mockUsePet.mockReturnValue(petResult())
     render(<PetCosmeticControls />)
     fireEvent.click(screen.getByLabelText(PALETTE_PRESETS[0].id, { exact: false }))
     expect(patchPetProfile).toHaveBeenCalledWith({
       cosmetic: { palette: PALETTE_PRESETS[0].palette },
     })
-    fireEvent.change(document.getElementById("pet-cosmetic-hat") as HTMLSelectElement, {
-      target: { value: "crown" },
-    })
+    await user.click(screen.getByRole("combobox", { name: /hat/i }))
+    await user.click(screen.getByRole("option", { name: /crown/i }))
     expect(patchPetProfile).toHaveBeenCalledWith({ cosmetic: { hat: "crown" } })
   })
 
-  it("overrides eyes/body and clears the palette back to default", () => {
+  it("overrides eyes/body and clears the palette back to default", async () => {
+    const user = userEvent.setup()
     mockUsePet.mockReturnValue(petResult({ cosmetic: { palette: PALETTE_PRESETS[1].palette } }))
     render(<PetCosmeticControls />)
-    fireEvent.change(document.getElementById("pet-cosmetic-eyes") as HTMLSelectElement, {
-      target: { value: "star" },
-    })
+    await user.click(screen.getByRole("combobox", { name: /eyes/i }))
+    await user.click(screen.getByRole("option", { name: /star/i }))
     expect(patchPetProfile).toHaveBeenCalledWith({
       cosmetic: expect.objectContaining({ eyes: "star" }),
     })
-    fireEvent.change(document.getElementById("pet-cosmetic-body") as HTMLSelectElement, {
-      target: { value: "tall" },
-    })
+    fireEvent.click(screen.getByRole("radio", { name: /tall/i }))
     expect(patchPetProfile).toHaveBeenCalledWith({
       cosmetic: expect.objectContaining({ bodyType: "tall" }),
     })
@@ -89,43 +88,46 @@ describe("PetCosmeticControls", () => {
     expect(screen.getByRole("button", { name: /reset to genetics/i })).toBeDisabled()
   })
 
-  it("locks purchasable hats until their decor item is owned", () => {
+  it("locks purchasable hats until their decor item is owned", async () => {
+    const user = userEvent.setup()
     inventoryValue = []
     const result = petResult()
     mockUsePet.mockReturnValue(result)
     render(<PetCosmeticControls />)
-    const select = document.getElementById("pet-cosmetic-hat") as HTMLSelectElement
-    const option = (value: string) =>
-      select.querySelector(`option[value="${value}"]`) as HTMLOptionElement
+    await user.click(screen.getByRole("combobox", { name: /hat/i }))
+    const option = (name: string | RegExp) => screen.getByRole("option", { name })
     const geneticHat = result.view.bones.hat
     // Every shop-backed hat is disabled with an empty inventory — except the
     // pet's own genetic hat, which is always free.
     for (const hat of ["crown", "tophat", "wizard", "halo", "propeller", "beanie"]) {
-      expect(option(hat).disabled).toBe(hat !== geneticHat)
+      const expectedName = new RegExp(hat === "tophat" ? "top hat" : hat, "i")
+      if (hat === geneticHat) expect(option(expectedName)).not.toHaveAttribute("data-disabled")
+      else expect(option(expectedName)).toHaveAttribute("data-disabled")
     }
     // Genetics-only legendary hat never unlocks via the shop.
-    expect(option("tinyduck").disabled).toBe(geneticHat !== "tinyduck")
+    if (geneticHat === "tinyduck") expect(option(/tiny duck/i)).not.toHaveAttribute("data-disabled")
+    else expect(option(/tiny duck/i)).toHaveAttribute("data-disabled")
     // Bare-headed stays free.
-    expect(option("none").disabled).toBe(false)
+    expect(option(/none/i)).not.toHaveAttribute("data-disabled")
   })
 
-  it("keeps an already-applied locked hat selectable so profiles can't get stuck", () => {
+  it("keeps an already-applied locked hat selectable so profiles can't get stuck", async () => {
+    const user = userEvent.setup()
     inventoryValue = []
     const result = petResult({ cosmetic: { hat: "wizard" } })
     mockUsePet.mockReturnValue(result)
     render(<PetCosmeticControls />)
-    const select = document.getElementById("pet-cosmetic-hat") as HTMLSelectElement
-    const wizard = select.querySelector('option[value="wizard"]') as HTMLOptionElement
-    expect(wizard.disabled).toBe(false)
+    await user.click(screen.getByRole("combobox", { name: /hat/i }))
+    expect(screen.getByRole("option", { name: /wizard/i })).not.toHaveAttribute("data-disabled")
   })
 
-  it("clearing a field's override drops it; reset wipes the whole cosmetic", () => {
+  it("clearing a field's override drops it; reset wipes the whole cosmetic", async () => {
+    const user = userEvent.setup()
     mockUsePet.mockReturnValue(petResult({ cosmetic: { hat: "crown", eyes: "star" } }))
     render(<PetCosmeticControls />)
     // Setting hat back to default removes only the hat key.
-    fireEvent.change(document.getElementById("pet-cosmetic-hat") as HTMLSelectElement, {
-      target: { value: "" },
-    })
+    await user.click(screen.getByRole("combobox", { name: /hat/i }))
+    await user.click(screen.getByRole("option", { name: /default/i }))
     expect(patchPetProfile).toHaveBeenCalledWith({ cosmetic: { eyes: "star" } })
     // Reset clears everything.
     fireEvent.click(screen.getByRole("button", { name: /reset to genetics/i }))

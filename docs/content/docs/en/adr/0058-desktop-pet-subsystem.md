@@ -104,8 +104,18 @@ All three skins follow `suspended/reduced > held > one-shot > locomotion > seman
 
 Live2D import now validates the complete reference graph and persists a versioned `ready`/`degraded`/`invalid` compatibility summary in non-indexed model metadata. Required settings, moc, and textures block activation; missing optional motions, expressions, sounds, physics, and pose are sanitized and reported. Traversal, normalized duplicates, case ambiguity, corrupt images, Cubism 2, and size limits fail before persistence. Official Hiyori/Haru test data is revision- and SHA-256-pinned and downloaded into a test cache rather than committed.
 
+### D8 — One master-detail console and one customization owner
+
+The original `/pet` console accumulated a horizontally scrolling tab strip and card-shaped detail islands, while `/pet → Customize` exposed only a subset of `Settings → Pet`. A user could therefore configure a skin in one entry point but had to leave it to reach speech, sound, Twin, care, or desktop-window controls. The duplicated ownership also made preview fallback and reset semantics drift.
+
+**Decision**: `/pet` is a responsive master-detail workspace. Desktop uses a grouped navigation rail and a separately scrolling detail pane; narrow containers use the same grouped navigation inside a shadcn Sheet. `PetConsoleTab`, `?tab=` deep links, the plugin slot context, and the cross-window message shape remain unchanged. Detail surfaces are flat sections separated by hierarchy and hairlines, while compact widget, popup, and overlay shells keep their bounded chrome.
+
+`components/pet/settings/pet-customization-workspace.tsx` is the sole settings owner rendered directly by both Customize and Settings. It reads `DEFAULT_PET_SETTINGS`, merges every patch through `useSettingsStore.save()`, exposes SVG, Live2D, Sprite v2, interaction, sound, care, Twin, and capability-gated desktop controls, and owns the responsive governed preview plus fallback diagnostics and retry. The profile reset uses a destructive confirmation and remains distinct from the Settings shell's configuration reset.
+
+This is a presentation and ownership refactor only. `PetSettings`, `PetProfile`, Live2D/Sprite records, Dexie versions, XP/economy/interaction rules, and Tauri window protocols are unchanged, so no schema migration is required.
+
 ## Consequences
 
 - The pet subsystem's real architecture is now discoverable without spelunking through two stale specs and the source tree.
-- D1–D5 are each individually reversible (a settings flag, a hook swap, an additive Rust module, an additive DTO field) — none required a Dexie migration. D6 is isolated behind a third skin registration and one additive Dexie table/version. D7 adds only non-indexed model metadata and a renderer owner, so it requires no Dexie schema bump.
+- D1–D5 are each individually reversible (a settings flag, a hook swap, an additive Rust module, an additive DTO field) — none required a Dexie migration. D6 is isolated behind a third skin registration and one additive Dexie table/version. D7 adds only non-indexed model metadata and a renderer owner. D8 changes only UI composition and settings ownership, so neither D7 nor D8 requires a Dexie schema bump.
 - Documentation debt intentionally not fully closed: `docs/superpowers/specs/2026-06-0{2,5}-*.md` are marked superseded in-place (not deleted — they retain historical value per the project's "flag, don't delete" convention) rather than rewritten, so the *decision history* they capture (why SVG-over-sprite-sheet, why side-channel-only LLM, the prior-art research) stays intact.

@@ -40,4 +40,10 @@ describe("PetWalletStrip", () => {
     render(<PetWalletStrip coins={5} />)
     expect(screen.getByTestId("pet-wallet-strip").tagName).toBe("DIV")
   })
+
+  it("uses the flat variant without outlined chrome", () => {
+    render(<PetWalletStrip coins={5} variant="flat" />)
+    expect(screen.getByTestId("pet-wallet-strip")).toHaveAttribute("data-variant", "flat")
+    expect(screen.getByTestId("pet-wallet-strip")).not.toHaveClass("border")
+  })
 })

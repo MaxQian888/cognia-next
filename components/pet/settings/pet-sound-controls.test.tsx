@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { PetSoundControls } from "./pet-sound-controls"
 import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 
@@ -20,7 +21,8 @@ describe("PetSoundControls", () => {
     })
   })
 
-  it("enabling quiet hours seeds a default window; editing patches start/end", () => {
+  it("enabling quiet hours seeds a default window; editing patches start/end", async () => {
+    const user = userEvent.setup()
     const patch = jest.fn()
     const { rerender } = render(
       <PetSoundControls pet={withSound({ enabled: true, volume: 0.5 })} patch={patch} />
@@ -37,15 +39,13 @@ describe("PetSoundControls", () => {
       />
     )
     expect(screen.getByTestId("pet-quiet-hours")).toBeInTheDocument()
-    fireEvent.change(document.getElementById("pet-quiet-start") as HTMLSelectElement, {
-      target: { value: "23" },
-    })
+    await user.click(screen.getByRole("combobox", { name: /from/i }))
+    await user.click(screen.getByRole("option", { name: "23:00" }))
     expect(patch).toHaveBeenCalledWith({
       sound: expect.objectContaining({ quietHours: { start: 23, end: 7 } }),
     })
-    fireEvent.change(document.getElementById("pet-quiet-end") as HTMLSelectElement, {
-      target: { value: "8" },
-    })
+    await user.click(screen.getByRole("combobox", { name: /to/i }))
+    await user.click(screen.getByRole("option", { name: "08:00" }))
     expect(patch).toHaveBeenCalledWith({
       sound: expect.objectContaining({ quietHours: { start: 22, end: 8 } }),
     })

@@ -7,8 +7,8 @@
 
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import {
   normalizeTransform,
@@ -45,11 +45,11 @@ export function PetModelTransformEditor({ value, onChange }: PetModelTransformEd
   }
 
   return (
-    <div className="space-y-4">
+    <FieldGroup>
       {FIELDS.map(({ key, min, max, step }) => (
-        <div key={key} className="space-y-2">
+        <Field key={key}>
           <div className="flex items-center justify-between gap-4">
-            <Label htmlFor={`pet-transform-${key}`}>{t(key)}</Label>
+            <FieldLabel htmlFor={`pet-transform-${key}`}>{t(key)}</FieldLabel>
             <Input
               id={`pet-transform-${key}`}
               type="number"
@@ -76,11 +76,11 @@ export function PetModelTransformEditor({ value, onChange }: PetModelTransformEd
             value={[value[key]]}
             onValueChange={([v]) => patch(key, v)}
           />
-        </div>
+        </Field>
       ))}
       <Button variant="outline" size="sm" onClick={() => onChange({ ...DEFAULT_LIVE2D_TRANSFORM })}>
         {t("resetTransform")}
       </Button>
-    </div>
+    </FieldGroup>
   )
 }

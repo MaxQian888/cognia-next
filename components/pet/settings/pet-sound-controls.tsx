@@ -1,111 +1,136 @@
-// Sound controls: enable the synthesized SFX, set the volume, and define a
-// quiet-hours window (start/end hour) during which sounds stay silent. The
-// quiet-hours gate itself already lives in `lib/pet/audio/sfx-gate.ts`; this is
-// the editor for the `PetSoundSettings.quietHours` value it consumes.
-
 "use client"
 
 import { useTranslations } from "next-intl"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
+
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { DEFAULT_PET_SOUND, type PetSoundSettings, type PetSettings } from "@/types/pet"
+import { Switch } from "@/components/ui/switch"
+import { DEFAULT_PET_SOUND, type PetSettings, type PetSoundSettings } from "@/types/pet"
+
 import type { PetControlsProps } from "./pet-appearance-controls"
 
-const HOURS = Array.from({ length: 24 }, (_, h) => h)
+const HOURS = Array.from({ length: 24 }, (_, hour) => hour)
 const DEFAULT_QUIET = { start: 22, end: 7 } as const
+const formatHour = (hour: number) => `${String(hour).padStart(2, "0")}:00`
 
-const fmtHour = (h: number) => `${String(h).padStart(2, "0")}:00`
+function HourSelect({
+  id,
+  label,
+  value,
+  onValueChange,
+}: {
+  id: string
+  label: string
+  value: number
+  onValueChange: (value: number) => void
+}) {
+  return (
+    <Select value={String(value)} onValueChange={(next) => onValueChange(Number(next))}>
+      <SelectTrigger id={id} size="sm" aria-label={label}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectGroup>
+          {HOURS.map((hour) => (
+            <SelectItem key={hour} value={String(hour)}>
+              {formatHour(hour)}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  )
+}
 
 export function PetSoundControls({ pet, patch }: PetControlsProps) {
   const t = useTranslations("settings.pet")
   const sound: PetSoundSettings = pet.sound ?? DEFAULT_PET_SOUND
+  const quiet = sound.quietHours ?? null
   const patchSound = (next: Partial<PetSoundSettings>) =>
     patch({ sound: { ...sound, ...next } } as Partial<PetSettings>)
-  const quiet = sound.quietHours ?? null
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="pet-sound-enabled">{t("sound.label")}</Label>
-          <p className="text-sm text-muted-foreground">{t("sound.description")}</p>
-        </div>
+    <FieldGroup>
+      <Field orientation="responsive">
+        <FieldContent>
+          <FieldLabel htmlFor="pet-sound-enabled">{t("sound.label")}</FieldLabel>
+          <FieldDescription>{t("sound.description")}</FieldDescription>
+        </FieldContent>
         <Switch
           id="pet-sound-enabled"
           checked={sound.enabled}
-          onCheckedChange={(v) => patchSound({ enabled: v })}
+          onCheckedChange={(enabled) => patchSound({ enabled })}
         />
-      </div>
-      {sound.enabled && (
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>
+      </Field>
+
+      {sound.enabled ? (
+        <>
+          <Field>
+            <FieldLabel htmlFor="pet-sound-volume">
               {t("sound.volume.label", { value: Math.round((sound.volume ?? 0.5) * 100) })}
-            </Label>
+            </FieldLabel>
             <Slider
+              id="pet-sound-volume"
               min={0}
               max={100}
               step={5}
               value={[Math.round((sound.volume ?? 0.5) * 100)]}
-              onValueChange={([v]) => patchSound({ volume: v / 100 })}
+              onValueChange={([volume]) => patchSound({ volume: volume / 100 })}
             />
-          </div>
+          </Field>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5">
-                <Label htmlFor="pet-sound-quiet">{t("sound.quietHours.label")}</Label>
-                <p className="text-sm text-muted-foreground">{t("sound.quietHours.description")}</p>
-              </div>
-              <Switch
-                id="pet-sound-quiet"
-                checked={!!quiet}
-                onCheckedChange={(v) => patchSound({ quietHours: v ? { ...DEFAULT_QUIET } : null })}
-              />
-            </div>
-            {quiet && (
-              <div className="flex items-center gap-2" data-testid="pet-quiet-hours">
-                <Label htmlFor="pet-quiet-start" className="text-xs text-muted-foreground">
-                  {t("sound.quietHours.start")}
-                </Label>
-                <NativeSelect
+          <Field orientation="responsive">
+            <FieldContent>
+              <FieldLabel htmlFor="pet-sound-quiet">{t("sound.quietHours.label")}</FieldLabel>
+              <FieldDescription>{t("sound.quietHours.description")}</FieldDescription>
+            </FieldContent>
+            <Switch
+              id="pet-sound-quiet"
+              checked={Boolean(quiet)}
+              onCheckedChange={(enabled) =>
+                patchSound({ quietHours: enabled ? { ...DEFAULT_QUIET } : null })
+              }
+            />
+          </Field>
+
+          {quiet ? (
+            <div className="grid gap-4 @md/field-group:grid-cols-2" data-testid="pet-quiet-hours">
+              <Field>
+                <FieldLabel htmlFor="pet-quiet-start">{t("sound.quietHours.start")}</FieldLabel>
+                <HourSelect
                   id="pet-quiet-start"
-                  size="sm"
+                  label={t("sound.quietHours.start")}
                   value={quiet.start}
-                  onChange={(e) =>
-                    patchSound({ quietHours: { ...quiet, start: Number(e.target.value) } })
-                  }
-                >
-                  {HOURS.map((h) => (
-                    <NativeSelectOption key={h} value={h}>
-                      {fmtHour(h)}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-                <Label htmlFor="pet-quiet-end" className="text-xs text-muted-foreground">
-                  {t("sound.quietHours.end")}
-                </Label>
-                <NativeSelect
+                  onValueChange={(start) => patchSound({ quietHours: { ...quiet, start } })}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="pet-quiet-end">{t("sound.quietHours.end")}</FieldLabel>
+                <HourSelect
                   id="pet-quiet-end"
-                  size="sm"
+                  label={t("sound.quietHours.end")}
                   value={quiet.end}
-                  onChange={(e) =>
-                    patchSound({ quietHours: { ...quiet, end: Number(e.target.value) } })
-                  }
-                >
-                  {HOURS.map((h) => (
-                    <NativeSelectOption key={h} value={h}>
-                      {fmtHour(h)}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+                  onValueChange={(end) => patchSound({ quietHours: { ...quiet, end } })}
+                />
+              </Field>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </FieldGroup>
   )
 }

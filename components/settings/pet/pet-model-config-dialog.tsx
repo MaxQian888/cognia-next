@@ -9,10 +9,26 @@
 
 import { lazy, Suspense, useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldTitle,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   Dialog,
   DialogContent,
@@ -202,7 +218,7 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[85vh] min-w-0 overflow-x-hidden overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("title", { name: model.name })}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
@@ -211,13 +227,9 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
         {coreReady ? (
           <div className="flex flex-col items-center gap-2">
             {previewError ? (
-              <div
-                role="alert"
-                className="flex items-center justify-center text-center text-sm text-destructive"
-                style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }}
-              >
-                {tErr(previewError)}
-              </div>
+              <Alert variant="destructive" className="max-w-sm">
+                <AlertDescription>{tErr(previewError)}</AlertDescription>
+              </Alert>
             ) : lease?.mode() === "live" ? (
               <Suspense fallback={<div style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }} />}>
                 <Live2dCanvas
@@ -243,29 +255,39 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
                 style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }}
               />
             )}
-            <div className="flex items-center gap-2">
-              <Label htmlFor="pet-preview-state" className="text-xs text-muted-foreground">
-                {t("previewState")}
-              </Label>
-              <NativeSelect
-                id="pet-preview-state"
-                className="text-sm"
+            <Field orientation="horizontal" className="w-auto">
+              <FieldTitle>{t("previewState")}</FieldTitle>
+              <Select
                 value={previewState}
-                onChange={(e) => {
+                onValueChange={(nextState) => {
                   setPreviewShot(null)
-                  setPreviewState(e.target.value as PetVisualState)
+                  setPreviewState(nextState as PetVisualState)
                 }}
               >
-                {STATE_KEYS.map((s) => (
-                  <NativeSelectOption key={s} value={s}>
-                    {tStates(s)}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </div>
+                <SelectTrigger
+                  id="pet-preview-state"
+                  size="sm"
+                  aria-label={t("previewState")}
+                  className="w-40"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {STATE_KEYS.map((state) => (
+                      <SelectItem key={state} value={state}>
+                        {tStates(state)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">{t("previewUnavailable")}</p>
+          <Empty className="py-6">
+            <EmptyDescription>{t("previewUnavailable")}</EmptyDescription>
+          </Empty>
         )}
 
         <Tabs defaultValue="transform">
@@ -287,53 +309,54 @@ export function PetModelConfigDialog({ model, open, onOpenChange }: PetModelConf
               onTest={handleTest}
             />
           </TabsContent>
-          <TabsContent value="parameters" className="space-y-2">
-            <p className="text-xs text-muted-foreground">{t("parameters.description")}</p>
-            {PARAMETER_ROLES.map((role) => {
-              const value = parameterMapping[role]
-              const mode =
-                value === null ? "disabled" : typeof value === "string" ? "custom" : "auto"
-              return (
-                <div key={role} className="grid gap-2 sm:grid-cols-[8rem_8rem_1fr] sm:items-center">
-                  <Label htmlFor={`pet-parameter-mode-${role}`} className="text-sm">
-                    {t(`parameters.roles.${role}`)}
-                  </Label>
-                  <NativeSelect
-                    id={`pet-parameter-mode-${role}`}
-                    className="text-sm"
-                    value={mode}
-                    onChange={(event) =>
-                      setParameterRoleMode(
-                        role,
-                        event.target.value as "auto" | "custom" | "disabled"
-                      )
-                    }
-                  >
-                    <NativeSelectOption value="auto">{t("parameters.auto")}</NativeSelectOption>
-                    <NativeSelectOption value="custom">{t("parameters.custom")}</NativeSelectOption>
-                    <NativeSelectOption value="disabled">
-                      {t("parameters.disabled")}
-                    </NativeSelectOption>
-                  </NativeSelect>
-                  {mode === "custom" && (
-                    <Input
-                      aria-label={t("parameters.parameterIdFor", {
-                        role: t(`parameters.roles.${role}`),
-                      })}
-                      className="text-sm"
-                      value={typeof value === "string" ? value : ""}
-                      placeholder={t("parameters.parameterIdPlaceholder")}
-                      onChange={(event) =>
-                        setParameterMapping((current) => ({
-                          ...current,
-                          [role]: event.target.value,
-                        }))
-                      }
-                    />
-                  )}
-                </div>
-              )
-            })}
+          <TabsContent value="parameters">
+            <FieldGroup>
+              <FieldDescription>{t("parameters.description")}</FieldDescription>
+              {PARAMETER_ROLES.map((role) => {
+                const value = parameterMapping[role]
+                const mode =
+                  value === null ? "disabled" : typeof value === "string" ? "custom" : "auto"
+                const roleLabel = t(`parameters.roles.${role}`)
+                return (
+                  <Field key={role}>
+                    <FieldContent>
+                      <FieldTitle id={`pet-parameter-mode-${role}`}>{roleLabel}</FieldTitle>
+                      <ToggleGroup
+                        type="single"
+                        value={mode}
+                        variant="outline"
+                        size="sm"
+                        className="flex-wrap justify-start"
+                        aria-labelledby={`pet-parameter-mode-${role}`}
+                        onValueChange={(nextMode) =>
+                          nextMode &&
+                          setParameterRoleMode(role, nextMode as "auto" | "custom" | "disabled")
+                        }
+                      >
+                        <ToggleGroupItem value="auto">{t("parameters.auto")}</ToggleGroupItem>
+                        <ToggleGroupItem value="custom">{t("parameters.custom")}</ToggleGroupItem>
+                        <ToggleGroupItem value="disabled">
+                          {t("parameters.disabled")}
+                        </ToggleGroupItem>
+                      </ToggleGroup>
+                    </FieldContent>
+                    {mode === "custom" ? (
+                      <Input
+                        aria-label={t("parameters.parameterIdFor", { role: roleLabel })}
+                        value={typeof value === "string" ? value : ""}
+                        placeholder={t("parameters.parameterIdPlaceholder")}
+                        onChange={(event) =>
+                          setParameterMapping((current) => ({
+                            ...current,
+                            [role]: event.target.value,
+                          }))
+                        }
+                      />
+                    ) : null}
+                  </Field>
+                )
+              })}
+            </FieldGroup>
           </TabsContent>
         </Tabs>
 

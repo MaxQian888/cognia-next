@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 let twinsValue: { id: string; name: string }[] | undefined = []
 const useLiveQuery = jest.fn(() => twinsValue)
@@ -43,7 +44,8 @@ describe("PetTwinAwarenessControls", () => {
     expect(screen.getByText(/don't have any twins yet/i)).toBeInTheDocument()
   })
 
-  it("lists twins and patches the selected twinId", () => {
+  it("lists twins and patches the selected twinId", async () => {
+    const user = userEvent.setup()
     twinsValue = [
       { id: "tw_1", name: "Work" },
       { id: "tw_2", name: "Personal" },
@@ -54,14 +56,15 @@ describe("PetTwinAwarenessControls", () => {
       twinAwareness: { enabled: true, twinId: null },
     }
     render(<PetTwinAwarenessControls pet={pet} patch={patch} />)
-    const select = document.getElementById("pet-twin-awareness-twin") as HTMLSelectElement
-    expect(select).not.toBeNull()
-    fireEvent.change(select, { target: { value: "tw_2" } })
+    const select = screen.getByRole("combobox", { name: /twin/i })
+    expect(select).toBeInTheDocument()
+    await user.click(select)
+    expect(screen.getByRole("option", { name: "Work" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "Personal" })).toBeInTheDocument()
+    await user.click(screen.getByRole("option", { name: "Personal" }))
     expect(patch).toHaveBeenCalledWith({
       twinAwareness: { enabled: true, twinId: "tw_2" },
     })
-    expect(screen.getByText("Work")).toBeInTheDocument()
-    expect(screen.getByText("Personal")).toBeInTheDocument()
   })
 
   it("shows the privacy note only when enabled", () => {

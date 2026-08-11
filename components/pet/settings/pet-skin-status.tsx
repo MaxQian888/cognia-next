@@ -1,6 +1,7 @@
 "use client"
 
 import { useTranslations } from "next-intl"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import type { PetAssetDiagnostic, PetSkinId } from "@/types/pet"
 
@@ -28,41 +29,43 @@ export function PetSkinStatus({
     id === "svg" || id === "live2d" || id === "sprite-v2" ? t(`skins.${id}`) : id
 
   return (
-    <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-      <div className="grid gap-1 text-xs">
-        <p>{t("requested", { skin: skinName(requestedSkinId) })}</p>
-        <p>{t("effective", { skin: skinName(effectiveSkinId) })}</p>
-        {isFallback && (
-          <p className="font-medium text-amber-700 dark:text-amber-400">{t("fallback")}</p>
-        )}
-      </div>
-
-      {diagnostics.length > 0 && (
-        <ul role="status" className="space-y-1 text-xs text-muted-foreground">
-          {diagnostics.map((diagnostic, index) => (
-            <li key={`${diagnostic.code}:${diagnostic.path ?? ""}:${index}`}>
-              {t(`diagnostics.${diagnostic.code}`, {
-                path: diagnostic.path ?? diagnostic.detail ?? t("unknownResource"),
-              })}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {(onRetry || onConfigure) && (
-        <div className="flex flex-wrap gap-2">
-          {onRetry && diagnostics.some((diagnostic) => diagnostic.recoverable) && (
-            <Button type="button" size="sm" variant="outline" onClick={onRetry}>
-              {t("retry")}
-            </Button>
-          )}
-          {onConfigure && (
-            <Button type="button" size="sm" variant="outline" onClick={onConfigure}>
-              {t("configure")}
-            </Button>
-          )}
+    <Alert>
+      <AlertTitle>
+        {isFallback ? t("fallback") : t("effective", { skin: skinName(effectiveSkinId) })}
+      </AlertTitle>
+      <AlertDescription className="space-y-2">
+        <div className="grid gap-1 text-xs">
+          <p>{t("requested", { skin: skinName(requestedSkinId) })}</p>
+          <p>{t("effective", { skin: skinName(effectiveSkinId) })}</p>
         </div>
-      )}
-    </div>
+
+        {diagnostics.length > 0 && (
+          <ul role="status" className="space-y-1 text-xs text-muted-foreground">
+            {diagnostics.map((diagnostic, index) => (
+              <li key={`${diagnostic.code}:${diagnostic.path ?? ""}:${index}`}>
+                {t(`diagnostics.${diagnostic.code}`, {
+                  path: diagnostic.path ?? diagnostic.detail ?? t("unknownResource"),
+                })}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {(onRetry || onConfigure) && (
+          <div className="flex flex-wrap gap-2">
+            {onRetry && diagnostics.some((diagnostic) => diagnostic.recoverable) && (
+              <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+                {t("retry")}
+              </Button>
+            )}
+            {onConfigure && (
+              <Button type="button" size="sm" variant="outline" onClick={onConfigure}>
+                {t("configure")}
+              </Button>
+            )}
+          </div>
+        )}
+      </AlertDescription>
+    </Alert>
   )
 }

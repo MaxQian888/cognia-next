@@ -40,6 +40,14 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
 import { listPetAchievements } from "@/lib/db/pet"
 import { PET_ACHIEVEMENTS } from "@/lib/pet/achievements/registry"
 import { listCompiledPluginAchievements } from "@/lib/plugin/registries/pet-achievement-registry"
@@ -84,7 +92,7 @@ export function AchievementsTab() {
   const all = [...PET_ACHIEVEMENTS, ...listCompiledPluginAchievements()]
 
   return (
-    <div data-testid="pet-achievements" className="grid gap-2 @md/pet-pane:grid-cols-2">
+    <ItemGroup data-testid="pet-achievements" className="grid gap-1 @md/pet-pane:grid-cols-2">
       {all.map((a) => {
         const Icon = ICONS[a.icon] ?? SparklesIcon
         const got = unlockedIds.has(a.id)
@@ -94,25 +102,22 @@ export function AchievementsTab() {
           ? pluginText.description
           : t(`achievements.${a.i18nKey}.description`)
         return (
-          <div
+          <Item
             key={a.id}
             data-achievement={a.id}
             data-unlocked={got}
-            className={cn(
-              "flex items-center gap-3 rounded-lg border p-3",
-              got ? "bg-card" : "opacity-50 grayscale"
-            )}
+            className={cn("min-w-0 px-0", got ? "bg-transparent" : "opacity-50 grayscale")}
           >
-            <Icon className={cn("size-5", got ? "text-primary" : "text-muted-foreground")} />
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">{title}</div>
-              {description && (
-                <div className="truncate text-xs text-muted-foreground">{description}</div>
-              )}
-            </div>
-          </div>
+            <ItemMedia>
+              <Icon className={cn("size-5", got ? "text-primary" : "text-muted-foreground")} />
+            </ItemMedia>
+            <ItemContent className="min-w-0">
+              <ItemTitle className="max-w-full truncate">{title}</ItemTitle>
+              {description ? <ItemDescription>{description}</ItemDescription> : null}
+            </ItemContent>
+          </Item>
         )
       })}
-    </div>
+    </ItemGroup>
   )
 }

@@ -1,27 +1,54 @@
-// Binding tab: give each Character its own pet species. Overrides are cosmetic
-// (the global rarity/stats are kept) and apply when that character is active.
-
 "use client"
 
-import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { getDb } from "@/lib/db/schema"
-import { listPetBindings, upsertPetBinding, deletePetBinding } from "@/lib/db/pet"
+import { useTranslations } from "next-intl"
+import { UsersIcon } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemSeparator,
+  ItemTitle,
+} from "@/components/ui/item"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { deletePetBinding, listPetBindings, upsertPetBinding } from "@/lib/db/pet"
 import { listPetModels } from "@/lib/db/pet-models"
 import { listPetSpritePacks } from "@/lib/db/pet-sprite-packs"
+import { getDb } from "@/lib/db/schema"
 import { ALL_PET_SPECIES } from "@/lib/pet/skins/species-traits"
-import { Button } from "@/components/ui/button"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { PetCharacterBinding, PetSkinSelection, PetSpecies } from "@/types/pet"
+
+const INHERIT = "__inherit__"
+const GLOBAL_SPECIES = "__global__"
 
 function selectionValue(binding: PetCharacterBinding | undefined): string {
   if (binding?.skin?.skinId === "svg") return "svg"
   if (binding?.skin?.skinId === "live2d") return `live2d:${binding.skin.modelId}`
   if (binding?.skin?.skinId === "sprite-v2") return `sprite-v2:${binding.skin.packId}`
-  return binding?.live2dModelId ? `live2d:${binding.live2dModelId}` : ""
+  return binding?.live2dModelId ? `live2d:${binding.live2dModelId}` : INHERIT
 }
 
-function parseSelection(value: string): PetSkinSelection | undefined {
+function parseSelection(value: string | null): PetSkinSelection | undefined {
+  if (!value || value === INHERIT) return undefined
   if (value === "svg") return { skinId: "svg" }
   if (value.startsWith("live2d:")) return { skinId: "live2d", modelId: value.slice(7) }
   if (value.startsWith("sprite-v2:")) return { skinId: "sprite-v2", packId: value.slice(10) }
@@ -53,70 +80,112 @@ export function BindingTab() {
 
   if (!characters || characters.length === 0) {
     return (
-      <p data-testid="pet-binding-empty" className="text-sm text-muted-foreground">
-        {t("binding.empty")}
-      </p>
+      <Empty data-testid="pet-binding-empty">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <UsersIcon />
+          </EmptyMedia>
+          <EmptyDescription>{t("binding.empty")}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     )
   }
 
   return (
-    <div data-testid="pet-binding" className="flex flex-col gap-2">
-      {characters.map((c) => {
-        const binding = byCharacter.get(c.id)
+    <ItemGroup data-testid="pet-binding">
+      {characters.map((character, index) => {
+        const binding = byCharacter.get(character.id)
+        const skinValue = selectionValue(binding)
+        const skinLabel =
+          skinValue === INHERIT
+            ? t("binding.inheritAppearance")
+            : skinValue === "svg"
+              ? t("binding.useSvg")
+              : (models.find((model) => `live2d:${model.id}` === skinValue)?.name ??
+                packs.find((pack) => `sprite-v2:${pack.id}` === skinValue)?.displayName ??
+                t("binding.inheritAppearance"))
+
         return (
-          <div
-            key={c.id}
-            data-character={c.id}
-            className="flex flex-wrap items-center gap-2 rounded-lg border p-2"
-          >
-            <span className="min-w-32 flex-1 truncate text-sm">{c.name}</span>
-            <NativeSelect
-              aria-label={t("binding.speciesFor", { name: c.name })}
-              size="sm"
-              value={binding?.species ?? ""}
-              onChange={(e) => save(c.id, { species: (e.target.value || undefined) as PetSpecies })}
-            >
-              <NativeSelectOption value="">{t("binding.useGlobal")}</NativeSelectOption>
-              {ALL_PET_SPECIES.map((s) => (
-                <NativeSelectOption key={s} value={s}>
-                  {t(`species.${s}`)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label={t("binding.skinFor", { name: c.name })}
-              size="sm"
-              wrapperClassName="max-w-52"
-              className="max-w-52"
-              value={selectionValue(binding)}
-              onChange={(event) =>
-                save(c.id, {
-                  skin: parseSelection(event.target.value),
-                  live2dModelId: undefined,
-                })
-              }
-            >
-              <NativeSelectOption value="">{t("binding.inheritAppearance")}</NativeSelectOption>
-              <NativeSelectOption value="svg">{t("binding.useSvg")}</NativeSelectOption>
-              {models.map((model) => (
-                <NativeSelectOption key={model.id} value={`live2d:${model.id}`}>
-                  {t("binding.live2dOption", { name: model.name })}
-                </NativeSelectOption>
-              ))}
-              {packs.map((pack) => (
-                <NativeSelectOption key={pack.id} value={`sprite-v2:${pack.id}`}>
-                  {t("binding.spriteOption", { name: pack.displayName })}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            {binding && (
-              <Button size="sm" variant="ghost" onClick={() => void deletePetBinding(c.id)}>
-                {t("binding.clear")}
-              </Button>
-            )}
+          <div key={character.id} className="contents">
+            {index > 0 ? <ItemSeparator /> : null}
+            <Item data-character={character.id} className="px-0">
+              <ItemContent className="min-w-32">
+                <ItemTitle className="truncate">{character.name}</ItemTitle>
+              </ItemContent>
+              <ItemActions className="w-full flex-wrap @xl/pet-pane:w-auto">
+                <Select
+                  value={binding?.species ?? GLOBAL_SPECIES}
+                  onValueChange={(species) =>
+                    save(character.id, {
+                      species: species === GLOBAL_SPECIES ? undefined : (species as PetSpecies),
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="min-w-40"
+                    aria-label={t("binding.speciesFor", { name: character.name })}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value={GLOBAL_SPECIES}>{t("binding.useGlobal")}</SelectItem>
+                      {ALL_PET_SPECIES.map((species) => (
+                        <SelectItem key={species} value={species}>
+                          {t(`species.${species}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+
+                <Combobox
+                  value={skinValue}
+                  onValueChange={(value: string | null) =>
+                    save(character.id, {
+                      skin: parseSelection(value),
+                      live2dModelId: undefined,
+                    })
+                  }
+                >
+                  <ComboboxInput
+                    aria-label={t("binding.skinFor", { name: character.name })}
+                    placeholder={skinLabel}
+                    className="min-w-48"
+                  />
+                  <ComboboxContent>
+                    <ComboboxList>
+                      <ComboboxEmpty>{t("binding.inheritAppearance")}</ComboboxEmpty>
+                      <ComboboxItem value={INHERIT}>{t("binding.inheritAppearance")}</ComboboxItem>
+                      <ComboboxItem value="svg">{t("binding.useSvg")}</ComboboxItem>
+                      {models.map((model) => (
+                        <ComboboxItem key={model.id} value={`live2d:${model.id}`}>
+                          {t("binding.live2dOption", { name: model.name })}
+                        </ComboboxItem>
+                      ))}
+                      {packs.map((pack) => (
+                        <ComboboxItem key={pack.id} value={`sprite-v2:${pack.id}`}>
+                          {t("binding.spriteOption", { name: pack.displayName })}
+                        </ComboboxItem>
+                      ))}
+                    </ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
+                {binding ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void deletePetBinding(character.id)}
+                  >
+                    {t("binding.clear")}
+                  </Button>
+                ) : null}
+              </ItemActions>
+            </Item>
           </div>
         )
       })}
-    </div>
+    </ItemGroup>
   )
 }

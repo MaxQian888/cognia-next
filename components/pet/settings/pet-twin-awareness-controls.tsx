@@ -1,73 +1,97 @@
-// Ambient Twin-awareness controls: an opt-in switch + a single-twin picker.
-// Kept as its own block (not folded into PetInteractionControls) because it's
-// the one control that crosses a subsystem boundary — the explanatory copy
-// here is a trust-building requirement, not decoration.
-
 "use client"
 
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
-import { Label } from "@/components/ui/label"
+import { UsersIcon } from "lucide-react"
+
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { listTwins } from "@/lib/db/twins"
 import { DEFAULT_PET_TWIN_AWARENESS, type PetTwinAwarenessSettings } from "@/types/pet"
+
 import type { PetControlsProps } from "./pet-appearance-controls"
 
 export function PetTwinAwarenessControls({ pet, patch }: PetControlsProps) {
   const t = useTranslations("settings.pet")
   const twinAwareness: PetTwinAwarenessSettings = pet.twinAwareness ?? DEFAULT_PET_TWIN_AWARENESS
+  const twins = useLiveQuery(() => listTwins(), [])
   const patchTwinAwareness = (next: Partial<PetTwinAwarenessSettings>) =>
     patch({ twinAwareness: { ...twinAwareness, ...next } })
-
-  const twins = useLiveQuery(() => listTwins(), [])
+  const selectedTwin = twins?.find((twin) => twin.id === twinAwareness.twinId)
 
   return (
-    <div className="space-y-4 border-t pt-4">
-      <div className="space-y-0.5">
-        <Label>{t("twinAwareness.title")}</Label>
-        <p className="text-sm text-muted-foreground">{t("twinAwareness.description")}</p>
-      </div>
-
-      <div className="flex items-center justify-between gap-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="pet-twin-awareness-enabled">{t("twinAwareness.enabled.label")}</Label>
-          <p className="text-sm text-muted-foreground">{t("twinAwareness.enabled.description")}</p>
-        </div>
+    <FieldGroup>
+      <Field orientation="responsive">
+        <FieldContent>
+          <FieldLabel htmlFor="pet-twin-awareness-enabled">
+            {t("twinAwareness.enabled.label")}
+          </FieldLabel>
+          <FieldDescription>{t("twinAwareness.enabled.description")}</FieldDescription>
+        </FieldContent>
         <Switch
           id="pet-twin-awareness-enabled"
           checked={twinAwareness.enabled}
-          onCheckedChange={(v) => patchTwinAwareness({ enabled: v })}
+          onCheckedChange={(enabled) => patchTwinAwareness({ enabled })}
         />
-      </div>
+      </Field>
 
-      {twinAwareness.enabled && (
+      {twinAwareness.enabled ? (
         <>
-          <div className="flex items-center justify-between gap-4">
-            <Label htmlFor="pet-twin-awareness-twin">{t("twinAwareness.twinSelect.label")}</Label>
-            {twins && twins.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("twinAwareness.twinSelect.empty")}</p>
-            ) : (
-              <NativeSelect
-                id="pet-twin-awareness-twin"
-                size="sm"
+          {twins && twins.length === 0 ? (
+            <Empty className="border-0 p-3">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <UsersIcon />
+                </EmptyMedia>
+                <EmptyDescription>{t("twinAwareness.twinSelect.empty")}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <Field>
+              <FieldLabel htmlFor="pet-twin-awareness-twin">
+                {t("twinAwareness.twinSelect.label")}
+              </FieldLabel>
+              <Combobox
                 value={twinAwareness.twinId ?? ""}
-                onChange={(e) => patchTwinAwareness({ twinId: e.target.value || null })}
+                onValueChange={(twinId: string | null) => patchTwinAwareness({ twinId })}
               >
-                <NativeSelectOption value="">
-                  {t("twinAwareness.twinSelect.placeholder")}
-                </NativeSelectOption>
-                {(twins ?? []).map((twin) => (
-                  <NativeSelectOption key={twin.id} value={twin.id}>
-                    {twin.name}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground">{t("twinAwareness.privacyNote")}</p>
+                <ComboboxInput
+                  id="pet-twin-awareness-twin"
+                  aria-label={t("twinAwareness.twinSelect.label")}
+                  placeholder={selectedTwin?.name ?? t("twinAwareness.twinSelect.placeholder")}
+                  showClear
+                />
+                <ComboboxContent>
+                  <ComboboxList>
+                    <ComboboxEmpty>{t("twinAwareness.twinSelect.empty")}</ComboboxEmpty>
+                    {(twins ?? []).map((twin) => (
+                      <ComboboxItem key={twin.id} value={twin.id}>
+                        {twin.name}
+                      </ComboboxItem>
+                    ))}
+                  </ComboboxList>
+                </ComboboxContent>
+              </Combobox>
+            </Field>
+          )}
+          <FieldDescription>{t("twinAwareness.privacyNote")}</FieldDescription>
         </>
-      )}
-    </div>
+      ) : null}
+    </FieldGroup>
   )
 }

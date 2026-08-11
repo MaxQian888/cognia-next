@@ -116,8 +116,20 @@ physics 和 pose 时，清理对应引用并报告。路径穿越、归一化重
 和大小上限都会在持久化前失败。官方 Hiyori/Haru 测试数据固定 revision 与 SHA-256，下载到测试缓存，
 而不提交模型二进制。
 
+### D8 — 一个主从控制台与一个自定义配置所有者
+
+**决策**：`/pet` 采用响应式主从工作区。桌面端使用分组导航轨道与独立滚动的详情面板，窄容器把
+相同分组放入 shadcn Sheet；`PetConsoleTab`、`?tab=` 深链、插件 slot context 与跨窗口消息形状均
+保持不变。详情区域以平铺 section 和分隔线表达层级，紧凑 widget、popup、overlay 继续保留必要外框。
+
+`components/pet/settings/pet-customization-workspace.tsx` 是 Customize 与 Settings 共同直接渲染的唯一
+配置所有者。它统一暴露 SVG、Live2D、Sprite v2、互动、声音、照料、Twin 与受能力门禁约束的桌宠
+窗口控制，并拥有响应式受治理预览、fallback 诊断与重试。宠物档案重置使用破坏性确认，并与 Settings
+Shell 的配置重置明确区分。本决策只改变 UI 组合与配置所有权，不改变任何持久化结构、成长规则或
+Tauri 窗口协议，因此不需要 schema migration。
+
 ## 后果
 
 - 宠物子系统的真实架构现在无需穿越两个陈旧的规格和源树就能发现。
-- D1–D5 各自可逆（设置标志、hook交换、加法Rust模块、加法DTO字段）——都不需要Dexie迁移。D6 被第三个皮肤注册和一个新增 Dexie table/version 隔离。D7 只增加非索引模型元数据和一个渲染所有者，因此不需要 Dexie schema 升版。
+- D1–D5 各自可逆（设置标志、hook交换、加法Rust模块、加法DTO字段）——都不需要Dexie迁移。D6 被第三个皮肤注册和一个新增 Dexie table/version 隔离。D7 只增加非索引模型元数据和一个渲染所有者，D8 只改变 UI 组合与配置所有权，因此两者都不需要 Dexie schema 升版。
 - 文档债务故意未完全关闭：`docs/superpowers/specs/2026-06-0{2,5}-*.md`被标记为原地被取代（非删除——根据项目的“标记，不删除”的惯例保留历史价值），而非重写，因此它们捕获的*决策历史*（为什么是SVG-over-sprite-sheet，为什么是侧信道LLM，是前技术研究）得以保持完整。

@@ -105,4 +105,16 @@ describe("PetStatCard", () => {
     rerender(<PetStatCard bones={makeBones()} soul={soul} stage="adult" />)
     expect(container.querySelector('[data-testid="pet-flavor-badge"]')).toBeNull()
   })
+
+  it("supports a flat page variant without changing the default outlined variant", () => {
+    const { rerender } = render(
+      <PetStatCard bones={makeBones()} soul={soul} stage="adult" variant="flat" />
+    )
+    expect(screen.getByTestId("pet-stat-card")).toHaveAttribute("data-variant", "flat")
+    expect(screen.getByTestId("pet-stat-card")).not.toHaveClass("border")
+
+    rerender(<PetStatCard bones={makeBones()} soul={soul} stage="adult" />)
+    expect(screen.getByTestId("pet-stat-card")).toHaveAttribute("data-variant", "outlined")
+    expect(screen.getByTestId("pet-stat-card")).toHaveClass("border")
+  })
 })

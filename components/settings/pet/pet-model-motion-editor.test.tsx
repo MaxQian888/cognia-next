@@ -1,7 +1,8 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
-  useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
+  useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
 }))
 
 import { PetModelMotionEditor, type PetModelMotionEditorProps } from "./pet-model-motion-editor"
@@ -16,93 +17,82 @@ function setup(partial: Partial<PetModelMotionEditorProps> = {}) {
     onTest: jest.fn(),
     ...partial,
   }
-  const view = render(<PetModelMotionEditor {...props} />)
-  return { ...view, props }
+  return { ...render(<PetModelMotionEditor {...props} />), props }
 }
 
-const groupSelect = (key: string) =>
-  screen.getByTestId(`pet-mapping-group-${key}`) as HTMLSelectElement
-const indexSelect = (key: string) =>
-  screen.getByTestId(`pet-mapping-index-${key}`) as HTMLSelectElement
-const expressionSelect = (key: string) =>
-  screen.getByTestId(`pet-mapping-expression-${key}`) as HTMLSelectElement
+async function choose(testId: string, option: string | RegExp) {
+  const user = userEvent.setup()
+  await user.click(screen.getByTestId(testId))
+  await user.click(screen.getByRole("option", { name: option }))
+}
 
 describe("PetModelMotionEditor", () => {
-  it("renders one row per state + namespaced one-shot (24 total)", () => {
+  it("renders one responsive row per state and namespaced one-shot", () => {
     setup()
     expect(screen.getAllByTestId(/pet-mapping-row-/)).toHaveLength(24)
     expect(screen.getByTestId("pet-mapping-row-unwell")).toBeInTheDocument()
-    expect(screen.getByTestId("pet-mapping-row-happy")).toBeInTheDocument()
-    expect(screen.getByTestId("pet-mapping-row-shot:happy")).toBeInTheDocument()
     expect(screen.getByTestId("pet-mapping-row-shot:love")).toBeInTheDocument()
   })
 
-  it("picking a real group emits an entry with that group (index random)", () => {
-    const { props } = setup()
-    fireEvent.change(groupSelect("happy"), { target: { value: "Special" } })
-    expect(props.onChange).toHaveBeenCalledWith({ happy: { motionGroup: "Special" } })
+  it("picks real, engine-default, and convention-default motion groups", async () => {
+    const real = setup()
+    await choose("pet-mapping-group-happy", "Special")
+    expect(real.props.onChange).toHaveBeenCalledWith({ happy: { motionGroup: "Special" } })
+    real.unmount()
+
+    const engine = setup({ value: { happy: { motionGroup: "Tap", expressionId: "sad" } } })
+    await choose("pet-mapping-group-happy", /optionEngine/)
+    expect(engine.props.onChange).toHaveBeenCalledWith({ happy: { expressionId: "sad" } })
+    engine.unmount()
+
+    const convention = setup({ value: { happy: { motionGroup: "Tap" }, idle: {} } })
+    await choose("pet-mapping-group-happy", /optionDefault/)
+    expect(convention.props.onChange).toHaveBeenCalledWith({ idle: {} })
   })
 
-  it("picking 'engine default' emits an empty entry, keeping a chosen expression", () => {
-    const { props } = setup({ value: { happy: { motionGroup: "Tap", expressionId: "sad" } } })
-    fireEvent.change(groupSelect("happy"), { target: { value: "__engine" } })
-    expect(props.onChange).toHaveBeenCalledWith({ happy: { expressionId: "sad" } })
+  it("sizes indices from the selected group and emits fixed or random values", async () => {
+    const fixed = setup({ value: { idle: { motionGroup: "Idle" } } })
+    await userEvent.setup().click(screen.getByTestId("pet-mapping-index-idle"))
+    expect(screen.getAllByRole("option")).toHaveLength(4)
+    await userEvent.setup().click(screen.getByRole("option", { name: "2" }))
+    expect(fixed.props.onChange).toHaveBeenCalledWith({
+      idle: { motionGroup: "Idle", motionIndex: 2 },
+    })
+    fixed.unmount()
+
+    const random = setup({ value: { idle: { motionGroup: "Idle", motionIndex: 1 } } })
+    await choose("pet-mapping-index-idle", /indexRandom/)
+    expect(random.props.onChange).toHaveBeenCalledWith({ idle: { motionGroup: "Idle" } })
   })
 
-  it("picking 'default' removes the key from the overrides", () => {
-    const { props } = setup({ value: { happy: { motionGroup: "Tap" }, idle: {} } })
-    fireEvent.change(groupSelect("happy"), { target: { value: "__default" } })
-    expect(props.onChange).toHaveBeenCalledWith({ idle: {} })
-  })
-
-  it("the index select sizes from the group's motion count and emits fixed indices", () => {
-    const { props } = setup({ value: { idle: { motionGroup: "Idle" } } })
-    const idx = indexSelect("idle")
-    expect(idx.disabled).toBe(false)
-    // random + 3 indices (Idle has count 3)
-    expect(idx.querySelectorAll("option")).toHaveLength(4)
-    fireEvent.change(idx, { target: { value: "2" } })
-    expect(props.onChange).toHaveBeenCalledWith({ idle: { motionGroup: "Idle", motionIndex: 2 } })
-  })
-
-  it("selecting random clears the fixed index", () => {
-    const { props } = setup({ value: { idle: { motionGroup: "Idle", motionIndex: 1 } } })
-    fireEvent.change(indexSelect("idle"), { target: { value: "__random" } })
-    expect(props.onChange).toHaveBeenCalledWith({ idle: { motionGroup: "Idle" } })
-  })
-
-  it("index select is disabled without a real group", () => {
+  it("disables index and expression selectors until their override exists", () => {
     setup({ value: { idle: {} } })
-    expect(indexSelect("idle").disabled).toBe(true)
-    expect(indexSelect("happy").disabled).toBe(true)
+    expect(screen.getByTestId("pet-mapping-index-idle")).toBeDisabled()
+    expect(screen.getByTestId("pet-mapping-index-happy")).toBeDisabled()
+    expect(screen.getByTestId("pet-mapping-expression-happy")).toBeDisabled()
   })
 
-  it("expression select emits and clears the expression", () => {
-    const { props } = setup({ value: { sad: { motionGroup: "Idle" } } })
-    fireEvent.change(expressionSelect("sad"), { target: { value: "sad" } })
-    expect(props.onChange).toHaveBeenCalledWith({
+  it("sets and clears expressions", async () => {
+    const set = setup({ value: { sad: { motionGroup: "Idle" } } })
+    await choose("pet-mapping-expression-sad", "sad")
+    expect(set.props.onChange).toHaveBeenCalledWith({
       sad: { motionGroup: "Idle", expressionId: "sad" },
     })
-    fireEvent.change(expressionSelect("sad"), { target: { value: "__none" } })
-    expect(props.onChange).toHaveBeenLastCalledWith({ sad: { motionGroup: "Idle" } })
+    set.unmount()
+
+    const clear = setup({ value: { sad: { motionGroup: "Idle", expressionId: "sad" } } })
+    await choose("pet-mapping-expression-sad", /optionNoExpression/)
+    expect(clear.props.onChange).toHaveBeenCalledWith({ sad: { motionGroup: "Idle" } })
   })
 
-  it("expression select is disabled for convention-default rows", () => {
-    setup()
-    expect(expressionSelect("idle").disabled).toBe(true)
-  })
-
-  it("test buttons report the row", () => {
-    const { props } = setup()
-    fireEvent.click(screen.getByTestId("pet-mapping-test-shot:wave"))
+  it("tests a mapping and resets the override table", async () => {
+    const { props } = setup({ value: { happy: { motionGroup: "Tap" } } })
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId("pet-mapping-test-shot:wave"))
     expect(props.onTest).toHaveBeenCalledWith(
       expect.objectContaining({ key: "shot:wave", kind: "oneShot", id: "wave" })
     )
-  })
-
-  it("reset-all emits an empty table", () => {
-    const { props } = setup({ value: { happy: { motionGroup: "Tap" } } })
-    fireEvent.click(screen.getByRole("button", { name: /resetMappings/ }))
+    await user.click(screen.getByRole("button", { name: /resetMappings/ }))
     expect(props.onChange).toHaveBeenCalledWith({})
   })
 })

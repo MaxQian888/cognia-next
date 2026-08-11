@@ -12,6 +12,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { SparklesIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { ALL_PET_SPECIES } from "@/lib/pet/skins/species-traits"
 import { listPetModels, type PetModelRow } from "@/lib/db/pet-models"
 import { useSettingsStore } from "@/stores/settings"
@@ -47,24 +49,24 @@ export function DexTab({ bones }: { bones: PetBones }) {
           )}
         </div>
         {models.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("dex.live2dEmpty")}</p>
+          <Empty className="py-8">
+            <EmptyDescription>{t("dex.live2dEmpty")}</EmptyDescription>
+          </Empty>
         ) : (
           <div className="grid grid-cols-3 gap-3 @sm/pet-pane:grid-cols-4 @lg/pet-pane:grid-cols-6">
             {models.map((m) => {
               const inUse = live2dActive && activeModelId === m.id
               return (
-                <button
+                <Button
                   key={m.id}
-                  type="button"
+                  variant="ghost"
                   data-model={m.id}
                   data-in-use={inUse}
                   aria-pressed={inUse}
                   onClick={() => pickModel(m.id)}
                   className={cn(
-                    "flex flex-col items-center gap-1 rounded-lg border p-2 text-center transition",
-                    inUse
-                      ? "border-primary bg-primary/5"
-                      : "opacity-80 hover:border-primary/50 hover:opacity-100"
+                    "h-auto min-w-0 flex-col gap-1 p-2 text-center",
+                    inUse ? "bg-primary/10 text-primary" : "opacity-80 hover:opacity-100"
                   )}
                 >
                   {inUse && coreReady ? (
@@ -86,7 +88,7 @@ export function DexTab({ bones }: { bones: PetBones }) {
                   <span className="w-full truncate text-[10px] text-muted-foreground">
                     {m.name}
                   </span>
-                </button>
+                </Button>
               )
             })}
           </div>
@@ -100,25 +102,31 @@ export function DexTab({ bones }: { bones: PetBones }) {
             const owned = species === bones.species
             const inUse = owned && !live2dActive
             return (
-              <div
+              <Item
                 key={species}
                 data-species={species}
                 data-owned={owned}
                 data-in-use={inUse}
                 className={cn(
-                  "flex flex-col items-center gap-1 rounded-lg border p-2",
-                  inUse ? "border-primary bg-primary/5" : owned ? "border-primary/60" : "opacity-80"
+                  "min-w-0 flex-col gap-1 p-2 text-center",
+                  inUse ? "bg-primary/10" : owned ? "bg-muted/50" : "opacity-80"
                 )}
               >
-                <PetRenderer
-                  bones={{ ...bones, species, hat: owned ? bones.hat : "none" }}
-                  stage="adult"
-                  state="idle"
-                  reducedMotion
-                  size={56}
-                />
-                <span className="text-[10px] text-muted-foreground">{t(`species.${species}`)}</span>
-              </div>
+                <ItemMedia>
+                  <PetRenderer
+                    bones={{ ...bones, species, hat: owned ? bones.hat : "none" }}
+                    stage="adult"
+                    state="idle"
+                    reducedMotion
+                    size={56}
+                  />
+                </ItemMedia>
+                <ItemContent className="items-center">
+                  <ItemTitle className="text-[10px] text-muted-foreground">
+                    {t(`species.${species}`)}
+                  </ItemTitle>
+                </ItemContent>
+              </Item>
             )
           })}
         </div>

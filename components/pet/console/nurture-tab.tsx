@@ -18,6 +18,7 @@ import { PetActionGrid } from "../pet-action-grid"
 import { PetInventoryStrip } from "../pet-inventory-strip"
 import { PetTalkComposer } from "../pet-talk-composer"
 import { PetRenderer } from "../pet-renderer"
+import { Separator } from "@/components/ui/separator"
 
 export interface NurtureTabProps {
   profile: PetProfile
@@ -57,10 +58,10 @@ export function NurtureTab({
   return (
     <div
       data-testid="pet-nurture-tab"
-      className="mx-auto grid w-full max-w-4xl gap-4 @2xl/pet-pane:grid-cols-[minmax(0,1fr)_18rem]"
+      className="mx-auto grid w-full max-w-5xl gap-5 @3xl/pet-pane:grid-cols-[minmax(0,1fr)_18rem]"
     >
       {/* Main column: stats, level + needs, actions. */}
-      <div className="flex flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-5">
         <PetStatCard
           bones={view.effectiveBones}
           soul={profile.soul}
@@ -70,16 +71,29 @@ export function NurtureTab({
           flavor={profile.evolutionFlavor}
           skinId={skinId}
           selection={selection}
+          variant="flat"
         />
 
-        <PetWalletStrip coins={profile.coins} streak={profile.streak} onOpenShop={onOpenShop} />
+        <Separator />
+
+        <PetWalletStrip
+          coins={profile.coins}
+          streak={profile.streak}
+          onOpenShop={onOpenShop}
+          variant="flat"
+        />
+
+        <Separator />
 
         <PetVitalsCard
           xp={profile.xp}
           needs={view.needs}
           mood={view.mood}
           condition={view.condition}
+          variant="flat"
         />
+
+        <Separator />
 
         <PetActionGrid
           onFeed={onFeed}
@@ -92,13 +106,13 @@ export function NurtureTab({
           onToggleTalk={() => setTalkOpen((o) => !o)}
         />
 
-        <PetInventoryStrip />
+        <PetInventoryStrip variant="flat" />
 
         {talkOpen && <PetTalkComposer onTalk={onTalk} />}
       </div>
 
       {/* Hero column: a large live preview of the pet. */}
-      <aside className="order-first flex items-center justify-center rounded-xl border bg-card p-6 @2xl/pet-pane:order-none @2xl/pet-pane:items-start">
+      <aside className="order-first flex items-center justify-center border-b pb-5 @3xl/pet-pane:order-none @3xl/pet-pane:items-start @3xl/pet-pane:border-b-0 @3xl/pet-pane:border-l @3xl/pet-pane:pb-0 @3xl/pet-pane:pl-5">
         <PetRenderer
           bones={view.effectiveBones}
           stage={profile.stage}

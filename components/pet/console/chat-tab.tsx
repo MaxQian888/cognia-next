@@ -10,6 +10,14 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { MessagesSquareIcon, SparklesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 import { usePetChat } from "@/hooks/pet/use-pet-chat"
 import { seedMainChat } from "@/lib/pet/chat/seed-main-chat"
@@ -64,7 +72,12 @@ export function ChatTab({ profile, view, activeCharacterId }: ChatTabProps) {
             petName={profile.soul?.name}
           />
           <div className="flex flex-col gap-2">
-            <PetTalkComposer onTalk={(text) => text && void send(text)} />
+            <PetTalkComposer
+              mode="chat"
+              status={inFlight ? "submitted" : degradeReason ? "error" : "ready"}
+              allowEmpty={false}
+              onTalk={(text) => text && void send(text)}
+            />
             <Button
               size="sm"
               variant="ghost"
@@ -77,17 +90,18 @@ export function ChatTab({ profile, view, activeCharacterId }: ChatTabProps) {
           </div>
         </>
       ) : (
-        <div
-          data-testid="pet-chat-enable-cta"
-          className="m-auto flex max-w-sm flex-col items-center gap-3 rounded-xl border p-6 text-center"
-        >
-          <SparklesIcon className="size-8 text-muted-foreground" />
-          <div className="space-y-1">
-            <p className="font-medium">{t("chat.enableCta.title")}</p>
-            <p className="text-sm text-muted-foreground">{t("chat.enableCta.body")}</p>
-          </div>
-          <Button onClick={enableLlm}>{t("chat.enableCta.action")}</Button>
-        </div>
+        <Empty data-testid="pet-chat-enable-cta" className="m-auto max-w-sm">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <SparklesIcon />
+            </EmptyMedia>
+            <EmptyTitle>{t("chat.enableCta.title")}</EmptyTitle>
+            <EmptyDescription>{t("chat.enableCta.body")}</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button onClick={enableLlm}>{t("chat.enableCta.action")}</Button>
+          </EmptyContent>
+        </Empty>
       )}
     </div>
   )

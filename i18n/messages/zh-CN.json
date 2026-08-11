@@ -15519,6 +15519,7 @@
         "rateLimited": "让我喘口气，稍等一下…"
       },
       "empty": "跟你的宠物打个招呼吧——它现在能回话啦。",
+      "emptyTitle": "开始与宠物对话",
       "enableCta": {
         "action": "开启聊天",
         "body": "让宠物用你配置的模型真正回话。它依然俏皮，也绝不会发送个人信息。",
@@ -15527,6 +15528,7 @@
       "openFullChat": "打开完整对话",
       "openPanel": "聊天",
       "petFallbackName": "宠物",
+      "scrollToBottom": "滚动到最新宠物消息",
       "sending": "{name} 正在思考…",
       "you": "你"
     },
@@ -15534,10 +15536,19 @@
       "unwell": "需要照顾"
     },
     "console": {
+      "groups": {
+        "extensions": "扩展",
+        "nurture": "养成",
+        "personalize": "个性化",
+        "records": "记录"
+      },
       "hatch": "孵化",
       "hatchPrompt": "你的蛋可以孵化了。",
       "live2dFallback": "Live2D 暂时不可用，正在显示内置形象。",
       "loading": "正在唤醒你的宠物…",
+      "navigation": "宠物导航",
+      "navigationDescription": "选择一个宠物工作区。",
+      "openNavigation": "打开宠物导航",
       "subtitle": "养育它、装扮它，一起成长。",
       "tabs": {
         "achievements": "成就",
@@ -15630,6 +15641,9 @@
         "title": "造型"
       },
       "openSettings": "打开完整宠物设置",
+      "preview": {
+        "unavailable": "孵化宠物后即可查看实时预览。"
+      },
       "sound": {
         "description": "音效与免打扰时段。",
         "title": "声音"
@@ -27246,8 +27260,13 @@
       },
       "reset": {
         "action": "重置",
+        "cancel": "取消",
+        "confirm": "重置宠物档案",
+        "confirmDescription": "这会永久删除宠物档案、成长进度、背包、日记和对话历史，但保留宠物配置。",
+        "confirmTitle": "重置这个宠物档案？",
         "description": "删除所有宠物数据并重新开始。",
-        "label": "重置宠物"
+        "label": "重置宠物",
+        "profileScope": "此操作只重置宠物进度与历史，不会重置本页配置。"
       },
       "size": {
         "label": "大小（{size}px）"

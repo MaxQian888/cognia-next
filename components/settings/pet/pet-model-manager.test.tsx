@@ -192,8 +192,7 @@ describe("PetModelManager", () => {
     setup()
     const input = screen.getByLabelText("Import model") as HTMLInputElement
     fireEvent.change(input, { target: { files: [new File(["x"], "bad.zip")] } })
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
-    expect(screen.getByRole("alert")).toHaveTextContent(/couldn't be read/i)
+    expect(await screen.findByText(/couldn't be read/i)).toBeInTheDocument()
   })
 
   it("surfaces a validation error from importModelFromEntries", async () => {
@@ -202,7 +201,7 @@ describe("PetModelManager", () => {
     setup()
     const input = screen.getByLabelText("Import model") as HTMLInputElement
     fireEvent.change(input, { target: { files: [new File(["x"], "model.zip")] } })
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/missing files/i))
+    expect(await screen.findByText(/missing files/i)).toBeInTheDocument()
   })
 
   it("ignores an empty file selection", async () => {
@@ -224,9 +223,7 @@ describe("PetModelManager", () => {
     Object.defineProperty(navigator, "onLine", { value: false, configurable: true })
     setup()
     fireEvent.click(screen.getAllByRole("button", { name: /Download sample/i })[0])
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(/couldn't be downloaded/i)
-    )
+    expect(await screen.findByText(/couldn't be downloaded/i)).toBeInTheDocument()
     expect(downloadSampleModel).not.toHaveBeenCalled()
   })
 
@@ -234,9 +231,7 @@ describe("PetModelManager", () => {
     downloadSampleModel.mockResolvedValue({ ok: false, code: "downloadFailed" })
     setup()
     fireEvent.click(screen.getAllByRole("button", { name: /Download sample/i })[0])
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(/couldn't be downloaded/i)
-    )
+    expect(await screen.findByText(/couldn't be downloaded/i)).toBeInTheDocument()
   })
 
   it("renders storage usage", () => {
@@ -288,7 +283,7 @@ describe("PetModelManager", () => {
     setup()
     const input = screen.getByLabelText("Import folder") as HTMLInputElement
     fireEvent.change(input, { target: { files: [new File(["x"], "readme.txt")] } })
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/No .model3.json/i))
+    expect(await screen.findByText(/No .model3.json/i)).toBeInTheDocument()
     expect(importModelFromEntries).not.toHaveBeenCalled()
   })
 

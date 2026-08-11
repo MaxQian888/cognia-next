@@ -206,6 +206,7 @@
       "rateLimited": "让我喘口气，稍等一下…"
     },
     "empty": "跟你的宠物打个招呼吧——它现在能回话啦。",
+    "emptyTitle": "开始与宠物对话",
     "enableCta": {
       "action": "开启聊天",
       "body": "让宠物用你配置的模型真正回话。它依然俏皮，也绝不会发送个人信息。",
@@ -215,16 +216,26 @@
     "openPanel": "聊天",
     "petFallbackName": "宠物",
     "sending": "{name} 正在思考…",
+    "scrollToBottom": "滚动到最新宠物消息",
     "you": "你"
   },
   "condition": {
     "unwell": "需要照顾"
   },
   "console": {
+    "groups": {
+      "extensions": "扩展",
+      "nurture": "养成",
+      "personalize": "个性化",
+      "records": "记录"
+    },
     "hatch": "孵化",
     "hatchPrompt": "你的蛋可以孵化了。",
     "live2dFallback": "Live2D 暂时不可用，正在显示内置形象。",
     "loading": "正在唤醒你的宠物…",
+    "navigation": "宠物导航",
+    "navigationDescription": "选择一个宠物工作区。",
+    "openNavigation": "打开宠物导航",
     "subtitle": "养育它、装扮它，一起成长。",
     "tabs": {
       "achievements": "成就",
@@ -315,6 +326,9 @@
       "descriptionSprite": "预览当前 AI 生成的 v2 精灵图宠物。",
       "spriteManagedBelow": "可在下方“外观”区域创建、导入和切换 v2 精灵图宠物。",
       "title": "造型"
+    },
+    "preview": {
+      "unavailable": "孵化宠物后即可查看实时预览。"
     },
     "openSettings": "打开完整宠物设置",
     "sound": {

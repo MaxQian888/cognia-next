@@ -8,6 +8,8 @@
 import { useTranslations } from "next-intl"
 import { CoinsIcon, FlameIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { normalizeCoins, normalizeStreak, type PetStreak } from "@/types/pet"
 import { coinMultiplier } from "@/lib/pet/economy/streak"
 
@@ -17,9 +19,16 @@ export interface PetWalletStripProps {
   /** Open the shop (console tab). Renders the strip as a button when given. */
   onOpenShop?: () => void
   className?: string
+  variant?: "outlined" | "flat"
 }
 
-export function PetWalletStrip({ coins, streak, onOpenShop, className }: PetWalletStripProps) {
+export function PetWalletStrip({
+  coins,
+  streak,
+  onOpenShop,
+  className,
+  variant = "outlined",
+}: PetWalletStripProps) {
   const t = useTranslations("pet")
   const balance = normalizeCoins(coins)
   const days = normalizeStreak(streak).days
@@ -32,41 +41,37 @@ export function PetWalletStrip({ coins, streak, onOpenShop, className }: PetWall
         {t("shop.balance", { coins: balance })}
       </span>
       {days > 0 && (
-        <span
-          data-testid="pet-wallet-streak"
-          className="ml-auto flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px]"
-        >
+        <Badge data-testid="pet-wallet-streak" className="ml-auto" variant="secondary">
           <FlameIcon className="size-3 text-primary" />
           {t("shop.streak", { days })}
-        </span>
+        </Badge>
       )}
       {multiplier > 1 && (
-        <span
-          data-testid="pet-wallet-multiplier"
-          className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary tabular-nums"
-        >
+        <Badge data-testid="pet-wallet-multiplier" variant="outline">
           {t("wallet.multiplier", { multiplier })}
-        </span>
+        </Badge>
       )}
     </>
   )
 
-  const layout = "flex items-center gap-2 rounded-lg border p-2.5"
+  const layout = cn("flex items-center gap-2", variant === "outlined" && "rounded-lg border p-2.5")
   if (onOpenShop) {
     return (
-      <button
+      <Button
         type="button"
+        variant="ghost"
         data-testid="pet-wallet-strip"
+        data-variant={variant}
         aria-label={t("console.tabs.shop")}
         onClick={onOpenShop}
-        className={cn(layout, "w-full text-left transition-colors hover:bg-muted/50", className)}
+        className={cn(layout, "h-auto w-full justify-start text-left", className)}
       >
         {content}
-      </button>
+      </Button>
     )
   }
   return (
-    <div data-testid="pet-wallet-strip" className={cn(layout, className)}>
+    <div data-testid="pet-wallet-strip" data-variant={variant} className={cn(layout, className)}>
       {content}
     </div>
   )

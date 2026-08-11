@@ -254,8 +254,13 @@
   },
   "reset": {
     "action": "Reset",
+    "cancel": "Cancel",
+    "confirm": "Reset pet profile",
+    "confirmDescription": "This permanently deletes the pet profile, progress, inventory, journal, and conversation history. Pet configuration is kept.",
+    "confirmTitle": "Reset this pet profile?",
     "description": "Delete all pet data and start over.",
-    "label": "Reset pet"
+    "label": "Reset pet",
+    "profileScope": "This resets pet progress and history, not the settings on this page."
   },
   "size": {
     "label": "Size ({size}px)"

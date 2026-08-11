@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 // Stub the renderer so we don't mount the SVG/live2d skin in this unit test.
 jest.mock("../pet-renderer", () => ({
@@ -110,12 +111,13 @@ describe("NurtureTab", () => {
     expect(screen.getByTestId("pet-mood-chip")).toBeInTheDocument()
   })
 
-  it("submits typed talk text and clears the input", () => {
+  it("submits typed talk text and clears the input", async () => {
+    const user = userEvent.setup()
     const h = setup()
-    fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
+    await user.click(screen.getByLabelText(/talk|actions\.talk/i))
     const input = screen.getByPlaceholderText("Say something to your pet…")
-    fireEvent.change(input, { target: { value: "  hi Boba  " } })
-    fireEvent.keyDown(input, { key: "Enter" })
+    await user.type(input, "  hi Boba  ")
+    await user.keyboard("{Enter}")
     expect(h.onTalk).toHaveBeenCalledWith("hi Boba")
     expect(input).toHaveValue("")
   })

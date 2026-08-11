@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
@@ -142,9 +142,11 @@ describe("PetModelConfigDialog", () => {
     await renderDialog()
     await user.click(screen.getByRole("tab", { name: "tabParameters" }))
 
-    await user.selectOptions(screen.getByLabelText("parameters.roles.headX"), "custom")
+    const headXGroup = screen.getByRole("radiogroup", { name: "parameters.roles.headX" })
+    await user.click(within(headXGroup).getByRole("radio", { name: "parameters.custom" }))
     await user.type(screen.getByLabelText("parameters.parameterIdFor"), "ParamCustomHeadX")
-    await user.selectOptions(screen.getByLabelText("parameters.roles.eyeY"), "disabled")
+    const eyeYGroup = screen.getByRole("radiogroup", { name: "parameters.roles.eyeY" })
+    await user.click(within(eyeYGroup).getByRole("radio", { name: "parameters.disabled" }))
     await user.click(screen.getByRole("button", { name: "save" }))
 
     await waitFor(() =>
@@ -162,10 +164,10 @@ describe("PetModelConfigDialog", () => {
   })
 
   it("the preview state selector switches the resting state", async () => {
+    const user = userEvent.setup()
     await renderDialog()
-    fireEvent.change(document.getElementById("pet-preview-state") as HTMLSelectElement, {
-      target: { value: "sleeping" },
-    })
+    await user.click(screen.getByRole("combobox", { name: "previewState" }))
+    await user.click(screen.getByRole("option", { name: "sleeping" }))
     expect(canvasProps).toHaveBeenLastCalledWith(expect.objectContaining({ state: "sleeping" }))
   })
 

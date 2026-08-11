@@ -6,6 +6,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
+import { Progress } from "@/components/ui/progress"
 import type { PetNeedKind } from "@/types/pet"
 
 export interface NeedBarProps {
@@ -22,15 +23,17 @@ export function NeedBar({ kind, value, label, className }: NeedBarProps) {
       className={cn("grid grid-cols-[4rem_1fr_2.5rem] items-center gap-2", className)}
     >
       <span className="text-xs text-muted-foreground">{label}</span>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <div
-          className={cn(
-            "h-full rounded-full transition-[width] duration-500",
-            value < 25 ? "bg-destructive" : value < 50 ? "bg-amber-400" : "bg-primary"
-          )}
-          style={{ width: `${Math.round(value)}%` }}
-        />
-      </div>
+      <Progress
+        value={Math.round(value)}
+        aria-label={label}
+        className={cn(
+          value < 25
+            ? "[&>[data-slot=progress-indicator]]:bg-destructive"
+            : value < 50
+              ? "[&>[data-slot=progress-indicator]]:bg-muted-foreground"
+              : undefined
+        )}
+      />
       <span className="text-right text-xs tabular-nums">{Math.round(value)}</span>
     </div>
   )

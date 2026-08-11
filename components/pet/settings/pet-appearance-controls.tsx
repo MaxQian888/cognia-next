@@ -1,19 +1,23 @@
-// Appearance controls for the pet: dock anchor, motion preference, skin
-// (SVG, Live2D, or v2 sprite with their asset managers), and widget size. Presentational over a
-// `{ pet, patch }` interface so both Settings → Pet and the /pet Customize tab
-// render identical controls against the same persisted PetSettings.
-
 "use client"
 
 import { useTranslations } from "next-intl"
-import { Label } from "@/components/ui/label"
+
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldTitle,
+} from "@/components/ui/field"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { useCubismCoreAvailable } from "@/hooks/pet/use-active-live2d-model"
-import type { PetAnchor, PetMotionPreference, PetSettings, PetSkinId } from "@/types/pet"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { PetModelManager } from "@/components/settings/pet/pet-model-manager"
 import { PetSpritePackManager } from "@/components/settings/pet/pet-sprite-pack-manager"
+import { useCubismCoreAvailable } from "@/hooks/pet/use-active-live2d-model"
+import type { PetAnchor, PetMotionPreference, PetSettings, PetSkinId } from "@/types/pet"
 
 const ANCHORS: PetAnchor[] = ["bottom-right", "bottom-left", "top-right", "top-left"]
 const MOTIONS: PetMotionPreference[] = ["auto", "full", "reduced"]
@@ -27,7 +31,6 @@ export interface PetControlsProps {
 export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
   const t = useTranslations("settings.pet")
   const skinId = pet.skinId ?? "svg"
-  // Only inject/probe the core when the user is actually configuring Live2D.
   const coreReady = useCubismCoreAvailable(skinId === "live2d")
   const effectiveSkin =
     skinId === "live2d"
@@ -39,97 +42,108 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
         : skinId
 
   return (
-    <>
-      <div className="flex items-center justify-between gap-4">
-        <Label htmlFor="pet-anchor">{t("anchor.label")}</Label>
-        <NativeSelect
+    <FieldGroup>
+      <Field orientation="responsive">
+        <FieldTitle id="pet-anchor-label">{t("anchor.label")}</FieldTitle>
+        <ToggleGroup
           id="pet-anchor"
-          size="sm"
+          type="single"
           value={pet.anchor}
-          onChange={(e) => patch({ anchor: e.target.value as PetAnchor })}
-        >
-          {ANCHORS.map((a) => (
-            <NativeSelectOption key={a} value={a}>
-              {t(`anchor.options.${a}`)}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </div>
-
-      <div className="flex items-center justify-between gap-4">
-        <Label htmlFor="pet-motion">{t("motion.label")}</Label>
-        <NativeSelect
-          id="pet-motion"
+          variant="outline"
           size="sm"
-          value={pet.motion}
-          onChange={(e) => patch({ motion: e.target.value as PetMotionPreference })}
+          className="flex-wrap justify-start"
+          aria-labelledby="pet-anchor-label"
+          onValueChange={(anchor) => anchor && patch({ anchor: anchor as PetAnchor })}
         >
-          {MOTIONS.map((m) => (
-            <NativeSelectOption key={m} value={m}>
-              {t(`motion.options.${m}`)}
-            </NativeSelectOption>
+          {ANCHORS.map((anchor) => (
+            <ToggleGroupItem key={anchor} value={anchor}>
+              {t(`anchor.options.${anchor}`)}
+            </ToggleGroupItem>
           ))}
-        </NativeSelect>
-      </div>
+        </ToggleGroup>
+      </Field>
 
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <Label htmlFor="pet-gaze-following">{t("gaze.label")}</Label>
-          <p className="text-xs text-muted-foreground">{t("gaze.description")}</p>
-        </div>
+      <Field orientation="responsive">
+        <FieldTitle id="pet-motion-label">{t("motion.label")}</FieldTitle>
+        <ToggleGroup
+          id="pet-motion"
+          type="single"
+          value={pet.motion}
+          variant="outline"
+          size="sm"
+          className="flex-wrap justify-start"
+          aria-labelledby="pet-motion-label"
+          onValueChange={(motion) => motion && patch({ motion: motion as PetMotionPreference })}
+        >
+          {MOTIONS.map((motion) => (
+            <ToggleGroupItem key={motion} value={motion}>
+              {t(`motion.options.${motion}`)}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </Field>
+
+      <Field orientation="responsive">
+        <FieldContent>
+          <FieldLabel htmlFor="pet-gaze-following">{t("gaze.label")}</FieldLabel>
+          <FieldDescription>{t("gaze.description")}</FieldDescription>
+        </FieldContent>
         <Switch
           id="pet-gaze-following"
           checked={pet.gazeFollowing ?? true}
           onCheckedChange={(gazeFollowing) => patch({ gazeFollowing })}
         />
-      </div>
+      </Field>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-4">
-          <Label htmlFor="pet-skin">{t("skin.label")}</Label>
-          <NativeSelect
-            id="pet-skin"
-            size="sm"
-            value={skinId}
-            onChange={(e) => patch({ skinId: e.target.value as PetSkinId })}
-          >
-            {SKINS.map((s) => (
-              <NativeSelectOption key={s} value={s}>
-                {t(`skin.options.${s}`)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </div>
-        {skinId === "live2d" && coreReady === false && (
-          <p className="text-sm text-destructive">{t("live2d.coreMissing")}</p>
-        )}
-        {skinId === "live2d" && coreReady === true && !pet.activeLive2dModelId && (
-          <p className="text-sm text-muted-foreground">{t("live2d.noModelHint")}</p>
-        )}
-        <p
-          className="flex flex-wrap gap-x-3 text-xs text-muted-foreground"
-          data-testid="pet-effective-skin"
+      <Field>
+        <FieldTitle id="pet-skin-label">{t("skin.label")}</FieldTitle>
+        <ToggleGroup
+          id="pet-skin"
+          type="single"
+          value={skinId}
+          variant="outline"
+          className="flex-wrap justify-start"
+          aria-labelledby="pet-skin-label"
+          onValueChange={(nextSkinId) => nextSkinId && patch({ skinId: nextSkinId as PetSkinId })}
         >
+          {SKINS.map((skin) => (
+            <ToggleGroupItem key={skin} value={skin}>
+              {t(`skin.options.${skin}`)}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        {skinId === "live2d" && coreReady === false ? (
+          <Alert variant="destructive">
+            <AlertDescription>{t("live2d.coreMissing")}</AlertDescription>
+          </Alert>
+        ) : null}
+        {skinId === "live2d" && coreReady === true && !pet.activeLive2dModelId ? (
+          <Alert>
+            <AlertDescription>{t("live2d.noModelHint")}</AlertDescription>
+          </Alert>
+        ) : null}
+        <FieldDescription className="flex flex-wrap gap-x-3" data-testid="pet-effective-skin">
           <span>{t("skinStatus.requested", { skin: t(`skin.options.${skinId}`) })}</span>
           <span>{t("skinStatus.effective", { skin: t(`skin.options.${effectiveSkin}`) })}</span>
-        </p>
-      </div>
+        </FieldDescription>
+      </Field>
 
-      {skinId === "live2d" && (
+      {skinId === "live2d" ? (
         <PetModelManager settings={pet} onPatch={patch} coreReady={coreReady} />
-      )}
-      {skinId === "sprite-v2" && <PetSpritePackManager settings={pet} onPatch={patch} />}
+      ) : null}
+      {skinId === "sprite-v2" ? <PetSpritePackManager settings={pet} onPatch={patch} /> : null}
 
-      <div className="space-y-2">
-        <Label>{t("size.label", { size: pet.size })}</Label>
+      <Field>
+        <FieldLabel htmlFor="pet-size">{t("size.label", { size: pet.size })}</FieldLabel>
         <Slider
+          id="pet-size"
           min={64}
           max={144}
           step={8}
           value={[pet.size]}
-          onValueChange={([v]) => patch({ size: v })}
+          onValueChange={([size]) => patch({ size })}
         />
-      </div>
-    </>
+      </Field>
+    </FieldGroup>
   )
 }

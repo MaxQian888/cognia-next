@@ -254,8 +254,13 @@
   },
   "reset": {
     "action": "重置",
+    "cancel": "取消",
+    "confirm": "重置宠物档案",
+    "confirmDescription": "这会永久删除宠物档案、成长进度、背包、日记和对话历史，但保留宠物配置。",
+    "confirmTitle": "重置这个宠物档案？",
     "description": "删除所有宠物数据并重新开始。",
-    "label": "重置宠物"
+    "label": "重置宠物",
+    "profileScope": "此操作只重置宠物进度与历史，不会重置本页配置。"
   },
   "size": {
     "label": "大小（{size}px）"

@@ -52,9 +52,7 @@ describe("PetInteractionControls", () => {
     render(<PetInteractionControls pet={full} patch={patch} />)
     fireEvent.click(document.getElementById("pet-llm-speak") as HTMLButtonElement)
     expect(patch).toHaveBeenCalledWith({ llmSpeak: { enabled: false } })
-    fireEvent.change(document.getElementById("pet-proactive-tier") as HTMLSelectElement, {
-      target: { value: "quiet" },
-    })
+    fireEvent.click(screen.getByRole("radio", { name: /quiet/i }))
     expect(patch).toHaveBeenCalledWith({ proactive: expect.objectContaining({ tier: "quiet" }) })
     fireEvent.click(document.getElementById("pet-proactive-events") as HTMLButtonElement)
     expect(patch).toHaveBeenCalledWith({

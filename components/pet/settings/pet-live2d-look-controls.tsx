@@ -12,14 +12,13 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { SlidersHorizontalIcon } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { usePet } from "@/hooks/pet/use-pet"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
+import { Item, ItemActions, ItemContent, ItemTitle } from "@/components/ui/item"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
-import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { PetModelConfigDialog } from "@/components/settings/pet/pet-model-config-dialog"
 import type { PetSettings } from "@/types/pet"
-import { resolveEffectiveSkin, selectionFromEffectiveSkin } from "../skins/resolve-effective-skin"
-import { PetRenderer } from "../pet-renderer"
 
 export interface PetLive2dLookControlsProps {
   pet: PetSettings
@@ -27,67 +26,43 @@ export interface PetLive2dLookControlsProps {
 
 export function PetLive2dLookControls({ pet }: PetLive2dLookControlsProps) {
   const t = useTranslations("pet.customize.live2dLook")
-  const { profile, view } = usePet()
   const { modelId, row, coreReady } = useActiveLive2dModel(pet)
-  const { row: activeSpritePack } = useActiveSpritePack(pet)
   const [configOpen, setConfigOpen] = useState(false)
-
-  if (!profile || !view) return null
-
-  const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
-    coreReady,
-    hasActiveModel: Boolean(modelId),
-    modelReady: row?.compatibility?.status !== "invalid",
-    hasActiveSpritePack: Boolean(activeSpritePack),
-  })
-  const selection = selectionFromEffectiveSkin(effectiveSkin, {
-    modelId,
-    packId: activeSpritePack?.id,
-  })
   // A model is picked but the Cubism runtime is definitively unavailable — the
   // preview is the SVG fallback, so say why it reads as intentional. (While the
   // probe is still resolving, `coreReady` is undefined; stay quiet then.)
   const coreMissing = Boolean(modelId) && coreReady === false
 
   return (
-    <div className="flex flex-col gap-4 sm:flex-row" data-testid="pet-live2d-look-controls">
-      <div className="flex items-center justify-center rounded-xl border bg-muted/30 p-4 sm:w-44">
-        <PetRenderer
-          bones={view.effectiveBones}
-          stage={profile.stage}
-          state="idle"
-          size={120}
-          skinId={effectiveSkin}
-          selection={selection}
-          renderPriority={configOpen ? "thumbnail" : "console"}
-          lowPower={pet.lowPower}
-        />
-      </div>
-
-      <div className="min-w-0 flex-1 space-y-3">
-        {row ? (
-          <>
-            <div>
-              <p className="text-xs text-muted-foreground">{t("activeModel")}</p>
+    <div className="min-w-0 space-y-3" data-testid="pet-live2d-look-controls">
+      {row ? (
+        <>
+          <Item className="px-0">
+            <ItemContent className="min-w-0">
+              <ItemTitle className="text-xs text-muted-foreground">{t("activeModel")}</ItemTitle>
               <p className="truncate text-sm font-medium" data-testid="pet-live2d-active-name">
                 {row.name}
               </p>
-            </div>
-            {coreMissing && (
-              <p className="text-sm text-destructive" role="status">
-                {t("unavailable.coreMissing")}
-              </p>
-            )}
-            <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)}>
-              <SlidersHorizontalIcon className="size-4" /> {t("configure")}
-            </Button>
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">{t("noModel")}</p>
-        )}
+            </ItemContent>
+            <ItemActions>
+              <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)}>
+                <SlidersHorizontalIcon className="size-4" /> {t("configure")}
+              </Button>
+            </ItemActions>
+          </Item>
+          {coreMissing && (
+            <Alert variant="destructive">
+              <AlertDescription role="status">{t("unavailable.coreMissing")}</AlertDescription>
+            </Alert>
+          )}
+        </>
+      ) : (
+        <Empty className="py-6">
+          <EmptyDescription>{t("noModel")}</EmptyDescription>
+        </Empty>
+      )}
 
-        <p className="text-xs text-muted-foreground">{t("mascotNote")}</p>
-      </div>
+      <p className="text-xs text-muted-foreground">{t("mascotNote")}</p>
 
       {row && configOpen && (
         <PetModelConfigDialog

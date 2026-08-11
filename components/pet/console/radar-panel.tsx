@@ -12,17 +12,22 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { Loader2Icon, SparklesIcon } from "lucide-react"
 import { toast } from "sonner"
+import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldTitle,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { getLatestRadarReport } from "@/lib/db/radar-reports"
 import { runRadarReport, NoRadarModelError } from "@/lib/radar/radar-runner"
 import { syncRadarCronToScheduler } from "@/lib/radar/radar-cron-bridge"
@@ -115,118 +120,128 @@ export function RadarPanel() {
         </Button>
       </div>
 
-      {report ? (
-        <RadarReportView report={report} t={t} />
-      ) : (
-        <p className="rounded border bg-card px-3 py-6 text-center text-sm text-muted-foreground">
-          {t("panel.empty")}
-        </p>
-      )}
+      <SettingsStack>
+        <SettingsBlock title={t("panel.title")}>
+          {report ? (
+            <RadarReportView report={report} t={t} />
+          ) : (
+            <Empty className="py-8">
+              <EmptyDescription>{t("panel.empty")}</EmptyDescription>
+            </Empty>
+          )}
+        </SettingsBlock>
 
-      {/* Config + schedule */}
-      <div className="space-y-3 rounded border bg-card px-3 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <Label className="text-xs font-medium">{t("settings.enabled")}</Label>
-            <p className="text-[11px] text-muted-foreground">{t("settings.enabledDesc")}</p>
-          </div>
-          <Switch
-            checked={settings.enabled}
-            onCheckedChange={(enabled) => setSettings({ ...settings, enabled })}
-            aria-label={t("settings.enabled")}
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">{t("settings.windowDays")}</Label>
-            <Input
-              type="number"
-              min={1}
-              value={settings.windowDays}
-              onChange={(e) =>
-                setSettings({ ...settings, windowDays: Number(e.target.value) || 1 })
-              }
-              className="h-8 text-xs"
-              aria-label={t("settings.windowDays")}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">
-              {t("settings.intervalDays")}
-            </Label>
-            <Input
-              type="number"
-              min={1}
-              value={settings.intervalDays}
-              onChange={(e) =>
-                setSettings({ ...settings, intervalDays: Number(e.target.value) || 1 })
-              }
-              className="h-8 text-xs"
-              aria-label={t("settings.intervalDays")}
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-2 @md/pet-pane:grid-cols-2">
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">
-              {t("settings.scheduleModeLabel")}
-            </Label>
-            <Select
-              value={scheduleMode}
-              onValueChange={(v) =>
-                setSettings({
-                  ...settings,
-                  schedule: { ...settings.schedule, mode: v as RadarScheduleMode },
-                })
-              }
+        <SettingsBlock
+          title={t("settings.enabled")}
+          description={t("settings.enabledDesc")}
+          action={
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void onSaveSettings()}
+              disabled={saving}
+              aria-label={t("settings.scheduleSaveAria")}
+              data-testid="radar-settings-save"
             >
-              <SelectTrigger className="h-8 text-xs" aria-label={t("settings.scheduleModeLabel")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="off">{t("settings.scheduleMode.off")}</SelectItem>
-                <SelectItem value="daily">{t("settings.scheduleMode.daily")}</SelectItem>
-                <SelectItem value="weekly">{t("settings.scheduleMode.weekly")}</SelectItem>
-                <SelectItem value="custom">{t("settings.scheduleMode.custom")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {scheduleMode === "custom" && (
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">
-                {t("settings.scheduleCustomCronLabel")}
-              </Label>
+              {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+              {t("settings.save")}
+            </Button>
+          }
+        >
+          <FieldGroup>
+            <Field orientation="responsive">
+              <FieldContent>
+                <FieldLabel htmlFor="radar-enabled">{t("settings.enabled")}</FieldLabel>
+                <FieldDescription>{t("settings.enabledDesc")}</FieldDescription>
+              </FieldContent>
+              <Switch
+                id="radar-enabled"
+                checked={settings.enabled}
+                onCheckedChange={(enabled) => setSettings({ ...settings, enabled })}
+              />
+            </Field>
+
+            <Field orientation="responsive">
+              <FieldLabel htmlFor="radar-window-days">{t("settings.windowDays")}</FieldLabel>
               <Input
-                value={settings.schedule?.customCron ?? ""}
+                id="radar-window-days"
+                type="number"
+                min={1}
+                value={settings.windowDays}
                 onChange={(e) =>
+                  setSettings({ ...settings, windowDays: Number(e.target.value) || 1 })
+                }
+                className="w-full @md/field-group:w-52"
+              />
+            </Field>
+
+            <Field orientation="responsive">
+              <FieldLabel htmlFor="radar-interval-days">{t("settings.intervalDays")}</FieldLabel>
+              <Input
+                id="radar-interval-days"
+                type="number"
+                min={1}
+                value={settings.intervalDays}
+                onChange={(e) =>
+                  setSettings({ ...settings, intervalDays: Number(e.target.value) || 1 })
+                }
+                className="w-full @md/field-group:w-52"
+              />
+            </Field>
+
+            <Field>
+              <FieldTitle id="radar-schedule-mode-label">
+                {t("settings.scheduleModeLabel")}
+              </FieldTitle>
+              <ToggleGroup
+                type="single"
+                value={scheduleMode}
+                variant="outline"
+                size="sm"
+                className="flex-wrap justify-start"
+                aria-labelledby="radar-schedule-mode-label"
+                onValueChange={(mode) =>
+                  mode &&
                   setSettings({
                     ...settings,
-                    schedule: { mode: "custom", ...settings.schedule, customCron: e.target.value },
+                    schedule: { ...settings.schedule, mode: mode as RadarScheduleMode },
                   })
                 }
-                placeholder="0 9 * * *"
-                className="h-8 font-mono text-xs"
-                aria-label={t("settings.scheduleCustomCronLabel")}
-              />
-            </div>
-          )}
-        </div>
+              >
+                {(["off", "daily", "weekly", "custom"] as RadarScheduleMode[]).map((mode) => (
+                  <ToggleGroupItem key={mode} value={mode}>
+                    {t(`settings.scheduleMode.${mode}`)}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </Field>
 
-        <div className="flex justify-end">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => void onSaveSettings()}
-            disabled={saving}
-            aria-label={t("settings.scheduleSaveAria")}
-            data-testid="radar-settings-save"
-          >
-            {saving ? <Loader2Icon className="h-3.5 w-3.5 animate-spin" /> : t("settings.save")}
-          </Button>
-        </div>
-      </div>
+            {scheduleMode === "custom" ? (
+              <Field>
+                <FieldLabel htmlFor="radar-custom-cron">
+                  {t("settings.scheduleCustomCronLabel")}
+                </FieldLabel>
+                <Input
+                  id="radar-custom-cron"
+                  value={settings.schedule?.customCron ?? ""}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      schedule: {
+                        mode: "custom",
+                        ...settings.schedule,
+                        customCron: e.target.value,
+                      },
+                    })
+                  }
+                  placeholder="0 9 * * *"
+                  className="font-mono"
+                />
+              </Field>
+            ) : null}
+          </FieldGroup>
+        </SettingsBlock>
+      </SettingsStack>
     </div>
   )
 }
@@ -241,9 +256,9 @@ function RadarReportView({
   const maxHeat = Math.max(1, ...report.heatmap.map((h) => h.count))
   return (
     <div className="space-y-3 text-sm">
-      <p className="rounded border-l-2 border-primary bg-card px-3 py-2 font-medium italic">
-        {report.verdict}
-      </p>
+      <Alert>
+        <AlertDescription className="font-medium italic">{report.verdict}</AlertDescription>
+      </Alert>
 
       <Section title={t("section.atAGlance")}>
         <ul className="list-disc space-y-1 pl-4">
@@ -289,9 +304,9 @@ function RadarReportView({
         <Section title={t("section.topics")}>
           <div className="flex flex-wrap gap-1.5">
             {report.topicCloud.map((tp, i) => (
-              <span key={i} className="rounded bg-secondary px-2 py-0.5 text-xs">
+              <Badge key={i} variant="secondary">
                 {tp.topic}
-              </span>
+              </Badge>
             ))}
           </div>
         </Section>

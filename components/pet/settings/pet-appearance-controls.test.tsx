@@ -22,17 +22,11 @@ describe("PetAppearanceControls", () => {
   it("patches anchor, motion, skin, and size", () => {
     const patch = jest.fn()
     render(<PetAppearanceControls pet={DEFAULT_PET_SETTINGS} patch={patch} />)
-    fireEvent.change(document.getElementById("pet-anchor") as HTMLSelectElement, {
-      target: { value: "top-left" },
-    })
+    fireEvent.click(screen.getByRole("radio", { name: /top left/i }))
     expect(patch).toHaveBeenCalledWith({ anchor: "top-left" })
-    fireEvent.change(document.getElementById("pet-motion") as HTMLSelectElement, {
-      target: { value: "reduced" },
-    })
+    fireEvent.click(screen.getByRole("radio", { name: /reduced/i }))
     expect(patch).toHaveBeenCalledWith({ motion: "reduced" })
-    fireEvent.change(document.getElementById("pet-skin") as HTMLSelectElement, {
-      target: { value: "live2d" },
-    })
+    fireEvent.click(screen.getByRole("radio", { name: /live2d model/i }))
     expect(patch).toHaveBeenCalledWith({ skinId: "live2d" })
     fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowRight" })
     expect(patch).toHaveBeenCalledWith({ size: expect.any(Number) })
@@ -102,7 +96,7 @@ describe("PetAppearanceControls", () => {
   it("offers and mounts the v2 sprite pack manager", () => {
     const pet = { ...DEFAULT_PET_SETTINGS, skinId: "sprite-v2" }
     render(<PetAppearanceControls pet={pet} patch={jest.fn()} />)
-    expect(screen.getByRole("option", { name: /v2|sprite/i })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: /v2|sprite/i })).toBeInTheDocument()
     expect(screen.getByTestId("pet-sprite-pack-manager")).toBeInTheDocument()
   })
 })

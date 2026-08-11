@@ -27,6 +27,16 @@ import {
   WorkflowIcon,
   type LucideIcon,
 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
 import { listPetActivity } from "@/lib/db/pet"
 import { localDayKey } from "@/lib/pet/economy/streak"
 import type { PetActivityRow } from "@/types/pet"
@@ -85,16 +95,16 @@ export function JournalTab() {
 
   if (!rows) {
     return (
-      <p data-testid="pet-journal-loading" className="text-sm text-muted-foreground">
-        {t("journal.loading")}
-      </p>
+      <Empty data-testid="pet-journal-loading" className="py-8">
+        <EmptyDescription>{t("journal.loading")}</EmptyDescription>
+      </Empty>
     )
   }
   if (rows.length === 0) {
     return (
-      <p data-testid="pet-journal-empty" className="text-sm text-muted-foreground">
-        {t("journal.empty")}
-      </p>
+      <Empty data-testid="pet-journal-empty" className="py-8">
+        <EmptyDescription>{t("journal.empty")}</EmptyDescription>
+      </Empty>
     )
   }
 
@@ -109,34 +119,43 @@ export function JournalTab() {
             <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {dayFormat.format(group.ts)}
             </h3>
-            <span className="text-xs tabular-nums text-muted-foreground">
+            <Badge variant="secondary" className="tabular-nums">
               {t("journal.dayTotals", { count: group.rows.length, xp: group.totalXp })}
-            </span>
+            </Badge>
           </div>
-          <div className="flex flex-col rounded-lg border">
+          <ItemGroup>
             {group.rows.map((row) => {
               const Icon = KIND_ICONS[row.kind] ?? SparklesIcon
               const known = row.kind in KIND_ICONS
               return (
-                <div
+                <Item
                   key={row.id ?? `${row.kind}-${row.ts}`}
                   data-journal-entry={row.kind}
-                  className="flex items-center gap-3 border-b px-3 py-2 last:border-b-0"
+                  size="sm"
+                  className="min-w-0 px-0"
                 >
-                  <Icon className="size-4 shrink-0 text-primary" />
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    {known ? t(`journal.kinds.${row.kind}`) : row.kind}
-                  </span>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    {row.xp > 0 ? t("journal.xp", { xp: row.xp }) : null}
-                  </span>
-                  <time className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    {timeFormat.format(row.ts)}
-                  </time>
-                </div>
+                  <ItemMedia>
+                    <Icon className="size-4 text-primary" />
+                  </ItemMedia>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="max-w-full truncate">
+                      {known ? t(`journal.kinds.${row.kind}`) : row.kind}
+                    </ItemTitle>
+                  </ItemContent>
+                  <ItemActions className="shrink-0 flex-wrap justify-end">
+                    {row.xp > 0 ? (
+                      <Badge variant="outline" className="tabular-nums">
+                        {t("journal.xp", { xp: row.xp })}
+                      </Badge>
+                    ) : null}
+                    <time className="text-xs tabular-nums text-muted-foreground">
+                      {timeFormat.format(row.ts)}
+                    </time>
+                  </ItemActions>
+                </Item>
               )
             })}
-          </div>
+          </ItemGroup>
         </section>
       ))}
     </div>

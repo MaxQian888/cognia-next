@@ -134,6 +134,21 @@ describe("PetConsole", () => {
     expect(screen.getByTestId("tab-bind")).toBeInTheDocument()
   })
 
+  it("renders grouped desktop navigation and a mobile Sheet trigger", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    render(<PetConsole />)
+
+    expect(screen.getByTestId("pet-console-nav")).toBeInTheDocument()
+    expect(screen.getByTestId("pet-console-mobile-nav-trigger")).toHaveTextContent(
+      /nurture|console\.tabs\.nurture/i
+    )
+    expect(screen.getAllByText(/care|console\.groups\.nurture/i).length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(/personalization|console\.groups\.personalize/i).length
+    ).toBeGreaterThan(0)
+    expect(screen.getAllByText(/records|console\.groups\.records/i).length).toBeGreaterThan(0)
+  })
+
   it("opens at the deep-linked initial tab and follows later deep links", () => {
     mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
     const { rerender } = render(<PetConsole initialTab="dex" />)

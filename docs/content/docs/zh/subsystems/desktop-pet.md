@@ -114,6 +114,24 @@ pointer；Tauri 的最小权限 cursor command 采样不超过 10 Hz，且绝不
 `live2dModelId` 会被惰性解释为类型化 Live2D 选择；删除资源时会在事务中清除全局和角色引用，
 随后由 SVG 接管。
 
+## 控制台与自定义工作区
+
+`/pet` 使用响应式主从布局，不再依赖横向滚动的 Tab。桌面端由固定分组导航轨道提供养成、聊天、
+商店、自定义、角色、洞察、日记、图鉴、成就和已注册插件入口，详情面板独立滚动；窄容器中，相同
+分组进入 Sheet。`PetConsoleTab`、`?tab=` 深链、插件显隐规则以及跨窗口导航协议的值和 wire shape
+保持不变。
+
+`PetCustomizationWorkspace` 同时由 `/pet → Customize` 与 `Settings → Pet` 直接挂载。它是唯一读取
+`DEFAULT_PET_SETTINGS` 并通过 `useSettingsStore.save()` 合并持久化配置的所有者，因此两个入口完整
+提供 SVG 遗传外观覆盖、Live2D 导入/兼容性/transform/motion/expression/parameter mapping、Sprite v2
+创建/导入/激活、停靠与运动、说话与记忆、声音与安静时段、照料提醒、Twin awareness，以及受能力
+门禁约束的桌宠窗口控制。响应式预览会渲染实际生效的 SVG、Live2D 或 Sprite 选择，并明确显示受
+治理的 fallback 诊断与重试。重置宠物档案需要破坏性确认，并与 Settings Shell 的配置重置保持区分。
+
+页面与配置 Dialog 统一使用平铺 Section、Field、Item、Empty、Alert 和 AI Elements 对话组件；紧凑
+widget、overlay 与 popup 仍保留小型边界外框。本次改动不改变 `PetSettings`、`PetProfile`、资产记录、
+Dexie 版本、成长/经济/互动规则或 Tauri 窗口协议，因此不需要 schema migration。
+
 ## 相关文档
 
 <Cards>

@@ -12,9 +12,22 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Trash2Icon, UploadIcon, FolderIcon, DownloadIcon } from "lucide-react"
 import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
+import { FieldDescription, FieldGroup } from "@/components/ui/field"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { SettingsIcon as AnimatedSettingsIcon } from "@/components/ui/settings"
-import { Label } from "@/components/ui/label"
 import {
   listPetModels,
   deletePetModel,
@@ -151,13 +164,15 @@ export function PetModelManager({ settings, onPatch, coreReady }: PetModelManage
   }
 
   return (
-    <div className="space-y-4 border-t pt-4">
-      <div className="flex items-center justify-between gap-4">
-        <Label>{t("title")}</Label>
-        <span className="text-xs text-muted-foreground">
+    <FieldGroup className="border-t pt-4">
+      <Item size="sm" className="px-0">
+        <ItemContent>
+          <ItemTitle>{t("title")}</ItemTitle>
+        </ItemContent>
+        <ItemDescription className="ml-auto text-right">
           {t("storageUsage", { count: usage.models, size: formatBytes(usage.totalBytes) })}
-        </span>
-      </div>
+        </ItemDescription>
+      </Item>
 
       <PetSkinStatus
         requestedSkinId="live2d"
@@ -167,43 +182,37 @@ export function PetModelManager({ settings, onPatch, coreReady }: PetModelManage
       />
 
       {models.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("noModels")}</p>
+        <Empty className="py-6">
+          <EmptyDescription>{t("noModels")}</EmptyDescription>
+        </Empty>
       ) : (
-        <ul className="space-y-2">
+        <RadioGroup
+          value={activeId}
+          aria-label={t("title")}
+          onValueChange={(id) => onPatch({ activeLive2dModelId: id })}
+        >
           {models.map((m) => (
-            <li
-              key={m.id}
-              className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="radio"
-                    name="pet-live2d-active"
-                    aria-label={t("setActive")}
-                    checked={activeId === m.id}
-                    disabled={m.compatibility?.status === "invalid"}
-                    onChange={() => {
-                      if (m.compatibility?.status !== "invalid") {
-                        onPatch({ activeLive2dModelId: m.id })
-                      }
-                    }}
-                  />
-                  <span className="text-sm">{m.name}</span>
-                  {activeId === m.id && (
-                    <span className="rounded bg-secondary px-1.5 py-0.5 text-xs">
-                      {t("active")}
-                    </span>
-                  )}
-                  <span
+            <Item key={m.id} className="min-w-0 px-0">
+              <ItemMedia>
+                <RadioGroupItem
+                  value={m.id}
+                  aria-label={t("setActive")}
+                  disabled={m.compatibility?.status === "invalid"}
+                />
+              </ItemMedia>
+              <ItemContent className="min-w-0">
+                <ItemTitle className="max-w-full flex-wrap">
+                  <span className="truncate">{m.name}</span>
+                  {activeId === m.id && <Badge variant="secondary">{t("active")}</Badge>}
+                  <Badge
+                    variant="outline"
                     data-compatibility-status={m.compatibility?.status ?? "legacy"}
-                    className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
                   >
                     {t(`compatibility.status.${m.compatibility?.status ?? "legacy"}`)}
-                  </span>
-                </div>
+                  </Badge>
+                </ItemTitle>
                 {m.compatibility && m.compatibility.diagnostics.length > 0 && (
-                  <ul className="mt-1 space-y-0.5 pl-6 text-xs text-amber-600 dark:text-amber-500">
+                  <ul className="space-y-0.5 text-xs text-muted-foreground">
                     {m.compatibility.diagnostics.map((diagnostic, index) => (
                       <li key={`${diagnostic.code}:${diagnostic.path ?? index}`}>
                         {diagnostic.path
@@ -216,8 +225,8 @@ export function PetModelManager({ settings, onPatch, coreReady }: PetModelManage
                     ))}
                   </ul>
                 )}
-              </div>
-              <div className="flex items-center gap-1">
+              </ItemContent>
+              <ItemActions>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -235,10 +244,10 @@ export function PetModelManager({ settings, onPatch, coreReady }: PetModelManage
                 >
                   <Trash2Icon className="size-4" />
                 </Button>
-              </div>
-            </li>
+              </ItemActions>
+            </Item>
           ))}
-        </ul>
+        </RadioGroup>
       )}
 
       {configModel && (
@@ -265,7 +274,7 @@ export function PetModelManager({ settings, onPatch, coreReady }: PetModelManage
         />
       )}
 
-      <p className="text-xs text-muted-foreground">{t("importHint")}</p>
+      <FieldDescription>{t("importHint")}</FieldDescription>
 
       <div className="flex flex-wrap gap-2">
         <Input
@@ -304,28 +313,32 @@ export function PetModelManager({ settings, onPatch, coreReady }: PetModelManage
         </Button>
       </div>
 
-      <div className="space-y-2">
+      <ItemGroup>
         {SAMPLE_MODEL_CATALOG.map((s) => (
-          <div key={s.id} className="flex items-center justify-between gap-2">
-            <span className="text-sm">{s.name}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy || downloadingId !== null}
-              onClick={() => void handleDownload(s.id)}
-            >
-              <DownloadIcon className="size-4" />
-              {downloadingId === s.id ? t("downloading") : t("download")}
-            </Button>
-          </div>
+          <Item key={s.id} size="sm" className="px-0">
+            <ItemContent>
+              <ItemTitle>{s.name}</ItemTitle>
+            </ItemContent>
+            <ItemActions>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy || downloadingId !== null}
+                onClick={() => void handleDownload(s.id)}
+              >
+                <DownloadIcon className="size-4" />
+                {downloadingId === s.id ? t("downloading") : t("download")}
+              </Button>
+            </ItemActions>
+          </Item>
         ))}
-      </div>
+      </ItemGroup>
 
       {errorCode && (
-        <p role="alert" className="text-sm text-destructive">
-          {t(`errors.${errorCode}`)}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{t(`errors.${errorCode}`)}</AlertDescription>
+        </Alert>
       )}
-    </div>
+    </FieldGroup>
   )
 }

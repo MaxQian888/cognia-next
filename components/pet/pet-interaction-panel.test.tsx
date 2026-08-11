@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 
 // Stub the renderer so the stat-card preview's resolved skin is observable
 // without mounting the live2d skin (stores + canvas) in this unit test.
@@ -100,33 +100,33 @@ describe("PetInteractionPanel", () => {
     expect(h.onTalk).not.toHaveBeenCalled()
   })
 
-  it("submits typed talk text and clears the input", () => {
+  it("submits typed talk text and clears the input", async () => {
     const h = setup()
     fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
     const input = screen.getByPlaceholderText("Say something to your pet…")
     fireEvent.change(input, { target: { value: "  hi Boba  " } })
     fireEvent.keyDown(input, { key: "Enter" })
-    expect(h.onTalk).toHaveBeenCalledWith("hi Boba")
-    expect(input).toHaveValue("")
+    await waitFor(() => expect(h.onTalk).toHaveBeenCalledWith("hi Boba"))
+    await waitFor(() => expect(input).toHaveValue(""))
   })
 
-  it("recalls a previously said phrase with ArrowUp", () => {
+  it("recalls a previously said phrase with ArrowUp", async () => {
     const h = setup()
     fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
     const input = screen.getByPlaceholderText("Say something to your pet…")
     fireEvent.change(input, { target: { value: "good boy" } })
     fireEvent.keyDown(input, { key: "Enter" })
-    expect(h.onTalk).toHaveBeenCalledWith("good boy")
-    expect(input).toHaveValue("")
+    await waitFor(() => expect(h.onTalk).toHaveBeenCalledWith("good boy"))
+    await waitFor(() => expect(input).toHaveValue(""))
     fireEvent.keyDown(input, { key: "ArrowUp" })
     expect(input).toHaveValue("good boy")
   })
 
-  it("submits bare talk (no text) as undefined via the send button", () => {
+  it("submits bare talk (no text) as undefined via the send button", async () => {
     const h = setup()
     fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
     fireEvent.click(screen.getByLabelText("Send"))
-    expect(h.onTalk).toHaveBeenCalledWith(undefined)
+    await waitFor(() => expect(h.onTalk).toHaveBeenCalledWith(undefined))
   })
 
   it("mounts the pet.panel.actions slot with the safe context bag", () => {

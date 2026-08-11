@@ -90,7 +90,7 @@ import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
 import { PerfHud } from "@/lib/perf"
 import { PetMount } from "@/components/pet/pet-mount"
 import { CaptureMount } from "@/components/capture/capture-mount"
-import { PetWindowShell } from "@/components/pet/pet-window-shell"
+import { LightweightRouteShell } from "@/components/runtime/lightweight-route-shell"
 import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
 import { AskUserDialog } from "@/components/chat/ask-user-dialog"
 import { SkillRecorderRoot } from "@/components/skills/recorder/recorder-root"
@@ -155,13 +155,13 @@ export default async function RootLayout({
           disableTransitionOnChange
           scriptProps={{ suppressHydrationWarning: true }}
         >
-          {/* The transparent desktop-pet windows (/pet-overlay, /pet-popup)
-              render ONLY the minimal petShell tree — booting the full app
-              runtime in those webviews caused severe lag and opaque paints
-              inside what must be paint-through windows. Route-keyed so the
-              prerendered HTML and hydration agree; see pet-window-shell.tsx. */}
-          <PetWindowShell
-            petShell={
+          {/* Lightweight routes render only locale, settings/theme, and tooltip
+              providers. This keeps transparent overlay windows paint-through
+              and lets the public /status document bypass account gating and
+              the authenticated app runtime. Route-keyed so static-export HTML
+              and hydration agree; see lightweight-route-shell.tsx. */}
+          <LightweightRouteShell
+            lightweightShell={
               <LocaleGate>
                 <SettingsHydrator />
                 <SettingsSyncProvider>
@@ -402,7 +402,7 @@ export default async function RootLayout({
                 </SettingsSyncProvider>
               </AccountGate>
             </LocaleGate>
-          </PetWindowShell>
+          </LightweightRouteShell>
         </ThemeProvider>
       </body>
     </html>

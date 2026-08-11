@@ -120,6 +120,28 @@ Character bindings may inherit the global selection or choose SVG, a Live2D mode
 Legacy `live2dModelId` rows are interpreted lazily as typed Live2D selections, and deleting an asset clears
 both global and character references transactionally before SVG takes over.
 
+## Console and customization workspace
+
+`/pet` uses a responsive master-detail shell rather than a horizontal tab carousel. On desktop, a fixed
+grouped rail exposes Nurture, Chat, Shop, Customize, Characters, Insights, Journal, Dex, Achievements, and
+registered plugin tabs while the detail pane scrolls independently. In a narrow container, the same groups
+move into a Sheet; `PetConsoleTab`, `?tab=` deep links, plugin visibility, and the cross-window navigation
+protocol keep their existing values and wire shapes.
+
+`PetCustomizationWorkspace` is mounted by both `/pet → Customize` and `Settings → Pet`. It is the only
+owner that reads `DEFAULT_PET_SETTINGS` and persists merged settings through `useSettingsStore.save()`, so
+both entry points expose the same SVG genetics overrides, Live2D import/compatibility/transform/motion/
+expression/parameter mapping, Sprite v2 creation/import/activation, dock and motion behavior, speech and
+memory, sound and quiet hours, care alerts, Twin awareness, and capability-gated desktop-window controls.
+Its responsive preview renders the effective SVG, Live2D, or Sprite selection and surfaces governed
+fallback diagnostics and retry. Resetting the pet profile is destructively confirmed and remains separate
+from resetting Settings configuration.
+
+The page and configuration dialogs use flat sections, Fields, Items, Empty states, Alerts, and AI Elements
+conversation primitives. Compact widget, overlay, and popup frames retain their small bounded shells. This
+UI ownership change does not alter `PetSettings`, `PetProfile`, asset records, Dexie versions, progression,
+economy, interactions, or Tauri window protocols; no schema migration is involved.
+
 ## Related
 
 <Cards>

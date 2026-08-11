@@ -19,9 +19,10 @@ import { petItemIcon } from "./item-icons"
 
 export interface PetInventoryStripProps {
   className?: string
+  variant?: "outlined" | "flat"
 }
 
-export function PetInventoryStrip({ className }: PetInventoryStripProps) {
+export function PetInventoryStrip({ className, variant = "outlined" }: PetInventoryStripProps) {
   const t = useTranslations("pet")
   const locale = useLocale()
   const inventory = useLiveQuery(() => listPetInventory(), [])
@@ -34,7 +35,12 @@ export function PetInventoryStrip({ className }: PetInventoryStripProps) {
   return (
     <div
       data-testid="pet-inventory-strip"
-      className={cn("flex flex-col gap-1.5 rounded-lg border p-2.5", className)}
+      data-variant={variant}
+      className={cn(
+        "flex flex-col gap-1.5",
+        variant === "outlined" && "rounded-lg border p-2.5",
+        className
+      )}
     >
       <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
         {t("inventory.title")}

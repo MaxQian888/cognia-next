@@ -7,6 +7,7 @@
 import { useTranslations } from "next-intl"
 import { StarIcon, SparklesIcon, SunIcon, TrendingUpIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
 import type {
   PetBones,
   PetEvolutionFlavor,
@@ -54,6 +55,7 @@ export interface PetStatCardProps {
   skinId?: string
   selection?: PetSkinSelection
   className?: string
+  variant?: "outlined" | "flat"
 }
 
 export function PetStatCard({
@@ -66,6 +68,7 @@ export function PetStatCard({
   skinId,
   selection,
   className,
+  variant = "outlined",
 }: PetStatCardProps) {
   const t = useTranslations("pet")
   const effective = effectiveStats(bones.stats, progress)
@@ -75,8 +78,10 @@ export function PetStatCard({
     <div
       data-testid="pet-stat-card"
       data-rarity={bones.rarity}
+      data-variant={variant}
       className={cn(
-        "flex flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground",
+        "flex flex-col gap-4 text-card-foreground",
+        variant === "outlined" && "rounded-xl border bg-card p-4",
         className
       )}
     >
@@ -98,29 +103,21 @@ export function PetStatCard({
               {soul?.name ?? t("statCard.unhatched")}
             </span>
             {bones.shiny && (
-              <span
-                data-testid="pet-shiny-badge"
-                className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-300"
-              >
+              <Badge data-testid="pet-shiny-badge" variant="secondary">
                 <SparklesIcon className="size-3" />
                 {t("statCard.shiny")}
-              </span>
+              </Badge>
             )}
             {flavor && flavor !== "normal" && (
-              <span
+              <Badge
                 data-testid="pet-flavor-badge"
                 data-flavor={flavor}
                 title={t(`statCard.flavorHint.${flavor}`)}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-                  flavor === "radiant"
-                    ? "bg-sky-400/20 text-sky-600 dark:text-sky-300"
-                    : "bg-muted text-muted-foreground"
-                )}
+                variant={flavor === "radiant" ? "secondary" : "outline"}
               >
                 <SunIcon className="size-3" />
                 {t(`statCard.flavor.${flavor}`)}
-              </span>
+              </Badge>
             )}
           </div>
           <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
