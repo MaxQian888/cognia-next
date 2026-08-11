@@ -115,6 +115,16 @@ describe("realSessionStoreFs", () => {
     expect(() => realSessionStoreFs.removeFile(path.join(root, "gone"))).not.toThrow()
   })
 
+  it("removes a session directory recursively and tolerates a missing directory", () => {
+    const dir = path.join(root, "session-1")
+    realSessionStoreFs.writeFileAtomic(path.join(dir, "nested", "events.jsonl"), "event\n")
+
+    realSessionStoreFs.removeDir(dir)
+
+    expect(realSessionStoreFs.exists(dir)).toBe(false)
+    expect(() => realSessionStoreFs.removeDir(dir)).not.toThrow()
+  })
+
   it("writes atomically through a same-directory temp file, creating parents", () => {
     const target = path.join(root, "deep", "nested", "manifest.json")
     realSessionStoreFs.writeFileAtomic(target, "first")

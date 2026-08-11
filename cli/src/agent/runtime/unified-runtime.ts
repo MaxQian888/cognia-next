@@ -74,6 +74,8 @@ export interface UnifiedTurnParams {
 
   /** Reuse an existing session; minted when omitted. */
   sessionId?: string
+  /** Preserve the logical run/turn when replaying a crash-suspended attempt. */
+  recoveryIdentity?: { runId: string; turnId: string; attempt: number }
   /** `--no-session`: run without persisting anything. Resume is then impossible. */
   persist?: boolean
   /** `--session-dir` override for the canonical store. */
@@ -118,6 +120,10 @@ export interface UnifiedTurnParams {
   resolveOptions?: AgentSessionParams["resolveOptions"]
   /** Injected transcript effects for the legacy flat transcript the session writes. */
   transcriptFs?: AgentSessionParams["transcriptFs"]
+  /** Override the in-process plugin-tool relay (RPC uses it for durable elicitations). */
+  subscribePluginTools?: AgentSessionParams["subscribePluginTools"]
+  /** Override MCP discovery for a host-managed session (for example RPC configure). */
+  resolveMcpServers?: AgentSessionParams["resolveMcpServers"]
 
   /**
    * Provider session owned by the CALLER and reused across turns.
@@ -199,8 +205,8 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
   const home = params.home ?? resolveHome(process.env, os.homedir())
   const startedAt = now()
   const sessionId = params.sessionId ?? mintSessionId(startedAt, random())
-  const runId = mintRunId(startedAt, random())
-  const turnId = mintTurnId(runId, 0)
+  const runId = params.recoveryIdentity?.runId ?? mintRunId(startedAt, random())
+  const turnId = params.recoveryIdentity?.turnId ?? mintTurnId(runId, 0)
   const persist = params.persist !== false
   // A one-shot run owns its provider session and closes it with the turn; a
   // multi-turn caller passes its own lease and keeps it open. See
@@ -311,7 +317,7 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
   let usage: AgentRunUsage | undefined
   let nativeSessionId: string | undefined
   let failure: AgentStructuredError | undefined
-  let attempt = 0
+  let attempt = params.recoveryIdentity?.attempt ?? 0
 
   try {
     for (;;) {
@@ -349,7 +355,7 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
       // (the SDK's `CogniaSession`, the RPC server) keeps it open across turns,
       // and closing it here would silently discard the conversation.
       if (!session) {
-        session = lease.session(
+        session = await lease.replace(
           providerSessionKey({
             sessionId,
             backendId: backend.id,
@@ -362,7 +368,7 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
           // A borrowed lease still closes on cancellation — a cancelled turn
           // must not leave a sidecar or external agent running, and the lease
           // rebuilds on the caller's next prompt.
-          if (ownsLease || cancellation.cancelled) lease.close()
+          if (ownsLease || cancellation.cancelled) return lease.close()
         })
       }
 
@@ -548,6 +554,8 @@ function buildSession(
     home,
     ...(params.resolveOptions ? { resolveOptions: params.resolveOptions } : {}),
     ...(params.transcriptFs ? { transcriptFs: params.transcriptFs } : {}),
+    ...(params.subscribePluginTools ? { subscribePluginTools: params.subscribePluginTools } : {}),
+    ...(params.resolveMcpServers ? { resolveMcpServers: params.resolveMcpServers } : {}),
   }
   if (backend.kind === "external") {
     return (params.createExternalSession ?? createExternalAgentSession)(base)

@@ -1,0 +1,18 @@
+---
+title: Session、事件与 HITL
+description: 持久 session、重放、分支、命令、权限、elicitation 与客户端 callback。
+---
+
+# Session、事件与 HITL
+
+Session 是 canonical store 记录，而不是 provider 私有对话句柄。`create`、`open`、`list`、`rename`、`tag`、`export`、`import`、`fork`、`clone`、`tree`、`close` 与 `delete` 都复用 CLI 的单写者 store。导入会校验 canonical 版本和 sequence digest；如果 system turn 无法无损表示，系统会明确拒绝，而不是静默降级。
+
+`events({ afterEventId })` 先重放已持久化的 envelope，再继续接收实时通知。事件采用至少一次投递，客户端按 `eventId` 去重。变更请求携带 `commandId`，成功 receipt 会持久化，因此 host 重启后的重试会返回原结果。每个 session 最多保留 1,000 条 receipt。
+
+权限请求与 `ask_user` elicitation 在对外可见前写入 `rpc-state.json`。如果客户端或 host 在请求未解决时退出，重新打开 session 会显示 `recovery_required`。所有恢复 action 被显式处理前，host 会拒绝新 turn。历史批准永远不会作为新授权重放。
+
+客户端工具与 Hook 使用反向 JSON-RPC 请求。工具注册必须声明 `none`、`idempotent` 或 `non-idempotent` side effect。Invocation ID 与 idempotency key 保持稳定；传输失败后，未解决 callback 会作为 external tool action 保留。Cognia 不宣称外部副作用具备全局 exactly-once，因此不会自动重试恢复出的非幂等操作。
+
+`compact()` 会等待 sidecar 返回真实的 compaction boundary。当 boundary 包含压缩前快照时，结果返回 `undoAvailable: true` 和实际 `boundaryId`；`undoCompact()` 通过现有、受 PII gate 保护的 live-session authority 恢复该快照。Undo 仅能使用一次，且只在当前 host 进程的 live session 中有效。如果运行时没有提供快照，compaction 仍成功并返回 `undoAvailable: false`，host 不会伪造 token。
+
+协议 v2 的 sandbox snapshot 保存的是有效 sandbox resource policy，而不是任意 workspace 文件。恢复时会重新建立网络、可写根目录、CPU 和内存上限，并使 provider option cache 失效。文件 checkpoint 仍由运行时能力控制，不会伪装成 sandbox policy snapshot。

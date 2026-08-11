@@ -40,6 +40,8 @@ export interface SessionStoreFs {
   mkdirp: (dir: string) => void
   readdir: (dir: string) => string[]
   removeFile: (absPath: string) => void
+  /** Remove one resolved session directory and all files below it. */
+  removeDir: (absPath: string) => void
   /**
    * Create a file only if it does not exist (`wx`). Returns false when it
    * already existed. This is the atomicity primitive the lease is built on.
@@ -93,6 +95,7 @@ export const realSessionStoreFs: SessionStoreFs = {
       // best-effort
     }
   },
+  removeDir: (p) => fs.rmSync(p, { recursive: true, force: true }),
   writeFileExclusive: (p, content) => {
     fs.mkdirSync(path.dirname(p), { recursive: true })
     try {

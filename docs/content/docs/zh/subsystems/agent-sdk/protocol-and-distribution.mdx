@@ -1,0 +1,22 @@
+---
+title: 协议、安全与分发
+description: 握手、资源限制、可观测性、包结构与发布验证。
+---
+
+# 协议、安全与分发
+
+协议 v2 是通过 stdin/stdout 上的换行分隔 UTF-8 JSON 承载的双向 JSON-RPC 2.0。客户端发送 `initialize`，host 选择 v2 并返回版本、方法、能力、限制和 instance ID，随后客户端发送 `initialized`。在此状态转换前的调用会失败。stderr 只用于诊断，绝不承载协议 frame。
+
+运行时 schema 使用 Valibot 定义，TypeScript method 类型从同一映射推导。Frame、重放页、打开 session、活动 turn 与 outbound buffer 都有硬限制。无效 frame 和未知方法返回稳定 JSON-RPC error。outbound buffer 超限时会关闭 peer，而不是让内存无界增长。
+
+Audit 行只包含方法、session identity、耗时、结果和 error code；不记录 prompt 或工具 payload。本地 JSONL 文件在 10 MiB 时轮换。`trace/subscribe` 流式发送相同的脱敏投影，`trace/export` 返回 JSON span。高基数 identity 留在 trace/audit 数据中，不作为 metric label。
+
+SDK 为 Node 20.19 及以上版本提供 ESM、CommonJS、declaration 和 source map。平台包包含现有原生 CLI 构建的产物：
+
+- `@cognia/agent-host-darwin-arm64`
+- `@cognia/agent-host-linux-x64`
+- `@cognia/agent-host-win32-x64`
+
+这些包是与 SDK 版本一致的 optional dependency，带 OS/CPU 限制、npm provenance，且没有 lifecycle downloader。`scripts/build/package-agent-host.mjs` 把通过认证的 `cli:build:binary` layout 复制到对应包。packed-consumer 测试在干净项目中安装 SDK tarball，并验证 ESM、CommonJS、declaration 和 protocol export。
+
+`scripts/smoke/agent-sdk-rpc.mjs` 会把构建后的 CLI 作为真实子进程启动，验证协商与健康状态，在持久命令完成后强制终止 host，使用同一个 home 重连并确认 session 与幂等 receipt 恢复，最后验证优雅 shutdown 且没有残留进程。

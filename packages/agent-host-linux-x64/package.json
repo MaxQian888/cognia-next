@@ -1,0 +1,29 @@
+{
+  "name": "@cognia/agent-host-linux-x64",
+  "version": "0.1.0",
+  "description": "Cognia Agent SDK host for Linux x64.",
+  "license": "AGPL-3.0-only",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "bin": {
+    "cognia-agent": "bin/cognia-agent"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "scripts": {
+    "prepack": "node ../../scripts/build/verify-agent-host-package.mjs linux-x64"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

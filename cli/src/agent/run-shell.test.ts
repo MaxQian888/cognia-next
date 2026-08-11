@@ -1,7 +1,14 @@
 /**
  * @jest-environment node
  */
-import { runShell, type ShellChild, type ShellSpawn } from "./run-shell"
+import {
+  runInteractiveShell,
+  runShell,
+  type InteractiveShellChild,
+  type InteractiveShellSpawn,
+  type ShellChild,
+  type ShellSpawn,
+} from "./run-shell"
 
 function fakeChild(opts: {
   out?: string[]
@@ -206,5 +213,128 @@ describe("runShell", () => {
     expect(() => writer!("x\n")).not.toThrow()
     handlers.close?.forEach((cb) => cb(0))
     await promise
+  })
+})
+
+describe("runInteractiveShell", () => {
+  it("attaches the child to inherited terminal I/O", async () => {
+    const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
+    const spawn: InteractiveShellSpawn = jest.fn((_command, opts) => {
+      expect(opts).toEqual({ cwd: "/repo", shell: true, stdio: "inherit" })
+      const child: InteractiveShellChild = {
+        on(event, cb) {
+          ;(handlers[event] ??= []).push(cb as (...args: unknown[]) => void)
+        },
+      }
+      queueMicrotask(() => handlers.close?.forEach((cb) => cb(0, null)))
+      return child
+    })
+
+    await expect(runInteractiveShell("top", { cwd: "/repo", spawn })).resolves.toEqual({
+      stdout: "",
+      stderr: "",
+      code: 0,
+    })
+    expect(spawn).toHaveBeenCalledWith("top", {
+      cwd: "/repo",
+      shell: true,
+      stdio: "inherit",
+    })
+  })
+
+  it("interrupts an externally aborted interactive child", async () => {
+    const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
+    const kill = jest.fn(() => handlers.close?.forEach((cb) => cb(null, "SIGINT")))
+    const child: InteractiveShellChild = {
+      on(event, cb) {
+        ;(handlers[event] ??= []).push(cb as (...args: unknown[]) => void)
+      },
+      kill,
+    }
+    const controller = new AbortController()
+    const promise = runInteractiveShell("top", { spawn: () => child, signal: controller.signal })
+
+    controller.abort()
+
+    await expect(promise).resolves.toMatchObject({ code: 130, aborted: true })
+    expect(kill).toHaveBeenCalledWith("SIGINT")
+  })
+
+  it("honors a signal that was aborted before the interactive spawn", async () => {
+    const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
+    const kill = jest.fn(() => handlers.close?.forEach((cb) => cb(null, "SIGINT")))
+    const child: InteractiveShellChild = {
+      on(event, cb) {
+        ;(handlers[event] ??= []).push(cb as (...args: unknown[]) => void)
+      },
+      kill,
+    }
+
+    await expect(
+      runInteractiveShell("top", { spawn: () => child, signal: AbortSignal.abort() })
+    ).resolves.toMatchObject({ code: 130, aborted: true })
+    expect(kill).toHaveBeenCalledWith("SIGINT")
+  })
+
+  it("reports interactive spawn failures", async () => {
+    const result = await runInteractiveShell("top", {
+      spawn: () => {
+        throw new Error("spawn failed")
+      },
+    })
+    expect(result).toEqual({ stdout: "", stderr: "spawn failed", code: 1 })
+  })
+
+  it("reports an asynchronous interactive child error only once", async () => {
+    const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
+    const child: InteractiveShellChild = {
+      on(event, cb) {
+        ;(handlers[event] ??= []).push(cb as (...args: unknown[]) => void)
+      },
+    }
+    const promise = runInteractiveShell("top", { spawn: () => child })
+
+    handlers.error?.forEach((cb) => cb(new Error("pty failed")))
+    handlers.close?.forEach((cb) => cb(0, null))
+
+    await expect(promise).resolves.toEqual({ stdout: "", stderr: "pty failed", code: 1 })
+  })
+
+  it("maps an unexplained null exit code to failure", async () => {
+    const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
+    const child: InteractiveShellChild = {
+      on(event, cb) {
+        ;(handlers[event] ??= []).push(cb as (...args: unknown[]) => void)
+      },
+    }
+    const promise = runInteractiveShell("top", { spawn: () => child })
+
+    handlers.close?.forEach((cb) => cb(null, null))
+
+    await expect(promise).resolves.toEqual({ stdout: "", stderr: "", code: 1 })
+  })
+
+  it("still settles an aborted run when signaling the child throws", async () => {
+    const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
+    const child: InteractiveShellChild = {
+      on(event, cb) {
+        ;(handlers[event] ??= []).push(cb as (...args: unknown[]) => void)
+      },
+      kill() {
+        throw new Error("already exited")
+      },
+    }
+    const controller = new AbortController()
+    const promise = runInteractiveShell("top", { spawn: () => child, signal: controller.signal })
+
+    controller.abort()
+    handlers.close?.forEach((cb) => cb(null, "SIGINT"))
+
+    await expect(promise).resolves.toEqual({
+      stdout: "",
+      stderr: "",
+      code: 130,
+      aborted: true,
+    })
   })
 })

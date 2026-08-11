@@ -34,7 +34,10 @@ import type {
   CanonicalSession,
   CanonicalTurn,
 } from "@cognia/agent-config-types/canonical-session"
-import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
+import {
+  computeSequenceDigest,
+  validateCanonicalSession,
+} from "@cognia/agent-config-types/canonical-session"
 
 import { importLegacyTranscript } from "./legacy"
 import {
@@ -645,6 +648,61 @@ export function createSessionStore(options: SessionStoreOptions) {
       }
     },
 
+    /** Import a validated canonical artifact without replaying historical grants. */
+    importCanonical(
+      canonical: CanonicalSession,
+      sessionId: string,
+      opts: OpenSessionOptions = {}
+    ): StoreResult<SessionHandle> {
+      const violations = validateCanonicalSession(canonical)
+      if (violations.length > 0) {
+        return fail("usage_error", "invalid canonical session", { violations })
+      }
+      if (canonical.turns.some((turn) => turn.role === "system")) {
+        return fail(
+          "unsupported_capability",
+          "canonical system turns cannot be represented by the v1 event log"
+        )
+      }
+      const created = this.create(sessionId, {
+        ...opts,
+        name: opts.name ?? canonical.header.title,
+        runtimeBinding: {
+          backend: canonical.header.sourceRuntime,
+          ...(canonical.header.runtimeBinding?.nativeSessionId
+            ? { nativeSessionId: canonical.header.runtimeBinding.nativeSessionId }
+            : {}),
+          ...opts.runtimeBinding,
+        },
+      })
+      if (!created.ok) return created
+      try {
+        const envelopes = canonicalImportEnvelopes(canonical, sessionId, now())
+        created.value.append(envelopes)
+        created.value.commitTurn({
+          turnsAdded: canonical.turns.length,
+          lastAssistantText:
+            [...canonical.turns].reverse().find((turn) => turn.role === "assistant")?.text ?? "",
+        })
+        return created
+      } catch (error) {
+        created.value.close()
+        fsx.removeDir(sessionDir(options.home, sessionId, override))
+        return fail("runtime_error", error instanceof Error ? error.message : String(error))
+      }
+    },
+
+    /** Delete a canonical session only when no live writer holds its lease. */
+    delete(sessionId: string): StoreResult<{ deleted: true }> {
+      if (!isSafeSessionId(sessionId))
+        return fail("usage_error", `invalid session id "${sessionId}"`)
+      if (!hasCanonicalStore(sessionId)) return fail("session_not_found", `no session ${sessionId}`)
+      const lease = takeLease(sessionId)
+      if (!lease.ok) return lease
+      fsx.removeDir(sessionDir(options.home, sessionId, override))
+      return { ok: true, value: { deleted: true } }
+    },
+
     /** Cross-session lineage graph. Orphaned parents surface as roots. */
     tree(): SessionTreeNode[] {
       const manifests = new Map<string, SessionManifest>()
@@ -730,6 +788,95 @@ export function createSessionStore(options: SessionStoreOptions) {
 
     host: options.host ?? os.hostname(),
   }
+}
+
+function canonicalImportEnvelopes(
+  canonical: CanonicalSession,
+  sessionId: string,
+  fallbackAt: number
+): AgentEventEnvelope[] {
+  const runId = `import-${sessionId}`
+  const attemptId = `${runId}-attempt`
+  let sequence = 0
+  const out: AgentEventEnvelope[] = []
+  const append = (turnId: string, event: AgentEventEnvelope["event"], at?: string): void => {
+    out.push({
+      schemaVersion: 1,
+      eventId: `${sessionId}:${attemptId}:${sequence}`,
+      sequence,
+      sessionId,
+      runId,
+      turnId,
+      attemptId,
+      hostRef: "canonical-import",
+      runtime: canonical.header.sourceRuntime,
+      timestamp: at ?? new Date(fallbackAt).toISOString(),
+      event,
+    })
+    sequence += 1
+  }
+  for (const turn of canonical.turns) {
+    const turnId = turn.turnId.replace(/:(user|assistant)$/, "")
+    if (turn.role === "user") append(turnId, { kind: "user-input", text: turn.text }, turn.at)
+    if (turn.role === "assistant") {
+      if (turn.text) append(turnId, { kind: "text-delta", delta: turn.text }, turn.at)
+      for (const call of turn.toolCalls ?? []) {
+        append(
+          turnId,
+          {
+            kind: "tool-call",
+            toolName: call.toolName,
+            input: call.input ?? {},
+            toolCallId: call.callId,
+          },
+          turn.at
+        )
+        if (call.resultText !== undefined) {
+          append(
+            turnId,
+            {
+              kind: "tool-result",
+              toolName: call.toolName,
+              toolCallId: call.callId,
+              result: call.resultText,
+              ...(call.isError ? { isError: true } : {}),
+            },
+            turn.at
+          )
+        }
+      }
+      if (turn.usage) append(turnId, { kind: "usage", usage: turn.usage }, turn.at)
+    }
+  }
+  for (const permission of canonical.permissions ?? []) {
+    append(
+      "import-permissions",
+      {
+        kind: "permission-request",
+        requestId: permission.requestId,
+        toolName: permission.toolName,
+      },
+      permission.at
+    )
+    if (permission.decision !== "pending") {
+      append(
+        "import-permissions",
+        {
+          kind: "permission-resolved",
+          requestId: permission.requestId,
+          behavior: permission.decision === "deny" ? "deny" : "allow",
+        },
+        permission.at
+      )
+    }
+  }
+  for (const checkpoint of canonical.checkpoints ?? []) {
+    append(checkpoint.afterTurnId.replace(/:(user|assistant)$/, ""), {
+      kind: "checkpoint",
+      checkpointId: checkpoint.checkpointId,
+    })
+  }
+  return out
 }
 
 export type SessionStore = ReturnType<typeof createSessionStore>

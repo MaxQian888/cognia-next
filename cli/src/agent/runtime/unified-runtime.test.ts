@@ -193,6 +193,29 @@ describe("successful turn", () => {
     expect(result.attemptId).toBe(`${result.turnId}:a0`)
   })
 
+  it("preserves recovered run and turn identities at the supplied attempt", async () => {
+    const fsx = createMemoryFs()
+    const seen: AgentEventEnvelope[] = []
+    const { result } = await runUnifiedTurn(
+      params(fsx, {
+        recoveryIdentity: { runId: "run-recovered", turnId: "turn-recovered", attempt: 3 },
+        onEnvelope: (envelope) => seen.push(envelope),
+        createSession: fakeSession([{ kind: "reply", text: "resumed" }]).factory,
+      })
+    )
+
+    expect(result).toMatchObject({
+      runId: "run-recovered",
+      turnId: "turn-recovered",
+      attemptId: "turn-recovered:a3",
+      text: "resumed",
+    })
+    expect(seen).not.toHaveLength(0)
+    expect(seen.every((envelope) => envelope.runId === "run-recovered")).toBe(true)
+    expect(seen.every((envelope) => envelope.turnId === "turn-recovered")).toBe(true)
+    expect(seen.every((envelope) => envelope.attemptId === "turn-recovered:a3")).toBe(true)
+  })
+
   it("emits lifecycle, user-input and the streamed events as canonical envelopes", async () => {
     const fsx = createMemoryFs()
     const seen: AgentEventEnvelope[] = []

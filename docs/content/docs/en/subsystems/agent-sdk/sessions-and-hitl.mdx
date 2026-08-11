@@ -1,0 +1,18 @@
+---
+title: Sessions, events, and HITL
+description: Durable sessions, replay, branching, commands, permissions, elicitations, and client callbacks.
+---
+
+# Sessions, events, and HITL
+
+Sessions are canonical store records, not provider-private conversation handles. `create`, `open`, `list`, `rename`, `tag`, `export`, `import`, `fork`, `clone`, `tree`, `close`, and `delete` all route through the same single-writer store used by the CLI. Import validates the canonical version and sequence digest; a representation that would lose a system turn is rejected instead of silently degraded.
+
+`events({ afterEventId })` replays persisted envelopes and continues with live notifications. Delivery is at least once; the client deduplicates by `eventId`. Mutating requests carry a `commandId`, and successful receipts are persisted so a retry after host restart returns the original result. The host keeps at most 1,000 receipts per session.
+
+Permissions and `ask_user` elicitations are written to `rpc-state.json` before they are exposed. If the client or host exits while one is unresolved, reopening the session reports `recovery_required`. A new turn is refused until every recovered action is explicitly settled. Historical approvals are never replayed as grants.
+
+Client tools and hooks use reverse JSON-RPC requests. Tool registrations declare `none`, `idempotent`, or `non-idempotent` side effects. Invocation IDs and idempotency keys are stable; unresolved callbacks remain visible as external tool actions after a transport failure. Cognia cannot promise global exactly-once behavior for an external side effect, so recovered non-idempotent work is never automatically repeated.
+
+`compact()` waits for the real sidecar compaction boundary. When that boundary includes a pre-compaction snapshot, the result contains `undoAvailable: true` and its actual `boundaryId`; `undoCompact()` restores the snapshot through the existing PII-gated live-session authority. Undo is single-use and live-host-only. If the runtime does not emit a snapshot, compaction still succeeds with `undoAvailable: false` and the host does not fabricate a token.
+
+Sandbox snapshots in protocol v2 snapshot the effective sandbox resource policy, not arbitrary workspace files. Restoring one re-establishes the network, writable-root, CPU, and memory ceiling and invalidates cached provider options. Filesystem checkpoints remain runtime-capability-gated and are not advertised as sandbox policy snapshots.

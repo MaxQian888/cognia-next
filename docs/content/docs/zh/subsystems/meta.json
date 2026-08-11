@@ -7,6 +7,7 @@
     "cognia-cli",
     "cognia-agent-tui",
     "cognia-agent-external-hosting",
+    "agent-sdk",
     "cli-app-bridge",
     "integrated-terminal",
     "embedded-browser",

@@ -58,6 +58,23 @@ describe("createMemoryFs", () => {
     expect(() => fsx.removeFile(FILE)).not.toThrow()
   })
 
+  it("removes a directory and every descendant without touching siblings", () => {
+    const sibling = path.join(path.dirname(DIR), "sibling.txt")
+    const fsx = createMemoryFs({
+      [FILE]: "one",
+      [path.join(DIR, "nested", "two.txt")]: "two",
+      [sibling]: "keep",
+    })
+
+    fsx.removeDir(DIR)
+
+    expect(fsx.exists(DIR)).toBe(false)
+    expect(fsx.exists(FILE)).toBe(false)
+    expect(fsx.exists(path.join(DIR, "nested", "two.txt"))).toBe(false)
+    expect(fsx.readFile(sibling)).toBe("keep")
+    expect(() => fsx.removeDir(DIR)).not.toThrow()
+  })
+
   it("creates directories explicitly and reports mtime only for files", () => {
     const fsx = createMemoryFs()
     fsx.mkdirp(DIR)

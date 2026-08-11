@@ -1,0 +1,29 @@
+{
+  "name": "@cognia/agent-host-win32-x64",
+  "version": "0.1.0",
+  "description": "Cognia Agent SDK host for Windows x64.",
+  "license": "AGPL-3.0-only",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "bin": {
+    "cognia-agent": "bin/cognia-agent.exe"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "scripts": {
+    "prepack": "node ../../scripts/build/verify-agent-host-package.mjs win32-x64"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

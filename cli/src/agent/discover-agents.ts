@@ -137,12 +137,7 @@ export function buildAgents(files: MarkdownAgentFile[]): AgentSummary[] {
   )
 }
 
-/** A draft's `providerHint` is the upstream tool's family (`anthropic` for
- * Claude Code, `openai` for Codex). Those map 1:1 onto cognia's built-in
- * provider ids, so a reused external agent runs on its NATIVE provider — and we
- * can keep its `model` too, since `buildChildConfig` only honors the model when
- * the paired provider is actually configured (else it falls back to the parent
- * and drops the now-mismatched model). `gemini` → `google` is the one rename. */
+/** Map an explicit/source-model provider hint onto Cognia's provider ids. */
 function providerFromHint(hint: SubagentImportDraft["providerHint"]): string | undefined {
   if (hint === "gemini") return "google"
   return hint // "anthropic" | "openai" | undefined
@@ -229,16 +224,19 @@ async function readExternalSourceFiles(
   return out
 }
 
-/** Map an importer draft to a dispatchable summary. We carry the upstream
- * `model` AND a `provider` derived from the draft's family hint, so a reused
- * Claude Code / Codex agent runs on its NATIVE provider+model (e.g. a Claude
- * Code agent on `anthropic`/`sonnet`) — `buildChildConfig` falls back to the
- * parent (and drops the model) when that provider isn't configured, so this is
- * safe even on a single-provider setup. Tools are kept (the runner narrows the
- * allowlist; unknown names are inert). */
+/** Map an importer draft to a dispatchable summary. A source directory alone
+ * does not opt into that source's provider: provider-agnostic `.claude/agents`
+ * files must inherit the active TUI provider, otherwise a DeepSeek session can
+ * unexpectedly launch an unauthenticated Anthropic child. An explicitly paired
+ * model or `provider:` frontmatter still keeps the upstream provider. */
 function draftToSummary(draft: SubagentImportDraft): AgentSummary {
   const description = draft.description ?? ""
-  const provider = providerFromHint(draft.providerHint)
+  const hasExplicitProvider = Object.prototype.hasOwnProperty.call(
+    draft.rawFrontmatter ?? {},
+    "provider"
+  )
+  const provider =
+    draft.model || hasExplicitProvider ? providerFromHint(draft.providerHint) : undefined
   return {
     id: draft.name,
     name: draft.name,

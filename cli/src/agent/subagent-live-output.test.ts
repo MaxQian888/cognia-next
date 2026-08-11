@@ -301,7 +301,14 @@ describe("timeline + counters", () => {
     applyLiveSubagentEvent(id, ev({ type: "text-delta", delta: "it" }))
     expect(getLiveSubagent(id)!.timeline).toEqual([
       { kind: "thinking", text: "let me look" },
-      { kind: "tool", id: "tu1", name: "grep", summary: "foo", status: "running" },
+      {
+        kind: "tool",
+        id: "tu1",
+        name: "grep",
+        summary: "foo",
+        status: "running",
+        startedAt: expect.any(Number),
+      },
       { kind: "text", text: "found it" },
     ])
   })
@@ -320,6 +327,44 @@ describe("timeline + counters", () => {
     expect(getLiveSubagent(id)!.timeline).toMatchObject([
       { kind: "tool", name: "read", status: "done" },
       { kind: "tool", name: "bash", status: "error" },
+    ])
+  })
+
+  it("retains bounded tool timing and result detail for the run inspector", () => {
+    const id = startLiveSubagent({
+      name: "x",
+      task: "t",
+      sessionId: "s1",
+      startedAt: 1_000,
+    })
+    applyLiveSubagentEvent(
+      id,
+      ev({ type: "tool-call", toolName: "bash", input: { command: "pnpm test" }, id: "a" }),
+      2_000
+    )
+    applyLiveSubagentEvent(
+      id,
+      ev({
+        type: "tool-result",
+        toolName: "bash",
+        id: "a",
+        result: "PASS first\nPASS second",
+      }),
+      3_500
+    )
+
+    expect(getLiveSubagent(id)!.timeline).toMatchObject([
+      {
+        kind: "tool",
+        name: "bash",
+        summary: "pnpm test",
+        status: "done",
+        startedAt: 2_000,
+        settledAt: 3_500,
+        resultPreview: "PASS first PASS second",
+        resultChars: 22,
+        resultLines: 2,
+      },
     ])
   })
 

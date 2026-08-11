@@ -24,6 +24,17 @@ const RESPONSE_SCHEMA_CATALOG_PATH = "protocol/companion-response-schemas.json"
 const HEADLESS_DISPOSITIONS_PATH = "protocol/headless-command-dispositions.json"
 const ZOD_REQUEST_SCHEMA_PATH = "scripts/build/companion-request-schema-contracts.mjs"
 const RPC_SOURCE_PATH = "src-tauri/src/companion_api/rpc.rs"
+const RPC_DISPATCH_SOURCE_PATHS = [
+  "src-tauri/src/companion_api/rpc/chat.rs",
+  "src-tauri/src/companion_api/rpc/native_tools.rs",
+  "src-tauri/src/companion_api/rpc/data_sync.rs",
+  "src-tauri/src/companion_api/rpc/service_plane.rs",
+  "src-tauri/src/companion_api/rpc/source_control.rs",
+  "src-tauri/src/companion_api/rpc/filesystem.rs",
+  "src-tauri/src/companion_api/rpc/terminal.rs",
+  "src-tauri/src/companion_api/rpc/plugins.rs",
+  "src-tauri/src/companion_api/rpc/diagnostics.rs",
+]
 const RUNTIME_ROUTE_SOURCES = [
   "src-tauri/src/companion_api/server.rs",
   "src-tauri/src/companion_api/api.rs",
@@ -2700,7 +2711,11 @@ export function inspectCommittedContract() {
   const runtimeRoutes = runtime.routes
   const remoteNames = extractKnownCommands(readRepo(RPC_SOURCE_PATH))
   const commandCoverageErrors = validateCommandCoverage(manifest, remoteNames)
-  const inferredArgumentSchemas = extractCommandArgumentSchemas(readRepo(RPC_SOURCE_PATH))
+  const inferredArgumentSchemas = new Map(
+    RPC_DISPATCH_SOURCE_PATHS.flatMap((sourcePath) => [
+      ...extractCommandArgumentSchemas(readRepo(sourcePath)),
+    ])
+  )
   const argumentSchemas = new Map(
     [...inferredArgumentSchemas].map(([name, schema]) => [
       name,

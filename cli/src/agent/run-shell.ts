@@ -112,6 +112,98 @@ export interface RunShellOpts {
   registerInput?: (write: (data: string) => void) => void
 }
 
+/** Minimal inherited-terminal process surface used by
+ * {@link runInteractiveShell}. Unlike {@link ShellChild}, it deliberately has
+ * no captured stdout/stderr: the child owns the real terminal while Ink is
+ * suspended. */
+export interface InteractiveShellChild {
+  on(event: "close", cb: (code: number | null, signal?: NodeJS.Signals | null) => void): void
+  on(event: "error", cb: (err: Error) => void): void
+  kill?(signal?: NodeJS.Signals | number): void
+}
+
+export interface InteractiveShellSpawnOpts {
+  cwd?: string
+  shell: true
+  stdio: "inherit"
+}
+
+export type InteractiveShellSpawn = (
+  command: string,
+  opts: InteractiveShellSpawnOpts
+) => InteractiveShellChild
+
+export interface RunInteractiveShellOpts {
+  cwd?: string
+  spawn?: InteractiveShellSpawn
+  signal?: AbortSignal
+}
+
+const realInteractiveSpawn: InteractiveShellSpawn = (command, opts) =>
+  nodeSpawn(command, opts) as InteractiveShellChild
+
+/**
+ * Run a command with the real terminal attached. The caller must first suspend
+ * Ink (via `useApp().suspendTerminal`) so full-screen programs and REPLs receive
+ * a genuine TTY and can handle native keys such as `q` and Ctrl+C.
+ */
+export function runInteractiveShell(
+  command: string,
+  opts: RunInteractiveShellOpts = {}
+): Promise<ShellResult> {
+  const spawn = opts.spawn ?? realInteractiveSpawn
+  return new Promise<ShellResult>((resolve) => {
+    let child: InteractiveShellChild
+    try {
+      child = spawn(command, { cwd: opts.cwd, shell: true, stdio: "inherit" })
+    } catch (e) {
+      resolve({ stdout: "", stderr: e instanceof Error ? e.message : String(e), code: 1 })
+      return
+    }
+
+    let settled = false
+    let aborted = false
+    const finish = (result: ShellResult) => {
+      if (settled) return
+      settled = true
+      opts.signal?.removeEventListener("abort", onAbort)
+      resolve(result)
+    }
+    const onAbort = () => {
+      aborted = true
+      try {
+        child.kill?.("SIGINT")
+      } catch {
+        // The child already exited; its close event will settle the run.
+      }
+    }
+
+    child.on("error", (error) => {
+      finish({
+        stdout: "",
+        stderr: error.message,
+        code: 1,
+        ...(aborted ? { aborted: true } : {}),
+      })
+    })
+    child.on("close", (code, signal) => {
+      finish({
+        stdout: "",
+        stderr: "",
+        code: code ?? (aborted || signal === "SIGINT" ? 130 : 1),
+        ...(aborted ? { aborted: true } : {}),
+      })
+    })
+    // Subscribe to child completion before honoring a pre-aborted signal: an
+    // injected (or unusually fast) child may emit `close` synchronously in
+    // response to `kill`.
+    if (opts.signal) {
+      if (opts.signal.aborted) onAbort()
+      else opts.signal.addEventListener("abort", onAbort, { once: true })
+    }
+  })
+}
+
 /** Coerce a `data` event payload to a Buffer (real child) or keep a string (the
  * injected test spawn, which emits already-decoded strings). */
 function toBytes(chunk: unknown): Uint8Array | null {

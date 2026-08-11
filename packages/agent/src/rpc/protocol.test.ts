@@ -3,6 +3,9 @@
  */
 
 import {
+  HOST_REQUEST_METHODS,
+  parseHostRequestParams,
+  parseRpcMethodParams,
   isJsonRpcRequest,
   isJsonRpcNotification,
   makeErrorResponse,
@@ -90,8 +93,8 @@ describe("RPC protocol", () => {
   })
 
   describe("constants", () => {
-    it("protocol version is 1", () => {
-      expect(RPC_PROTOCOL_VERSION).toBe(1)
+    it("uses the stable bidirectional protocol version", () => {
+      expect(RPC_PROTOCOL_VERSION).toBe(2)
     })
 
     it("has standard error codes", () => {
@@ -100,11 +103,88 @@ describe("RPC protocol", () => {
       expect(RPC_ERROR_CODES.methodNotFound).toBe(-32601)
     })
 
-    it("method catalog includes core methods", () => {
-      expect(RPC_METHODS).toContain("runtime.discover")
-      expect(RPC_METHODS).toContain("session.create")
-      expect(RPC_METHODS).toContain("turn.run")
-      expect(RPC_METHODS).toContain("session.annotation")
+    it("publishes the complete v2 client-to-host method catalog", () => {
+      expect(RPC_METHODS).toEqual([
+        "initialize",
+        "initialized",
+        "shutdown",
+        "runtime/status",
+        "runtime/capabilities",
+        "model/list",
+        "model/refresh",
+        "auth/status",
+        "session/create",
+        "session/open",
+        "session/list",
+        "session/state",
+        "session/messages",
+        "session/entries",
+        "session/rename",
+        "session/tag",
+        "session/delete",
+        "session/export",
+        "session/import",
+        "session/fork",
+        "session/clone",
+        "session/tree",
+        "session/close",
+        "turn/run",
+        "turn/steer",
+        "turn/followUp",
+        "turn/abort",
+        "turn/wait",
+        "session/model/set",
+        "session/thinking/set",
+        "session/permissionMode/set",
+        "session/compact",
+        "session/compact/undo",
+        "permission/respond",
+        "elicitation/respond",
+        "externalTool/respond",
+        "tool/register",
+        "tool/unregister",
+        "hook/register",
+        "hook/unregister",
+        "mcp/configure",
+        "mcp/status",
+        "plugin/reload",
+        "skill/reload",
+        "task/list",
+        "task/stop",
+        "task/background",
+        "sandbox/status",
+        "sandbox/snapshot",
+        "sandbox/restore",
+        "trace/subscribe",
+        "trace/export",
+        "audit/query",
+      ])
+      expect(HOST_REQUEST_METHODS).toEqual(["client/tool/invoke", "client/hook/invoke"])
+    })
+
+    it("validates required parameters through the schema map", () => {
+      expect(parseRpcMethodParams("session/state", { sessionId: "session-1" })).toEqual({
+        sessionId: "session-1",
+      })
+      expect(() => parseRpcMethodParams("session/state", {})).toThrow(/sessionId/i)
+      expect(() => parseRpcMethodParams("turn/run", { sessionId: "session-1" })).toThrow(/input/i)
+    })
+
+    it("validates host callback parameters independently", () => {
+      expect(
+        parseHostRequestParams("client/tool/invoke", {
+          handlerId: "tool-handler",
+          toolCallId: "tool-call-1",
+          sessionId: "session-1",
+          runId: "run-1",
+          attemptId: "attempt-1",
+          idempotencyKey: "idem-1",
+          input: { path: "README.md" },
+        })
+      ).toMatchObject({ handlerId: "tool-handler", toolCallId: "tool-call-1" })
+      expect(() =>
+        parseHostRequestParams("client/tool/invoke", { handlerId: "tool-handler" })
+      ).toThrow(/toolCallId/i)
     })
   })
 })

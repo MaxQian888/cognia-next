@@ -11,17 +11,22 @@
  * The server reads the credential from the CLI config (same as `cognia-agent run`).
  */
 
+import { randomUUID } from "node:crypto"
+import os from "node:os"
+
 import type { ParsedArgs } from "./args"
 import { stringFlag } from "./args"
 import type { OutputSink } from "./output"
 import { realOutput } from "./output"
-import { loadConfig as defaultLoadConfig } from "../config/load"
-import { createRpcServer } from "@/packages/agent/src/rpc/server"
-import type { CogniaRuntimeOptions } from "@/packages/agent/src/runtime"
+import { loadConfig as defaultLoadConfig, resolveHome } from "../config/load"
+import { createAgentRpcServer } from "../agent/rpc/server"
+import { createAgentRuntimeService } from "../agent/rpc/runtime-service"
 
 export interface RpcCommandDeps {
   out?: OutputSink
   loadConfig?: typeof defaultLoadConfig
+  createService?: typeof createAgentRuntimeService
+  createServer?: typeof createAgentRpcServer
 }
 
 const RPC_HELP = `cognia-agent rpc — JSON-RPC 2.0 server
@@ -33,7 +38,7 @@ Reads JSON-RPC 2.0 requests from stdin (one per line, newline-delimited JSON).
 Writes responses and agent.event notifications to stdout.
 Diagnostics go to stderr.
 
-Protocol version: 1
+Protocol version: 2
 `
 
 export async function rpcCommand(args: ParsedArgs, deps: RpcCommandDeps = {}): Promise<number> {
@@ -50,26 +55,34 @@ export async function rpcCommand(args: ParsedArgs, deps: RpcCommandDeps = {}): P
   const provider = stringFlag(args, "provider") ?? config.provider
   const backend = stringFlag(args, "backend") ?? config.agentBackend
 
-  // Determine credential from config — the RPC server uses the same credential
-  // resolution as `cognia-agent run`.
-  const runtimeOptions: CogniaRuntimeOptions = {
-    credential: config.credentialRef ?? { credentialEnv: "ANTHROPIC_API_KEY" },
+  const runtimeConfig = {
+    ...config,
     ...(model ? { model } : {}),
     ...(provider ? { provider } : {}),
-    ...(backend ? { backend } : {}),
+    ...(backend ? { agentBackend: backend } : {}),
   }
+  const home = resolveHome(process.env, os.homedir())
+  let service: ReturnType<typeof createAgentRuntimeService> | undefined
 
   try {
-    const server = await createRpcServer({
-      runtimeOptions,
+    service = (deps.createService ?? createAgentRuntimeService)({
+      config: runtimeConfig,
+      home,
+    })
+    const server = (deps.createServer ?? createAgentRpcServer)({
       input: process.stdin,
       output: process.stdout,
       diagnostic: process.stderr,
+      service,
+      hostVersion: process.env.npm_package_version ?? "0.1.0",
+      runtimeVersion: process.env.npm_package_version ?? "0.1.0",
+      instanceId: randomUUID(),
     })
 
     await server.serve()
     return 0
   } catch (err) {
+    await service?.close().catch(() => undefined)
     const message = err instanceof Error ? err.message : String(err)
     process.stderr.write(JSON.stringify({ level: "error", message }) + "\n")
     return 1

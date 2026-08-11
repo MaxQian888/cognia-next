@@ -52,6 +52,14 @@ export type SubagentTimelineSegment =
       /** One-line input summary (`summarizeToolCall`), truncated for display. */
       summary: string
       status: "running" | "done" | "error"
+      /** Wall-clock boundaries for relative-start and duration labels. */
+      startedAt?: number
+      settledAt?: number
+      /** Bounded, single-line result detail for the live inspector. The full
+       * result is deliberately not retained in this process-global store. */
+      resultPreview?: string
+      resultChars?: number
+      resultLines?: number
     }
 
 /** A live (or recently-settled) subagent run's accumulated output. */
@@ -141,6 +149,7 @@ const TIMELINE_CAP = 400
 const TIMELINE_TEXT_CAP = 240_000
 // Truncate a tool segment's input summary for display.
 const TOOL_SUMMARY_CAP = 120
+const TOOL_RESULT_PREVIEW_CAP = 240
 
 const entries = new Map<string, SubagentLiveEntry>()
 
@@ -166,6 +175,47 @@ function approxResultChars(result: unknown): number {
     return JSON.stringify(result)?.length ?? 0
   } catch {
     return 0
+  }
+}
+
+function toolResultText(result: unknown): string {
+  if (typeof result === "string") return result
+  if (result == null) return ""
+  if (Array.isArray(result)) {
+    const textBlocks = result
+      .map((block) =>
+        block && typeof block === "object" && typeof block.text === "string"
+          ? block.text
+          : undefined
+      )
+      .filter((text): text is string => text !== undefined)
+    if (textBlocks.length > 0) return textBlocks.join("\n")
+  }
+  try {
+    return JSON.stringify(result) ?? ""
+  } catch {
+    return ""
+  }
+}
+
+function toolResultDetail(result: unknown): {
+  preview?: string
+  chars: number
+  lines: number
+} {
+  const text = toolResultText(result)
+  const compact = text.replace(/\s+/g, " ").trim()
+  return {
+    ...(compact
+      ? {
+          preview:
+            compact.length > TOOL_RESULT_PREVIEW_CAP
+              ? compact.slice(0, TOOL_RESULT_PREVIEW_CAP - 1) + "…"
+              : compact,
+        }
+      : {}),
+    chars: text.length,
+    lines: text.length > 0 ? text.split(/\r?\n/).length : 0,
   }
 }
 
@@ -340,7 +390,11 @@ export function applyCanonicalTaskEnvelope(envelope: AgentEventEnvelope): boolea
  * (the run was evicted or never started) and for events that carry no display
  * state (`usage` / `compact`). Bumps `version` only when something changed.
  */
-export function applyLiveSubagentEvent(liveId: string, event: CaptureStreamEvent): void {
+export function applyLiveSubagentEvent(
+  liveId: string,
+  event: CaptureStreamEvent,
+  now: number = Date.now()
+): void {
   const entry = entries.get(liveId)
   if (!entry) return
 
@@ -375,6 +429,7 @@ export function applyLiveSubagentEvent(liveId: string, event: CaptureStreamEvent
             ? summary.slice(0, TOOL_SUMMARY_CAP - 1) + "…"
             : summary,
         status: "running",
+        startedAt: now,
       })
       trimTimeline(entry.timeline)
       entry.toolUseCount++
@@ -397,7 +452,14 @@ export function applyLiveSubagentEvent(liveId: string, event: CaptureStreamEvent
           .find((s) => s.kind === "tool" && s.status === "running" && s.name === event.toolName)
       if (!target && !seg) return
       if (target) target.status = next
-      if (seg && seg.kind === "tool") seg.status = next
+      if (seg && seg.kind === "tool") {
+        const detail = toolResultDetail(event.result)
+        seg.status = next
+        seg.settledAt = now
+        seg.resultChars = detail.chars
+        seg.resultLines = detail.lines
+        if (detail.preview) seg.resultPreview = detail.preview
+      }
       // Count the result volume toward the live token estimate — tool results
       // dominate a research agent's input tokens, so this is what makes the
       // live counter track reality instead of the (tiny) reply text.
@@ -436,7 +498,10 @@ export function settleLiveSubagent(liveId: string, status: SubagentLiveStatus): 
   const toolEnd: SubagentLiveTool["status"] = status === "error" ? "error" : "done"
   for (const tool of entry.tools) if (tool.status === "running") tool.status = toolEnd
   for (const seg of entry.timeline)
-    if (seg.kind === "tool" && seg.status === "running") seg.status = toolEnd
+    if (seg.kind === "tool" && seg.status === "running") {
+      seg.status = toolEnd
+      seg.settledAt = entry.settledAt
+    }
   entry.version++
   evictSettled()
 }

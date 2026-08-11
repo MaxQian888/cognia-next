@@ -1,21 +1,17 @@
 {
-  // Deliberately does NOT redeclare `paths`, unlike @cognia/memory and the
-  // other standalone packages. Those are zero-`@/` cores that must typecheck in
-  // isolation; this one is the opposite by design — it is a thin facade over
-  // the app's real agent runtime (`cli/src/agent/**`, `lib/claude/**`), and the
-  // `@/*` graph is resolved and inlined at BUILD time by
-  // `scripts/build/build-agent-sdk.mjs`. Inheriting the root `paths` is what
-  // lets `tsc --noEmit` here see the same graph the bundler will.
-  //
-  // Consequence: this package is NOT in `pnpm build:packages` (the zero-`@/`
-  // gate). Its equivalent guard is the packed-tarball test, which asserts the
-  // published bundle contains no unresolved `@/` specifier.
-  "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "types": ["node", "jest"],
-    "incremental": false,
-    "ignoreDeprecations": "6.0"
+    "target": "ES2022",
+    "lib": ["ES2022", "ESNext.Disposable", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "ignoreDeprecations": "6.0",
+    "noEmit": true,
+    "types": ["node", "jest"]
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*.ts", "tsup.config.ts"],
+  "exclude": ["dist", "node_modules"]
 }

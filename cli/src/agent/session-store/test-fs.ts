@@ -71,6 +71,15 @@ export function createMemoryFs(initial: Record<string, string> = {}): MemoryFs {
     removeFile: (p) => {
       files.delete(p)
     },
+    removeDir: (p) => {
+      const prefix = p.endsWith(path.sep) ? p : `${p}${path.sep}`
+      for (const key of [...files.keys()]) {
+        if (key === p || key.startsWith(prefix)) files.delete(key)
+      }
+      for (const key of [...dirs]) {
+        if (key === p || key.startsWith(prefix)) dirs.delete(key)
+      }
+    },
     writeFileExclusive: (p, content) => {
       if (files.has(p)) return false
       ensureParents(p)

@@ -57,7 +57,7 @@ Usage:
   cognia-agent sdk <capabilities|sessions|info|messages|rename|tag|fork|delete|settings>
                      typed Claude Agent SDK management (never raw option JSON)
   cognia-agent rpc [--model m] [--provider p] [--backend id]
-                     JSON-RPC 2.0 server on stdin/stdout (for @cognia/agent/rpc)
+  Bidirectional JSON-RPC 2.0 host on stdin/stdout (for @cognia/agent)
   cognia-agent serve [--server-url u] [--account id] [--home dir]
                      [--flush-debounce ms]           headless brain for cognia-server
                      (COGNIA_SERVER_URL / COGNIA_SERVICE_TOKEN / COGNIA_BRIDGE_URL /

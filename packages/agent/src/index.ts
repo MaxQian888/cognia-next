@@ -1,84 +1,69 @@
-/**
- * @cognia/agent — embed the Cognia coding agent in a Node process.
- *
- * One persistent session runtime — the same one behind `cognia-agent run`, the
- * TUI and the RPC server — with canonical streaming events, durable sessions
- * and a structured result contract.
- *
- * @example
- * ```ts
- * import { createCogniaRuntime } from "@cognia/agent"
- *
- * const runtime = await createCogniaRuntime({
- *   credential: { credentialEnv: "ANTHROPIC_API_KEY" },
- * })
- *
- * const session = await runtime.createSession({ name: "my-session" })
- * const result = await session.run("Write hello world in TypeScript")
- * console.log(result.text)
- *
- * await session.close()
- * await runtime.dispose()
- * ```
- *
- * @packageDocumentation
- */
-
-// ---- Public types from the authority packages ----
-export type {
-  AgentRunResultV1,
-  AgentStructuredError,
-  AgentErrorCode,
-  AgentRunStatus,
-  AgentRunUsage,
-  AgentSessionPersistence,
-  AgentResumeReport,
-  AgentExitCode,
-} from "@cognia/agent-config-types/agent-run-result"
+export {
+  createCogniaClient,
+  HostNotFoundError,
+  IncompatibleHostError,
+  RpcError,
+  type CogniaClient,
+  type CogniaClientOptions,
+  type CogniaSession,
+  type AuditApi,
+  type AuthApi,
+  type HookApi,
+  type McpApi,
+  type ModelApi,
+  type PluginApi,
+  type RuntimeApi,
+  type SessionApi,
+  type SkillApi,
+  type TaskApi,
+  type TraceApi,
+  type ToolApi,
+} from "./client"
+export type { CogniaHostOption } from "./host"
 export type {
   AgentEventEnvelope,
-  CanonicalAgentEvent,
-  AgentCapabilityId,
-  AgentRuntimeAdapterId,
-  AgentExecutionPolicy,
-  CanonicalContentPart,
-} from "@cognia/agent-config-types/agent-execution"
-export type { CanonicalSession, CanonicalTurn } from "@cognia/agent-config-types/canonical-session"
-
-// ---- SDK-specific types ----
-export type { CogniaCredentialRef, ResolvedCredential } from "./credentials"
-export type {
   AgentInput,
-  AgentAttachment,
-  AgentPathAttachment,
-  AgentBase64Attachment,
-} from "./input"
-export { assertNoInlineSecret, resolveCredential } from "./credentials"
-export { lowerAgentInput, safeAttachmentName } from "./input"
-
-// ---- Runtime & Session ----
-export type {
-  CogniaRuntime,
-  CogniaRuntimeOptions,
-  CogniaSession,
-  CogniaSessionOptions,
-  SessionRunOptions,
+  AgentPermissionMode,
+  AgentRunResultV1,
+  AgentTurnOutcome,
+  CanonicalSession,
+  CanonicalSessionHeader,
+  CanonicalToolCall,
+  CanonicalTurn,
+  ClientHookHandler,
+  ClientHookRegistration,
+  ClientInvocationContext,
+  ClientToolHandler,
+  ClientToolRegistration,
+  CloneOptions,
+  CogniaDiagnostic,
+  CommandOptions,
+  CommandReceipt,
+  CompactOptions,
+  CompactionResult,
+  ElicitationResponse,
+  ExternalToolResponse,
+  EntryPage,
+  EntryPageOptions,
+  ForkOptions,
+  JsonSchema,
+  JsonValue,
+  PendingElicitation,
+  PendingExternalTool,
+  PendingPermission,
+  PermissionDecision,
+  ProtocolLimits,
+  ResolvedAgentExecutionSpec,
+  RunOptions,
+  SessionCreateOptions,
   SessionState,
-  SessionEntry,
-  SessionAnnotation,
-} from "./runtime"
-export { createCogniaRuntime } from "./runtime"
-
-// ---- Strict tool sampling (public policy layer) ----
-export type {
-  ToolStrictPolicy,
-  ToolStrictDeclaration,
-  ModelStrictCapability,
-  StrictPolicyResolution,
-  StrictPolicyBatchResult,
-} from "@/lib/ai/tools/strict-sampling"
-export {
-  getModelStrictCapability,
-  resolveStrictPolicy,
-  applyStrictPolicies,
-} from "@/lib/ai/tools/strict-sampling"
+  SessionFidelity,
+  SessionSummary,
+  SandboxSnapshot,
+  SandboxStatus,
+  AuditPage,
+  SideEffectClass,
+  SuspendedRunState,
+  ThinkingLevel,
+  WaitOptions,
+} from "./types"

@@ -2,6 +2,7 @@ import os from "node:os"
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type {
   AcpConfigOption,
   AcpPermissionMode,
@@ -772,7 +773,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       let observedSessionId = externalSessionId
       let result: ExternalAgentResult
       try {
-        const execution = manager.execute(agentId, flattened.text, {
+        const executionOptions: ExternalAgentExecutionOptions = {
           ...(externalSessionId ? { sessionId: externalSessionId } : {}),
           // External model memory is keyed by backend/preset. The top-level
           // `config.model` is a legacy built-in-provider pin and may name a
@@ -856,7 +857,21 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
               }
             }
           },
-        })
+        }
+        if (
+          !hasNoLeakingPiiDeep({
+            prompt: flattened.text,
+            systemPrompt: executionOptions.systemPrompt,
+            instructionEnvelope: executionOptions.instructionEnvelope,
+            context: executionOptions.context,
+          })
+        ) {
+          throw new RunAndCaptureError(
+            "External agent input blocked by the outbound PII gate",
+            "session_error"
+          )
+        }
+        const execution = manager.execute(agentId, flattened.text, executionOptions)
         // Fold rejection into the value so the losing race branch can never
         // surface as an unhandled rejection.
         const settled = execution.then(

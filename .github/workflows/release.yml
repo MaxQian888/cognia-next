@@ -55,3 +55,92 @@ jobs:
     with:
       tagName: ${{ github.ref_name }}
     secrets: inherit
+
+  publish-agent-hosts:
+    name: Publish Agent host (${{ matrix.target }})
+    needs: [quality, test]
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: darwin-arm64
+            package: agent-host-darwin-arm64
+          - runner: ubuntu-latest
+            target: linux-x64
+            package: agent-host-linux-x64
+          - runner: windows-latest
+            target: win32-x64
+            package: agent-host-win32-x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - id: release
+        name: Check whether this version is unpublished
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./packages/${{ matrix.package }}/package.json').version")
+          if npm view "@cognia/${{ matrix.package }}@$VERSION" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.release.outputs.publish == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.release.outputs.publish == 'true'
+        run: pnpm cli:build:binary
+      - if: steps.release.outputs.publish == 'true'
+        run: pnpm agent:host:package -- ${{ matrix.target }}
+      - if: steps.release.outputs.publish == 'true'
+        run: pnpm --dir packages/agent build
+      - if: steps.release.outputs.publish == 'true'
+        run: pnpm agent:host:smoke -- ${{ matrix.target }}
+      - if: steps.release.outputs.publish == 'true'
+        run: pnpm --dir packages/${{ matrix.package }} publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-agent-sdk:
+    name: Publish Agent SDK
+    needs: publish-agent-hosts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - id: release
+        name: Check whether this version is unpublished
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./packages/agent/package.json').version")
+          if npm view "@cognia/agent@$VERSION" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.release.outputs.publish == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.release.outputs.publish == 'true'
+        run: pnpm agent:sdk:smoke
+      - if: steps.release.outputs.publish == 'true'
+        run: pnpm --dir packages/agent pack:test
+      - if: steps.release.outputs.publish == 'true'
+        run: pnpm --dir packages/agent publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

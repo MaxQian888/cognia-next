@@ -4,6 +4,7 @@ import type {
   AgentEventEnvelope,
   CanonicalAgentEvent,
 } from "@cognia/agent-config-types/agent-execution"
+import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 
 import { legacyTranscriptPath, manifestPath, eventLogPath } from "./paths"
 import { createSessionStore, withoutReplayedGrants, type SessionStoreOptions } from "./store"
@@ -903,5 +904,87 @@ describe("withoutReplayedGrants", () => {
     const input = [{ requestId: "1", toolName: "a", decision: "allow" as const }]
     withoutReplayedGrants(input)
     expect(input[0]?.decision).toBe("allow")
+  })
+})
+
+describe("importCanonical / delete", () => {
+  it("round-trips a validated canonical session through the event log", () => {
+    const fsx = createMemoryFs()
+    const { store } = makeStore(fsx)
+    const imported = store.importCanonical(
+      {
+        header: {
+          canonicalVersion: 1,
+          canonicalSessionId: "source-1",
+          sourceRuntime: "external",
+          title: "Imported",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          turnCount: 2,
+          importFidelity: "structured",
+          sequenceDigest: computeSequenceDigest([
+            { turnId: "turn-1:user", role: "user", text: "hello" },
+            { turnId: "turn-1:assistant", role: "assistant", text: "hi" },
+          ]),
+        },
+        turns: [
+          { turnId: "turn-1:user", role: "user", text: "hello" },
+          { turnId: "turn-1:assistant", role: "assistant", text: "hi" },
+        ],
+      },
+      "imported-1",
+      { cwd: REPO }
+    )
+    expect(imported.ok).toBe(true)
+    if (!imported.ok) return
+    imported.value.close()
+
+    const canonical = store.toCanonicalSession("imported-1")
+    expect(canonical.ok).toBe(true)
+    if (!canonical.ok) return
+    expect(canonical.value.header).toMatchObject({
+      canonicalSessionId: "imported-1",
+      sourceRuntime: "external",
+      title: "Imported",
+      turnCount: 2,
+    })
+    expect(canonical.value.turns.map(({ role, text }) => ({ role, text }))).toEqual([
+      { role: "user", text: "hello" },
+      { role: "assistant", text: "hi" },
+    ])
+  })
+
+  it("rejects lossy system-turn imports and deletes only unlocked sessions", () => {
+    const fsx = createMemoryFs()
+    const { store } = makeStore(fsx)
+    const invalid = store.importCanonical(
+      {
+        header: {
+          canonicalVersion: 1,
+          canonicalSessionId: "source-1",
+          sourceRuntime: "external",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          turnCount: 1,
+          importFidelity: "structured",
+          sequenceDigest: computeSequenceDigest([
+            { turnId: "system-1", role: "system", text: "policy" },
+          ]),
+        },
+        turns: [{ turnId: "system-1", role: "system", text: "policy" }],
+      },
+      "imported-1"
+    )
+    expect(invalid.ok).toBe(false)
+    if (!invalid.ok) expect(invalid.error.code).toBe("unsupported_capability")
+
+    const held = store.create("held", { cwd: REPO })
+    expect(held.ok).toBe(true)
+    const blocked = store.delete("held")
+    expect(blocked.ok).toBe(false)
+    if (!blocked.ok) expect(blocked.error.code).toBe("session_locked")
+    if (held.ok) held.value.close()
+    expect(store.delete("held")).toEqual({ ok: true, value: { deleted: true } })
+    expect(store.open("held", { writable: false }).ok).toBe(false)
   })
 })

@@ -36,6 +36,7 @@ import type { AgentCapabilityId, AgentExecutionSendSpec } from "./agent-executio
 import type { ClaudeAgentSdkOptionsV1 } from "./claude-agent-sdk-options"
 
 export * from "./transcript"
+export * from "./working-set"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -2014,6 +2015,8 @@ export interface ChatSession {
   permissionMode?: SendOptions["permissionMode"]
   /** Free-form shared notes injected into every team member's transcript. */
   scratchpad?: string
+  /** Bounded, structured run context that survives turns and compaction. */
+  workingSet?: import("./working-set").SessionWorkingSetV1
   /**
    * SDK-issued conversation id, captured on the first event that carries a
    * `session_id`. Used to drive `SendOptions.resumeSessionId` so the

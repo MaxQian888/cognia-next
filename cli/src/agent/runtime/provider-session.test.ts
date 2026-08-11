@@ -5,7 +5,9 @@ import { createProviderSessionLease, providerSessionKey } from "./provider-sessi
 function fakeSession(log: string[], label: string): AgentSession {
   return {
     send: async () => ({ text: "", usage: undefined }),
-    close: () => log.push(`close:${label}`),
+    close: async () => {
+      log.push(`close:${label}`)
+    },
   } as unknown as AgentSession
 }
 
@@ -34,18 +36,20 @@ describe("createProviderSessionLease", () => {
     expect(log).toEqual([])
   })
 
-  it("reports which key is open", () => {
+  it("reports which key and session are open", () => {
     const lease = createProviderSessionLease()
     expect(lease.openKey).toBeNull()
-    lease.session("k1", () => fakeSession([], "a"))
+    expect(lease.current).toBeNull()
+    const session = lease.session("k1", () => fakeSession([], "a"))
     expect(lease.openKey).toBe("k1")
+    expect(lease.current).toBe(session)
   })
 
-  it("rebuilds — closing the old session — when the key changes", () => {
+  it("rebuilds — closing the old session — when the key changes", async () => {
     const log: string[] = []
     const lease = createProviderSessionLease()
     const first = lease.session("builtin", () => fakeSession(log, "a"))
-    const second = lease.session("codex", () => fakeSession(log, "b"))
+    const second = await lease.replace("codex", () => fakeSession(log, "b"))
 
     // A caller that switched backend must not keep talking to the old one.
     expect(second).not.toBe(first)
@@ -53,45 +57,45 @@ describe("createProviderSessionLease", () => {
     expect(lease.openKey).toBe("codex")
   })
 
-  it("closes the live session and forgets it", () => {
+  it("closes the live session and forgets it", async () => {
     const log: string[] = []
     const lease = createProviderSessionLease()
     lease.session("k1", () => fakeSession(log, "a"))
-    lease.close()
+    await lease.close()
 
     expect(log).toEqual(["close:a"])
     expect(lease.openKey).toBeNull()
   })
 
-  it("makes close idempotent, and a no-op before anything was built", () => {
+  it("makes close idempotent, and a no-op before anything was built", async () => {
     const log: string[] = []
     const lease = createProviderSessionLease()
-    lease.close()
+    await lease.close()
     lease.session("k1", () => fakeSession(log, "a"))
-    lease.close()
-    lease.close()
+    await lease.close()
+    await lease.close()
     expect(log).toEqual(["close:a"])
   })
 
-  it("builds a fresh session after a close", () => {
+  it("builds a fresh session after a close", async () => {
     const log: string[] = []
     const lease = createProviderSessionLease()
     const first = lease.session("k1", () => fakeSession(log, "a"))
-    lease.close()
+    await lease.close()
     const second = lease.session("k1", () => fakeSession(log, "b"))
     expect(second).not.toBe(first)
   })
 
-  it("does not strand a half-dead session when close() throws", () => {
+  it("does not strand a half-dead session when close() rejects", async () => {
     const lease = createProviderSessionLease()
     const exploding = {
-      close: () => {
+      close: async () => {
         throw new Error("sidecar already gone")
       },
     } as unknown as AgentSession
 
     lease.session("k1", () => exploding)
-    expect(() => lease.close()).toThrow("sidecar already gone")
+    await expect(lease.close()).rejects.toThrow("sidecar already gone")
     // The lease must have let go regardless: reusing a session whose close()
     // failed would hand the next turn a dead sidecar.
     expect(lease.openKey).toBeNull()

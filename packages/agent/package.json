@@ -1,37 +1,58 @@
 {
   "name": "@cognia/agent",
   "version": "0.1.0",
-  "description": "Embed the Cognia coding agent in a Node process. One persistent session runtime — the same one behind `cognia-agent run`, the TUI and the RPC server — with canonical streaming events, durable sessions and a structured result contract.",
+  "description": "Typed RPC-first TypeScript client for the Cognia agent runtime.",
+  "license": "AGPL-3.0-only",
   "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
-    "./rpc": {
-      "types": "./dist/rpc/index.d.ts",
-      "import": "./dist/rpc/index.js",
-      "default": "./dist/rpc/index.js"
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js",
+      "require": "./dist/protocol.cjs",
+      "default": "./dist/protocol.js"
     },
     "./package.json": "./package.json"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "README.md"
   ],
   "sideEffects": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
-    "build": "node ../../scripts/build/build-agent-sdk.mjs",
+    "build": "tsup",
     "test": "pnpm -w exec jest packages/agent",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pack:test": "node scripts/pack-test.mjs"
+  },
+  "dependencies": {
+    "valibot": "^1.4.2"
+  },
+  "optionalDependencies": {
+    "@cognia/agent-host-darwin-arm64": "0.1.0",
+    "@cognia/agent-host-linux-x64": "0.1.0",
+    "@cognia/agent-host-win32-x64": "0.1.0"
   },
   "engines": {
-    "node": ">=26.0.0"
-  }
+    "node": ">=20.19.0"
+  },
+  "keywords": [
+    "agent",
+    "ai",
+    "cognia",
+    "rpc",
+    "sdk"
+  ]
 }

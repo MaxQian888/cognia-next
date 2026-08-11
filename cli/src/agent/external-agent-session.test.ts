@@ -252,6 +252,23 @@ describe("createExternalAgentSession", () => {
     expect(state.cells.map((cell) => cell.kind)).toEqual(["user", "assistant"])
   })
 
+  it("blocks provider-visible PII before dispatching to an external agent", async () => {
+    const { manager } = fakeManager()
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "opencode-server" },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    await expect(
+      session.send("Email alice@example.com with the report", {
+        gate: async () => ({ decision: "allow" }),
+      })
+    ).rejects.toThrow("External agent input blocked by the outbound PII gate")
+    expect(manager.execute).not.toHaveBeenCalled()
+  })
+
   it("lazily materializes a preset, streams TUI actions, persists the turn, and reuses the ACP session", async () => {
     const { manager } = fakeManager()
     const transcript = memoryTranscript()

@@ -141,6 +141,15 @@ describe("discoverDispatchableAgents", () => {
     expect(agent.def.tools).toEqual(["Read", "Grep"])
   })
 
+  it("inherits the active provider for a provider-agnostic external agent", async () => {
+    const ccFile = path.join("/p", ".claude", "agents", "analyze-rust-core.md")
+    const markdown = `---\nname: analyze-rust-core\ndescription: Analyze the Rust core\ntools: Read, Grep\n---\nInspect the Rust backend.`
+    const [agent] = await discoverDispatchableAgents(["/p"], fakeFs({ [ccFile]: markdown }))
+
+    expect(agent.def.provider).toBeUndefined()
+    expect(agent.def.model).toBeUndefined()
+  })
+
   it("maps a Codex agent to the openai provider", async () => {
     const codexFile = path.join("/p", ".codex", "agents", "codex-refactor.md")
     const [agent] = await discoverDispatchableAgents(

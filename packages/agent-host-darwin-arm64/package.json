@@ -1,0 +1,29 @@
+{
+  "name": "@cognia/agent-host-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Cognia Agent SDK host for macOS arm64.",
+  "license": "AGPL-3.0-only",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "bin": {
+    "cognia-agent": "bin/cognia-agent"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "scripts": {
+    "prepack": "node ../../scripts/build/verify-agent-host-package.mjs darwin-arm64"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

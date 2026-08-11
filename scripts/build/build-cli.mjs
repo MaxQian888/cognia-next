@@ -76,6 +76,19 @@ const jsonDefaultOnlyPlugin = {
   },
 }
 
+// The RPC protocol is imported from the standalone @cognia/agent source so the
+// client and host share one schema map. Unlike the app's ordinary npm runtime
+// dependencies, its validator belongs to the host wire contract and must remain
+// available after the CLI bundle is copied into a platform host package.
+const bundleAgentProtocolDependenciesPlugin = {
+  name: "bundle-agent-protocol-dependencies",
+  setup(build) {
+    build.onResolve({ filter: /^valibot$/ }, () => ({
+      path: path.join(root, "packages/agent/node_modules/valibot/dist/index.mjs"),
+    }))
+  },
+}
+
 await esbuild.build({
   entryPoints: [entry],
   outdir,
@@ -105,7 +118,12 @@ await esbuild.build({
     ".woff": "empty",
     ".woff2": "empty",
   },
-  plugins: [createCliExternalAgentAliasPlugin(root), stubNextPlugin, jsonDefaultOnlyPlugin],
+  plugins: [
+    createCliExternalAgentAliasPlugin(root),
+    bundleAgentProtocolDependenciesPlugin,
+    stubNextPlugin,
+    jsonDefaultOnlyPlugin,
+  ],
   logLevel: "info",
 })
 
