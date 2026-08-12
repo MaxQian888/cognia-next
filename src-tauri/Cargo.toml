@@ -228,7 +228,7 @@ portable-pty = "0.8"
 # Font Access API).
 fontdb = "0.18"
 regex = "1"
-toml_edit = { version = "0.22", features = ["serde"] }
+toml_edit = { version = "0.25", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
 opentelemetry = { version = "0.32", optional = true, features = ["trace", "metrics"] }
 opentelemetry_sdk = { version = "0.32", optional = true, features = ["trace", "metrics", "rt-tokio"] }
