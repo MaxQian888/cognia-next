@@ -19181,6 +19181,145 @@
     "xai": "xAI (Grok)",
     "xaiDescription": "Grok 3, Grok 3 Mini"
   },
+  "publicStatus": {
+    "activeIncidents": {
+      "empty": "No active incidents",
+      "title": "Active incident"
+    },
+    "availability": {
+      "dayLabel": "{component} on {date}: {status}, {uptime}% uptime",
+      "from": "90 days ago",
+      "legend": "Availability history legend",
+      "today": "Today",
+      "uptime": "{value}% uptime"
+    },
+    "brand": "Cognia",
+    "brandMark": "C",
+    "components": {
+      "agentRuntime": {
+        "description": "Agent execution, tool orchestration, and managed workloads.",
+        "name": "Agent Runtime"
+      },
+      "artifactStorage": {
+        "description": "Durable artifacts, snapshots, and generated files.",
+        "name": "Artifact Storage"
+      },
+      "controlPlane": {
+        "description": "Authentication, configuration, and fleet coordination.",
+        "name": "Control Plane"
+      },
+      "realtimeGateway": {
+        "description": "Realtime sessions, event delivery, and presence.",
+        "name": "Realtime Gateway"
+      },
+      "webApp": {
+        "description": "The Cognia web experience and static application delivery.",
+        "name": "Web App"
+      }
+    },
+    "details": {
+      "hide": "Hide details for {component}",
+      "lastChecked": "Last checked {date}",
+      "latency": "24-hour response time",
+      "latencyValue": "{value} ms",
+      "regions": "Regional health",
+      "show": "View details for {component}"
+    },
+    "footer": {
+      "description": "Get a clear signal when Cognia services change state.",
+      "eyebrow": "Stay informed",
+      "legal": "This prototype displays deterministic preview data and does not report live infrastructure.",
+      "title": "Know before your workflows are affected."
+    },
+    "hero": {
+      "description": "A transparent view of Cognia Cloud availability, service performance, and incident response.",
+      "eyebrow": "Current platform health",
+      "lastUpdated": "Last updated {date}",
+      "title": "Infrastructure status, without the noise.",
+      "uptimeLabel": "90-day platform uptime",
+      "uptimeValue": "{value}%"
+    },
+    "history": {
+      "duration": "{minutes} min",
+      "title": "Incident history"
+    },
+    "incidentStates": {
+      "identified": "Identified",
+      "investigating": "Investigating",
+      "monitoring": "Monitoring",
+      "resolved": "Resolved"
+    },
+    "incidents": {
+      "apacRuntimeLatency": {
+        "description": "Agent jobs in Asia Pacific may take longer than usual to start. Running jobs are not affected.",
+        "title": "Elevated job start latency in APAC",
+        "updates": {
+          "identified": "A capacity imbalance in the APAC scheduler pool was identified. Traffic has been redistributed.",
+          "investigating": "We are investigating elevated queue times for new Agent Runtime jobs in Asia Pacific.",
+          "monitoring": "Queue latency has returned to the expected range. We are monitoring the recovery."
+        }
+      },
+      "realtimeDisconnects": {
+        "description": "Some realtime sessions briefly reconnected after an edge routing change.",
+        "title": "Intermittent realtime disconnects"
+      },
+      "storageReadErrors": {
+        "description": "A subset of artifact reads returned errors while storage traffic was rerouted.",
+        "title": "Elevated artifact read errors"
+      }
+    },
+    "maintenance": {
+      "controlPlaneDatabase": {
+        "description": "A rolling database upgrade is scheduled. Existing sessions will remain connected.",
+        "title": "Control plane database maintenance"
+      },
+      "title": "Scheduled maintenance",
+      "window": "{start}–{end}"
+    },
+    "metadata": {
+      "description": "Current availability, service performance, and incident history for Cognia.",
+      "title": "Cognia System Status"
+    },
+    "nav": {
+      "history": "Incident history",
+      "services": "Service health",
+      "subscribe": "Subscribe to updates",
+      "systemStatus": "System status"
+    },
+    "previewData": "Preview data",
+    "regions": {
+      "asiaPacific": "Asia Pacific",
+      "europe": "Europe",
+      "northAmerica": "North America"
+    },
+    "serviceHealth": {
+      "description": "Availability and latency for the services that power Cognia Cloud.",
+      "title": "Service health"
+    },
+    "statuses": {
+      "degraded": "Degraded",
+      "maintenance": "Under maintenance",
+      "major_outage": "Major outage",
+      "operational": "Operational",
+      "overall": {
+        "degraded": "Partially degraded service",
+        "maintenance": "Service under maintenance",
+        "major_outage": "Major system outage",
+        "operational": "All systems operational",
+        "partial_outage": "Partial system outage"
+      },
+      "partial_outage": "Partial outage"
+    },
+    "subscribe": {
+      "cancel": "Close",
+      "description": "Notification delivery is not connected in this frontend prototype.",
+      "email": "Email address",
+      "emailPlaceholder": "operator@example.com",
+      "preview": "Preview subscription",
+      "result": "Preview only — no subscription was created.",
+      "title": "Subscribe to status updates"
+    }
+  },
   "radar": {
     "panel": {
       "empty": "No report yet. Run the radar to analyze your recent info diet.",

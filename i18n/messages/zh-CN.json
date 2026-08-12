@@ -19181,6 +19181,145 @@
     "xai": "xAI (Grok)",
     "xaiDescription": "Grok 3、Grok 3 Mini"
   },
+  "publicStatus": {
+    "activeIncidents": {
+      "empty": "当前没有事故",
+      "title": "当前事故"
+    },
+    "availability": {
+      "dayLabel": "{component} 在 {date}：{status}，可用率 {uptime}%",
+      "from": "90 天前",
+      "legend": "可用性历史图例",
+      "today": "今天",
+      "uptime": "可用率 {value}%"
+    },
+    "brand": "Cognia",
+    "brandMark": "C",
+    "components": {
+      "agentRuntime": {
+        "description": "智能体执行、工具编排和托管工作负载。",
+        "name": "智能体运行时"
+      },
+      "artifactStorage": {
+        "description": "持久化产物、快照和生成文件。",
+        "name": "产物存储"
+      },
+      "controlPlane": {
+        "description": "身份认证、配置和服务集群协调。",
+        "name": "控制平面"
+      },
+      "realtimeGateway": {
+        "description": "实时会话、事件投递和在线状态。",
+        "name": "实时网关"
+      },
+      "webApp": {
+        "description": "Cognia Web 体验和静态应用分发。",
+        "name": "Web 应用"
+      }
+    },
+    "details": {
+      "hide": "收起 {component} 的详情",
+      "lastChecked": "上次检查于 {date}",
+      "latency": "24 小时响应时间",
+      "latencyValue": "{value} 毫秒",
+      "regions": "区域健康状态",
+      "show": "查看 {component} 的详情"
+    },
+    "footer": {
+      "description": "当 Cognia 服务状态发生变化时，及时获得清晰通知。",
+      "eyebrow": "及时掌握动态",
+      "legal": "此原型展示的是确定性预览数据，并不代表实时基础设施状态。",
+      "title": "在工作流受到影响前了解情况。"
+    },
+    "hero": {
+      "description": "透明呈现 Cognia Cloud 的可用性、服务性能和事故响应进展。",
+      "eyebrow": "当前平台健康状态",
+      "lastUpdated": "更新于 {date}",
+      "title": "清晰呈现基础设施状态。",
+      "uptimeLabel": "90 天平台可用率",
+      "uptimeValue": "{value}%"
+    },
+    "history": {
+      "duration": "{minutes} 分钟",
+      "title": "事故历史"
+    },
+    "incidentStates": {
+      "identified": "已定位",
+      "investigating": "调查中",
+      "monitoring": "监控中",
+      "resolved": "已解决"
+    },
+    "incidents": {
+      "apacRuntimeLatency": {
+        "description": "亚太地区的智能体任务启动时间可能比平时更长，运行中的任务不受影响。",
+        "title": "亚太地区任务启动延迟升高",
+        "updates": {
+          "identified": "已定位到亚太调度池容量不均衡，流量现已重新分配。",
+          "investigating": "我们正在调查亚太地区新智能体运行时任务的排队时间升高问题。",
+          "monitoring": "队列延迟已恢复到预期范围，我们正在持续监控恢复情况。"
+        }
+      },
+      "realtimeDisconnects": {
+        "description": "边缘路由调整后，部分实时会话发生了短暂重连。",
+        "title": "实时连接间歇性中断"
+      },
+      "storageReadErrors": {
+        "description": "存储流量重新路由期间，部分产物读取请求返回错误。",
+        "title": "产物读取错误率升高"
+      }
+    },
+    "maintenance": {
+      "controlPlaneDatabase": {
+        "description": "计划执行滚动数据库升级，现有会话将保持连接。",
+        "title": "控制平面数据库维护"
+      },
+      "title": "计划维护",
+      "window": "{start}–{end}"
+    },
+    "metadata": {
+      "description": "查看 Cognia 当前可用性、服务性能和事故历史。",
+      "title": "Cognia 系统状态"
+    },
+    "nav": {
+      "history": "事故历史",
+      "services": "服务健康状态",
+      "subscribe": "订阅状态更新",
+      "systemStatus": "系统状态"
+    },
+    "previewData": "预览数据",
+    "regions": {
+      "asiaPacific": "亚太地区",
+      "europe": "欧洲",
+      "northAmerica": "北美"
+    },
+    "serviceHealth": {
+      "description": "查看支撑 Cognia Cloud 的各项服务的可用性和延迟。",
+      "title": "服务健康状态"
+    },
+    "statuses": {
+      "degraded": "性能下降",
+      "maintenance": "维护中",
+      "major_outage": "重大中断",
+      "operational": "运行正常",
+      "overall": {
+        "degraded": "部分服务性能下降",
+        "maintenance": "服务维护中",
+        "major_outage": "系统重大中断",
+        "operational": "所有系统运行正常",
+        "partial_outage": "系统部分中断"
+      },
+      "partial_outage": "部分中断"
+    },
+    "subscribe": {
+      "cancel": "关闭",
+      "description": "此页面是前端原型，尚未接入通知投递。",
+      "email": "邮箱地址",
+      "emailPlaceholder": "operator@example.com",
+      "preview": "预览订阅",
+      "result": "仅供预览——没有创建任何订阅。",
+      "title": "订阅状态更新"
+    }
+  },
   "radar": {
     "panel": {
       "empty": "还没有报告。运行雷达以分析你近期的信息饮食。",
