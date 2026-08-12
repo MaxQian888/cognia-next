@@ -287,7 +287,7 @@ jobs:
           cache: "pnpm"
 
       - name: Cache Next.js build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .next/cache
@@ -349,7 +349,7 @@ jobs:
       # changes the compiled output, so the two builds must not share
       # incremental state.
       - name: Cache Next.js build (E2E)
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .next/cache
@@ -409,7 +409,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
