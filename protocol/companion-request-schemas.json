@@ -846,6 +846,329 @@
     "codeserver_supported": {
       "type": "object"
     },
+    "codex_app_inventory": {
+      "type": "object",
+      "required": ["request"],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": ["cwd"],
+          "properties": {
+            "cwd": {
+              "type": "string",
+              "minLength": 1
+            },
+            "forceReload": {
+              "type": "boolean"
+            },
+            "threadId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "codex_app_runtime_status": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "codex_app_task_create": {
+      "type": "object",
+      "required": ["request"],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": ["cwd", "input"],
+          "properties": {
+            "cwd": {
+              "type": "string",
+              "minLength": 1
+            },
+            "input": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "image",
+                      "localImage",
+                      "audio",
+                      "localAudio",
+                      "skill",
+                      "mention"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string",
+                    "enum": ["auto", "low", "high", "original"]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "browserUrl": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "codex_app_task_interrupt": {
+      "type": "object",
+      "required": ["request"],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": ["threadId", "turnId"],
+          "properties": {
+            "threadId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "turnId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "codex_app_task_list": {
+      "type": "object",
+      "required": ["request"],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": ["cwd"],
+          "properties": {
+            "cursor": {
+              "type": "string",
+              "minLength": 1
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "searchTerm": {
+              "type": "string",
+              "minLength": 1
+            },
+            "cwd": {
+              "type": "string",
+              "minLength": 1
+            },
+            "archived": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "codex_app_task_open": {
+      "type": "object",
+      "required": ["threadId"],
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codex_app_task_read": {
+      "type": "object",
+      "required": ["request"],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": ["threadId"],
+          "properties": {
+            "threadId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "includeTurns": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "codex_app_task_send": {
+      "type": "object",
+      "required": ["request"],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": ["threadId", "input"],
+          "properties": {
+            "threadId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "input": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": ["type", "text"],
+                    "properties": {
+                      "type": {
+                        "const": "text"
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "url"],
+                    "properties": {
+                      "type": {
+                        "const": "image"
+                      },
+                      "url": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "detail": {
+                        "type": "string",
+                        "enum": ["auto", "low", "high", "original"]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "path"],
+                    "properties": {
+                      "type": {
+                        "const": "localImage"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "detail": {
+                        "type": "string",
+                        "enum": ["auto", "low", "high", "original"]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "url"],
+                    "properties": {
+                      "type": {
+                        "const": "audio"
+                      },
+                      "url": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "path"],
+                    "properties": {
+                      "type": {
+                        "const": "localAudio"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "name", "path"],
+                    "properties": {
+                      "type": {
+                        "const": "skill"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "name", "path"],
+                    "properties": {
+                      "type": {
+                        "const": "mention"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "contextLabel": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "companion_can_control": {
       "type": "object",
       "description": "Empty body."

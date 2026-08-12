@@ -113,6 +113,11 @@
       "category": "development"
     },
     {
+      "id": "codex",
+      "title": "Codex",
+      "category": "agents"
+    },
+    {
       "id": "companion",
       "title": "Companion",
       "category": "system"
@@ -4401,6 +4406,839 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "boolean"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codex_app_inventory",
+      "category": "agents",
+      "resource": "codex",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "codex_app_inventory (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "object",
+            "required": [
+              "cwd"
+            ],
+            "properties": {
+              "cwd": {
+                "type": "string",
+                "minLength": 1
+              },
+              "forceReload": {
+                "type": "boolean"
+              },
+              "threadId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "plugins",
+          "skills",
+          "mcpServers"
+        ],
+        "properties": {
+          "plugins": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "skills": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "mcpServers": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codex_app_runtime_status",
+      "category": "agents",
+      "resource": "codex",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "codex_app_runtime_status (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ready",
+          "mode"
+        ],
+        "properties": {
+          "ready": {
+            "type": "boolean"
+          },
+          "mode": {
+            "const": "normal-app-cdp-rollout-mirror"
+          },
+          "restartSupported": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codex_app_task_create",
+      "category": "agents",
+      "resource": "codex",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "codex_app_task_create (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "object",
+            "required": [
+              "cwd",
+              "input"
+            ],
+            "properties": {
+              "cwd": {
+                "type": "string",
+                "minLength": 1
+              },
+              "input": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "type"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "image",
+                        "localImage",
+                        "audio",
+                        "localAudio",
+                        "skill",
+                        "mention"
+                      ]
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "enum": [
+                        "auto",
+                        "low",
+                        "high",
+                        "original"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "browserUrl": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "thread"
+        ],
+        "properties": {
+          "thread": {
+            "type": "object",
+            "required": [
+              "id",
+              "cwd"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "parentThreadId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "preview": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "integer"
+              },
+              "status": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "turns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codex_app_task_interrupt",
+      "category": "agents",
+      "resource": "codex",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "codex_app_task_interrupt (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "object",
+            "required": [
+              "threadId",
+              "turnId"
+            ],
+            "properties": {
+              "threadId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "turnId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "threadId",
+          "interrupted"
+        ],
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interrupted": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codex_app_task_list",
+      "category": "agents",
+      "resource": "codex",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "codex_app_task_list (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "object",
+            "required": [
+              "cwd"
+            ],
+            "properties": {
+              "cursor": {
+                "type": "string",
+                "minLength": 1
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200
+              },
+              "searchTerm": {
+                "type": "string",
+                "minLength": 1
+              },
+              "cwd": {
+                "type": "string",
+                "minLength": 1
+              },
+              "archived": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "cwd"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "parentThreadId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "preview": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "cwd": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "integer"
+                },
+                "updatedAt": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "turns": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codex_app_task_open",
+      "category": "agents",
+      "resource": "codex",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "codex_app_task_open (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "threadId"
+        ],
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "threadId",
+          "deepLink"
+        ],
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deepLink": {
+            "type": "string",
+            "pattern": "^codex://threads/"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codex_app_task_read",
+      "category": "agents",
+      "resource": "codex",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "codex_app_task_read (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "object",
+            "required": [
+              "threadId"
+            ],
+            "properties": {
+              "threadId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "includeTurns": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "thread"
+        ],
+        "properties": {
+          "thread": {
+            "type": "object",
+            "required": [
+              "id",
+              "cwd"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "parentThreadId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "preview": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "integer"
+              },
+              "status": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "turns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codex_app_task_send",
+      "category": "agents",
+      "resource": "codex",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "codex_app_task_send (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "object",
+            "required": [
+              "threadId",
+              "input"
+            ],
+            "properties": {
+              "threadId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "input": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "text"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "text"
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "url"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "image"
+                        },
+                        "url": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "detail": {
+                          "type": "string",
+                          "enum": [
+                            "auto",
+                            "low",
+                            "high",
+                            "original"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "path"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "localImage"
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "detail": {
+                          "type": "string",
+                          "enum": [
+                            "auto",
+                            "low",
+                            "high",
+                            "original"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "url"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "audio"
+                        },
+                        "url": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "path"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "localAudio"
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "name",
+                        "path"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "skill"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "name",
+                        "path"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "mention"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "contextLabel": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "turn"
+        ],
+        "properties": {
+          "turn": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -22228,5 +23066,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "3dedfc4a5ba354366de4f1cb66f7aa1a830c249d05255f3aa163b05d078c4cde"
+  "catalogHash": "d6a9b1421313c4339bc790ab5b1cccd5486811186750d8970774dc884f0bb355"
 }

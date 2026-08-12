@@ -63,6 +63,113 @@
     "IntegerResult": {
       "type": "integer"
     },
+    "CodexAppRuntimeStatus": {
+      "type": "object",
+      "required": ["ready", "mode"],
+      "properties": {
+        "ready": { "type": "boolean" },
+        "mode": { "const": "normal-app-cdp-rollout-mirror" },
+        "restartSupported": { "type": "boolean" },
+        "error": { "type": "string" },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "CodexAppThread": {
+      "type": "object",
+      "required": ["id", "cwd"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "sessionId": { "type": "string" },
+        "parentThreadId": { "type": ["string", "null"] },
+        "preview": { "type": ["string", "null"] },
+        "name": { "type": ["string", "null"] },
+        "cwd": { "type": "string" },
+        "createdAt": { "type": "integer" },
+        "updatedAt": { "type": "integer" },
+        "status": { "type": "object", "additionalProperties": true },
+        "turns": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "additionalProperties": true
+    },
+    "CodexAppThreadEnvelope": {
+      "type": "object",
+      "required": ["thread"],
+      "properties": {
+        "thread": { "$ref": "#/$defs/CodexAppThread" }
+      },
+      "additionalProperties": false
+    },
+    "CodexAppThreadStartEnvelope": {
+      "type": "object",
+      "required": ["thread"],
+      "properties": {
+        "thread": { "$ref": "#/$defs/CodexAppThread" }
+      },
+      "additionalProperties": true
+    },
+    "CodexAppTaskPage": {
+      "type": "object",
+      "required": ["data"],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CodexAppThread" }
+        },
+        "nextCursor": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "CodexAppTurnEnvelope": {
+      "type": "object",
+      "required": ["turn"],
+      "properties": {
+        "turn": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "format": "uuid" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "CodexAppTaskOpen": {
+      "type": "object",
+      "required": ["threadId", "deepLink"],
+      "properties": {
+        "threadId": { "type": "string", "format": "uuid" },
+        "deepLink": { "type": "string", "pattern": "^codex://threads/" }
+      },
+      "additionalProperties": false
+    },
+    "CodexAppTaskInterrupt": {
+      "type": "object",
+      "required": ["threadId", "interrupted"],
+      "properties": {
+        "threadId": { "type": "string", "format": "uuid" },
+        "interrupted": { "type": "boolean" },
+        "reason": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "CodexAppInventory": {
+      "type": "object",
+      "required": ["plugins", "skills", "mcpServers"],
+      "properties": {
+        "plugins": { "type": "object", "additionalProperties": true },
+        "skills": { "type": "object", "additionalProperties": true },
+        "mcpServers": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
     "McpOAuthAuthResult": {
       "type": "object",
       "required": ["ok", "status", "message"],
@@ -473,6 +580,30 @@
     },
     "claude_tool_result_decision": {
       "$ref": "#/$defs/NullResult"
+    },
+    "codex_app_inventory": {
+      "$ref": "#/$defs/CodexAppInventory"
+    },
+    "codex_app_runtime_status": {
+      "$ref": "#/$defs/CodexAppRuntimeStatus"
+    },
+    "codex_app_task_create": {
+      "$ref": "#/$defs/CodexAppThreadStartEnvelope"
+    },
+    "codex_app_task_interrupt": {
+      "$ref": "#/$defs/CodexAppTaskInterrupt"
+    },
+    "codex_app_task_list": {
+      "$ref": "#/$defs/CodexAppTaskPage"
+    },
+    "codex_app_task_open": {
+      "$ref": "#/$defs/CodexAppTaskOpen"
+    },
+    "codex_app_task_read": {
+      "$ref": "#/$defs/CodexAppThreadEnvelope"
+    },
+    "codex_app_task_send": {
+      "$ref": "#/$defs/CodexAppTurnEnvelope"
     },
     "codeserver_activate_proxy": {
       "$ref": "#/$defs/LegacyResult"

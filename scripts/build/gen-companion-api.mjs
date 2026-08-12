@@ -26,6 +26,7 @@ const ZOD_REQUEST_SCHEMA_PATH = "scripts/build/companion-request-schema-contract
 const RPC_SOURCE_PATH = "src-tauri/src/companion_api/rpc.rs"
 const RPC_DISPATCH_SOURCE_PATHS = [
   "src-tauri/src/companion_api/rpc/chat.rs",
+  "src-tauri/src/companion_api/rpc/codex_app.rs",
   "src-tauri/src/companion_api/rpc/native_tools.rs",
   "src-tauri/src/companion_api/rpc/data_sync.rs",
   "src-tauri/src/companion_api/rpc/service_plane.rs",
@@ -268,7 +269,7 @@ const HOST_CATEGORIES = [
     description: "Agent runtimes, Claude sessions, teams, fleet controls, and goals.",
     skill: "cognia-host-agents",
     pattern:
-      /^(agent_|claude_|external_agent_|spawn_external_agent$|send_to_external_agent$|kill_external_agent$|get_external_agent_status$|fleet_|team_|goal_)/,
+      /^(agent_|claude_|codex_app_|external_agent_|spawn_external_agent$|send_to_external_agent$|kill_external_agent$|get_external_agent_status$|fleet_|team_|goal_)/,
   },
   {
     id: "tasks",
