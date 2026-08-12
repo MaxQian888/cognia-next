@@ -39,6 +39,7 @@
 //! their idempotency is structural (same args → same result).
 
 mod chat;
+mod codex_app;
 mod data_sync;
 mod diagnostics;
 mod filesystem;
@@ -316,6 +317,14 @@ const KNOWN_COMMANDS: &[&str] = &[
     "claude_has_oauth_bearer",
     "claude_set_provider_env",
     "claude_restart_sidecar",
+    "codex_app_runtime_status",
+    "codex_app_task_list",
+    "codex_app_task_read",
+    "codex_app_task_create",
+    "codex_app_task_send",
+    "codex_app_task_interrupt",
+    "codex_app_task_open",
+    "codex_app_inventory",
     "skills_load_registry",
     "skills_scan_native",
     "skills_install_native",
@@ -902,6 +911,10 @@ pub fn known_commands() -> &'static [&'static str] {
 /// They are cheap to re-run and structurally idempotent.
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
+    "codex_app_runtime_status",
+    "codex_app_task_list",
+    "codex_app_task_read",
+    "codex_app_inventory",
     "browser_capability",
     "browser_runtime_status",
     "browser_session_get",
@@ -1099,6 +1112,10 @@ const CONTROL_COMMANDS: &[&str] = &[
     "claude_plugin_tool_response",
     "claude_tool_result_decision",
     "claude_protocol_adapter_message",
+    "codex_app_task_create",
+    "codex_app_task_send",
+    "codex_app_task_interrupt",
+    "codex_app_task_open",
     "skills_bundle_upload_open",
     "skills_bundle_upload_write",
     "skills_bundle_upload_commit",
@@ -2564,6 +2581,10 @@ pub(super) async fn dispatch(
 
     if chat::COMMANDS.contains(&name) {
         return chat::dispatch(name, args, state, host, device_id, account_id, scope).await;
+    }
+
+    if codex_app::COMMANDS.contains(&name) {
+        return codex_app::dispatch(name, args, state, host, device_id, account_id, scope).await;
     }
 
     if native_tools::COMMANDS.contains(&name) {

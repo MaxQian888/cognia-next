@@ -23,6 +23,12 @@ Pure UI/logic changes verified in `pnpm dev` web mode do NOT need this.
 
 ## Procedure (~5 min)
 
+For an agent-driven or repeatable flow, use `$tauri-agent-debug` instead of
+manual clicking; it supplies authenticated launch, semantic actions, console /
+network / native-log evidence, screenshots, and tracked shutdown in the real
+Tauri shell. Keep this manual procedure for seams the semantic bridge cannot
+exercise, such as tray menus and OS-native drag behavior.
+
 1. Start `rtk pnpm tauri dev` in a dedicated terminal and wait for the window.
    (`predev` scripts run automatically; don't bypass them.)
 2. **Boot check**: main window renders past the splash; DevTools console has

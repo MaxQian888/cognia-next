@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tauri Agent Debug"
+  short_description: "Drive and diagnose Cognia in its real Tauri shell"
+  default_prompt: "Use $tauri-agent-debug to reproduce and diagnose this behavior in Cognia’s real Tauri shell."

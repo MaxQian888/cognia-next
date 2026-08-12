@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cognia Codex relay PoC</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: #090d12;
+        color: #edf4ff;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        width: min(1080px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 32px 0;
+      }
+      h1 {
+        margin: 0 0 8px;
+      }
+      p {
+        color: #9dacbf;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .card {
+        border: 1px solid #263241;
+        background: #111821;
+        border-radius: 16px;
+        padding: 18px;
+      }
+      textarea,
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #344357;
+        background: #080c11;
+        color: inherit;
+        border-radius: 10px;
+        padding: 11px;
+        margin: 8px 0;
+      }
+      textarea {
+        min-height: 120px;
+      }
+      button {
+        border: 1px solid #41536b;
+        background: #1a2736;
+        color: inherit;
+        border-radius: 10px;
+        padding: 9px 13px;
+        margin: 4px 6px 4px 0;
+        cursor: pointer;
+      }
+      button.primary {
+        background: #dceaff;
+        color: #08111d;
+      }
+      pre {
+        max-height: 620px;
+        overflow: auto;
+        white-space: pre-wrap;
+        font-size: 12px;
+      }
+      .stack {
+        display: grid;
+        gap: 8px;
+      }
+      .muted {
+        color: #8494a8;
+        font-size: 13px;
+      }
+      .ok {
+        color: #79e3a3;
+      }
+      .warning {
+        color: #ffcb7c;
+      }
+      @media (max-width: 800px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Cognia → one Codex App runtime</h1>
+      <p>
+        Disposable relay operator. Approvals remain desktop-owned; this page can inject only
+        allowlisted task methods.
+      </p>
+      <div class="grid">
+        <section class="card">
+          <h2>Control</h2>
+          <label>Relay token <input id="token" type="password" autocomplete="off" /></label>
+          <button id="connect">Connect</button>
+          <p id="connection" class="warning">Not connected</p>
+          <h3>App-owned CDP bootstrap</h3>
+          <p class="muted">
+            Opens a native Codex task and Browser sidebar, then submits through the App renderer.
+          </p>
+          <label>
+            Browser URL
+            <input id="bootstrap-url" value="http://127.0.0.1:4318/browser-target?code=MANUAL" />
+          </label>
+          <label>
+            App prompt
+            <textarea id="bootstrap-prompt">
+Inspect the page already open in the Codex Browser sidebar and summarize its visible content.</textarea>
+          </label>
+          <button id="bootstrap" class="primary">Create App-owned task</button>
+          <button id="bootstrap-browser">Run App-owned Browser verification</button>
+          <h3>Bootstrap result</h3>
+          <pre id="bootstrap-result">—</pre>
+
+          <h3>Direct relay controls</h3>
+          <textarea id="prompt">
+Inspect the current workspace and reply with a concise status. Do not change files.</textarea>
+          <button id="send">Send directly to active task</button>
+          <button id="browser">Run legacy injected Browser smoke</button>
+          <button id="interrupt">Interrupt active turn</button>
+          <h3>Legacy Browser result</h3>
+          <pre id="browser-result">—</pre>
+        </section>
+        <section class="card">
+          <h2>Mirrored state</h2>
+          <pre id="state">—</pre>
+          <h3>Live events</h3>
+          <pre id="events">—</pre>
+        </section>
+      </div>
+    </main>
+    <script>
+      const tokenInput = document.querySelector("#token")
+      const stateOutput = document.querySelector("#state")
+      const connection = document.querySelector("#connection")
+      const browserResult = document.querySelector("#browser-result")
+      const bootstrapResult = document.querySelector("#bootstrap-result")
+      const bootstrapUrlInput = document.querySelector("#bootstrap-url")
+      const eventsOutput = document.querySelector("#events")
+      let eventSource = null
+      const liveEvents = []
+      const fragment = new URLSearchParams(location.hash.slice(1))
+      tokenInput.value = fragment.get("token") ?? ""
+
+      async function api(path, body) {
+        const response = await fetch(path, {
+          method: body === undefined ? "GET" : "POST",
+          headers: {
+            authorization: `Bearer ${tokenInput.value}`,
+            ...(body === undefined ? {} : { "content-type": "application/json" }),
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        })
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`)
+        return payload
+      }
+
+      async function refresh() {
+        try {
+          const state = await api("/api/state")
+          stateOutput.textContent = JSON.stringify(state, null, 2)
+          connection.textContent = state.initialized
+            ? `Ready · active task ${state.activeThreadId ?? "none"} · CDP ${state.cdp?.enabled ? `127.0.0.1:${state.cdp.port}` : "disabled"}`
+            : `Relay phase: ${state.phase}`
+          connection.className = state.initialized ? "ok" : "warning"
+          if (state.browserSmoke)
+            browserResult.textContent = JSON.stringify(state.browserSmoke, null, 2)
+          if (state.latestBootstrap)
+            bootstrapResult.textContent = JSON.stringify(state.latestBootstrap, null, 2)
+          if (bootstrapUrlInput.value.includes("code=MANUAL")) {
+            bootstrapUrlInput.value = `${location.origin}/browser-target?code=MANUAL`
+          }
+        } catch (error) {
+          connection.textContent = error.message
+          connection.className = "warning"
+        }
+      }
+
+      function connectEvents() {
+        eventSource?.close()
+        eventSource = new EventSource(`/api/events?token=${encodeURIComponent(tokenInput.value)}`)
+        eventSource.addEventListener("snapshot", (event) => {
+          const snapshot = JSON.parse(event.data)
+          liveEvents.splice(0, liveEvents.length, ...snapshot.slice(-50))
+          eventsOutput.textContent = JSON.stringify(liveEvents, null, 2)
+        })
+        eventSource.addEventListener("relay", (event) => {
+          liveEvents.push(JSON.parse(event.data))
+          if (liveEvents.length > 100) liveEvents.shift()
+          eventsOutput.textContent = JSON.stringify(liveEvents, null, 2)
+          refresh()
+        })
+      }
+
+      document.querySelector("#connect").onclick = () => {
+        connectEvents()
+        refresh()
+      }
+      document.querySelector("#bootstrap").onclick = async () => {
+        try {
+          bootstrapResult.textContent = JSON.stringify(
+            await api("/api/bootstrap-task", {
+              prompt: document.querySelector("#bootstrap-prompt").value,
+              browserUrl: bootstrapUrlInput.value,
+            }),
+            null,
+            2
+          )
+          await refresh()
+        } catch (error) {
+          bootstrapResult.textContent = error.message
+        }
+      }
+      document.querySelector("#bootstrap-browser").onclick = async () => {
+        try {
+          bootstrapResult.textContent = JSON.stringify(
+            await api("/api/bootstrap-task", { verifyBrowser: true }),
+            null,
+            2
+          )
+          await refresh()
+        } catch (error) {
+          bootstrapResult.textContent = error.message
+        }
+      }
+      document.querySelector("#send").onclick = async () => {
+        await api("/api/turn", { prompt: document.querySelector("#prompt").value })
+        await refresh()
+      }
+      document.querySelector("#browser").onclick = async () => {
+        browserResult.textContent = JSON.stringify(await api("/api/browser-smoke", {}), null, 2)
+        await refresh()
+      }
+      document.querySelector("#interrupt").onclick = async () => {
+        const state = await api("/api/state")
+        await api("/api/request", {
+          method: "turn/interrupt",
+          params: { threadId: state.activeThreadId, turnId: state.activeTurnId },
+        })
+        await refresh()
+      }
+      setInterval(() => tokenInput.value && refresh(), 1500)
+      if (tokenInput.value) {
+        connectEvents()
+        refresh()
+      }
+    </script>
+  </body>
+</html>

@@ -10,7 +10,9 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 use tempfile::NamedTempFile;
+use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::process::Command;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
@@ -24,6 +26,8 @@ const RPC_TIMEOUT: Duration = Duration::from_secs(15);
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_TRANSCRIPT_BYTES: usize = 64 << 20;
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 128 << 20;
+const MAX_CONTROL_OUTPUT_BYTES: usize = 128 << 20;
+const CDP_CONTROL_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +50,96 @@ struct CodexAppDispatchMessage {
 pub struct CodexAppDispatchResult {
     thread_id: String,
     deep_link: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAppTaskListRequest {
+    pub(crate) cursor: Option<String>,
+    pub(crate) limit: Option<u32>,
+    pub(crate) search_term: Option<String>,
+    pub(crate) cwd: Option<String>,
+    pub(crate) archived: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAppTaskCreateRequest {
+    pub(crate) cwd: String,
+    pub(crate) input: Vec<CodexAppTurnInput>,
+    pub(crate) browser_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum CodexAppTurnInput {
+    Text {
+        text: String,
+    },
+    Image {
+        url: String,
+        detail: Option<String>,
+    },
+    LocalImage {
+        path: String,
+        detail: Option<String>,
+    },
+    Audio {
+        url: String,
+    },
+    LocalAudio {
+        path: String,
+    },
+    Skill {
+        name: String,
+        path: String,
+    },
+    Mention {
+        name: String,
+        path: String,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAppTaskSendRequest {
+    pub(crate) thread_id: String,
+    pub(crate) input: Vec<CodexAppTurnInput>,
+    pub(crate) cwd: Option<String>,
+    pub(crate) model: Option<String>,
+    pub(crate) effort: Option<String>,
+    pub(crate) approval_policy: Option<String>,
+    pub(crate) context_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAppTaskReadRequest {
+    pub(crate) thread_id: String,
+    pub(crate) include_turns: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAppTaskInterruptRequest {
+    pub(crate) thread_id: String,
+    pub(crate) turn_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAppInventoryRequest {
+    pub(crate) cwd: Option<String>,
+    pub(crate) force_reload: Option<bool>,
+    pub(crate) thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAppInventory {
+    plugins: Value,
+    skills: Value,
+    mcp_servers: Value,
 }
 
 #[derive(Debug)]
@@ -72,6 +166,7 @@ struct SocketRpc<S> {
     socket: WebSocketStream<S>,
     next_request_id: u64,
     notifications: VecDeque<(String, Value)>,
+    server_info: Value,
 }
 
 impl<S> SocketRpc<S>
@@ -83,12 +178,13 @@ where
             socket,
             next_request_id: 0,
             notifications: VecDeque::new(),
+            server_info: Value::Null,
         }
     }
 
     async fn send_json(&mut self, value: Value) -> Result<()> {
         self.socket
-            .send(Message::Text(value.to_string()))
+            .send(Message::Text(value.to_string().into()))
             .await
             .context("failed to write to the Codex App control socket")
     }
@@ -121,14 +217,6 @@ where
         }
     }
 
-    async fn reject_server_request(&mut self, id: &Value, method: &str) -> Result<()> {
-        self.send_json(json!({
-            "id": id,
-            "error": { "code": -32601, "message": format!("Method not found: {method}") }
-        }))
-        .await
-    }
-
     async fn request_value(
         &mut self,
         method: &str,
@@ -158,11 +246,15 @@ where
                 return Ok(message.get("result").cloned().unwrap_or(Value::Null));
             }
 
-            if let (Some(id), Some(server_method)) = (
+            if let (Some(_id), Some(_server_method)) = (
                 message.get("id"),
                 message.get("method").and_then(Value::as_str),
             ) {
-                self.reject_server_request(id, server_method).await?;
+                // The desktop App is the sole approval authority. Server requests
+                // (permissions, MCP elicitation, request-user-input) are broadcast
+                // to every thread subscriber with one shared callback; replying
+                // here would race the App and could consume that callback first.
+                // Leave it pending so the App can render and answer it.
             } else if let Some(notification_method) = message.get("method").and_then(Value::as_str)
             {
                 self.notifications.push_back((
@@ -184,11 +276,12 @@ where
         let deadline = Instant::now() + IMPORT_TIMEOUT;
         loop {
             let message = self.read_json_until(deadline).await?;
-            if let (Some(id), Some(server_method)) = (
+            if let (Some(_id), Some(_server_method)) = (
                 message.get("id"),
                 message.get("method").and_then(Value::as_str),
             ) {
-                self.reject_server_request(id, server_method).await?;
+                // See `request_value`: Cognia never races the desktop App for
+                // approval or elicitation ownership.
                 continue;
             }
             let Some(method) = message.get("method").and_then(Value::as_str) else {
@@ -515,7 +608,8 @@ async fn connect_rpc(path: &Path) -> Result<SocketRpc<local_socket::Stream>> {
         .await
         .context("Codex App rejected the WebSocket control handshake")?;
     let mut rpc = SocketRpc::new(socket);
-    rpc.request(
+    rpc.server_info = rpc
+        .request(
         "initialize",
         json!({
             "clientInfo": { "name": "cognia", "title": "Cognia", "version": env!("CARGO_PKG_VERSION") },
@@ -527,8 +621,8 @@ async fn connect_rpc(path: &Path) -> Result<SocketRpc<local_socket::Stream>> {
         }),
         RPC_TIMEOUT,
     )
-    .await
-    .context("failed to initialize the Codex App control connection")?;
+        .await
+        .context("failed to initialize the Codex App control connection")?;
     rpc.send_json(json!({ "method": "initialized" })).await?;
     Ok(rpc)
 }
@@ -700,6 +794,469 @@ async fn import_and_verify<R: CodexRpc + Send>(
         return Err(error);
     }
     Ok(thread_id)
+}
+
+fn validate_thread_id(thread_id: &str) -> Result<String> {
+    let thread_id = thread_id.trim();
+    uuid::Uuid::parse_str(thread_id).context("invalid Codex task id")?;
+    Ok(thread_id.to_string())
+}
+
+fn normalize_optional_text(value: Option<String>, field: &str) -> Result<Option<String>> {
+    value
+        .map(|value| {
+            let value = value.trim().to_string();
+            if value.is_empty() {
+                bail!("{field} must not be empty")
+            }
+            Ok(value)
+        })
+        .transpose()
+}
+
+fn normalize_existing_path(path: &str, kind: &str) -> Result<String> {
+    let path = PathBuf::from(path.trim());
+    if !path.is_absolute() {
+        bail!("{kind} path must be absolute")
+    }
+    std::fs::canonicalize(&path)
+        .with_context(|| format!("{kind} path does not exist: {}", path.display()))
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+fn normalize_turn_input(input: Vec<CodexAppTurnInput>) -> Result<Vec<CodexAppTurnInput>> {
+    if input.is_empty() {
+        bail!("Codex task input is required")
+    }
+    input
+        .into_iter()
+        .map(|item| match item {
+            CodexAppTurnInput::Text { text } => {
+                let text = text.trim().to_string();
+                if text.is_empty() {
+                    bail!("Codex task input contains empty text")
+                }
+                Ok(CodexAppTurnInput::Text { text })
+            }
+            CodexAppTurnInput::Image { url, detail } => {
+                let parsed = url::Url::parse(url.trim()).context("invalid image URL")?;
+                if !matches!(parsed.scheme(), "http" | "https" | "data") {
+                    bail!("image URL must use http, https, or data")
+                }
+                Ok(CodexAppTurnInput::Image {
+                    url: parsed.to_string(),
+                    detail: validate_image_detail(detail)?,
+                })
+            }
+            CodexAppTurnInput::LocalImage { path, detail } => Ok(CodexAppTurnInput::LocalImage {
+                path: normalize_existing_path(&path, "local image")?,
+                detail: validate_image_detail(detail)?,
+            }),
+            CodexAppTurnInput::Audio { url } => {
+                let parsed = url::Url::parse(url.trim()).context("invalid audio URL")?;
+                if !matches!(parsed.scheme(), "http" | "https" | "data") {
+                    bail!("audio URL must use http, https, or data")
+                }
+                Ok(CodexAppTurnInput::Audio {
+                    url: parsed.to_string(),
+                })
+            }
+            CodexAppTurnInput::LocalAudio { path } => Ok(CodexAppTurnInput::LocalAudio {
+                path: normalize_existing_path(&path, "local audio")?,
+            }),
+            CodexAppTurnInput::Skill { name, path } => {
+                let name = normalize_optional_text(Some(name), "skill name")?.unwrap();
+                Ok(CodexAppTurnInput::Skill {
+                    name,
+                    path: normalize_existing_path(&path, "skill")?,
+                })
+            }
+            CodexAppTurnInput::Mention { name, path } => {
+                let name = normalize_optional_text(Some(name), "mention name")?.unwrap();
+                Ok(CodexAppTurnInput::Mention {
+                    name,
+                    path: normalize_existing_path(&path, "mention")?,
+                })
+            }
+        })
+        .collect()
+}
+
+fn validate_image_detail(value: Option<String>) -> Result<Option<String>> {
+    let value = normalize_optional_text(value, "image detail")?;
+    if value
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "auto" | "low" | "high" | "original"))
+    {
+        bail!("unsupported image detail")
+    }
+    Ok(value)
+}
+
+fn validate_approval_policy(value: Option<String>) -> Result<Option<String>> {
+    let value = normalize_optional_text(value, "approval policy")?;
+    if value
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "untrusted" | "on-request" | "never"))
+    {
+        bail!("unsupported Codex approval policy")
+    }
+    Ok(value)
+}
+
+fn validate_sandbox(value: Option<String>) -> Result<Option<String>> {
+    let value = normalize_optional_text(value, "sandbox")?;
+    if value.as_deref().is_some_and(|value| {
+        !matches!(
+            value,
+            "read-only" | "workspace-write" | "danger-full-access"
+        )
+    }) {
+        bail!("unsupported Codex sandbox")
+    }
+    Ok(value)
+}
+
+async fn task_list_with_rpc<R: CodexRpc + Send>(
+    rpc: &mut R,
+    request: CodexAppTaskListRequest,
+) -> Result<Value> {
+    let mut params = serde_json::Map::new();
+    if let Some(cursor) = normalize_optional_text(request.cursor, "cursor")? {
+        params.insert("cursor".into(), json!(cursor));
+    }
+    params.insert(
+        "limit".into(),
+        json!(request.limit.unwrap_or(50).clamp(1, 200)),
+    );
+    if let Some(search_term) = normalize_optional_text(request.search_term, "search term")? {
+        params.insert("searchTerm".into(), json!(search_term));
+    }
+    if let Some(cwd) = request.cwd {
+        params.insert(
+            "cwd".into(),
+            json!(normalize_existing_path(&cwd, "workspace")?),
+        );
+    }
+    if let Some(archived) = request.archived {
+        params.insert("archived".into(), json!(archived));
+    }
+    params.insert("sortKey".into(), json!("recency_at"));
+    params.insert("sortDirection".into(), json!("desc"));
+    rpc.request("thread/list", Value::Object(params), RPC_TIMEOUT)
+        .await
+}
+
+async fn task_read_with_rpc<R: CodexRpc + Send>(
+    rpc: &mut R,
+    request: CodexAppTaskReadRequest,
+) -> Result<Value> {
+    rpc.request(
+        "thread/read",
+        json!({
+            "threadId": validate_thread_id(&request.thread_id)?,
+            "includeTurns": request.include_turns.unwrap_or(true),
+        }),
+        IMPORT_TIMEOUT,
+    )
+    .await
+}
+
+async fn task_send_with_rpc<R: CodexRpc + Send>(
+    rpc: &mut R,
+    request: CodexAppTaskSendRequest,
+) -> Result<Value> {
+    let thread_id = validate_thread_id(&request.thread_id)?;
+    let mut params = serde_json::Map::new();
+    params.insert("threadId".into(), json!(thread_id));
+    params.insert(
+        "input".into(),
+        serde_json::to_value(normalize_turn_input(request.input)?)?,
+    );
+    if let Some(cwd) = request.cwd {
+        params.insert(
+            "cwd".into(),
+            json!(normalize_existing_path(&cwd, "workspace")?),
+        );
+    }
+    if let Some(model) = normalize_optional_text(request.model, "model")? {
+        params.insert("model".into(), json!(model));
+    }
+    if let Some(effort) = normalize_optional_text(request.effort, "effort")? {
+        params.insert("effort".into(), json!(effort));
+    }
+    if let Some(approval_policy) = validate_approval_policy(request.approval_policy)? {
+        params.insert("approvalPolicy".into(), json!(approval_policy));
+    }
+    rpc.request("turn/start", Value::Object(params), RPC_TIMEOUT)
+        .await
+}
+
+async fn inventory_with_rpc<R: CodexRpc + Send>(
+    rpc: &mut R,
+    request: CodexAppInventoryRequest,
+) -> Result<CodexAppInventory> {
+    let cwd = request
+        .cwd
+        .map(|cwd| normalize_existing_path(&cwd, "workspace"))
+        .transpose()?;
+    let cwds = cwd.into_iter().collect::<Vec<_>>();
+    let plugins = rpc
+        .request(
+            "plugin/list",
+            json!({ "cwds": cwds.clone(), "forceRefetch": request.force_reload.unwrap_or(false) }),
+            IMPORT_TIMEOUT,
+        )
+        .await?;
+    let skills = rpc
+        .request(
+            "skills/list",
+            json!({ "cwds": cwds, "forceReload": request.force_reload.unwrap_or(false) }),
+            IMPORT_TIMEOUT,
+        )
+        .await?;
+    let mcp_servers = rpc
+        .request(
+            "mcpServerStatus/list",
+            json!({ "detail": "full" }),
+            IMPORT_TIMEOUT,
+        )
+        .await?;
+    Ok(CodexAppInventory {
+        plugins,
+        skills,
+        mcp_servers,
+    })
+}
+
+async fn app_rpc(app: &AppHandle) -> Result<SocketRpc<local_socket::Stream>> {
+    let socket_path = codex_home()?.join(CONTROL_SOCKET_RELATIVE_PATH);
+    connect_or_launch(app, &socket_path).await
+}
+
+async fn run_cdp_control(app: &AppHandle, operation: &str, payload: Value) -> Result<Value> {
+    let sidecar_dir = crate::claude::sidecar::sidecar_dir(app).map_err(anyhow::Error::msg)?;
+    let script = sidecar_dir.join("codex-app-control/control-cli.mjs");
+    if !script.is_file() {
+        bail!(
+            "Codex App control sidecar is unavailable: {}",
+            script.display()
+        )
+    }
+    let mut child = Command::new("node")
+        .arg(&script)
+        .arg(operation)
+        .current_dir(&sidecar_dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| format!("failed to launch Codex App control operation {operation}"))?;
+    let request = serde_json::to_vec(&payload)?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(&request)
+            .await
+            .context("failed to write the Codex App control request")?;
+    }
+    let output = timeout(CDP_CONTROL_TIMEOUT, child.wait_with_output())
+        .await
+        .context("timed out waiting for Codex App control")??;
+    if output.stdout.len() > MAX_CONTROL_OUTPUT_BYTES {
+        bail!("Codex App control response exceeds 128 MiB")
+    }
+    let envelope: Value = serde_json::from_slice(&output.stdout).with_context(|| {
+        format!(
+            "Codex App control returned invalid JSON: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })?;
+    if !output.status.success() || envelope.get("ok").and_then(Value::as_bool) != Some(true) {
+        bail!(
+            "{}",
+            envelope
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or_else(
+                    || std::str::from_utf8(&output.stderr).unwrap_or("Codex App control failed")
+                )
+        )
+    }
+    Ok(envelope.get("result").cloned().unwrap_or(Value::Null))
+}
+
+pub async fn codex_app_runtime_status_impl(app: &AppHandle) -> Result<Value> {
+    run_cdp_control(app, "runtime-status", json!({})).await
+}
+
+pub async fn codex_app_task_list_impl(
+    app: &AppHandle,
+    mut request: CodexAppTaskListRequest,
+) -> Result<Value> {
+    request.cursor = normalize_optional_text(request.cursor, "cursor")?;
+    request.limit = Some(request.limit.unwrap_or(50).clamp(1, 200));
+    request.search_term = request
+        .search_term
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    request.cwd = request
+        .cwd
+        .map(|cwd| normalize_existing_path(&cwd, "workspace"))
+        .transpose()?;
+    run_cdp_control(app, "task-list", serde_json::to_value(request)?).await
+}
+
+pub async fn codex_app_task_read_impl(
+    app: &AppHandle,
+    mut request: CodexAppTaskReadRequest,
+) -> Result<Value> {
+    request.thread_id = validate_thread_id(&request.thread_id)?;
+    run_cdp_control(app, "task-read", serde_json::to_value(request)?).await
+}
+
+pub async fn codex_app_task_create_impl(
+    app: &AppHandle,
+    mut request: CodexAppTaskCreateRequest,
+) -> Result<Value> {
+    request.cwd = normalize_existing_path(&request.cwd, "workspace")?;
+    request.input = normalize_turn_input(request.input)?;
+    request.browser_url = request
+        .browser_url
+        .map(|value| {
+            let parsed = url::Url::parse(value.trim()).context("invalid browser URL")?;
+            if !matches!(parsed.scheme(), "http" | "https") {
+                bail!("browser URL must use http or https")
+            }
+            Ok(parsed.to_string())
+        })
+        .transpose()?;
+    run_cdp_control(app, "task-create", serde_json::to_value(request)?).await
+}
+
+pub async fn codex_app_task_send_impl(
+    app: &AppHandle,
+    mut request: CodexAppTaskSendRequest,
+) -> Result<Value> {
+    request.thread_id = validate_thread_id(&request.thread_id)?;
+    request.input = normalize_turn_input(request.input)?;
+    request.cwd = request
+        .cwd
+        .map(|cwd| normalize_existing_path(&cwd, "workspace"))
+        .transpose()?;
+    request.context_label = normalize_optional_text(request.context_label, "context label")?;
+    run_cdp_control(app, "task-send", serde_json::to_value(request)?).await
+}
+
+pub async fn codex_app_task_interrupt_impl(
+    app: &AppHandle,
+    request: CodexAppTaskInterruptRequest,
+) -> Result<Value> {
+    validate_thread_id(&request.thread_id)?;
+    validate_thread_id(&request.turn_id)?;
+    run_cdp_control(app, "task-interrupt", serde_json::to_value(request)?).await
+}
+
+pub async fn codex_app_inventory_impl(
+    app: &AppHandle,
+    mut request: CodexAppInventoryRequest,
+) -> Result<CodexAppInventory> {
+    request.cwd = request
+        .cwd
+        .map(|cwd| normalize_existing_path(&cwd, "workspace"))
+        .transpose()?;
+    request.thread_id = request
+        .thread_id
+        .map(|thread_id| validate_thread_id(&thread_id))
+        .transpose()?;
+    serde_json::from_value(run_cdp_control(app, "inventory", serde_json::to_value(request)?).await?)
+        .context("Codex App inventory returned an invalid response")
+}
+
+pub async fn codex_app_task_open_impl(app: &AppHandle, thread_id: String) -> Result<Value> {
+    let thread_id = validate_thread_id(&thread_id)?;
+    run_cdp_control(app, "task-open", json!({ "threadId": thread_id })).await
+}
+
+fn command_error(command: &str, error: anyhow::Error) -> String {
+    format!("{command} failed: {error:#}")
+}
+
+#[tauri::command]
+pub async fn codex_app_runtime_status(app: AppHandle) -> std::result::Result<Value, String> {
+    codex_app_runtime_status_impl(&app)
+        .await
+        .map_err(|error| command_error("Codex App status", error))
+}
+
+#[tauri::command]
+pub async fn codex_app_task_list(
+    app: AppHandle,
+    request: CodexAppTaskListRequest,
+) -> std::result::Result<Value, String> {
+    codex_app_task_list_impl(&app, request)
+        .await
+        .map_err(|error| command_error("Codex App task list", error))
+}
+
+#[tauri::command]
+pub async fn codex_app_task_read(
+    app: AppHandle,
+    request: CodexAppTaskReadRequest,
+) -> std::result::Result<Value, String> {
+    codex_app_task_read_impl(&app, request)
+        .await
+        .map_err(|error| command_error("Codex App task read", error))
+}
+
+#[tauri::command]
+pub async fn codex_app_task_create(
+    app: AppHandle,
+    request: CodexAppTaskCreateRequest,
+) -> std::result::Result<Value, String> {
+    codex_app_task_create_impl(&app, request)
+        .await
+        .map_err(|error| command_error("Codex App task creation", error))
+}
+
+#[tauri::command]
+pub async fn codex_app_task_send(
+    app: AppHandle,
+    request: CodexAppTaskSendRequest,
+) -> std::result::Result<Value, String> {
+    codex_app_task_send_impl(&app, request)
+        .await
+        .map_err(|error| command_error("Codex App task send", error))
+}
+
+#[tauri::command]
+pub async fn codex_app_task_interrupt(
+    app: AppHandle,
+    request: CodexAppTaskInterruptRequest,
+) -> std::result::Result<Value, String> {
+    codex_app_task_interrupt_impl(&app, request)
+        .await
+        .map_err(|error| command_error("Codex App task interrupt", error))
+}
+
+#[tauri::command]
+pub async fn codex_app_inventory(
+    app: AppHandle,
+    request: CodexAppInventoryRequest,
+) -> std::result::Result<CodexAppInventory, String> {
+    codex_app_inventory_impl(&app, request)
+        .await
+        .map_err(|error| command_error("Codex App inventory", error))
+}
+
+#[tauri::command]
+pub async fn codex_app_task_open(
+    app: AppHandle,
+    thread_id: String,
+) -> std::result::Result<Value, String> {
+    codex_app_task_open_impl(&app, thread_id)
+        .await
+        .map_err(|error| command_error("Codex App task open", error))
 }
 
 #[tauri::command]
@@ -906,5 +1463,99 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("different import"));
+    }
+
+    #[tokio::test]
+    async fn task_list_uses_canonical_filters_and_bounds_the_page_size() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut rpc = FakeRpc {
+            requests: Vec::new(),
+            responses: VecDeque::from([Ok(json!({ "data": [], "nextCursor": null }))]),
+            completion: Err(anyhow!("unused")),
+        };
+
+        let result = task_list_with_rpc(
+            &mut rpc,
+            CodexAppTaskListRequest {
+                cursor: None,
+                limit: Some(900),
+                search_term: Some("browser task".into()),
+                cwd: Some(cwd.path().display().to_string()),
+                archived: Some(false),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["data"], json!([]));
+        assert_eq!(rpc.requests[0].0, "thread/list");
+        assert_eq!(rpc.requests[0].1["limit"], 200);
+        assert_eq!(rpc.requests[0].1["searchTerm"], "browser task");
+        assert_eq!(rpc.requests[0].1["sortKey"], "recency_at");
+    }
+
+    #[tokio::test]
+    async fn task_send_preserves_typed_context_and_canonicalizes_local_inputs() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let thread_id = "01989a8f-7b2b-7aa2-a8b8-c859418ac18f";
+        let turn_id = "01989a8f-7b2b-7aa2-a8b8-c859418ac190";
+        let mut rpc = FakeRpc {
+            requests: Vec::new(),
+            responses: VecDeque::from([Ok(json!({ "turn": { "id": turn_id } }))]),
+            completion: Err(anyhow!("unused")),
+        };
+
+        let result = task_send_with_rpc(
+            &mut rpc,
+            CodexAppTaskSendRequest {
+                thread_id: thread_id.into(),
+                input: vec![
+                    CodexAppTurnInput::Text {
+                        text: " Use Browser and inspect this file. ".into(),
+                    },
+                    CodexAppTurnInput::Mention {
+                        name: "Browser".into(),
+                        path: file.path().display().to_string(),
+                    },
+                    CodexAppTurnInput::LocalImage {
+                        path: file.path().display().to_string(),
+                        detail: Some("original".into()),
+                    },
+                ],
+                cwd: None,
+                model: None,
+                effort: Some("high".into()),
+                approval_policy: Some("on-request".into()),
+                context_label: Some("Browser".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["turn"]["id"], turn_id);
+        assert_eq!(rpc.requests[0].0, "turn/start");
+        assert_eq!(rpc.requests[0].1["threadId"], thread_id);
+        assert_eq!(rpc.requests[0].1["input"][0]["type"], "text");
+        assert_eq!(
+            rpc.requests[0].1["input"][0]["text"],
+            "Use Browser and inspect this file."
+        );
+        assert_eq!(rpc.requests[0].1["input"][1]["type"], "mention");
+        assert_eq!(rpc.requests[0].1["input"][2]["type"], "localImage");
+        assert_eq!(rpc.requests[0].1["input"][2]["detail"], "original");
+        assert_eq!(rpc.requests[0].1["effort"], "high");
+    }
+
+    #[test]
+    fn task_send_rejects_relative_paths_and_unknown_policies() {
+        assert!(normalize_turn_input(vec![CodexAppTurnInput::LocalImage {
+            path: "relative.png".into(),
+            detail: None,
+        }])
+        .unwrap_err()
+        .to_string()
+        .contains("absolute"));
+        assert!(validate_approval_policy(Some("sometimes".into())).is_err());
+        assert!(validate_sandbox(Some("host-root".into())).is_err());
     }
 }

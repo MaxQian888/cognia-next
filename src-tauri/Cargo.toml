@@ -537,6 +537,10 @@ urlencoding = "2"
 # dispatch table dense without making an unavailable backend routable.
 [features]
 default = ["ocr-paddle"]
+# Explicit opt-in for the authenticated loopback agent debugging surface.
+# Never enable this in release packaging: it intentionally exposes raw
+# renderer evaluation and window capture to the per-launch CLI bridge token.
+agent-debug = []
 # ADR-0021 — compiles the `cognia-webrtc-peer` harness binary. Off by default
 # so the extra bin never enters normal builds; enabled only by `pnpm webrtc:pair`.
 webrtc-harness = []

@@ -1,5 +1,7 @@
 mod a2ui_bridge;
 mod account_auth;
+#[cfg(all(feature = "agent-debug", desktop))]
+mod agent_debug;
 mod agent_session_store;
 
 /// Configure the shared Claude Agent SDK session mirror before a host starts
@@ -438,6 +440,14 @@ pub fn run() {
                 }
             }
 
+            #[cfg(all(feature = "agent-debug", desktop))]
+            if matches!(
+                payload.event(),
+                tauri::webview::PageLoadEvent::Started | tauri::webview::PageLoadEvent::Finished
+            ) {
+                agent_debug::install(webview);
+            }
+
             if !webview_watchdog::should_arm_boot_reveal(
                 webview.label(),
                 payload.event() == tauri::webview::PageLoadEvent::Finished,
@@ -649,6 +659,14 @@ pub fn run() {
             // Project-scoped `.mcp.json` (read-only — it's usually committed).
             agents::commands::read_project_mcp_config,
             codex_app_dispatch::codex_app_dispatch_conversation,
+            codex_app_dispatch::codex_app_runtime_status,
+            codex_app_dispatch::codex_app_task_list,
+            codex_app_dispatch::codex_app_task_read,
+            codex_app_dispatch::codex_app_task_create,
+            codex_app_dispatch::codex_app_task_send,
+            codex_app_dispatch::codex_app_task_interrupt,
+            codex_app_dispatch::codex_app_task_open,
+            codex_app_dispatch::codex_app_inventory,
             // ADR-0062 — external-agent session-history import. Reads OpenCode's
             // local SQLite store read-only for the session importer.
             session_import::opencode_sessions_read,
