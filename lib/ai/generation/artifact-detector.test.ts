@@ -113,6 +113,26 @@ describe("shouldAutoCreate", () => {
 })
 
 describe("detectArtifacts", () => {
+  it("marks Cognia Diagram Design HTML with its renderer profile", () => {
+    const html = [
+      "<!doctype html>",
+      '<html><head><meta name="cognia-renderer" content="diagram-design-v1"></head>',
+      '<body><svg viewBox="0 0 100 100"></svg></body></html>',
+    ].join("\n")
+    const out = detectArtifacts(`\`\`\`html\n${html}\n\`\`\``)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ type: "html", rendererProfile: "diagram-design-v1" })
+  })
+
+  it("does not assign a renderer profile to ordinary or unknown-profile HTML", () => {
+    const ordinary = detectArtifacts("```html\n<html>\n<body>plain</body>\n</html>\n```")
+    const unknown = detectArtifacts(
+      '```html\n<html>\n<meta name="cognia-renderer" content="future-v9">\n<body>x</body>\n</html>\n```'
+    )
+    expect(ordinary[0].rendererProfile).toBeUndefined()
+    expect(unknown[0].rendererProfile).toBeUndefined()
+  })
+
   it("returns artifacts only above the line threshold", () => {
     const md = "```js\n" + "a\n".repeat(15) + "```"
     const out = detectArtifacts(md)

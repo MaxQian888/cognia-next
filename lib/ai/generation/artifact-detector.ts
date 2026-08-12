@@ -3,7 +3,7 @@
  * Similar to OpenAI Canvas auto-triggering behavior
  */
 
-import type { ArtifactType, ArtifactLanguage } from "@/types"
+import type { ArtifactType, ArtifactLanguage, ArtifactRendererProfile } from "@/types"
 import { LANGUAGE_MAP, ALWAYS_CREATE_TYPES, generateArtifactTitle } from "@/lib/artifacts"
 
 // Configuration for auto-detection
@@ -26,6 +26,7 @@ export const DEFAULT_DETECTION_CONFIG: ArtifactDetectionConfig = {
 export interface DetectedArtifact {
   type: ArtifactType
   language?: ArtifactLanguage
+  rendererProfile?: ArtifactRendererProfile
   content: string
   title: string
   startIndex: number
@@ -39,6 +40,9 @@ const CODE_BLOCK_REGEX = /```(\w+)?\n([\s\S]*?)```/g
 
 // HTML detection patterns
 const HTML_PATTERNS = [/<!DOCTYPE\s+html/i, /<html[\s>]/i, /<head[\s>]/i, /<body[\s>]/i]
+
+const DIAGRAM_DESIGN_RENDERER_MARKER =
+  /<meta\b(?=[^>]*\bname\s*=\s*["']cognia-renderer["'])(?=[^>]*\bcontent\s*=\s*["']diagram-design-v1["'])[^>]*>/i
 
 // React/JSX detection patterns
 const REACT_PATTERNS = [
@@ -102,6 +106,12 @@ export function detectArtifactType(
     return { type: "math", confidence: 0.85 }
   }
 
+  // A fenced HTML document can legitimately contain inline SVG. Honor the
+  // explicit language before applying content-based SVG detection.
+  if (language === "html") {
+    return { type: "html", confidence: 0.9 }
+  }
+
   // Check for SVG
   if (language === "svg" || SVG_PATTERNS.some((p) => p.test(content))) {
     return { type: "svg", confidence: 0.9 }
@@ -129,6 +139,12 @@ export function detectArtifactType(
 
   // Default to code for other languages
   return { type: "code", confidence: 0.7 }
+}
+
+export function detectArtifactRendererProfile(
+  content: string
+): ArtifactRendererProfile | undefined {
+  return DIAGRAM_DESIGN_RENDERER_MARKER.test(content) ? "diagram-design-v1" : undefined
 }
 
 /**
@@ -217,6 +233,7 @@ export function detectArtifacts(
       artifacts.push({
         type,
         language,
+        rendererProfile: type === "html" ? detectArtifactRendererProfile(block.code) : undefined,
         content: block.code,
         title: generateTitle(block.code, type, block.language),
         startIndex: block.startIndex,
