@@ -21,7 +21,7 @@ use p256::{
     elliptic_curve::sec1::ToEncodedPoint,
     PublicKey,
 };
-use rand::rngs::OsRng;
+use rand::rngs::SysRng;
 use serde_json::Value;
 use sha2_v10::{Digest, Sha256};
 
@@ -87,7 +87,7 @@ pub struct V2Identity {
 impl V2Identity {
     pub fn generate() -> Self {
         Self {
-            signing_key: SigningKey::random(&mut OsRng),
+            signing_key: SigningKey::random(&mut SysRng),
         }
     }
 
@@ -117,7 +117,7 @@ pub struct V2EphemeralKey {
 
 impl V2EphemeralKey {
     pub fn generate() -> Self {
-        let secret = EphemeralSecret::random(&mut OsRng);
+        let secret = EphemeralSecret::random(&mut SysRng);
         let public_key = PublicKey::from(&secret);
         Self { secret, public_key }
     }

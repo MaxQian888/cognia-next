@@ -19,10 +19,10 @@ path = "src/lib.rs"
 [dependencies]
 cognia-secrets = { path = "../cognia-secrets" }
 cognia-net = { path = "../cognia-net" }
-tauri = { version = "=2.11.1" }
+tauri = { version = "=2.11.5" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-base64 = "0.22"
+base64 = "0.23"
 url = "2"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
@@ -32,21 +32,21 @@ dirs = "6"
 # Upstream-CLI credential discovery (~/.claude, ~/.codex keychain entries) —
 # deliberately raw keyring reads of OTHER apps' entries; our own storage goes
 # through cognia-secrets::secret_store.
-keyring = { version = "3", default-features = false }
+keyring = { version = "4", default-features = false }
 # Live re-discovery of upstream CLI credential files.
-notify = "6"
+notify = "8"
 # Codex device-auth flow.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart", "form"] }
 tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3", features = ["windows-native"] }
+keyring = { version = "4", features = ["windows-native-keyring-store"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
+keyring = { version = "4", features = ["apple-native-keyring-store"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+keyring = { version = "4", features = ["zbus-secret-service-keyring-store"] }
 
 [dev-dependencies]
 # Keep this crate's tests off the real OS keyring / disk store.

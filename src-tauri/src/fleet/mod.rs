@@ -784,9 +784,8 @@ pub async fn fleet_question_respond(
 }
 
 fn mint_token() -> String {
-    use rand::RngCore;
     let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::fill(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 

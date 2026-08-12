@@ -51,7 +51,6 @@ pub mod server;
 
 use ::anyhow::{Context, Result};
 use parking_lot::Mutex;
-use rand::RngCore;
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -130,7 +129,7 @@ impl CliBridgeServerState {
 /// Generate a fresh random hex dev token (32 bytes → 64 hex chars).
 pub fn generate_dev_token() -> String {
     let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::fill(&mut bytes);
     hex::encode(bytes)
 }
 

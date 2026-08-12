@@ -158,7 +158,8 @@ impl HeadlessContract {
             .map(|error| {
                 format!(
                     "instance path `{}` violates schema path `{}`",
-                    error.instance_path, error.schema_path
+                    error.instance_path(),
+                    error.schema_path()
                 )
             })
             .collect::<Vec<_>>();

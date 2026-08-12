@@ -21,7 +21,6 @@ use cognia_terminal::host_wire::serve_host_stream;
 use cognia_terminal::session::{PathInjection, SessionOrigin, SpawnRequest};
 use ed25519_dalek::{Signer, SigningKey};
 use once_cell::sync::Lazy;
-use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -388,7 +387,7 @@ fn load_or_create_bootstrap_secret() -> Result<String, String> {
         Ok(secret) if valid_bootstrap_secret(&secret) => Ok(secret),
         Ok(_) | Err(keyring::Error::NoEntry) => {
             let mut bytes = [0u8; 32];
-            OsRng.fill_bytes(&mut bytes);
+            rand::fill(&mut bytes);
             let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
             entry
                 .set_password(&secret)
@@ -415,7 +414,7 @@ fn descriptor_signing_key() -> Result<SigningKey, String> {
         Ok(encoded) => decode_signing_key(&encoded),
         Err(keyring::Error::NoEntry) => {
             let mut bytes = [0u8; 32];
-            OsRng.fill_bytes(&mut bytes);
+            rand::fill(&mut bytes);
             let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
             entry
                 .set_password(&encoded)

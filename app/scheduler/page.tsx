@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useMemo, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useScheduler, useSystemScheduler } from "@/hooks/scheduler"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
@@ -44,6 +45,7 @@ import type { CreateScheduledTaskInput, CreateSystemTaskInput } from "@/types/sc
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 
 export default function SchedulerPage() {
+  const router = useRouter()
   const schedulerHost = getSchedulerDataSource().host
   const {
     tasks,
@@ -553,11 +555,7 @@ export default function SchedulerPage() {
             onCreateSystemTask={() => setShowSystemCreateSheet(true)}
             onCreateWorkflowTrigger={() => setShowQuickWorkflowDialog(true)}
             onOpenBackupSettings={() => setShowBackupDialog(true)}
-            onOpenPluginSettings={() => {
-              if (typeof window !== "undefined") {
-                window.location.assign("/settings?section=plugins")
-              }
-            }}
+            onOpenPluginSettings={() => router.push("/settings?section=plugins")}
             onRefresh={handleRefresh}
             onExport={() => setShowExportDialog(true)}
             onImport={() => setShowImportDialog(true)}

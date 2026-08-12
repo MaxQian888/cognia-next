@@ -71,7 +71,7 @@ export function WindowLivenessInitializers() {
   // Secondary overlay windows (pet sprite/popup, fleet island) load the same
   // root layout but are revealed by their own spawn path and must never boot
   // main-window concerns. `app/layout.tsx` already routes those windows to the
-  // minimal `petShell` tree (so this component isn't mounted there); this guard
+  // lightweight route tree (so this component isn't mounted there); this guard
   // keeps the behaviour correct even if the mount point ever changes.
   if (isSecondaryOverlayRole(getPetWindowRole())) return null
 

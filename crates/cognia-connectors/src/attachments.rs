@@ -25,10 +25,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     Aes256Gcm, Key, Nonce,
 };
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -271,7 +270,7 @@ fn master_key() -> Result<[u8; 32], String> {
         None => {
             // Auto-generate on first use.
             let mut key = [0u8; 32];
-            OsRng.fill_bytes(&mut key);
+            rand::fill(&mut key);
             super::keyring::set("", ACCOUNT, &hex::encode(key))?;
             Ok(key)
         }
@@ -280,15 +279,15 @@ fn master_key() -> Result<[u8; 32], String> {
 
 fn encrypt_bytes(data: &[u8]) -> Result<Vec<u8>, String> {
     let key_bytes = master_key()?;
-    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
+    let key = Key::<Aes256Gcm>::from(key_bytes);
+    let cipher = Aes256Gcm::new(&key);
 
     let mut nonce_bytes = [0u8; 12];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    rand::fill(&mut nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
 
     let ciphertext = cipher
-        .encrypt(nonce, data)
+        .encrypt(&nonce, data)
         .map_err(|e| format!("encrypt failed: {e}"))?;
 
     // Prepend nonce so we can reconstruct it on decrypt.
@@ -304,11 +303,12 @@ fn decrypt_file(path: &Path) -> Result<Vec<u8>, String> {
     }
     let (nonce_bytes, ciphertext) = data.split_at(12);
     let key_bytes = master_key()?;
-    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
-    let nonce = Nonce::from_slice(nonce_bytes);
+    let key = Key::<Aes256Gcm>::from(key_bytes);
+    let cipher = Aes256Gcm::new(&key);
+    let nonce = Nonce::try_from(nonce_bytes)
+        .map_err(|_| "encrypted file nonce has invalid length".to_string())?;
     cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|e| format!("decrypt failed: {e}"))
 }
 

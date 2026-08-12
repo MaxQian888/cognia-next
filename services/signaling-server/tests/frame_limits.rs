@@ -24,7 +24,7 @@ async fn connect(addr: std::net::SocketAddr) -> WsClient {
 
 async fn send(client: &mut WsClient, frame: ClientFrame) {
     let text = serde_json::to_string(&frame).unwrap();
-    client.send(TgMessage::Text(text)).await.unwrap();
+    client.send(TgMessage::Text(text.into())).await.unwrap();
 }
 
 async fn recv(client: &mut WsClient) -> ServerFrame {
@@ -52,7 +52,7 @@ async fn oversized_frame_is_rejected_but_connection_survives() {
     // ~9 KiB sits above the 8 KiB soft cap but below the 64 KiB hard cap, so
     // the server replies with a graceful error instead of closing the socket.
     let big = "x".repeat(9 * 1024);
-    client.send(TgMessage::Text(big)).await.unwrap();
+    client.send(TgMessage::Text(big.into())).await.unwrap();
     match recv(&mut client).await {
         ServerFrame::Error { code, .. } => assert_eq!(code, "frame_too_large"),
         other => panic!("expected frame_too_large, got {other:?}"),

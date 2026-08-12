@@ -1208,7 +1208,6 @@ mod tests {
     async fn verify_lark_encrypted_round_trip() {
         use aes::cipher::{block_padding::Pkcs7, BlockModeEncrypt, KeyIvInit};
         use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-        use rand::RngCore;
         use sha2::{Digest, Sha256};
         type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 
@@ -1223,7 +1222,7 @@ mod tests {
         let key_bytes = Sha256::digest(b"the-encrypt-key");
         let key_arr: [u8; 32] = key_bytes.as_slice().try_into().unwrap();
         let mut iv = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut iv);
+        rand::fill(&mut iv);
         let ciphertext =
             Aes256CbcEnc::new(&key_arr.into(), &iv.into()).encrypt_padded_vec::<Pkcs7>(plaintext);
         let mut combined = iv.to_vec();

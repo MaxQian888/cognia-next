@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use rand::{rngs::OsRng, RngCore};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -280,7 +279,7 @@ pub(super) async fn clear_entry(storage_key: String) -> Result<(), String> {
 
 pub(super) fn new_state() -> String {
     let mut bytes = [0_u8; 32];
-    OsRng.fill_bytes(&mut bytes);
+    rand::fill(&mut bytes);
     hex::encode(bytes)
 }
 

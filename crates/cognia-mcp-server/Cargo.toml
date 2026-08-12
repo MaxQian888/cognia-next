@@ -16,11 +16,11 @@ path = "src/lib.rs"
 
 [dependencies]
 cognia-automation = { path = "../cognia-automation" }
-tauri = { version = "=2.11.1" }
+tauri = { version = "=2.11.5" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 axum = { version = "0.8", features = ["macros", "ws"] }
-tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
+tower-http = { version = "0.7", features = ["limit", "trace", "cors"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util", "process"] }
 futures-util = { version = "0.3", default-features = false }
 chrono = { version = "0.4", features = ["serde"] }
@@ -29,11 +29,11 @@ parking_lot = "0.12"
 log = "0.4"
 thiserror = "2"
 subtle = "2"
-rand = "0.8"
-sha2 = "0.10"
+rand = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util", "limit", "timeout"] }
 # http_server integration tests drive the live listener over HTTP.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }

@@ -25,7 +25,7 @@ k8s-exec = ["dep:kube", "dep:k8s-openapi"]
 workspace-runtime-exec = ["dep:reqwest"]
 
 [dependencies]
-tauri = { version = "=2.11.1" }
+tauri = { version = "=2.11.5" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 async-trait = "0.1"
@@ -33,7 +33,7 @@ parking_lot = "0.12"
 log = "0.4"
 futures-util = { version = "0.3", default-features = false }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "sync", "time", "io-util"] }
-bollard = { version = "0.20", optional = true }
+bollard = { version = "0.21", optional = true }
 kube = { version = "4", default-features = false, features = ["client", "ws", "runtime", "rustls-tls"], optional = true }
 k8s-openapi = { version = "0.28", features = ["v1_32"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }

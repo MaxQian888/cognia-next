@@ -141,16 +141,15 @@ async fn synthesize(
         .await
         .map_err(|e| format!("ws connect failed: {e}"))?;
 
-    ws.send(Message::Text(build_session_update(
-        &request.voice,
-        &request.instructions,
-    )))
+    ws.send(Message::Text(
+        build_session_update(&request.voice, &request.instructions).into(),
+    ))
     .await
     .map_err(|e| format!("ws send session failed: {e}"))?;
-    ws.send(Message::Text(build_item_create(&request.text)))
+    ws.send(Message::Text(build_item_create(&request.text).into()))
         .await
         .map_err(|e| format!("ws send item failed: {e}"))?;
-    ws.send(Message::Text(build_response_create()))
+    ws.send(Message::Text(build_response_create().into()))
         .await
         .map_err(|e| format!("ws send response failed: {e}"))?;
 

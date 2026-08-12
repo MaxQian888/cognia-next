@@ -18,18 +18,18 @@ path = "src/lib.rs"
 [dependencies]
 cognia-core = { path = "../cognia-core" }
 cognia-subscription = { path = "../cognia-subscription" }
-tauri = { version = "=2.11.1" }
+tauri = { version = "=2.11.5" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dirs = "6"
 log = "0.4"
 parking_lot = "0.12"
 thiserror = "2"
-notify = "6"
+notify = "8"
 rusqlite = { version = "0.37", features = ["bundled"] }
 tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
 # Codex config.toml enrichment.
-toml_edit = { version = "0.22", features = ["serde"] }
+toml_edit = { version = "0.25", features = ["serde"] }
 
 [dev-dependencies]
 tempfile = "3"

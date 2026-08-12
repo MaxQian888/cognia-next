@@ -10,7 +10,6 @@ use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 use ed25519_dalek::{Signer, SigningKey};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -940,7 +939,7 @@ fn load_or_create_signing_key(root: &Path) -> Result<SigningKey, String> {
     std::fs::create_dir_all(root)
         .map_err(|error| format!("create signing key directory: {error}"))?;
     let mut secret = [0_u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut secret);
+    rand::fill(&mut secret);
     atomic_write(&path, &secret)?;
     #[cfg(unix)]
     {

@@ -29,7 +29,7 @@
     "components/browser/remote-browser-preview.tsx",
     "components/canvas/code-execution-panel.tsx",
     "components/canvas/suggestions-panel.tsx",
-    "components/capture/capture-settings-card.tsx",
+    "components/capture/capture-settings-panel.tsx",
     "components/chat/branch-dialog.tsx",
     "components/chat/chat-tab-strip.tsx",
     "components/chat/chat-view.tsx",

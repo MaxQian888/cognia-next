@@ -102,7 +102,7 @@ async fn synthesize(request: &EdgeRequest) -> Result<Vec<u8>, String> {
 
     // 1) speech.config
     let config = build_config_frame();
-    ws.send(Message::Text(config))
+    ws.send(Message::Text(config.into()))
         .await
         .map_err(|e| format!("ws send config failed: {e}"))?;
 
@@ -116,7 +116,7 @@ async fn synthesize(request: &EdgeRequest) -> Result<Vec<u8>, String> {
         &request.volume,
         &request.text,
     );
-    ws.send(Message::Text(ssml))
+    ws.send(Message::Text(ssml.into()))
         .await
         .map_err(|e| format!("ws send ssml failed: {e}"))?;
 

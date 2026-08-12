@@ -294,6 +294,15 @@ impl SidecarState {
 ///     MCP configs can spawn `node ${sidecarDir}/a2ui-mcp.mjs` with an
 ///     absolute argv.
 pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    // The agent-debug dev config deliberately avoids copying the repository's
+    // 1+ GiB sidecar/node_modules tree into target/debug on every Rust edit.
+    // Use the checkout directly in this explicit, feature-gated launch mode;
+    // release builds continue to prefer immutable bundled resources.
+    #[cfg(feature = "agent-debug")]
+    if std::env::var_os("COGNIA_AGENT_DEBUG").is_some() {
+        return checkout_sidecar_dir();
+    }
+
     // Release: bundled resources directory.
     if let Ok(resource_dir) = app.path().resource_dir() {
         let candidate = resource_dir.join("sidecar");
@@ -302,11 +311,7 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
         }
     }
     // Dev: walk up from the Cargo manifest dir to the repo root.
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let candidate = manifest
-        .parent()
-        .map(|p| p.join("sidecar"))
-        .ok_or_else(|| "could not locate project root".to_string())?;
+    let candidate = checkout_sidecar_dir()?;
     if candidate.exists() {
         return Ok(candidate);
     }
@@ -314,6 +319,13 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
         "sidecar directory not found at {}",
         candidate.display()
     ))
+}
+
+fn checkout_sidecar_dir() -> Result<PathBuf, String> {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|parent| parent.join("sidecar"))
+        .ok_or_else(|| "could not locate project root".to_string())
 }
 
 /// Resolve the absolute path to `sidecar/claude-host.mjs`, in both dev and
@@ -1002,5 +1014,12 @@ mod tests {
     async fn managed_snapshot_is_none_when_no_child() {
         let s = SidecarState::new();
         assert!(s.managed_snapshot().await.is_none());
+    }
+
+    #[test]
+    fn checkout_sidecar_fallback_resolves_from_the_manifest_directory() {
+        let sidecar = checkout_sidecar_dir().expect("checkout sidecar path");
+        assert!(sidecar.join("claude-host.mjs").is_file());
+        assert!(sidecar.join("node_modules").is_dir());
     }
 }

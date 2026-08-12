@@ -19,16 +19,16 @@ path = "src/lib.rs"
 [dependencies]
 cognia-instrument = { path = "../cognia-instrument" }
 cognia-net = { path = "../cognia-net" }
-tauri = { version = "=2.11.1" }
+tauri = { version = "=2.11.5" }
 log = "0.4"
 # VectorBackend + the 5 cloud backends are `#[async_trait]` (dyn-dispatched
 # through VectorRegistry), so this must be a direct dep, not transitive.
 async-trait = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 sqlite-vec = "0.1"
-qdrant-client = { version = "1.18", default-features = false, features = ["serde"] }
+qdrant-client = { version = "1.19", default-features = false, features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2"

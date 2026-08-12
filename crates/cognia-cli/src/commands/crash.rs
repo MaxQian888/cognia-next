@@ -321,7 +321,7 @@ fn submit(
     }
     let base = server.trim_end_matches('/');
     let create: Value = request_json(
-        ureq::post(&format!("{base}/v1/incidents")),
+        &format!("{base}/v1/incidents"),
         grant,
         Some(json!({
             "artifactHash": package_hash,
@@ -342,14 +342,13 @@ fn submit(
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("diagnostic service omitted incident id"))?;
     request_bytes(
-        ureq::put(&format!("{base}/v1/incidents/{incident_id}/parts/1"))
-            .set("x-part-sha256", &package_hash)
-            .set("x-artifact-kind", "attachment"),
+        &format!("{base}/v1/incidents/{incident_id}/parts/1"),
         grant,
+        &package_hash,
         &package_bytes,
     )?;
     let receipt = request_json(
-        ureq::post(&format!("{base}/v1/incidents/{incident_id}/complete")),
+        &format!("{base}/v1/incidents/{incident_id}/complete"),
         grant,
         Some(json!({"symbolizedFrames": []})),
     )?;
@@ -371,10 +370,10 @@ fn submit(
 
 fn status(incident_id: &str, server: &str, grant: &str, format: OutputFormat) -> Result<()> {
     let receipt = request_json(
-        ureq::get(&format!(
+        &format!(
             "{}/v1/incidents/{incident_id}",
             server.trim_end_matches('/')
-        )),
+        ),
         grant,
         None,
     )?;
@@ -383,10 +382,10 @@ fn status(incident_id: &str, server: &str, grant: &str, format: OutputFormat) ->
 
 fn delete_remote(incident_id: &str, server: &str, grant: &str, format: OutputFormat) -> Result<()> {
     request_empty(
-        ureq::delete(&format!(
+        &format!(
             "{}/v1/incidents/{incident_id}",
             server.trim_end_matches('/')
-        )),
+        ),
         grant,
     )?;
     emit(
@@ -416,54 +415,77 @@ fn delete_local(dir: PathBuf, stem: &str, format: OutputFormat) -> Result<()> {
     )
 }
 
-fn request_json(request: ureq::Request, grant: &str, body: Option<Value>) -> Result<Value> {
-    let request = request
-        .set("Authorization", &format!("Bearer {grant}"))
-        .set("Content-Type", "application/json");
+fn request_json(url: &str, grant: &str, body: Option<Value>) -> Result<Value> {
     let response = match body {
-        Some(body) => request.send_json(body),
-        None => request.call(),
+        Some(body) => ureq::post(url)
+            .header("Authorization", format!("Bearer {grant}"))
+            .content_type("application/json")
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .send_json(body),
+        None => ureq::get(url)
+            .header("Authorization", format!("Bearer {grant}"))
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .call(),
     };
     decode_response(response)
 }
 
-fn request_bytes(request: ureq::Request, grant: &str, body: &[u8]) -> Result<()> {
+fn request_bytes(url: &str, grant: &str, package_hash: &str, body: &[u8]) -> Result<()> {
     decode_response(
-        request
-            .set("Authorization", &format!("Bearer {grant}"))
-            .set("Content-Type", "application/octet-stream")
-            .send_bytes(body),
+        ureq::put(url)
+            .header("Authorization", format!("Bearer {grant}"))
+            .header("x-part-sha256", package_hash)
+            .header("x-artifact-kind", "attachment")
+            .content_type("application/octet-stream")
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .send(body),
     )?;
     Ok(())
 }
 
-fn request_empty(request: ureq::Request, grant: &str) -> Result<()> {
-    match request
-        .set("Authorization", &format!("Bearer {grant}"))
+fn request_empty(url: &str, grant: &str) -> Result<()> {
+    match ureq::delete(url)
+        .header("Authorization", format!("Bearer {grant}"))
+        .config()
+        .http_status_as_error(false)
+        .build()
         .call()
     {
-        Ok(_) => Ok(()),
+        Ok(response) if response.status().is_success() => Ok(()),
+        Ok(mut response) => Err(anyhow!(
+            "diagnostic service returned HTTP {}: {}",
+            response.status().as_u16(),
+            response.body_mut().read_to_string().unwrap_or_default()
+        )),
         Err(error) => Err(http_error(error)),
     }
 }
 
-fn decode_response(response: std::result::Result<ureq::Response, ureq::Error>) -> Result<Value> {
+fn decode_response(
+    response: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+) -> Result<Value> {
     match response {
-        Ok(response) => response
-            .into_json()
+        Ok(mut response) if response.status().is_success() => response
+            .body_mut()
+            .read_json()
             .context("decode diagnostic service response"),
+        Ok(mut response) => Err(anyhow!(
+            "diagnostic service returned HTTP {}: {}",
+            response.status().as_u16(),
+            response.body_mut().read_to_string().unwrap_or_default()
+        )),
         Err(error) => Err(http_error(error)),
     }
 }
 
 fn http_error(error: ureq::Error) -> anyhow::Error {
-    match error {
-        ureq::Error::Status(status, response) => anyhow!(
-            "diagnostic service returned HTTP {status}: {}",
-            response.into_string().unwrap_or_default()
-        ),
-        error => anyhow!("diagnostic service request failed: {error}"),
-    }
+    anyhow!("diagnostic service request failed: {error}")
 }
 
 #[cfg(test)]

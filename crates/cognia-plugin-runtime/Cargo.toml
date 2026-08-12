@@ -27,15 +27,15 @@ cognia-secrets = { path = "../cognia-secrets" }
 cognia-automation = { path = "../cognia-automation" }
 cognia-terminal = { path = "../cognia-terminal" }
 cognia-connectors = { path = "../cognia-connectors" }
-tauri = { version = "=2.11.1" }
+tauri = { version = "=2.11.5" }
 tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
 # The WASM component host — the compile monster this crate isolates.
-wasmtime = { version = "=36.0.12", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
-wasmtime-wasi = "=36.0.12"
+wasmtime = { version = "=40.0.4", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
+wasmtime-wasi = "=40.0.4"
 # Component/manifest validation during install.
-wasmparser = "0.221"
+wasmparser = "0.256"
 # Bounded child-process shutdown in the python host.
 wait-timeout = "0.2"
 serde = { version = "1.0", features = ["derive"] }
@@ -50,23 +50,23 @@ log = "0.4"
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
-base64 = "0.22"
+base64 = "0.23"
 hex = "0.4"
-rand = "0.8"
+rand = "0.10"
 sha2 = "0.11"
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 url = "2"
 dirs = "6"
-notify = "6"
+notify = "8"
 rusqlite = { version = "0.37", features = ["bundled"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart"] }
 # Marketplace archive staging / extraction.
 tempfile = "3"
-zip = { version = "2", default-features = false, features = ["deflate", "bzip2"] }
+zip = { version = "8", default-features = false, features = ["deflate", "bzip2"] }
 tar = "0.4"
 flate2 = "1"
-cap-std = "3"
-cap-fs-ext = "3"
+cap-std = "4"
+cap-fs-ext = "4"
 
 [dev-dependencies]
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }

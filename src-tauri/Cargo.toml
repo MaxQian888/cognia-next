@@ -64,7 +64,7 @@ path = "src/bin/cognia-webrtc-peer.rs"
 required-features = ["webrtc-harness"]
 
 [build-dependencies]
-tauri-build = { version = "2.5.0", features = [] }
+tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 serde_json = "1.0"
@@ -143,7 +143,7 @@ log = "0.4"
 # `Manager::get_webview`) that powers the embedded in-app browser pane
 # (`src-tauri/src/browser/embedded.rs`). Pinned exactly because unstable APIs
 # may shift across minor versions.
-tauri = { version = "=2.11.1", features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
+tauri = { version = "=2.11.5", features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
 tauri-plugin-log = "2"
 
 # Native logging — fern dispatch chain mirrors records into the OS-native
@@ -161,7 +161,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json",
 # the latest line bumped its MSRV to 1.95, above our 1.93 toolchain pin
 # (`rust-toolchain.toml`). Only the `system` feature is needed; disabling the
 # defaults drops disk/network/component/multithread to keep it lean.
-sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 thiserror = "2"
 # `anyhow` is already pulled in as a transitive; expose it directly so
 # `cli_bridge` (and similar small modules) can use Result<T> + Context
@@ -196,7 +196,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io
 dirs = "6"
 # `directories` (separate from `dirs`) gives us the per-platform config_dir
 # the CLI bridge writes its endpoint file into. Used only by `cli_bridge`.
-directories = "5"
+directories = "6"
 ignore = "0.4"
 
 # System scheduler — async-trait abstraction over Windows Task Scheduler /
@@ -221,16 +221,16 @@ wait-timeout = "0.2"
 # Uses ConPTY on Windows (Win10 1809+), forkpty on macOS/Linux. wezterm's
 # upstream of choice — accept its known ConPTY quirks (resize artifacts,
 # Alt-key duplication) for v1 and patch downstream if hit.
-portable-pty = "0.8"
+portable-pty = "0.9"
 # System font enumeration for the appearance / terminal font pickers
 # (`src-tauri/src/fonts.rs`). Pure-Rust — loads the OS font set and reports
 # each face's monospaced flag so the terminal picker can show only
 # fixed-pitch families. The webview can't do this (WKWebView has no Local
 # Font Access API).
-fontdb = "0.18"
+fontdb = "0.24"
 regex = "1"
-toml_edit = { version = "0.22", features = ["serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
+toml_edit = { version = "0.25", features = ["serde"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart", "form"] }
 opentelemetry = { version = "0.32", optional = true, features = ["trace", "metrics"] }
 opentelemetry_sdk = { version = "0.32", optional = true, features = ["trace", "metrics", "rt-tokio"] }
 opentelemetry-otlp = { version = "0.32", optional = true, default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-rustls"] }
@@ -239,7 +239,7 @@ tokio-socks = "0.5"
 tokio-rustls = "0.26"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 futures-util = { version = "0.3", default-features = false }
-rquickjs = "0.12.1"
+rquickjs = "0.12.2"
 bytes = "1"
 
 # Vector cloud backends (ADR-0022, qdrant/milvus/pinecone/chroma/weaviate) moved
@@ -254,15 +254,15 @@ bytes = "1"
 # handshake (private-chat bot went dead). The real OS backend is wired per
 # target below (windows-native / apple-native / sync-secret-service); the base
 # entry stays default-free so Android/iOS fall back to mock intentionally.
-keyring = { version = "3", default-features = false }
-tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
+keyring = { version = "4", default-features = false }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
 uuid = { version = "1", features = ["v4", "v7"] }
-base64 = "0.22"
+base64 = "0.23"
 # Feishu/Lark long-connection wire protocol — the WS transport exchanges
 # protobuf-framed `pbbp2.Frame` messages (not JSON). `prost` decodes/encodes
 # them via `#[derive(Message)]`, so no `.proto`/`protoc`/build.rs is needed.
 # See `src-tauri/src/connectors/lark_ws.rs`.
-prost = "0.13"
+prost = "0.14"
 
 # ADR-0067 Phase 6 — scheduler + workflow + timing (and the `cron` expression
 # parser) live in `crates/cognia-scheduling`; re-aliased as
@@ -277,24 +277,24 @@ axum = { version = "0.8", features = ["macros", "ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 subtle = "2"
 tower = { version = "0.5", features = ["util", "limit", "timeout"] }
-tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
+tower-http = { version = "0.7", features = ["limit", "trace", "cors"] }
 hmac = "0.13"
 sha1 = "0.11"
 sha2 = "0.11"
 sha2-v10 = { package = "sha2", version = "0.10" }
-hkdf = "0.12"
-p256 = { version = "0.13", features = ["ecdsa", "ecdh"] }
+hkdf = "0.13"
+p256 = { version = "0.14", features = ["ecdsa", "ecdh"] }
 argon2 = "0.5"
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 hex = "0.4"
 url = "2"
-aes-gcm = { version = "0.10", features = ["aes"] }
+aes-gcm = { version = "0.11", features = ["aes"] }
 aes = "0.9"
 cbc = { version = "0.2", features = ["alloc"] }
 pbkdf2 = "0.13"
 psl = "2.1"
-rand = "0.8"
-jsonwebtoken = "9"
+rand = "0.10"
+jsonwebtoken = "11"
 serde_urlencoded = "0.7"
 
 # Local IP detection — used by `companion_issue_pair_jwt` to render the
@@ -316,13 +316,13 @@ git2 = { version = "0.21", default-features = false, features = ["vendored-libgi
 # SHA-256 SubjectPublicKeyInfo fingerprint computation. The mobile client
 # pins the fingerprint via the QR pair payload, so the cert chain is never
 # validated by hostname; this avoids needing a real CA.
-rcgen = "0.13"
+rcgen = "0.14"
 time = { version = "0.3", features = ["std"] }
 
 # mDNS (Wave 1.5 / M2.9) — service advertisement for `_cognia._tcp.local.`
 # so the mobile app can pick the desktop server out of the LAN without
 # manual baseUrl entry.
-mdns-sd = "0.13"
+mdns-sd = "0.20"
 
 # Cloudflared launcher (Wave 1.6) — runs the cloudflared subprocess and
 # parses the trycloudflare URL out of stderr. We use std::process via
@@ -331,7 +331,7 @@ mdns-sd = "0.13"
 # Plugin runtime — filesystem watcher (T3b, ADR 0016) and tarball backup
 # (T3c). `notify` is the canonical pure-Rust filesystem watcher; `flate2` +
 # `tar` form a minimal gzipped-tar pair for plugin backup snapshots.
-notify = "6"
+notify = "8"
 flate2 = "1"
 tar = "0.4"
 # Temp-dir staging for WASM plugin installs (M2.2/M2.3). Used by
@@ -342,7 +342,7 @@ tar = "0.4"
 tempfile = "3"
 # WASM plugin bundle extraction (M2.2) — .zip is the canonical bundle format
 # the `cognia plugin build` CLI emits. Pure-Rust, no system zlib dep.
-zip = { version = "2", default-features = false, features = ["deflate", "bzip2"] }
+zip = { version = "8", default-features = false, features = ["deflate", "bzip2"] }
 
 # WASM plugin runtime (ADR 0013) — Wasmtime 36 LTS with the component-model
 # feature on by default. `wasmtime-wasi` provides the WASI Preview 2
@@ -350,9 +350,9 @@ zip = { version = "2", default-features = false, features = ["deflate", "bzip2"]
 # to scan for the embedded `cognia:api-version` custom section before the
 # component is compiled. Pin the patched 36.x LTS line: older 24/26 releases
 # are affected by sandbox-escape advisories that were fixed in 36.0.12.
-wasmtime = { version = "=36.0.12", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
-wasmtime-wasi = "=36.0.12"
-wasmparser = "0.221"
+wasmtime = { version = "=47.0.3", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
+wasmtime-wasi = "=47.0.3"
+wasmparser = "0.256"
 
 # CLI argument parsing for the cognia-server binary (Phase D follow-up).
 # `derive` gives us the `#[derive(Parser)]` macro; `std` keeps default
@@ -373,7 +373,7 @@ dial9-tokio-telemetry = "0.3"
 # with runtime flexibility (Tokio/Smol) and not yet ready for production.
 # Heavy compile cost (~50 transitive deps) is acceptable for the
 # connectivity win.
-webrtc = "0.17"
+webrtc = "0.20"
 
 # ADR-0067 Phase 3 — native OCR subsystem (ADR-0024) lives in `crates/cognia-ocr`.
 # The optional ocrs/rten/rten-imageproc/oar-ocr/ort/image deps and the 5 `ocr-*`
@@ -402,21 +402,21 @@ tauri-plugin-cli = "2"
 # Mach ports); `minidumper` writes the minidump out-of-process from a sibling
 # monitor. Desktop-only — mobile shells (Capacitor) never compile this crate,
 # and the code is additionally `#[cfg(desktop)]`-gated in `crash::monitor`.
-crash-handler = "0.7"
-minidumper = "0.10"
+crash-handler = "0.8"
+minidumper = "0.11"
 
 # Platform-native logging backends + UI automation back-ends.
 [target."cfg(target_os = \"windows\")".dependencies]
 # Real OS credential store (Windows Credential Manager) — see the keyring
 # note in [dependencies]. Without this feature keyring uses the mock store.
-keyring = { version = "3", features = ["windows-native"] }
-eventlog = "0.3"
+keyring = { version = "4", features = ["windows-native-keyring-store"] }
+eventlog = "0.4"
 # Codex App exposes its app-server control plane over a Unix-domain socket on
 # every desktop platform. Windows needs the same compatibility stack Codex
 # itself uses for that socket transport.
 async-io = "2.6.0"
-tokio-util = { version = "0.7.18", features = ["compat"] }
-uds_windows = "1.1.0"
+tokio-util = { version = "0.7.19", features = ["compat"] }
+uds_windows = "1.2.1"
 # ADR-0067 Phase 5 — `uiautomation` moved to `crates/cognia-automation`.
 # Direct windows-rs dep for SendInput/MOUSEEVENTF_WHEEL/GetSystemMetrics calls
 # that aren't exposed publicly through `uiautomation::inputs`. Version pinned
@@ -445,7 +445,7 @@ windows = { version = "0.62.2", features = [
 block2 = "0.6"
 # Real OS credential store (macOS/iOS Keychain) — see the keyring note in
 # [dependencies]. Without this feature keyring uses the mock store.
-keyring = { version = "3", features = ["apple-native"] }
+keyring = { version = "4", features = ["apple-native-keyring-store"] }
 oslog = "0.2"
 # ADR-0067 Phase 5 — `enigo` moved to `crates/cognia-automation`.
 # CGEventTap-based global input capture for the skill recorder
@@ -491,15 +491,11 @@ objc2-web-kit = { version = "0.3.2", features = [
 # needs (all verified against Chrome / VS Code): activating lazy web-content
 # a11y on Chromium/WebKit/Electron apps, resolving the focused/main window, and
 # reading element geometry (AXPosition/AXSize). The whole graph shares one
-# `core-foundation-sys` (0.8), so the raw `*Ref` C types are interchangeable;
-# only `accessibility`'s core-foundation-0.9 `TCFType` methods
-# (`as_concrete_TypeRef` / `wrap_under_create_rule`) need that version, imported
-# under an alias in `ax/raw.rs` and never leaking into the rest of the app
-# (which is on core-foundation 0.10).
+# `core-foundation-sys` (0.8) and core-foundation (0.10), so the raw `*Ref` C
+# types and `TCFType` wrappers are interchangeable.
 # ADR-0067 Phase 5 — `accessibility` + `accessibility-sys` moved to
 # `crates/cognia-automation`. The lower-level CF crates stay (shared).
 core-foundation-sys = "0.8"
-core-foundation-0-9 = { package = "core-foundation", version = "0.9" }
 
 [target."cfg(unix)".dependencies]
 # Direct syscalls for the execution sandbox (ADR-0028): `setrlimit` for the
@@ -513,7 +509,7 @@ libc = "0.2"
 # transfer with RustCrypto so no system OpenSSL is needed at build time.
 # Chosen over `linux-native` (kernel keyutils) because keyutils is wiped on
 # reboot, which would lose stored bot credentials.
-keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+keyring = { version = "4", features = ["zbus-secret-service-keyring-store"] }
 libsystemd = "0.7"
 syslog = "7"
 # ADR-0067 Phase 5 — `enigo` (atspi input sim) + `seccompiler` (bwrap seccomp

@@ -48,14 +48,13 @@ use accessibility_sys::{
     AXObserverAddNotification, AXObserverCreate, AXObserverGetRunLoopSource, AXObserverRef,
     AXObserverRemoveNotification, AXUIElementCreateApplication, AXUIElementRef,
 };
+use core_foundation as cf_ax;
 use core_foundation::base::TCFType as TCFType010;
 use core_foundation::runloop::{kCFRunLoopDefaultMode, CFRunLoop, CFRunLoopSource};
-use core_foundation_0_9 as cf_ax;
 use core_foundation_sys::base::CFRelease;
 use core_foundation_sys::runloop::CFRunLoopSourceRef;
 use core_foundation_sys::string::CFStringRef;
 
-use cf_ax::base::TCFType;
 use cf_ax::string::CFString;
 
 use super::raw;

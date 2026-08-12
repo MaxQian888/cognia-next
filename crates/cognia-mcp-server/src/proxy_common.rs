@@ -15,7 +15,6 @@ use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex as ParkingMutex;
-use rand::RngCore;
 use subtle::ConstantTimeEq;
 
 /// ADR-0020 W3 — token-bucket parameters per peer IP. Defaults match the
@@ -151,7 +150,7 @@ pub fn token_matches(provided: &str, expected: &str) -> bool {
 /// Generate a random 32-byte hex shared-secret token.
 pub fn generate_token() -> String {
     let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::fill(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 

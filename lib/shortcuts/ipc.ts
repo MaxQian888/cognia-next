@@ -5,7 +5,7 @@
  *
  * `useShortcutStore` is the normal way to read bindings, but it is a zustand
  * store that also hydrates prefs — too much for the selection-toolbar overlay,
- * which mounts a minimal shell (`components/pet/pet-window-shell.tsx`) and never
+ * which mounts a minimal shell (`components/runtime/lightweight-route-shell.tsx`) and never
  * hydrates the app-wide stores. Both callers went through this one command with
  * their own inline copy of its shape; this is that shape, declared once.
  */

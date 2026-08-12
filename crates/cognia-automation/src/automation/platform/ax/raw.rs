@@ -20,10 +20,8 @@
 //! These drop to raw `accessibility-sys` + `core-foundation-sys`. The whole
 //! dependency graph shares a single `core-foundation-sys` 0.8, so the raw `*Ref`
 //! C types are the same everywhere and pass freely. `accessibility::AXUIElement`
-//! carries its `TCFType` impl from core-foundation 0.9, imported here under the
-//! `cf_ax` alias purely to reach `as_concrete_TypeRef` / `wrap_under_create_rule`
-//! — no CF wrapper type crosses out of this module, so the rest of the app stays
-//! on core-foundation 0.10 without interop.
+//! carries its `TCFType` impl from core-foundation 0.10, shared with the rest of
+//! the application.
 
 use std::ffi::c_void;
 
@@ -37,7 +35,7 @@ use accessibility_sys::{
     AXUIElementRef, AXUIElementSetAttributeValue, AXUIElementSetMessagingTimeout, AXValueCreate,
     AXValueGetValue, AXValueRef,
 };
-use core_foundation_0_9 as cf_ax;
+use core_foundation as cf_ax;
 use core_foundation_sys::array::CFArrayRef;
 use core_foundation_sys::base::{CFRange, CFRelease, CFTypeRef};
 use core_foundation_sys::dictionary::CFDictionaryRef;

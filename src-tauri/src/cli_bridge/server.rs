@@ -59,7 +59,7 @@ pub fn build_router(state: SharedState) -> Router {
     // too (`mod.rs::init`); only the *dev-build binary discovery* is
     // debug-gated. Do not rename these routes without a coordinated CLI change,
     // or already-installed CLIs stop reaching the desktop.
-    Router::new()
+    let router = Router::new()
         .route("/api/dev/health", get(handlers::health))
         // ── Read endpoints ──────────────────────────────────────────────
         // `installed` returns the list of currently-loaded plugins so the
@@ -95,7 +95,12 @@ pub fn build_router(state: SharedState) -> Router {
         .route(
             "/api/dev/teams/run-status",
             post(handlers::teams_run_status),
-        )
+        );
+
+    #[cfg(all(feature = "agent-debug", desktop))]
+    let router = router.merge(crate::agent_debug::router());
+
+    router
         .layer(from_fn_with_state(state.clone(), auth_middleware))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .with_state(state)

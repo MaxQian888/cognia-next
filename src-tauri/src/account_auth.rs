@@ -1,6 +1,5 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
-use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -51,7 +50,7 @@ pub fn account_password_create_verifier(
     password: String,
 ) -> Result<AccountPasswordVerifier, String> {
     let mut salt = [0_u8; SALT_LEN];
-    OsRng.fill_bytes(&mut salt);
+    rand::fill(&mut salt);
     create_password_verifier_with_salt(&password, &salt)
 }
 

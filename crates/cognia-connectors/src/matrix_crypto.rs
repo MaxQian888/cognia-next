@@ -12,7 +12,6 @@ use matrix_sdk_crypto::{
 };
 use matrix_sdk_sqlite::SqliteCryptoStore;
 use parking_lot::Mutex;
-use rand::{rngs::OsRng, RngCore};
 use ruma::api::client::sync::sync_events::DeviceLists;
 use ruma::api::IncomingResponse;
 use ruma::events::{AnyMessageLikeEventContent, AnyToDeviceEvent, MessageLikeEventContent};
@@ -187,7 +186,7 @@ fn crypto_store_passphrase(adapter_id: &str, device_id: &str) -> Result<String, 
         return Ok(existing);
     }
     let mut raw = [0u8; 32];
-    OsRng.fill_bytes(&mut raw);
+    rand::fill(&mut raw);
     let passphrase = hex::encode(raw);
     super::keyring::set(adapter_id, &account, &passphrase)?;
     Ok(passphrase)

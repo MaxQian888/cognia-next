@@ -46,11 +46,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     Aes256Gcm, Key, Nonce,
 };
 use parking_lot::RwLock;
-use rand::RngCore;
 
 /// Keyring service holding the single master key. (Only the production global
 /// touches the keyring; the test global is in-memory.)
@@ -82,17 +81,18 @@ fn composite(service: &str, account: &str) -> String {
 
 fn random_key() -> [u8; 32] {
     let mut key = [0u8; 32];
-    OsRng.fill_bytes(&mut key);
+    rand::fill(&mut key);
     key
 }
 
 fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, String> {
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    let key = Key::<Aes256Gcm>::from(*key);
+    let cipher = Aes256Gcm::new(&key);
     let mut nonce_bytes = [0u8; 12];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    rand::fill(&mut nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
     let ciphertext = cipher
-        .encrypt(nonce, plaintext)
+        .encrypt(&nonce, plaintext)
         .map_err(|e| format!("secret-store encrypt failed: {e}"))?;
     // Prepend the nonce so decrypt can reconstruct it.
     let mut out = nonce_bytes.to_vec();
@@ -105,10 +105,12 @@ fn decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, String> {
         return Err("secret-store blob too short".to_string());
     }
     let (nonce_bytes, ciphertext) = data.split_at(12);
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
-    let nonce = Nonce::from_slice(nonce_bytes);
+    let key = Key::<Aes256Gcm>::from(*key);
+    let cipher = Aes256Gcm::new(&key);
+    let nonce = Nonce::try_from(nonce_bytes)
+        .map_err(|_| "secret-store nonce has invalid length".to_string())?;
     cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|e| format!("secret-store decrypt failed: {e}"))
 }
 

@@ -394,7 +394,7 @@ fn run_categories(
         })),
         HostListFormat::Table => {
             let mut table = Table::new();
-            table.load_preset(UTF8_FULL).set_header([
+            table.load_style(UTF8_FULL).set_header([
                 "CATEGORY", "COMMANDS", "READ", "WRITE", "HIGH", "CRITICAL", "SKILL",
             ]);
             for category in categories {
@@ -470,7 +470,7 @@ fn run_resources(
         })),
         HostListFormat::Table => {
             let mut table = Table::new();
-            table.load_preset(UTF8_FULL).set_header([
+            table.load_style(UTF8_FULL).set_header([
                 "RESOURCE", "CATEGORY", "COMMANDS", "HIGH", "CRITICAL", "EXAMPLES",
             ]);
             for resource in resources {
@@ -566,7 +566,7 @@ fn run_commands(
         })),
         HostListFormat::Table => {
             let mut table = Table::new();
-            table.load_preset(UTF8_FULL).set_header([
+            table.load_style(UTF8_FULL).set_header([
                 "COMMAND",
                 "CATEGORY",
                 "RESOURCE",
@@ -1147,15 +1147,31 @@ fn build_tls_connector(path: &Path) -> std::result::Result<TlsConnector, HostFai
 }
 
 fn build_agent(resolved: &ResolvedConfig) -> std::result::Result<ureq::Agent, HostFailure> {
-    let connector = build_tls_connector(&resolved.ca_cert)?;
-    Ok(ureq::AgentBuilder::new()
-        .tls_connector(Arc::new(connector))
-        .timeout_connect(CONNECT_TIMEOUT)
-        .timeout_read(Duration::from_secs(30))
-        .timeout_write(Duration::from_secs(30))
-        .redirects(0)
+    let pem = fs::read(&resolved.ca_cert).map_err(|error| {
+        HostFailure::configuration(
+            "ca_cert_unreadable",
+            format!("cannot read Headless CA certificate: {error}"),
+        )
+    })?;
+    let certificate = ureq::tls::Certificate::from_pem(&pem).map_err(|error| {
+        HostFailure::configuration(
+            "invalid_ca_cert",
+            format!("Headless CA certificate is not valid PEM: {error}"),
+        )
+    })?;
+    let tls_config = ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::NativeTls)
+        .root_certs(ureq::tls::RootCerts::Specific(Arc::new(vec![certificate])))
+        .build();
+    Ok(ureq::Agent::config_builder()
+        .tls_config(tls_config)
+        .timeout_connect(Some(CONNECT_TIMEOUT))
+        .timeout_global(Some(Duration::from_secs(30)))
+        .max_redirects(0)
+        .http_status_as_error(false)
         .user_agent(concat!("cognia/", env!("CARGO_PKG_VERSION")))
-        .build())
+        .build()
+        .new_agent())
 }
 
 fn resolve_service_token(resolved: &ResolvedConfig) -> std::result::Result<String, HostFailure> {
@@ -1254,15 +1270,15 @@ fn post_rpc_with_retry(
     for attempt in 0..3 {
         let mut request = agent
             .post(endpoint.as_str())
-            .set("Authorization", &format!("Bearer {token}"))
-            .set("Content-Type", "application/json");
+            .header("Authorization", format!("Bearer {token}"))
+            .content_type("application/json");
         if let Some(key) = idempotency_key {
-            request = request.set("Idempotency-Key", key);
+            request = request.header("Idempotency-Key", key);
         }
         match request.send_json(body.clone()) {
-            Ok(response) => return parse_response(response),
-            Err(ureq::Error::Status(status, response)) => {
-                return Err(server_failure(status, response));
+            Ok(response) if response.status().is_success() => return parse_response(response),
+            Ok(response) => {
+                return Err(server_failure(response.status().as_u16(), response));
             }
             Err(_) if attempt < 2 => thread::sleep(Duration::from_millis(100 * (attempt + 1))),
             Err(_) => {
@@ -1299,12 +1315,14 @@ fn poll_operation_with_retry(
     for attempt in 0..3 {
         match agent
             .get(endpoint.as_str())
-            .set("Authorization", &format!("Bearer {token}"))
+            .header("Authorization", format!("Bearer {token}"))
             .call()
         {
-            Ok(response) => return parse_operation_response(parse_response(response)?),
-            Err(ureq::Error::Status(status, response)) => {
-                return Err(server_failure(status, response));
+            Ok(response) if response.status().is_success() => {
+                return parse_operation_response(parse_response(response)?);
+            }
+            Ok(response) => {
+                return Err(server_failure(response.status().as_u16(), response));
             }
             Err(_) if attempt < 2 => thread::sleep(Duration::from_millis(100 * (attempt + 1))),
             Err(_) => {
@@ -1390,9 +1408,11 @@ fn parse_operation_response(outcome: HttpOutcome) -> std::result::Result<HttpOut
     }
 }
 
-fn parse_response(response: ureq::Response) -> std::result::Result<HttpOutcome, HostFailure> {
-    let status = response.status();
-    let body = response.into_string().map_err(|_| {
+fn parse_response(
+    mut response: ureq::http::Response<ureq::Body>,
+) -> std::result::Result<HttpOutcome, HostFailure> {
+    let status = response.status().as_u16();
+    let body = response.body_mut().read_to_string().map_err(|_| {
         HostFailure::new(
             "server",
             "response_read_failed",
@@ -1412,9 +1432,10 @@ fn parse_response(response: ureq::Response) -> std::result::Result<HttpOutcome, 
     Ok(HttpOutcome { status, body })
 }
 
-fn server_failure(status: u16, response: ureq::Response) -> HostFailure {
+fn server_failure(status: u16, mut response: ureq::http::Response<ureq::Body>) -> HostFailure {
     let body = response
-        .into_string()
+        .body_mut()
+        .read_to_string()
         .ok()
         .and_then(|body| serde_json::from_str::<Value>(&body).ok())
         .unwrap_or_else(|| json!({}));
@@ -1570,9 +1591,9 @@ fn probe_json(
         .join(path)
         .map_err(|_| HostFailure::configuration("invalid_probe_url", "cannot build probe URL"))?;
     match agent.get(url.as_str()).call() {
-        Ok(response) => {
-            let status = response.status();
-            let body: Value = response.into_json().map_err(|_| {
+        Ok(mut response) if response.status().is_success() => {
+            let status = response.status().as_u16();
+            let body: Value = response.body_mut().read_json().map_err(|_| {
                 HostFailure::new(
                     "server",
                     "invalid_probe_response",
@@ -1585,12 +1606,12 @@ fn probe_json(
             }
             Ok(json!({"name":path,"status":"ok","detail":format!("HTTP {status}")}))
         }
-        Err(ureq::Error::Status(status, _)) => Err(HostFailure::new(
+        Ok(response) => Err(HostFailure::new(
             "server",
             "probe_failed",
-            format!("/{path} returned HTTP {status}"),
+            format!("/{path} returned HTTP {}", response.status().as_u16()),
         )
-        .with_status(status)
+        .with_status(response.status().as_u16())
         .with_exit(6)),
         Err(_) => Err(HostFailure::transport(
             "probe_transport_failed",

@@ -2,8 +2,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use ed25519_dalek::SigningKey;
-use rand::rngs::OsRng;
-use rand::RngCore;
 use serde::Serialize;
 
 use crate::cli::OutputFormat;
@@ -38,7 +36,7 @@ pub fn load_or_create_signing_key(override_path: Option<PathBuf>) -> Result<Sign
             .with_context(|| format!("create diagnostic key directory {}", parent.display()))?;
     }
     let mut secret = [0_u8; 32];
-    OsRng.fill_bytes(&mut secret);
+    rand::fill(&mut secret);
     let key = SigningKey::from_bytes(&secret);
     write_private_key(&path, &hex::encode(key.to_bytes()))?;
     Ok(key)

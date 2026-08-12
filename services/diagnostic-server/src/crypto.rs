@@ -3,7 +3,6 @@ use aes_gcm::{
     Aes256Gcm, KeyInit, Nonce,
 };
 use async_trait::async_trait;
-use rand::{rngs::OsRng, RngCore};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -220,7 +219,7 @@ pub fn encrypt_artifact(
         anyhow::bail!("tenant key version must be positive");
     }
     let mut nonce_bytes = [0_u8; NONCE_BYTES];
-    OsRng.fill_bytes(&mut nonce_bytes);
+    rand::fill(&mut nonce_bytes);
     let aad = artifact_aad(tenant_id, key_version);
     let ciphertext = Aes256Gcm::new_from_slice(dek)
         .expect("AES-256 key has fixed length")

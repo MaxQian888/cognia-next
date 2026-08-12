@@ -12,7 +12,6 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cognia_signaling_core::{proto::RoomDescriptorV2, v2::validate_room_descriptor};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use once_cell::sync::Lazy;
-use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -1160,7 +1159,7 @@ fn provision_signaling(
     let host_identity = V2Identity::generate();
     let room_nonce = {
         let mut bytes = [0_u8; 16];
-        OsRng.fill_bytes(&mut bytes);
+        rand::fill(&mut bytes);
         URL_SAFE_NO_PAD.encode(bytes)
     };
     let room_descriptor = build_room_descriptor(
@@ -1288,7 +1287,7 @@ struct AccessTokenAuthority {
 impl AccessTokenAuthority {
     fn random() -> Self {
         let mut key = [0u8; 32];
-        OsRng.fill_bytes(&mut key);
+        rand::fill(&mut key);
         Self { key }
     }
 

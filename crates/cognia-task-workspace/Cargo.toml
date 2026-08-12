@@ -12,12 +12,12 @@ name = "cognia_task_workspace"
 path = "src/lib.rs"
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 flate2 = "1"
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 hex = "0.4"
 ignore = "0.4"
-notify = "6"
+notify = "8"
 parking_lot = "0.12"
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }

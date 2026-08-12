@@ -93,18 +93,25 @@ pub fn load_endpoint() -> Result<EndpointFile> {
 /// `GET /api/dev/plugins/installed`.
 pub fn get_json<R: for<'de> Deserialize<'de>>(endpoint: &EndpointFile, path: &str) -> Result<R> {
     let url = format!("{}{}", endpoint.base_url.trim_end_matches('/'), path);
-    let agent = ureq::Agent::new();
+    let agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .new_agent();
     let response = agent
         .get(&url)
-        .set("X-Cognia-Dev-Token", &endpoint.dev_token)
+        .header("X-Cognia-Dev-Token", &endpoint.dev_token)
         .call();
     match response {
-        Ok(resp) => {
-            let parsed: R = resp.into_json().context("decode response JSON body")?;
+        Ok(mut resp) if resp.status().is_success() => {
+            let parsed: R = resp
+                .body_mut()
+                .read_json()
+                .context("decode response JSON body")?;
             Ok(parsed)
         }
-        Err(ureq::Error::Status(code, resp)) => {
-            let body = resp.into_string().unwrap_or_default();
+        Ok(mut resp) => {
+            let code = resp.status().as_u16();
+            let body = resp.body_mut().read_to_string().unwrap_or_default();
             Err(anyhow!(
                 "GET {} → HTTP {}\nresponse: {}",
                 url,
@@ -163,19 +170,26 @@ pub fn post_json<R: for<'de> Deserialize<'de>>(
     body: &serde_json::Value,
 ) -> Result<R> {
     let url = format!("{}{}", endpoint.base_url.trim_end_matches('/'), path);
-    let agent = ureq::Agent::new();
+    let agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .new_agent();
     let response = agent
         .post(&url)
-        .set("X-Cognia-Dev-Token", &endpoint.dev_token)
-        .set("Content-Type", "application/json")
+        .header("X-Cognia-Dev-Token", &endpoint.dev_token)
+        .content_type("application/json")
         .send_json(body.clone());
     match response {
-        Ok(resp) => {
-            let parsed: R = resp.into_json().context("decode response JSON body")?;
+        Ok(mut resp) if resp.status().is_success() => {
+            let parsed: R = resp
+                .body_mut()
+                .read_json()
+                .context("decode response JSON body")?;
             Ok(parsed)
         }
-        Err(ureq::Error::Status(code, resp)) => {
-            let body = resp.into_string().unwrap_or_default();
+        Ok(mut resp) => {
+            let code = resp.status().as_u16();
+            let body = resp.body_mut().read_to_string().unwrap_or_default();
             Err(anyhow!(
                 "POST {} → HTTP {}\nresponse: {}",
                 url,

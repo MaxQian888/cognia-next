@@ -18,9 +18,7 @@ test.describe("settings — AI Connections and Model Catalog", () => {
   })
 
   test("@smoke keeps the legacy providers deep link compatible", async ({ page }) => {
-    await page.evaluate(() => {
-      window.location.href = "/settings?section=providers"
-    })
+    await page.goto("/settings?section=providers")
 
     await expect.poll(() => new URL(page.url()).searchParams.get("section")).toBe("ai-connections")
     await expect(page.getByText("AI Connections", { exact: true }).first()).toBeVisible()

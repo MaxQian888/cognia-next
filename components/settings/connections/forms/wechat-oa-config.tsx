@@ -12,6 +12,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import { CheckCircle2Icon, CopyIcon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -50,6 +51,7 @@ export function WechatOaConfigDialog({
   onCreated,
 }: WechatOaConfigDialogProps) {
   const t = useTranslations("settings.connections.wechatOa")
+  const router = useRouter()
   const isNew = row === null
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
@@ -364,11 +366,7 @@ export function WechatOaConfigDialog({
               size="sm"
               variant="outline"
               className="self-start"
-              onClick={() => {
-                if (typeof window !== "undefined") {
-                  window.location.assign("/settings/companion#tunnel")
-                }
-              }}
+              onClick={() => router.push("/settings/companion#tunnel")}
               aria-label={t("openCompanionAria")}
             >
               {t("openCompanion")}

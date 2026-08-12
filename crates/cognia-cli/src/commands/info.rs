@@ -501,7 +501,7 @@ fn print_detailed(report: &InfoReport) {
     println!();
     println!("Files:");
     let mut t = Table::new();
-    t.load_preset(UTF8_FULL)
+    t.load_style(UTF8_FULL)
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(["Path", "Size (bytes)"]);
     for f in &report.files {

@@ -60,10 +60,7 @@ fn rotation_start(
         st.reservation_counts.retain(|key, _| pool.contains(key));
     }
     match strategy {
-        "random" => {
-            use rand::Rng;
-            rand::thread_rng().gen_range(0..pool.len())
-        }
+        "random" => rand::random_range(0..pool.len()),
         "least-used" => {
             let mut best = 0usize;
             let mut best_count = u64::MAX;

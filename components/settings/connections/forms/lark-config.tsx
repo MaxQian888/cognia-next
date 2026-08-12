@@ -19,6 +19,7 @@
 
 import { useMemo, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -969,6 +970,7 @@ interface DeliveryFieldsProps {
 
 function DeliveryFields(p: DeliveryFieldsProps) {
   const t = useTranslations("settings.connections.lark")
+  const router = useRouter()
 
   const onOpenConsole = useMemo(
     () => () => {
@@ -1058,14 +1060,7 @@ function DeliveryFields(p: DeliveryFieldsProps) {
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  if (typeof window !== "undefined") {
-                    window.location.hash = "#tunnel"
-                    // Companion settings live at /settings/companion in the
-                    // sidebar; the hash hops the user to the tunnel card.
-                    window.location.assign("/settings/companion#tunnel")
-                  }
-                }}
+                onClick={() => router.push("/settings/companion#tunnel")}
                 aria-label={t("openCompanionAria")}
                 data-testid="lark-open-companion"
               >

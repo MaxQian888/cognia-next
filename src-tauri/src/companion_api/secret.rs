@@ -15,7 +15,6 @@
 //! and generation tests run unconditionally.
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use rand::RngCore as _;
 
 const SERVICE: &str = "com.cognia.companion/v1";
 const ACCOUNT: &str = "signing-key";
@@ -66,7 +65,7 @@ pub fn clear() -> Result<(), String> {
 
 fn generate_secret() -> Vec<u8> {
     let mut buf = vec![0u8; 32];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::fill(&mut buf);
     buf
 }
 

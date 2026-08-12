@@ -13,7 +13,6 @@ use std::fs;
 
 use chrono::Utc;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, SIGNATURE_LENGTH};
-use rand::RngCore;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -48,7 +47,7 @@ fn compute_digest(plugin_id: &str, version: &str, file_bytes: &[u8]) -> [u8; 32]
 #[tauri::command]
 pub async fn plugin_generate_keypair() -> Result<KeypairPayload> {
     let mut seed = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut seed);
+    rand::fill(&mut seed);
     let signing_key = SigningKey::from_bytes(&seed);
     let verifying_key: VerifyingKey = (&signing_key).into();
     Ok(KeypairPayload {

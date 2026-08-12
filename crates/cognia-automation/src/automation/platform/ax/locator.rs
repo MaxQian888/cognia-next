@@ -31,7 +31,7 @@ use super::raw;
 /// Non-empty string projection of an AX attribute read. Mirrors the helper in
 /// `mod.rs`; duplicated rather than exported so this module stays independent
 /// of the backend's internals.
-fn str_attr<S: ToString>(r: std::result::Result<S, accessibility_sys::AXError>) -> Option<String> {
+fn str_attr<S: ToString, E>(r: std::result::Result<S, E>) -> Option<String> {
     r.ok().map(|s| s.to_string()).filter(|s| !s.is_empty())
 }
 

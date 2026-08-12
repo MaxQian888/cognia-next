@@ -107,13 +107,13 @@ fn authorized(headers: &HeaderMap, secret: &str) -> bool {
 
 fn generate_code() -> String {
     let mut bytes = [0u8; CODE_LENGTH];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     code_from_bytes(&bytes)
 }
 
 fn generate_owner_token() -> String {
     let mut bytes = [0u8; OWNER_TOKEN_BYTES];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     let mut out = String::with_capacity(OWNER_TOKEN_BYTES * 2);
     for byte in bytes {
         let _ = write!(&mut out, "{byte:02x}");

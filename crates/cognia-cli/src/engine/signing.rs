@@ -9,7 +9,6 @@
 use anyhow::bail;
 use anyhow::{anyhow, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, SIGNATURE_LENGTH};
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 
 use crate::shared::{b64_decode, b64_encode};
@@ -22,7 +21,7 @@ pub struct Keypair {
 impl Keypair {
     pub fn generate() -> Self {
         let mut seed = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut seed);
+        rand::fill(&mut seed);
         let signing_key = SigningKey::from_bytes(&seed);
         let verifying_key: VerifyingKey = (&signing_key).into();
         Self {

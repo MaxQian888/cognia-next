@@ -13,25 +13,25 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 ed25519-dalek = "2"
-rand = "0.8"
-base64 = "0.22"
+rand = "0.9"
+base64 = "0.23"
 sha2 = "0.10"
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "5", default-features = false, features = ["deflate"] }
 anyhow = "1"
-notify = "6"
-wasmparser = "0.221"
+notify = "8"
+wasmparser = "0.246"
 # Used by status/install/uninstall/list/reload/dev to talk to a running
 # cognia desktop's CLI bridge. Plain HTTP because the bridge binds to
 # 127.0.0.1 only — see src-tauri/src/cli_bridge/.
-ureq = { version = "2", default-features = false, features = ["json", "native-tls"] }
+ureq = { version = "3", default-features = false, features = ["json", "native-tls"] }
 # `cognia acp` stdio↔WS bridge to the companion API's ACP endpoint. Sync
 # (blocking) client keeps tokio out of the binary, matching the ureq choice.
-tungstenite = { version = "0.26", features = ["native-tls"] }
+tungstenite = { version = "0.29", features = ["native-tls"] }
 native-tls = "0.2"
-directories = "5"
+directories = "6"
 parking_lot = "0.12"
 # ── UX/TUI stack (Phase 1 — see plans/cli-tui-majestic-quokka.md) ─────────
 # `eyre` + `color-eyre` provide the top-level error report with severity
@@ -40,11 +40,11 @@ parking_lot = "0.12"
 eyre = "0.6"
 color-eyre = { version = "0.6", default-features = false, features = ["track-caller"] }
 # Spinner / progress bar / MultiProgress (for `plugin build` & `plugin dev`).
-indicatif = "0.17"
+indicatif = "0.18"
 # Confirm / Input / Select / MultiSelect prompts.
-dialoguer = { version = "0.11", default-features = false, features = ["completion", "fuzzy-select"] }
+dialoguer = { version = "0.12", default-features = false, features = ["completion", "fuzzy-select"] }
 # Unicode-aware table layout for `plugin info`.
-comfy-table = "7"
+comfy-table = "8"
 # Color macros that honor NO_COLOR / FORCE_COLOR / set_override.
 owo-colors = { version = "4", features = ["supports-colors"] }
 # TTY detection — std::io::IsTerminal would also work, but is-terminal

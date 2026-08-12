@@ -11,6 +11,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -91,6 +92,7 @@ interface SlackConfigDialogProps {
 
 export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackConfigDialogProps) {
   const t = useTranslations("settings.connections.slack")
+  const router = useRouter()
   const isNew = row === null
   const persisted = (row?.settings ?? {}) as SlackPersistedSettings
 
@@ -486,11 +488,7 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => {
-                    if (typeof window !== "undefined") {
-                      window.location.assign("/settings/companion#tunnel")
-                    }
-                  }}
+                  onClick={() => router.push("/settings/companion#tunnel")}
                 >
                   {t("openCompanion")}
                 </Button>

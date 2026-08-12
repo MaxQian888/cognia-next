@@ -173,7 +173,7 @@ description: 对 cognia-next Jest + Playwright + sidecar 测试体系做的一�
 
 ### C3. workflow executors 全覆盖（ADR-0011）
 
-ADR-0011 列举的 38 个 node kinds + 32 个 executor 在 `lib/workflow/nodes/built-ins.ts`、`lib/workflow/nodes/desktop.ts` 和注册表/catalog/schema 等基础设施层都有 co-located 测试。**无缺口**。
+ADR-0011 列举的 38 个 node kinds + 32 个 executor 在 `lib/workflow/nodes/built-ins/index.ts`、`lib/workflow/nodes/automation/desktop.ts` 和注册表/catalog/schema 等基础设施层都有 co-located 测试。**无缺口**。
 
 ### C4. connector adapters 接近全覆盖
 

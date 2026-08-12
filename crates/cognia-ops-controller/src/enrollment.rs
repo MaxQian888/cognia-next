@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use rcgen::{
-    CertificateParams, CertificateSigningRequestParams, DistinguishedName, DnType,
-    ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, SanType,
+    CertificateSigningRequestParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, KeyPair,
+    KeyUsagePurpose, SanType,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -25,8 +25,7 @@ pub trait CertificateIssuer: Send + Sync {
 
 pub struct RcgenCertificateIssuer {
     ca_certificate_pem: String,
-    ca_certificate: rcgen::Certificate,
-    ca_key: KeyPair,
+    ca_issuer: rcgen::Issuer<'static, KeyPair>,
     validity: Duration,
 }
 
@@ -37,18 +36,10 @@ impl RcgenCertificateIssuer {
         validity: Duration,
     ) -> anyhow::Result<Arc<Self>> {
         let ca_key = KeyPair::from_pem(ca_private_key_pem)?;
-        let mut ca_params = CertificateParams::from_ca_cert_pem(&ca_certificate_pem)?;
-        ca_params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        ca_params.key_usages = vec![
-            KeyUsagePurpose::KeyCertSign,
-            KeyUsagePurpose::DigitalSignature,
-            KeyUsagePurpose::CrlSign,
-        ];
-        let ca_certificate = ca_params.self_signed(&ca_key)?;
+        let ca_issuer = rcgen::Issuer::from_ca_cert_pem(&ca_certificate_pem, ca_key)?;
         Ok(Arc::new(Self {
             ca_certificate_pem,
-            ca_certificate,
-            ca_key,
+            ca_issuer,
             validity,
         }))
     }
@@ -76,7 +67,7 @@ impl CertificateIssuer for RcgenCertificateIssuer {
         csr.params.not_before =
             time::OffsetDateTime::from_unix_timestamp((now - Duration::minutes(5)).timestamp())?;
         csr.params.not_after = time::OffsetDateTime::from_unix_timestamp(expires_at.timestamp())?;
-        let certificate = csr.signed_by(&self.ca_certificate, &self.ca_key)?;
+        let certificate = csr.signed_by(&self.ca_issuer)?;
         let fingerprint_sha256 = hex::encode(Sha256::digest(certificate.der().as_ref()));
         Ok(IssuedCertificate {
             certificate_pem: certificate.pem(),

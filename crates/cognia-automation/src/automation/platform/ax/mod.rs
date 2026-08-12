@@ -1052,7 +1052,7 @@ fn project_ax_name(
 }
 
 /// Read a CFString-typed AX accessor result into a trimmed, non-empty `String`.
-fn str_attr<S: ToString>(r: std::result::Result<S, accessibility_sys::AXError>) -> Option<String> {
+fn str_attr<S: ToString, E>(r: std::result::Result<S, E>) -> Option<String> {
     r.ok().map(|s| s.to_string()).filter(|s| !s.is_empty())
 }
 

@@ -29,7 +29,6 @@ use cognia_signaling_core::{
     v2::{validate_room_descriptor, verify_subscribe_proof},
 };
 use futures_util::{SinkExt, StreamExt};
-use rand::RngCore;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::{
@@ -756,7 +755,7 @@ fn v2_envelope_err(e: V2EnvelopeError) -> SessionError {
 
 fn fresh_v2_id() -> String {
     let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::fill(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
 }
 

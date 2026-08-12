@@ -283,7 +283,7 @@ mod tests {
 
         let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
         let certificate = certified.cert.der().clone();
-        let key = PrivatePkcs8KeyDer::from(certified.key_pair.serialize_der());
+        let key = PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der());
         let server_config = rustls::ServerConfig::builder_with_provider(
             rustls::crypto::ring::default_provider().into(),
         )

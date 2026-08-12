@@ -8,7 +8,6 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use chrono::{DateTime, Utc};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use hmac::{Hmac, KeyInit as HmacKeyInit, Mac};
-use rand::RngCore;
 use rusqlite::{backup::Backup, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -597,7 +596,7 @@ fn encrypt_archive(archive: &[u8], key: &[u8; 32], key_version: &str) -> Result<
     let version = key_version.as_bytes();
     let version_len = u16::try_from(version.len()).map_err(|_| "key version is too long")?;
     let mut nonce = [0_u8; NONCE_LEN];
-    rand::rngs::OsRng.fill_bytes(&mut nonce);
+    rand::fill(&mut nonce);
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| "invalid backup key")?;
     let ciphertext = cipher
         .encrypt(Nonce::from_slice(&nonce), archive)

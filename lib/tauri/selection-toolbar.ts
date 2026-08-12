@@ -267,7 +267,7 @@ export async function finishSelectionToolbar(candidateId: string): Promise<void>
  *
  * Read straight from Rust rather than through `useShortcutStore`: the toolbar
  * renders in an overlay window that deliberately mounts only the minimal shell
- * (`components/pet/pet-window-shell.tsx`), so the app-wide stores are not
+ * (`components/runtime/lightweight-route-shell.tsx`), so the app-wide stores are not
  * hydrated there. The capsule shows whatever the user has actually bound, which
  * is why this is a live read and not the hard-coded defaults. Skipping the store
  * is not a reason to skip `lib/shortcuts/` — the command and its shape live

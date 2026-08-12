@@ -10270,14 +10270,7 @@
       "dialogTitle": "会话覆盖设置",
       "fields": {
         "activationPolicy": {
-          "label": "激活策略",
-          "options": {
-            "always": "始终激活",
-            "direct_only": "仅私聊消息",
-            "inherit": "继承适配器默认",
-            "mention_activates": "提及后临时激活",
-            "mention_each": "每次都需要提及"
-          }
+          "label": "激活策略"
         },
         "activationTtl": {
           "label": "激活有效期（小时）",
@@ -10312,12 +10305,7 @@
         "characterPlaceholder": "（无）",
         "cooldownMs": "机器人回复后冷却时间 (ms)",
         "dispatchMode": {
-          "label": "调度模式",
-          "options": {
-            "inherit": "继承适配器默认",
-            "queue": "当前运行结束后排队处理",
-            "steer": "引导当前运行"
-          }
+          "label": "调度模式"
         },
         "liveActivity": "实时活动卡片",
         "liveActivityHint": "助手工作时在对话中显示实时进度卡片（工具数、用时、当前操作、文件编辑）。默认开启；频道消息过多时可关闭。",
@@ -10399,7 +10387,6 @@
       "cancel": "取消",
       "markdownPlaceholder": "草稿 Markdown…",
       "reject": "拒绝",
-      "segmentFallback": "[消息片段]",
       "textPlaceholder": "草稿文本…"
     },
     "extensionPoints": {
@@ -10946,7 +10933,6 @@
           "errors": "错误",
           "inputTokens": "输入 token",
           "loading": "正在加载 Agent 追踪统计…",
-          "modelRuns": "{count} 次运行",
           "outputHint": "输出：{count}",
           "regionLabel": "Agent 追踪统计 — {window}",
           "title": "Agent 追踪",
@@ -13047,7 +13033,6 @@
     },
     "inbox": {
       "tabs": {
-        "draftCountOverflow": "99+",
         "drafts": "草稿",
         "messages": "消息"
       },
@@ -20726,7 +20711,6 @@
   },
   "servers": {
     "actions": {
-      "backToServers": "返回服务器列表",
       "backup": "创建备份",
       "deploy": "部署服务器",
       "refresh": "刷新",
@@ -20751,12 +20735,7 @@
       "connecting": "正在连接…",
       "controllerPlaceholder": "https://ops.example.com",
       "controllerUrl": "控制器地址",
-      "description": "连接云中立运维控制器。OIDC 令牌保存在系统安全钥匙串中，不会写入浏览器存储。",
-      "disconnect": "断开连接",
-      "disconnectFailed": "无法删除已保存的控制器凭据",
-      "disconnected": "已断开运维控制器",
-      "eventsConnected": "操作事件流已启用",
-      "eventsReconnecting": "正在重连操作事件流",
+      "description": "连接云中立运维控制器。凭据仅保留在内存中，此页面不会持久化凭据。",
       "failed": "无法连接运维控制器",
       "targetId": "默认目标 ID",
       "title": "连接运维控制器",
@@ -20766,7 +20745,6 @@
     "description": "在一个云中立工作区中部署、观测、备份、恢复并保护 Compose 或 Kubernetes 目标。",
     "errors": {
       "authenticationRequired": "OIDC 会话缺失或已过期，请重新登录后连接。",
-      "capabilities": "无法加载提供方能力",
       "detail": "无法加载服务器详情",
       "networkUnavailable": "运维控制器不可用，请检查地址、TLS 证书和网络路由。",
       "operation": "无法将服务器操作加入队列",
@@ -20850,7 +20828,6 @@
       "ingress": "Ingress TLS",
       "kubernetes": "Kubernetes",
       "kubernetes-csi": "Kubernetes CSI",
-      "none": "不配置快照",
       "vault": "Vault"
     },
     "overview": {
@@ -20875,29 +20852,22 @@
     },
     "wizard": {
       "cancel": "取消",
-      "controllerCredentialRef": "控制器凭据引用",
       "controllerUrl": "控制器地址",
       "credentialsNotice": "配置仅保存凭据引用。云平台密钥、kubeconfig、SSH 密钥、对象存储密钥和 enrollment token 都不会进入此配置或浏览器缓存。",
-      "custom": "JSON / YAML",
       "deploymentRoot": "部署根目录",
       "description": "配置版本化 DeploymentTarget。所有云厂商预设最终都会转换为同一云中立协议。",
-      "guided": "引导式配置",
       "identitySection": "OIDC 身份认证",
       "imagesSection": "不可变镜像",
       "ingressClass": "IngressClass",
-      "invalid": "部署目标配置无效",
       "label": "显示名称",
       "namespace": "命名空间",
       "objectStoreBucket": "存储桶",
       "objectStoreCredentialRef": "对象存储凭据引用",
       "objectStoreEndpoint": "S3-compatible 地址",
-      "objectStorePathStyle": "使用路径式对象存储地址",
-      "objectStorePathStyleHelp": "当 S3-compatible 服务不支持虚拟主机式存储桶地址时启用。",
       "objectStoreRegion": "对象存储区域",
       "oidcAudience": "OIDC audience",
       "oidcIssuer": "OIDC issuer",
       "placeholders": {
-        "controllerCredentialRef": "ops-controller/staging",
         "controllerUrl": "https://ops.example.com",
         "keyVersion": "key-2026-08",
         "label": "预发布环境",
@@ -20909,9 +20879,6 @@
         "oidcIssuer": "https://auth.example.com/oidc",
         "publicUrl": "https://server.example.com",
         "runnerImage": "ghcr.io/owner/cognia-runner@sha256:…",
-        "scopeAdmin": "servers:admin",
-        "scopeOperate": "servers:operate",
-        "scopeRead": "servers:read",
         "secretRootRef": "cognia/staging",
         "serverImage": "ghcr.io/owner/cognia-server@sha256:…",
         "snapshotRef": "cognia-snapshots",
@@ -20922,13 +20889,9 @@
       },
       "platformSection": "平台设置",
       "projectName": "Compose 项目名称",
-      "providerCredentialsRequired": "此控制器要求为所选部署提供方配置凭据引用。",
       "publicUrl": "公网地址",
       "runnerImage": "Runner 镜像摘要",
       "runtimeClass": "RuntimeClass",
-      "scopeAdmin": "OIDC 管理 scope",
-      "scopeOperate": "OIDC 操作 scope",
-      "scopeRead": "OIDC 读取 scope",
       "secretProvider": "密钥提供方",
       "secretRootRef": "密钥根引用",
       "serverImage": "服务器镜像摘要",
@@ -26352,9 +26315,6 @@
       "copyKey": "复制密钥",
       "costUnknown": "—",
       "createKey": "创建密钥",
-      "customApplied": "网关配置已应用",
-      "customHeading": "自定义配置",
-      "customHelp": "以严格 JSON 或 YAML 编辑、导入、校验、预览和导出完整 GatewayConfig 协议。",
       "deleteKey": "删除密钥",
       "deleteKeyConfirm": "删除此密钥？正在使用它的工具会立即失效。",
       "description": "把你配置好的服务商暴露成本地 OpenAI / Anthropic 兼容端点，让外部工具借用 Cognia 的路由和凭据。",
@@ -26378,8 +26338,6 @@
       "fieldStripAllowPlaceholder": "openai:service_tier",
       "fieldStripHeading": "出站字段剥离",
       "fieldStripHelp": "请求体到达上游前会被移除的字段。",
-      "gatewayLocalRoutingV2": "本地路由 v2",
-      "gatewayLocalRoutingV2Help": "网关请求使用 Cognia 当前的本地路由权威和策略快照。",
       "hide": "隐藏",
       "hideRawModels": "仅列出别名",
       "hideRawModelsHelp": "在 /v1/models 中隐藏原始服务商模型 id，只公布路由别名。直接的 provider:model 调用仍然有效。",
@@ -26430,22 +26388,15 @@
       "maxConcurrentPerUpstreamKeyHelp": "每个池内上游账号允许的同时在途调用数，所有端点共用同一并发上限。0 = 不限。流式对话会占用并发槽直到整条流结束。",
       "maxRetries": "最大尝试数",
       "maxRetriesHelp": "每个请求尝试的候选上限。0 = 走完整条回退链。",
-      "maxRetryWait": "最大重试等待（毫秒）",
-      "maxRetryWaitHelp": "限制重试候选之间等待的总时长。",
       "nav": {
         "badgeNoKeyAria": "没有可用的 API 密钥",
         "badgeParkedKeysAria": "{count} 个上游密钥已停用",
-        "badgeRestartRequiredAria": "需要重启监听器",
         "groups": {
           "observabilityGroup": "可观测",
           "routingGroup": "路由与保护",
           "serviceGroup": "服务"
         },
         "items": {
-          "custom": {
-            "description": "完整 JSON 或 YAML 配置",
-            "label": "自定义配置"
-          },
           "exposure": {
             "description": "/v1/models 对外公布的内容",
             "label": "模型暴露"
@@ -26500,16 +26451,9 @@
       "requestTimeoutHelp": "非流式请求的总时长上限。0 表示不限；流式响应永不受此约束。",
       "requiresKey": "启用网关前请先创建 API 密钥。",
       "resetQuota": "重置用量",
-      "respectRetryAfter": "遵循 Retry-After",
-      "respectRetryAfterHelp": "故障转移前的延迟优先采用上游 Retry-After 提示。",
       "restartListener": "重启监听器",
       "restartRequired": "运行中的监听器仍在使用旧配置，重启后这些修改才会生效。",
-      "restartRequiredBadge": "需要重启",
       "restarted": "监听器已重启",
-      "retryBackoffBase": "重试退避基数（毫秒）",
-      "retryBackoffBaseHelp": "尝试下一个上游候选前的初始延迟。",
-      "retryBackoffMax": "重试退避上限（毫秒）",
-      "retryBackoffMaxHelp": "候选之间指数退避延迟的最大值。",
       "retryStatusCodes": "触发重试的状态码",
       "retryStatusCodesHelp": "遇到这些上游 HTTP 状态码时转移到下一个服务商，而非直接返回。",
       "retryStatusCodesPlaceholder": "429, 503",
@@ -29889,9 +29833,6 @@
       "export": "导出为 SKILL.md",
       "open": "打开",
       "selectAria": "选择 {name}",
-      "syncCurrent": "已同步",
-      "syncError": "同步失败",
-      "syncPending": "未同步",
       "usageCount": "已用 {count} 次"
     },
     "category": {
@@ -31090,19 +31031,6 @@
     "trustedDomainPlaceholder": "example.com",
     "trustedDomains": "信任",
     "verificationMode": "模式"
-  },
-  "structuredConfig": {
-    "apply": "应用配置",
-    "download": "导出",
-    "editorDescription": "仅接受当前严格协议。未知字段、别名、格式错误的值以及超过 1 MiB 的文件都会被拒绝。",
-    "editorLabel": "配置源码",
-    "format": "格式",
-    "import": "导入",
-    "invalid": "配置无效",
-    "json": "JSON",
-    "reset": "重置",
-    "validate": "校验并预览",
-    "yaml": "YAML"
   },
   "subscription": {
     "account": {

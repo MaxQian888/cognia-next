@@ -49,7 +49,7 @@ impl CuaRemoteClient {
                         continue;
                     }
                 };
-                if let Err(e) = sink.send(Message::Text(payload)).await {
+                if let Err(e) = sink.send(Message::Text(payload.into())).await {
                     let _ = reply.send(Err(backend_err(format!("cua send: {e}"))));
                     continue;
                 }

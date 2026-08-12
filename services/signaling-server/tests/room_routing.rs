@@ -31,7 +31,7 @@ async fn connect_path(addr: std::net::SocketAddr, path: &str) -> WsClient {
 
 async fn send(client: &mut WsClient, frame: ClientFrame) {
     let text = serde_json::to_string(&frame).unwrap();
-    client.send(TgMessage::Text(text)).await.unwrap();
+    client.send(TgMessage::Text(text.into())).await.unwrap();
 }
 
 async fn recv(client: &mut WsClient) -> ServerFrame {
@@ -220,7 +220,10 @@ async fn binary_frame_is_rejected_gracefully() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
     let mut client = connect(addr).await;
     consume_challenge(&mut client).await;
-    client.send(TgMessage::Binary(vec![1, 2, 3])).await.unwrap();
+    client
+        .send(TgMessage::Binary(vec![1, 2, 3].into()))
+        .await
+        .unwrap();
     match recv(&mut client).await {
         ServerFrame::Error { code, .. } => assert_eq!(code, "binary_not_supported"),
         other => panic!("expected Error, got {other:?}"),

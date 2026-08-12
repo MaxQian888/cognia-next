@@ -10,7 +10,7 @@
 // Unknown top-level keys produce warnings (loud, not silent) so future
 // Codex extensions don't slip past us, but the parse still succeeds.
 
-import yaml from "js-yaml"
+import { load as loadYaml } from "js-yaml"
 
 export interface CodexInterfaceMeta {
   displayName?: string
@@ -78,9 +78,13 @@ function pickBoolean(obj: Record<string, unknown>, key: string): boolean | undef
 export function parseCodexOpenaiYaml(text: string): CodexOpenaiMeta {
   const warnings: string[] = []
 
+  if (text.trim() === "" || text.trim() === "---") {
+    return { toolDependencies: [], warnings }
+  }
+
   let parsed: unknown
   try {
-    parsed = yaml.load(text)
+    parsed = loadYaml(text)
   } catch (err) {
     return {
       toolDependencies: [],
@@ -207,14 +211,18 @@ export function parseCodexOpenaiYaml(text: string): CodexOpenaiMeta {
  */
 export function parseCodexOpenaiYamlForEdit(text: string): ParsedCodexOpenaiYamlForEdit {
   let parsed: unknown
-  try {
-    parsed = yaml.load(text)
-  } catch (error) {
-    throw new Error(
-      `agents/openai.yaml failed to parse as YAML: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    )
+  if (text.trim() === "" || text.trim() === "---") {
+    parsed = {}
+  } else {
+    try {
+      parsed = loadYaml(text)
+    } catch (error) {
+      throw new Error(
+        `agents/openai.yaml failed to parse as YAML: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+    }
   }
   if (parsed === null || parsed === undefined) parsed = {}
   if (typeof parsed !== "object" || Array.isArray(parsed)) {

@@ -111,7 +111,6 @@ pub fn decrypt_body(encrypted_b64: &str, encrypt_key: &str) -> Result<Vec<u8>, S
 mod tests {
     use super::*;
     use aes::cipher::{BlockModeEncrypt, KeyIvInit};
-    use rand::RngCore;
 
     type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 
@@ -121,7 +120,7 @@ mod tests {
 
         // Random IV
         let mut iv = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut iv);
+        rand::fill(&mut iv);
 
         let ciphertext =
             Aes256CbcEnc::new(&key_arr.into(), &iv.into()).encrypt_padded_vec::<Pkcs7>(plaintext);
