@@ -272,6 +272,77 @@ describe("handleTurnComplete — exit paths", () => {
     expect(events.some((e) => e.kind === "acceptance_requested")).toBe(true)
   })
 
+  it("runs the published verifier before human acceptance and continues on a negative verdict", async () => {
+    const verificationWorkflow = {
+      workflowId: "wf-verify",
+      versionId: "wfv-verify",
+      deploymentId: "wfd-verify",
+      deploymentRevision: 1,
+      dependencyLock: { workflows: {}, indexes: {} },
+    }
+    await createGoal(
+      buildGoal({
+        id: "g1",
+        config: { ...SAMPLE_CONFIG, verificationWorkflow, requireAcceptance: true },
+      })
+    )
+    const execute = jest.fn(async (options: { onAdmitted?: (runId: string) => void }) => {
+      options.onAdmitted?.("workflow-run-1")
+      return {
+        invocationId: "inv-1",
+        runId: "workflow-run-1",
+        reused: false,
+        version: {},
+        executionBinding: {},
+        result: {
+          runId: "workflow-run-1",
+          status: "succeeded" as const,
+          output: { passed: false, summary: "Add the reload recovery test" },
+        },
+      } as never
+    })
+    const rejected = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "candidate done",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "objective met"}'),
+      capturedGenerationId: "gen-1",
+      verificationDependencies: { execute: execute as never },
+    })
+    expect(rejected).toMatchObject({ kind: "continue" })
+    expect((await getGoal("g1"))?.awaitingAcceptance).not.toBe(true)
+
+    execute.mockImplementationOnce(async (options) => {
+      options.onAdmitted?.("workflow-run-2")
+      return {
+        invocationId: "inv-2",
+        runId: "workflow-run-2",
+        reused: false,
+        version: {},
+        executionBinding: {},
+        result: {
+          runId: "workflow-run-2",
+          status: "succeeded" as const,
+          output: { passed: true, summary: "Reload recovery verified" },
+        },
+      } as never
+    })
+    const passed = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "candidate with recovery test",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "objective met"}'),
+      capturedGenerationId: "gen-1",
+      verificationDependencies: { execute: execute as never },
+    })
+    expect(passed).toMatchObject({ kind: "exit", resultingStatus: "paused" })
+    expect((await getGoal("g1"))?.awaitingAcceptance).toBe(true)
+    const events = (await listGoalEvents("g1", 50)).reverse()
+    expect(events.findIndex((event) => event.kind === "verification_passed")).toBeLessThan(
+      events.findIndex((event) => event.kind === "acceptance_requested")
+    )
+  })
+
   it("requireAcceptance does NOT gate non-completed exits (user stop limits etc.)", async () => {
     await createGoal(
       buildGoal({

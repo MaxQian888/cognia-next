@@ -4,6 +4,31 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { __resetGoalRuntimeForTesting, getGoalRuntime } from "@/lib/goal/runtime"
 import type { Goal } from "@/types/goal"
+
+jest.mock("@/components/goal/goal-verification-workflow-picker", () => ({
+  GoalVerificationWorkflowPicker: ({ onChange }: { onChange: (value?: unknown) => void }) => (
+    <div>
+      <button
+        type="button"
+        data-testid="select-verifier"
+        onClick={() =>
+          onChange({
+            workflowId: "wf-1",
+            versionId: "wfv-1",
+            deploymentId: "wfd-1",
+            deploymentRevision: 1,
+            dependencyLock: { workflows: {}, indexes: {} },
+          })
+        }
+      >
+        select verifier
+      </button>
+      <button type="button" data-testid="clear-verifier" onClick={() => onChange(undefined)}>
+        clear verifier
+      </button>
+    </div>
+  ),
+}))
 import { GoalSettingsTab } from "./settings-tab"
 
 beforeEach(async () => {
@@ -141,6 +166,45 @@ describe("GoalSettingsTab", () => {
     // The component coerces NaN back to the previous draft value, so the
     // visible value matches the prior state.
     expect(Number(turns.value)).toBe(g.config.maxTurns)
+  })
+
+  it("persists an immutable published Workflow verifier binding", async () => {
+    const g = await createTestGoal()
+    render(<GoalSettingsTab goal={g} />)
+    fireEvent.click(screen.getByTestId("select-verifier"))
+    fireEvent.click(screen.getByTestId("goal-config-save"))
+    await waitFor(async () => {
+      const fresh = await getGoalRuntime().listGoalsBySession("ses_a")
+      expect(fresh[0]?.config.verificationWorkflow).toMatchObject({
+        workflowId: "wf-1",
+        versionId: "wfv-1",
+        deploymentId: "wfd-1",
+        deploymentRevision: 1,
+      })
+    })
+  })
+
+  it("requires confirmation before disabling a verifier and resumes active", async () => {
+    const g = await createTestGoal()
+    await getGoalRuntime().updateConfig(g.id, {
+      verificationWorkflow: {
+        workflowId: "wf-1",
+        versionId: "wfv-1",
+        deploymentId: "wfd-1",
+        deploymentRevision: 1,
+      },
+    })
+    const fresh = (await getGoalRuntime().listGoalsBySession("ses_a"))[0]!
+    const confirm = jest.spyOn(window, "confirm").mockReturnValue(true)
+    render(<GoalSettingsTab goal={fresh} />)
+    fireEvent.click(screen.getByTestId("clear-verifier"))
+    fireEvent.click(screen.getByTestId("goal-config-save"))
+    await waitFor(async () => {
+      const updated = (await getGoalRuntime().listGoalsBySession("ses_a"))[0]!
+      expect(updated.config.verificationWorkflow).toBeUndefined()
+      expect(updated.status).toBe("active")
+    })
+    expect(confirm).toHaveBeenCalledTimes(1)
   })
 })
 

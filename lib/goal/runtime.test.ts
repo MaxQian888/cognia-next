@@ -60,6 +60,19 @@ describe("resolveGoalConfig", () => {
     expect(out.inlineStopCondition).toBe("or after 2h")
   })
 
+  it("preserves an immutable published Workflow verifier binding", () => {
+    const verificationWorkflow = {
+      workflowId: "wf-1",
+      versionId: "wfv-1",
+      deploymentId: "wfd-1",
+      deploymentRevision: 2,
+      dependencyLock: { workflows: {}, indexes: {} },
+    }
+    expect(resolveGoalConfig(null, { verificationWorkflow }).verificationWorkflow).toEqual(
+      verificationWorkflow
+    )
+  })
+
   it("merges judge + pacing fields from settings (ADR-0019 Phase 2)", () => {
     const settings = {
       goals: {

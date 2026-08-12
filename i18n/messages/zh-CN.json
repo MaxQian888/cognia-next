@@ -9582,7 +9582,13 @@
       "turn_started": "第 {n} 回合开始",
       "user_paused": "用户暂停",
       "user_resumed": "用户恢复",
-      "user_stopped": "用户停止"
+      "user_stopped": "用户停止",
+      "verification_disabled": "已禁用工作流验证器，目标已恢复",
+      "verification_error": "工作流验证器错误：{error}",
+      "verification_failed": "工作流验证器拒绝第 {attempt} 次候选：{summary}",
+      "verification_passed": "工作流验证器通过第 {attempt} 次候选：{summary}",
+      "verification_requested": "已请求工作流验证（第 {attempt} 次）",
+      "verification_started": "工作流验证已开始：{runId}"
     },
     "analytics": {
       "avgTokens": "平均 Token",
@@ -9639,7 +9645,17 @@
       "save": "保存修改",
       "saving": "保存中…",
       "timeout": "超时（分钟）",
-      "timeoutHint": "从目标创建起的挂钟上限。"
+      "timeoutHint": "从目标创建起的挂钟上限。",
+      "verification": {
+        "disableConfirm": "确定禁用此验证器吗？目标会恢复为进行中，当前完成候选不会被直接标记为完成。",
+        "disabled": "不使用工作流验证器",
+        "hint": "仅显示输入、输出 Schema 符合 Goal 验证契约的已发布工作流。",
+        "label": "完成验证工作流",
+        "placeholder": "选择已发布的验证器",
+        "retry": "重试验证",
+        "retryPassed": "验证已通过",
+        "retrying": "正在重试…"
+      }
     },
     "console": {
       "activeEmpty": "暂无活跃目标。在聊天里用 /goal 命令开始一个。",

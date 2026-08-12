@@ -157,6 +157,22 @@ describe("renderContinuationMessage", () => {
     expect(out).toMatch(/If blocked and needing user input/)
     expect(out).toMatch(/Otherwise, do the next thing/)
   })
+
+  it("restores structured verifier feedback on the next continuation", () => {
+    const goal = buildGoal({
+      verification: {
+        attempt: 1,
+        status: "failed",
+        idempotencyKey: "verify-1",
+        generationId: "gen-1",
+        failureCount: 1,
+        candidateSummary: "candidate",
+        summary: "Add a reload recovery test",
+        updatedAt: 1,
+      },
+    })
+    expect(renderContinuationMessage(goal)).toContain("Add a reload recovery test")
+  })
 })
 
 describe("renderContinuationMessage — adaptive pacing directive", () => {

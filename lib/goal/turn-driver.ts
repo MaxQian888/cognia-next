@@ -48,6 +48,11 @@ import {
   renderPromiseVerificationMessage,
   resolveJudgeSystemPrompt,
 } from "./prompts"
+import {
+  goalVerificationFeedback,
+  verifyGoalCompletion,
+  type GoalVerificationDependencies,
+} from "./verification"
 
 /** Default `config.maxPromiseDenials` when the gate is armed without one. */
 const DEFAULT_MAX_PROMISE_DENIALS = 3
@@ -87,6 +92,8 @@ export interface TurnCompleteInput {
   firer?: LifecycleHookFirer
   /** Hook context (session/cwd) for the judge firer. */
   hookContext?: AgentHookContext
+  /** Test/host override for the published Workflow verification ingress. */
+  verificationDependencies?: GoalVerificationDependencies
 }
 
 export type TurnCompleteOutcome =
@@ -162,7 +169,13 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
   // exits `turn_limited` even mid-verification (documented trade-off).
   const preJudge = evaluateExitConditions(goal, { costLimited: input.budgetExceeded })
   if (preJudge) {
-    return commitExit(goalId, preJudge, input.capturedGenerationId)
+    return commitExit(
+      goalId,
+      preJudge,
+      input.capturedGenerationId,
+      lastResponse,
+      input.verificationDependencies
+    )
   }
 
   if (signal?.aborted) return { kind: "aborted" }
@@ -187,7 +200,9 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
           resultingStatus: "completed",
           reason: "completion promise confirmed",
         },
-        input.capturedGenerationId
+        input.capturedGenerationId,
+        lastResponse,
+        input.verificationDependencies
       )
     }
     // Denied — the model would not (or did not) emit the token. Clear the
@@ -213,7 +228,9 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
           resultingStatus: "completed",
           reason: `judge confirmed done; promise gate overridden after ${denialCount} denial(s)`,
         },
-        input.capturedGenerationId
+        input.capturedGenerationId,
+        lastResponse,
+        input.verificationDependencies
       )
     }
     return { kind: "continue", userMessage: renderContinuationMessage(goal) }
@@ -263,7 +280,15 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
     })
     if (newFailureCount >= goal.config.maxJudgeFailures) {
       const exit = evaluateExitConditions((await getGoal(goalId)) as Goal)
-      if (exit) return commitExit(goalId, exit, input.capturedGenerationId)
+      if (exit) {
+        return commitExit(
+          goalId,
+          exit,
+          input.capturedGenerationId,
+          lastResponse,
+          input.verificationDependencies
+        )
+      }
     }
     // Otherwise: keep looping. The model's last response wasn't formally
     // judged "done", and we don't want to wedge — so we send the standard
@@ -317,7 +342,9 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
             resultingStatus: "completed",
             reason: "completion promise confirmed",
           },
-          input.capturedGenerationId
+          input.capturedGenerationId,
+          lastResponse,
+          input.verificationDependencies
         )
       }
       const fresh = await getGoal(goalId)
@@ -332,11 +359,16 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
       })
       return { kind: "continue", userMessage: renderPromiseVerificationMessage(goal) }
     }
-    return commitExit(goalId, postJudge, input.capturedGenerationId)
+    return commitExit(
+      goalId,
+      postJudge,
+      input.capturedGenerationId,
+      lastResponse,
+      input.verificationDependencies
+    )
   }
   return { kind: "continue", userMessage: renderContinuationMessage(goal) }
 }
-
 /**
  * Apply an exit decision: mutate the row's status + endedAt, log
  * `exit_triggered`. Returns the same shape as `handleTurnComplete`'s
@@ -345,11 +377,41 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
 async function commitExit(
   goalId: string,
   decision: { exit: ExitReason; resultingStatus: GoalStatus; reason: string },
-  capturedGenerationId: string
+  capturedGenerationId: string,
+  candidateSummary = "Goal completion candidate",
+  verificationDependencies?: GoalVerificationDependencies
 ): Promise<TurnCompleteOutcome> {
   const fresh = await getGoal(goalId)
   if (!fresh || fresh.generationId !== capturedGenerationId) {
     return { kind: "stale", reason: "generationId rotated before exit commit" }
+  }
+  if (decision.resultingStatus === "completed" && fresh.config.verificationWorkflow) {
+    const verification = await verifyGoalCompletion(
+      { goalId, candidateSummary, capturedGenerationId },
+      verificationDependencies
+    )
+    if (verification.kind === "stale") {
+      return { kind: "stale", reason: "generationId rotated during workflow verification" }
+    }
+    if (verification.kind === "failed") {
+      if (!verification.paused) {
+        return { kind: "continue", userMessage: goalVerificationFeedback(verification.result) }
+      }
+      return {
+        kind: "exit",
+        exit: decision.exit,
+        resultingStatus: "paused",
+        reason: `${decision.reason} (workflow verification failed 3 times)`,
+      }
+    }
+    if (verification.kind === "error") {
+      return {
+        kind: "exit",
+        exit: decision.exit,
+        resultingStatus: "paused",
+        reason: `${decision.reason} (workflow verification error: ${verification.error})`,
+      }
+    }
   }
   // Acceptance gate (opt-in): a judge-verdict "completed" parks as `paused` +
   // `awaitingAcceptance` instead of going terminal; `resolveGoalAcceptance`

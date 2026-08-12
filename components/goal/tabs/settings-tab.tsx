@@ -6,9 +6,12 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { GoalVerificationWorkflowPicker } from "@/components/goal/goal-verification-workflow-picker"
 import type { Goal, GoalConfig } from "@/types/goal"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { isTerminalGoalStatus } from "@/types/goal"
+import { disableGoalVerification, retryPausedGoalVerification } from "@/lib/goal/verification"
+import { toast } from "sonner"
 
 interface Props {
   goal: Goal
@@ -37,6 +40,7 @@ export function GoalSettingsTab({ goal }: Props) {
     setDraft(goal.config)
   }
   const [saving, setSaving] = useState(false)
+  const [retryingVerification, setRetryingVerification] = useState(false)
 
   const dirty =
     draft.maxTurns !== goal.config.maxTurns ||
@@ -49,12 +53,18 @@ export function GoalSettingsTab({ goal }: Props) {
     (draft.adaptivePacing ?? false) !== (goal.config.adaptivePacing ?? false) ||
     (draft.requireAcceptance ?? false) !== (goal.config.requireAcceptance ?? false) ||
     (draft.riskGating ?? true) !== (goal.config.riskGating ?? true) ||
-    (draft.maxBudgetUsd ?? 0) !== (goal.config.maxBudgetUsd ?? 0)
+    (draft.maxBudgetUsd ?? 0) !== (goal.config.maxBudgetUsd ?? 0) ||
+    JSON.stringify(draft.verificationWorkflow) !== JSON.stringify(goal.config.verificationWorkflow)
 
   async function handleSave() {
     if (!dirty || disabled) return
     setSaving(true)
     try {
+      if (goal.config.verificationWorkflow && !draft.verificationWorkflow) {
+        if (!window.confirm(t("config.verification.disableConfirm"))) return
+        await disableGoalVerification(goal.id)
+        return
+      }
       await getGoalRuntime().updateConfig(goal.id, {
         maxTurns: Math.max(1, draft.maxTurns),
         maxTokens: Math.max(1000, draft.maxTokens),
@@ -68,6 +78,7 @@ export function GoalSettingsTab({ goal }: Props) {
         // Default is ON, so only an explicit opt-out is worth persisting.
         riskGating: draft.riskGating === false ? false : undefined,
         maxBudgetUsd: draft.maxBudgetUsd && draft.maxBudgetUsd > 0 ? draft.maxBudgetUsd : undefined,
+        verificationWorkflow: draft.verificationWorkflow,
       })
     } finally {
       setSaving(false)
@@ -200,6 +211,39 @@ export function GoalSettingsTab({ goal }: Props) {
             data-testid="goal-config-require-acceptance"
           />
         </div>
+      </Field>
+      <Field label={t("config.verification.label")} hint={t("config.verification.hint")}>
+        <GoalVerificationWorkflowPicker
+          value={draft.verificationWorkflow}
+          disabled={disabled}
+          onChange={(verificationWorkflow) => setDraft({ ...draft, verificationWorkflow })}
+        />
+        {goal.verification && ["failed", "error"].includes(goal.verification.status) ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="mt-2"
+            disabled={retryingVerification || !draft.verificationWorkflow}
+            onClick={() => {
+              setRetryingVerification(true)
+              void retryPausedGoalVerification(goal.id)
+                .then((outcome) => {
+                  if (outcome.kind === "passed") toast.success(t("config.verification.retryPassed"))
+                  else if (outcome.kind === "failed") toast.error(outcome.result.summary)
+                  else if (outcome.kind === "error") toast.error(outcome.error)
+                })
+                .catch((error) =>
+                  toast.error(error instanceof Error ? error.message : String(error))
+                )
+                .finally(() => setRetryingVerification(false))
+            }}
+          >
+            {retryingVerification
+              ? t("config.verification.retrying")
+              : t("config.verification.retry")}
+          </Button>
+        ) : null}
       </Field>
       <Field label={t("config.riskGating")} hint={t("config.riskGatingHint")}>
         <div className="pt-1">

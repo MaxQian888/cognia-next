@@ -6,6 +6,9 @@ jest.mock("./code-adoption-tracker-initializer", () => ({
 jest.mock("./background-task-initializer", () => ({
   BackgroundTaskInitializer: () => <span data-boot="background" />,
 }))
+jest.mock("./goal-verification-initializer", () => ({
+  GoalVerificationInitializer: () => <span data-boot="goal-verification" />,
+}))
 jest.mock("./automation-policy-initializer", () => ({
   AutomationPolicyInitializer: () => <span data-boot="automation-policy" />,
 }))
@@ -36,6 +39,7 @@ it("mounts workflow automation in deterministic order and reports readiness", ()
     )
   ).toEqual([
     "background",
+    "goal-verification",
     "automation-policy",
     "auto-mode",
     "code-adoption",

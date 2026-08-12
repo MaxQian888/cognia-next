@@ -32,6 +32,12 @@ const KIND_ICON: Record<GoalEvent["kind"], string> = {
   pacing_decided: "⏲️",
   acceptance_requested: "🔍",
   acceptance_resolved: "🏁",
+  verification_requested: "🧪",
+  verification_started: "▶️",
+  verification_passed: "✅",
+  verification_failed: "❌",
+  verification_error: "⚠️",
+  verification_disabled: "⏭️",
 }
 
 export function GoalActivityTab({ goal }: Props) {
@@ -139,5 +145,17 @@ function summarisePayload(ev: GoalEvent, t: GoalT, tRisk: GoalT): string {
       return p.accepted
         ? t("activity.acceptance_accepted")
         : t("activity.acceptance_changes_requested")
+    case "verification_requested":
+      return t("activity.verification_requested", { attempt: p.attempt })
+    case "verification_started":
+      return t("activity.verification_started", { runId: p.workflowRunId })
+    case "verification_passed":
+      return t("activity.verification_passed", { attempt: p.attempt, summary: p.summary })
+    case "verification_failed":
+      return t("activity.verification_failed", { attempt: p.attempt, summary: p.summary })
+    case "verification_error":
+      return t("activity.verification_error", { error: p.error })
+    case "verification_disabled":
+      return t("activity.verification_disabled")
   }
 }

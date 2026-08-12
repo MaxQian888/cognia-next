@@ -88,13 +88,17 @@ Pacing: end your reply with one line suggesting when the loop should continue, b
 <next-delay minutes=N reason="why"/>
 N must be a whole number between 1 and 60. Omit the line to continue at the default pace.`
     : ""
+  const verificationFeedback =
+    goal.verification?.status === "failed" && goal.verification.summary
+      ? `\n\nThe configured completion verifier rejected the previous candidate. Address this feedback before claiming completion again:\n${goal.verification.summary}`
+      : ""
   return `[Goal continuation — turn ${goal.turnsUsed + 1} of ${goal.config.maxTurns}]
 
 Continue working toward the active goal in <objective>. Take the next concrete step.
 
 If complete, state the deliverable explicitly and stop.
 If blocked and needing user input, say so clearly and stop.
-Otherwise, do the next thing.${pacingDirective}`
+Otherwise, do the next thing.${verificationFeedback}${pacingDirective}`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

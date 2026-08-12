@@ -173,6 +173,7 @@ export function resolveGoalConfig(
     completionPromise: overrides.completionPromise,
     maxPromiseDenials: overrides.maxPromiseDenials ?? defaults?.maxPromiseDenials,
     adaptivePacing: overrides.adaptivePacing ?? defaults?.adaptivePacing,
+    verificationWorkflow: overrides.verificationWorkflow,
   }
 }
 

@@ -1,3 +1,6 @@
+import type { ResourceRefV1 } from "@cognia/agent-config-types/governance"
+import type { WorkflowDependencyBinding } from "@/types/workflow/deployment"
+
 /**
  * `/goal` Command — type model. (ADR-0013)
  *
@@ -197,6 +200,43 @@ export interface GoalConfig {
    * 1–60 minutes.
    */
   adaptivePacing?: boolean
+  /** Immutable published Workflow used as the completion verification gate. */
+  verificationWorkflow?: WorkflowDependencyBinding
+}
+
+export interface GoalVerificationInputV1 {
+  contractVersion: 1
+  goal: {
+    id: string
+    safeObjective: string
+    turnsUsed: number
+    tokensUsed: number
+  }
+  candidate: { summary: string }
+  execution: ResourceRefV1[]
+}
+
+export interface GoalVerificationResultV1 {
+  passed: boolean
+  summary: string
+  evidenceRefs?: ResourceRefV1[]
+}
+
+export type GoalVerificationStatus =
+  "requested" | "running" | "passed" | "failed" | "error" | "disabled"
+
+export interface GoalVerificationState {
+  attempt: number
+  status: GoalVerificationStatus
+  idempotencyKey: string
+  generationId: string
+  workflowRunId?: string
+  failureCount: number
+  candidateSummary: string
+  summary?: string
+  evidenceRefs?: ResourceRefV1[]
+  error?: string
+  updatedAt: number
 }
 
 export interface Goal {
@@ -288,6 +328,8 @@ export interface Goal {
   nextContinuationAt?: number
   /** Why the continuation was deferred — i18n category for the pill footnote. */
   nextContinuationSource?: "interval" | "quiet_hours" | "model_suggested"
+  /** Durable state for the published Workflow completion verifier. */
+  verification?: GoalVerificationState
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -318,6 +360,12 @@ export type GoalEventKind =
   | "pacing_decided"
   | "acceptance_requested"
   | "acceptance_resolved"
+  | "verification_requested"
+  | "verification_started"
+  | "verification_passed"
+  | "verification_failed"
+  | "verification_error"
+  | "verification_disabled"
 
 /**
  * Per-kind payloads. Keep these structurally typed (TypeScript discriminated
@@ -385,6 +433,18 @@ export type GoalEventPayload =
     }
   | { kind: "acceptance_requested"; turnNumber: number }
   | { kind: "acceptance_resolved"; accepted: boolean }
+  | { kind: "verification_requested"; attempt: number }
+  | { kind: "verification_started"; attempt: number; workflowRunId: string }
+  | { kind: "verification_passed"; attempt: number; summary: string }
+  | {
+      kind: "verification_failed"
+      attempt: number
+      failureCount: number
+      summary: string
+      paused: boolean
+    }
+  | { kind: "verification_error"; attempt: number; error: string }
+  | { kind: "verification_disabled" }
 
 export interface GoalEvent {
   /** UUIDv4 primary key. */

@@ -117,6 +117,7 @@ export interface GoalUpdatePatch {
   promiseDenialCount?: number
   nextContinuationAt?: number
   nextContinuationSource?: Goal["nextContinuationSource"]
+  verification?: Goal["verification"]
 }
 
 /**
@@ -197,21 +198,31 @@ export interface AppendEventInput {
  * the per-goal cap-prune so the table can't blow up under heavy looping.
  */
 export async function appendGoalEvent(input: AppendEventInput): Promise<GoalEvent> {
-  const row: GoalEvent = {
-    id: input.id ?? crypto.randomUUID(),
-    goalId: input.goalId,
-    kind: input.kind,
-    ts: input.ts ?? Date.now(),
-    payload: input.payload,
-  }
+  let row: GoalEvent | undefined
   await withDbReopenRetry(() => {
     const db = getDb()
     return db.transaction("rw", db.chatGoalEvents, () =>
       db.chatGoalEvents
-        .put(row)
-        .then(() => pruneEventsForGoal(input.goalId, EVENTS_PER_GOAL_CAP, db))
+        .where("[goalId+ts]")
+        .between([input.goalId, -Infinity], [input.goalId, Infinity])
+        .reverse()
+        .first()
+        .then((newest) => {
+          const ts = input.ts ?? Math.max(Date.now(), (newest?.ts ?? -1) + 1)
+          row = {
+            id: input.id ?? crypto.randomUUID(),
+            goalId: input.goalId,
+            kind: input.kind,
+            ts,
+            payload: input.payload,
+          }
+          return db.chatGoalEvents
+            .put(row)
+            .then(() => pruneEventsForGoal(input.goalId, EVENTS_PER_GOAL_CAP, db))
+        })
     )
   })
+  if (!row) throw new Error("Failed to append goal event")
   return row
 }
 

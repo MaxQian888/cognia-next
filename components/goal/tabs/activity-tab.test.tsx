@@ -102,7 +102,7 @@ describe("GoalActivityTab", () => {
     expect(screen.queryByText(/approval required/i)).not.toBeInTheDocument()
   })
 
-  it("renders all 11 event kinds with their kind-specific summaries", async () => {
+  it("renders all event kinds with their kind-specific summaries", async () => {
     await createGoal(goal)
     const baseConfig = { maxTurns: 20, maxTokens: 200_000, maxJudgeFailures: 3, timeoutMs: 1 }
     const all: Array<Parameters<typeof appendGoalEvent>[0]> = [
@@ -149,6 +149,42 @@ describe("GoalActivityTab", () => {
         kind: "config_updated",
         payload: { kind: "config_updated", before: baseConfig, after: baseConfig },
       },
+      {
+        goalId: "g1",
+        kind: "verification_requested",
+        payload: { kind: "verification_requested", attempt: 1 },
+      },
+      {
+        goalId: "g1",
+        kind: "verification_started",
+        payload: { kind: "verification_started", attempt: 1, workflowRunId: "workflow-run-1" },
+      },
+      {
+        goalId: "g1",
+        kind: "verification_passed",
+        payload: { kind: "verification_passed", attempt: 1, summary: "checks passed" },
+      },
+      {
+        goalId: "g1",
+        kind: "verification_failed",
+        payload: {
+          kind: "verification_failed",
+          attempt: 2,
+          failureCount: 1,
+          summary: "missing test",
+          paused: false,
+        },
+      },
+      {
+        goalId: "g1",
+        kind: "verification_error",
+        payload: { kind: "verification_error", attempt: 3, error: "deployment unavailable" },
+      },
+      {
+        goalId: "g1",
+        kind: "verification_disabled",
+        payload: { kind: "verification_disabled" },
+      },
     ]
     for (let i = 0; i < all.length; i++) {
       await appendGoalEvent({ ...all[i]!, ts: i })
@@ -166,6 +202,12 @@ describe("GoalActivityTab", () => {
     expect(screen.getByText("User resumed")).toBeInTheDocument()
     expect(screen.getByText("User stopped")).toBeInTheDocument()
     expect(screen.getByText("Config updated")).toBeInTheDocument()
+    expect(screen.getByText(/Workflow verification requested/)).toBeInTheDocument()
+    expect(screen.getByText(/workflow-run-1/)).toBeInTheDocument()
+    expect(screen.getByText(/checks passed/)).toBeInTheDocument()
+    expect(screen.getByText(/missing test/)).toBeInTheDocument()
+    expect(screen.getByText(/deployment unavailable/)).toBeInTheDocument()
+    expect(screen.getByText(/verifier disabled/)).toBeInTheDocument()
   })
 
   it("renders the loading state before the live query resolves", () => {

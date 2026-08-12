@@ -28,7 +28,13 @@
     "turn_started": "Turn {n} started",
     "user_paused": "User paused",
     "user_resumed": "User resumed",
-    "user_stopped": "User stopped"
+    "user_stopped": "User stopped",
+    "verification_disabled": "Workflow verifier disabled — goal resumed",
+    "verification_error": "Workflow verifier error: {error}",
+    "verification_failed": "Workflow verifier rejected attempt {attempt}: {summary}",
+    "verification_passed": "Workflow verifier passed attempt {attempt}: {summary}",
+    "verification_requested": "Workflow verification requested (attempt {attempt})",
+    "verification_started": "Workflow verification started: {runId}"
   },
   "analytics": {
     "avgTokens": "Avg tokens",
@@ -85,7 +91,17 @@
     "save": "Save changes",
     "saving": "Saving…",
     "timeout": "Timeout (minutes)",
-    "timeoutHint": "Wall-clock cap from goal creation."
+    "timeoutHint": "Wall-clock cap from goal creation.",
+    "verification": {
+      "disableConfirm": "Disable this verifier? The goal will resume as active, and the current completion candidate will not be completed automatically.",
+      "disabled": "No workflow verifier",
+      "hint": "Only published Workflows whose input and output schemas match the Goal verification contract are available.",
+      "label": "Completion verification workflow",
+      "placeholder": "Select a published verifier",
+      "retry": "Retry verification",
+      "retryPassed": "Verification passed",
+      "retrying": "Retrying…"
+    }
   },
   "console": {
     "activeEmpty": "No active goals. Start one with the /goal command in a chat.",

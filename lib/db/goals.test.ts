@@ -242,6 +242,26 @@ describe("chatGoalEvents", () => {
     expect(ev.ts).toBe(999)
   })
 
+  it("keeps implicit timestamps monotonic when events land in the same millisecond", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    const now = jest.spyOn(Date, "now").mockReturnValue(1_000)
+    try {
+      const first = await appendGoalEvent({
+        goalId: "g1",
+        kind: "verification_passed",
+        payload: { kind: "verification_passed", attempt: 1, summary: "Verified" },
+      })
+      const second = await appendGoalEvent({
+        goalId: "g1",
+        kind: "acceptance_requested",
+        payload: { kind: "acceptance_requested", turnNumber: 1 },
+      })
+      expect(second.ts).toBe(first.ts + 1)
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   it("listGoalEvents returns events newest-first scoped to the goal", async () => {
     await createGoal(buildGoal({ id: "g1" }))
     await createGoal(buildGoal({ id: "g2", sessionId: "ses_b" }))
