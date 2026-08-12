@@ -24,6 +24,7 @@ import {
 import { createResource, listResourcesForSkill } from "./skill-resources"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
+import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
 
 const dbFixture = createDbTestFixture()
 
@@ -619,19 +620,18 @@ describe("upsertSkillByCanonicalId", () => {
 })
 
 describe("seedBuiltInSkills", () => {
-  it("seeds the 5 generic + 10 functional built-ins idempotently and preserves status", async () => {
+  it("seeds generic and catalog built-ins idempotently and preserves status", async () => {
     await seedBuiltInSkills()
     const all = await listSkills()
     const builtIns = all.filter((s) => s.isBuiltIn)
-    // 5 generic style skills + the functional catalog (10 entries).
-    expect(builtIns.length).toBe(15)
+    expect(builtIns.length).toBe(5 + BUILT_IN_SKILL_CATALOG.length)
     // Disable one, then reseed; status must be preserved.
     await setSkillStatus(builtIns[0].id, "disabled")
     await seedBuiltInSkills()
     expect((await getSkill(builtIns[0].id))?.status).toBe("disabled")
     // No duplicates introduced.
     const after = await listSkills()
-    expect(after.filter((s) => s.isBuiltIn).length).toBe(15)
+    expect(after.filter((s) => s.isBuiltIn).length).toBe(5 + BUILT_IN_SKILL_CATALOG.length)
   })
 
   it("seeds functional catalog skills disabled by default, keyed by canonical id", async () => {
@@ -644,6 +644,33 @@ describe("seedBuiltInSkills", () => {
     expect(im?.content.length).toBeGreaterThan(0)
     // The generic style skills stay enabled.
     expect((await getSkill("skill_builtin_concise"))?.status).toBe("enabled")
+  })
+
+  it("enables diagram design by default while preserving a user disable", async () => {
+    await seedBuiltInSkills()
+    const diagram = await getSkill("skill_builtin_diagram_design")
+    expect(diagram?.status).toBe("enabled")
+
+    const implicitCatalog = renderSkillsCatalog([diagram!])
+    expect(implicitCatalog).toContain("Diagram Design")
+    expect(implicitCatalog).toContain("full instructions are NOT loaded")
+    expect(implicitCatalog).not.toContain("Required output contract")
+
+    await setSkillStatus(diagram!.id, "disabled")
+    await seedBuiltInSkills()
+    expect((await getSkill(diagram!.id))?.status).toBe("disabled")
+  })
+
+  it("persists the curated diagram references and examples for progressive loading", async () => {
+    await seedBuiltInSkills()
+    const resources = await listResourcesForSkill("skill_builtin_diagram_design")
+    expect(
+      resources.filter((resource) => resource.path.startsWith("references/type-"))
+    ).toHaveLength(27)
+    expect(
+      resources.filter((resource) => /^assets\/example-.*\.html$/.test(resource.path))
+    ).toHaveLength(27)
+    expect(resources.some((resource) => resource.path === "assets/template.html")).toBe(true)
   })
 
   it("persists each functional skill's reference resources, idempotently", async () => {

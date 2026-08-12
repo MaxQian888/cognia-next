@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Storage backends · Capability radar</title>
+  
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   var(--paper);
+      --color-ink:     var(--ink);
+      --color-muted:   var(--muted);
+      --color-accent:  var(--accent);
+      --font-sans:     system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+      --font-serif:    Georgia, Times New Roman, serif;
+      --font-mono:     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%;  display: block; }
+  </style>
+  <meta name="cognia-renderer" content="diagram-design-v1">
+  <style id="cognia-diagram-theme">:root{--paper:var(--background,#f5f5f5);--paper-2:var(--card,#ececec);--ink:var(--foreground,#2d3142);--muted:var(--muted-foreground,#4f5d75);--soft:var(--muted-foreground,#7a8399);--rule:var(--border,rgba(45,49,66,.14));--rule-solid:var(--border,#bfc0c0);--accent:var(--primary,#eb6c36);--accent-ink:var(--primary-foreground,#fff);--accent-tint:color-mix(in srgb,var(--primary,#eb6c36) 10%,transparent);--link:var(--info,#2e5aa8);--series-1:var(--chart-1,#7c8f6f);--series-2:var(--chart-2,#5e7a9b);--series-3:var(--chart-3,#b8915a);--series-4:var(--chart-4,#9c6b50);--series-5:var(--chart-5,#6e6479)}svg{display:block;width:100%;max-width:100%;height:auto}</style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Radar · Diagram Design</p>
+    <h1>Storage backends · Capability radar</h1>
+
+    <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg">
+      <title>Diagram Design standard example</title>
+      <desc>Responsive standard example for the Diagram Design skill.</desc>
+        <defs>
+          <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.9" fill="color-mix(in srgb, var(--ink) 10%, transparent)"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="var(--paper)"/>
+        <rect width="100%" height="100%" fill="url(#dots)" opacity="0.55"/>
+
+        <!-- Concentric grid rings (f = 0.2, 0.4, 0.6, 0.8, 1.0) -->
+        <polygon points="500,208 530,230 519,266 481,266 470,230" fill="none" stroke="color-mix(in srgb, var(--ink) 10%, transparent)" stroke-width="0.8"/>
+        <polygon points="500,176 561,220 538,292 462,292 439,220" fill="none" stroke="color-mix(in srgb, var(--ink) 10%, transparent)" stroke-width="0.8"/>
+        <polygon points="500,144 591,211 556,317 444,317 409,211" fill="none" stroke="color-mix(in srgb, var(--ink) 10%, transparent)" stroke-width="0.8"/>
+        <polygon points="500,112 622,201 575,343 425,343 378,201" fill="none" stroke="color-mix(in srgb, var(--ink) 10%, transparent)" stroke-width="0.8"/>
+        <polygon points="500,80 652,191 594,369 406,369 348,191" fill="none" stroke="color-mix(in srgb, var(--ink) 20%, transparent)" stroke-width="1"/>
+
+        <!-- Axis spokes (center to outer vertex) -->
+        <line x1="500" y1="240" x2="500" y2="80" stroke="color-mix(in srgb, var(--ink) 20%, transparent)" stroke-width="1"/>
+        <line x1="500" y1="240" x2="652" y2="191" stroke="color-mix(in srgb, var(--ink) 20%, transparent)" stroke-width="1"/>
+        <line x1="500" y1="240" x2="594" y2="369" stroke="color-mix(in srgb, var(--ink) 20%, transparent)" stroke-width="1"/>
+        <line x1="500" y1="240" x2="406" y2="369" stroke="color-mix(in srgb, var(--ink) 20%, transparent)" stroke-width="1"/>
+        <line x1="500" y1="240" x2="348" y2="191" stroke="color-mix(in srgb, var(--ink) 20%, transparent)" stroke-width="1"/>
+
+        <!-- Axis labels (one word per spoke, system sans sans 11px 600) -->
+        <text x="500" y="62" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">Small-file handling</text>
+        <text x="669" y="189" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="start">Large-object reads</text>
+        <text x="605" y="400" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="start">Write throughput</text>
+        <text x="395" y="400" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="end">Operational simplicity</text>
+        <text x="331" y="189" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="end">Iceberg integration</text>
+
+        <!-- Scale ticks on first (top) axis only -->
+        <text x="494" y="82" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">10</text>
+        <text x="494" y="114" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">8</text>
+        <text x="494" y="146" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">6</text>
+        <text x="494" y="178" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">4</text>
+        <text x="494" y="210" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">2</text>
+
+        <!-- Non-focal series (smallest to largest, back to front) -->
+        <!-- Ceph · series-2 dusty-blue · [7,7,7,4,6] -->
+        <polygon points="500,128 606,206 566,330 462,292 409,211" fill="color-mix(in srgb, var(--series-2) 18%, transparent)" stroke="var(--series-2)" stroke-width="1.5"/>
+        <!-- GCS · series-3 mustard · [6,9,8,6,7] -->
+        <polygon points="500,144 637,196 575,343 444,317 394,206" fill="color-mix(in srgb, var(--series-3) 18%, transparent)" stroke="var(--series-3)" stroke-width="1.5"/>
+        <!-- Amazon S3 · series-1 sage · [6,10,9,5,8] -->
+        <polygon points="500,144 652,191 585,356 453,305 378,201" fill="color-mix(in srgb, var(--series-1) 18%, transparent)" stroke="var(--series-1)" stroke-width="1.5"/>
+
+        <!-- Focal series · MinIO · accent · [9,8,9,9,9] -->
+        <polygon points="500,96 622,201 585,356 415,356 363,196" fill="color-mix(in srgb, var(--accent) 18%, transparent)" stroke="var(--accent)" stroke-width="1.8"/>
+
+        <!-- Focal vertex dots (only on focal series) -->
+        <circle cx="500" cy="96"  r="4" fill="var(--accent)"/>
+        <circle cx="622" cy="201" r="4" fill="var(--accent)"/>
+        <circle cx="585" cy="356" r="4" fill="var(--accent)"/>
+        <circle cx="415" cy="356" r="4" fill="var(--accent)"/>
+        <circle cx="363" cy="196" r="4" fill="var(--accent)"/>
+
+        <!-- Legend -->
+        <line x1="40" y1="456" x2="960" y2="456" stroke="color-mix(in srgb, var(--ink) 10%, transparent)" stroke-width="0.8"/>
+        <text x="40" y="472" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+
+        <rect x="40"  y="484" width="16" height="8" fill="color-mix(in srgb, var(--accent) 18%, transparent)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="64"  y="492" fill="var(--muted)" font-size="8.5" font-family="system-ui, sans-serif">MinIO · recommended</text>
+
+        <rect x="220" y="484" width="16" height="8" fill="color-mix(in srgb, var(--series-1) 18%, transparent)" stroke="var(--series-1)" stroke-width="1.5"/>
+        <text x="244" y="492" fill="var(--muted)" font-size="8.5" font-family="system-ui, sans-serif">Amazon S3</text>
+
+        <rect x="344" y="484" width="16" height="8" fill="color-mix(in srgb, var(--series-2) 18%, transparent)" stroke="var(--series-2)" stroke-width="1.5"/>
+        <text x="368" y="492" fill="var(--muted)" font-size="8.5" font-family="system-ui, sans-serif">Ceph</text>
+
+        <rect x="424" y="484" width="16" height="8" fill="color-mix(in srgb, var(--series-3) 18%, transparent)" stroke="var(--series-3)" stroke-width="1.5"/>
+        <text x="448" y="492" fill="var(--muted)" font-size="8.5" font-family="system-ui, sans-serif">Google Cloud Storage</text>
+
+        <text x="608" y="492" fill="var(--muted)" font-size="8.5" font-family="system-ui, sans-serif" font-style="italic">One coral. Position is the signal — color reserved for the recommended option.</text>
+      </svg>
+  </div>
+</body>
+</html>

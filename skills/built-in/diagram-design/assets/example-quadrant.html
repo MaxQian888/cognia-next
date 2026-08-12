@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Content ideas · Impact × Effort</title>
+  
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   var(--paper);
+      --color-ink:     var(--ink);
+      --color-muted:   var(--muted);
+      --color-accent:  var(--accent);
+      --font-sans:     system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+      --font-serif:    Georgia, Times New Roman, serif;
+      --font-mono:     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%;  display: block; }
+  </style>
+  <meta name="cognia-renderer" content="diagram-design-v1">
+  <style id="cognia-diagram-theme">:root{--paper:var(--background,#f5f5f5);--paper-2:var(--card,#ececec);--ink:var(--foreground,#2d3142);--muted:var(--muted-foreground,#4f5d75);--soft:var(--muted-foreground,#7a8399);--rule:var(--border,rgba(45,49,66,.14));--rule-solid:var(--border,#bfc0c0);--accent:var(--primary,#eb6c36);--accent-ink:var(--primary-foreground,#fff);--accent-tint:color-mix(in srgb,var(--primary,#eb6c36) 10%,transparent);--link:var(--info,#2e5aa8);--series-1:var(--chart-1,#7c8f6f);--series-2:var(--chart-2,#5e7a9b);--series-3:var(--chart-3,#b8915a);--series-4:var(--chart-4,#9c6b50);--series-5:var(--chart-5,#6e6479)}svg{display:block;width:100%;max-width:100%;height:auto}</style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Quadrant · Diagram Design</p>
+    <h1>Content ideas · Impact × Effort</h1>
+
+    <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg">
+      <title>Diagram Design standard example</title>
+      <desc>Responsive standard example for the Diagram Design skill.</desc>
+        <defs>
+          <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.9" fill="color-mix(in srgb, var(--ink) 10%, transparent)"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="var(--paper)"/>
+        <rect width="100%" height="100%" fill="url(#dots)" opacity="0.55"/>
+
+        <!-- Quadrant backgrounds (very subtle, only coral on DO FIRST) -->
+        <rect x="120" y="80" width="380" height="170" fill="color-mix(in srgb, var(--accent) 3%, transparent)"/>
+
+        <!-- Axis cross -->
+        <line x1="120" y1="250" x2="880" y2="250" stroke="color-mix(in srgb, var(--ink) 45%, transparent)" stroke-width="1"/>
+        <line x1="500" y1="80" x2="500" y2="420" stroke="color-mix(in srgb, var(--ink) 45%, transparent)" stroke-width="1"/>
+
+        <!-- Axis end labels -->
+        <text x="880" y="266" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end" letter-spacing="0.14em">HIGH EFFORT →</text>
+        <text x="120" y="266" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.14em">← LOW EFFORT</text>
+        <text x="512" y="80" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.14em">↑ HIGH IMPACT</text>
+        <text x="512" y="432" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.14em">↓ LOW IMPACT</text>
+
+        <!-- Quadrant corner labels -->
+        <text x="140" y="104" fill="var(--accent)" font-size="9" font-family="ui-monospace, monospace" letter-spacing="0.18em" font-weight="600">DO FIRST</text>
+        <text x="860" y="104" fill="var(--muted)" font-size="9" font-family="ui-monospace, monospace" text-anchor="end" letter-spacing="0.18em">MAJOR PROJECTS</text>
+        <text x="140" y="412" fill="var(--muted)" font-size="9" font-family="ui-monospace, monospace" letter-spacing="0.18em">QUICK WINS</text>
+        <text x="860" y="412" fill="var(--muted)" font-size="9" font-family="ui-monospace, monospace" text-anchor="end" letter-spacing="0.18em">AVOID</text>
+
+        <!-- Items: TL (Do First) -->
+        <!-- coral focal -->
+        <circle cx="220" cy="140" r="6" fill="var(--accent)"/>
+        <text x="232" y="144" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif">Schematic skill v4</text>
+
+        <circle cx="320" cy="200" r="4" fill="var(--ink)"/>
+        <text x="332" y="204" fill="var(--muted)" font-size="11" font-family="system-ui, sans-serif">Update changelog</text>
+
+        <!-- Items: TR (Major Projects) -->
+        <circle cx="620" cy="140" r="4" fill="var(--ink)"/>
+        <text x="632" y="144" fill="var(--muted)" font-size="11" font-family="system-ui, sans-serif">Design v4 refresh</text>
+
+        <circle cx="760" cy="180" r="4" fill="var(--ink)"/>
+        <text x="772" y="184" fill="var(--muted)" font-size="11" font-family="system-ui, sans-serif">New publication</text>
+
+        <!-- Items: BL (Quick Wins) -->
+        <circle cx="260" cy="320" r="4" fill="var(--ink)"/>
+        <text x="272" y="324" fill="var(--muted)" font-size="11" font-family="system-ui, sans-serif">Fix footer link</text>
+
+        <circle cx="360" cy="380" r="4" fill="var(--ink)"/>
+        <text x="372" y="384" fill="var(--muted)" font-size="11" font-family="system-ui, sans-serif">Update OG tags</text>
+
+        <!-- Items: BR (Avoid) -->
+        <circle cx="640" cy="380" r="4" fill="var(--ink)"/>
+        <text x="652" y="384" fill="var(--muted)" font-size="11" font-family="system-ui, sans-serif">Rewrite build pipeline</text>
+
+        <circle cx="780" cy="320" r="4" fill="var(--ink)"/>
+        <text x="792" y="324" fill="var(--muted)" font-size="11" font-family="system-ui, sans-serif">Port to Nuxt</text>
+
+        <!-- Legend -->
+        <line x1="40" y1="456" x2="960" y2="456" stroke="color-mix(in srgb, var(--ink) 10%, transparent)" stroke-width="0.8"/>
+        <text x="40" y="472" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+
+        <circle cx="52" cy="488" r="6" fill="var(--accent)"/>
+        <text x="68" y="492" fill="var(--muted)" font-size="8.5" font-family="system-ui, sans-serif">Start tomorrow</text>
+
+        <circle cx="192" cy="488" r="4" fill="var(--ink)"/>
+        <text x="208" y="492" fill="var(--muted)" font-size="8.5" font-family="system-ui, sans-serif">Candidate project</text>
+
+        <text x="336" y="492" fill="var(--muted)" font-size="8.5" font-family="system-ui, sans-serif" font-style="italic">Position is the signal. Colour is reserved for the single action item.</text>
+      </svg>
+  </div>
+</body>
+</html>

@@ -26,6 +26,8 @@ The effective `allowedTools` set is the union from only:
 
 Explicit attachments include the full body, a resource manifest, and UTF-8 resources marked `inline`. Implicit Skills contribute only ID, slug, display name, and description. The catalog instructs the model to call `load_skill` before following an unloaded Skill.
 
+Catalog-authored built-ins may declare `metadata.default-enabled: true`. Seeding applies that default only when the row is first created and preserves a later user disable. `Diagram Design` uses this path: it is discoverable for drawing intent without injecting its full body or its 27 type references into ordinary turns.
+
 Inline resource text across one Skill is capped at 64 KiB. Files beyond the cap remain in the manifest for on-demand reads.
 
 ## Scoped loader tools

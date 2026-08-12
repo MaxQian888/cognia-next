@@ -11,6 +11,7 @@ describe("built-in skills catalog", () => {
     expect(ids).toEqual([
       "agent-team-delegation",
       "computer-use-safety",
+      "diagram-design",
       "digital-twin-query",
       "goal-loop-execution",
       "im-auto-reply",

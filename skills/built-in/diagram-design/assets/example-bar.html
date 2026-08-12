@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sprint velocity · Bar chart</title>
+  
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:  var(--paper);
+      --color-ink:    var(--ink);
+      --color-muted:  var(--muted);
+      --color-accent: var(--accent);
+      --font-sans:    system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+      --font-serif:   Georgia, Times New Roman, serif;
+      --font-mono:    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 1.5rem; }
+    svg { width: 100%;  display: block; }
+  </style>
+  <meta name="cognia-renderer" content="diagram-design-v1">
+  <style id="cognia-diagram-theme">:root{--paper:var(--background,#f5f5f5);--paper-2:var(--card,#ececec);--ink:var(--foreground,#2d3142);--muted:var(--muted-foreground,#4f5d75);--soft:var(--muted-foreground,#7a8399);--rule:var(--border,rgba(45,49,66,.14));--rule-solid:var(--border,#bfc0c0);--accent:var(--primary,#eb6c36);--accent-ink:var(--primary-foreground,#fff);--accent-tint:color-mix(in srgb,var(--primary,#eb6c36) 10%,transparent);--link:var(--info,#2e5aa8);--series-1:var(--chart-1,#7c8f6f);--series-2:var(--chart-2,#5e7a9b);--series-3:var(--chart-3,#b8915a);--series-4:var(--chart-4,#9c6b50);--series-5:var(--chart-5,#6e6479)}svg{display:block;width:100%;max-width:100%;height:auto}</style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Bar · Diagram Design</p>
+    <h1>Sprint velocity · 8-sprint view</h1>
+
+    <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg">
+      <title>Diagram Design standard example</title>
+      <desc>Responsive standard example for the Diagram Design skill.</desc>
+      <defs>
+        <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+          <circle cx="1" cy="1" r="0.9" fill="color-mix(in srgb, var(--ink) 10%, transparent)"/>
+        </pattern>
+      </defs>
+
+      <rect width="100%" height="100%" fill="var(--paper)"/>
+      <rect width="100%" height="100%" fill="url(#dots)" opacity="0.55"/>
+
+      <!-- Y-axis rotated label -->
+      <text transform="rotate(-90 24 230)" x="24" y="230" fill="var(--muted)" font-size="7" font-family="ui-monospace, monospace" letter-spacing="0.14em" text-anchor="middle">STORY POINTS</text>
+
+      <!-- Horizontal gridlines (drawn before bars) -->
+      <line x1="80" y1="357" x2="960" y2="357" stroke="color-mix(in srgb, var(--ink) 8%, transparent)" stroke-width="0.8"/>
+      <line x1="80" y1="293" x2="960" y2="293" stroke="color-mix(in srgb, var(--ink) 8%, transparent)" stroke-width="0.8"/>
+      <line x1="80" y1="230" x2="960" y2="230" stroke="color-mix(in srgb, var(--ink) 8%, transparent)" stroke-width="0.8"/>
+      <line x1="80" y1="167" x2="960" y2="167" stroke="color-mix(in srgb, var(--ink) 8%, transparent)" stroke-width="0.8"/>
+      <line x1="80" y1="103" x2="960" y2="103" stroke="color-mix(in srgb, var(--ink) 8%, transparent)" stroke-width="0.8"/>
+      <line x1="80" y1="40"  x2="960" y2="40"  stroke="color-mix(in srgb, var(--ink) 6%, transparent)" stroke-width="0.8"/>
+
+      <!-- Y-axis line and X-axis baseline -->
+      <line x1="80" y1="40" x2="80" y2="420" stroke="color-mix(in srgb, var(--ink) 25%, transparent)" stroke-width="1"/>
+      <line x1="80" y1="420" x2="960" y2="420" stroke="color-mix(in srgb, var(--ink) 25%, transparent)" stroke-width="1"/>
+
+      <!-- Y-axis tick labels -->
+      <text x="72" y="361" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">20</text>
+      <text x="72" y="297" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">40</text>
+      <text x="72" y="234" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">60</text>
+      <text x="72" y="171" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">80</text>
+      <text x="72" y="107" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">100</text>
+      <text x="72" y="44"  fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="end">120</text>
+
+      <!-- ─── BARS (pitch=110, width=72, pad=19) ─── -->
+      <!-- S1: v=72, h=228, y=192 -->
+      <rect x="99" y="192" width="72" height="228" fill="var(--paper)"/>
+      <rect x="99" y="192" width="72" height="228" fill="color-mix(in srgb, var(--muted) 15%, transparent)" stroke="var(--muted)" stroke-width="1"/>
+      <text x="135" y="184" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="middle">72</text>
+
+      <!-- S2: v=88, h=280, y=140 -->
+      <rect x="209" y="140" width="72" height="280" fill="var(--paper)"/>
+      <rect x="209" y="140" width="72" height="280" fill="color-mix(in srgb, var(--muted) 15%, transparent)" stroke="var(--muted)" stroke-width="1"/>
+      <text x="245" y="132" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="middle">88</text>
+
+      <!-- S3: v=95, h=300, y=120 -->
+      <rect x="319" y="120" width="72" height="300" fill="var(--paper)"/>
+      <rect x="319" y="120" width="72" height="300" fill="color-mix(in srgb, var(--muted) 15%, transparent)" stroke="var(--muted)" stroke-width="1"/>
+      <text x="355" y="112" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="middle">95</text>
+
+      <!-- S4: v=78, h=248, y=172 -->
+      <rect x="429" y="172" width="72" height="248" fill="var(--paper)"/>
+      <rect x="429" y="172" width="72" height="248" fill="color-mix(in srgb, var(--muted) 15%, transparent)" stroke="var(--muted)" stroke-width="1"/>
+      <text x="465" y="164" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="middle">78</text>
+
+      <!-- S5 FOCAL: v=110, h=348, y=72 -->
+      <rect x="539" y="72" width="72" height="348" fill="var(--paper)"/>
+      <rect x="539" y="72" width="72" height="348" fill="color-mix(in srgb, var(--accent) 12%, transparent)" stroke="var(--accent)" stroke-width="1"/>
+      <text x="575" y="64" fill="var(--accent)" font-size="8" font-family="ui-monospace, monospace" text-anchor="middle" font-weight="600">110</text>
+
+      <!-- S6: v=102, h=324, y=96 -->
+      <rect x="649" y="96" width="72" height="324" fill="var(--paper)"/>
+      <rect x="649" y="96" width="72" height="324" fill="color-mix(in srgb, var(--muted) 15%, transparent)" stroke="var(--muted)" stroke-width="1"/>
+      <text x="685" y="88" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="middle">102</text>
+
+      <!-- S7: v=85, h=268, y=152 -->
+      <rect x="759" y="152" width="72" height="268" fill="var(--paper)"/>
+      <rect x="759" y="152" width="72" height="268" fill="color-mix(in srgb, var(--muted) 15%, transparent)" stroke="var(--muted)" stroke-width="1"/>
+      <text x="795" y="144" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="middle">85</text>
+
+      <!-- S8: v=93, h=296, y=124 -->
+      <rect x="869" y="124" width="72" height="296" fill="var(--paper)"/>
+      <rect x="869" y="124" width="72" height="296" fill="color-mix(in srgb, var(--muted) 15%, transparent)" stroke="var(--muted)" stroke-width="1"/>
+      <text x="905" y="116" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" text-anchor="middle">93</text>
+
+      <!-- X-axis category labels -->
+      <text x="135" y="440" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">S1</text>
+      <text x="245" y="440" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">S2</text>
+      <text x="355" y="440" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">S3</text>
+      <text x="465" y="440" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">S4</text>
+      <text x="575" y="440" fill="var(--accent)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">S5</text>
+      <text x="685" y="440" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">S6</text>
+      <text x="795" y="440" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">S7</text>
+      <text x="905" y="440" fill="var(--ink)" font-size="11" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">S8</text>
+
+      <!-- Legend -->
+      <line x1="40" y1="462" x2="960" y2="462" stroke="color-mix(in srgb, var(--ink) 10%, transparent)" stroke-width="0.8"/>
+      <text x="40" y="478" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <rect x="40" y="488" width="16" height="10" rx="2" fill="color-mix(in srgb, var(--accent) 12%, transparent)" stroke="var(--accent)" stroke-width="1"/>
+      <text x="64" y="497" fill="var(--muted)" font-size="8.5" font-family="system-ui, sans-serif">Sprint 5 · record high</text>
+
+      <rect x="220" y="488" width="16" height="10" rx="2" fill="color-mix(in srgb, var(--muted) 15%, transparent)" stroke="var(--muted)" stroke-width="1"/>
+      <text x="244" y="497" fill="var(--muted)" font-size="8.5" font-family="system-ui, sans-serif">Other sprints</text>
+    </svg>
+  </div>
+</body>
+</html>

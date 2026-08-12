@@ -5,6 +5,7 @@ import {
   loadSkillResourceForSession,
   releaseSkillLoadContext,
 } from "./runtime-loader"
+import { getCatalogSkill } from "./built-in-catalog"
 
 const skill: Skill = {
   id: "skill_allowed",
@@ -150,5 +151,50 @@ describe("session-scoped skill runtime loader", () => {
       ok: false,
       code: "missing_context",
     })
+  })
+
+  it("loads the curated diagram skill progressively, including paged references", async () => {
+    const diagram = getCatalogSkill("diagram-design")!
+    const diagramSkill: Skill = {
+      id: "skill_builtin_diagram_design",
+      slug: "diagram-design",
+      name: diagram.name,
+      description: diagram.description,
+      content: diagram.content,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const diagramResources: SkillResource[] = diagram.resources!.map((resource, index) => ({
+      ...resource,
+      id: `diagram-resource-${index}`,
+      skillId: diagramSkill.id,
+      encoding: "utf-8",
+      createdAt: 1,
+      updatedAt: 1,
+    }))
+    createSkillLoadContext({
+      sessionId: "diagram-session",
+      allowedSkillIds: [diagramSkill.id],
+      getSkill: async () => diagramSkill,
+      listResources: async () => diagramResources,
+      recordUsage,
+    })
+
+    const loaded = await loadSkillForSession("diagram-session", diagramSkill.id)
+    expect(loaded).toMatchObject({ ok: true, skill: { id: diagramSkill.id } })
+    expect(loaded.ok && loaded.content).toContain("Required output contract")
+    expect(loaded.ok && loaded.resources).toHaveLength(diagramResources.length)
+    expect(loaded.ok && loaded.content).not.toContain("# Architecture\n\n**Best for:**")
+
+    const page = await loadSkillResourceForSession(
+      "diagram-session",
+      diagramSkill.id,
+      "references/type-architecture.md",
+      0,
+      64
+    )
+    expect(page).toMatchObject({ ok: true, binary: false, nextOffset: expect.any(Number) })
+    expect(page.ok && page.content).toContain("# Architecture")
+    releaseSkillLoadContext("diagram-session")
   })
 })

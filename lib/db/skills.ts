@@ -690,14 +690,13 @@ export async function seedBuiltInSkills(): Promise<void> {
     },
     // Functional, surface-guidance skills (authored as SKILL.md under
     // skills/built-in/, codegen'd into BUILT_IN_SKILL_CATALOG). Unlike the five
-    // generic style skills above, these ship *disabled* by default: they're
-    // auto-injected on the matching agent surface (see
-    // lib/skills/surface-activation.ts) rather than added to every plain chat.
-    // Seeding them as rows still lets users see + manually enable them in
-    // Settings, and the read-merge below preserves any such user override.
+    // generic style skills above, catalog skills declare whether they are
+    // enabled by default. Enabled skills still contribute only their compact
+    // discovery summary until the model calls load_skill; the full body is not
+    // added to every plain chat. The read-merge below preserves user overrides.
     ...BUILT_IN_SKILL_CATALOG.map((entry): Skill => ({
       ...baseDefaults,
-      status: "disabled" as SkillStatus,
+      status: (entry.defaultEnabled ? "enabled" : "disabled") as SkillStatus,
       id: builtinSkillId(entry),
       name: entry.name,
       description: entry.description,

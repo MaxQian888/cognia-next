@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The CLAUDE.md Hierarchy</title>
+  
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   var(--paper);
+      --color-ink:     var(--ink);
+      --color-muted:   var(--muted);
+      --color-accent:  var(--accent);
+      --font-sans:     system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+      --font-serif:    Georgia, Times New Roman, serif;
+      --font-mono:     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%;  display: block; }
+  </style>
+  <meta name="cognia-renderer" content="diagram-design-v1">
+  <style id="cognia-diagram-theme">:root{--paper:var(--background,#f5f5f5);--paper-2:var(--card,#ececec);--ink:var(--foreground,#2d3142);--muted:var(--muted-foreground,#4f5d75);--soft:var(--muted-foreground,#7a8399);--rule:var(--border,rgba(45,49,66,.14));--rule-solid:var(--border,#bfc0c0);--accent:var(--primary,#eb6c36);--accent-ink:var(--primary-foreground,#fff);--accent-tint:color-mix(in srgb,var(--primary,#eb6c36) 10%,transparent);--link:var(--info,#2e5aa8);--series-1:var(--chart-1,#7c8f6f);--series-2:var(--chart-2,#5e7a9b);--series-3:var(--chart-3,#b8915a);--series-4:var(--chart-4,#9c6b50);--series-5:var(--chart-5,#6e6479)}svg{display:block;width:100%;max-width:100%;height:auto}</style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Nested · Diagram Design</p>
+    <h1>The CLAUDE.md Hierarchy</h1>
+
+    <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg">
+      <title>Diagram Design standard example</title>
+      <desc>Responsive standard example for the Diagram Design skill.</desc>
+        <defs>
+          <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.9" fill="color-mix(in srgb, var(--ink) 10%, transparent)"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="var(--paper)"/>
+        <rect width="100%" height="100%" fill="url(#dots)" opacity="0.55"/>
+
+        <!-- Level 1: ~/.claude/ (global) — outermost -->
+        <rect x="40" y="60" width="920" height="380" rx="8" fill="color-mix(in srgb, var(--ink) 2%, transparent)" stroke="color-mix(in srgb, var(--ink) 30%, transparent)" stroke-width="1"/>
+        <!-- Level 2: ~/vault/ -->
+        <rect x="72" y="96" width="856" height="308" rx="8" fill="color-mix(in srgb, var(--ink) 2%, transparent)" stroke="color-mix(in srgb, var(--ink) 35%, transparent)" stroke-width="1"/>
+        <!-- Level 3: /business -->
+        <rect x="104" y="132" width="792" height="236" rx="8" fill="color-mix(in srgb, var(--ink) 3%, transparent)" stroke="color-mix(in srgb, var(--ink) 45%, transparent)" stroke-width="1"/>
+        <!-- Level 4: /marketing -->
+        <rect x="136" y="168" width="728" height="164" rx="8" fill="color-mix(in srgb, var(--ink) 3%, transparent)" stroke="var(--muted)" stroke-width="1"/>
+        <!-- Level 5: /project — innermost, coral focal -->
+        <rect x="168" y="204" width="664" height="92" rx="8" fill="color-mix(in srgb, var(--accent) 6%, transparent)" stroke="var(--accent)" stroke-width="1"/>
+
+        <!-- Level labels on paper-colored masks -->
+        <rect x="56" y="52" width="188" height="16" fill="var(--paper)"/>
+        <text x="64" y="64" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.14em">~/.claude/ (global)</text>
+
+        <rect x="88" y="88" width="148" height="16" fill="var(--paper)"/>
+        <text x="96" y="100" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.14em">~/vault/ (notes)</text>
+
+        <rect x="120" y="124" width="96" height="16" fill="var(--paper)"/>
+        <text x="128" y="136" fill="var(--muted)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.14em">/business</text>
+
+        <rect x="152" y="160" width="108" height="16" fill="var(--paper)"/>
+        <text x="160" y="172" fill="var(--ink)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.14em">/marketing</text>
+
+        <rect x="184" y="196" width="88" height="16" fill="var(--paper)"/>
+        <text x="192" y="208" fill="var(--accent)" font-size="8" font-family="ui-monospace, monospace" letter-spacing="0.14em" font-weight="600">/project</text>
+
+        <!-- File-icon glyphs (simple rect with folded corner) inside each level -->
+        <!-- Glyph in level 1 (bottom-right area of outer ring) -->
+        <g transform="translate(908, 408)">
+          <path d="M0 0 L16 0 L20 4 L20 20 L0 20 Z" fill="var(--paper)" stroke="color-mix(in srgb, var(--ink) 35%, transparent)" stroke-width="1"/>
+          <path d="M16 0 L16 4 L20 4" fill="none" stroke="color-mix(in srgb, var(--ink) 35%, transparent)" stroke-width="1"/>
+        </g>
+        <!-- Glyph in level 2 ring -->
+        <g transform="translate(876, 372)">
+          <path d="M0 0 L16 0 L20 4 L20 20 L0 20 Z" fill="var(--paper)" stroke="color-mix(in srgb, var(--ink) 40%, transparent)" stroke-width="1"/>
+          <path d="M16 0 L16 4 L20 4" fill="none" stroke="color-mix(in srgb, var(--ink) 40%, transparent)" stroke-width="1"/>
+        </g>
+        <!-- Glyph in level 3 ring -->
+        <g transform="translate(844, 336)">
+          <path d="M0 0 L16 0 L20 4 L20 20 L0 20 Z" fill="var(--paper)" stroke="color-mix(in srgb, var(--ink) 50%, transparent)" stroke-width="1"/>
+          <path d="M16 0 L16 4 L20 4" fill="none" stroke="color-mix(in srgb, var(--ink) 50%, transparent)" stroke-width="1"/>
+        </g>
+        <!-- Glyph in level 4 ring -->
+        <g transform="translate(812, 300)">
+          <path d="M0 0 L16 0 L20 4 L20 20 L0 20 Z" fill="var(--paper)" stroke="var(--muted)" stroke-width="1"/>
+          <path d="M16 0 L16 4 L20 4" fill="none" stroke="var(--muted)" stroke-width="1"/>
+        </g>
+
+        <!-- Innermost label — human readable -->
+        <text x="500" y="248" fill="var(--ink)" font-size="16" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">CLAUDE.md</text>
+        <text x="500" y="272" fill="var(--muted)" font-size="9" font-family="ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">inherits every level above</text>
+
+        <!-- Annotation top-right: italic callout with curved arrow -->
+        <text x="904" y="36" fill="var(--ink)" font-size="14" font-style="italic" font-family="Georgia, Times New Roman, serif" text-anchor="end">no imports, no configuration</text>
+        <path d="M 820 44 Q 700 84 520 216" fill="none" stroke="color-mix(in srgb, var(--ink) 40%, transparent)" stroke-width="1" stroke-dasharray="4,3"/>
+        <circle cx="520" cy="216" r="2" fill="var(--ink)"/>
+
+        <!-- Annotation bottom-left: italic callout -->
+        <text x="40" y="484" fill="var(--muted)" font-size="14" font-style="italic" font-family="Georgia, Times New Roman, serif">structure IS the index</text>
+      </svg>
+  </div>
+</body>
+</html>

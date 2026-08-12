@@ -26,6 +26,8 @@ description: 桌面混合渐进加载、作用域 loader 工具、资源、工�
 
 显式附件包含完整正文、资源 manifest，以及标记为 `inline` 的 UTF-8 资源。隐式 Skill 只提供 ID、slug、显示名称和 description。目录会要求模型在遵循未加载 Skill 前调用 `load_skill`。
 
+catalog 内置 Skill 可以声明 `metadata.default-enabled: true`。首次建行时会应用这个默认值，之后用户手动禁用的选择会被保留。`Diagram Design` 走这条路径：画图意图可以发现它，但普通对话不会注入完整正文与 27 类参考。
+
 单个 Skill 的 inline 资源文本总量最多 64 KiB。超出上限的文件继续保留在 manifest 中，按需读取。
 
 ## 作用域 loader 工具
