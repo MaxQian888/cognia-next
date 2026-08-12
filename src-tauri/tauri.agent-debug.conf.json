@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": [
+      "resources/terminal/shell-integration.bash",
+      "resources/terminal/shell-integration.zsh",
+      "resources/terminal/shell-integration.ps1"
+    ]
+  }
+}
