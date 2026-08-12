@@ -4,6 +4,7 @@ import {
 } from "@cognia/agent-config-types/action-review"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
+import { getDecisionContext } from "./governance-ledger"
 import {
   ACTION_REVIEW_RECEIPT_CAP,
   ACTION_REVIEW_RETENTION_DAYS,
@@ -31,6 +32,7 @@ function makeReceipt(
     runId?: string
     projectId?: string
     surfaces?: ActionReviewReceipt["request"]["surfaces"]
+    effect?: ActionReviewReceipt["effect"]
   } = {}
 ): ActionReviewReceipt {
   const id = overrides.id ?? "req-1"
@@ -63,6 +65,7 @@ function makeReceipt(
       authority: overrides.authority ?? "human",
       decidedAt,
     },
+    effect: overrides.effect,
     expiresAt: overrides.expiresAt ?? 0,
   }
 }
@@ -134,6 +137,41 @@ describe("recordActionReviewReceipt", () => {
     expect(row?.id).toBe("a")
     expect(row?.request.subject.ref).toBe("Bash")
     expect(row?.decision.authority).toBe("human")
+  })
+
+  it("projects every durable review into the cross-domain decision ledger", async () => {
+    await recordActionReviewReceipt(
+      makeReceipt({
+        id: "governed-review",
+        channel: "chat-tool",
+        outcome: "allow",
+        authority: "human",
+        sessionId: "session-1",
+      })
+    )
+
+    await expect(getDecisionContext("action-review:governed-review")).resolves.toMatchObject({
+      decision: {
+        kind: "tool-authorization",
+        resolution: { outcome: "allow", reasonCode: "human" },
+        correlation: { sessionId: "session-1", requestId: "governed-review" },
+      },
+      events: [{ type: "resolved" }],
+    })
+  })
+
+  it("projects an already-known effect from the durable receipt", async () => {
+    await recordActionReviewReceipt(
+      makeReceipt({
+        id: "governed-effect",
+        effect: { status: "executed", completedAt: 123, durationMs: 12 },
+      })
+    )
+
+    await expect(getDecisionContext("action-review:governed-effect")).resolves.toMatchObject({
+      decision: { lifecycle: { state: "executed" } },
+      events: expect.arrayContaining([expect.objectContaining({ type: "executed", at: 123 })]),
+    })
   })
 
   it("is idempotent on id — a retried write overwrites rather than duplicating", async () => {

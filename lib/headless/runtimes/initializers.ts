@@ -57,6 +57,7 @@ registerHeadlessRuntime({
       { syncWorkflowTriggers, unsyncWorkflowTriggers },
       { resumeInFlightRuns },
       { initPluginTriggerLifecycle, disposePluginTriggerLifecycle },
+      { reconcilePendingGoalVerifications },
     ] = await Promise.all([
       import("@/lib/workflow/runtime/trigger-subscriptions"),
       import("@/lib/db/workflows"),
@@ -64,6 +65,7 @@ registerHeadlessRuntime({
       import("@/lib/workflow/runtime/webhook-bridge"),
       import("@/lib/workflow/runtime/resume-controller"),
       import("@/lib/workflow/triggers/lifecycle"),
+      import("@/lib/goal/verification"),
     ])
 
     initTriggerSubscriptions()
@@ -91,6 +93,12 @@ registerHeadlessRuntime({
         `workflow resume failed: ${error instanceof Error ? error.message : String(error)}`
       )
     }
+    await reconcilePendingGoalVerifications().catch((error) =>
+      ctx.log(
+        "warn",
+        `goal verification reconcile failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+    )
     return async () => {
       disposeTriggerSubscriptions()
       await disposePluginTriggerLifecycle()
@@ -206,9 +214,15 @@ registerHeadlessRuntime({
   name: "background-task",
   hosts: ["brain"],
   start: async () => {
-    const { interruptRendererBackgroundTasksOnBoot } =
-      await import("@/lib/background-tasks/renderer-subagent-registry")
-    await interruptRendererBackgroundTasksOnBoot()
+    const [{ interruptRendererBackgroundTasksOnBoot }, { recoverStaleDirectChatExecutionRuns }] =
+      await Promise.all([
+        import("@/lib/background-tasks/renderer-subagent-registry"),
+        import("@/lib/execution/direct-chat-run"),
+      ])
+    await Promise.all([
+      interruptRendererBackgroundTasksOnBoot(),
+      recoverStaleDirectChatExecutionRuns(),
+    ])
   },
 })
 

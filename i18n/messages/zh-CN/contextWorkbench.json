@@ -166,6 +166,96 @@
     "sortLabel": "排序方式",
     "title": "记忆"
   },
+  "runContext": {
+    "title": "运行上下文",
+    "tabs": {
+      "workingSet": "工作集",
+      "review": "复盘"
+    },
+    "workingSet": {
+      "title": "工作集",
+      "description": "你与 Agent 共享的受限事实和句柄。",
+      "emptyTitle": "工作集为空",
+      "emptyDescription": "添加事实、决策、问题、资源或子任务句柄。",
+      "summaryLabel": "工作集摘要",
+      "summaryPlaceholder": "添加一条简洁、可持久化的内容",
+      "kindLabel": "条目类型",
+      "add": "添加",
+      "resolve": "解决",
+      "remove": "移除",
+      "active": "进行中",
+      "resolved": "已解决",
+      "revisionConflict": "工作集已发生变化，请查看最新版本后重试。",
+      "kinds": {
+        "fact": "事实",
+        "decision": "决策",
+        "open-question": "待确认问题",
+        "resource": "资源",
+        "subtask": "子任务"
+      },
+      "projectionTitle": "实时投影",
+      "projectionDescription": "实时运行与任务句柄仅合并展示，不会复制写入工作集。",
+      "projection": {
+        "artifact": "产物：{title}",
+        "backgroundTask": "子任务 {id}：{status}",
+        "run": "{kind}：{status}",
+        "taskWorkspace": "任务：{id}"
+      },
+      "runKinds": {
+        "agent-turn": "Agent 轮次",
+        "goal": "目标",
+        "plan": "计划",
+        "scheduled": "定时运行",
+        "team": "Agent 团队",
+        "workflow": "工作流"
+      },
+      "runStatuses": {
+        "cancelled": "已取消",
+        "completed": "已完成",
+        "failed": "失败",
+        "paused": "已暂停",
+        "queued": "排队中",
+        "recovery_required": "需要恢复",
+        "running": "运行中",
+        "waiting": "等待中"
+      },
+      "backgroundTaskStatuses": {
+        "done": "已完成",
+        "error": "错误",
+        "interrupted": "已中断",
+        "running": "运行中"
+      }
+    },
+    "review": {
+      "title": "运行复盘",
+      "description": "从终态运行中生成并审批受限的学习建议。",
+      "emptyTitle": "暂无运行复盘",
+      "emptyDescription": "仅在你对终态运行手动发起时生成复盘。",
+      "generate": "生成复盘",
+      "approve": "批准并应用",
+      "reject": "拒绝",
+      "dismiss": "忽略",
+      "retry": "重试应用",
+      "status": {
+        "pending_review": "等待复核",
+        "resolved": "已处理"
+      },
+      "proposalStatus": {
+        "pending": "待处理",
+        "approved_pending_apply": "应用中",
+        "applied": "已应用",
+        "rejected": "已拒绝",
+        "apply_failed": "应用失败"
+      },
+      "target": {
+        "team-config": "团队配置",
+        "project-environment": "项目环境",
+        "memory-candidate": "记忆候选",
+        "skill-draft": "禁用的 Skill 草稿",
+        "observation": "观察记录"
+      }
+    }
+  },
   "mobileDescription": "当前资源的 AI、评论、检查、审阅与预览工具。",
   "mobileTitle": "上下文工作台",
   "panelError": "面板暂不可用",

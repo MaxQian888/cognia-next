@@ -43,6 +43,7 @@ import { computeDueAt } from "@/lib/connectors/sla"
 import { upsertIdentity } from "@/lib/db/platform-identities"
 import { getCharacter } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
+import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
 import { recordAndCheckInbound, isRecordedInbound } from "./dedup"
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { appendAudit } from "./audit"
@@ -50,6 +51,7 @@ import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
 import { evaluatePolicy, rateBucketKey, type PolicyEvalState } from "./policy-eval"
 import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
 import { routeInbound, type RouteDecision } from "./mode-router"
+import { recordConnectorRouteGovernance } from "@/lib/governance/producers/connector"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { findMatchingWorkflows } from "@/lib/workflow/runtime/trigger-subscriptions"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
@@ -757,6 +759,31 @@ export class ConnectorBus {
       evalResult,
       resolved.trigger.storeUnmatchedInDraftMode
     )
+    try {
+      await recordConnectorRouteGovernance({
+        adapterId: event.adapterId,
+        messageId: event.messageId,
+        conversationKey: event.conversationKey,
+        mode: resolved.mode,
+        evaluation: evalResult,
+        route: decision,
+        decidedAt: now,
+      })
+    } catch (error) {
+      await reportGovernanceProjectionFailure(
+        {
+          producer: "connector-route",
+          operation: "record",
+          subjectRef: {
+            namespace: "cognia",
+            type: "connector-route",
+            id: `${event.adapterId}:${event.messageId}`,
+          },
+          occurredAt: now,
+        },
+        error
+      )
+    }
 
     // ── Step 8: policy state bookkeeping ──────────────────────────────────────
     if (evalResult.blocked) {

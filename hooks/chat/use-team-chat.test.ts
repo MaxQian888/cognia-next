@@ -96,11 +96,14 @@ jest.mock("@/lib/claude/team-router", () => ({
   stripDispatches: (s: string) => stripDispatchesMock(s),
 }))
 
-const selectPrimaryResponderMock = jest.fn(async ({ members }: { members: unknown[] }) => members[0])
+const selectPrimaryResponderMock = jest.fn(
+  async ({ members }: { members: unknown[] }) => members[0]
+)
 jest.mock("@/lib/claude/team-primary-router", () => ({
   duplicateTeamResponseIds: jest.fn(() => new Set()),
   resolveTeamResponseCap: jest.fn(() => 4),
-  selectPrimaryResponder: (...args: unknown[]) => selectPrimaryResponderMock(...(args as [{ members: unknown[] }])),
+  selectPrimaryResponder: (...args: unknown[]) =>
+    selectPrimaryResponderMock(...(args as [{ members: unknown[] }])),
 }))
 
 const buildUtilityLlmClientMock = jest.fn(() => null)
@@ -937,6 +940,63 @@ describe("useTeamChat — send coverage", () => {
     replayPolicy: "pre-commit-only",
     createdAt: 1,
   }
+
+  it("restores the active Working Set through the existing team compaction seam", async () => {
+    makeAutoResolveSetup()
+    chatState.messages = [
+      {
+        id: "compact-1",
+        role: "system",
+        parts: [{ type: "compact-boundary" }],
+      },
+    ]
+    getSessionMock.mockResolvedValueOnce({
+      id: "team-1",
+      kind: "team",
+      teamId: "t-1",
+      title: "T",
+      workingSet: {
+        contractVersion: 1,
+        revision: 1,
+        updatedAt: 20,
+        entries: [
+          {
+            id: "decision-1",
+            kind: "decision",
+            summary: "Reuse the workflow runtime",
+            status: "active",
+            origin: "agent",
+            refs: [],
+            createdAt: 10,
+            updatedAt: 20,
+          },
+        ],
+      },
+    })
+    getTeamMock.mockResolvedValueOnce({
+      id: "t-1",
+      orchestration: "round_robin",
+      members: [{ characterId: "alice" }],
+      supervisorCharacterId: null,
+    })
+    listCharactersByIdsMock.mockResolvedValueOnce([{ id: "alice", name: "Alice" }])
+    routeTurnMock.mockReturnValueOnce([{ id: "alice", name: "Alice" }])
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("continue")
+    })
+
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postCompaction: expect.objectContaining({
+          phaseNumber: 1,
+          durableInstructions: expect.stringContaining("Reuse the workflow runtime"),
+        }),
+      })
+    )
+  })
 
   it("retries a Team Chat member on the next planned provider before commitment", async () => {
     let emitTeamEvent: ((evt: unknown) => void) | null = null

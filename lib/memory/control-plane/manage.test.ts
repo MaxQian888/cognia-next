@@ -10,6 +10,8 @@ const mockDeleteEvidence = jest.fn()
 const mockAudit = jest.fn()
 const mockSinkDelete = jest.fn()
 const mockSinkUpsert = jest.fn()
+const mockRecordMemoryConflictGovernance = jest.fn()
+const mockReportGovernanceProjectionFailure = jest.fn()
 
 jest.mock("@/lib/memory/api/store-memory", () => ({
   storeMemoryCore: (...args: unknown[]) => mockStore(...args),
@@ -38,6 +40,14 @@ const mockNoteVectorFailure = jest.fn()
 jest.mock("@/lib/memory/lifecycle/enqueue-reconcile", () => ({
   noteMemoryVectorFailure: (...args: unknown[]) => mockNoteVectorFailure(...args),
 }))
+jest.mock("@/lib/governance/producers/memory", () => ({
+  recordMemoryConflictGovernance: (...args: unknown[]) =>
+    mockRecordMemoryConflictGovernance(...args),
+}))
+jest.mock("@/lib/db/governance-ledger", () => ({
+  reportGovernanceProjectionFailure: (...args: unknown[]) =>
+    mockReportGovernanceProjectionFailure(...args),
+}))
 
 import { manageMemory } from "./manage"
 
@@ -46,6 +56,13 @@ beforeEach(() => {
   mockGet.mockResolvedValue({ id: "m1", text: "old", version: 1 })
   mockStore.mockResolvedValue({ ok: true, memoryId: "new", stored: true })
   mockList.mockResolvedValue([])
+  mockEvidence.mockResolvedValue({
+    id: "evidence-merge",
+    sourceId: "conflict-merge:a:b",
+    createdAt: 250,
+  })
+  mockRecordMemoryConflictGovernance.mockResolvedValue("memory-resolution:test")
+  mockReportGovernanceProjectionFailure.mockResolvedValue(undefined)
 })
 
 describe("manageMemory", () => {
@@ -140,6 +157,14 @@ describe("manageMemory", () => {
     expect(mockAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "invalidated", memoryId: "b" })
     )
+    expect(mockRecordMemoryConflictGovernance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keep: expect.objectContaining({ id: "a" }),
+        drop: expect.objectContaining({ id: "b" }),
+        mode: "keep",
+        actorId: "local-user",
+      })
+    )
     expect(result).toEqual({ ok: true, memoryId: "a" })
   })
 
@@ -157,13 +182,23 @@ describe("manageMemory", () => {
   })
 
   it("resolve-conflict merge writes the PII-gated text and reindexes", async () => {
-    mockGet.mockImplementation(async (id: string) => ({
-      id,
-      text: id,
-      version: 1,
-      vectorDocId: `vec-${id}`,
-      conflictWithIds: [],
-    }))
+    mockGet.mockImplementation(async (id: string) =>
+      id === "a" && mockGet.mock.calls.length > 2
+        ? {
+            id,
+            text: "User migrated from npm to pnpm in 2026",
+            version: 2,
+            vectorDocId: "vec-a",
+            conflictWithIds: [],
+          }
+        : {
+            id,
+            text: id,
+            version: 1,
+            vectorDocId: `vec-${id}`,
+            conflictWithIds: [],
+          }
+    )
     const result = await manageMemory({
       kind: "resolve-conflict",
       keepId: "a",
@@ -182,6 +217,21 @@ describe("manageMemory", () => {
     expect(mockSinkUpsert).toHaveBeenCalledWith("vec-a", "User migrated from npm to pnpm in 2026")
     expect(mockEvidence).toHaveBeenCalledWith(
       expect.objectContaining({ memoryId: "a", sourceId: "conflict-merge:a:b" })
+    )
+    expect(mockRecordMemoryConflictGovernance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keep: expect.objectContaining({ id: "a", text: "a", version: 1 }),
+        result: expect.objectContaining({
+          id: "a",
+          text: "User migrated from npm to pnpm in 2026",
+          version: 2,
+        }),
+        resolutionEvidence: {
+          id: "evidence-merge",
+          sourceId: "conflict-merge:a:b",
+          createdAt: 250,
+        },
+      })
     )
     expect(mockInvalidate).toHaveBeenCalledWith("b", "a")
     expect(result).toEqual({ ok: true, memoryId: "a" })

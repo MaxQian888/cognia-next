@@ -90,7 +90,7 @@ const fire = (evt: ClaudeEvent) => {
 
 const SESSION = "ses_test"
 
-const assistantEvent = (text: string, opts?: { uuid?: string }): ClaudeEvent =>
+const assistantEvent = (text: string, opts?: { uuid?: string; messageId?: string }): ClaudeEvent =>
   ({
     type: "event",
     sessionId: SESSION,
@@ -99,7 +99,7 @@ const assistantEvent = (text: string, opts?: { uuid?: string }): ClaudeEvent =>
       uuid: opts?.uuid ?? "uuid-asst-1",
       session_id: SESSION,
       message: {
-        id: "m-1",
+        id: opts?.messageId ?? "m-1",
         role: "assistant",
         content: [{ type: "text", text }],
       },
@@ -293,6 +293,54 @@ describe("runAndCaptureAssistantReply", () => {
     ac.abort()
     await expect(promise).rejects.toMatchObject({ code: "aborted" })
     expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+    expect(unlistenMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the interrupted turn subscribed until its final usage arrives", async () => {
+    const ac = new AbortController()
+    const events: CaptureStreamEvent[] = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      signal: ac.signal,
+      timeoutMs: 1_000,
+      onEvent: (event) => events.push(event),
+    })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    expect(sendPromptMock).toHaveBeenCalledTimes(1)
+    fire(assistantEvent("partial reply"))
+
+    ac.abort()
+    await Promise.resolve()
+
+    // Production unlisten detaches the transport handler. Deliver the sidecar's
+    // interrupt tail only while capture is still subscribed, matching the real
+    // event channel instead of calling a stale test closure directly.
+    if (unlistenMock.mock.calls.length === 0) {
+      fire({
+        type: "event",
+        sessionId: SESSION,
+        event: {
+          type: "result",
+          subtype: "success",
+          duration_ms: 20,
+          is_error: false,
+          uuid: "uuid-result-interrupted",
+          session_id: SESSION,
+          usage: { input_tokens: 1_200, output_tokens: 80, context_input_tokens: 900 },
+        },
+      } as unknown as ClaudeEvent)
+      fire(sessionEnded())
+    }
+
+    await expect(promise).rejects.toMatchObject({ code: "aborted" })
+    expect(events).toContainEqual({
+      type: "usage",
+      usage: expect.objectContaining({
+        inputTokens: 1_200,
+        outputTokens: 80,
+        contextInputTokens: 900,
+      }),
+    })
     expect(unlistenMock).toHaveBeenCalledTimes(1)
   })
 
@@ -939,6 +987,120 @@ describe("runAndCaptureAssistantReply", () => {
     expect(deltas).toEqual(["Hel", "lo"])
   })
 
+  it("keeps multi-round assistant text interleaved with tool calls and results", async () => {
+    const events: CaptureStreamEvent[] = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (event) => events.push(event),
+    })
+    await flushUntilSubscribed()
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "assistant",
+        uuid: "uuid-text-tool",
+        session_id: SESSION,
+        message: {
+          id: "m-text-tool",
+          role: "assistant",
+          content: [
+            { type: "text", text: "I will inspect the project.\n\n" },
+            { type: "tool_use", id: "tu-order", name: "read", input: { path: "README.md" } },
+          ],
+        },
+      },
+    } as unknown as ClaudeEvent)
+    fire(userToolResultEvent("tu-order", "done"))
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "assistant",
+        uuid: "uuid-text-tool-2",
+        session_id: SESSION,
+        message: {
+          id: "m-text-tool-2",
+          role: "assistant",
+          content: [
+            { type: "text", text: "Next I will inspect the package.\n\n" },
+            { type: "tool_use", id: "tu-order-2", name: "read", input: { path: "package.json" } },
+          ],
+        },
+      },
+    } as unknown as ClaudeEvent)
+    fire(userToolResultEvent("tu-order-2", "done"))
+    fire(
+      assistantEvent("# Findings\n\nThe project is healthy.", {
+        uuid: "uuid-final",
+        messageId: "m-final",
+      })
+    )
+    fire(sessionEnded())
+    await promise
+
+    expect(
+      events
+        .filter((event) => ["text-delta", "tool-call", "tool-result"].includes(event.type))
+        .map((event) => event.type)
+    ).toEqual([
+      "text-delta",
+      "tool-call",
+      "tool-result",
+      "text-delta",
+      "tool-call",
+      "tool-result",
+      "text-delta",
+    ])
+  })
+
+  it("forwards AI SDK stream-event markdown deltas before the canonical snapshot", async () => {
+    const events: CaptureStreamEvent[] = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (event) => events.push(event),
+    })
+    await flushUntilSubscribed()
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "stream_event",
+        uuid: "stream-envelope-start",
+        session_id: SESSION,
+        event: { type: "message_start", message: { id: "m-stream" } },
+      },
+    } as unknown as ClaudeEvent)
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "stream_event",
+        uuid: "stream-envelope-delta",
+        session_id: SESSION,
+        event: {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: "# Findings\n\nFirst paragraph." },
+        },
+      },
+    } as unknown as ClaudeEvent)
+
+    expect(events).toContainEqual({
+      type: "text-delta",
+      delta: "# Findings\n\nFirst paragraph.",
+    })
+
+    fire(
+      assistantEvent("# Findings\n\nFirst paragraph.", {
+        uuid: "uuid-stream-final",
+        messageId: "m-stream",
+      })
+    )
+    fire(sessionEnded())
+    await promise
+    expect(events.filter((event) => event.type === "text-delta")).toHaveLength(1)
+  })
+
   const thinkingEvent = (thinking: string, text?: string): ClaudeEvent =>
     ({
       type: "event",
@@ -1406,6 +1568,7 @@ describe("runAndCaptureAssistantReply — execution broker admission", () => {
     await flushUntilSubscribed()
     await flushMicrotasks()
     expect(broker.cancelBySession(SESSION)).toBe(1)
+    fire(sessionEnded())
     await expect(promise).rejects.toMatchObject({ code: "aborted" })
     expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
     expect(broker.countRunning()).toBe(0)

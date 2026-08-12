@@ -57,6 +57,7 @@ import { bumpUnread } from "@/lib/db/session-state"
 import { getTeam } from "@/lib/db/teams"
 import type {
   ApprovalDecision,
+  ChatSession,
   Character,
   ClaudeEvent,
   PendingApproval,
@@ -90,6 +91,7 @@ import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { RoutingAttemptController } from "@cognia/provider-routing"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
+import { buildWorkingSetPostCompaction } from "./claude-chat-send-options"
 
 const MAX_SUPERVISOR_ROUNDS = 2
 
@@ -815,7 +817,7 @@ export function useTeamChat() {
 // ---- Linear orchestration (round_robin / mention / manual-targeted) ------
 
 interface RunCommonArgs {
-  session: { id: string; scratchpad?: string }
+  session: { id: string; scratchpad?: string; workingSet?: ChatSession["workingSet"] }
   sessionId: string
   team: Team
   members: Character[]
@@ -1080,7 +1082,7 @@ function buildSynthesisAddendum(results: { name: string; reply: string }[]): str
 // ---- Per-member sub-session driver --------------------------------------
 
 interface RunMemberArgs {
-  session: { id: string; scratchpad?: string }
+  session: { id: string; scratchpad?: string; workingSet?: ChatSession["workingSet"] }
   sessionId: string
   team: Team
   character: Character
@@ -1152,7 +1154,7 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     memoryDeps: turnMemoryDeps,
     memoryUserMessage: turnMemoryDeps ? turnUserMessage : undefined,
     twinInjectSource: "team",
-    postCompaction: teamRecoveryPhase !== null ? { phaseNumber: teamRecoveryPhase } : undefined,
+    postCompaction: buildWorkingSetPostCompaction(teamRecoveryPhase, session.workingSet),
     routingSurface: "chat",
     routingContextHint: { promptText: turnUserMessage },
   })

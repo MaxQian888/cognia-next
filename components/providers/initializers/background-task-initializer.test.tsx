@@ -11,6 +11,7 @@ const redispatchBackgroundRun = jest.fn(async (): Promise<unknown> => ({
 const pruneBackgroundTaskRecords = jest.fn(async () => 0)
 const getSettings = jest.fn(async (): Promise<Record<string, unknown>> => ({}))
 const notify = jest.fn(async () => "n1")
+const recoverStaleDirectChatExecutionRuns = jest.fn(async () => 0)
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
@@ -39,6 +40,10 @@ jest.mock("@/lib/db/settings", () => ({
 }))
 jest.mock("@/lib/notifications/runtime", () => ({
   notify: (...args: unknown[]) => notify(...(args as [])),
+}))
+jest.mock("@/lib/execution/direct-chat-run", () => ({
+  recoverStaleDirectChatExecutionRuns: (...args: unknown[]) =>
+    recoverStaleDirectChatExecutionRuns(...(args as [])),
 }))
 
 import { BackgroundTaskInitializer } from "./background-task-initializer"
@@ -69,6 +74,7 @@ it("reconciles renderer background tasks and prunes history on client boot", asy
 
   expect(container).toBeEmptyDOMElement()
   await waitFor(() => expect(interruptRendererBackgroundTasksOnBoot).toHaveBeenCalledTimes(1))
+  expect(recoverStaleDirectChatExecutionRuns).toHaveBeenCalledTimes(1)
   await waitFor(() => expect(pruneBackgroundTaskRecords).toHaveBeenCalledTimes(1))
 })
 

@@ -7,6 +7,22 @@
     "option": "{minutes} min",
     "title": "Auto-lock"
   },
+  "contextInspector": {
+    "auditGap": "Governance history is incomplete because some projections failed.",
+    "conflicts": "Conflicts",
+    "decisionListLabel": "Recent governance decisions",
+    "description": "Inspect why an action was chosen, which evidence and policy supported it, and whether facts remain in conflict.",
+    "empty": "No governance decisions have been recorded on this device yet.",
+    "events": "Events",
+    "evidence": "Evidence",
+    "lineage": "Lineage",
+    "none": "None",
+    "open": "Open",
+    "outcome": "Outcome",
+    "provenance": "Provenance",
+    "title": "Decision context",
+    "whyTitle": "Why this action"
+  },
   "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
   "rows": {
     "deletePairing": {

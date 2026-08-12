@@ -15,11 +15,11 @@
  * each event independently. The bridge only intercepts text for outbound
  * routing.
  *
- * Cancellation: pass an `AbortSignal` to abort early. On abort, the
- * subscription is detached, an `interruptSession` IPC is fired (best
- * effort), and the promise rejects with `AbortError`. Mirrors the
- * `mode-switcher.tsx:invoke("claude_interrupt", ...)` semantics so a
- * mode switch mid-run cleans up properly.
+ * Cancellation: pass an `AbortSignal` to abort early. On abort, an
+ * `interruptSession` IPC is fired (best effort), the subscription briefly
+ * drains the interrupted turn's terminal usage event, then detaches and rejects
+ * with `AbortError`. Mirrors the `mode-switcher.tsx:invoke("claude_interrupt",
+ * ...)` semantics without discarding tokens already billed by completed steps.
  */
 
 import {
@@ -436,6 +436,7 @@ export interface RunAndCaptureOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
+const INTERRUPT_DRAIN_TIMEOUT_MS = 1_000
 
 /**
  * Drive a Claude turn and resolve with the assistant's captured text once
@@ -569,7 +570,10 @@ async function captureAssistantReplyCore(
     let preferEnvelopeEvents = false
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null
     let idleHandle: ReturnType<typeof setTimeout> | null = null
+    let interruptDrainHandle: ReturnType<typeof setTimeout> | null = null
     let settled = false
+    let promptSent = false
+    let abortRequested = false
 
     // Accumulated state — the latest assistant message wins. Most turns
     // emit a single `assistant` event with the full text. If the model
@@ -583,6 +587,10 @@ async function captureAssistantReplyCore(
     // Tracks text already surfaced via `cap.onEvent` text-delta events so we
     // emit only the newly-grown suffix.
     let streamedText = ""
+    // Stable SDK message id for the current delta/snapshot sequence. AI SDK
+    // rotates it after a tool boundary; resetting suffix state there prevents
+    // one assistant segment from being diffed against the previous segment.
+    let activeStreamMessageId = ""
     // Same suffix-diffing for `thinking` blocks surfaced as `thinking-delta`
     // events. Kept separate from `streamedText` and never added to
     // `assembledText`, so reasoning is observable live but never leaks into the
@@ -616,6 +624,19 @@ async function captureAssistantReplyCore(
         cap.onEvent(event)
       } catch {
         /* swallow — streaming events are best-effort */
+      }
+    }
+
+    const emitPartial = (text: string) => {
+      if (!cap?.onPartial || text === lastEmittedPartial) return
+      lastEmittedPartial = text
+      try {
+        const result = cap.onPartial(text)
+        if (result && typeof (result as Promise<void>).catch === "function") {
+          void (result as Promise<void>).catch(() => undefined)
+        }
+      } catch {
+        /* swallow — partial preview is best-effort */
       }
     }
 
@@ -711,6 +732,10 @@ async function captureAssistantReplyCore(
         clearTimeout(idleHandle)
         idleHandle = null
       }
+      if (interruptDrainHandle != null) {
+        clearTimeout(interruptDrainHandle)
+        interruptDrainHandle = null
+      }
       if (signal && abortHandler) {
         try {
           signal.removeEventListener("abort", abortHandler)
@@ -762,7 +787,27 @@ async function captureAssistantReplyCore(
     const abortHandler = () => {
       // Best-effort interrupt — the sidecar may already be done.
       void interruptSession(sessionId).catch(() => undefined)
-      finishErr(new RunAndCaptureError("aborted by signal", "aborted"))
+      // Before the prompt is sent there is no sidecar tail to drain. Once it is
+      // in flight, keep the event subscription alive until `session_ended` so
+      // the result usage emitted during interrupt is not lost. Bound the drain:
+      // a broken sidecar must never make cancellation hang indefinitely.
+      if (!promptSent) {
+        finishErr(new RunAndCaptureError("aborted by signal", "aborted"))
+        return
+      }
+      abortRequested = true
+      if (timeoutHandle != null) {
+        clearTimeout(timeoutHandle)
+        timeoutHandle = null
+      }
+      if (idleHandle != null) {
+        clearTimeout(idleHandle)
+        idleHandle = null
+      }
+      interruptDrainHandle = setTimeout(() => {
+        interruptDrainHandle = null
+        finishErr(new RunAndCaptureError("aborted by signal", "aborted"))
+      }, INTERRUPT_DRAIN_TIMEOUT_MS)
     }
 
     if (signal?.aborted) {
@@ -875,6 +920,15 @@ async function captureAssistantReplyCore(
       }
 
       if (evt.type === "session_ended") {
+        if (abortRequested) {
+          // Some transports attach usage only to the terminal envelope instead
+          // of streaming a preceding result event. Surface that final snapshot
+          // before reporting the neutral interruption to the caller.
+          const usage = evt.result ? (extractUsage(evt.result) ?? undefined) : undefined
+          if (usage) emitEvent({ type: "usage", usage })
+          finishErr(new RunAndCaptureError("aborted by signal", "aborted"))
+          return
+        }
         if (evt.error) {
           finishErr(new RunAndCaptureError(evt.error, "session_error"))
           return
@@ -926,7 +980,36 @@ async function captureAssistantReplyCore(
           if (cap?.onEvent) emitEvent(compactEvent)
           return
         }
-        if (inner.type === "assistant") {
+        if (inner.type === "stream_event") {
+          const stream = (inner as { event?: unknown }).event as
+            | {
+                type?: string
+                message?: { id?: string }
+                delta?: { type?: string; text?: string; thinking?: string }
+              }
+            | undefined
+          if (stream?.type === "message_start") {
+            const messageId = stream.message?.id
+            if (messageId && messageId !== activeStreamMessageId) {
+              activeStreamMessageId = messageId
+              streamedText = ""
+              streamedThinking = ""
+            }
+          } else if (stream?.type === "content_block_delta") {
+            if (stream.delta?.type === "text_delta" && stream.delta.text) {
+              const chunk = stream.delta.text
+              streamedText += chunk
+              assembledText = streamedText
+              emitEvent({ type: "text-delta", delta: chunk })
+              if (activeStreamMessageId) lastMessageId = activeStreamMessageId
+              emitPartial(streamedText)
+            } else if (stream.delta?.type === "thinking_delta" && stream.delta.thinking) {
+              const chunk = stream.delta.thinking
+              streamedThinking += chunk
+              emitEvent({ type: "thinking-delta", delta: chunk })
+            }
+          }
+        } else if (inner.type === "assistant") {
           // SDKAssistantMessage shape: message.content is BetaContentBlock[].
           // Extract every `text` block + every `tool_use` block —
           // text accumulates to the model's exact output; tool_use
@@ -935,6 +1018,7 @@ async function captureAssistantReplyCore(
           // surfaces alongside the text.
           const message = inner.message as
             | {
+                id?: string
                 content?: Array<{
                   type?: string
                   text?: string
@@ -945,7 +1029,32 @@ async function captureAssistantReplyCore(
               }
             | undefined
           if (Array.isArray(message?.content)) {
+            if (message.id && message.id !== activeStreamMessageId) {
+              activeStreamMessageId = message.id
+              streamedText = ""
+              streamedThinking = ""
+            }
             const parts: string[] = []
+            const flushTextSnapshot = () => {
+              const text = parts.join("")
+              if (text.length === 0) return
+
+              assembledText = text
+              // Emit before the following non-text block. Assistant snapshots
+              // preserve content order (`text`, then `tool_use`/`thinking`), so
+              // deferring this until after the whole block loop inverted the
+              // stream into tool → text and grouped multi-round tools above all
+              // of the model's transition prose in the TUI.
+              if (cap?.onEvent) {
+                const delta = text.startsWith(streamedText) ? text.slice(streamedText.length) : text
+                if (delta.length > 0) emitEvent({ type: "text-delta", delta })
+                streamedText = text
+              }
+              if (typeof inner.uuid === "string" && inner.uuid.length > 0) {
+                lastMessageId = inner.uuid
+              }
+              emitPartial(text)
+            }
             for (const block of message.content) {
               if (block?.type === "text" && typeof block.text === "string") {
                 parts.push(block.text)
@@ -955,6 +1064,7 @@ async function captureAssistantReplyCore(
                 block.input &&
                 typeof block.input === "object"
               ) {
+                flushTextSnapshot()
                 applyA2UIToolCall(surfaceAcc, block.name, block.input)
                 // Dedup by tool_use id. Assistant snapshots are emitted on EVERY
                 // streaming delta and each one repeats every completed tool_use
@@ -994,6 +1104,7 @@ async function captureAssistantReplyCore(
                 block?.type === "thinking" &&
                 typeof (block as { thinking?: unknown }).thinking === "string"
               ) {
+                flushTextSnapshot()
                 // Reasoning block — surface the newly-grown suffix as a
                 // `thinking-delta` so a consumer (the CLI TUI) can render the
                 // model's reasoning live. Deliberately NOT pushed into `parts`:
@@ -1008,34 +1119,8 @@ async function captureAssistantReplyCore(
                 }
               }
             }
-            const text = parts.join("")
-            if (text.length > 0) {
-              assembledText = text
-              // Emit the newly-grown suffix as a text-delta. Most turns send
-              // the full text each event, so diff against what we've streamed.
-              if (cap?.onEvent) {
-                const delta = text.startsWith(streamedText) ? text.slice(streamedText.length) : text
-                if (delta.length > 0) emitEvent({ type: "text-delta", delta })
-                streamedText = text
-              }
-              if (typeof inner.uuid === "string" && inner.uuid.length > 0) {
-                lastMessageId = inner.uuid
-              }
-              // Fire the incremental-output callback when the accumulated
-              // text actually grew. Best-effort: a throwing / rejecting
-              // callback must never break the capture loop.
-              if (cap?.onPartial && text !== lastEmittedPartial) {
-                lastEmittedPartial = text
-                try {
-                  const r = cap.onPartial(text)
-                  if (r && typeof (r as Promise<void>).catch === "function") {
-                    void (r as Promise<void>).catch(() => undefined)
-                  }
-                } catch {
-                  /* swallow — partial preview is best-effort */
-                }
-              }
-            } else if (typeof inner.uuid === "string" && inner.uuid.length > 0) {
+            flushTextSnapshot()
+            if (parts.length === 0 && typeof inner.uuid === "string" && inner.uuid.length > 0) {
               // tool-only assistant turn (no text) — still remember the
               // message id so session_ended can attribute correctly.
               lastMessageId = inner.uuid
@@ -1149,9 +1234,14 @@ async function captureAssistantReplyCore(
           envelopeUnlisten = null
           preferEnvelopeEvents = false
         }
+        // The signal may abort while the async envelope subscription above is
+        // resolving. Cleanup has already detached the raw listener in that case;
+        // never send a prompt after cancellation won that race.
+        if (settled) return
         // Now fire the actual send. If it throws synchronously the
         // catch below cleans up; if it rejects async we still clean up
         // via the same path.
+        promptSent = true
         sendPrompt(sessionId, prompt, { ...(options ?? {}), turnId }).catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err)
           finishErr(new RunAndCaptureError(`sendPrompt failed: ${message}`, "send_failed"))

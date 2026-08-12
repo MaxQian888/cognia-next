@@ -7,6 +7,9 @@ const prepareEnvironment = jest.fn(async () => {
 const updateAgentTeamRun = jest.fn<Promise<boolean>, [runId: string, patch: unknown]>(
   async () => true
 )
+const appendExecutionRunEvent = jest.fn<Promise<{ appended: boolean }>, [string, unknown]>(
+  async () => ({ appended: true })
+)
 
 jest.mock("./team/durable-runtime", () => ({
   getDurableTeamCoordinator: () => ({ prepareRun }),
@@ -29,6 +32,13 @@ jest.mock("./execution/local-tauri-environment", () => ({
 jest.mock("@/lib/db/agent-team-runtime", () => ({
   getAgentTeamRun: async () => ({ id: "run-durable" }),
   updateAgentTeamRun: (runId: string, patch: unknown) => updateAgentTeamRun(runId, patch),
+}))
+
+jest.mock("@/lib/db/execution-runs", () => ({
+  getExecutionRun: async () => ({ id: "run-durable", status: "queued" }),
+  runEventJournal: {
+    append: (runId: string, event: unknown) => appendExecutionRunEvent(runId, event),
+  },
 }))
 
 import { runTeamLifecycle } from "./agent-team-runtime"
@@ -88,6 +98,10 @@ describe("runTeamLifecycle durable preflight", () => {
         status: "failed",
         recoveryReason: "Execution environment cannot enforce: sandbox",
       })
+    )
+    expect(appendExecutionRunEvent).toHaveBeenCalledWith(
+      "run-durable",
+      expect.objectContaining({ type: "run.failed" })
     )
   })
 })

@@ -95,6 +95,22 @@ describe("createSession — without default preset", () => {
     expect(session.systemPrompt).toBeUndefined()
   })
 
+  it("rejects working-set writes that bypass the CAS mutation service", async () => {
+    await expect(
+      createSession({
+        title: "Unsafe",
+        workingSet: { contractVersion: 1, revision: 0, entries: [], updatedAt: 0 },
+      } as never)
+    ).rejects.toThrow("mutateSessionWorkingSet")
+
+    const session = await createSession({ title: "Safe" })
+    await expect(
+      updateSession(session.id, {
+        workingSet: { contractVersion: 1, revision: 0, entries: [], updatedAt: 0 },
+      } as never)
+    ).rejects.toThrow("mutateSessionWorkingSet")
+  })
+
   it("persists the recorder's controlled-trial skill alongside the session-disable list", async () => {
     // ADR-0106. `trialSkillId` is what makes the send path load a skill that is
     // still `disabled`; dropping it here would silently turn the trial back

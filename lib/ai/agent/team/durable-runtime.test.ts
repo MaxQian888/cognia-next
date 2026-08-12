@@ -93,6 +93,11 @@ describe("durable AgentTeam coordinator", () => {
         detail: "Do not break the public API",
       }),
     ])
+    expect(await getDb().executionRuns.get("run-constraints")).toMatchObject({
+      kind: "team",
+      sourceId: "team-1",
+      status: "running",
+    })
   })
 
   it("serializes writers while allowing read-only work to proceed", async () => {

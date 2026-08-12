@@ -15,6 +15,7 @@ import { useEffect, useRef } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import { getDb } from "@/lib/db/schema"
 import type { RunStatus, WorkflowRunRow } from "@/types/workflow/visual"
 import { decideRunToast } from "@/lib/workflow/runs/run-progress-toast"
@@ -26,6 +27,7 @@ const RECENT_LIMIT = 200
 
 export function WorkflowRunToaster() {
   const t = useTranslations("workflows.runs.runToast")
+  const router = useRouter()
   // runId → last observed status + its (loading) toast id.
   const seenRef = useRef<Map<string, { status: RunStatus; toastId: string | number }>>(new Map())
 
@@ -50,7 +52,7 @@ export function WorkflowRunToaster() {
       const kind = decideRunToast(prev?.status, run.status)
       if (kind === "start") {
         const toastId = toast.loading(t("started", { name: run.title ?? run.workflowId }), {
-          action: actionFor(run, t),
+          action: actionFor(run, t, router.push),
         })
         seen.set(run.id, { status: run.status, toastId })
         continue
@@ -58,32 +60,35 @@ export function WorkflowRunToaster() {
       if (kind === "success") {
         toast.success(t("succeeded", { name: run.title ?? run.workflowId }), {
           id: prev?.toastId,
-          action: actionFor(run, t),
+          action: actionFor(run, t, router.push),
         })
       } else if (kind === "error") {
         toast.error(t("failed", { name: run.title ?? run.workflowId }), {
           id: prev?.toastId,
-          action: actionFor(run, t),
+          action: actionFor(run, t, router.push),
         })
       }
       // Always record the latest status so transitions are computed from it.
       seen.set(run.id, { status: run.status, toastId: prev?.toastId ?? run.id })
     }
-  }, [runs, t])
+  }, [router, runs, t])
 
   return null
 }
 
 function actionFor(
   run: WorkflowRunRow,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  navigate: (href: string) => void
 ): { label: string; onClick: () => void } {
   return {
     label: t("view"),
     onClick: () => {
-      window.location.href = `/workflows/run?id=${encodeURIComponent(
-        run.workflowId
-      )}&runId=${encodeURIComponent(run.id)}`
+      navigate(
+        `/workflows/run?id=${encodeURIComponent(
+          run.workflowId
+        )}&runId=${encodeURIComponent(run.id)}`
+      )
     },
   }
 }

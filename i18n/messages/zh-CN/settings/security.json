@@ -7,6 +7,22 @@
     "option": "{minutes} 分钟",
     "title": "自动锁定"
   },
+  "contextInspector": {
+    "auditGap": "部分治理投影失败，治理历史记录不完整。",
+    "conflicts": "冲突",
+    "decisionListLabel": "最近的治理决策",
+    "description": "查看某次行动为何被选中、有哪些证据和策略支持，以及是否仍有事实冲突待处理。",
+    "empty": "此设备尚未记录治理决策。",
+    "events": "事件",
+    "evidence": "证据",
+    "lineage": "血缘",
+    "none": "无",
+    "open": "待处理",
+    "outcome": "结果",
+    "provenance": "来源链",
+    "title": "决策上下文",
+    "whyTitle": "为何执行此行动"
+  },
   "description": "在执行敏感操作前要求生物识别校验。未录入生物识别的设备在导出时会放行（避免你被锁在自己的数据之外），在揭示密钥时会阻止。",
   "rows": {
     "deletePairing": {

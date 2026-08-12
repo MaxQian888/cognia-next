@@ -6430,6 +6430,96 @@
       "title": "切换面板"
     },
     "resourceChat": "AI 会话",
+    "runContext": {
+      "review": {
+        "approve": "批准并应用",
+        "description": "从终态运行中生成并审批受限的学习建议。",
+        "dismiss": "忽略",
+        "emptyDescription": "仅在你对终态运行手动发起时生成复盘。",
+        "emptyTitle": "暂无运行复盘",
+        "generate": "生成复盘",
+        "proposalStatus": {
+          "applied": "已应用",
+          "apply_failed": "应用失败",
+          "approved_pending_apply": "应用中",
+          "pending": "待处理",
+          "rejected": "已拒绝"
+        },
+        "reject": "拒绝",
+        "retry": "重试应用",
+        "status": {
+          "pending_review": "等待复核",
+          "resolved": "已处理"
+        },
+        "target": {
+          "memory-candidate": "记忆候选",
+          "observation": "观察记录",
+          "project-environment": "项目环境",
+          "skill-draft": "禁用的 Skill 草稿",
+          "team-config": "团队配置"
+        },
+        "title": "运行复盘"
+      },
+      "tabs": {
+        "review": "复盘",
+        "workingSet": "工作集"
+      },
+      "title": "运行上下文",
+      "workingSet": {
+        "active": "进行中",
+        "add": "添加",
+        "backgroundTaskStatuses": {
+          "done": "已完成",
+          "error": "错误",
+          "interrupted": "已中断",
+          "running": "运行中"
+        },
+        "description": "你与 Agent 共享的受限事实和句柄。",
+        "emptyDescription": "添加事实、决策、问题、资源或子任务句柄。",
+        "emptyTitle": "工作集为空",
+        "kindLabel": "条目类型",
+        "kinds": {
+          "decision": "决策",
+          "fact": "事实",
+          "open-question": "待确认问题",
+          "resource": "资源",
+          "subtask": "子任务"
+        },
+        "projection": {
+          "artifact": "产物：{title}",
+          "backgroundTask": "子任务 {id}：{status}",
+          "run": "{kind}：{status}",
+          "taskWorkspace": "任务：{id}"
+        },
+        "projectionDescription": "实时运行与任务句柄仅合并展示，不会复制写入工作集。",
+        "projectionTitle": "实时投影",
+        "remove": "移除",
+        "resolve": "解决",
+        "resolved": "已解决",
+        "revisionConflict": "工作集已发生变化，请查看最新版本后重试。",
+        "runKinds": {
+          "agent-turn": "Agent 轮次",
+          "goal": "目标",
+          "plan": "计划",
+          "scheduled": "定时运行",
+          "team": "Agent 团队",
+          "workflow": "工作流"
+        },
+        "runStatuses": {
+          "cancelled": "已取消",
+          "completed": "已完成",
+          "failed": "失败",
+          "paused": "已暂停",
+          "queued": "排队中",
+          "recovery_required": "需要恢复",
+          "running": "运行中",
+          "waiting": "等待中"
+        },
+        "summaryLabel": "工作集摘要",
+        "summaryPlaceholder": "添加一条简洁、可持久化的内容",
+        "title": "工作集"
+      }
+    },
     "sessionSidechat": "侧聊",
     "sessionSources": {
       "description": "集中查看本会话使用的文件、网页、检索上下文和工具。",
@@ -28019,6 +28109,21 @@
         "off": "从不",
         "option": "{minutes} 分钟",
         "title": "自动锁定"
+      },
+      "contextInspector": {
+        "conflicts": "冲突",
+        "decisionListLabel": "最近的治理决策",
+        "description": "查看某次行动为何被选中、有哪些证据和策略支持，以及是否仍有事实冲突待处理。",
+        "empty": "此设备尚未记录治理决策。",
+        "events": "事件",
+        "evidence": "证据",
+        "lineage": "血缘",
+        "none": "无",
+        "open": "待处理",
+        "outcome": "结果",
+        "provenance": "来源链",
+        "title": "决策上下文",
+        "whyTitle": "为何执行此行动"
       },
       "description": "在执行敏感操作前要求生物识别校验。未录入生物识别的设备在导出时会放行（避免你被锁在自己的数据之外），在揭示密钥时会阻止。",
       "rows": {

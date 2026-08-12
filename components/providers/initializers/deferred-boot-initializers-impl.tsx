@@ -6,6 +6,7 @@ import { ProviderCoreRuntimeInitializer } from "./provider-core-runtime-initiali
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { markBootCapabilityReady } from "@/lib/boot/capabilities"
+import { recoverStaleDirectChatExecutionRuns } from "@/lib/execution/direct-chat-run"
 
 /**
  * The core-chat capability chunk (ADR-0068 C3). Its initializers mount in
@@ -20,7 +21,10 @@ import { markBootCapabilityReady } from "@/lib/boot/capabilities"
  * Mount order preserves `app/layout.tsx`'s previous document order.
  */
 export function DeferredBootInitializersImpl() {
-  useEffect(() => markBootCapabilityReady("core-chat"), [])
+  useEffect(() => {
+    markBootCapabilityReady("core-chat")
+    void recoverStaleDirectChatExecutionRuns()
+  }, [])
 
   return (
     <>

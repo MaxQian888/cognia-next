@@ -11,6 +11,10 @@ jest.mock("./routing-runtime-initializer", () => ({
 jest.mock("@/components/providers/gateway-provider", () => ({
   GatewayProvider: () => <span data-boot="gateway" />,
 }))
+const recoverDirectRuns = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/execution/direct-chat-run", () => ({
+  recoverStaleDirectChatExecutionRuns: () => recoverDirectRuns(),
+}))
 const mockMarkReady = jest.fn()
 jest.mock("@/lib/boot/capabilities", () => ({
   markBootCapabilityReady: (...args: unknown[]) => mockMarkReady(...args),
@@ -32,5 +36,6 @@ describe("DeferredBootInitializersImpl", () => {
     // child is caught here.
     expect(order).toEqual(["provider-core", "routing", "gateway"])
     expect(mockMarkReady).toHaveBeenCalledWith("core-chat")
+    expect(recoverDirectRuns).toHaveBeenCalledTimes(1)
   })
 })

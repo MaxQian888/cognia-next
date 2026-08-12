@@ -40,7 +40,7 @@ export interface DataTableCatalogEntry {
   queryBudget: { hotReadMaxMs: number; pageSize: number }
 }
 
-/** Static Dexie stores declared by CogniaDB v150. Kept explicit so review and
+/** Static Dexie stores declared by CogniaDB v157. Kept explicit so review and
  * CI can detect both an ungoverned new table and a stale catalog entry. */
 export const CORE_TABLE_NAMES = [
   "a2uiApps",
@@ -94,6 +94,8 @@ export const CORE_TABLE_NAMES = [
   "chatInputHistory",
   "chatSearchState",
   "chatSearchText",
+  "chatTranscriptIndexState",
+  "chatTurnSummaries",
   "codeAdoptionTurns",
   "connectorAttachments",
   "connectorAudit",
@@ -132,6 +134,12 @@ export const CORE_TABLE_NAMES = [
   "feishuTenants",
   "fleetSessions",
   "gatewayRequestLog",
+  "governanceConflicts",
+  "governanceDecisionEvents",
+  "governanceDecisions",
+  "governanceEvidence",
+  "governanceLineage",
+  "governanceProvenance",
   "goalTemplates",
   "hostSyncCursors",
   "inboundDrafts",
@@ -155,12 +163,16 @@ export const CORE_TABLE_NAMES = [
   "loopEvents",
   "loops",
   "mcpAuditLog",
+  "mcpCapabilityCache",
   "mcpServers",
+  "mcpServerSummaries",
+  "mcpSyncJobs",
   "memories",
   "memoryAuditEvents",
   "memoryEvidence",
   "memoryJobs",
   "messageMedia",
+  "messageMediaRefs",
   "messages",
   "mobileOutboundQueue",
   "modelsDevCatalog",
@@ -215,6 +227,7 @@ export const CORE_TABLE_NAMES = [
   "runRecords",
   "sandboxConnections",
   "sessionFolders",
+  "sessionPeerMessages",
   "sessionState",
   "sessionUsage",
   "sessions",
@@ -276,6 +289,8 @@ export const CORE_TABLE_NAMES = [
   "workflowTriggers",
   "workflowVersions",
   "workflowViewportBookmarks",
+  "workflowWaitEvents",
+  "workflowWaitpoints",
   "workflows",
 ] as const
 
@@ -473,13 +488,18 @@ const AUTHORITATIVE_ROLE_OVERRIDES = new Set<CoreTableName>([
   "terminalHistory",
 ])
 
-const AUDIT_TABLES = new Set<CoreTableName>(
-  CORE_TABLE_NAMES.filter((name) =>
+const AUDIT_TABLES = new Set<CoreTableName>([
+  ...CORE_TABLE_NAMES.filter((name) =>
     /Audit|Events$|History$|Receipts$|Traces$|Trajectory$|Observations$|Recordings$|Usage$/.test(
       name
     )
-  )
-)
+  ),
+  "governanceConflicts",
+  "governanceDecisions",
+  "governanceEvidence",
+  "governanceLineage",
+  "governanceProvenance",
+])
 
 const QUEUE_TABLES = new Set<CoreTableName>(
   CORE_TABLE_NAMES.filter((name) =>

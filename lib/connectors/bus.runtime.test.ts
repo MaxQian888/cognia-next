@@ -16,6 +16,7 @@ import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-i
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
 import { getByPlatformUser } from "@/lib/db/platform-identities"
 import { listRecent } from "@/lib/db/connector-audit"
+import { listRecentGovernanceAuditGaps } from "@/lib/db/governance-ledger"
 import { getBus, __resetBusForTesting } from "./bus"
 import { LarkFollowUpControlDispatchError } from "./follow-up-control"
 import { __resetPruneCounterForTesting } from "./dedup"
@@ -23,6 +24,12 @@ import type { NormalizedInboundEvent, PlatformAdapter } from "@/types/connectors
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
 import type { TriggerPolicy } from "@/types/connectors/policy"
+
+const mockRecordConnectorRouteGovernance = jest.fn().mockResolvedValue("connector-decision")
+jest.mock("@/lib/governance/producers/connector", () => ({
+  recordConnectorRouteGovernance: (...args: unknown[]) =>
+    mockRecordConnectorRouteGovernance(...args),
+}))
 
 // Plugin connector hook + PII gate are mocked so the bus inbound block/transform
 // path can be driven deterministically (the PII heuristics are tested in their
@@ -146,6 +153,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     mockMaybeHandleLarkFollowUpControl.mockReset()
     mockMaybeHandleLarkFollowUpControl.mockResolvedValue(false)
     mockRunInboundOcr.mockClear()
+    mockRecordConnectorRouteGovernance.mockReset().mockResolvedValue("connector-decision")
 
     // Seed adapter instances
     const autoRow = await createAdapterInstance({
@@ -292,9 +300,38 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
       ResolvedBinding,
     ]
     expect(decision).toBe("ai-run")
+    expect(mockRecordConnectorRouteGovernance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapterId: autoAdapterId,
+        messageId: "msg_priv_1",
+        mode: "auto",
+        evaluation: expect.objectContaining({ matched: true, blocked: false }),
+        route: "ai-run",
+      })
+    )
 
     const auditRows = await listRecent(autoAdapterId)
     expect(auditRows.some((r) => r.kind === "inbound.received")).toBe(true)
+  })
+
+  it("keeps inbound routing available when governance projection fails", async () => {
+    mockRecordConnectorRouteGovernance.mockRejectedValueOnce(new Error("ledger unavailable"))
+
+    await getBus().dispatchInboundFull(privateEvent(autoAdapterId, "msg_governance_failed"))
+    await getBus().flushInboundTurns()
+
+    expect(routeHandler).toHaveBeenCalledTimes(1)
+    await expect(listRecentGovernanceAuditGaps()).resolves.toEqual([
+      expect.objectContaining({
+        eventType: "governance.projection.failed",
+        subjectKey: `cognia:connector-route:${autoAdapterId}:msg_governance_failed`,
+        data: {
+          producer: "connector-route",
+          operation: "record",
+          errorType: "Error",
+        },
+      }),
+    ])
   })
 
   it("binds the durable inbound job to the execution run before handler side effects", async () => {

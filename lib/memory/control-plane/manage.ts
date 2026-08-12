@@ -18,6 +18,8 @@ import { noteMemoryVectorFailure } from "@/lib/memory/lifecycle/enqueue-reconcil
 import { tryBuildMemoryVectorSink } from "@/lib/memory/runtime/build-deps"
 import { storeMemoryCore } from "@/lib/memory/api/store-memory"
 import { resolveMemoryConfig, type MemoryScope, type MemoryType } from "@/types/memory/memory"
+import { recordMemoryConflictGovernance } from "@/lib/governance/producers/memory"
+import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
 
 export type ManageMemoryCommand =
   | {
@@ -58,6 +60,10 @@ export type ManageMemoryCommand =
       dropId: string
       mode: "keep" | "keep-both" | "merge"
       mergedText?: string
+      /** Stable producer identity for replay-safe governance projection. */
+      commandId?: string
+      actorId?: string
+      rationale?: string
     }
   /**
    * Hard-delete every memory matching `query` (each row still goes through the
@@ -106,6 +112,8 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
     const config = resolveMemoryConfig(settings?.memory)
 
     let piiRedacted = false
+    let resolutionEvidence: { id: string; sourceId: string; createdAt: number } | undefined
+    let result = keep
     if (command.mode === "merge") {
       const raw = command.mergedText?.trim()
       if (!raw) throw new Error("resolve-conflict merge requires non-empty mergedText")
@@ -127,7 +135,7 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
         // Canonical update remains BM25-searchable.
         noteMemoryVectorFailure()
       }
-      await createMemoryEvidence({
+      resolutionEvidence = await createMemoryEvidence({
         memoryId: command.keepId,
         kind: "manual",
         sourceId: `conflict-merge:${command.keepId}:${command.dropId}`,
@@ -139,6 +147,9 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
         memoryId: command.keepId,
         reason: "conflict_merge",
       })
+      const updated = await getMemory(command.keepId)
+      if (!updated) throw new Error(`Resolved memory disappeared: ${command.keepId}`)
+      result = updated
     } else {
       await updateMemory(command.keepId, {
         reviewStatus: "verified",
@@ -177,6 +188,38 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
         memoryId: command.dropId,
         reason: "conflict_resolved",
       })
+    }
+    const resolvedAt = Date.now()
+    const governanceInput = {
+      commandId:
+        command.commandId ??
+        `${command.keepId}:${command.dropId}:v${keep.version}:v${drop.version}:${command.mode}`,
+      keep,
+      drop,
+      result,
+      ...(resolutionEvidence ? { resolutionEvidence } : {}),
+      mode: command.mode,
+      actorId: command.actorId ?? "local-user",
+      rationale: command.rationale,
+      resolvedAt,
+    }
+    try {
+      await recordMemoryConflictGovernance(governanceInput)
+    } catch (error) {
+      await reportGovernanceProjectionFailure(
+        {
+          producer: "memory-conflict",
+          operation: "resolve",
+          subjectRef: {
+            namespace: "cognia",
+            type: "memory-conflict",
+            id: [command.keepId, command.dropId].sort().join(":"),
+          },
+          occurredAt: resolvedAt,
+          correlation: { requestId: governanceInput.commandId },
+        },
+        error
+      )
     }
     return { ok: true, memoryId: command.keepId, ...(piiRedacted ? { piiRedacted } : {}) }
   }

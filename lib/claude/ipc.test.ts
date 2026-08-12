@@ -1,6 +1,17 @@
 /** @jest-environment jsdom */
 import { transport } from "@/lib/tauri"
 
+const mockRecordToolAuthorizationGovernance = jest.fn().mockResolvedValue("decision-1")
+const mockReportGovernanceProjectionFailure = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/governance/producers/tool-authorization", () => ({
+  recordToolAuthorizationGovernance: (...args: unknown[]) =>
+    mockRecordToolAuthorizationGovernance(...args),
+}))
+jest.mock("@/lib/db/governance-ledger", () => ({
+  reportGovernanceProjectionFailure: (...args: unknown[]) =>
+    mockReportGovernanceProjectionFailure(...args),
+}))
+
 const mockHasNoLeakingPiiDeep = jest.fn((..._args: unknown[]) => true)
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (...args: unknown[]) => mockHasNoLeakingPiiDeep(...args),
@@ -76,6 +87,8 @@ beforeEach(() => {
   mockHasNoLeakingPiiDeep.mockReturnValue(true)
   setTauri(true)
   callSpy = jest.spyOn(transport, "call")
+  mockRecordToolAuthorizationGovernance.mockReset().mockResolvedValue("decision-1")
+  mockReportGovernanceProjectionFailure.mockReset().mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -372,6 +385,46 @@ describe("Claude session commands", () => {
       message: "no thanks",
       updatedInput: { foo: 1 },
     })
+    expect(mockRecordToolAuthorizationGovernance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess-3",
+        requestId: "req-1",
+        outcome: "deny",
+        dispatched: true,
+        hasUpdatedInput: true,
+      })
+    )
+  })
+
+  it("approveTool records dispatch failures and preserves the transport error", async () => {
+    const failure = new Error("sidecar unavailable")
+    callSpy.mockRejectedValueOnce(failure)
+
+    await expect(approveTool("sess-3", "req-failed", "allow")).rejects.toBe(failure)
+    expect(mockRecordToolAuthorizationGovernance).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-failed", dispatched: false })
+    )
+  })
+
+  it("approveTool does not fail a successful dispatch when governance projection fails", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    const projectionError = new Error("ledger unavailable for alice@example.com")
+    mockRecordToolAuthorizationGovernance.mockRejectedValueOnce(projectionError)
+
+    await expect(approveTool("sess-3", "req-ledger", "allow")).resolves.toBeUndefined()
+    expect(mockReportGovernanceProjectionFailure).toHaveBeenCalledWith(
+      {
+        producer: "tool-authorization",
+        operation: "record-dispatched",
+        subjectRef: {
+          namespace: "cognia",
+          type: "tool-authorization",
+          id: "sess-3:req-ledger",
+        },
+        occurredAt: expect.any(Number),
+      },
+      projectionError
+    )
   })
 
   it("approveTool tolerates omitted message / updatedInput", async () => {

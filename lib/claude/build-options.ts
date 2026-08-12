@@ -2635,6 +2635,25 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // Bounded session working state is a core chat capability, not a third-party
+  // plugin. Surface it for every persisted session through the existing
+  // plugin-tool relay even when optional plugin tools are disabled.
+  if (session?.id) {
+    try {
+      const { buildWorkingSetManifestEntries, WORKING_SET_TOOL_NAME } =
+        await import("@/lib/claude/working-set-tool")
+      if (!(opts.pluginTools ?? []).some((entry) => entry.name === WORKING_SET_TOOL_NAME)) {
+        opts.pluginTools = [...(opts.pluginTools ?? []), ...buildWorkingSetManifestEntries()]
+      }
+      const guidance =
+        "Use working_set to keep bounded facts, decisions, open questions, resource references, and subtask handles durable and user-visible; never store reasoning or secrets."
+      const existing = opts.appendSystemPrompt?.trim() ?? ""
+      opts.appendSystemPrompt = existing ? `${existing}\n\n${guidance}` : guidance
+    } catch (err) {
+      loggers.app.warn("failed to append working_set core tool", { error: String(err) })
+    }
+  }
+
   // --- Anthropic native tools (Computer Use) -------------------------------
   // When the character has `enableComputerUse === true`, attach every
   // registered native Anthropic tool (computer / bash / text_editor) plus

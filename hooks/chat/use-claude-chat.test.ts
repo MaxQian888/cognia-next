@@ -465,6 +465,15 @@ jest.mock("@/lib/execution/chat-lease", () => ({
   acquireChatLease: (...args: unknown[]) => acquireChatLeaseMock(...args),
 }))
 
+// Direct-chat journal persistence is covered by lib/execution/direct-chat-run.test.ts.
+// Keep this hook suite focused on routing and UI state without requiring IndexedDB.
+jest.mock("@/lib/execution/direct-chat-run", () => ({
+  finishDirectChatExecutionRun: jest.fn().mockResolvedValue(undefined),
+  projectDirectChatCaptureEvent: jest.fn().mockResolvedValue(undefined),
+  projectDirectChatSdkMessage: jest.fn().mockResolvedValue(undefined),
+  startDirectChatExecutionRun: jest.fn().mockResolvedValue(undefined),
+}))
+
 const settingsState = {
   settings: {
     alwaysAllowTools: [] as string[],

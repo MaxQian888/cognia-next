@@ -166,6 +166,96 @@
     "sortLabel": "Sort memories",
     "title": "Memory"
   },
+  "runContext": {
+    "title": "Run Context",
+    "tabs": {
+      "workingSet": "Working Set",
+      "review": "Review"
+    },
+    "workingSet": {
+      "title": "Working Set",
+      "description": "Bounded facts and handles shared by you and the agent.",
+      "emptyTitle": "Working set is empty",
+      "emptyDescription": "Add a fact, decision, question, resource, or subtask handle.",
+      "summaryLabel": "Working set summary",
+      "summaryPlaceholder": "Add a concise, durable item",
+      "kindLabel": "Entry kind",
+      "add": "Add",
+      "resolve": "Resolve",
+      "remove": "Remove",
+      "active": "Active",
+      "resolved": "Resolved",
+      "revisionConflict": "The working set changed. Review the latest revision and try again.",
+      "kinds": {
+        "fact": "Fact",
+        "decision": "Decision",
+        "open-question": "Open question",
+        "resource": "Resource",
+        "subtask": "Subtask"
+      },
+      "projectionTitle": "Live projections",
+      "projectionDescription": "Live runs and task handles are shown without copying them into the working set.",
+      "projection": {
+        "artifact": "Artifact: {title}",
+        "backgroundTask": "Subtask {id}: {status}",
+        "run": "{kind}: {status}",
+        "taskWorkspace": "Task: {id}"
+      },
+      "runKinds": {
+        "agent-turn": "Agent turn",
+        "goal": "Goal",
+        "plan": "Plan",
+        "scheduled": "Scheduled run",
+        "team": "Agent Team",
+        "workflow": "Workflow"
+      },
+      "runStatuses": {
+        "cancelled": "Cancelled",
+        "completed": "Completed",
+        "failed": "Failed",
+        "paused": "Paused",
+        "queued": "Queued",
+        "recovery_required": "Recovery required",
+        "running": "Running",
+        "waiting": "Waiting"
+      },
+      "backgroundTaskStatuses": {
+        "done": "Done",
+        "error": "Error",
+        "interrupted": "Interrupted",
+        "running": "Running"
+      }
+    },
+    "review": {
+      "title": "Run Review",
+      "description": "Generate and approve bounded learning from terminal runs.",
+      "emptyTitle": "No run review yet",
+      "emptyDescription": "Reviews are generated only when you request one for a terminal run.",
+      "generate": "Generate review",
+      "approve": "Approve and apply",
+      "reject": "Reject",
+      "dismiss": "Dismiss",
+      "retry": "Retry apply",
+      "status": {
+        "pending_review": "Pending review",
+        "resolved": "Resolved"
+      },
+      "proposalStatus": {
+        "pending": "Pending",
+        "approved_pending_apply": "Applying",
+        "applied": "Applied",
+        "rejected": "Rejected",
+        "apply_failed": "Apply failed"
+      },
+      "target": {
+        "team-config": "Team configuration",
+        "project-environment": "Project environment",
+        "memory-candidate": "Memory candidate",
+        "skill-draft": "Disabled skill draft",
+        "observation": "Observation"
+      }
+    }
+  },
   "mobileDescription": "AI, comments, inspection, review, and preview tools for the current resource.",
   "mobileTitle": "Context Workbench",
   "panelError": "Panel unavailable",

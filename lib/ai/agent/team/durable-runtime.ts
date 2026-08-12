@@ -28,6 +28,7 @@ import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { createFairTeamScheduler } from "./fair-scheduler"
 import { createDecisionLedger } from "./decision-ledger"
 import { createEvidenceBundle } from "./evidence-bundle"
+import { createExecutionRun, getExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
 
 export interface DurableChildControl {
   /** Must route through the runtime's PII-gated steering adapter. */
@@ -204,6 +205,35 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       }
     } else if (existing.teamId !== team.id) {
       throw new Error(`Durable run ${runId} belongs to another team`)
+    }
+    const executionRun = await getExecutionRun(runId)
+    if (!executionRun) {
+      await createExecutionRun({
+        id: runId,
+        kind: "team",
+        sourceId: team.id,
+        ...(team.projectId ? { projectId: team.projectId } : {}),
+        title: "Agent team run",
+        status: "queued",
+        currentRevision: 0,
+        startedAt: at,
+        updatedAt: at,
+      })
+      await runEventJournal.append(runId, {
+        id: `execution-event:${runId}:started`,
+        ts: at,
+        type: "run.started",
+        visibility: "summary",
+        payload: { summary: "Agent team run started" },
+      })
+    } else if (["waiting", "paused", "recovery_required"].includes(executionRun.status)) {
+      await runEventJournal.append(runId, {
+        id: `execution-event:${runId}:resumed:${at}`,
+        ts: at,
+        type: "run.resumed",
+        visibility: "summary",
+        payload: { summary: "Agent team run resumed" },
+      })
     }
     policies.set(runId, {
       teamId: team.id,

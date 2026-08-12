@@ -19,7 +19,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(234)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(249)
     db.close()
   })
 
@@ -114,5 +114,24 @@ describe("DataTableCatalog", () => {
       accountScope: "runtime-target",
       deleteCascade: { account: true, runtimeTarget: true },
     })
+  })
+
+  it("keeps the governance ledger device-local, protected, and out of companion sync", () => {
+    for (const name of [
+      "governanceConflicts",
+      "governanceDecisionEvents",
+      "governanceDecisions",
+      "governanceEvidence",
+      "governanceLineage",
+      "governanceProvenance",
+    ] as const) {
+      expect(policyForTable(name)).toMatchObject({
+        role: "audit",
+        backupPolicy: { mode: "device-local" },
+        syncPolicy: { mode: "none" },
+        cleanupPolicy: "protected",
+      })
+      expect(COMPANION_SYNC_TABLES.has(name)).toBe(false)
+    }
   })
 })

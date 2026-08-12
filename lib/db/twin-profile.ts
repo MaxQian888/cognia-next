@@ -16,6 +16,7 @@ import type {
   TwinProfile,
 } from "@/types/twin"
 import { getDb } from "./schema"
+import { recordTwinDecisionsGovernance } from "@/lib/governance/producers/twin"
 
 function emptyProfile(twinId: string): TwinProfile {
   return {
@@ -257,12 +258,18 @@ export async function appendDecisions(
   decisions: DecisionRecord[]
 ): Promise<TwinProfile> {
   const profile = await ensureTwinProfile(twinId)
+  const updatedAt = Date.now()
   const merged: TwinProfile = {
     ...profile,
     decisions: [...profile.decisions, ...decisions],
-    updatedAt: Date.now(),
+    updatedAt,
   }
   await getDb().twinProfile.put(merged)
+  await recordTwinDecisionsGovernance({
+    twinId,
+    decisions: merged.decisions,
+    recordedAt: updatedAt,
+  }).catch(() => undefined)
   return merged
 }
 
@@ -280,15 +287,31 @@ export async function upsertDecisions(
   const byKey = new Map(profile.decisions.map((decision) => [decisionKey(decision), decision]))
   for (const decision of decisions) {
     const key = decisionKey(decision)
-    if (byKey.get(key)?.pinned) continue
-    byKey.set(key, decision)
+    const existing = byKey.get(key)
+    if (existing?.pinned) continue
+    byKey.set(
+      key,
+      existing
+        ? {
+            ...decision,
+            id: existing.id,
+            sourceChunkIds: [...new Set([...existing.sourceChunkIds, ...decision.sourceChunkIds])],
+          }
+        : decision
+    )
   }
+  const updatedAt = Date.now()
   const merged: TwinProfile = {
     ...profile,
     decisions: Array.from(byKey.values()),
-    updatedAt: Date.now(),
+    updatedAt,
   }
   await getDb().twinProfile.put(merged)
+  await recordTwinDecisionsGovernance({
+    twinId,
+    decisions: merged.decisions,
+    recordedAt: updatedAt,
+  }).catch(() => undefined)
   return merged
 }
 

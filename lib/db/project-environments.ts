@@ -73,18 +73,26 @@ export async function updateProjectEnvironmentInitialization(
 export async function createProjectEnvironmentVersion(
   environment: ProjectEnvironment,
   policy: ProjectEnvironmentPolicy,
-  createdAt = Date.now()
+  createdAt = Date.now(),
+  idempotencyKey?: string
 ): Promise<ProjectEnvironmentVersion> {
   assertEnvironmentBoundary(environment)
   const db = getDb()
   return db.transaction("rw", db.projectEnvironmentVersions, async () => {
+    const materializedId = idempotencyKey
+      ? `${environment.id}:materialized:${idempotencyKey}`
+      : undefined
+    if (materializedId) {
+      const existing = await db.projectEnvironmentVersions.get(materializedId)
+      if (existing) return existing
+    }
     const last = await db.projectEnvironmentVersions
       .where("[environmentId+version]")
       .between([environment.id, -Infinity], [environment.id, Infinity])
       .last()
     const version = (last?.version ?? 0) + 1
     const row: ProjectEnvironmentVersion = {
-      id: `${environment.id}:v${version}`,
+      id: materializedId ?? `${environment.id}:v${version}`,
       environmentId: environment.id,
       projectId: environment.projectId,
       version,

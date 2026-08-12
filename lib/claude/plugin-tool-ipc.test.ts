@@ -65,6 +65,11 @@ const mockExecuteRunWorkflowTyped = jest.fn()
 jest.mock("@/lib/workflow/publish/run-workflow-typed-tool", () => ({
   executeRunWorkflowTyped: (args: Record<string, unknown>) => mockExecuteRunWorkflowTyped(args),
 }))
+const mockRunWorkingSetTool = jest.fn()
+jest.mock("./working-set-tool", () => ({
+  isWorkingSetTool: (name: string) => name === "working_set",
+  runWorkingSetTool: (...args: unknown[]) => mockRunWorkingSetTool(...args),
+}))
 
 import { webSearch, webFetch, buildFetchExtractor } from "@/lib/web/web-tools-core"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
@@ -149,6 +154,18 @@ describe("handlePluginToolExec", () => {
     expect(response).toMatchObject({ result: { ok: true, taskSessionId: "task-1" } })
     expect(dispatch).toHaveBeenCalledWith("parent-1", expect.objectContaining({ mode: "aside" }))
     expect(execute).not.toHaveBeenCalled()
+  })
+
+  it("routes working_set through the Host tool with the calling session", async () => {
+    mockRunWorkingSetTool.mockResolvedValueOnce({ revision: 2, entries: [] })
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "working_set", sessionId: "session-working", args: { action: "get" } })
+    )
+    expect(mockRunWorkingSetTool).toHaveBeenCalledWith(
+      { action: "get" },
+      { sessionId: "session-working" }
+    )
+    expect(response.result).toEqual({ revision: 2, entries: [] })
   })
 
   it("routes session messaging before the plugin registry with the calling session identity", async () => {

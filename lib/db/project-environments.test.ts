@@ -117,6 +117,24 @@ describe("project environments persistence", () => {
     expect((await getProjectEnvironmentVersion(first.id))?.setupScript.default).toBe("pnpm install")
   })
 
+  it("materializes a proposal idempotently without creating a second version", async () => {
+    const first = await createProjectEnvironmentVersion(
+      environment(),
+      { requiredRuntimeCapabilities: ["filesystem"] },
+      10,
+      "proposal-1"
+    )
+    const retry = await createProjectEnvironmentVersion(
+      environment({ setupScript: { default: "must not replace the first effect" } }),
+      { requiredRuntimeCapabilities: ["process"] },
+      20,
+      "proposal-1"
+    )
+
+    expect(retry).toEqual(first)
+    expect(await listProjectEnvironmentVersions("env-1")).toHaveLength(1)
+  })
+
   it("compares versions and rolls back by creating a new immutable version", async () => {
     const first = await createProjectEnvironmentVersion(
       environment(),

@@ -49,6 +49,12 @@ jest.mock("./workflow-completion-fanout", () => ({
   emitWorkflowCompletedFanout: (...args: unknown[]) => mockEmitCompletionFanout(...args),
 }))
 
+const mockRecordWorkflowBranchGovernance = jest.fn().mockResolvedValue("workflow-decision")
+jest.mock("@/lib/governance/producers/workflow", () => ({
+  recordWorkflowBranchGovernance: (...args: unknown[]) =>
+    mockRecordWorkflowBranchGovernance(...args),
+}))
+
 /** Flush the orchestrator's fire-and-forget fanout (dynamic import + then). */
 async function flushFanout(): Promise<void> {
   await new Promise((r) => setTimeout(r, 0))
@@ -57,6 +63,7 @@ async function flushFanout(): Promise<void> {
 
 import { runWorkflow } from "./orchestrator"
 import { getDb } from "@/lib/db/schema"
+import { listRecentGovernanceAuditGaps } from "@/lib/db/governance-ledger"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listRunEvents } from "./event-log"
 import type { TriggerEvent, VisualWorkflow } from "@/types/workflow/visual"
@@ -74,6 +81,7 @@ beforeEach(async () => {
   await getDb().workflowRuns.clear()
   await getDb().workflowRunEvents.clear()
   jest.clearAllMocks()
+  mockRecordWorkflowBranchGovernance.mockResolvedValue("workflow-decision")
 })
 afterAll(dbFixture.dispose)
 
@@ -376,6 +384,8 @@ describe("runWorkflow — branch decisions", () => {
       ]
     )
 
+    // A governance projection failure must not change routing semantics.
+    mockRecordWorkflowBranchGovernance.mockRejectedValueOnce(new Error("ledger unavailable"))
     // Truthy: take yes branch.
     const r1 = await runWorkflow({
       workflow: wf,
@@ -385,6 +395,33 @@ describe("runWorkflow — branch decisions", () => {
     const ev1 = await listRunEvents(r1.runId)
     expect(ev1.find((e) => e.type === "step_completed" && e.stepId === "n_yes")).toBeDefined()
     expect(ev1.find((e) => e.type === "step_skipped" && e.stepId === "n_no")).toBeDefined()
+    expect(mockRecordWorkflowBranchGovernance).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        workflowId: "wf_x",
+        stepId: "n_branch",
+        chosenRouteKeys: ["e2"],
+        availableRouteKeys: ["e2", "e3"],
+        policySnapshot: expect.objectContaining({
+          nodeType: "flow.branch",
+          nodeTypeVersion: 1,
+          params: expect.objectContaining({ condition: "{{ $trigger.payload.takeYes }}" }),
+        }),
+        evaluationSnapshot: expect.objectContaining({ decision: "yes" }),
+        reasonCode: "condition-evaluated",
+        rationale: "flow.branch@1 selected 1 of 2 routes after evaluating its frozen policy.",
+      })
+    )
+    await expect(listRecentGovernanceAuditGaps()).resolves.toEqual([
+      expect.objectContaining({
+        eventType: "governance.projection.failed",
+        data: {
+          producer: "workflow-branch",
+          operation: "record",
+          errorType: "Error",
+        },
+      }),
+    ])
 
     // Falsy: take no branch.
     const r2 = await runWorkflow({
@@ -395,6 +432,10 @@ describe("runWorkflow — branch decisions", () => {
     const ev2 = await listRunEvents(r2.runId)
     expect(ev2.find((e) => e.type === "step_completed" && e.stepId === "n_no")).toBeDefined()
     expect(ev2.find((e) => e.type === "step_skipped" && e.stepId === "n_yes")).toBeDefined()
+    expect(mockRecordWorkflowBranchGovernance).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ chosenRouteKeys: ["e3"], availableRouteKeys: ["e2", "e3"] })
+    )
   })
 
   it("routes a v2 branch by sourceHandle even when edges carry custom labels", async () => {

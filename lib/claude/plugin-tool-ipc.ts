@@ -50,6 +50,7 @@ import {
   type VectorToolRunDeps,
 } from "./vector-builtin-tools"
 import { getTeamDispatchContext } from "./agents/dispatch-context-registry"
+import { isWorkingSetTool, runWorkingSetTool } from "./working-set-tool"
 import {
   isSpawnTaskBuiltinTool,
   runSpawnTaskBuiltinTool,
@@ -508,6 +509,13 @@ export async function handlePluginToolExec(
         await resolveSessionPeerToolDeps(),
         { sessionId: request.sessionId }
       )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    // Session-owned RLM-style working state. The Host remains authoritative:
+    // the sidecar only receives a bounded manifest and every mutation reaches
+    // the shared Dexie CAS service through this existing tool round trip.
+    if (isWorkingSetTool(request.name)) {
+      const result = await runWorkingSetTool(request.args, { sessionId: request.sessionId })
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Promoted vector built-ins — project-scoped vector memory ───────────

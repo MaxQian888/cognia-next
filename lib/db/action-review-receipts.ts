@@ -31,6 +31,10 @@ import type {
 } from "@cognia/agent-config-types/action-review"
 
 import { getDb } from "./schema"
+import {
+  recordActionReviewEffectGovernance,
+  recordActionReviewGovernance,
+} from "@/lib/governance/producers/action-review"
 
 const MS_PER_DAY = 86_400_000
 
@@ -131,6 +135,10 @@ export async function recordActionReviewReceipt(
       }
     }
   })
+  await recordActionReviewGovernance(receipt).catch(() => undefined)
+  if (receipt.effect) {
+    await recordActionReviewEffectGovernance(receipt.id, receipt.effect).catch(() => undefined)
+  }
 }
 
 /**
@@ -147,7 +155,10 @@ export async function attachActionReviewEffect(
   effect: ActionReviewEffect
 ): Promise<void> {
   const db = getDb()
-  await db.actionReviewReceipts.update(requestId, { effect })
+  const updated = await db.actionReviewReceipts.update(requestId, { effect })
+  if (updated > 0) {
+    await recordActionReviewEffectGovernance(requestId, effect).catch(() => undefined)
+  }
 }
 
 export async function getActionReviewReceipt(

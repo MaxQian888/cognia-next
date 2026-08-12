@@ -20,6 +20,7 @@ import type {
 
 import * as ipc from "@/lib/claude/ipc"
 import { isCapabilityProtocolFailure } from "./capability-health"
+import type { AgentSessionControlPort } from "./agent-session-control-port"
 
 export class AgentCapabilityError extends Error {
   readonly capability: AgentCapabilityId
@@ -40,7 +41,7 @@ export class FrozenModelBindingError extends Error {
 
 let handleCounter = 0
 
-export interface AgentExecutionHandle {
+export interface AgentExecutionHandle extends AgentSessionControlPort {
   readonly sessionId: string
   readonly spec: ResolvedAgentExecutionSpec
   events(onEnvelope: (envelope: AgentEventEnvelope) => void): Promise<() => void>

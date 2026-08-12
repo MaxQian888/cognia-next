@@ -69,8 +69,11 @@ export async function getSession(id: string): Promise<ChatSession | undefined> {
  * stores at once with no UI surface to undo it.
  */
 export async function createSession(
-  partial?: Partial<Omit<ChatSession, "id" | "createdAt" | "updatedAt">>
+  partial?: Partial<Omit<ChatSession, "id" | "createdAt" | "updatedAt" | "workingSet">>
 ): Promise<ChatSession> {
+  if (partial && Object.prototype.hasOwnProperty.call(partial, "workingSet")) {
+    throw new Error("Working set changes must use mutateSessionWorkingSet")
+  }
   const now = Date.now()
 
   let autoApplied: {
@@ -146,8 +149,11 @@ export async function createSession(
 
 export async function updateSession(
   id: string,
-  patch: Partial<Omit<ChatSession, "id" | "createdAt">>
+  patch: Partial<Omit<ChatSession, "id" | "createdAt" | "workingSet">>
 ): Promise<void> {
+  if (Object.prototype.hasOwnProperty.call(patch, "workingSet")) {
+    throw new Error("Working set changes must use mutateSessionWorkingSet")
+  }
   await withDbReopenRetry(() =>
     getDb()
       .sessions.update(id, { ...patch, updatedAt: Date.now() })

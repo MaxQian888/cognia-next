@@ -5,6 +5,8 @@
  */
 
 import { findCapturedByFingerprint, saveCapturedItem } from "@/lib/db/captured-items"
+import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
+import { recordCaptureGovernance } from "@/lib/governance/producers/capture"
 import { enrichCandidate, buildEnrichDeps, type EnrichDeps } from "./enrich"
 import type { CaptureCandidate, CapturedItem, CaptureKind } from "@/types/capture"
 
@@ -69,6 +71,19 @@ export async function persistCapture(
     fingerprint: candidate.fingerprint,
   }
   await saveCapturedItem(item)
+  try {
+    await recordCaptureGovernance(item)
+  } catch (error) {
+    await reportGovernanceProjectionFailure(
+      {
+        producer: "capture",
+        operation: "persist",
+        subjectRef: { namespace: "cognia", type: "capture", id: item.id },
+        occurredAt: item.capturedAt,
+      },
+      error
+    )
+  }
   emitCapturePersisted({ captureId: item.id, kind: item.kind, capturedAt: item.capturedAt })
   return item
 }

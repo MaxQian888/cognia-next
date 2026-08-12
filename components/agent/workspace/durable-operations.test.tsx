@@ -82,7 +82,7 @@ describe("DurableOperations", () => {
       evidence: [],
       graph: undefined,
       deliveryNodes: [],
-      retrospective: undefined,
+      retrospectives: [],
       environment: undefined,
     }
     render(

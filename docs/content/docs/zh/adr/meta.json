@@ -109,6 +109,7 @@
     "0108-codex-inspired-desktop-workflows",
     "0109-plugin-interface-catalog-governance",
     "0110-mcp-control-plane-governance",
-    "0111-managed-workspace-registry-and-bundle"
+    "0111-managed-workspace-registry-and-bundle",
+    "0112-unified-decision-provenance-conflict-ledger"
   ]
 }

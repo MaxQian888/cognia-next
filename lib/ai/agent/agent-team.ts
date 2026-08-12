@@ -200,14 +200,9 @@ async function runManaged(
       useAgentTeamStore.getState().setTeamStatus(id, "paused")
     }
   }
-  if (
-    team?.config.runtimeVersion === "durable-v2" &&
-    result.runId &&
-    team.config.retrospectivePolicy?.enabled !== false
-  ) {
-    const { generateConfiguredRetrospective } = await import("./team/retrospective")
-    await generateConfiguredRetrospective(result.runId).catch(() => undefined)
-  }
+  // Retrospectives are intentionally user-triggered. The generic Run Review
+  // surface reads this terminal ExecutionRun and never writes the legacy
+  // AgentTeam retrospective table automatically.
   // Emit a scheduler event so event-triggered tasks / forward chains can
   // react to a team finishing. Lazy import + best-effort.
   void emitTeamCompletedSchedulerEvent(id, result.status)

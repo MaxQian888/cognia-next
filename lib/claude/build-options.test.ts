@@ -342,6 +342,23 @@ describe("resolveSendOptions — editor workspace tool", () => {
   })
 })
 
+describe("resolveSendOptions — session working set", () => {
+  it("surfaces the core tool and concise guidance for persisted sessions", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ disablePluginTools: true }),
+      session: makeSession({ id: "working-session" }),
+    })
+
+    expect(toolNames(opts)).toContain("working_set")
+    expect(opts.appendSystemPrompt).toContain("Use working_set")
+  })
+
+  it("does not surface session state for a transient call without a session", async () => {
+    const opts = await resolveSendOptions({ character: makeChar() })
+    expect(toolNames(opts)).not.toContain("working_set")
+  })
+})
+
 describe("resolveSendOptions — Cognia Support safety", () => {
   it("replaces normal Agent overlays with read-only docs and redacted diagnostics context", async () => {
     const opts = await resolveSendOptions({
@@ -3334,7 +3351,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       .map((t) => t.name)
       .filter(notWeb)
       .sort()
-    expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor"])
+    expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor", "working_set"])
   })
 
   it("filters computer-use plugin tools when character.enableComputerUse !== true", async () => {
@@ -3343,7 +3360,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       character: makeChar({ enableComputerUse: false }),
     })
     const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
-    expect(names).toEqual(["github_pr"])
+    expect(names).toEqual(["github_pr", "working_set"])
     expect(names).not.toContain("computer_use")
   })
 
@@ -3353,7 +3370,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       character: makeChar(),
     })
     const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
-    expect(names).toEqual(["github_pr"])
+    expect(names).toEqual(["github_pr", "working_set"])
   })
 
   const browserTool = {
@@ -3398,7 +3415,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       character: makeChar({ enableComputerUse: true }),
     })
     const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
-    expect(names).toEqual(["github_pr"])
+    expect(names).toEqual(["github_pr", "working_set"])
   })
 
   it("IM-session opt-in (allowComputerUse=true) restores computer-use plugin tools", async () => {
@@ -3417,7 +3434,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       .map((t) => t.name)
       .filter(notWeb)
       .sort()
-    expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor"])
+    expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor", "working_set"])
   })
 
   it("withholds scheduler agent tools from IM sessions by default", async () => {
@@ -3457,7 +3474,11 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     })
     // web_search / web_fetch are first-class built-ins (ungated by the plugin
     // toggle); every other plugin tool is gone.
-    expect((opts.pluginTools ?? []).map((t) => t.name)).toEqual(["web_search", "web_fetch"])
+    expect((opts.pluginTools ?? []).map((t) => t.name)).toEqual([
+      "web_search",
+      "web_fetch",
+      "working_set",
+    ])
   })
 
   it("appends the first-class web tools by default (web capability on)", async () => {

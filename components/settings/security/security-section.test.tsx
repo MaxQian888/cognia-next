@@ -21,6 +21,9 @@ const guardMock = jest.fn()
 jest.mock("@/hooks/use-biometric-guard", () => ({
   useBiometricGuard: () => guardMock,
 }))
+jest.mock("@/components/governance/context-inspector", () => ({
+  ContextInspector: () => <div data-testid="context-inspector" />,
+}))
 
 import { SecuritySection } from "./security-section"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
@@ -39,6 +42,7 @@ describe("SecuritySection", () => {
     expect(screen.getByTestId("biometric-reveal-secrets")).toBeInTheDocument()
     expect(screen.getByTestId("biometric-sign-out")).toBeInTheDocument()
     expect(screen.getAllByRole("switch")).toHaveLength(4)
+    expect(screen.getByTestId("context-inspector")).toBeInTheDocument()
   })
 
   it("reflects the persisted policy in switch state", () => {

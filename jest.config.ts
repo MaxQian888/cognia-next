@@ -381,6 +381,9 @@ const globalConfig: Config = {
     "components/**/*.{js,jsx,ts,tsx}",
     "hooks/**/*.{js,jsx,ts,tsx}",
     "lib/**/*.{js,jsx,ts,tsx}",
+    // Public compile-time contract only; its co-located test verifies assignability,
+    // but V8 cannot attribute runtime coverage to an interface-only module.
+    "!lib/ai/agent/execution/agent-session-control-port.ts",
     // First-party Work Mode is a browser-bundled plugin and follows the same
     // co-located ≥90% coverage contract as host modules.
     "plugins/cognia-work-mode/src/**/*.{ts,tsx}",

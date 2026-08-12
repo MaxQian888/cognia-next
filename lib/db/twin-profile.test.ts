@@ -35,6 +35,7 @@ import {
   upsertStyleSamples,
 } from "./twin-profile"
 import type { DecisionRecord, Playbook, ProfileEntity, StyleSample } from "@/types/twin"
+import { getDecisionContext } from "./governance-ledger"
 
 const TWIN_ID = "twin-test"
 
@@ -298,6 +299,28 @@ describe("DecisionRecord lifecycle", () => {
       makeDecision("d2", { context: "  choose   A queue ", choice: "kafka", rationale: "new" }),
     ])
     expect(profile.decisions).toEqual([expect.objectContaining({ id: "d1", pinned: true })])
+  })
+
+  it("unions source evidence instead of silently replacing an equivalent decision", async () => {
+    await upsertDecisions(TWIN_ID, [makeDecision("d1", { sourceChunkIds: ["chunk-1"] })])
+    const profile = await upsertDecisions(TWIN_ID, [
+      makeDecision("d2", { sourceChunkIds: ["chunk-2"], rationale: "New evidence" }),
+    ])
+
+    expect(profile.decisions).toEqual([
+      expect.objectContaining({ id: "d1", sourceChunkIds: ["chunk-1", "chunk-2"] }),
+    ])
+  })
+
+  it("projects contradictory choices as disputed observed decisions", async () => {
+    await upsertDecisions(TWIN_ID, [
+      makeDecision("d1", { choice: "Kafka", sourceChunkIds: ["chunk-1"] }),
+      makeDecision("d2", { choice: "NATS", sourceChunkIds: ["chunk-2"] }),
+    ])
+
+    const context = await getDecisionContext(`twin-observation:${TWIN_ID}:d1`)
+    expect(context?.decision.lifecycle.state).toBe("disputed")
+    expect(context?.conflicts).toEqual([expect.objectContaining({ status: "open" })])
   })
 
   it("supports add, edit, pin, and delete", async () => {

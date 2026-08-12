@@ -3709,6 +3709,117 @@ export class CogniaDB extends Dexie {
         "&id, key, correlationId, emittedAt, expiresAt, consumedByWaitpointId, [key+emittedAt]",
     })
 
+    // v157 — Cross-domain Decision / Evidence / Lineage governance ledger.
+    // Domain stores remain authoritative; these content-free rows provide the
+    // durable decision lifecycle and rebuildable why-chain projection shared
+    // by Workflow, authorization, Memory, Twin, Capture and Connectors.
+    this.version(157).stores({
+      governanceDecisions:
+        "&id, mode, kind, state, recordedAt, subjectKey, projectId, runId, sessionId, [kind+recordedAt], [runId+recordedAt]",
+      governanceDecisionEvents:
+        "&id, decisionId, &[decisionId+sequence], type, at, runId, [decisionId+at]",
+      governanceEvidence:
+        "&id, kind, sourceKey, observedAt, projectId, [kind+observedAt], [projectId+observedAt]",
+      governanceLineage:
+        "&id, fromKey, toKey, relation, recordedAt, *evidenceRefs, [fromKey+relation], [toKey+relation]",
+      governanceConflicts:
+        "&id, status, risk, subjectKey, predicateKey, createdAt, projectId, resolutionDecisionRef, [status+createdAt]",
+      governanceProvenance:
+        "&eventId, eventType, source, occurredAt, subjectKey, runId, projectId, *decisionRefs, *evidenceRefs, [eventType+occurredAt]",
+    })
+
+    // v158 — Run-scoped retrospectives and approval-gated learning proposals.
+    // The legacy AgentTeam table stays available for one read-only compatibility
+    // window; new generation writes only to these generic ExecutionRun tables.
+    this.version(158)
+      .stores({
+        runRetrospectives:
+          "&id, &runKey, runId, status, analysisVersion, createdAt, updatedAt, [runId+analysisVersion]",
+        runLearningProposals:
+          "&id, retrospectiveId, runId, status, targetKind, createdAt, updatedAt, [retrospectiveId+status], [runId+status]",
+      })
+      .upgrade(async (tx) => {
+        const legacyRows = (await tx.table("agentTeamRetrospectives").toArray()) as Array<{
+          id: string
+          runId: string
+          status: string
+          issueTimeline?: Array<{ at: number; summary: string; childRunId?: string }>
+          proposals?: Array<{
+            id: string
+            kind: string
+            title: string
+            before?: string
+            after: string
+            status: string
+            resolvedAt?: number
+          }>
+          contentHash?: string
+          createdAt: number
+          updatedAt: number
+        }>
+        if (legacyRows.length === 0) return
+        const teamRuns = (await tx.table("agentTeamRuns").toArray()) as Array<{
+          id: string
+          teamId?: string
+        }>
+        const teamIdByRun = new Map(teamRuns.map((run) => [run.id, run.teamId]))
+        const retrospectives = legacyRows.map((legacy) => ({
+          id: legacy.id,
+          runId: legacy.runId,
+          runKey: `legacy:${legacy.runId}:${legacy.id}`,
+          analysisVersion: 0,
+          status: legacy.proposals?.some((proposal) => proposal.status === "pending")
+            ? "pending_review"
+            : "resolved",
+          issueTimeline: (legacy.issueTimeline ?? []).map((item) => ({
+            at: item.at,
+            summary: item.summary,
+            ...(item.childRunId
+              ? {
+                  eventRef: {
+                    namespace: "cognia",
+                    type: "execution-run",
+                    id: item.childRunId,
+                  },
+                }
+              : {}),
+          })),
+          contentHash: legacy.contentHash ?? `legacy:${legacy.id}`,
+          createdAt: legacy.createdAt,
+          updatedAt: legacy.updatedAt,
+        }))
+        const targetKind = (kind: string) => {
+          if (kind === "prompt" || kind === "decomposition") return "team-config"
+          if (kind === "environment") return "project-environment"
+          if (kind === "memory_useful") return "memory-candidate"
+          return "observation"
+        }
+        const proposals = legacyRows.flatMap((legacy) =>
+          (legacy.proposals ?? []).map((proposal) => ({
+            id: proposal.id,
+            retrospectiveId: legacy.id,
+            runId: legacy.runId,
+            targetKind: targetKind(proposal.kind),
+            ...(teamIdByRun.get(legacy.runId) ? { targetId: teamIdByRun.get(legacy.runId) } : {}),
+            title: proposal.title,
+            ...(proposal.before !== undefined ? { before: proposal.before } : {}),
+            after: proposal.after,
+            status:
+              proposal.status === "approved"
+                ? "applied"
+                : proposal.status === "rejected"
+                  ? "rejected"
+                  : "pending",
+            evidenceRefs: [{ namespace: "cognia", type: "execution-run", id: legacy.runId }],
+            createdAt: legacy.createdAt,
+            updatedAt: proposal.resolvedAt ?? legacy.updatedAt,
+            ...(proposal.resolvedAt !== undefined ? { resolvedAt: proposal.resolvedAt } : {}),
+          }))
+        )
+        await tx.table("runRetrospectives").bulkPut(retrospectives)
+        if (proposals.length > 0) await tx.table("runLearningProposals").bulkPut(proposals)
+      })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3781,6 +3892,21 @@ export class CogniaDB extends Dexie {
   // reviewed action across every decision point. See
   // `lib/db/action-review-receipts.ts`.
   actionReviewReceipts!: Table<import("./action-review-receipts").ActionReviewReceiptRow, string>
+  // v157 — content-free cross-domain governance ledger. See
+  // `lib/db/governance-ledger.ts`.
+  governanceDecisions!: Table<import("./governance-ledger").GovernanceDecisionRow, string>
+  governanceDecisionEvents!: Table<import("./governance-ledger").GovernanceDecisionEventRow, string>
+  governanceEvidence!: Table<import("./governance-ledger").GovernanceEvidenceRow, string>
+  governanceLineage!: Table<import("./governance-ledger").GovernanceLineageRow, string>
+  governanceConflicts!: Table<import("./governance-ledger").GovernanceConflictRow, string>
+  governanceProvenance!: Table<import("./governance-ledger").GovernanceProvenanceRow, string>
+  // v158 — generic ExecutionRun retrospectives. AgentTeam legacy rows remain
+  // read-only during the compatibility window.
+  runRetrospectives!: Table<import("@/types/execution/retrospective").RunRetrospective, string>
+  runLearningProposals!: Table<
+    import("@/types/execution/retrospective").RunLearningProposal,
+    string
+  >
   // v140 — Provider diagnostics and balance history.
   providerDiagnosticJobs!: Table<ProviderDiagnosticJob, string>
   providerDiagnosticSamples!: Table<ProviderDiagnosticSample, string>
@@ -3903,6 +4029,14 @@ export type { TerminalHistoryRow } from "./terminal-history"
 export type { ProviderCostDailyRow } from "./provider-cost-daily"
 export type { UnattendedExecAuditRow } from "./terminal-audit"
 export type { ActionReviewReceiptRow } from "./action-review-receipts"
+export type {
+  GovernanceDecisionRow,
+  GovernanceDecisionEventRow,
+  GovernanceEvidenceRow,
+  GovernanceLineageRow,
+  GovernanceConflictRow,
+  GovernanceProvenanceRow,
+} from "./governance-ledger"
 export type { SkillRecordingRow, SkillRecordingStatus } from "./skill-recordings"
 export type {
   ConversationLabelRow,

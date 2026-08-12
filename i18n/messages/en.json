@@ -6430,6 +6430,96 @@
       "title": "Switch panel"
     },
     "resourceChat": "AI conversation",
+    "runContext": {
+      "review": {
+        "approve": "Approve and apply",
+        "description": "Generate and approve bounded learning from terminal runs.",
+        "dismiss": "Dismiss",
+        "emptyDescription": "Reviews are generated only when you request one for a terminal run.",
+        "emptyTitle": "No run review yet",
+        "generate": "Generate review",
+        "proposalStatus": {
+          "applied": "Applied",
+          "apply_failed": "Apply failed",
+          "approved_pending_apply": "Applying",
+          "pending": "Pending",
+          "rejected": "Rejected"
+        },
+        "reject": "Reject",
+        "retry": "Retry apply",
+        "status": {
+          "pending_review": "Pending review",
+          "resolved": "Resolved"
+        },
+        "target": {
+          "memory-candidate": "Memory candidate",
+          "observation": "Observation",
+          "project-environment": "Project environment",
+          "skill-draft": "Disabled skill draft",
+          "team-config": "Team configuration"
+        },
+        "title": "Run Review"
+      },
+      "tabs": {
+        "review": "Review",
+        "workingSet": "Working Set"
+      },
+      "title": "Run Context",
+      "workingSet": {
+        "active": "Active",
+        "add": "Add",
+        "backgroundTaskStatuses": {
+          "done": "Done",
+          "error": "Error",
+          "interrupted": "Interrupted",
+          "running": "Running"
+        },
+        "description": "Bounded facts and handles shared by you and the agent.",
+        "emptyDescription": "Add a fact, decision, question, resource, or subtask handle.",
+        "emptyTitle": "Working set is empty",
+        "kindLabel": "Entry kind",
+        "kinds": {
+          "decision": "Decision",
+          "fact": "Fact",
+          "open-question": "Open question",
+          "resource": "Resource",
+          "subtask": "Subtask"
+        },
+        "projection": {
+          "artifact": "Artifact: {title}",
+          "backgroundTask": "Subtask {id}: {status}",
+          "run": "{kind}: {status}",
+          "taskWorkspace": "Task: {id}"
+        },
+        "projectionDescription": "Live runs and task handles are shown without copying them into the working set.",
+        "projectionTitle": "Live projections",
+        "remove": "Remove",
+        "resolve": "Resolve",
+        "resolved": "Resolved",
+        "revisionConflict": "The working set changed. Review the latest revision and try again.",
+        "runKinds": {
+          "agent-turn": "Agent turn",
+          "goal": "Goal",
+          "plan": "Plan",
+          "scheduled": "Scheduled run",
+          "team": "Agent Team",
+          "workflow": "Workflow"
+        },
+        "runStatuses": {
+          "cancelled": "Cancelled",
+          "completed": "Completed",
+          "failed": "Failed",
+          "paused": "Paused",
+          "queued": "Queued",
+          "recovery_required": "Recovery required",
+          "running": "Running",
+          "waiting": "Waiting"
+        },
+        "summaryLabel": "Working set summary",
+        "summaryPlaceholder": "Add a concise, durable item",
+        "title": "Working Set"
+      }
+    },
     "sessionSidechat": "Side chat",
     "sessionSources": {
       "description": "Files, web pages, retrieved context, and tools used in this conversation.",
@@ -28019,6 +28109,21 @@
         "off": "Never",
         "option": "{minutes} min",
         "title": "Auto-lock"
+      },
+      "contextInspector": {
+        "conflicts": "Conflicts",
+        "decisionListLabel": "Recent governance decisions",
+        "description": "Inspect why an action was chosen, which evidence and policy supported it, and whether facts remain in conflict.",
+        "empty": "No governance decisions have been recorded on this device yet.",
+        "events": "Events",
+        "evidence": "Evidence",
+        "lineage": "Lineage",
+        "none": "None",
+        "open": "Open",
+        "outcome": "Outcome",
+        "provenance": "Provenance",
+        "title": "Decision context",
+        "whyTitle": "Why this action"
       },
       "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
       "rows": {

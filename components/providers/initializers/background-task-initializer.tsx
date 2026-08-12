@@ -45,6 +45,13 @@ export function BackgroundTaskInitializer() {
 
   useEffect(() => {
     void (async () => {
+      try {
+        const { recoverStaleDirectChatExecutionRuns } =
+          await import("@/lib/execution/direct-chat-run")
+        await recoverStaleDirectChatExecutionRuns()
+      } catch {
+        // Recovery projection is best-effort; boot must remain available.
+      }
       const interrupted = await interruptRendererBackgroundTasksOnBoot()
 
       try {

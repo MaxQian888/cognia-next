@@ -156,6 +156,30 @@ async function lockWorkflowDependencies(
   return { workflows, indexes: {} }
 }
 
+/** Resolve and freeze the complete production deployment graph for a caller-owned binding. */
+export async function createPublishedWorkflowDependencyBinding(
+  workflowId: string,
+  environment = "production"
+): Promise<WorkflowDependencyBinding> {
+  const resolved = await resolveWorkflowDeployment(workflowId, environment, {
+    entrypoint: "trigger",
+    caller: "binding-resolver",
+  })
+  if (!resolved) {
+    throw new WorkflowAdmissionError(
+      "deployment-not-found",
+      `No active ${environment} deployment for workflow ${workflowId}`
+    )
+  }
+  return {
+    workflowId,
+    versionId: resolved.version.id,
+    deploymentId: resolved.deployment.id,
+    deploymentRevision: resolved.deployment.revision,
+    dependencyLock: await lockWorkflowDependencies(resolved.version, environment),
+  }
+}
+
 /**
  * Canonical formal-execution ingress. Draft/editor calls deliberately continue
  * to call `runWorkflow` directly; every published surface resolves and pins an

@@ -111,6 +111,113 @@ describe("getDb", () => {
     30_000
   )
 
+  fullSchemaIt(
+    "v157 adds the cross-domain governance ledger tables and indexes",
+    async () => {
+      const name = `cognia-governance-v157-${Date.now()}`
+      const legacy = new Dexie(name)
+      legacy.version(156).stores({ sessions: "id, updatedAt" })
+      await legacy.open()
+      await legacy.table("sessions").put({ id: "session-1", updatedAt: 1 })
+      legacy.close()
+
+      const upgraded = new CogniaDB(name)
+      await upgraded.open()
+
+      expect(upgraded.verno).toBeGreaterThanOrEqual(157)
+      expect(upgraded.tables.map((table) => table.name)).toEqual(
+        expect.arrayContaining([
+          "governanceDecisions",
+          "governanceDecisionEvents",
+          "governanceEvidence",
+          "governanceLineage",
+          "governanceConflicts",
+          "governanceProvenance",
+        ])
+      )
+      expect(upgraded.governanceDecisionEvents.schema.indexes.map((index) => index.name)).toContain(
+        "[decisionId+sequence]"
+      )
+      expect(upgraded.governanceProvenance.schema.indexes.map((index) => index.name)).toEqual(
+        expect.arrayContaining(["decisionRefs", "evidenceRefs"])
+      )
+      expect(await upgraded.sessions.get("session-1")).toEqual({ id: "session-1", updatedAt: 1 })
+
+      upgraded.close()
+      await Dexie.delete(name)
+    },
+    30_000
+  )
+
+  fullSchemaIt(
+    "v158 adds generic run retrospectives and migrates legacy team learning",
+    async () => {
+      const name = `cognia-run-retrospective-v158-${Date.now()}`
+      const legacy = new Dexie(name)
+      legacy.version(157).stores({
+        agentTeamRuns: "&id, teamId",
+        agentTeamRetrospectives: "&id, runId, status, createdAt, updatedAt",
+      })
+      await legacy.open()
+      await legacy.table("agentTeamRuns").put({ id: "run-legacy", teamId: "team-1" })
+      await legacy.table("agentTeamRetrospectives").put({
+        id: "retro-legacy",
+        runId: "run-legacy",
+        status: "pending_approval",
+        issueTimeline: [{ at: 10, summary: "A child failed", childRunId: "child-1" }],
+        proposals: [
+          {
+            id: "proposal-useful",
+            kind: "memory_useful",
+            title: "Keep this",
+            after: "safe",
+            status: "approved",
+            resolvedAt: 20,
+          },
+          {
+            id: "proposal-misleading",
+            kind: "memory_misleading",
+            title: "Observe this",
+            after: "safe",
+            status: "pending",
+          },
+        ],
+        contentHash: "hash-1",
+        createdAt: 10,
+        updatedAt: 20,
+      })
+      legacy.close()
+
+      const upgraded = new CogniaDB(name)
+      await upgraded.open()
+
+      expect(upgraded.verno).toBeGreaterThanOrEqual(158)
+      expect(upgraded.tables.map((table) => table.name)).toEqual(
+        expect.arrayContaining(["runRetrospectives", "runLearningProposals"])
+      )
+      expect(await upgraded.runRetrospectives.get("retro-legacy")).toMatchObject({
+        id: "retro-legacy",
+        runId: "run-legacy",
+        analysisVersion: 0,
+        status: "pending_review",
+      })
+      expect(await upgraded.runLearningProposals.get("proposal-useful")).toMatchObject({
+        id: "proposal-useful",
+        targetKind: "memory-candidate",
+        targetId: "team-1",
+        status: "applied",
+      })
+      expect(await upgraded.runLearningProposals.get("proposal-misleading")).toMatchObject({
+        targetKind: "observation",
+        status: "pending",
+      })
+
+      upgraded.close()
+      await Dexie.delete(name)
+    },
+    30_000
+  )
+
   it("constructs an explicit database name for account-local databases", () => {
     const db = new CogniaDB("cognia-account-acct_one")
     expect(db.name).toBe("cognia-account-acct_one")

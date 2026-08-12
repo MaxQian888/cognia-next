@@ -71,6 +71,8 @@ import {
   stopLeaseHeartbeat,
 } from "./run-lease"
 import { type ConcurrencyController, createConcurrencyController } from "./concurrency-controller"
+import { recordWorkflowBranchGovernance } from "@/lib/governance/producers/workflow"
+import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
 
 /**
  * Release run-scoped resources, then drop the cancel-registry entry.
@@ -768,11 +770,61 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         if (result.decision !== undefined) {
           const decisions = Array.isArray(result.decision) ? result.decision : [result.decision]
           const chosen = new Set(decisions)
-          for (const edge of workflowGraph.outgoingEdgesByNode.get(stepId) ?? []) {
+          const outgoingEdges = workflowGraph.outgoingEdgesByNode.get(stepId) ?? []
+          for (const edge of outgoingEdges) {
             const routeKey = edge.sourceHandle ?? edge.label ?? "default"
             if (!chosen.has(routeKey) && chosen.size > 0) {
               propagateSkip(workflowGraph, edge.target, skipped, markSkipped)
             }
+          }
+          const chosenEdgeIds = outgoingEdges
+            .filter((edge) => chosen.has(edge.sourceHandle ?? edge.label ?? "default"))
+            .map((edge) => edge.id)
+          const reasonCode =
+            node.type === "flow.branch" || node.type === "flow.switch"
+              ? "condition-evaluated"
+              : "node-decision"
+          const governanceInput = {
+            workflowId: workflow.id,
+            workflowVersionId: runRow.versionId,
+            runId,
+            stepId,
+            traceId,
+            attempt: 1,
+            chosenRouteKeys: chosenEdgeIds,
+            availableRouteKeys: outgoingEdges.map((edge) => edge.id),
+            policySnapshot: {
+              nodeType: node.type,
+              nodeTypeVersion: node.typeVersion,
+              params: node.data.params,
+            },
+            evaluationSnapshot: {
+              decision: result.decision,
+              output: result.output,
+            },
+            reasonCode,
+            rationale: `${node.type}@${node.typeVersion} selected ${chosenEdgeIds.length} of ${outgoingEdges.length} routes after evaluating its frozen policy.`,
+            decidedAt: Date.now(),
+            projectId,
+          }
+          try {
+            await recordWorkflowBranchGovernance(governanceInput)
+          } catch (error) {
+            await reportGovernanceProjectionFailure(
+              {
+                producer: "workflow-branch",
+                operation: "record",
+                subjectRef: {
+                  namespace: "cognia",
+                  type: "workflow-step",
+                  id: `${runId}:${stepId}`,
+                  ...(projectId ? { scope: { projectId } } : {}),
+                },
+                occurredAt: governanceInput.decidedAt,
+                correlation: { runId, workflowId: workflow.id, stepId },
+              },
+              error
+            )
           }
         }
       } catch (err) {

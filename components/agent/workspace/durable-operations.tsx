@@ -9,17 +9,24 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { RunRetrospectiveView } from "@/components/context-workbench/run-retrospective-view"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { getDb } from "@/lib/db/schema"
 import { createDecisionLedger } from "@/lib/ai/agent/team/decision-ledger"
 import { getDurableTeamCoordinator } from "@/lib/ai/agent/team/durable-runtime"
 import { approveAndMergeGithubStack } from "@/lib/ai/agent/team/github-delivery-adapter"
-import { applyApprovedLearningProposal } from "@/lib/ai/agent/team/learning-application"
-import { createRetrospectiveService } from "@/lib/ai/agent/team/retrospective"
 import { createLocalTauriExecutionEnvironment } from "@/lib/ai/agent/execution/local-tauri-environment"
 import { getProjectEnvironmentVersion } from "@/lib/db/project-environments"
+import { getRunRetrospectiveBundle } from "@/lib/db/run-retrospectives"
+import { generateConfiguredRunRetrospective } from "@/lib/execution/run-retrospective"
+import {
+  approveRunLearningProposal,
+  rejectRunLearningProposal,
+  retryRunLearningProposal,
+} from "@/lib/execution/run-learning-materializer"
 import type { AgentTeam } from "@/types/agent/agent-team"
+import type { RunRetrospectiveBundle } from "@/types/execution/retrospective"
 
 export interface DurableOperationsProps {
   team: AgentTeam
@@ -41,6 +48,8 @@ export function DurableOperations({
   const [manualCommands, setManualCommands] = useState<Record<string, string>>({})
   const [manualDiffs, setManualDiffs] = useState<Record<string, string>>({})
   const [showMigration, setShowMigration] = useState(false)
+  const [generatingRetrospective, setGeneratingRetrospective] = useState(false)
+  const [busyProposalId, setBusyProposalId] = useState<string | null>(null)
   const selectedEnvironment = useLiveQuery(
     () =>
       team.config.environmentRef
@@ -60,12 +69,12 @@ export function DurableOperations({
         .sortBy("updatedAt")
       const run = runs[0]
       if (!run) return null
-      const [children, decisions, evidence, graph, retrospective] = await Promise.all([
+      const [children, decisions, evidence, graph, retrospectiveRows] = await Promise.all([
         db.agentTeamChildRuns.where("runId").equals(run.id).toArray(),
         db.agentTeamDecisions.where("runId").equals(run.id).toArray(),
         db.agentTeamEvidence.where("runId").equals(run.id).toArray(),
         db.agentTeamDeliveryGraphs.where("runId").equals(run.id).first(),
-        db.agentTeamRetrospectives.where("runId").equals(run.id).first(),
+        db.runRetrospectives.where("runId").equals(run.id).toArray(),
       ])
       const deliveryNodes = graph
         ? await db.agentTeamDeliveryNodes.where("graphId").equals(graph.id).sortBy("order")
@@ -73,6 +82,13 @@ export function DurableOperations({
       const environment = team.config.environmentRef
         ? await getProjectEnvironmentVersion(team.config.environmentRef.versionId)
         : undefined
+      const retrospectives = (
+        await Promise.all(
+          retrospectiveRows
+            .sort((a, b) => b.analysisVersion - a.analysisVersion)
+            .map((row) => getRunRetrospectiveBundle(row.id))
+        )
+      ).filter((bundle): bundle is RunRetrospectiveBundle => Boolean(bundle))
       return {
         run,
         children,
@@ -80,7 +96,7 @@ export function DurableOperations({
         evidence,
         graph,
         deliveryNodes,
-        retrospective,
+        retrospectives,
         environment,
       }
     },
@@ -94,6 +110,19 @@ export function DurableOperations({
       toast.success(success)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const proposalAction = async (proposalId: string, action: "approve" | "reject" | "retry") => {
+    setBusyProposalId(proposalId)
+    try {
+      if (action === "approve") await approveRunLearningProposal(proposalId)
+      else if (action === "retry") await retryRunLearningProposal(proposalId)
+      else await rejectRunLearningProposal(proposalId)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusyProposalId(null)
     }
   }
 
@@ -405,70 +434,47 @@ export function DurableOperations({
         )}
       </Card>
 
-      <Card className="space-y-3 p-4">
-        <h3 className="font-semibold">{t("retrospective.title")}</h3>
-        {!data.retrospective ? (
-          <p className="text-sm text-muted-foreground">{t("retrospective.empty")}</p>
-        ) : (
-          data.retrospective.proposals.map((proposal) => (
-            <div key={proposal.id} className="space-y-2 rounded-md border p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-medium">{proposal.title}</span>
-                <Badge variant="outline">{proposal.status}</Badge>
-              </div>
-              <pre className="whitespace-pre-wrap text-xs text-muted-foreground">
-                {proposal.after}
-              </pre>
-              {proposal.status === "pending" ? (
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      void invoke(
-                        () =>
-                          createRetrospectiveService({
-                            runModel: async () => {
-                              throw new Error("not used")
-                            },
-                          }).resolveProposal(
-                            data.retrospective!.id,
-                            proposal.id,
-                            "approved",
-                            (approved) => applyApprovedLearningProposal(team.id, approved)
-                          ),
-                        t("retrospective.approved")
-                      )
-                    }
-                  >
-                    {t("retrospective.approve")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      void invoke(
-                        () =>
-                          createRetrospectiveService({
-                            runModel: async () => {
-                              throw new Error("not used")
-                            },
-                          }).resolveProposal(
-                            data.retrospective!.id,
-                            proposal.id,
-                            "rejected",
-                            async () => undefined
-                          ),
-                        t("retrospective.rejected")
-                      )
-                    }
-                  >
-                    {t("retrospective.reject")}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          ))
-        )}
+      <Card className="overflow-hidden">
+        <RunRetrospectiveView
+          bundles={data.retrospectives}
+          canGenerate={
+            ["completed", "failed", "cancelled"].includes(data.run.status) &&
+            data.retrospectives.length === 0 &&
+            !generatingRetrospective
+          }
+          busyProposalId={busyProposalId}
+          onGenerate={() => {
+            setGeneratingRetrospective(true)
+            void generateConfiguredRunRetrospective(data.run.id, {
+              adapterContext: {
+                summary: `Agent Team ${team.id}`,
+                resourceRefs: [
+                  { namespace: "cognia", type: "agent-team", id: team.id },
+                  ...(team.config.environmentRef
+                    ? [
+                        {
+                          namespace: "cognia",
+                          type: "project-environment-version",
+                          id: team.config.environmentRef.versionId,
+                        },
+                      ]
+                    : []),
+                ],
+              },
+              defaultTargetIds: {
+                "team-config": team.id,
+                ...(team.config.environmentRef
+                  ? { "project-environment": team.config.environmentRef.versionId }
+                  : {}),
+              },
+            })
+              .catch((error) => toast.error(error instanceof Error ? error.message : String(error)))
+              .finally(() => setGeneratingRetrospective(false))
+          }}
+          onApprove={(id) => void proposalAction(id, "approve")}
+          onReject={(id) => void proposalAction(id, "reject")}
+          onRetry={(id) => void proposalAction(id, "retry")}
+        />
       </Card>
     </div>
   )

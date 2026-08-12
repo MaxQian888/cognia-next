@@ -14,7 +14,7 @@
  */
 
 import { useTranslations } from "next-intl"
-import { LockKeyholeIcon, ShieldCheckIcon } from "lucide-react"
+import { GitBranchIcon, LockKeyholeIcon, ShieldCheckIcon } from "lucide-react"
 import { motion } from "motion/react"
 
 import { Button } from "@/components/ui/button"
@@ -25,6 +25,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import type { BiometricGuardPolicy } from "@cognia/agent-config-types"
 import { STAGGER_CONTAINER, STAGGER_CHILD, useReducedMotionVariants } from "@/lib/ui/motion"
+import { ContextInspector } from "@/components/governance/context-inspector"
 
 const GUARD_ROWS: { key: keyof BiometricGuardPolicy; testid: string }[] = [
   { key: "deletePairing", testid: "biometric-delete-pairing" },
@@ -103,6 +104,14 @@ export function SecuritySection() {
         description={t("autoLock.description")}
       >
         <AutoLockControl />
+      </SettingsCard>
+
+      <SettingsCard
+        icon={<GitBranchIcon className="size-4" />}
+        title={t("contextInspector.title")}
+        description={t("contextInspector.description")}
+      >
+        <ContextInspector />
       </SettingsCard>
     </div>
   )

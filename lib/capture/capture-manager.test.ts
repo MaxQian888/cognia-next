@@ -3,6 +3,8 @@ import { findCapturedByFingerprint, saveCapturedItem } from "@/lib/db/captured-i
 import { isTauri } from "@/lib/native/utils"
 import { invoke } from "@tauri-apps/api/core"
 import type { CaptureCandidate } from "@/types/capture"
+import { recordCaptureGovernance } from "@/lib/governance/producers/capture"
+import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
 
 jest.mock("@/lib/db/captured-items", () => ({
   findCapturedByFingerprint: jest.fn(),
@@ -10,11 +12,17 @@ jest.mock("@/lib/db/captured-items", () => ({
 }))
 jest.mock("@/lib/native/utils", () => ({ isTauri: jest.fn(() => false) }))
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
+jest.mock("@/lib/governance/producers/capture", () => ({ recordCaptureGovernance: jest.fn() }))
+jest.mock("@/lib/db/governance-ledger", () => ({
+  reportGovernanceProjectionFailure: jest.fn(),
+}))
 
 const mockFind = findCapturedByFingerprint as jest.Mock
 const mockSave = saveCapturedItem as jest.Mock
 const mockIsTauri = isTauri as jest.Mock
 const mockInvoke = invoke as jest.Mock
+const mockRecordGovernance = jest.mocked(recordCaptureGovernance)
+const mockReportGovernanceFailure = jest.mocked(reportGovernanceProjectionFailure)
 
 const candidate: CaptureCandidate = {
   kind: "url",
@@ -27,6 +35,8 @@ const candidate: CaptureCandidate = {
 beforeEach(() => {
   jest.clearAllMocks()
   mockIsTauri.mockReturnValue(false)
+  mockRecordGovernance.mockResolvedValue("capture-evidence")
+  mockReportGovernanceFailure.mockResolvedValue(undefined)
 })
 
 describe("persistCapture", () => {
@@ -45,6 +55,7 @@ describe("persistCapture", () => {
     expect(item?.enrichment).toEqual({ markdown: "# Page", title: "Page", via: "url-reader" })
     expect(item?.capturedAt).toBe(5000)
     expect(mockSave).toHaveBeenCalledWith(item)
+    expect(mockRecordGovernance).toHaveBeenCalledWith(item)
   })
 
   it("publishes a metadata-only event after a new capture is persisted", async () => {
@@ -62,6 +73,29 @@ describe("persistCapture", () => {
     expect(JSON.stringify(listener.mock.calls)).not.toContain("https://x.test")
 
     unsubscribe()
+  })
+
+  it("records a content-free audit gap when governance projection fails", async () => {
+    mockFind.mockResolvedValue(undefined)
+    const projectionError = new Error("projection failed for alice@example.com")
+    mockRecordGovernance.mockRejectedValueOnce(projectionError)
+
+    const item = await persistCapture(candidate, { deps: {}, now: 5000 })
+
+    expect(item).toBeTruthy()
+    expect(mockReportGovernanceFailure).toHaveBeenCalledWith(
+      {
+        producer: "capture",
+        operation: "persist",
+        subjectRef: {
+          namespace: "cognia",
+          type: "capture",
+          id: item?.id,
+        },
+        occurredAt: 5000,
+      },
+      projectionError
+    )
   })
 
   it("uses default dependencies/time for a minimal non-enriched capture", async () => {

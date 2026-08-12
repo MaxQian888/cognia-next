@@ -2,7 +2,11 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getDb } from "@/lib/db/schema"
 import { createWorkflow, updateWorkflow } from "@/lib/db/workflows"
 import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
-import { executeDeployedWorkflow, retryWorkflowRun } from "./execution-authority"
+import {
+  createPublishedWorkflowDependencyBinding,
+  executeDeployedWorkflow,
+  retryWorkflowRun,
+} from "./execution-authority"
 
 const dbFixture = createDbTestFixture()
 
@@ -11,6 +15,21 @@ beforeEach(dbFixture.restore)
 afterAll(dbFixture.dispose)
 
 describe("ExecutionAuthority", () => {
+  it("freezes a published deployment and its dependency lock into a reusable binding", async () => {
+    const workflow = await createWorkflow({ name: "Verifier", nodes: [], edges: [] })
+    const published = await publishWorkflow(workflow.id, 10)
+    await expect(createPublishedWorkflowDependencyBinding(workflow.id)).resolves.toEqual({
+      workflowId: workflow.id,
+      versionId: published.versionId,
+      deploymentId: published.deploymentId,
+      deploymentRevision: 1,
+      dependencyLock: { workflows: {}, indexes: {} },
+    })
+    await expect(createPublishedWorkflowDependencyBinding("missing")).rejects.toMatchObject({
+      code: "deployment-not-found",
+    })
+  })
+
   it("runs the deployed version and stamps immutable provenance on the run", async () => {
     const workflow = await createWorkflow({ name: "Authority", nodes: [], edges: [] })
     const published = await publishWorkflow(workflow.id, 10)

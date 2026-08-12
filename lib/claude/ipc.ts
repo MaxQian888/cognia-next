@@ -5,6 +5,7 @@
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { UIMessage } from "@/types"
 import { transport } from "@/lib/tauri"
+import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
 import type {
   AgentId,
   ApprovalDecision,
@@ -655,8 +656,12 @@ export async function approveTool(
   updatedInput?: unknown,
   remoteExecutionContext?: RemoteExecutionContext
 ): Promise<void> {
+  const { recordToolAuthorizationGovernance } =
+    await import("@/lib/governance/producers/tool-authorization")
   const key = remoteApprovalKey(sessionId, requestId)
   const context = remoteExecutionContext ?? remoteApprovalContexts.get(key)
+  const decidedAt = Date.now()
+  const governanceOutcome = decision === "deny" ? "deny" : "allow"
   try {
     await transport.call("claude_approve", {
       sessionId,
@@ -666,6 +671,56 @@ export async function approveTool(
       updatedInput,
       ...(context ? { remoteExecutionContext: context } : {}),
     })
+    try {
+      await recordToolAuthorizationGovernance({
+        sessionId,
+        requestId,
+        outcome: governanceOutcome,
+        decidedAt,
+        dispatched: true,
+        hasUpdatedInput: updatedInput !== undefined,
+      })
+    } catch (error) {
+      await reportGovernanceProjectionFailure(
+        {
+          producer: "tool-authorization",
+          operation: "record-dispatched",
+          subjectRef: {
+            namespace: "cognia",
+            type: "tool-authorization",
+            id: `${sessionId}:${requestId}`,
+          },
+          occurredAt: decidedAt,
+        },
+        error
+      )
+    }
+  } catch (error) {
+    try {
+      await recordToolAuthorizationGovernance({
+        sessionId,
+        requestId,
+        outcome: governanceOutcome,
+        decidedAt,
+        dispatched: false,
+        hasUpdatedInput: updatedInput !== undefined,
+      })
+    } catch (projectionError) {
+      await reportGovernanceProjectionFailure(
+        {
+          producer: "tool-authorization",
+          operation: "record-failed-dispatch",
+          subjectRef: {
+            namespace: "cognia",
+            type: "tool-authorization",
+            id: `${sessionId}:${requestId}`,
+          },
+          occurredAt: decidedAt,
+        },
+        projectionError
+      )
+    }
+    throw error
   } finally {
     remoteApprovalContexts.delete(key)
   }

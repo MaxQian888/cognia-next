@@ -347,6 +347,18 @@ export async function runTeamLifecycle(
           completedAt: Date.now(),
           updatedAt: Date.now(),
         }).catch(() => false)
+        const { getExecutionRun, runEventJournal } = await import("@/lib/db/execution-runs")
+        if (await getExecutionRun(runId).catch(() => undefined)) {
+          await runEventJournal
+            .append(runId, {
+              id: `execution-event:${runId}:team-terminal:failed`,
+              ts: Date.now(),
+              type: "run.failed",
+              visibility: "summary",
+              payload: { summary: "Agent team run failed during durable admission" },
+            })
+            .catch(() => undefined)
+        }
         return { runId, status: "failed", reason }
       }
     }
@@ -1144,6 +1156,34 @@ export async function runTeamLifecycle(
             : {}),
           updatedAt: Date.now(),
         }).catch(() => false)
+        const { getExecutionRun, runEventJournal } = await import("@/lib/db/execution-runs")
+        const executionRun = await getExecutionRun(runId).catch(() => undefined)
+        if (executionRun && !["completed", "failed", "cancelled"].includes(executionRun.status)) {
+          const eventType =
+            durableStatus === "completed"
+              ? "run.completed"
+              : durableStatus === "failed"
+                ? "run.failed"
+                : durableStatus === "cancelled" || durableStatus === "terminated"
+                  ? "run.cancelled"
+                  : durableStatus === "paused"
+                    ? "run.paused"
+                    : "run.waiting"
+          await runEventJournal
+            .append(runId, {
+              id: `execution-event:${runId}:team-terminal:${durableStatus}`,
+              ts: Date.now(),
+              type: eventType,
+              visibility: "summary",
+              payload: {
+                summary:
+                  eventType === "run.waiting"
+                    ? "Agent team run requires input"
+                    : `Agent team run ${durableStatus}`,
+              },
+            })
+            .catch(() => undefined)
+        }
       }
       hooks.dispatchOnTeamComplete({
         teamId,
