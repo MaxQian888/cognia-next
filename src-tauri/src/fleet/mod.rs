@@ -248,7 +248,33 @@ impl FleetRuntime {
     }
 
     pub fn snapshot(&self) -> FleetSnapshot {
-        self.registry.lock().snapshot(now_ms())
+        self.snapshot_for_tenant("local_acct_a")
+    }
+
+    pub fn snapshot_for_tenant(&self, tenant_id: &str) -> FleetSnapshot {
+        let brain_tenant = crate::companion_api::ws_bridge::current_brain_account_id();
+        let projects_this_tenant = brain_tenant.as_deref() == Some(tenant_id)
+            || (brain_tenant.is_none() && tenant_id == "local_acct_a");
+        let mut snapshot = if projects_this_tenant {
+            self.registry.lock().snapshot(now_ms())
+        } else {
+            registry::FleetRegistry::new().snapshot(now_ms())
+        };
+        snapshot.hosts = crate::companion_api::ws_worker::fleet_hosts(tenant_id);
+        snapshot
+    }
+
+    pub fn project_managed_session(&self, input: registry::ManagedFleetSession) {
+        self.registry.lock().upsert_managed_session(input, now_ms());
+        self.emit_update();
+    }
+
+    pub fn remove_managed_session(&self, session_id: &str) -> bool {
+        let removed = self.registry.lock().remove_managed_session(session_id);
+        if removed {
+            self.emit_update();
+        }
+        removed
     }
 
     /// Terminal source for one session (focus-action lookup).
@@ -579,7 +605,7 @@ impl FleetRuntime {
         Ok(())
     }
 
-    fn emit_update(&self) {
+    pub(crate) fn emit_update(&self) {
         let snapshot = self.snapshot();
         if let Some(app) = self.app_handle.read().as_ref() {
             let _ = app.emit(UPDATE_EVENT, &snapshot);
@@ -746,6 +772,21 @@ pub async fn fleet_monitor_status(
 #[tauri::command]
 pub async fn fleet_get_snapshot() -> Result<FleetSnapshot, String> {
     Ok(runtime().snapshot())
+}
+
+/// Brain-side disposable projection of a durable AgentTeam child. The child
+/// row and ExecutionRun journal remain authoritative.
+#[tauri::command]
+pub async fn fleet_project_managed_session(
+    input: registry::ManagedFleetSession,
+) -> Result<(), String> {
+    runtime().project_managed_session(input);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn fleet_remove_managed_session(session_id: String) -> Result<bool, String> {
+    Ok(runtime().remove_managed_session(&session_id))
 }
 
 /// Island → queue a prompt for an OpenCode session (the plugin executes it via

@@ -12,16 +12,12 @@
 // On success the target host is pinned into the child policy so the resolver
 // freezes `hostRef` — side-effectful work never migrates silently.
 //
-// INTENTIONALLY DORMANT until remote-host teammate dispatch lands (ADR-0082
-// R4 is blocked on device-JWT scoping): the gate is the contract every future
-// cross-host dispatcher must call BEFORE dispatch; pinned by
-// cross-host-preflight.test.ts.
+// AgentTeam remote dispatch calls this gate after claiming the child lease and
+// before session/create. Device identity and authorization are established by
+// the Companion worker front door; only stable refs reach this boundary.
 
 import type { AgentCapabilityId } from "@cognia/agent-config-types/agent-execution"
-import {
-  validateHandoffEnvelope,
-  type HandoffEnvelope,
-} from "@cognia/agent-config-types/handoff-envelope"
+import { validateHandoffEnvelope, type HandoffEnvelope } from "@cognia/agent/handoff-envelope"
 
 export class CrossHostPreflightError extends Error {
   readonly code:

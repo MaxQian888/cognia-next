@@ -2,6 +2,7 @@
 import {
   AGENT_EXECUTION_FLAGS,
   getAgentExecutionFlags,
+  isAgentTeamRemoteDispatchEnabled,
   isAgentExecutionFlagEnabled,
   setAgentExecutionFlag,
   subscribeToAgentExecutionFlags,
@@ -12,6 +13,7 @@ const STORAGE_KEY = "cognia-agent-execution-flags-v1"
 describe("agent execution feature flags", () => {
   const envKeys = [
     "NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2",
+    "NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH",
     "NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS",
     "NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS",
     "NEXT_PUBLIC_HEADLESS_LLM_GATEWAY",
@@ -49,12 +51,14 @@ describe("agent execution feature flags", () => {
 
   it("env vars override defaults ('1'/'true' on, '0'/'false' off, junk ignored)", () => {
     process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
+    process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
     process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS = "true"
     process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1 = "true"
     process.env.NEXT_PUBLIC_HEADLESS_LLM_GATEWAY = "banana"
 
     const flags = getAgentExecutionFlags()
     expect(flags.agentExecutionResolverV2).toBe(true)
+    expect(flags.agentTeamRemoteDispatch).toBe(true)
     expect(flags.gatewayAgentRouteTickets).toBe(true)
     expect(flags.claudeSdkParityV1).toBe(true)
     expect(flags.headlessLlmGateway).toBe(false)
@@ -73,6 +77,14 @@ describe("agent execution feature flags", () => {
 
     expect(isAgentExecutionFlagEnabled("agentExecutionResolverV2")).toBe(true)
     expect(isAgentExecutionFlagEnabled("experimentalAnthropicDeploymentAgentSdk")).toBe(true)
+  })
+
+  it("requires resolver v2 and Task Workspace before remote team dispatch activates", () => {
+    setAgentExecutionFlag("agentTeamRemoteDispatch", true)
+    expect(isAgentTeamRemoteDispatchEnabled(true)).toBe(false)
+    setAgentExecutionFlag("agentExecutionResolverV2", true)
+    expect(isAgentTeamRemoteDispatchEnabled(false)).toBe(false)
+    expect(isAgentTeamRemoteDispatchEnabled(true)).toBe(true)
   })
 
   it("ignores malformed localStorage payloads and non-boolean values", () => {

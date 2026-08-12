@@ -660,6 +660,24 @@
     "fleet_get_snapshot": {
       "$ref": "#/$defs/LegacyList"
     },
+    "fleet_worker_enrollment_create": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "fleet_worker_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "fleet_worker_set": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "fleet_project_managed_session": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "fleet_project_worker_load": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "fleet_remove_managed_session": {
+      "$ref": "#/$defs/BooleanResult"
+    },
     "fleet_interrupt_session": {
       "$ref": "#/$defs/LegacyResult"
     },

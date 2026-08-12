@@ -1,9 +1,34 @@
 use super::*;
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerLoadProjection {
+    host_ref: String,
+    used_slots: u32,
+}
+
+fn fleet_event_payload(tenant_id: &str) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    let mut payload = serde_json::to_value(crate::fleet::runtime().snapshot_for_tenant(tenant_id))
+        .map_err(|error| RpcError::internal(error.to_string()))?;
+    payload
+        .as_object_mut()
+        .ok_or_else(|| {
+            RpcError::internal("fleet snapshot must serialize as an object".to_string())
+        })?
+        .insert("tenantId".to_string(), Value::String(tenant_id.to_string()));
+    Ok(payload)
+}
+
 pub(super) const COMMANDS: &[&str] = &[
     "logs_query",
     "logs_list_files",
     "fleet_get_snapshot",
+    "fleet_worker_enrollment_create",
+    "fleet_worker_list",
+    "fleet_worker_set",
+    "fleet_project_managed_session",
+    "fleet_project_worker_load",
+    "fleet_remove_managed_session",
     "fleet_permission_respond",
     "fleet_question_respond",
     "fleet_opencode_send_message",
@@ -13,6 +38,32 @@ pub(super) const COMMANDS: &[&str] = &[
     "lark_result_complete",
     "lark_metrics_record",
 ];
+
+fn require_owner(
+    security: &super::super::security_store::SecurityStore,
+    tenant_id: &str,
+    device_id: &str,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    let devices = security
+        .list_devices(tenant_id)
+        .map_err(|error| RpcError::internal(error.to_string()))?;
+    if is_active_owner(&devices, device_id) {
+        Ok(())
+    } else {
+        Err(RpcError::forbidden(
+            "only an active owner may administer execution workers",
+        ))
+    }
+}
+
+fn is_active_owner(
+    devices: &[super::super::security_store::DeviceSummary],
+    device_id: &str,
+) -> bool {
+    devices.iter().any(|device| {
+        device.device_id == device_id && device.role == "owner" && device.status == "active"
+    })
+}
 
 pub(super) async fn dispatch(
     name: &str,
@@ -56,7 +107,127 @@ pub(super) async fn dispatch(
         // (no AppHandle / desktop_writes_bridge), so they also serve a headless
         // server (which returns an empty snapshot). camelCase arg keys mirror
         // the TS wrappers in `lib/fleet/fleet-remote-actions.ts`.
-        "fleet_get_snapshot" => to_json(crate::fleet::runtime().snapshot()),
+        "fleet_get_snapshot" => {
+            let tenant_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("fleet snapshot requires an authenticated tenant")
+            })?;
+            to_json(crate::fleet::runtime().snapshot_for_tenant(tenant_id))
+        }
+        "fleet_worker_enrollment_create" => {
+            let tenant_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("worker enrollment requires an authenticated tenant")
+            })?;
+            let security = super::super::security_store::security_store().ok_or_else(|| {
+                RpcError::internal("companion security store is unavailable".to_string())
+            })?;
+            require_owner(&security, tenant_id, device_id)?;
+            let base_url: String = required(&args, "baseUrl")?;
+            if !(base_url.starts_with("https://") || base_url.starts_with("http://127.0.0.1")) {
+                return Err(RpcError::malformed(
+                    "worker enrollment baseUrl must use HTTPS".to_string(),
+                ));
+            }
+            let fingerprint: String = required(&args, "fingerprint")?;
+            let now = super::super::security_store::unix_time_secs();
+            let ttl = 10 * 60;
+            let enrollment = security
+                .create_worker_enrollment(tenant_id, device_id, now, ttl)
+                .map_err(|error| RpcError::internal(error.to_string()))?;
+            Ok(serde_json::json!({
+                "enrollment": enrollment,
+                "expiresAtMs": now.saturating_add(ttl) * 1_000,
+                "baseUrl": base_url,
+                "fingerprint": fingerprint,
+                "tenantId": tenant_id,
+            }))
+        }
+        "fleet_worker_list" => {
+            let tenant_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("worker listing requires an authenticated tenant")
+            })?;
+            let security = super::super::security_store::security_store().ok_or_else(|| {
+                RpcError::internal("companion security store is unavailable".to_string())
+            })?;
+            require_owner(&security, tenant_id, device_id)?;
+            let devices = security
+                .list_worker_devices(tenant_id)
+                .map_err(|error| RpcError::internal(error.to_string()))?;
+            to_json(devices)
+        }
+        "fleet_worker_set" => {
+            let tenant_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("worker administration requires an authenticated tenant")
+            })?;
+            let security = super::super::security_store::security_store().ok_or_else(|| {
+                RpcError::internal("companion security store is unavailable".to_string())
+            })?;
+            require_owner(&security, tenant_id, device_id)?;
+            let target_device_id: String = required(&args, "deviceId")?;
+            let allowed: bool = required(&args, "allowed")?;
+            let mut capabilities = security
+                .capability_snapshot(tenant_id, &target_device_id)
+                .map_err(|error| RpcError::internal(error.to_string()))?
+                .ok_or_else(|| RpcError::malformed("worker device is unavailable".to_string()))?;
+            capabilities.retain(|capability| capability != "agent.worker");
+            if allowed {
+                capabilities.push("agent.worker".to_string());
+            }
+            security
+                .replace_device_capabilities(
+                    tenant_id,
+                    device_id,
+                    &target_device_id,
+                    &capabilities,
+                    super::super::security_store::unix_time_secs(),
+                )
+                .map_err(|error| RpcError::internal(error.to_string()))?;
+            Ok(Value::Null)
+        }
+        "fleet_project_managed_session" => {
+            let tenant_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("fleet projection requires an authenticated tenant")
+            })?;
+            let input: crate::fleet::registry::ManagedFleetSession = required(&args, "input")?;
+            crate::fleet::runtime().project_managed_session(input);
+            state.event_bus.publish(
+                crate::fleet::UPDATE_EVENT.to_string(),
+                fleet_event_payload(tenant_id)?,
+            );
+            Ok(Value::Null)
+        }
+        "fleet_project_worker_load" => {
+            let loads: Vec<WorkerLoadProjection> = required(&args, "loads")?;
+            super::super::ws_worker::project_worker_load(
+                account_id.ok_or_else(|| {
+                    RpcError::forbidden("worker load projection requires an authenticated tenant")
+                })?,
+                loads
+                    .into_iter()
+                    .map(|load| (load.host_ref, load.used_slots))
+                    .collect(),
+            );
+            state.event_bus.publish(
+                crate::fleet::UPDATE_EVENT.to_string(),
+                fleet_event_payload(account_id.ok_or_else(|| {
+                    RpcError::forbidden("fleet projection requires an authenticated tenant")
+                })?)?,
+            );
+            Ok(Value::Null)
+        }
+        "fleet_remove_managed_session" => {
+            let tenant_id = account_id.ok_or_else(|| {
+                RpcError::forbidden("fleet projection requires an authenticated tenant")
+            })?;
+            let session_id: String = required(&args, "sessionId")?;
+            let removed = crate::fleet::runtime().remove_managed_session(&session_id);
+            if removed {
+                state.event_bus.publish(
+                    crate::fleet::UPDATE_EVENT.to_string(),
+                    fleet_event_payload(tenant_id)?,
+                );
+            }
+            to_json(removed)
+        }
         "fleet_permission_respond" => {
             let request_id: String = required(&args, "requestId")?;
             let behavior: crate::fleet::PermissionBehavior = required(&args, "behavior")?;
@@ -112,6 +283,7 @@ pub(super) async fn dispatch(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::security_store::DeviceSummary;
     use super::*;
 
     #[test]
@@ -119,5 +291,20 @@ mod tests {
         assert!(!COMMANDS.is_empty());
         let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
         assert_eq!(unique.len(), COMMANDS.len());
+    }
+
+    #[test]
+    fn worker_administration_requires_the_active_owner_identity() {
+        let devices = vec![DeviceSummary {
+            device_id: "owner-a".into(),
+            display_name: "Owner".into(),
+            role: "owner".into(),
+            status: "active".into(),
+            created_at: 1,
+            updated_at: 1,
+            capabilities: vec!["host.admin".into()],
+        }];
+        assert!(is_active_owner(&devices, "owner-a"));
+        assert!(!is_active_owner(&devices, "worker-a"));
     }
 }

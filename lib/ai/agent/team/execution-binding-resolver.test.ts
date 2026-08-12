@@ -15,6 +15,7 @@ describe("resolveTeammateExecutionBinding", () => {
     })
     expect(resolved.source).toBe("member")
     expect(resolved.policy).toEqual({ deploymentRef: "dep-member" })
+    expect(resolved.executionTarget).toEqual({ mode: "colocate" })
     expect(resolved.trace.managedForced).toBe(false)
   })
 
@@ -61,6 +62,19 @@ describe("resolveTeammateExecutionBinding", () => {
       member: { mode: "pinned", credentialProfileRef: "cred-1" },
     })
     expect(resolved.policy).toEqual({ credentialProfileRef: "cred-1" })
+  })
+
+  it("resolves host placement independently from deployment selection", () => {
+    const resolved = resolveTeammateExecutionBinding({
+      member: {
+        mode: "pool",
+        candidateIds: ["dep-a"],
+        executionTarget: { mode: "pinned", hostRef: "device:worker-a" },
+      },
+    })
+    expect(resolved.policy).toEqual({})
+    expect(resolved.candidateIds).toEqual(["dep-a"])
+    expect(resolved.executionTarget).toEqual({ mode: "pinned", hostRef: "device:worker-a" })
   })
 })
 

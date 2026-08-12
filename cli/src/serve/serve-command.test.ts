@@ -15,6 +15,8 @@ import type { OutputSink } from "../cli/output"
 import { parseArgv } from "../cli/args"
 import { __resetCliDbForTesting } from "../db/bootstrap"
 import type { WebSocketLike } from "./bridge-client"
+import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
+import { BRIDGE_PROTOCOL_VERSION } from "./protocol"
 import { serveCommand } from "./serve-command"
 
 type Listener = (event: { data?: unknown }) => void
@@ -38,11 +40,13 @@ class FakeServerSocket implements WebSocketLike {
       setTimeout(
         () =>
           this.serverSend({
-            v: 1,
+            v: BRIDGE_PROTOCOL_VERSION,
             type: "hello_ack",
             serverVersion: "0.0.0-test",
-            protocol: 1,
+            protocol: BRIDGE_PROTOCOL_VERSION,
             accountId: frame.accountId,
+            catalogHash: HEADLESS_CATALOG_HASH,
+            contractVersion: HEADLESS_CONTRACT_VERSION,
           }),
         0
       )

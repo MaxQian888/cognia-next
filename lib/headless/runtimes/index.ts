@@ -29,6 +29,11 @@
  * - `plugin-runtime` — boots the canonical Node PluginManager and serially
  *   reconciles native install/restore/uninstall events from cognia-server.
  * - `twin-job-worker` — drains enabled Twin ingest/distill jobs in a headless brain.
+ * - The bridge-owned `BridgeWorkerRpcPool` is the one sanctioned bootstrap
+ *   exception: `serveCommand` creates it only after the authenticated bridge
+ *   connects, injects that transport into the existing AgentTeam runtime, and
+ *   closes/uninstalls both in the same command teardown. It cannot be created
+ *   from this import-only roster because its dependency is the live bridge.
  *
  * ## Deliberately NOT registered (desktop/mobile-UI-only provider effects)
  *

@@ -66,6 +66,33 @@ function helloAck(
   }
 }
 
+function fixturesWorker(type: "worker_attach" | "worker_frame" | "worker_detach") {
+  if (type === "worker_attach") {
+    return {
+      v: BRIDGE_PROTOCOL_VERSION,
+      type,
+      connectionId: "connection-1",
+      hostRef: "device:worker-a",
+      manifest: { manifestVersion: 1, maxActiveTurns: 1 },
+    }
+  }
+  if (type === "worker_detach") {
+    return {
+      v: BRIDGE_PROTOCOL_VERSION,
+      type,
+      connectionId: "connection-1",
+      hostRef: "device:worker-a",
+      reason: "socket_closed",
+    }
+  }
+  return {
+    v: BRIDGE_PROTOCOL_VERSION,
+    type,
+    connectionId: "connection-1",
+    frame: '{"jsonrpc":"2.0","id":1}',
+  }
+}
+
 interface Harness {
   client: BridgeClient
   sockets: FakeSocket[]
@@ -172,6 +199,40 @@ describe("BridgeClient", () => {
       command: "companion_sync_pull_response",
       payload: { requestId: "r1", delta: { rows: [] }, error: null },
     })
+  })
+
+  it("multiplexes opaque worker attach, Agent RPC frames, and detach", async () => {
+    const attached: unknown[] = []
+    const frames: unknown[] = []
+    const detached: unknown[] = []
+    const h = makeClient({
+      onWorkerAttach: (worker) => attached.push(worker),
+      onWorkerFrame: (connectionId, frame) => frames.push({ connectionId, frame }),
+      onWorkerDetach: (worker) => detached.push(worker),
+    })
+    await handshake(h)
+
+    h.sockets[0].serverSend(fixturesWorker("worker_attach"))
+    h.sockets[0].serverSend(fixturesWorker("worker_frame"))
+    h.sockets[0].serverSend(fixturesWorker("worker_detach"))
+    h.client.sendWorkerFrame("connection-1", '{"jsonrpc":"2.0","id":1}')
+
+    expect(attached).toEqual([
+      {
+        connectionId: "connection-1",
+        hostRef: "device:worker-a",
+        manifest: { manifestVersion: 1, maxActiveTurns: 1 },
+      },
+    ])
+    expect(frames).toEqual([{ connectionId: "connection-1", frame: '{"jsonrpc":"2.0","id":1}' }])
+    expect(detached).toEqual([
+      {
+        connectionId: "connection-1",
+        hostRef: "device:worker-a",
+        reason: "socket_closed",
+      },
+    ])
+    expect(h.sockets[0].lastSent()).toEqual(fixturesWorker("worker_frame"))
   })
 
   it("invoke while disconnected drops loudly instead of rejecting", async () => {

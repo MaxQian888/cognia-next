@@ -305,6 +305,37 @@ export interface AgentWorkerManifestV1 {
   platform: { os: string; arch: string }
 }
 
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string" && item.length > 0)
+}
+
+/** Validate an untrusted worker hello before it can participate in placement. */
+export function isAgentWorkerManifestV1(value: unknown): value is AgentWorkerManifestV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const manifest = value as Record<string, unknown>
+  const taskWorkspace = manifest.taskWorkspace as Record<string, unknown> | undefined
+  const sandbox = manifest.sandbox as Record<string, unknown> | undefined
+  const platform = manifest.platform as Record<string, unknown> | undefined
+  return (
+    manifest.manifestVersion === 1 &&
+    typeof manifest.runtime === "string" &&
+    manifest.runtime.length > 0 &&
+    isStringArray(manifest.models) &&
+    isStringArray(manifest.hardCapabilities) &&
+    Number.isInteger(manifest.maxActiveTurns) &&
+    (manifest.maxActiveTurns as number) > 0 &&
+    isStringArray(manifest.credentialProfileRefs) &&
+    isStringArray(manifest.workspaceBindingRefs) &&
+    taskWorkspace?.enabled !== undefined &&
+    typeof taskWorkspace.enabled === "boolean" &&
+    isStringArray(sandbox?.capabilities) &&
+    typeof platform?.os === "string" &&
+    platform.os.length > 0 &&
+    typeof platform.arch === "string" &&
+    platform.arch.length > 0
+  )
+}
+
 export interface InitializeResult {
   protocolVersion: 2
   host: { name: string; version: string }

@@ -114,6 +114,14 @@ export interface AgentTeamChildRun {
   status: AgentTeamChildStatus
   attempt: number
   sessionId?: string
+  /** Authenticated Companion device identity; never supplied by the worker. */
+  hostRef?: string
+  executionFingerprint?: string
+  remoteSessionId?: string
+  dispatchLeaseId?: string
+  dispatchLeaseExpiresAt?: number
+  lastRemoteEventId?: string
+  waitingReason?: string
   runtime?: string
   decisionVersion?: number
   workspacePath?: string

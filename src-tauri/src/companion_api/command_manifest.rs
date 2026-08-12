@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn shared_manifest_is_complete_and_validated() {
-        assert_eq!(commands().len(), 1035);
+        assert_eq!(commands().len(), 1041);
         assert_eq!(command_names().len(), commands().len());
         assert_eq!(DESCRIPTORS.len(), commands().len());
     }
@@ -193,7 +193,7 @@ mod tests {
         let contract = headless_contract().expect("embedded Headless contract");
         assert_eq!(contract.schema_version(), 1);
         assert_eq!(contract.catalog_hash().len(), 64);
-        assert_eq!(contract.command_count(), 450);
+        assert_eq!(contract.command_count(), 456);
         assert!(contract
             .validate_input(
                 "browser_session_ensure",

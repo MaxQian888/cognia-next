@@ -10,7 +10,9 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
+import { agentTeamManager } from "@/lib/ai/agent/agent-team"
 import { getDb } from "@/lib/db/schema"
 import { createDecisionLedger } from "@/lib/ai/agent/team/decision-ledger"
 import { getDurableTeamCoordinator } from "@/lib/ai/agent/team/durable-runtime"
@@ -20,6 +22,7 @@ import { createRetrospectiveService } from "@/lib/ai/agent/team/retrospective"
 import { createLocalTauriExecutionEnvironment } from "@/lib/ai/agent/execution/local-tauri-environment"
 import { getProjectEnvironmentVersion } from "@/lib/db/project-environments"
 import type { AgentTeam } from "@/types/agent/agent-team"
+import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
 
 export interface DurableOperationsProps {
   team: AgentTeam
@@ -37,10 +40,13 @@ export function DurableOperations({
   onMigrate,
 }: DurableOperationsProps) {
   const t = useTranslations("agentTeamsWorkspace.operations")
+  const [now] = useState(() => Date.now())
   const [steering, setSteering] = useState<Record<string, string>>({})
   const [manualCommands, setManualCommands] = useState<Record<string, string>>({})
   const [manualDiffs, setManualDiffs] = useState<Record<string, string>>({})
+  const [retryHosts, setRetryHosts] = useState<Record<string, string>>({})
   const [showMigration, setShowMigration] = useState(false)
+  const { snapshot: fleetSnapshot } = useFleetSnapshot()
   const selectedEnvironment = useLiveQuery(
     () =>
       team.config.environmentRef
@@ -263,6 +269,91 @@ export function DurableOperations({
             <p className="text-xs text-muted-foreground">
               {child.repositoryId} · {child.workspacePath ?? t("children.noWorkspace")}
             </p>
+            <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+              <span>{t("children.host", { value: child.hostRef ?? t("children.localHost") })}</span>
+              <span>
+                {t("children.remoteSession", {
+                  value: child.remoteSessionId ?? t("children.noRemoteSession"),
+                })}
+              </span>
+              <span>
+                {t("children.lease", {
+                  value: child.dispatchLeaseId
+                    ? (child.dispatchLeaseExpiresAt ?? 0) > now
+                      ? t("children.leaseFresh")
+                      : t("children.leaseExpired")
+                    : t("children.noLease"),
+                })}
+              </span>
+              {child.waitingReason ? (
+                <span>{t("children.waitingReason", { value: child.waitingReason })}</span>
+              ) : null}
+            </div>
+            {child.waitingReason === "recovery_required" ? (
+              <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                <p className="text-sm font-medium">{t("children.recoveryRequired")}</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!child.hostRef}
+                    onClick={() =>
+                      void invoke(
+                        () => agentTeamManager.retryChild(child.id, child.hostRef),
+                        t("children.retryStarted")
+                      )
+                    }
+                  >
+                    {t("children.retrySameHost")}
+                  </Button>
+                  <NativeSelect
+                    size="sm"
+                    aria-label={t("children.retryHostLabel")}
+                    value={retryHosts[child.id] ?? ""}
+                    onChange={(event) =>
+                      setRetryHosts((current) => ({
+                        ...current,
+                        [child.id]: event.target.value,
+                      }))
+                    }
+                  >
+                    <NativeSelectOption value="">{t("children.selectHost")}</NativeSelectOption>
+                    {(fleetSnapshot.hosts ?? [])
+                      .filter((host) => host.online && host.hostRef !== child.hostRef)
+                      .map((host) => (
+                        <NativeSelectOption key={host.hostRef} value={host.hostRef}>
+                          {host.hostRef}
+                        </NativeSelectOption>
+                      ))}
+                  </NativeSelect>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!retryHosts[child.id]}
+                    onClick={() =>
+                      void invoke(
+                        () => agentTeamManager.retryChild(child.id, retryHosts[child.id]),
+                        t("children.retryStarted")
+                      )
+                    }
+                  >
+                    {t("children.retrySelectedHost")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() =>
+                      void invoke(
+                        () => getDurableTeamCoordinator().terminateChild(child.id),
+                        t("children.cancelled")
+                      )
+                    }
+                  >
+                    {t("children.cancel")}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             <div className="flex gap-2">
               <Input
                 value={steering[child.id] ?? ""}

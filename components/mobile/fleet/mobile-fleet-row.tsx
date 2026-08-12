@@ -10,6 +10,7 @@
  */
 
 import { useTranslations } from "next-intl"
+import Link from "next/link"
 import { TerminalIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -109,6 +110,15 @@ export function MobileFleetRow({ session }: { session: FleetSession }) {
           <p className="truncate text-xs text-muted-foreground" data-testid="mobile-fleet-prompt">
             {t("you")} {truncateLine(session.lastPrompt, 120)}
           </p>
+        ) : null}
+
+        {session.origin === "managed-team" && session.agentTeamId ? (
+          <Link
+            href={`/agent-teams/workspace?teamId=${encodeURIComponent(session.agentTeamId)}`}
+            className="inline-flex text-xs font-medium text-primary underline-offset-4 hover:underline"
+          >
+            {t("openTeam")}
+          </Link>
         ) : null}
 
         {lastError ? (

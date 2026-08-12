@@ -809,24 +809,34 @@ export const TEAM_USER_SENDER_ID = "__user__"
  *  - `pool`: the coordinator may pick among candidate deployment ids only —
  *    it never sees endpoints or credentials.
  */
-export type TeammateExecutionBinding =
-  | { mode: "inherit" }
-  | {
-      mode: "pinned"
-      /** External runtimes pin via `TeammateConfig.runtime`, not here. */
-      runtimePolicy?: "auto" | "claude-agent-sdk" | "ai-sdk"
-      /** Deployment profile id (ADR-0090 P1 store) — an id, never a URL. */
-      deploymentRef?: string
-      /** Credential PROFILE reference — never key material. */
-      credentialProfileRef?: string
-      /** Frozen model role the teammate runs as. */
-      modelRole?: "primary" | "fast" | "powerful"
-    }
-  | {
-      mode: "pool"
-      /** Deployment/profile candidate ids the coordinator may choose from. */
-      candidateIds: string[]
-    }
+export type TeammateExecutionTarget =
+  { mode: "colocate" } | { mode: "auto" } | { mode: "pinned"; hostRef: string }
+
+type TeammateExecutionTargetBinding = {
+  /** Host placement is independent from deployment/runtime selection. */
+  executionTarget?: TeammateExecutionTarget
+}
+
+export type TeammateExecutionBinding = TeammateExecutionTargetBinding &
+  (
+    | { mode: "inherit" }
+    | {
+        mode: "pinned"
+        /** External runtimes pin via `TeammateConfig.runtime`, not here. */
+        runtimePolicy?: "auto" | "claude-agent-sdk" | "ai-sdk"
+        /** Deployment profile id (ADR-0090 P1 store) — an id, never a URL. */
+        deploymentRef?: string
+        /** Credential PROFILE reference — never key material. */
+        credentialProfileRef?: string
+        /** Frozen model role the teammate runs as. */
+        modelRole?: "primary" | "fast" | "powerful"
+      }
+    | {
+        mode: "pool"
+        /** Deployment/profile candidate ids the coordinator may choose from. */
+        candidateIds: string[]
+      }
+  )
 
 export interface TeammateConfig {
   /** Custom system prompt */

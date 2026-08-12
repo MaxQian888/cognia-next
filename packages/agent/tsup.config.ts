@@ -2,6 +2,7 @@ import { defineConfig } from "tsup"
 
 export default defineConfig({
   entry: {
+    "handoff-envelope": "src/handoff-envelope.ts",
     index: "src/index.ts",
     protocol: "src/protocol.ts",
   },

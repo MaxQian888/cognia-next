@@ -107,6 +107,103 @@ export async function updateAgentTeamChildRun(
   return (await getDb().agentTeamChildRuns.update(id, patch)) > 0
 }
 
+export interface ClaimAgentTeamDispatchLeaseInput {
+  childRunId: string
+  leaseId: string
+  hostRef: string
+  now: number
+  ttlMs?: number
+  executionFingerprint?: string
+}
+
+/**
+ * Claim the existing child row as the remote dispatch lease authority. The CAS
+ * permits idempotent replay by the same lease and rejects a competing lease
+ * until the old claim expires.
+ */
+export async function claimAgentTeamDispatchLease(
+  input: ClaimAgentTeamDispatchLeaseInput
+): Promise<AgentTeamChildRun | undefined> {
+  const db = getDb()
+  return db.transaction("rw", db.agentTeamChildRuns, async () => {
+    const child = await db.agentTeamChildRuns.get(input.childRunId)
+    if (!child) return undefined
+    const heldByOther =
+      child.dispatchLeaseId !== undefined &&
+      child.dispatchLeaseId !== input.leaseId &&
+      (child.dispatchLeaseExpiresAt ?? 0) > input.now
+    if (heldByOther) return undefined
+    const patch: Partial<AgentTeamChildRun> = {
+      dispatchLeaseId: input.leaseId,
+      dispatchLeaseExpiresAt: input.now + (input.ttlMs ?? 60_000),
+      hostRef: input.hostRef,
+      waitingReason: undefined,
+      ...(input.executionFingerprint ? { executionFingerprint: input.executionFingerprint } : {}),
+      updatedAt: input.now,
+    }
+    await db.agentTeamChildRuns.update(child.id, patch)
+    return { ...child, ...patch }
+  })
+}
+
+export async function renewAgentTeamDispatchLease(
+  childRunId: string,
+  expectedLeaseId: string,
+  now: number,
+  ttlMs = 60_000
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.agentTeamChildRuns, async () => {
+    const child = await db.agentTeamChildRuns.get(childRunId)
+    if (!child || child.dispatchLeaseId !== expectedLeaseId) return false
+    return (
+      (await db.agentTeamChildRuns.update(childRunId, {
+        dispatchLeaseExpiresAt: now + ttlMs,
+        updatedAt: now,
+      })) > 0
+    )
+  })
+}
+
+export async function settleAgentTeamDispatchLease(
+  childRunId: string,
+  expectedLeaseId: string,
+  now: number
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.agentTeamChildRuns, async () => {
+    const child = await db.agentTeamChildRuns.get(childRunId)
+    if (!child || child.dispatchLeaseId !== expectedLeaseId) return false
+    return (
+      (await db.agentTeamChildRuns.update(childRunId, {
+        dispatchLeaseId: undefined,
+        dispatchLeaseExpiresAt: undefined,
+        updatedAt: now,
+      })) > 0
+    )
+  })
+}
+
+/** Sequential event CAS used by the remote adapter to reject duplicate replay. */
+export async function advanceAgentTeamRemoteEvent(
+  childRunId: string,
+  expectedPreviousEventId: string | undefined,
+  eventId: string,
+  now: number
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.agentTeamChildRuns, async () => {
+    const child = await db.agentTeamChildRuns.get(childRunId)
+    if (!child || child.lastRemoteEventId !== expectedPreviousEventId) return false
+    return (
+      (await db.agentTeamChildRuns.update(childRunId, {
+        lastRemoteEventId: eventId,
+        updatedAt: now,
+      })) > 0
+    )
+  })
+}
+
 export type AppendTrajectoryInput = Omit<AgentTeamTrajectoryEvent, "id" | "sequence">
 
 export async function appendAgentTeamTrajectory(

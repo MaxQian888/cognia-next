@@ -188,7 +188,7 @@ export interface AgentRuntimeServiceOptions {
   compactionTimeoutMs?: number
   workerDispatch?: {
     manifest: AgentWorkerManifestV1
-    resolveHandoffWorkspace(handoff: HandoffEnvelope): string | Promise<string>
+    resolveHandoffWorkspace(handoff: HandoffEnvelope, commandId: string): string | Promise<string>
   }
 }
 
@@ -1112,7 +1112,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     }
     const base = options.config
     const handoffWorkspace = handoff
-      ? await options.workerDispatch!.resolveHandoffWorkspace(handoff)
+      ? await options.workerDispatch!.resolveHandoffWorkspace(handoff, commandId)
       : undefined
     const config: ResolvedConfig = {
       ...base,

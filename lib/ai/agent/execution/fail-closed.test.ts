@@ -13,6 +13,7 @@ import { resolveAgentExecutionSpec } from "./resolve-agent-execution-spec"
 
 const flags: Record<AgentExecutionFlag, boolean> = {
   agentExecutionResolverV2: true,
+  agentTeamRemoteDispatch: false,
   genericAgentHostCommands: true,
   gatewayAgentRouteTickets: true,
   headlessLlmGateway: false,

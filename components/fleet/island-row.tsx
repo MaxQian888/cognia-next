@@ -238,6 +238,15 @@ export function IslandRow({
         <span className="min-w-0 flex-1 truncate text-xs font-semibold text-white/90">
           {session.projectName ?? session.sessionId}
         </span>
+        {session.hostRef ? (
+          <span
+            className="max-w-28 shrink-0 truncate rounded bg-white/10 px-1.5 py-0.5 text-[9px] text-white/60"
+            title={t("host", { host: session.hostRef })}
+            data-testid="island-host-badge"
+          >
+            {session.hostRef}
+          </span>
+        ) : null}
         {session.terminal ? <TerminalBadge terminal={session.terminal} /> : null}
         <span className="shrink-0 text-[10px] tabular-nums text-white/50" data-testid="elapsed">
           {formatElapsed(session.startedAt, elapsedReference)}

@@ -34,6 +34,7 @@ import {
 import { resolveTeammateExecutionBinding } from "@/lib/ai/agent/team/execution-binding-resolver"
 import { resolveAgentExecutionSpec } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
 import type { TeammateExecutionBinding } from "@/types/agent/agent-team"
+import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
 
 export interface TeammateExecutionBindingFieldProps {
   value: TeammateExecutionBinding | undefined
@@ -69,10 +70,15 @@ export function TeammateExecutionBindingField({
   teamDefault,
 }: TeammateExecutionBindingFieldProps) {
   const t = useTranslations("agentTeamsWorkspace.teammateConfig.executionBinding")
+  const { snapshot } = useFleetSnapshot()
 
   const mode = value?.mode ?? "inherit"
   const pinned = value?.mode === "pinned" ? value : undefined
   const pool = value?.mode === "pool" ? value : undefined
+  const executionTarget = value?.executionTarget ?? { mode: "colocate" as const }
+  const executionTargetPatch = value?.executionTarget ? { executionTarget } : {}
+  const pinnedHostRef = executionTarget.mode === "pinned" ? executionTarget.hostRef : undefined
+  const hosts = snapshot.hosts ?? []
 
   const decision = useMemo(() => previewDecision(value, teamDefault), [value, teamDefault])
 
@@ -98,9 +104,14 @@ export function TeammateExecutionBindingField({
       <Select
         value={mode}
         onValueChange={(v) => {
-          if (v === "inherit") onChange({ mode: "inherit" })
-          else if (v === "pinned") onChange({ mode: "pinned" })
-          else onChange({ mode: "pool", candidateIds: pool?.candidateIds ?? [] })
+          if (v === "inherit") onChange({ mode: "inherit", ...executionTargetPatch })
+          else if (v === "pinned") onChange({ mode: "pinned", ...executionTargetPatch })
+          else
+            onChange({
+              mode: "pool",
+              candidateIds: pool?.candidateIds ?? [],
+              ...executionTargetPatch,
+            })
         }}
       >
         <SelectTrigger className="h-8 text-xs" data-testid="execution-binding-mode">
@@ -112,6 +123,54 @@ export function TeammateExecutionBindingField({
           <SelectItem value="pool">{t("modePool")}</SelectItem>
         </SelectContent>
       </Select>
+
+      <div className="space-y-1">
+        <Label className="text-xs">{t("hostTarget")}</Label>
+        <Select
+          value={
+            executionTarget.mode === "pinned"
+              ? `host:${executionTarget.hostRef}`
+              : executionTarget.mode
+          }
+          onValueChange={(next) =>
+            onChange({
+              ...(value ?? { mode: "inherit" }),
+              executionTarget:
+                next === "colocate"
+                  ? { mode: "colocate" }
+                  : next === "auto"
+                    ? { mode: "auto" }
+                    : { mode: "pinned", hostRef: next.slice("host:".length) },
+            })
+          }
+        >
+          <SelectTrigger className="h-8 text-xs" data-testid="execution-host-target">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="colocate">{t("hostLocal")}</SelectItem>
+            <SelectItem value="auto">{t("hostAuto")}</SelectItem>
+            {pinnedHostRef && !hosts.some((host) => host.hostRef === pinnedHostRef) ? (
+              <SelectItem value={`host:${pinnedHostRef}`}>
+                {t("hostPinnedOffline", { host: pinnedHostRef })}
+              </SelectItem>
+            ) : null}
+            {hosts.map((host) => (
+              <SelectItem key={host.hostRef} value={`host:${host.hostRef}`}>
+                {host.online
+                  ? t("hostPinned", { host: host.hostRef })
+                  : t("hostPinnedOffline", { host: host.hostRef })}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {executionTarget.mode === "pinned" &&
+        !hosts.some((host) => host.hostRef === executionTarget.hostRef && host.online) ? (
+          <p className="text-[10px] text-amber-600 dark:text-amber-500">
+            {t("hostWaitingWarning")}
+          </p>
+        ) : null}
+      </div>
 
       {pinned && (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -206,6 +265,7 @@ export function TeammateExecutionBindingField({
                   .split(",")
                   .map((s) => s.trim())
                   .filter(Boolean),
+                ...executionTargetPatch,
               })
             }
           />

@@ -28,6 +28,7 @@ import path from "node:path"
 import "../db/install-indexeddb"
 
 import { bootstrapHeadlessRuntimes } from "@/lib/headless/bootstrap"
+import { installRemoteWorkerRuntime } from "@/lib/ai/agent/team/remote-worker-runtime"
 import { loadMessageResolver } from "@/lib/headless/i18n"
 import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 import { setTransport } from "@/lib/tauri"
@@ -42,6 +43,7 @@ import { createNodeBackupFilesystem } from "./backup-filesystem"
 import { BridgeClient, type WebSocketLike } from "./bridge-client"
 import { startDurability } from "./durability"
 import { createNodePluginRuntimeAdapter } from "./plugin-runtime-adapter"
+import { BridgeWorkerRpcPool } from "./worker-rpc-pool"
 
 export interface ServeDeps {
   out: OutputSink
@@ -117,6 +119,23 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   setTransport(transport)
 
   // ── 5. Data plane: the bridge WS ───────────────────────────────────────────
+  const bridgeRef: { current: BridgeClient | null } = { current: null }
+  const workerPool = new BridgeWorkerRpcPool({
+    sendFrame: (connectionId, frame) => {
+      if (!bridgeRef.current) throw new Error("brain bridge is not connected")
+      bridgeRef.current.sendWorkerFrame(connectionId, frame)
+    },
+    onWorkersChanged: (workers) => {
+      void transport
+        .call("fleet_project_worker_load", {
+          loads: workers.map((worker) => ({
+            hostRef: worker.hostRef,
+            usedSlots: worker.activeTurns,
+          })),
+        })
+        .catch(() => undefined)
+    },
+  })
   const bridge = new BridgeClient({
     url: bridgeUrl,
     token: currentToken,
@@ -126,13 +145,23 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     onTokenRefresh: (token) => {
       currentToken = token
     },
+    onWorkerAttach: ({ connectionId, hostRef, manifest }) =>
+      workerPool.attach({
+        connectionId,
+        hostRef,
+        manifest,
+      }),
+    onWorkerFrame: (connectionId, frame) => workerPool.receive(connectionId, frame),
+    onWorkerDetach: ({ connectionId, reason }) => workerPool.detach(connectionId, reason),
     rss: () => durability.rss(),
     log: (level, message) => {
       if (level === "error") out.error(`serve: ${message}\n`)
       else out.write(`serve: ${message}\n`)
     },
   })
+  bridgeRef.current = bridge
   await bridge.connect()
+  const uninstallWorkerRuntime = installRemoteWorkerRuntime(workerPool)
   out.write(`serve: bridge connected (${bridgeUrl})\n`)
 
   // ── 6. Runtimes ────────────────────────────────────────────────────────────
@@ -171,6 +200,8 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
 
   out.write("serve: shutting down…\n")
   await runtimes.stop()
+  uninstallWorkerRuntime()
+  workerPool.close()
   bridge.close()
   transport.destroy()
   await durability.dispose()

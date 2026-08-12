@@ -4,6 +4,7 @@ import type {
   CompactionResult,
   SessionState,
 } from "./types"
+import { isAgentWorkerManifestV1 } from "./types"
 
 describe("public SDK types", () => {
   it("models compaction as a command with an optional live undo boundary", () => {
@@ -33,5 +34,23 @@ describe("public SDK types", () => {
       outcome: { status: "requires_action" },
       state: { status: "idle" },
     })
+  })
+
+  it("validates untrusted worker manifests at the placement boundary", () => {
+    const manifest = {
+      manifestVersion: 1,
+      runtime: "builtin",
+      models: ["test"],
+      hardCapabilities: ["worker-dispatch-v1"],
+      maxActiveTurns: 1,
+      credentialProfileRefs: ["credential:test"],
+      workspaceBindingRefs: ["repository:project:repo"],
+      taskWorkspace: { enabled: true },
+      sandbox: { capabilities: ["filesystem"] },
+      platform: { os: "linux", arch: "arm64" },
+    }
+    expect(isAgentWorkerManifestV1(manifest)).toBe(true)
+    expect(isAgentWorkerManifestV1({ ...manifest, maxActiveTurns: 0 })).toBe(false)
+    expect(isAgentWorkerManifestV1({ ...manifest, workspaceBindingRefs: [""] })).toBe(false)
   })
 })

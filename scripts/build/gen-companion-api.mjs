@@ -17,6 +17,7 @@ const HEADLESS_ASYNCAPI_SPEC_PATH = "docs/api/headless-service-api.asyncapi.yaml
 const HOST_COMMAND_CATALOG_PATH = "crates/cognia-cli/assets/host-command-catalog.json"
 const HEADLESS_CONTRACT_IDENTITY_PATH = "cli/src/serve/headless-contract-identity.ts"
 const BRIDGE_FIXTURE_PATH = "cli/src/serve/fixtures/bridge-frames.json"
+const BRIDGE_PROTOCOL_VERSION = 3
 const ROUTE_CONTRACT_PATH = "protocol/companion-api-routes.json"
 const COMMAND_MANIFEST_PATH = "protocol/companion-commands.json"
 const REQUEST_SCHEMA_CATALOG_PATH = "protocol/companion-request-schemas.json"
@@ -456,10 +457,10 @@ function renderHeadlessContractIdentity(catalog) {
 
 function renderBridgeFixture(source, catalog) {
   const fixture = JSON.parse(source)
-  fixture.protocol = 2
-  for (const frame of Object.values(fixture.frames ?? {})) frame.v = 2
+  fixture.protocol = BRIDGE_PROTOCOL_VERSION
+  for (const frame of Object.values(fixture.frames ?? {})) frame.v = BRIDGE_PROTOCOL_VERSION
   for (const name of ["hello", "helloAck"]) {
-    fixture.frames[name].protocol = 2
+    fixture.frames[name].protocol = BRIDGE_PROTOCOL_VERSION
     fixture.frames[name].catalogHash = catalog.catalogHash
     fixture.frames[name].contractVersion = catalog.schemaVersion
   }
@@ -2442,7 +2443,7 @@ function buildHeadlessAsyncApi(contract, catalog) {
     type: "object",
     required: ["v", "type"],
     properties: {
-      v: { type: "integer", const: 2 },
+      v: { type: "integer", const: BRIDGE_PROTOCOL_VERSION },
       type: { type: "string" },
     },
   }
@@ -2572,7 +2573,7 @@ function buildHeadlessAsyncApi(contract, catalog) {
             type: { type: "string", const: "hello" },
             role: { type: "string", const: "brain" },
             brainVersion: { type: "string" },
-            protocol: { type: "integer", const: 2 },
+            protocol: { type: "integer", const: BRIDGE_PROTOCOL_VERSION },
             accountId: { type: "string" },
             capabilities: { type: "array", items: { type: "string" } },
             catalogHash: { type: "string", const: catalog.catalogHash },
@@ -2587,7 +2588,7 @@ function buildHeadlessAsyncApi(contract, catalog) {
             ...frameBase.properties,
             type: { type: "string", const: "hello_ack" },
             serverVersion: { type: "string" },
-            protocol: { type: "integer", const: 2 },
+            protocol: { type: "integer", const: BRIDGE_PROTOCOL_VERSION },
             accountId: { type: "string" },
             catalogHash: { type: "string", const: catalog.catalogHash },
             contractVersion: { type: "integer", const: catalog.schemaVersion },

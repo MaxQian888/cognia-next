@@ -3,8 +3,13 @@ import {
   clearCompanionAccessTokens,
   issueSocketTicket,
   registerCompanionDevice,
+  registerCompanionWorker,
   type AuthFetcher,
 } from "./companion-auth"
+
+function unsignedToken(payload: Record<string, unknown>): string {
+  return `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`
+}
 
 describe("companion auth lifecycle", () => {
   afterEach(() => clearCompanionAccessTokens())
@@ -63,6 +68,27 @@ describe("companion auth lifecycle", () => {
       )
     ).rejects.toThrow("browser socket tickets require a sessionId")
     expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it("requests the dedicated worker socket channel without path credentials", async () => {
+    const fetcher = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ticket: "worker-once", expiresIn: 60 }),
+    })
+
+    await issueSocketTicket(
+      {
+        baseUrl: "https://host.test",
+        serviceToken: "service-token",
+        deviceId: "worker-a",
+        serverVersion: "1.0.0",
+      },
+      "worker",
+      fetcher
+    )
+
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ channel: "worker" })
+    expect(fetcher.mock.calls[0][0]).toBe("https://host.test/api/auth/socket-ticket")
   })
 
   it("registers independent auth and signaling identities from canonical config", async () => {
@@ -143,6 +169,52 @@ describe("companion auth lifecycle", () => {
       signalingPrivateKeyJwk: expect.objectContaining({ d: expect.any(String) }),
     })
     expect(fetcher).toHaveBeenCalledTimes(5)
+  })
+
+  it("registers worker enrollment with only the dedicated worker capability", async () => {
+    let challenge = 0
+    const fetcher = jest.fn(async (url: string, init: RequestInit) => {
+      const path = new URL(url).pathname
+      if (path === "/api/auth/device/challenge") {
+        challenge += 1
+        return Response.json({
+          challengeId: `challenge-${challenge}`,
+          nonce: `nonce-${challenge}`,
+          expiresAt: Date.now() + 60_000,
+        })
+      }
+      if (path === "/api/auth/worker/register") {
+        const body = JSON.parse(init.body as string)
+        expect(body.enrollment).toBe("one-time-worker")
+        return Response.json({
+          deviceId: body.deviceId,
+          tenantId: "tenant-a",
+          role: "member",
+          capabilities: ["agent.worker"],
+          serverVersion: "1.0.0",
+        })
+      }
+      if (path === "/api/auth/token") {
+        return Response.json({
+          accessToken: unsignedToken({ jti: "worker-token" }),
+          expiresIn: 300,
+        })
+      }
+      throw new Error(`unexpected ${path}`)
+    })
+
+    const registered = await registerCompanionWorker(
+      {
+        baseUrl: "https://host.test",
+        tenantId: "tenant-a",
+        enrollment: "one-time-worker",
+        displayName: "Worker A",
+      },
+      fetcher
+    )
+
+    expect(registered).toMatchObject({ tenantId: "tenant-a", serverVersion: "1.0.0" })
+    expect(registered.devicePrivateKeyJwk).toBeDefined()
   })
 
   it("rejects a Host mismatch before generating or registering a device", async () => {

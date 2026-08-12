@@ -28,6 +28,7 @@ export {
   type HandoffResourceRef,
   type HandoffRuntimeAdapterId,
 } from "./handoff-envelope"
+export { isAgentWorkerManifestV1 } from "./types"
 export type {
   AgentEventEnvelope,
   AgentInput,

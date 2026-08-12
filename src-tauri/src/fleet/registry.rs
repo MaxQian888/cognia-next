@@ -34,6 +34,7 @@ pub enum FleetAgent {
     ClaudeCode,
     Codex,
     Opencode,
+    Cognia,
 }
 
 impl FleetAgent {
@@ -42,13 +43,14 @@ impl FleetAgent {
             "claude-code" => Some(Self::ClaudeCode),
             "codex" => Some(Self::Codex),
             "opencode" => Some(Self::Opencode),
+            "cognia" => Some(Self::Cognia),
             _ => None,
         }
     }
 }
 
 /// Lifecycle state of one monitored session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FleetStatus {
     Idle,
@@ -221,6 +223,21 @@ pub struct FleetSession {
     /// (never in the pure fold — see `FleetRuntime::ingest`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_branch: Option<String>,
+    /// Authenticated placement and existing authority lineage for managed runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_team_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_team_run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_team_child_run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_evidence_ref: Option<String>,
     /// Internal guard: has the branch been captured for the current turn?
     /// Never serialized — the frontend has no use for it.
     #[serde(skip)]
@@ -282,11 +299,29 @@ impl FleetSession {
 #[serde(rename_all = "camelCase")]
 pub struct FleetSnapshot {
     pub sessions: Vec<FleetSession>,
+    /// Authenticated execution workers. Additive for older Fleet consumers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<FleetHost>,
     /// Per-agent ingress liveness — present for every agent that has ever sent
     /// an event this process lifetime, absent for the rest. See
     /// [`AgentLiveness`].
     pub liveness: Vec<AgentLivenessRow>,
     pub generated_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FleetHost {
+    pub host_ref: String,
+    pub online: bool,
+    pub max_active_turns: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_slots: Option<u32>,
+    pub runtime: String,
+    pub workspace_binding_ready: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_binding_refs: Vec<String>,
+    pub last_seen_at: u64,
 }
 
 /// One hook event after envelope parsing — the registry's sole input shape.
@@ -376,6 +411,43 @@ impl FleetRegistry {
 
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Merge a managed AgentTeam session into the existing Fleet projection.
+    /// The durable child and ExecutionRun remain authoritative; this row is a
+    /// disposable read model consumed only through FleetSnapshot.
+    pub fn upsert_managed_session(&mut self, input: ManagedFleetSession, now_ms: u64) {
+        let key = (FleetAgent::Cognia, input.session_id.clone());
+        let ev = FleetEvent {
+            agent: FleetAgent::Cognia,
+            event: String::new(),
+            pid: None,
+            ppid: None,
+            env: HashMap::new(),
+            payload: serde_json::Value::Null,
+        };
+        let entry = self.sessions.entry(key).or_insert_with(|| {
+            new_session(FleetAgent::Cognia, input.session_id.clone(), &ev, now_ms)
+        });
+        entry.status = input.status;
+        entry.host_ref = Some(input.host_ref);
+        entry.origin = Some("managed-team".to_string());
+        entry.agent_team_id = Some(input.agent_team_id);
+        entry.agent_team_run_id = Some(input.agent_team_run_id);
+        entry.agent_team_child_run_id = Some(input.agent_team_child_run_id);
+        entry.execution_run_id = Some(input.execution_run_id);
+        entry.review_evidence_ref = input.review_evidence_ref;
+        entry.model = input.model;
+        entry.project_name = input.project_name;
+        entry.started_at = input.started_at.unwrap_or(entry.started_at);
+        entry.last_event_at = now_ms;
+        entry.ended_at = (input.status == FleetStatus::Ended).then_some(now_ms);
+    }
+
+    pub fn remove_managed_session(&mut self, session_id: &str) -> bool {
+        self.sessions
+            .remove(&(FleetAgent::Cognia, session_id.to_string()))
+            .is_some()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -964,6 +1036,9 @@ impl FleetRegistry {
                 return now_ms.saturating_sub(ended_at) < ENDED_LINGER_MS;
             }
             if now_ms.saturating_sub(s.last_event_at) >= STALE_AFTER_MS {
+                if s.origin.as_deref() == Some("managed-team") {
+                    return true;
+                }
                 return s.agent_pid.map(&pid_alive).unwrap_or(false);
             }
             true
@@ -988,6 +1063,7 @@ impl FleetRegistry {
         liveness.sort_by_key(|row| row.agent as u8);
         FleetSnapshot {
             sessions,
+            hosts: Vec::new(),
             liveness,
             generated_at: now_ms,
         }
@@ -1032,8 +1108,31 @@ fn new_session(
         turn_count: 0,
         start_source: None,
         git_branch: None,
+        host_ref: None,
+        origin: None,
+        agent_team_id: None,
+        agent_team_run_id: None,
+        agent_team_child_run_id: None,
+        execution_run_id: None,
+        review_evidence_ref: None,
         git_checked: false,
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedFleetSession {
+    pub session_id: String,
+    pub host_ref: String,
+    pub status: FleetStatus,
+    pub agent_team_id: String,
+    pub agent_team_run_id: String,
+    pub agent_team_child_run_id: String,
+    pub execution_run_id: String,
+    pub review_evidence_ref: Option<String>,
+    pub model: Option<String>,
+    pub project_name: Option<String>,
+    pub started_at: Option<u64>,
 }
 
 /// Session id extraction is per-agent: the key order lives in that agent's
@@ -1411,6 +1510,35 @@ mod tests {
         let snap = reg.snapshot(0);
         assert_eq!(snap.sessions.len(), 1);
         snap.sessions[0].clone()
+    }
+
+    #[test]
+    fn managed_session_is_a_disposable_lineage_projection() {
+        let mut reg = FleetRegistry::new();
+        reg.upsert_managed_session(
+            ManagedFleetSession {
+                session_id: "remote-1".into(),
+                host_ref: "device:worker-a".into(),
+                status: FleetStatus::Working,
+                agent_team_id: "team-1".into(),
+                agent_team_run_id: "run-1".into(),
+                agent_team_child_run_id: "child-1".into(),
+                execution_run_id: "execution:team:run-1".into(),
+                review_evidence_ref: None,
+                model: Some("test-model".into()),
+                project_name: Some("Project".into()),
+                started_at: Some(10),
+            },
+            20,
+        );
+        let session = reg.snapshot(20).sessions.pop().unwrap();
+        assert_eq!(session.agent, FleetAgent::Cognia);
+        assert_eq!(session.origin.as_deref(), Some("managed-team"));
+        assert_eq!(session.host_ref.as_deref(), Some("device:worker-a"));
+        assert_eq!(session.agent_team_child_run_id.as_deref(), Some("child-1"));
+        assert!(!reg.reap(STALE_AFTER_MS + 20, |_| false));
+        assert!(reg.remove_managed_session("remote-1"));
+        assert!(reg.snapshot(21).sessions.is_empty());
     }
 
     #[test]

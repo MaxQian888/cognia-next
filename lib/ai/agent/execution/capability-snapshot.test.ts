@@ -16,6 +16,7 @@ import type { AgentExecutionFlag } from "./feature-flags"
 
 const flags: Record<AgentExecutionFlag, boolean> = {
   agentExecutionResolverV2: true,
+  agentTeamRemoteDispatch: false,
   genericAgentHostCommands: false,
   gatewayAgentRouteTickets: false,
   headlessLlmGateway: false,

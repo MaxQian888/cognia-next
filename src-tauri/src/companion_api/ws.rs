@@ -213,7 +213,7 @@ async fn handle_socket(
 
     // 2. Send replay frames.
     for frame in replay {
-        if !frame.visible_to(&device_id) {
+        if !frame.visible_to(&device_id) || !frame_visible_to_tenant(&frame, tenant_id.as_deref()) {
             continue;
         }
         match serde_json::to_string(&frame) {
@@ -252,7 +252,9 @@ async fn handle_socket(
             result = receiver.recv() => {
                 match result {
                     Ok(frame) => {
-                        if !frame.visible_to(&device_id) {
+                        if !frame.visible_to(&device_id)
+                            || !frame_visible_to_tenant(&frame, tenant_id.as_deref())
+                        {
                             continue;
                         }
                         if frame.event_type == "security://device-revoked" {
@@ -362,6 +364,13 @@ fn revocation_targets(
     })
 }
 
+fn frame_visible_to_tenant(frame: &super::event_bus::EventFrame, tenant_id: Option<&str>) -> bool {
+    match frame.payload.get("tenantId").and_then(Value::as_str) {
+        Some(event_tenant) => tenant_id == Some(event_tenant),
+        None => true,
+    }
+}
+
 fn unix_time_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -454,6 +463,9 @@ mod tests {
         assert!(!revocation_targets(&frame, Some("tenant-b"), "device-a"));
         assert!(!revocation_targets(&frame, Some("tenant-a"), "device-b"));
         assert!(!revocation_targets(&frame, None, "device-a"));
+        assert!(frame_visible_to_tenant(&frame, Some("tenant-a")));
+        assert!(!frame_visible_to_tenant(&frame, Some("tenant-b")));
+        assert!(!frame_visible_to_tenant(&frame, None));
     }
 
     #[test]

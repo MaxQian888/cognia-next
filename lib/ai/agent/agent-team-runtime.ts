@@ -965,6 +965,7 @@ export async function runTeamLifecycle(
     // with a meaningful payload even when runWorkflow throws.
     let finalStatus: RunTeamLifecycleResult["status"] = "failed"
     let finalReason: string | undefined
+    let suppressCompletionFanout = false
     try {
       let result: Awaited<ReturnType<typeof runWorkflow>>
       if (adaptiveFlat) {
@@ -1120,6 +1121,7 @@ export async function runTeamLifecycle(
       if (team.config.runtimeVersion === "durable-v2") {
         const { getAgentTeamRun, updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
         const persistedRun = await getAgentTeamRun(runId)
+        suppressCompletionFanout = persistedRun?.status === "needs_input"
         const abortMessage =
           ac.signal.reason instanceof Error
             ? ac.signal.reason.message
@@ -1145,34 +1147,38 @@ export async function runTeamLifecycle(
           updatedAt: Date.now(),
         }).catch(() => false)
       }
-      hooks.dispatchOnTeamComplete({
-        teamId,
-        runId,
-        status: finalStatus,
-        reason: finalReason,
-      })
+      if (!suppressCompletionFanout) {
+        hooks.dispatchOnTeamComplete({
+          teamId,
+          runId,
+          status: finalStatus,
+          reason: finalReason,
+        })
+      }
       // "On team finished" workflow fan-out (trigger.team). Fire-and-forget:
       // the linkage module PII-gates reason/finalResult and enforces the
       // chain-depth loop guard. This terminal block is the single point every
       // start surface funnels through, so no per-trigger wiring is needed.
-      void import("./team-completion-linkage")
-        .then(({ dispatchTeamCompletedTriggers }) =>
-          dispatchTeamCompletedTriggers({
-            teamId,
-            teamName: team.name,
-            runId,
-            status: finalStatus,
-            ...(finalReason ? { reason: finalReason } : {}),
-            ...(() => {
-              const finalResult = deps.storeReader.getTeam(teamId)?.finalResult
-              return finalResult ? { finalResult } : {}
-            })(),
-            chainDepth: deps.triggerChainDepth ?? 0,
+      if (!suppressCompletionFanout) {
+        void import("./team-completion-linkage")
+          .then(({ dispatchTeamCompletedTriggers }) =>
+            dispatchTeamCompletedTriggers({
+              teamId,
+              teamName: team.name,
+              runId,
+              status: finalStatus,
+              ...(finalReason ? { reason: finalReason } : {}),
+              ...(() => {
+                const finalResult = deps.storeReader.getTeam(teamId)?.finalResult
+                return finalResult ? { finalResult } : {}
+              })(),
+              chainDepth: deps.triggerChainDepth ?? 0,
+            })
+          )
+          .catch(() => {
+            // Best-effort — fan-out failures must not affect the run result.
           })
-        )
-        .catch(() => {
-          // Best-effort — fan-out failures must not affect the run result.
-        })
+      }
       for (const u of subs) {
         try {
           u()

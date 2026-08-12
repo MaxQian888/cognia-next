@@ -61,6 +61,9 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       ? previous
       : undefined
   const childRunId = resumable?.id ?? id()
+  const retryTargetHostRef = resumable?.waitingReason?.startsWith("retry_host:")
+    ? resumable.waitingReason.slice("retry_host:".length)
+    : undefined
   const attempt = resumable ? resumable.attempt + 1 : 1
   const previousFailures = resumable?.resourceUsage.failures ?? 0
   const startedAt = now()
@@ -71,6 +74,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       attempt,
       decisionVersion: run?.decisionVersion ?? resumable.decisionVersion,
       error: undefined,
+      waitingReason: undefined,
       completedAt: undefined,
       updatedAt: startedAt,
     })
@@ -261,6 +265,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
 
   return {
     childRunId,
+    retryTargetHostRef,
     capture,
     attachControl,
     attachEnvironment(environment: AgentExecutionEnvironment): void {
@@ -353,6 +358,50 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       )
     },
 
+    async wait(waitingReason: string, hostRef?: string): Promise<void> {
+      await writes
+      const waitingAt = now()
+      await Promise.all([
+        updateAgentTeamChildRun(childRunId, {
+          status: "queued",
+          waitingReason,
+          ...(hostRef ? { hostRef } : {}),
+          error: undefined,
+          updatedAt: waitingAt,
+        }),
+        updateAgentTeamRun(input.runId, {
+          status: "needs_input",
+          recoveryReason: `worker_waiting:${waitingReason}`,
+          updatedAt: waitingAt,
+        }),
+      ])
+      detachControl?.()
+    },
+
+    async checkpointPause(): Promise<boolean> {
+      await writes
+      const pausedAt = now()
+      const effects = [...sideEffects.values()]
+      const safe = effects.every(
+        (effect) =>
+          effect.state !== "unknown" && !(effect.state === "intent" && effect.replay !== "safe")
+      )
+      const event = await appendAgentTeamTrajectory({
+        runId: input.runId,
+        childRunId,
+        kind: "checkpoint",
+        correlationId: `pause:${childRunId}:${pausedAt}`,
+        payload: { replay: safe ? "safe" : "needs_input", paused: true },
+        createdAt: pausedAt,
+      })
+      await input.coordinator.checkpoint(childRunId, {
+        trajectorySequence: event.sequence,
+        replay: safe ? "safe" : "needs_input",
+        sideEffects: effects,
+      })
+      return safe
+    },
+
     async complete(result: {
       text: string
       usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
@@ -437,6 +486,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       })
       await updateAgentTeamChildRun(childRunId, {
         status: "completed",
+        waitingReason: undefined,
         completedAt,
         updatedAt: completedAt,
         resourceUsage: {
@@ -479,6 +529,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       })
       await updateAgentTeamChildRun(childRunId, {
         status: needsInput ? "needs_input" : "failed",
+        waitingReason: needsInput ? "recovery_required" : undefined,
         error: message,
         completedAt: failedAt,
         updatedAt: failedAt,

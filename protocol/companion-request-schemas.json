@@ -1493,6 +1493,101 @@
       },
       "additionalProperties": false
     },
+    "fleet_project_managed_session": {
+      "type": "object",
+      "required": ["input"],
+      "properties": {
+        "input": {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "hostRef",
+            "status",
+            "agentTeamId",
+            "agentTeamRunId",
+            "agentTeamChildRunId",
+            "executionRunId"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "hostRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "idle",
+                "working",
+                "waiting-input",
+                "waiting-permission",
+                "plan-pending",
+                "ended"
+              ]
+            },
+            "agentTeamId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "agentTeamRunId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "agentTeamChildRunId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "executionRunId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reviewEvidenceRef": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "projectName": {
+              "type": "string"
+            },
+            "startedAt": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "fleet_project_worker_load": {
+      "type": "object",
+      "required": ["loads"],
+      "properties": {
+        "loads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["hostRef", "usedSlots"],
+            "properties": {
+              "hostRef": {
+                "type": "string",
+                "minLength": 1
+              },
+              "usedSlots": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "fleet_question_respond": {
       "type": "object",
       "required": ["requestId", "selections"],
@@ -1509,6 +1604,50 @@
               "minimum": 0
             }
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "fleet_remove_managed_session": {
+      "type": "object",
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "fleet_worker_enrollment_create": {
+      "type": "object",
+      "required": ["baseUrl", "fingerprint"],
+      "properties": {
+        "baseUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "fingerprint": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "fleet_worker_list": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "fleet_worker_set": {
+      "type": "object",
+      "required": ["deviceId", "allowed"],
+      "properties": {
+        "deviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowed": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false

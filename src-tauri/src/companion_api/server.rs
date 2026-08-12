@@ -34,7 +34,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use super::{a2a, acp, healthz, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
+use super::{a2a, acp, healthz, tls::TlsMaterial, ws, ws_bridge, ws_terminal, ws_worker};
 use axum::{
     extract::Request,
     http::{header, HeaderValue, Method, StatusCode},
@@ -400,6 +400,10 @@ fn build_router_for_mode(state: SharedState, _mode: super::deployment::Deploymen
         )
         .route("/api/invitations", post(super::api::invitation_handler))
         .route(
+            "/api/worker-enrollments",
+            post(super::api::worker_enrollment_handler),
+        )
+        .route(
             "/api/policies",
             get(super::api::policies_handler).post(super::api::create_policy_handler),
         )
@@ -463,6 +467,7 @@ fn build_router_for_mode(state: SharedState, _mode: super::deployment::Deploymen
         // Terminal upgrades use the same single-use-ticket pattern as the
         // browser stream, so a bearer access token never enters the URL.
         .route("/ws/terminal", any(ws_terminal::ws_terminal_handler))
+        .route("/ws/worker", any(ws_worker::ws_worker_handler))
         .with_state(state.clone());
 
     // Fleet ingress (`/api/fleet/*`) — its own auth tier: loopback-source

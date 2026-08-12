@@ -735,6 +735,94 @@ pub struct OwnerInvitationIssue {
     pub tenant_id: String,
 }
 
+/// One-time least-privilege worker enrollment and connection metadata.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerEnrollmentIssue {
+    pub enrollment: String,
+    pub expires_at_ms: i64,
+    pub base_url: String,
+    pub fingerprint: String,
+    pub tenant_id: String,
+}
+
+#[tauri::command]
+pub async fn companion_create_worker_enrollment(
+    state: State<'_, CompanionServerState>,
+    app_handle: tauri::AppHandle,
+) -> Result<WorkerEnrollmentIssue, String> {
+    const TENANT_ID: &str = "local_acct_a";
+    const ENROLLMENT_TTL_SECS: i64 = 10 * 60;
+    let port = state.bound_port().unwrap_or(DEFAULT_PORT);
+    let (base_url, is_tunnel) = if let Some(info) = state.tunnel.current() {
+        (info.public_url, true)
+    } else if let Some(hostname) = state.tunnel.named_public_url() {
+        (hostname, true)
+    } else {
+        let host = match state.bind_mode() {
+            Some(BindMode::Lan) => detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
+            _ => "127.0.0.1".to_string(),
+        };
+        (format!("https://{host}:{port}"), false)
+    };
+    let fingerprint = if is_tunnel {
+        String::new()
+    } else {
+        ensure_tls_fingerprint(&app_handle).unwrap_or_default()
+    };
+    let now = unix_time_secs();
+    let security = security_store::security_store()
+        .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    let enrollment = security
+        .create_worker_enrollment(TENANT_ID, "local-trust-root", now, ENROLLMENT_TTL_SECS)
+        .map_err(|error| error.to_string())?;
+    Ok(WorkerEnrollmentIssue {
+        enrollment,
+        expires_at_ms: now.saturating_add(ENROLLMENT_TTL_SECS) * 1_000,
+        base_url,
+        fingerprint,
+        tenant_id: TENANT_ID.to_string(),
+    })
+}
+
+#[tauri::command]
+pub async fn companion_list_workers() -> Result<Vec<security_store::DeviceSummary>, String> {
+    const TENANT_ID: &str = "local_acct_a";
+    let security = security_store::security_store()
+        .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    security
+        .list_worker_devices(TENANT_ID)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn companion_set_worker(device_id: String, allowed: bool) -> Result<(), String> {
+    const TENANT_ID: &str = "local_acct_a";
+    if device_id.trim().is_empty() {
+        return Err("device_id is required".into());
+    }
+    let security = security_store::security_store()
+        .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    let mut capabilities = security
+        .capability_snapshot(TENANT_ID, &device_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "worker device is unavailable".to_string())?;
+    capabilities.retain(|capability| capability != "agent.worker");
+    if allowed {
+        capabilities.push("agent.worker".to_string());
+    }
+    security
+        .replace_device_capabilities(
+            TENANT_ID,
+            "local-trust-root",
+            &device_id,
+            &capabilities,
+            unix_time_secs(),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 /// Create the destructive-upgrade pairing payload. No bearer credential is
 /// placed in the QR; the invitation can be consumed exactly once by device-key
 /// registration.

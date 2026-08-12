@@ -73,4 +73,63 @@ describe("workerCommand", () => {
     expect(workspace.list).toHaveBeenCalled()
     expect(workspace.remove).toHaveBeenCalledWith("repository:project-1:repo-1")
   })
+
+  it("connects with the paired worker identity and existing Task Workspace client", async () => {
+    const workspace = client()
+    const connect = jest.fn().mockResolvedValue(undefined)
+    const runtimeConfig = { providers: {} } as never
+
+    await expect(
+      workerCommand(parseArgv(["worker", "connect", "--config", "/secure/worker.json"]), {
+        workspace,
+        connect,
+        loadConfig: () => runtimeConfig,
+        env: { COGNIA_HOME: "/worker-home" },
+      })
+    ).resolves.toBe(0)
+
+    expect(connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceConfigPath: "/secure/worker.json",
+        runtimeConfig,
+        home: "/worker-home",
+        workspace,
+        maxActiveTurns: 1,
+      })
+    )
+  })
+
+  it("enrolls a least-privilege worker identity into an owner-only config file", async () => {
+    const output = sink()
+    const enroll = jest.fn().mockResolvedValue({ deviceId: "worker-a" })
+
+    await expect(
+      workerCommand(
+        parseArgv([
+          "worker",
+          "enroll",
+          "--server-url",
+          "https://brain.example",
+          "--tenant-id",
+          "tenant-a",
+          "--enrollment",
+          "one-time",
+          "--config",
+          "/secure/worker.json",
+          "--json",
+        ]),
+        { workspace: client(), enroll, out: output.out }
+      )
+    ).resolves.toBe(0)
+
+    expect(enroll).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: "https://brain.example",
+        tenantId: "tenant-a",
+        enrollment: "one-time",
+        deviceConfigPath: "/secure/worker.json",
+      })
+    )
+    expect(output.stdout.join("")).toContain('"deviceId":"worker-a"')
+  })
 })

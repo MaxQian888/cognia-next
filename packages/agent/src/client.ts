@@ -1,3 +1,4 @@
+// static-export-exempt: Node-only SDK client; browser code imports only the handoff-envelope subpath.
 import { randomUUID } from "node:crypto"
 import type { Readable, Writable } from "node:stream"
 

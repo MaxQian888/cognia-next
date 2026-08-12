@@ -21,6 +21,7 @@ export interface ResolvedTeammateBinding {
   source: ExecutionBindingSource
   /** Pool mode: the candidate ids the coordinator may pick from. */
   candidateIds?: string[]
+  executionTarget: NonNullable<TeammateExecutionBinding["executionTarget"]>
   /** Explicit trace of the chain that was consulted (audit). */
   trace: {
     consulted: ExecutionBindingSource[]
@@ -61,6 +62,8 @@ function policyFromBinding(binding: TeammateExecutionBinding): {
   return { policy: {} }
 }
 
+const LOCAL_TARGET = { mode: "colocate" } as const
+
 /**
  * Resolve the effective binding by fixed precedence. `inherit` (or absence)
  * at any level falls through to the next; managed force-all short-circuits
@@ -86,6 +89,7 @@ export function resolveTeammateExecutionBinding(
       policy,
       source,
       ...(candidateIds ? { candidateIds } : {}),
+      executionTarget: binding.executionTarget ?? LOCAL_TARGET,
       trace: { consulted, managedForced: source === "managed" },
     }
   }
@@ -95,6 +99,7 @@ export function resolveTeammateExecutionBinding(
   return {
     policy: {},
     source: "app-default",
+    executionTarget: LOCAL_TARGET,
     trace: { consulted, managedForced: false },
   }
 }

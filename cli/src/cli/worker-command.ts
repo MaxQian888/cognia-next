@@ -2,7 +2,8 @@ import os from "node:os"
 import path from "node:path"
 
 import { createWorkerWorkspaceClient, type WorkerWorkspaceClient } from "../worker/workspace-client"
-import { resolveHome } from "../config/load"
+import { connectWorker, enrollWorker } from "../worker/worker-connect"
+import { loadConfig, resolveHome } from "../config/load"
 import { boolFlag, stringFlag, type ParsedArgs } from "./args"
 import { realOutput, type OutputSink } from "./output"
 
@@ -11,6 +12,9 @@ export interface WorkerCommandDeps {
   workspace?: WorkerWorkspaceClient
   env?: Record<string, string | undefined>
   homedir?: string
+  connect?: typeof connectWorker
+  enroll?: typeof enrollWorker
+  loadConfig?: typeof loadConfig
 }
 
 export async function workerCommand(
@@ -19,12 +23,11 @@ export async function workerCommand(
 ): Promise<number> {
   const out = deps.out ?? realOutput
   const env = deps.env ?? process.env
+  const home = resolveHome(env, deps.homedir ?? os.homedir())
   const workspace =
     deps.workspace ??
     createWorkerWorkspaceClient({
-      dataDir:
-        env.COGNIA_DATA_DIR?.trim() ||
-        path.join(resolveHome(env, deps.homedir ?? os.homedir()), "worker-data"),
+      dataDir: env.COGNIA_DATA_DIR?.trim() || path.join(home, "worker-data"),
     })
   try {
     let result: unknown
@@ -41,8 +44,37 @@ export async function workerCommand(
       case "remove":
         result = await workspace.remove(requiredFlag(args, "repository-ref"))
         break
+      case "connect": {
+        const requestedMax = Number(stringFlag(args, "max-active-turns") ?? "1")
+        if (!Number.isInteger(requestedMax) || requestedMax < 1 || requestedMax > 32) {
+          throw new Error("--max-active-turns must be an integer between 1 and 32")
+        }
+        await (deps.connect ?? connectWorker)({
+          deviceConfigPath: stringFlag(args, "config") ?? path.join(home, "worker-device.json"),
+          runtimeConfig: (deps.loadConfig ?? loadConfig)(),
+          home,
+          workspace,
+          maxActiveTurns: requestedMax,
+        })
+        return 0
+      }
+      case "enroll": {
+        const deviceConfigPath = stringFlag(args, "config") ?? path.join(home, "worker-device.json")
+        const enrolled = await (deps.enroll ?? enrollWorker)({
+          baseUrl: requiredFlag(args, "server-url"),
+          tenantId: requiredFlag(args, "tenant-id"),
+          enrollment: requiredFlag(args, "enrollment"),
+          displayName: stringFlag(args, "name") ?? os.hostname(),
+          deviceConfigPath,
+          ...(stringFlag(args, "fingerprint")
+            ? { serverFingerprint: stringFlag(args, "fingerprint") }
+            : {}),
+        })
+        result = { deviceId: enrolled.deviceId, configPath: deviceConfigPath }
+        break
+      }
       default:
-        out.error("Usage: cognia-agent worker <bind|list|remove>\n")
+        out.error("Usage: cognia-agent worker <enroll|bind|list|remove|connect>\n")
         return 2
     }
     if (boolFlag(args, "json")) out.json(result)

@@ -9,7 +9,7 @@
 
 import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
 
-export const BRIDGE_PROTOCOL_VERSION = 2
+export const BRIDGE_PROTOCOL_VERSION = 3
 
 export interface HelloFrame {
   v: number
@@ -69,8 +69,42 @@ export interface TokenRefreshFrame {
   token: string
 }
 
+export interface WorkerAttachFrame {
+  v: number
+  type: "worker_attach"
+  connectionId: string
+  /** Derived from the authenticated Companion device identity by the front door. */
+  hostRef: string
+  manifest: Record<string, unknown>
+}
+
+export interface WorkerFrame {
+  v: number
+  type: "worker_frame"
+  connectionId: string
+  /** An opaque, newline-free Agent RPC v2 JSON frame. */
+  frame: string
+}
+
+export interface WorkerDetachFrame {
+  v: number
+  type: "worker_detach"
+  connectionId: string
+  hostRef: string
+  reason: string
+}
+
 export type BridgeFrame =
-  HelloFrame | HelloAckFrame | EventFrame | RespondFrame | PingFrame | PongFrame | TokenRefreshFrame
+  | HelloFrame
+  | HelloAckFrame
+  | EventFrame
+  | RespondFrame
+  | PingFrame
+  | PongFrame
+  | TokenRefreshFrame
+  | WorkerAttachFrame
+  | WorkerFrame
+  | WorkerDetachFrame
 
 const FRAME_TYPES = new Set([
   "hello",
@@ -80,6 +114,9 @@ const FRAME_TYPES = new Set([
   "ping",
   "pong",
   "token_refresh",
+  "worker_attach",
+  "worker_frame",
+  "worker_detach",
 ])
 
 /**
@@ -128,4 +165,11 @@ export function buildRespond(command: string, payload: Record<string, unknown>):
 
 export function buildPong(ts: number, rssBytes: number, lastFlushAt: number): PongFrame {
   return { v: BRIDGE_PROTOCOL_VERSION, type: "pong", ts, rssBytes, lastFlushAt }
+}
+
+export function buildWorkerFrame(connectionId: string, frame: string): WorkerFrame {
+  if (frame.includes("\n") || frame.includes("\r")) {
+    throw new Error("worker Agent RPC frames must not contain newlines")
+  }
+  return { v: BRIDGE_PROTOCOL_VERSION, type: "worker_frame", connectionId, frame }
 }

@@ -21,6 +21,7 @@ import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { startSpan, endSpan, recordEvent } from "@cognia/agent-trace/emitter"
 import { RoutingAttemptController } from "@cognia/provider-routing"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { recordTeamUsage, swallowUsageWrite } from "@/lib/db/session-usage"
@@ -45,6 +46,13 @@ import {
   type TaskWorkspaceRunLease,
 } from "@/lib/task-workspace/run-lease"
 import { useSettingsStore } from "@/stores/settings"
+import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
+import type { TeammateExecutionTarget } from "@/types/agent/agent-team"
+import {
+  getRemoteWorkerRuntime,
+  RemoteWorkerWaitingError,
+  selectRemoteWorker,
+} from "./remote-worker-runtime"
 
 const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
   "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
@@ -640,6 +648,8 @@ export async function dispatchTeammate(
     positive(teammate.config?.maxSteps) ?? positive(teamCtx.team.config?.defaultMaxSteps)
 
   const runtime = teammate.config?.runtime ?? "claude"
+  let frozenExecutionSpec: ResolvedAgentExecutionSpec | undefined
+  let executionTarget: TeammateExecutionTarget = { mode: "colocate" }
   let externalAgentId: string | null = null
   if (runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0) {
     // External-backed teammate: route to the external CLI agent when a preset
@@ -700,6 +710,8 @@ export async function dispatchTeammate(
         },
         identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
       })
+      frozenExecutionSpec = spec
+      executionTarget = binding.executionTarget
       channel = channelFromSpec(spec, environment)
       // ADR-0090 Phase 7: intersect the plugin capability bundle with what the
       // FROZEN runtime can serve (mcp / native subagents / tool-backed ids).
@@ -856,6 +868,12 @@ export async function dispatchTeammate(
   let durableEnvironmentSession: AgentChildEnvironmentSession | undefined
   let taskWorkspaceExecutionRoot: string | undefined
   let taskWorkspaceChanges: unknown[] = []
+  let settleRemoteDispatchLease: (() => Promise<void>) | undefined
+  const settleRemoteDispatch = async (): Promise<void> => {
+    const settle = settleRemoteDispatchLease
+    settleRemoteDispatchLease = undefined
+    await settle?.()
+  }
   let environmentEvidence:
     | Awaited<
         ReturnType<NonNullable<typeof teamCtx.durableEnvironment>["adapter"]["collectEvidence"]>
@@ -889,6 +907,261 @@ export async function dispatchTeammate(
           "",
           promptText,
         ].join("\n")
+      }
+      const taskWorkspaceEnabled =
+        useSettingsStore.getState().settings?.developer?.taskWorkspace === true
+      const { isAgentTeamRemoteDispatchEnabled } =
+        await import("@/lib/ai/agent/execution/feature-flags")
+      if (
+        durableDispatch &&
+        frozenExecutionSpec &&
+        executionTarget.mode !== "colocate" &&
+        isAgentTeamRemoteDispatchEnabled(taskWorkspaceEnabled)
+      ) {
+        const remoteRuntime = getRemoteWorkerRuntime()
+        if (!remoteRuntime) throw new RemoteWorkerWaitingError("no_compatible_capacity")
+        if (!teamCtx.team.projectId) {
+          throw new Error("Remote AgentTeam dispatch requires a stable projectId")
+        }
+        const repositoryRef = `repository:${teamCtx.team.projectId}:${durableRepositoryId}`
+        const remotePrompt = redactText(promptText).redacted
+        if (!hasNoLeakingPii(remotePrompt)) {
+          throw new Error("Remote AgentTeam prompt still contains PII after redaction")
+        }
+        const selectedExecutionTarget = durableDispatch.retryTargetHostRef
+          ? ({ mode: "pinned", hostRef: durableDispatch.retryTargetHostRef } as const)
+          : executionTarget
+        const target = selectRemoteWorker(remoteRuntime.listWorkers(), selectedExecutionTarget, {
+          requiredCapabilities: frozenExecutionSpec.capabilities.effective,
+          ...(frozenExecutionSpec.credential?.profileRef
+            ? { credentialProfileRef: frozenExecutionSpec.credential.profileRef }
+            : {}),
+          workspaceBindingRef: repositoryRef,
+          requiredSandboxCapabilities: teamCtx.team.config?.sandboxPolicy ? ["filesystem"] : [],
+        })
+        const {
+          advanceAgentTeamRemoteEvent,
+          claimAgentTeamDispatchLease,
+          getAgentTeamChildRun,
+          getAgentTeamRun,
+          renewAgentTeamDispatchLease,
+          settleAgentTeamDispatchLease,
+          updateAgentTeamChildRun,
+        } = await import("@/lib/db/agent-team-runtime")
+        const existingChild = await getAgentTeamChildRun(durableDispatch.childRunId)
+        const leaseId =
+          existingChild?.dispatchLeaseId ??
+          `dispatch:${durableDispatch.childRunId}:${globalThis.crypto.randomUUID()}`
+        const claimed = await claimAgentTeamDispatchLease({
+          childRunId: durableDispatch.childRunId,
+          leaseId,
+          hostRef: target.hostRef,
+          executionFingerprint: frozenExecutionSpec.executionFingerprint,
+          now: Date.now(),
+        })
+        if (!claimed) throw new RemoteWorkerWaitingError("no_compatible_capacity", target.hostRef)
+        settleRemoteDispatchLease = async () => {
+          await settleAgentTeamDispatchLease(durableDispatch.childRunId, leaseId, Date.now())
+        }
+        const sourceRun = await getAgentTeamRun(teamCtx.runId)
+        if (!sourceRun) throw new Error(`Unknown durable AgentTeam run: ${teamCtx.runId}`)
+        const {
+          agentTeamExecutionRunId,
+          projectAgentTeamChildLifecycle,
+          projectRemoteAgentTeamEvent,
+        } = await import("@/lib/execution/agent-team-bridge")
+        const { preflightCrossHostDispatch } =
+          await import("@/lib/ai/agent/execution/cross-host-preflight")
+        const handoff = preflightCrossHostDispatch({
+          envelope: {
+            envelopeVersion: 1,
+            identity: {
+              parentRunId: teamCtx.runId,
+              childRunId: durableDispatch.childRunId,
+              teamId: teamCtx.teamId,
+              taskId: args.taskId,
+              depth: 1,
+              parentChain: [teamCtx.runId],
+            },
+            task: { title: args.taskId, prompt: remotePrompt },
+            execution: {
+              mode: "orchestrated",
+              executionFingerprint: frozenExecutionSpec.executionFingerprint,
+              runtimeAdapter: frozenExecutionSpec.runtimeAdapter,
+              ...(frozenExecutionSpec.deploymentRef
+                ? { deploymentRef: frozenExecutionSpec.deploymentRef }
+                : {}),
+              ...(frozenExecutionSpec.credential?.profileRef
+                ? { credentialProfileRef: frozenExecutionSpec.credential.profileRef }
+                : {}),
+              modelRole: "primary",
+            },
+            ...(teamCtx.team.config.resourcePolicy?.maxTokens
+              ? { budget: { maxTokens: teamCtx.team.config.resourcePolicy.maxTokens } }
+              : {}),
+            resources: [{ kind: "repository", ref: repositoryRef }],
+            createdAt: new Date().toISOString(),
+          },
+          target: {
+            hostRef: target.hostRef,
+            capabilities: target.manifest.hardCapabilities as never,
+            localCredentialProfileRefs: target.manifest.credentialProfileRefs,
+          },
+          requiredCapabilities: frozenExecutionSpec.capabilities.effective,
+          leaseHeld: true,
+        }).envelope
+        await projectAgentTeamChildLifecycle({
+          sourceRun,
+          childRunId: durableDispatch.childRunId,
+          taskId: args.taskId,
+          state: "started",
+          sourceEventId: `agent-team:${teamCtx.runId}:${leaseId}:started`,
+        })
+        let lastRemoteEventId = claimed.lastRemoteEventId
+        let projectedRemoteSessionId = claimed.remoteSessionId
+        const { projectManagedFleetSession } =
+          await import("@/lib/fleet/managed-session-projection")
+        const projectFleet = async (status: import("@/lib/fleet/types").FleetStatus) => {
+          if (!projectedRemoteSessionId) return
+          await projectManagedFleetSession({
+            sessionId: projectedRemoteSessionId,
+            hostRef: target.hostRef,
+            status,
+            agentTeamId: teamCtx.teamId,
+            agentTeamRunId: teamCtx.runId,
+            agentTeamChildRunId: durableDispatch.childRunId,
+            executionRunId: agentTeamExecutionRunId(teamCtx.runId),
+            projectName: teamCtx.team.name,
+            startedAt: claimed.startedAt,
+          }).catch(() => undefined)
+        }
+        const leaseController = new AbortController()
+        const renew = setInterval(() => {
+          void renewAgentTeamDispatchLease(durableDispatch.childRunId, leaseId, Date.now()).then(
+            (ok) => {
+              if (!ok) leaseController.abort(new Error("Remote dispatch lease was lost"))
+            }
+          )
+        }, 20_000)
+        try {
+          const outcome = await remoteRuntime.run({
+            hostRef: target.hostRef,
+            handoff,
+            commandId: leaseId,
+            ...(claimed.remoteSessionId ? { remoteSessionId: claimed.remoteSessionId } : {}),
+            ...(lastRemoteEventId ? { lastRemoteEventId } : {}),
+            prompt: remotePrompt,
+            ...(maxSteps ? { maxSteps } : {}),
+            signal: AbortSignal.any([combinedSignal, leaseController.signal]),
+            onSession: async (remoteSessionId) => {
+              projectedRemoteSessionId = remoteSessionId
+              await updateAgentTeamChildRun(durableDispatch.childRunId, {
+                remoteSessionId,
+                sessionId: remoteSessionId,
+                updatedAt: Date.now(),
+              })
+              await projectFleet("working")
+            },
+            onControl: async (control) => {
+              await durableDispatch.attachControl({
+                steer: (message, sourceMessageId) => control.steer(message, sourceMessageId),
+                pause: async () => {
+                  await control.pause(`${leaseId}:pause`)
+                  await durableDispatch.checkpointPause()
+                },
+                resume: () => control.resume(`${leaseId}:resume`),
+                terminate: () => control.terminate(`${leaseId}:terminate`),
+              })
+            },
+            onEvent: async (envelope) => {
+              const advanced = await advanceAgentTeamRemoteEvent(
+                durableDispatch.childRunId,
+                lastRemoteEventId,
+                envelope.eventId,
+                Date.now()
+              )
+              if (!advanced) return
+              lastRemoteEventId = envelope.eventId
+              await projectRemoteAgentTeamEvent({
+                sourceRun,
+                childRunId: durableDispatch.childRunId,
+                taskId: args.taskId,
+                hostRef: target.hostRef,
+                envelope,
+              })
+              await projectFleet("working")
+              const event = envelope.event
+              if (event.kind === "text-delta" && typeof event.delta === "string") {
+                onTurnCapture?.({ type: "text-delta", delta: event.delta })
+              } else if (event.kind === "thinking-delta" && typeof event.delta === "string") {
+                onTurnCapture?.({ type: "thinking-delta", delta: event.delta })
+              } else if (event.kind === "tool-call" && typeof event.toolName === "string") {
+                onTurnCapture?.({
+                  type: "tool-call",
+                  toolName: event.toolName,
+                  input:
+                    event.input && typeof event.input === "object"
+                      ? (event.input as Record<string, unknown>)
+                      : {},
+                  ...(typeof event.toolCallId === "string" ? { id: event.toolCallId } : {}),
+                })
+              } else if (event.kind === "tool-result" && typeof event.toolName === "string") {
+                onTurnCapture?.({
+                  type: "tool-result",
+                  toolName: event.toolName,
+                  result: event.result,
+                  ...(typeof event.toolCallId === "string" ? { id: event.toolCallId } : {}),
+                  ...(event.isError === true ? { isError: true } : {}),
+                })
+              }
+            },
+          })
+          if (outcome.status === "requires_action") {
+            await projectFleet("waiting-input")
+            await updateAgentTeamChildRun(durableDispatch.childRunId, {
+              status: "needs_input",
+              waitingReason: "recovery_required",
+              updatedAt: Date.now(),
+            })
+            await projectAgentTeamChildLifecycle({
+              sourceRun,
+              childRunId: durableDispatch.childRunId,
+              taskId: args.taskId,
+              state: "recovery_required",
+              sourceEventId: `agent-team:${teamCtx.runId}:${leaseId}:recovery-required`,
+            })
+            throw new Error("Remote worker requires governed operator action")
+          }
+          if (outcome.status !== "completed") {
+            await projectAgentTeamChildLifecycle({
+              sourceRun,
+              childRunId: durableDispatch.childRunId,
+              taskId: args.taskId,
+              state: "failed",
+              sourceEventId: `agent-team:${teamCtx.runId}:${leaseId}:${outcome.status}`,
+            })
+            throw new Error(
+              typeof outcome.result.error === "object" && outcome.result.error
+                ? JSON.stringify(outcome.result.error)
+                : `Remote worker turn ${outcome.status}`
+            )
+          }
+          await projectAgentTeamChildLifecycle({
+            sourceRun,
+            childRunId: durableDispatch.childRunId,
+            taskId: args.taskId,
+            state: "completed",
+            sourceEventId: `agent-team:${teamCtx.runId}:${leaseId}:completed`,
+          })
+          await projectFleet("ended")
+          const usage = outcome.result.usage as TokenUsage | undefined
+          return { text: outcome.result.text ?? "", ...(usage ? { usage } : {}) }
+        } catch (error) {
+          await projectFleet("waiting-input")
+          throw error
+        } finally {
+          clearInterval(renew)
+        }
       }
       // Durable-v2 always uses a task workspace for writable isolation. Legacy
       // runs retain the developer setting and existing allocator behavior.
@@ -1032,7 +1305,12 @@ export async function dispatchTeammate(
     }
     turn = durableDispatch ? await durableDispatch.run(executeTurn) : await executeTurn()
   } catch (err) {
-    await durableDispatch?.fail(err).catch(() => undefined)
+    if (err instanceof RemoteWorkerWaitingError) {
+      await durableDispatch?.wait(err.reason, err.hostRef).catch(() => undefined)
+    } else {
+      await durableDispatch?.fail(err).catch(() => undefined)
+    }
+    await settleRemoteDispatch().catch(() => undefined)
     if (durableEnvironmentSession) {
       await settleDurableEnvironment(
         err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed"
@@ -1042,14 +1320,16 @@ export async function dispatchTeammate(
       await taskWorkspaceLease.settle(
         err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed"
       )
-    reporter?.finalize("failed")
+    if (!(err instanceof RemoteWorkerWaitingError)) reporter?.finalize("failed")
     endSpan(span.spanId, {
       errorType: err instanceof Error ? err.name : "Error",
       errorMessage: err instanceof Error ? err.message : String(err),
     })
-    teamCtx.pool.recordFailure(teammate.id, err)
-    budgetAccount?.recordFailure()
-    if (args.recordToStore) {
+    if (!(err instanceof RemoteWorkerWaitingError)) {
+      teamCtx.pool.recordFailure(teammate.id, err)
+      budgetAccount?.recordFailure()
+    }
+    if (args.recordToStore && !(err instanceof RemoteWorkerWaitingError)) {
       teamCtx.storeWriter.setTaskStatus(
         args.taskId,
         "failed",
@@ -1062,7 +1342,8 @@ export async function dispatchTeammate(
     // known cooldown, schedule a single guarded "continue" nudge (additive — the
     // wave's existing error handling still runs). No-op when nudges are disabled
     // (controller absent) or the error isn't a rate limit.
-    const cooldown = parseRateLimitCooldown(error.message)
+    const cooldown =
+      err instanceof RemoteWorkerWaitingError ? undefined : parseRateLimitCooldown(error.message)
     if (cooldown && teamCtx.rateLimitResume) {
       teamCtx.rateLimitResume.onRateLimit({
         memberId: teammate.id,
@@ -1071,7 +1352,7 @@ export async function dispatchTeammate(
       })
     }
     recordWorkspace(false)
-    release("failure", error)
+    if (!(err instanceof RemoteWorkerWaitingError)) release("failure", error)
     throw error
   }
 
@@ -1097,6 +1378,7 @@ export async function dispatchTeammate(
       release("failure", empty)
       if (taskWorkspaceLease) await taskWorkspaceLease.settle("failed")
       if (durableEnvironmentSession) await settleDurableEnvironment("failed").catch(() => undefined)
+      await settleRemoteDispatch().catch(() => undefined)
       throw empty
     }
     const minChars = args.minOutputChars ?? teamCtx.team.config?.minOutputChars ?? 0
@@ -1114,6 +1396,7 @@ export async function dispatchTeammate(
       release("failure", short)
       if (taskWorkspaceLease) await taskWorkspaceLease.settle("failed")
       if (durableEnvironmentSession) await settleDurableEnvironment("failed").catch(() => undefined)
+      await settleRemoteDispatch().catch(() => undefined)
       throw short
     }
   }
@@ -1141,6 +1424,7 @@ export async function dispatchTeammate(
       : {}),
     ...(environmentEvidence && environmentEvidence.length > 0 ? { environmentEvidence } : {}),
   })
+  await settleRemoteDispatch()
   teamCtx.pool.recordSuccess(teammate.id)
   if (turn.usage) {
     // One accounting authority: the governor's child account when present

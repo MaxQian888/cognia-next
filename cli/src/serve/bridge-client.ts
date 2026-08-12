@@ -23,6 +23,7 @@ import {
   buildHello,
   buildPong,
   buildRespond,
+  buildWorkerFrame,
   parseBridgeFrame,
   serializeBridgeFrame,
 } from "./protocol"
@@ -67,6 +68,13 @@ export interface BridgeClientOptions {
   reconnect?: boolean
   onStateChange?: (state: BridgeClientState) => void
   onTokenRefresh?: (token: string) => void
+  onWorkerAttach?: (worker: {
+    connectionId: string
+    hostRef: string
+    manifest: Record<string, unknown>
+  }) => void
+  onWorkerFrame?: (connectionId: string, frame: string) => void
+  onWorkerDetach?: (worker: { connectionId: string; hostRef: string; reason: string }) => void
   /** RSS gauge for pong frames. */
   rss?: () => { rssBytes: number; lastFlushAt: number }
   log?: (level: "info" | "warn" | "error", message: string) => void
@@ -187,6 +195,13 @@ export class BridgeClient implements RuntimeBridge {
     }
     this.socket.send(serializeBridgeFrame(buildRespond(name, args)))
     return null
+  }
+
+  sendWorkerFrame(connectionId: string, frame: string): void {
+    if (this.state !== "connected" || !this.socket) {
+      throw new Error("brain bridge is not connected")
+    }
+    this.socket.send(serializeBridgeFrame(buildWorkerFrame(connectionId, frame)))
   }
 
   // ── Internals ───────────────────────────────────────────────────────────────
@@ -315,6 +330,26 @@ export class BridgeClient implements RuntimeBridge {
               )
             }
           }
+          break
+        }
+        case "worker_attach": {
+          this.opts.onWorkerAttach?.({
+            connectionId: frame.connectionId,
+            hostRef: frame.hostRef,
+            manifest: frame.manifest,
+          })
+          break
+        }
+        case "worker_frame": {
+          this.opts.onWorkerFrame?.(frame.connectionId, frame.frame)
+          break
+        }
+        case "worker_detach": {
+          this.opts.onWorkerDetach?.({
+            connectionId: frame.connectionId,
+            hostRef: frame.hostRef,
+            reason: frame.reason,
+          })
           break
         }
         case "ping": {

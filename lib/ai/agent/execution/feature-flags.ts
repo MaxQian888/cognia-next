@@ -6,6 +6,7 @@
 
 export type AgentExecutionFlag =
   | "agentExecutionResolverV2"
+  | "agentTeamRemoteDispatch"
   | "genericAgentHostCommands"
   | "gatewayAgentRouteTickets"
   | "headlessLlmGateway"
@@ -19,6 +20,7 @@ const AGENT_EXECUTION_FLAGS_KEY = "cognia-agent-execution-flags-v1"
 
 export const AGENT_EXECUTION_FLAGS: readonly AgentExecutionFlag[] = [
   "agentExecutionResolverV2",
+  "agentTeamRemoteDispatch",
   "genericAgentHostCommands",
   "gatewayAgentRouteTickets",
   "headlessLlmGateway",
@@ -31,6 +33,7 @@ export const AGENT_EXECUTION_FLAGS: readonly AgentExecutionFlag[] = [
 
 const DEFAULT_AGENT_EXECUTION_FLAGS: Record<AgentExecutionFlag, boolean> = {
   agentExecutionResolverV2: false,
+  agentTeamRemoteDispatch: false,
   genericAgentHostCommands: false,
   gatewayAgentRouteTickets: false,
   headlessLlmGateway: false,
@@ -52,6 +55,7 @@ function readEnvFlags(): Partial<Record<AgentExecutionFlag, boolean>> {
   // client bundle; read per-call so node/headless env changes are observed.
   const raw: Record<AgentExecutionFlag, string | undefined> = {
     agentExecutionResolverV2: process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2,
+    agentTeamRemoteDispatch: process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH,
     genericAgentHostCommands: process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS,
     gatewayAgentRouteTickets: process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS,
     headlessLlmGateway: process.env.NEXT_PUBLIC_HEADLESS_LLM_GATEWAY,
@@ -98,6 +102,14 @@ export function getAgentExecutionFlags(): Record<AgentExecutionFlag, boolean> {
 
 export function isAgentExecutionFlagEnabled(flag: AgentExecutionFlag): boolean {
   return getAgentExecutionFlags()[flag]
+}
+
+/** Remote team dispatch is fail-closed unless both prerequisite authorities are active. */
+export function isAgentTeamRemoteDispatchEnabled(taskWorkspaceEnabled: boolean): boolean {
+  const flags = getAgentExecutionFlags()
+  return (
+    flags.agentTeamRemoteDispatch && flags.agentExecutionResolverV2 && taskWorkspaceEnabled === true
+  )
 }
 
 /**

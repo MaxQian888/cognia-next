@@ -3,6 +3,8 @@ import type { TeamRunContext } from "./team-run-context"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import type { RoutingPlan } from "@cognia/provider-types/auto-router"
+import { RUNTIME_CAPABILITIES } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
+import type { RemoteWorkerRunInput } from "./remote-worker-runtime"
 
 const mockedBusEmit = emitSystemBusEvent as jest.Mock
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
@@ -118,6 +120,56 @@ jest.mock("./durable-runtime", () => ({
   getDurableTeamCoordinator: () => ({ durable: true }),
 }))
 
+const remoteRunMock = jest.fn()
+const remoteWorkersMock = jest.fn(() => [] as unknown[])
+jest.mock("./remote-worker-runtime", () => {
+  const actual = jest.requireActual("./remote-worker-runtime")
+  return {
+    ...actual,
+    getRemoteWorkerRuntime: () => ({
+      listWorkers: () => remoteWorkersMock(),
+      run: (...args: unknown[]) => remoteRunMock(...args),
+    }),
+  }
+})
+
+const claimDispatchLeaseMock = jest.fn<Promise<unknown>, unknown[]>(async () => undefined)
+const getAgentTeamChildRunMock = jest.fn(async (..._args: unknown[]) => undefined as unknown)
+const updateChildRunMock = jest.fn(async (..._args: unknown[]) => true)
+const settleDispatchLeaseMock = jest.fn(async (..._args: unknown[]) => true)
+const advanceRemoteEventMock = jest.fn(async (..._args: unknown[]) => true)
+jest.mock("@/lib/db/agent-team-runtime", () => ({
+  claimAgentTeamDispatchLease: (...args: unknown[]) => claimDispatchLeaseMock(...args),
+  getAgentTeamChildRun: (...args: unknown[]) => getAgentTeamChildRunMock(...args),
+  getAgentTeamRun: async () => ({
+    id: "run1",
+    teamId: "team1",
+    projectId: "project1",
+    objective: "Ship",
+    status: "running",
+    priority: 0,
+    decisionVersion: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  }),
+  renewAgentTeamDispatchLease: async () => true,
+  settleAgentTeamDispatchLease: (...args: unknown[]) => settleDispatchLeaseMock(...args),
+  updateAgentTeamChildRun: (...args: unknown[]) => updateChildRunMock(...args),
+  advanceAgentTeamRemoteEvent: (...args: unknown[]) => advanceRemoteEventMock(...args),
+}))
+
+const projectRemoteEventMock = jest.fn(async (..._args: unknown[]) => undefined)
+const projectChildLifecycleMock = jest.fn(async (..._args: unknown[]) => undefined)
+const projectFleetMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/execution/agent-team-bridge", () => ({
+  agentTeamExecutionRunId: (runId: string) => `execution:team:${runId}`,
+  projectRemoteAgentTeamEvent: (...args: unknown[]) => projectRemoteEventMock(...args),
+  projectAgentTeamChildLifecycle: (...args: unknown[]) => projectChildLifecycleMock(...args),
+}))
+jest.mock("@/lib/fleet/managed-session-projection", () => ({
+  projectManagedFleetSession: (...args: unknown[]) => projectFleetMock(...args),
+}))
+
 const decisionContextMock = jest.fn(async () => "")
 jest.mock("./decision-ledger", () => ({
   createDecisionLedger: () => ({ context: decisionContextMock }),
@@ -229,6 +281,16 @@ beforeEach(() => {
   resolveExternalMock.mockResolvedValue(null)
   applyTeammateTwinContextMock.mockResolvedValue({ systemPrompt: "unused-default", applied: false })
   beginDurableDispatchMock.mockReset()
+  remoteRunMock.mockReset()
+  remoteWorkersMock.mockReset().mockReturnValue([])
+  claimDispatchLeaseMock.mockReset()
+  getAgentTeamChildRunMock.mockReset().mockResolvedValue(undefined)
+  updateChildRunMock.mockClear()
+  settleDispatchLeaseMock.mockClear()
+  advanceRemoteEventMock.mockClear()
+  projectRemoteEventMock.mockClear()
+  projectChildLifecycleMock.mockClear()
+  projectFleetMock.mockClear()
   decisionContextMock.mockResolvedValue("")
   resolveProviderAttemptOptionsMock.mockResolvedValue({
     providerCredentials: { apiKey: "fallback-key", protocol: "openai" },
@@ -480,6 +542,145 @@ describe("dispatchTeammate — durable execution environment", () => {
         environmentEvidence: [{ kind: "test", title: "pnpm test", content: "passed" }],
       })
     )
+  })
+})
+
+describe("dispatchTeammate — remote durable worker", () => {
+  it("claims a child lease, dispatches by stable repository ref, and captures events once", async () => {
+    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "true"
+    process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
+    taskWorkspaceEnabledMock.mockReturnValue(true)
+    const complete = jest.fn(async () => undefined)
+    const attachControl = jest.fn(async () => undefined)
+    beginDurableDispatchMock.mockResolvedValue({
+      childRunId: "child-remote",
+      retryTargetHostRef: undefined,
+      capture: jest.fn(),
+      attachControl,
+      attachEnvironment: jest.fn(),
+      prepareTurnContext: jest.fn(async () => ""),
+      setWorkspace: jest.fn(async () => undefined),
+      run: (operation: () => Promise<unknown>) => operation(),
+      wait: jest.fn(async () => undefined),
+      complete,
+      fail: jest.fn(async () => undefined),
+    })
+    remoteWorkersMock.mockReturnValue([
+      {
+        connectionId: "connection-a",
+        hostRef: "device:worker-a",
+        online: true,
+        activeTurns: 0,
+        lastSeenAt: 1,
+        manifest: {
+          manifestVersion: 1,
+          runtime: "cognia-agent",
+          models: ["default"],
+          hardCapabilities: [...new Set(Object.values(RUNTIME_CAPABILITIES).flat())],
+          maxActiveTurns: 1,
+          credentialProfileRefs: [],
+          workspaceBindingRefs: ["repository:project1:primary"],
+          taskWorkspace: { enabled: true },
+          sandbox: { capabilities: ["filesystem"] },
+          platform: { os: "linux", arch: "x64" },
+        },
+      },
+    ])
+    claimDispatchLeaseMock.mockImplementation(async (input: { leaseId: string }) => ({
+      id: "child-remote",
+      dispatchLeaseId: input.leaseId,
+    }))
+    getAgentTeamChildRunMock.mockResolvedValue({ dispatchLeaseId: "dispatch:existing" })
+    remoteRunMock.mockImplementation(async (input: RemoteWorkerRunInput) => {
+      await input.onSession("remote-session-a")
+      await input.onControl({
+        steer: jest.fn(),
+        pause: jest.fn(),
+        resume: jest.fn(),
+        terminate: jest.fn(),
+      })
+      await input.onEvent({
+        eventId: "remote-event-1",
+        sequence: 1,
+        event: { kind: "text-delta", delta: "done" },
+      })
+      return {
+        status: "completed",
+        result: {
+          status: "completed",
+          text: "remote answer",
+          usage: { promptTokens: 2, completionTokens: 3, totalTokens: 5 },
+        },
+      }
+    })
+    const { ctx, pool } = makeCtx(
+      makeTeammate({
+        config: {
+          execution: {
+            mode: "pinned",
+            deploymentRef: "anthropic",
+            executionTarget: { mode: "auto" },
+          },
+        },
+      }),
+      {
+        runtimeVersion: "durable-v2",
+        repositories: [{ id: "primary", role: "primary", path: "/repo", writable: true }],
+      }
+    )
+    ;(ctx.team as AgentTeam).projectId = "project1"
+
+    try {
+      const result = await dispatchTeammate(ctx, {
+        taskId: "task-1",
+        prompt: "ship for alice@example.com",
+      })
+
+      expect(result.text).toBe("remote answer")
+      expect(remoteRunMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hostRef: "device:worker-a",
+          commandId: "dispatch:existing",
+          prompt: expect.not.stringContaining("alice@example.com"),
+          handoff: expect.objectContaining({
+            task: expect.objectContaining({
+              prompt: expect.not.stringContaining("alice@example.com"),
+            }),
+            resources: [{ kind: "repository", ref: "repository:project1:primary" }],
+          }),
+        })
+      )
+      expect(updateChildRunMock).toHaveBeenCalledWith(
+        "child-remote",
+        expect.objectContaining({ remoteSessionId: "remote-session-a" })
+      )
+      expect(advanceRemoteEventMock).toHaveBeenCalledTimes(1)
+      expect(projectRemoteEventMock).toHaveBeenCalledTimes(1)
+      expect(projectFleetMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "remote-session-a",
+          hostRef: "device:worker-a",
+          status: "ended",
+          agentTeamId: "team1",
+          agentTeamChildRunId: "child-remote",
+          executionRunId: expect.stringMatching(/^execution:team:/),
+        })
+      )
+      expect(settleDispatchLeaseMock).toHaveBeenCalledTimes(1)
+      expect(complete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: "remote answer",
+          usage: { promptTokens: 2, completionTokens: 3, totalTokens: 5 },
+        })
+      )
+      expect(complete.mock.invocationCallOrder[0]!).toBeLessThan(
+        settleDispatchLeaseMock.mock.invocationCallOrder[0]!
+      )
+      expect(pool.recordSuccess).toHaveBeenCalledWith("tm1")
+    } finally {
+      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
+      delete process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH
+    }
   })
 })
 

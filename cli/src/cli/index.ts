@@ -59,8 +59,10 @@ Usage:
                      typed Claude Agent SDK management (never raw option JSON)
   cognia-agent rpc [--model m] [--provider p] [--backend id]
   Bidirectional JSON-RPC 2.0 host on stdin/stdout (for @cognia/agent)
-  cognia-agent worker <bind|list|remove>
-                     [--repository-ref ref] [--path path] [--json]
+  cognia-agent worker <enroll|bind|list|remove|connect>
+                     [--repository-ref ref] [--path path] [--config file]
+                     [--server-url u] [--tenant-id id] [--enrollment token]
+                     [--max-active-turns n] [--json]
   cognia-agent serve [--server-url u] [--account id] [--home dir]
                      [--flush-debounce ms]           headless brain for cognia-server
                      (COGNIA_SERVER_URL / COGNIA_SERVICE_TOKEN / COGNIA_BRIDGE_URL /
