@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cognia Performance Optimization"
+  short_description: "Evidence-driven Cognia performance experiments"
+  default_prompt: "Use $optimize-cognia-performance to run a measured Cognia performance experiment and report the evidence."
