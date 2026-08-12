@@ -12,6 +12,8 @@
       "@cognia/provider-core/*": ["../provider-core/src/*"],
       "@cognia/provider-embedding": ["../provider-embedding/src/index.ts"],
       "@cognia/provider-embedding/*": ["../provider-embedding/src/*"],
+      "@cognia/redact": ["../redact/src/index.ts"],
+      "@cognia/redact/*": ["../redact/src/*"],
       "@cognia/provider-routing": ["../provider-routing/src/index.ts"],
       "@cognia/provider-routing/*": ["../provider-routing/src/*"],
       "@cognia/rag": ["./src/index.ts"],

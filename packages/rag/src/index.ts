@@ -8,6 +8,11 @@
  * - Query expansion
  */
 
+// Canonical retrieval contracts and outbound embedding boundary
+export * from "./retrieval-profile"
+export * from "./safe-embedding-gateway"
+export * from "./retrieval-kernel"
+
 // Hybrid Search
 export {
   type BM25Config,

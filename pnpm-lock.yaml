@@ -1122,6 +1122,9 @@ importers:
       '@cognia/provider-embedding':
         specifier: workspace:*
         version: link:../provider-embedding
+      '@cognia/redact':
+        specifier: workspace:*
+        version: link:../redact
       '@cognia/vector':
         specifier: workspace:*
         version: link:../vector
