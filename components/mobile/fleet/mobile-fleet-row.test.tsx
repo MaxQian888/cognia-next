@@ -65,6 +65,23 @@ describe("MobileFleetRow", () => {
     expect(screen.getByTestId("mobile-fleet-status")).toBeInTheDocument()
   })
 
+  it("links a managed session back to its AgentTeam authority", () => {
+    render(
+      <MobileFleetRow
+        session={session({
+          agent: "cognia",
+          origin: "managed-team",
+          agentTeamId: "team/a",
+          agentTeamChildRunId: "child-1",
+        })}
+      />
+    )
+    expect(screen.getByRole("link")).toHaveAttribute(
+      "href",
+      "/agent-teams/workspace?teamId=team%2Fa"
+    )
+  })
+
   it("swaps the status line for permission actions when one is parked", () => {
     render(
       <MobileFleetRow

@@ -854,6 +854,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     // All reach the process-global runtime directly (no AppHandle), so they also
     // work on a headless server.
     "fleet_get_snapshot",
+    "fleet_worker_enrollment_create",
+    "fleet_worker_list",
+    "fleet_worker_set",
+    "fleet_project_managed_session",
+    "fleet_project_worker_load",
+    "fleet_remove_managed_session",
     "fleet_permission_respond",
     "fleet_question_respond",
     "fleet_opencode_send_message",
@@ -1532,6 +1538,9 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "github_workspace_commit_and_push",
     "github_workspace_remove",
     "github_workspace_stat",
+    "fleet_project_managed_session",
+    "fleet_project_worker_load",
+    "fleet_remove_managed_session",
     // ADR-0059 T-A5 — the connector command plane carries credentials and
     // arbitrary outbound HTTP; only the brain's service token may touch it.
     "connectors_health",

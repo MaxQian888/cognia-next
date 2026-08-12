@@ -1,4 +1,4 @@
-//! Bridge WebSocket — `GET /internal/bridge` (ADR-0059 W3, protocol v1).
+//! Bridge WebSocket — `GET /internal/bridge` (ADR-0059 W3, protocol v3).
 //!
 //! The headless Node brain connects here and becomes the data plane: the
 //! companion bridges (`sync_bridge`, `desktop_messages_bridge`,
@@ -67,7 +67,7 @@ use super::SharedState;
 
 /// Bridge protocol version. Bumped only on breaking frame-shape changes;
 /// mismatches close the socket with code 1002.
-pub const BRIDGE_PROTOCOL_VERSION: u32 = 2;
+pub const BRIDGE_PROTOCOL_VERSION: u32 = 3;
 
 /// How long the server waits for the brain's `hello` before closing 1002.
 #[cfg(not(test))]
@@ -162,6 +162,31 @@ pub enum BridgeFrame {
     },
     /// server → brain: a re-minted service token (12h refresh, R8).
     TokenRefresh { v: u32, token: String },
+    /// server → brain: an authenticated worker became available.
+    WorkerAttach {
+        v: u32,
+        #[serde(rename = "connectionId")]
+        connection_id: String,
+        #[serde(rename = "hostRef")]
+        host_ref: String,
+        manifest: Value,
+    },
+    /// Bidirectional opaque Agent RPC v2 frame multiplexed by connection id.
+    WorkerFrame {
+        v: u32,
+        #[serde(rename = "connectionId")]
+        connection_id: String,
+        frame: String,
+    },
+    /// server → brain: an authenticated worker attachment ended.
+    WorkerDetach {
+        v: u32,
+        #[serde(rename = "connectionId")]
+        connection_id: String,
+        #[serde(rename = "hostRef")]
+        host_ref: String,
+        reason: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +334,7 @@ fn install_socket_bridge(
         let _ = old.shutdown.send(true);
     }
     let _ = READY.0.send(true);
+    super::ws_worker::announce_all_workers();
 }
 
 /// Clear the slot iff it is still owned by `conn_id` (a replaced connection
@@ -373,6 +399,71 @@ pub fn send_token_refresh(token: String) -> Result<(), String> {
         }),
         None => Err("no connected brain".to_string()),
     }
+}
+
+pub(crate) fn send_worker_attach(
+    tenant_id: String,
+    connection_id: String,
+    host_ref: String,
+    manifest: Value,
+) -> Result<(), String> {
+    send_worker_bridge_frame(
+        &tenant_id,
+        BridgeFrame::WorkerAttach {
+            v: BRIDGE_PROTOCOL_VERSION,
+            connection_id,
+            host_ref,
+            manifest,
+        },
+    )
+}
+
+pub(crate) fn send_worker_frame(
+    tenant_id: String,
+    connection_id: String,
+    frame: String,
+) -> Result<(), String> {
+    send_worker_bridge_frame(
+        &tenant_id,
+        BridgeFrame::WorkerFrame {
+            v: BRIDGE_PROTOCOL_VERSION,
+            connection_id,
+            frame,
+        },
+    )
+}
+
+pub(crate) fn send_worker_detach(
+    tenant_id: String,
+    connection_id: String,
+    host_ref: String,
+    reason: String,
+) -> Result<(), String> {
+    send_worker_bridge_frame(
+        &tenant_id,
+        BridgeFrame::WorkerDetach {
+            v: BRIDGE_PROTOCOL_VERSION,
+            connection_id,
+            host_ref,
+            reason,
+        },
+    )
+}
+
+fn send_worker_bridge_frame(tenant_id: &str, frame: BridgeFrame) -> Result<(), String> {
+    let slot = SOCKET_BRIDGE.read();
+    match slot.as_ref() {
+        Some(slot) if slot.hello.account_id == tenant_id => slot.transport.send_frame(&frame),
+        Some(_) => Err("worker tenant does not match the connected brain".to_string()),
+        None => Err("no connected brain".to_string()),
+    }
+}
+
+pub(crate) fn current_brain_account_id() -> Option<String> {
+    SOCKET_BRIDGE
+        .read()
+        .as_ref()
+        .map(|slot| slot.hello.account_id.clone())
 }
 
 // ---------------------------------------------------------------------------
@@ -582,7 +673,7 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         last_brain_activity = Instant::now();
-                        handle_brain_frame(&state, text.as_str(), &transport);
+                        handle_brain_frame(&state, text.as_str(), &transport, &account_id);
                     }
                     Some(Ok(Message::Ping(data))) => {
                         last_brain_activity = Instant::now();
@@ -654,7 +745,12 @@ async fn await_hello(socket: &mut WebSocket) -> Option<BridgeFrame> {
 }
 
 /// Dispatch one parsed brain→server frame.
-fn handle_brain_frame(state: &SharedState, text: &str, transport: &SocketBridgeTransport) {
+fn handle_brain_frame(
+    state: &SharedState,
+    text: &str,
+    transport: &SocketBridgeTransport,
+    account_id: &str,
+) {
     let frame = match serde_json::from_str::<BridgeFrame>(text) {
         Ok(f) => f,
         Err(e) => {
@@ -681,6 +777,16 @@ fn handle_brain_frame(state: &SharedState, text: &str, transport: &SocketBridgeT
                 rss_bytes: 0,
                 last_flush_at: 0,
             });
+        }
+        BridgeFrame::WorkerFrame {
+            connection_id,
+            frame,
+            ..
+        } => {
+            if let Err(error) = super::ws_worker::send_to_worker(account_id, &connection_id, frame)
+            {
+                log::debug!("companion-api ws-bridge: worker frame rejected: {error}");
+            }
         }
         BridgeFrame::Hello { .. } => {
             log::debug!("companion-api ws-bridge: ignoring duplicate hello");

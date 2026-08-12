@@ -119,6 +119,29 @@ jest.mock("@/lib/claude/settings", () => ({
   subscribeClaudeSettings: (...args: unknown[]) => mockSubscribe(...args),
 }))
 
+const mockFleetSnapshot = {
+  sessions: [],
+  hosts: [
+    {
+      hostRef: "device:worker-a",
+      online: true,
+      activeTurns: 1,
+      maxActiveTurns: 2,
+      lastSeenAt: 1,
+      runtime: "codex",
+      workspaceBindingRefs: ["repository:project:repo"],
+    },
+  ],
+}
+jest.mock("@/hooks/fleet/use-fleet-snapshot", () => ({
+  useFleetSnapshot: () => ({ snapshot: mockFleetSnapshot, source: "companion" }),
+}))
+jest.mock("./execution-workers-card", () => ({
+  ExecutionWorkersCard: ({ hosts }: { hosts: Array<{ hostRef: string }> }) => (
+    <div data-testid="execution-workers-card">{hosts.map((host) => host.hostRef).join(",")}</div>
+  ),
+}))
+
 function hooksStatus(
   install: "installed" | "partial" | "not-installed" | "unavailable",
   script: "installed" | "stale" | "missing" = "installed"
@@ -179,6 +202,11 @@ async function renderLoaded() {
 }
 
 describe("FleetSection", () => {
+  it("mounts worker management with hosts from the shared Fleet snapshot", async () => {
+    await renderLoaded()
+    expect(screen.getByTestId("execution-workers-card")).toHaveTextContent("device:worker-a")
+  })
+
   it("renders the switches off for a fresh install", async () => {
     await renderLoaded()
     expect(screen.getByTestId("fleet-monitor-switch").getAttribute("aria-checked")).toBe("false")

@@ -45,6 +45,7 @@ pub fn router() -> Router<SharedState> {
         .route("/api/auth/config", get(auth_config_handler))
         .route("/api/auth/device/challenge", post(challenge_handler))
         .route("/api/auth/device/register", post(register_handler))
+        .route("/api/auth/worker/register", post(worker_register_handler))
         .route("/api/auth/token", post(token_handler))
         .route("/api/auth/socket-ticket", post(socket_ticket_handler))
         .layer(from_fn(super::middleware::pre_auth_rate_limit))
@@ -335,6 +336,40 @@ pub struct InvitationRequest {
 pub struct InvitationResponse {
     invitation: String,
     expires_in: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerEnrollmentResponse {
+    enrollment: String,
+    expires_in: i64,
+}
+
+pub(crate) async fn worker_enrollment_handler(
+    Extension(context): Extension<DeviceContext>,
+    body: Result<Json<InvitationRequest>, JsonRejection>,
+) -> ApiResult<WorkerEnrollmentResponse> {
+    let request = parse_public_json(body)?;
+    let ttl = request.ttl_seconds.unwrap_or(600);
+    if !(1..=3_600).contains(&ttl) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_worker_enrollment_ttl",
+            "ttlSeconds must be between 1 and 3600",
+        ));
+    }
+    let enrollment = store()?
+        .create_worker_enrollment(
+            &context.account_id,
+            &context.device_id,
+            unix_time_secs(),
+            ttl,
+        )
+        .map_err(store_error)?;
+    Ok(Json(WorkerEnrollmentResponse {
+        enrollment,
+        expires_in: ttl,
+    }))
 }
 
 pub(crate) async fn invitation_handler(
@@ -1053,6 +1088,29 @@ struct RegisterResponse {
     signaling: SignalingRegistrationResponse,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerRegisterRequest {
+    tenant_id: Option<String>,
+    enrollment: String,
+    challenge_id: String,
+    challenge_nonce: String,
+    device_id: String,
+    display_name: String,
+    public_key_pem: String,
+    proof: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerRegisterResponse {
+    device_id: String,
+    tenant_id: String,
+    role: &'static str,
+    capabilities: [&'static str; 1],
+    server_version: &'static str,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SignalingRegistrationResponse {
@@ -1148,6 +1206,49 @@ async fn register_handler(
         role: authority.role,
         server_version: env!("CARGO_PKG_VERSION"),
         signaling,
+    }))
+}
+
+async fn worker_register_handler(
+    body: Result<Json<WorkerRegisterRequest>, JsonRejection>,
+) -> ApiResult<WorkerRegisterResponse> {
+    let request = parse_public_json(body)?;
+    if request.enrollment.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "worker_enrollment_required",
+            "a one-time worker enrollment is required",
+        ));
+    }
+    let tenant_id = request_tenant(request.tenant_id)?;
+    let _ = verify_device_proof(
+        &request.public_key_pem,
+        &request.proof,
+        &request.challenge_nonce,
+        "POST",
+        "/api/auth/worker/register",
+        unix_time_secs(),
+    )?;
+    let thumbprint = hex::encode(Sha256::digest(request.public_key_pem.as_bytes()));
+    store()?
+        .register_worker_device(
+            &tenant_id,
+            &request.enrollment,
+            &request.challenge_id,
+            &request.challenge_nonce,
+            &request.device_id,
+            &request.display_name,
+            &request.public_key_pem,
+            &thumbprint,
+            unix_time_secs(),
+        )
+        .map_err(store_error)?;
+    Ok(Json(WorkerRegisterResponse {
+        device_id: request.device_id,
+        tenant_id,
+        role: "member",
+        capabilities: ["agent.worker"],
+        server_version: env!("CARGO_PKG_VERSION"),
     }))
 }
 
@@ -1386,6 +1487,7 @@ enum SocketChannel {
     Terminal,
     Browser,
     Acp,
+    Worker,
 }
 
 impl SocketChannel {
@@ -1394,6 +1496,7 @@ impl SocketChannel {
             Self::Events => "host.observe",
             Self::Terminal => "terminal.open",
             Self::Browser | Self::Acp => "agent.run",
+            Self::Worker => "agent.worker",
         }
     }
 
@@ -1402,6 +1505,7 @@ impl SocketChannel {
             (Self::Events, None) => Ok(("/ws/events".to_string(), "events")),
             (Self::Terminal, None) => Ok(("/ws/terminal".to_string(), "terminal")),
             (Self::Acp, None) => Ok(("/ws/acp".to_string(), "acp")),
+            (Self::Worker, None) => Ok(("/ws/worker".to_string(), "worker")),
             (Self::Browser, Some(session_id)) if !session_id.is_empty() => {
                 Ok((format!("/ws/browser/{session_id}"), "browser"))
             }
@@ -1867,6 +1971,11 @@ mod tests {
         assert_eq!(SocketChannel::Terminal.capability(), "terminal.open");
         assert_eq!(SocketChannel::Browser.capability(), "agent.run");
         assert_eq!(SocketChannel::Acp.capability(), "agent.run");
+        assert_eq!(
+            SocketChannel::Worker.binding(None).unwrap(),
+            ("/ws/worker".to_string(), "worker")
+        );
+        assert_eq!(SocketChannel::Worker.capability(), "agent.worker");
     }
 
     #[test]

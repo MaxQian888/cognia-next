@@ -4,6 +4,7 @@ export {
   RPC_ERROR_CODES,
   RPC_METHODS,
   RPC_PROTOCOL_VERSION,
+  agentWorkerManifestV1Schema,
   RpcValidationError,
   hostRequestSchemas,
   isJsonRpcNotification,

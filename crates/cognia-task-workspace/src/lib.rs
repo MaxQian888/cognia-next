@@ -16,6 +16,7 @@ mod tracking;
 mod transfer;
 mod types;
 mod watcher;
+mod worker_cli;
 
 pub use bundle::{
     execute_bundle_apply, plan_bundle_apply, plan_bundle_composition, ApplyStep, BundleApplier,
@@ -47,12 +48,13 @@ pub use types::{
     RunState, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
     TaskWorkspaceState, WorkspaceBaseKind, WorkspaceBaseSpec, WorkspaceBundle,
     WorkspaceBundleOutcome, WorkspaceLifecyclePolicy, WorkspaceOwnerType, WorkspaceRecord,
-    WorkspaceRootLease, WorkspaceRootRole, WorkspaceState,
+    WorkspaceRootLease, WorkspaceRootRole, WorkspaceSourceBinding, WorkspaceState,
 };
 pub use watcher::{
     ResourceEventChange, ResourceEventKind, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,
     WatchManager,
 };
+pub use worker_cli::run_worker_cli;
 
 #[cfg(test)]
 mod tests {

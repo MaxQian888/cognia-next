@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl"
 import { MobileFleetRow } from "./mobile-fleet-row"
 import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
 import { fleetStatusSummary, sortForIsland } from "@/lib/fleet/format"
+import { Badge } from "@/components/ui/badge"
 
 export function MobileFleetScreen() {
   const t = useTranslations("mobile.fleet")
@@ -29,6 +30,23 @@ export function MobileFleetScreen() {
 
   const sessions = sortForIsland(snapshot.sessions)
   const summary = fleetStatusSummary(sessions)
+  const hosts = snapshot.hosts ?? []
+  const grouped = [
+    ...hosts.map((host) => ({
+      key: host.hostRef,
+      label: host.hostRef,
+      host,
+      sessions: sessions.filter((session) => session.hostRef === host.hostRef),
+    })),
+    {
+      key: "local",
+      label: t("localHost"),
+      host: undefined,
+      sessions: sessions.filter(
+        (session) => !session.hostRef || !hosts.some((host) => host.hostRef === session.hostRef)
+      ),
+    },
+  ].filter((group) => group.host || group.sessions.length > 0)
 
   return (
     <div className="flex h-full flex-col" data-testid="mobile-fleet-screen">
@@ -43,14 +61,50 @@ export function MobileFleetScreen() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {sessions.length === 0 ? (
+        {sessions.length === 0 && hosts.length === 0 ? (
           <p className="p-4 text-xs text-muted-foreground" data-testid="mobile-fleet-empty">
             {t("empty")}
           </p>
         ) : (
-          <div className="space-y-2 p-3" data-testid="mobile-fleet-list">
-            {sessions.map((s) => (
-              <MobileFleetRow key={`${s.agent}:${s.sessionId}`} session={s} />
+          <div className="space-y-4 p-3" data-testid="mobile-fleet-list">
+            {grouped.map((group) => (
+              <section key={group.key} className="space-y-2" data-testid={`fleet-host-${group.key}`}>
+                <div className="flex flex-wrap items-center gap-2 px-1">
+                  <h2 className="min-w-0 flex-1 truncate text-xs font-semibold">{group.label}</h2>
+                  {group.host ? (
+                    <>
+                      <Badge variant={group.host.online ? "secondary" : "outline"}>
+                        {group.host.online ? t("hostOnline") : t("hostOffline")}
+                      </Badge>
+                      <span className="text-[11px] text-muted-foreground">
+                        {t("hostCapacity", {
+                          used: group.host.usedSlots ?? 0,
+                          total: group.host.maxActiveTurns,
+                        })}
+                      </span>
+                      <Badge
+                        variant={group.host.workspaceBindingReady ? "outline" : "destructive"}
+                      >
+                        {group.host.workspaceBindingReady
+                          ? t("workspaceReady")
+                          : t("workspaceMissing")}
+                      </Badge>
+                    </>
+                  ) : null}
+                </div>
+                {group.sessions.length === 0 ? (
+                  <p className="rounded-md border p-3 text-xs text-muted-foreground">
+                    {t("hostEmpty")}
+                  </p>
+                ) : (
+                  group.sessions.map((session) => (
+                    <MobileFleetRow
+                      key={`${session.agent}:${session.sessionId}`}
+                      session={session}
+                    />
+                  ))
+                )}
+              </section>
             ))}
           </div>
         )}

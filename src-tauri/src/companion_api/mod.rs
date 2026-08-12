@@ -74,6 +74,7 @@ pub mod workflow_api;
 pub mod ws;
 pub mod ws_bridge;
 pub mod ws_terminal;
+pub mod ws_worker;
 
 pub mod commands;
 

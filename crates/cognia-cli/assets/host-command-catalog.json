@@ -7339,6 +7339,146 @@
       "outputTyped": true
     },
     {
+      "name": "fleet_project_managed_session",
+      "category": "agents",
+      "resource": "fleet",
+      "target": "service",
+      "operation": "write",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "fleet_project_managed_session (host.observe)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "object",
+            "required": [
+              "sessionId",
+              "hostRef",
+              "status",
+              "agentTeamId",
+              "agentTeamRunId",
+              "agentTeamChildRunId",
+              "executionRunId"
+            ],
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRef": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "idle",
+                  "working",
+                  "waiting-input",
+                  "waiting-permission",
+                  "plan-pending",
+                  "ended"
+                ]
+              },
+              "agentTeamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "agentTeamRunId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "agentTeamChildRunId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "executionRunId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reviewEvidenceRef": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "projectName": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "fleet_project_worker_load",
+      "category": "agents",
+      "resource": "fleet",
+      "target": "service",
+      "operation": "write",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "fleet_project_worker_load (host.observe)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "loads"
+        ],
+        "properties": {
+          "loads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "hostRef",
+                "usedSlots"
+              ],
+              "properties": {
+                "hostRef": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "usedSlots": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "fleet_question_respond",
       "category": "agents",
       "resource": "fleet",
@@ -7386,6 +7526,150 @@
         ],
         "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
         "x-cognia-schema-owner": "fleet"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "fleet_remove_managed_session",
+      "category": "agents",
+      "resource": "fleet",
+      "target": "service",
+      "operation": "write",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "fleet_remove_managed_session (host.observe)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "boolean"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "fleet_worker_enrollment_create",
+      "category": "agents",
+      "resource": "fleet",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "fleet_worker_enrollment_create (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "baseUrl",
+          "fingerprint"
+        ],
+        "properties": {
+          "baseUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "fingerprint": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "fleet"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "fleet_worker_list",
+      "category": "agents",
+      "resource": "fleet",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "structural",
+      "summary": "fleet_worker_list (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "fleet"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "fleet_worker_set",
+      "category": "agents",
+      "resource": "fleet",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "fleet_worker_set (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "allowed"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "allowed": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -23066,5 +23350,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "d6a9b1421313c4339bc790ab5b1cccd5486811186750d8970774dc884f0bb355"
+  "catalogHash": "f88a74f52d6325ff6603320907b6084d33574095824fbe719e405508168d4802"
 }

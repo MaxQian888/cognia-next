@@ -1,6 +1,10 @@
+// static-export-exempt: Agent host lifecycle runs exclusively in the Node CLI/sidecar.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+// static-export-exempt: Agent host lifecycle runs exclusively in the Node CLI/sidecar.
 import { createRequire } from "node:module"
+// static-export-exempt: Agent host lifecycle runs exclusively in the Node CLI/sidecar.
 import { existsSync, readFileSync } from "node:fs"
+// static-export-exempt: Agent host lifecycle runs exclusively in the Node CLI/sidecar.
 import path from "node:path"
 
 import type { CogniaDiagnostic } from "./types"

@@ -50,6 +50,7 @@ export interface AgentTeamManager {
    * only. No-op unless the team is `paused`.
    */
   resume(id: string, opts?: Parameters<AgentTeamManager["start"]>[1]): Promise<void>
+  retryChild(childRunId: string, optionalHostRef?: string): Promise<void>
   shutdown(id: string): Promise<void>
 }
 
@@ -168,13 +169,41 @@ async function runManaged(
         ? { ultracodeOverride: "off" as const }
         : {}),
   })
+  let durableRunStatus: import("@/types/agent/agent-team-runtime").AgentTeamRunStatus | undefined
+  if (
+    result.runId &&
+    useAgentTeamStore.getState().teams[id]?.config.runtimeVersion === "durable-v2"
+  ) {
+    const { getAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+    durableRunStatus = (await getAgentTeamRun(result.runId))?.status
+  }
   // Optimistically mirror the terminal result onto store team.status as an
   // in-flight bridge. The authoritative source is the workflowRuns
   // subscription (`useTeamLiveStatus`), which the workspace overview and the
   // teams-list card both consume; `deriveTeamStatus` only lets this
   // optimistic write win while it's still non-terminal.
-  useAgentTeamStore.getState().setTeamStatus(id, result.status)
+  useAgentTeamStore
+    .getState()
+    .setTeamStatus(id, durableRunStatus === "needs_input" ? "paused" : result.status)
   const team = useAgentTeamStore.getState().teams[id]
+  if (
+    team?.config.runtimeVersion === "durable-v2" &&
+    result.runId &&
+    durableRunStatus !== "needs_input" &&
+    ["completed", "failed", "cancelled"].includes(result.status)
+  ) {
+    const [{ getAgentTeamRun }, { settleAgentTeamExecutionRun }] = await Promise.all([
+      import("@/lib/db/agent-team-runtime"),
+      import("@/lib/execution/agent-team-bridge"),
+    ])
+    const durableRun = await getAgentTeamRun(result.runId)
+    if (durableRun) {
+      await settleAgentTeamExecutionRun(
+        durableRun,
+        result.status as "completed" | "failed" | "cancelled"
+      )
+    }
+  }
   if (
     team?.config.runtimeVersion === "durable-v2" &&
     result.status === "completed" &&
@@ -205,7 +234,9 @@ async function runManaged(
   // AgentTeam retrospective table automatically.
   // Emit a scheduler event so event-triggered tasks / forward chains can
   // react to a team finishing. Lazy import + best-effort.
-  void emitTeamCompletedSchedulerEvent(id, result.status)
+  if (durableRunStatus !== "needs_input") {
+    void emitTeamCompletedSchedulerEvent(id, result.status)
+  }
 }
 
 /** Rebuild durable queues after renderer restart and replay only safe checkpoints. */
@@ -346,6 +377,25 @@ export const agentTeamManager: AgentTeamManager = {
     }
 
     await runManaged(id, opts, (t) => !RESUME_SKIP_STATUSES.has(t.status))
+  },
+  retryChild: async (childRunId, optionalHostRef) => {
+    const [{ getDurableTeamCoordinator }, { getAgentTeamChildRun }] = await Promise.all([
+      import("./team/durable-runtime"),
+      import("@/lib/db/agent-team-runtime"),
+    ])
+    const child = await getAgentTeamChildRun(childRunId)
+    if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
+    const team = useAgentTeamStore.getState().getTeam(child.teamId)
+    if (!team || team.config.runtimeVersion !== "durable-v2") {
+      throw new Error("Remote child recovery requires a durable-v2 AgentTeam")
+    }
+    await getDurableTeamCoordinator().retryChild(childRunId, optionalHostRef)
+    useAgentTeamStore.getState().updateTask(child.taskId, {
+      status: "pending",
+      error: undefined,
+      completedAt: undefined,
+    })
+    await runManaged(team.id, undefined, (task) => task.id === child.taskId, child.runId)
   },
   shutdown: async (id) => {
     abortTeam(id, new Error("shutdown"))

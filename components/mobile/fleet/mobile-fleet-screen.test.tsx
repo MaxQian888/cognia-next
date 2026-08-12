@@ -53,4 +53,27 @@ describe("MobileFleetScreen", () => {
     render(<MobileFleetScreen />)
     expect(screen.getByTestId("mobile-fleet-summary").textContent).not.toContain("waiting")
   })
+
+  it("groups managed sessions under authenticated worker hosts", () => {
+    snapshotState.source = "companion"
+    snapshotState.snapshot = {
+      sessions: [{ ...sessionLike("remote"), hostRef: "device:a", origin: "managed-team" }],
+      hosts: [
+        {
+          hostRef: "device:a",
+          online: true,
+          maxActiveTurns: 1,
+          usedSlots: 1,
+          runtime: "test",
+          workspaceBindingReady: true,
+          lastSeenAt: 1,
+        },
+      ],
+      generatedAt: 5,
+    }
+    render(<MobileFleetScreen />)
+    expect(screen.getByTestId("fleet-host-device:a")).toContainElement(
+      screen.getByTestId("fleet-row-remote")
+    )
+  })
 })

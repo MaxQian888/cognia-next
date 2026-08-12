@@ -12,6 +12,7 @@ import {
   buildHello,
   buildPong,
   buildRespond,
+  buildWorkerFrame,
   parseBridgeFrame,
   serializeBridgeFrame,
   type BridgeFrame,
@@ -61,5 +62,12 @@ describe("bridge protocol golden fixtures", () => {
     expect(parseBridgeFrame("42")).toBeNull()
     expect(parseBridgeFrame(JSON.stringify({ type: "mystery", v: 1 }))).toBeNull()
     expect(parseBridgeFrame(JSON.stringify({ type: "ping" }))).toBeNull() // no v
+  })
+
+  it("keeps Agent RPC payloads opaque and newline-free", () => {
+    expect(buildWorkerFrame("connection-1", '{"jsonrpc":"2.0","id":1}')).toEqual(
+      fixtures.frames.workerFrame
+    )
+    expect(() => buildWorkerFrame("connection-1", "{}\n{}")).toThrow(/newlines/)
   })
 })

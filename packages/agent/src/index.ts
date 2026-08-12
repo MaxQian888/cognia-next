@@ -20,9 +20,19 @@ export {
   type ToolApi,
 } from "./client"
 export type { CogniaHostOption } from "./host"
+export {
+  isHandoffEnvelope,
+  validateHandoffEnvelope,
+  type HandoffEnvelope,
+  type HandoffExecutionBinding,
+  type HandoffResourceRef,
+  type HandoffRuntimeAdapterId,
+} from "./handoff-envelope"
+export { isAgentWorkerManifestV1 } from "./types"
 export type {
   AgentEventEnvelope,
   AgentInput,
+  AgentWorkerManifestV1,
   AgentPermissionMode,
   AgentRunResultV1,
   AgentTurnOutcome,
@@ -53,6 +63,7 @@ export type {
   PendingPermission,
   PermissionDecision,
   ProtocolLimits,
+  InitializeResult,
   ResolvedAgentExecutionSpec,
   RunOptions,
   SessionCreateOptions,

@@ -517,6 +517,58 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     return outcomes
   }
 
+  const retryChild = async (
+    childRunId: string,
+    requestedHostRef?: string
+  ): Promise<AgentTeamChildRun> => {
+    const child = await getAgentTeamChildRun(childRunId)
+    if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
+    if (["completed", "cancelled", "terminated"].includes(child.status)) {
+      throw new Error(`Durable child ${childRunId} cannot be retried from ${child.status}`)
+    }
+    const run = await getAgentTeamRun(child.runId)
+    if (!run) throw new Error(`Unknown durable AgentTeam run: ${child.runId}`)
+
+    const checkpoint = await getLatestAgentTeamCheckpoint(childRunId)
+    const safeToMigrate =
+      checkpoint?.replay === "safe" &&
+      checkpoint.sideEffects.every(
+        (effect) =>
+          effect.state !== "unknown" && !(effect.state === "intent" && effect.replay !== "safe")
+      )
+    const changesHost =
+      requestedHostRef !== undefined &&
+      child.hostRef !== undefined &&
+      requestedHostRef !== child.hostRef
+    if (changesHost && !safeToMigrate) {
+      throw new Error("Cross-host retry requires a safe checkpoint")
+    }
+
+    // Unsafe automatic retries remain pinned to the authenticated source host.
+    // beginDurableDispatch consumes this marker before clearing waitingReason.
+    const retryHostRef =
+      requestedHostRef ?? (!safeToMigrate && child.hostRef ? child.hostRef : undefined)
+    const at = now()
+    await Promise.all([
+      updateAgentTeamChildRun(childRunId, {
+        status: "queued",
+        error: undefined,
+        dispatchLeaseId: undefined,
+        dispatchLeaseExpiresAt: undefined,
+        waitingReason: retryHostRef ? `retry_host:${retryHostRef}` : undefined,
+        updatedAt: at,
+      }),
+      updateAgentTeamRun(run.id, {
+        status: "recovering",
+        recoveryReason: retryHostRef ? "operator_retry_host" : "operator_retry_auto",
+        updatedAt: at,
+      }),
+    ])
+    const updated = await getAgentTeamChildRun(childRunId)
+    if (!updated) throw new Error(`Durable child disappeared during retry: ${childRunId}`)
+    return updated
+  }
+
   const setChildControlState = async (
     childRunId: string,
     action: "pause" | "resume" | "terminate"
@@ -527,14 +579,25 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     // Pause is cooperative: never kill an in-flight tool call. The current
     // turn reaches its next durable boundary, while new admissions wait.
     if (action === "pause") await control?.pause?.()
+    if (action === "resume" && child.remoteSessionId) {
+      const checkpoint = await getLatestAgentTeamCheckpoint(childRunId)
+      if (checkpoint?.replay !== "safe") {
+        throw new Error("Remote child resume requires a safe checkpoint")
+      }
+    }
     if (action === "resume") await control?.resume?.()
     if (action === "terminate") await control?.terminate?.()
     const status = action === "pause" ? "paused" : action === "resume" ? "running" : "terminated"
     await updateAgentTeamChildRun(childRunId, {
       status,
+      ...(action === "resume" && child.remoteSessionId ? { attempt: child.attempt + 1 } : {}),
       ...(action === "terminate" ? { completedAt: now() } : {}),
       updatedAt: now(),
     })
+    if (action === "terminate" && child.remoteSessionId) {
+      const { removeManagedFleetSession } = await import("@/lib/fleet/managed-session-projection")
+      await removeManagedFleetSession(child.remoteSessionId).catch(() => false)
+    }
   }
 
   const sleepChild = async (childRunId: string): Promise<void> => {
@@ -626,6 +689,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     steer,
     checkpoint,
     recover,
+    retryChild,
     pauseChild: (childRunId: string) => setChildControlState(childRunId, "pause"),
     resumeChild: (childRunId: string) => setChildControlState(childRunId, "resume"),
     sleepChild,

@@ -54,6 +54,8 @@ const sidecarOutDir = path.join(binDir, "sidecar")
 const vscodeHostOutDir = path.join(sidecarOutDir, "vscode-ext-host")
 const externalHostLauncherName = process.platform === "win32" ? "cognia-external-agent-launcher.exe" : "cognia-external-agent-launcher"
 const externalHostLauncher = path.join(root, "target", "release", externalHostLauncherName)
+const workspaceHelperName = process.platform === "win32" ? "cognia-task-workspace-worker.exe" : "cognia-task-workspace-worker"
+const workspaceHelper = path.join(root, "target", "release", workspaceHelperName)
 
 // Deps the sidecar bundle keeps external (resolved from the copied node_modules
 // at runtime): claude-agent-sdk does dynamic requires / spawns the `claude`
@@ -161,6 +163,10 @@ if (!LAYOUT_ONLY) {
 
 if (!fs.existsSync(externalHostLauncher)) {
   console.error(`build-cli-binary: missing ${path.relative(root, externalHostLauncher)} — run pnpm cli:external-host:build`)
+  process.exit(1)
+}
+if (!fs.existsSync(workspaceHelper)) {
+  console.error(`build-cli-binary: missing ${path.relative(root, workspaceHelper)} — run pnpm cli:worker-workspace:build`)
   process.exit(1)
 }
 
@@ -451,7 +457,9 @@ if (LAYOUT_ONLY) {
   })
   fs.cpSync(sidecarOutDir, path.join(layoutDir, "sidecar"), { recursive: true, dereference: true })
   fs.cpSync(externalHostLauncher, path.join(layoutDir, externalHostLauncherName))
+  fs.cpSync(workspaceHelper, path.join(layoutDir, workspaceHelperName))
   if (process.platform !== "win32") fs.chmodSync(path.join(layoutDir, externalHostLauncherName), 0o755)
+  if (process.platform !== "win32") fs.chmodSync(path.join(layoutDir, workspaceHelperName), 0o755)
   console.log(`build-cli-binary: assembled layout ${path.relative(root, layoutDir)}`)
   process.exit(0)
 }
@@ -526,7 +534,9 @@ for (const t of TARGETS) {
       (process.platform === "win32" && process.arch === "x64" && t.dist === "cognia-agent-win-x64")
     if (nativeTarget) {
       fs.cpSync(externalHostLauncher, path.join(distDir, externalHostLauncherName))
+      fs.cpSync(workspaceHelper, path.join(distDir, workspaceHelperName))
       if (process.platform !== "win32") fs.chmodSync(path.join(distDir, externalHostLauncherName), 0o755)
+      if (process.platform !== "win32") fs.chmodSync(path.join(distDir, workspaceHelperName), 0o755)
     }
     console.log(`build-cli-binary: assembled ${path.relative(root, distDir)}`)
 

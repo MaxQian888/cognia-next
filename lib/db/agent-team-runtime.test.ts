@@ -8,7 +8,9 @@ import {
 } from "./schema"
 import {
   appendAgentTeamTrajectory,
+  advanceAgentTeamRemoteEvent,
   aggregateAgentTeamRunUsage,
+  claimAgentTeamDispatchLease,
   createAgentTeamChildRun,
   createAgentTeamRun,
   createAgentTeamSteeringReceipt,
@@ -21,6 +23,8 @@ import {
   purgeAgentTeamRun,
   purgeAgentTeam,
   putAgentTeamContent,
+  renewAgentTeamDispatchLease,
+  settleAgentTeamDispatchLease,
   updateAgentTeamSteeringReceipt,
   updateAgentTeamChildRun,
 } from "./agent-team-runtime"
@@ -131,6 +135,63 @@ describe("durable AgentTeam runtime persistence", () => {
 
     await updateAgentTeamSteeringReceipt("steer-1", "delivered", 22)
     expect((await getDb().agentTeamSteeringReceipts.get("steer-1"))?.status).toBe("delivered")
+  })
+
+  it("uses the child row for lease CAS, renewal, settlement, and event dedupe", async () => {
+    await createAgentTeamRun({
+      id: "run-lease",
+      teamId: "team-1",
+      objective: "Dispatch once",
+      decisionVersion: 0,
+      priority: 1,
+      status: "running",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await createAgentTeamChildRun({
+      id: "child-lease",
+      runId: "run-lease",
+      teamId: "team-1",
+      teammateId: "mate-1",
+      taskId: "task-1",
+      repositoryId: "primary",
+      attempt: 1,
+      status: "queued",
+      resourceUsage: {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        wallTimeMs: 0,
+        toolTimeMs: 0,
+        attempts: 1,
+        failures: 0,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    expect(
+      await claimAgentTeamDispatchLease({
+        childRunId: "child-lease",
+        leaseId: "lease-a",
+        hostRef: "device:a",
+        now: 10,
+      })
+    ).toMatchObject({ dispatchLeaseId: "lease-a", dispatchLeaseExpiresAt: 60_010 })
+    expect(
+      await claimAgentTeamDispatchLease({
+        childRunId: "child-lease",
+        leaseId: "lease-b",
+        hostRef: "device:b",
+        now: 11,
+      })
+    ).toBeUndefined()
+    expect(await renewAgentTeamDispatchLease("child-lease", "lease-b", 20)).toBe(false)
+    expect(await renewAgentTeamDispatchLease("child-lease", "lease-a", 20)).toBe(true)
+    expect(await advanceAgentTeamRemoteEvent("child-lease", undefined, "event-1", 21)).toBe(true)
+    expect(await advanceAgentTeamRemoteEvent("child-lease", undefined, "event-1", 22)).toBe(false)
+    expect(await settleAgentTeamDispatchLease("child-lease", "lease-b", 23)).toBe(false)
+    expect(await settleAgentTeamDispatchLease("child-lease", "lease-a", 23)).toBe(true)
   })
 
   it("recovers only runs interrupted during active execution", async () => {

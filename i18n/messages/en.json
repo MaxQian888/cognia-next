@@ -2387,20 +2387,37 @@
     "openWorkspace": "Open workspace",
     "operations": {
       "children": {
+        "cancel": "Cancel child",
+        "cancelled": "Child cancelled.",
         "commandsPlaceholder": "Manual commands, one per line",
         "diffPlaceholder": "Manual diff or edit summary",
+        "host": "Host: {value}",
+        "lease": "Dispatch lease: {value}",
+        "leaseExpired": "expired",
+        "leaseFresh": "fresh",
+        "localHost": "local",
+        "noLease": "none",
+        "noRemoteSession": "none",
         "noWorkspace": "workspace pending",
         "openBrowser": "Open browser",
         "openEditor": "Open editor",
         "openTerminal": "Open terminal",
+        "recoveryRequired": "Operator recovery is required before this child can continue.",
+        "remoteSession": "Remote session: {value}",
         "resume": "Checkpoint and resume",
+        "retryHostLabel": "Compatible retry host",
+        "retrySameHost": "Retry same host",
+        "retrySelectedHost": "Retry selected host",
+        "retryStarted": "Child retry started.",
+        "selectHost": "Select compatible host",
         "steer": "Send steering",
         "steerPlaceholder": "Steer this child at the next safe boundary",
         "steered": "Steering recorded.",
         "takeover": "Begin takeover",
         "takeoverCompleted": "Manual takeover checkpointed.",
         "takeoverStarted": "Child paused for takeover.",
-        "title": "Child sessions and takeover"
+        "title": "Child sessions and takeover",
+        "waitingReason": "Waiting: {value}"
       },
       "decisions": {
         "accept": "Accept",
@@ -2911,6 +2928,12 @@
         "deploymentRefPlaceholder": "deployment id (e.g. dep-vendor-a)",
         "description": "How this teammate's runtime, deployment and credentials are bound. References only — endpoints and keys live in provider profiles.",
         "flagOffHint": "Inert until the unified execution resolver flag (agentExecutionResolverV2) is enabled — dispatch ignores this binding while it is off.",
+        "hostAuto": "Auto",
+        "hostLocal": "Local",
+        "hostPinned": "{host}",
+        "hostPinnedOffline": "{host} (offline)",
+        "hostTarget": "Host target",
+        "hostWaitingWarning": "Pinned host is offline; the child will remain queued.",
         "modeInherit": "Inherit team default",
         "modePinned": "Pinned",
         "modePool": "Candidate pool",
@@ -9462,6 +9485,7 @@
     "agents": {
       "claude-code": "Claude Code",
       "codex": "Codex",
+      "cognia": "Cognia",
       "opencode": "OpenCode"
     },
     "island": {
@@ -9521,6 +9545,7 @@
         "turn": "Turn failed"
       },
       "focusTerminal": "Focus terminal",
+      "host": "Execution host: {host}",
       "interrupt": {
         "error": {
           "interrupt_identity_mismatch": "That process is no longer the agent — nothing was sent.",
@@ -12911,6 +12936,11 @@
     "fleet": {
       "connectFirst": "Connect to your desktop to watch its agent fleet.",
       "empty": "No active agents.",
+      "hostCapacity": "{used}/{total} slots",
+      "hostEmpty": "No active sessions on this host.",
+      "hostOffline": "Offline",
+      "hostOnline": "Online",
+      "localHost": "Local host",
       "permission": {
         "allow": "Allow",
         "allowed": "Allowed",
@@ -12944,6 +12974,7 @@
         },
         "focus": "Focus terminal",
         "focusFailed": "Couldn't focus the terminal.",
+        "openTeam": "Open AgentTeam run",
         "status": {
           "ended": "Session ended",
           "idle": "Idle",
@@ -12956,7 +12987,9 @@
       },
       "summary": "{total, plural, one {# agent} other {# agents}}",
       "title": "Agent Fleet",
-      "waiting": "{count} waiting"
+      "waiting": "{count} waiting",
+      "workspaceMissing": "Repository binding missing",
+      "workspaceReady": "Workspace ready"
     },
     "home": {
       "actions": {
@@ -26260,7 +26293,26 @@
         "unavailable": "Claude Code not found"
       },
       "summaryAria": "{count} integrations active",
-      "title": "Agent fleet monitor"
+      "title": "Agent fleet monitor",
+      "workers": {
+        "bindingHint": "Repository paths stay on each worker. Bind one locally with cognia-agent worker bind; this screen never accepts absolute paths.",
+        "capacity": "{used}/{total} slots",
+        "copied": "Worker enrollment command copied.",
+        "copy": "Copy command",
+        "copyFailed": "Could not copy the command.",
+        "description": "Enroll least-privilege Agent RPC workers and inspect their readiness.",
+        "empty": "No execution workers enrolled.",
+        "enroll": "Enroll worker",
+        "error": "Worker action failed: {detail}",
+        "expires": "One-time enrollment expires at {time}.",
+        "notConnected": "Connect this browser to a Companion host first.",
+        "offline": "Offline",
+        "online": "Online",
+        "qrAria": "Worker enrollment QR code",
+        "revoke": "Revoke worker",
+        "revoked": "Worker capability revoked.",
+        "title": "Execution workers"
+      }
     },
     "gateway": {
       "add": "Add",

@@ -1,3 +1,4 @@
+// static-export-exempt: JSON-RPC peer transport runs exclusively in the Node CLI/sidecar.
 import { createInterface, type Interface as ReadLineInterface } from "node:readline"
 import type { Readable, Writable } from "node:stream"
 

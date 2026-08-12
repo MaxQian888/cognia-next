@@ -35,15 +35,15 @@ try {
   )
   fs.writeFileSync(
     path.join(consumer, "esm.mjs"),
-    'import { createCogniaClient } from "@cognia/agent"; if (typeof createCogniaClient !== "function") process.exit(1)\n'
+    'import { createCogniaClient } from "@cognia/agent"; import { validateHandoffEnvelope } from "@cognia/agent/handoff-envelope"; if (typeof createCogniaClient !== "function" || typeof validateHandoffEnvelope !== "function") process.exit(1)\n'
   )
   fs.writeFileSync(
     path.join(consumer, "cjs.cjs"),
-    'const { createCogniaClient } = require("@cognia/agent"); if (typeof createCogniaClient !== "function") process.exit(1)\n'
+    'const { createCogniaClient } = require("@cognia/agent"); const { validateHandoffEnvelope } = require("@cognia/agent/handoff-envelope"); if (typeof createCogniaClient !== "function" || typeof validateHandoffEnvelope !== "function") process.exit(1)\n'
   )
   fs.writeFileSync(
     path.join(consumer, "types.ts"),
-    'import type { CogniaClient } from "@cognia/agent"; import type { RpcMethodMap } from "@cognia/agent/protocol"; declare const client: CogniaClient; declare const map: RpcMethodMap; void client; void map\n'
+    'import type { CogniaClient } from "@cognia/agent"; import type { RpcMethodMap } from "@cognia/agent/protocol"; import type { HandoffEnvelope } from "@cognia/agent/handoff-envelope"; declare const client: CogniaClient; declare const map: RpcMethodMap; declare const handoff: HandoffEnvelope; void client; void map; void handoff\n'
   )
   fs.writeFileSync(
     path.join(consumer, "tsconfig.json"),

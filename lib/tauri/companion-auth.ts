@@ -50,7 +50,7 @@ interface TokenState {
 
 export type AuthFetcher = (url: string, init: PinnedFetchInit) => Promise<Response>
 export type SocketTicketRequest =
-  { channel: "events" | "terminal" | "acp" } | { channel: "browser"; sessionId: string }
+  { channel: "events" | "terminal" | "acp" | "worker" } | { channel: "browser"; sessionId: string }
 const tokens = new Map<string, TokenState>()
 
 export async function generateDeviceIdentity(): Promise<DeviceIdentity> {
@@ -143,6 +143,67 @@ export async function registerCompanionDevice(
     signalingPrivateKeyJwk: signalingIdentity.privateKeyJwk,
     signalingUrl: authConfig.signaling.url,
     iceServers: authConfig.signaling.iceServers,
+  }
+  await refreshAccessToken(config, fetcher)
+  return config
+}
+
+/** Register a least-privilege execution worker from a one-time Owner-issued enrollment. */
+export async function registerCompanionWorker(
+  input: {
+    baseUrl: string
+    tenantId: string
+    enrollment: string
+    displayName: string
+    serverFingerprint?: string
+  },
+  fetcher: AuthFetcher = pinnedFetch
+): Promise<CompanionConfig> {
+  const identity = await generateDeviceIdentity()
+  const challenge = await requestChallenge(
+    input.baseUrl,
+    input.tenantId,
+    input.serverFingerprint,
+    fetcher
+  )
+  const path = "/api/auth/worker/register"
+  const proof = await createDeviceProof(identity.privateKeyJwk, challenge.nonce, "POST", path)
+  const registration = await expectJson(
+    fetcher(`${trimSlash(input.baseUrl)}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenantId: input.tenantId,
+        enrollment: input.enrollment,
+        challengeId: challenge.challengeId,
+        challengeNonce: challenge.nonce,
+        deviceId: identity.deviceId,
+        displayName: input.displayName,
+        publicKeyPem: identity.publicKeyPem,
+        proof,
+      }),
+      serverFingerprint: input.serverFingerprint,
+    })
+  )
+  if (
+    registration.deviceId !== identity.deviceId ||
+    registration.tenantId !== input.tenantId ||
+    registration.role !== "member" ||
+    !Array.isArray(registration.capabilities) ||
+    registration.capabilities.length !== 1 ||
+    registration.capabilities[0] !== "agent.worker"
+  ) {
+    throw new Error("worker registration response is malformed or over-privileged")
+  }
+  const config: CompanionConfig = {
+    baseUrl: trimSlash(input.baseUrl),
+    deviceId: identity.deviceId,
+    devicePrivateKeyJwk: identity.privateKeyJwk,
+    deviceKeyThumbprint: identity.thumbprint,
+    tenantId: input.tenantId,
+    serverVersion:
+      typeof registration.serverVersion === "string" ? registration.serverVersion : "unknown",
+    serverFingerprint: input.serverFingerprint,
   }
   await refreshAccessToken(config, fetcher)
   return config
@@ -255,7 +316,7 @@ export async function companionAuthorizationHeaders(
 
 export async function issueSocketTicket(
   config: CompanionConfig,
-  request: SocketTicketRequest | "events" | "terminal" | "acp",
+  request: SocketTicketRequest | "events" | "terminal" | "acp" | "worker",
   fetcher: AuthFetcher = pinnedFetch
 ): Promise<{ ticket: string; expiresAt: number }> {
   const payload: SocketTicketRequest = typeof request === "string" ? { channel: request } : request

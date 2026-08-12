@@ -198,6 +198,43 @@ impl SecurityStore {
         Ok(secret)
     }
 
+    /// Create a one-time enrollment for a least-privilege execution worker.
+    pub fn create_worker_enrollment(
+        &self,
+        tenant_id: &str,
+        actor_id: &str,
+        now: i64,
+        ttl_secs: i64,
+    ) -> Result<String, SecurityStoreError> {
+        let secret = format!("{}.{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+        let enrollment_id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock();
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO worker_enrollments
+             (id, tenant_id, token_hash, expires_at, created_by, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                enrollment_id,
+                tenant_id,
+                hash_secret(&secret),
+                now.saturating_add(ttl_secs),
+                actor_id,
+                now
+            ],
+        )?;
+        insert_audit(
+            &tx,
+            tenant_id,
+            actor_id,
+            "worker_enrollment.created",
+            &enrollment_id,
+            now,
+        )?;
+        tx.commit()?;
+        Ok(secret)
+    }
+
     pub fn consume_challenge(
         &self,
         tenant_id: &str,
@@ -289,6 +326,83 @@ impl SecurityStore {
             tenant_id,
             device_id,
             "device.registered",
+            device_id,
+            now,
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Consume a worker enrollment and register only the `agent.worker`
+    /// capability. Worker enrollment never grants ordinary agent control,
+    /// terminal, remote control, or Owner authority.
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_worker_device(
+        &self,
+        tenant_id: &str,
+        enrollment: &str,
+        challenge_id: &str,
+        challenge_nonce: &str,
+        device_id: &str,
+        display_name: &str,
+        public_key_pem: &str,
+        public_key_thumbprint: &str,
+        now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let consumed_challenge = tx.execute(
+            "UPDATE device_challenges SET consumed_at = ?1
+             WHERE id = ?2 AND tenant_id = ?3 AND nonce_hash = ?4
+               AND consumed_at IS NULL AND expires_at >= ?1",
+            params![now, challenge_id, tenant_id, hash_secret(challenge_nonce)],
+        )?;
+        if consumed_challenge != 1 {
+            return Err(SecurityStoreError::InvalidChallenge);
+        }
+        let enrollment_id: Option<String> = tx
+            .query_row(
+                "SELECT id FROM worker_enrollments
+                 WHERE tenant_id = ?1 AND token_hash = ?2
+                   AND consumed_at IS NULL AND expires_at >= ?3",
+                params![tenant_id, hash_secret(enrollment), now],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let enrollment_id = enrollment_id.ok_or(SecurityStoreError::InvalidInvitation)?;
+        if tx.execute(
+            "UPDATE worker_enrollments SET consumed_at = ?1, consumed_by_device_id = ?2
+             WHERE id = ?3 AND consumed_at IS NULL",
+            params![now, device_id, enrollment_id],
+        )? != 1
+        {
+            return Err(SecurityStoreError::InvalidInvitation);
+        }
+        tx.execute(
+            "INSERT INTO devices
+             (id, tenant_id, display_name, role, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'member', 'active', ?4, ?4)",
+            params![device_id, tenant_id, display_name, now],
+        )?;
+        tx.execute(
+            "INSERT INTO device_keys
+             (id, device_id, tenant_id, public_key_pem, thumbprint, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                device_id,
+                tenant_id,
+                public_key_pem,
+                public_key_thumbprint,
+                now
+            ],
+        )?;
+        upsert_capability_grant(&tx, tenant_id, device_id, "agent.worker", now)?;
+        insert_audit(
+            &tx,
+            tenant_id,
+            device_id,
+            "worker.registered",
             device_id,
             now,
         )?;
@@ -406,6 +520,35 @@ impl SecurityStore {
                 .collect::<Result<Vec<String>, _>>()?;
         }
         Ok(devices)
+    }
+
+    /// Return every device that was enrolled as an execution worker, including
+    /// devices whose `agent.worker` grant was later revoked. Worker identity is
+    /// historical; the live capability snapshot is authorization state, not a
+    /// deletion signal for the owner's management surface.
+    pub fn list_worker_devices(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Vec<DeviceSummary>, SecurityStoreError> {
+        let workers = self
+            .list_devices(tenant_id)?
+            .into_iter()
+            .filter(|device| {
+                self.conn
+                    .lock()
+                    .query_row(
+                        "SELECT EXISTS(
+                           SELECT 1 FROM audit_events
+                           WHERE tenant_id = ?1 AND action = 'worker.registered'
+                             AND target_id = ?2
+                         )",
+                        params![tenant_id, device.device_id],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .unwrap_or(false)
+            })
+            .collect();
+        Ok(workers)
     }
 
     /// Atomically replace the complete live capability snapshot for one device.
@@ -1126,7 +1269,7 @@ impl SecurityStore {
     }
 }
 
-fn unix_time_secs() -> i64 {
+pub(crate) fn unix_time_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1288,6 +1431,7 @@ fn is_assignable_device_capability(capability: &str) -> bool {
             | "host.admin"
             | "device.admin"
             | "server.admin"
+            | "agent.worker"
     )
 }
 
@@ -1356,6 +1500,16 @@ CREATE TABLE IF NOT EXISTS capability_grants (
     FOREIGN KEY (tenant_id, device_id) REFERENCES devices(tenant_id, id)
 );
 CREATE TABLE IF NOT EXISTS owner_invitations (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    consumed_at INTEGER,
+    consumed_by_device_id TEXT
+);
+CREATE TABLE IF NOT EXISTS worker_enrollments (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
@@ -1583,6 +1737,64 @@ mod tests {
     }
 
     #[test]
+    fn worker_enrollment_is_single_use_and_grants_only_agent_worker() {
+        let store = SecurityStore::in_memory().unwrap();
+        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
+        let enrollment = store
+            .create_worker_enrollment("tenant-a", "owner-a", 100, 60)
+            .unwrap();
+        store
+            .register_worker_device(
+                "tenant-a",
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                "worker-a",
+                "Worker A",
+                "pem",
+                "thumb-worker-a",
+                101,
+            )
+            .unwrap();
+
+        assert_eq!(
+            store
+                .capability_snapshot("tenant-a", "worker-a")
+                .unwrap()
+                .unwrap(),
+            vec!["agent.worker"]
+        );
+        for capability in ["agent.run", "terminal.open", "host.admin", "process.spawn"] {
+            assert!(!store
+                .has_capability("tenant-a", "worker-a", capability)
+                .unwrap());
+        }
+        store
+            .replace_device_capabilities("tenant-a", "owner-a", "worker-a", &[], 102)
+            .unwrap();
+        let enrolled_workers = store.list_worker_devices("tenant-a").unwrap();
+        assert_eq!(enrolled_workers.len(), 1);
+        assert_eq!(enrolled_workers[0].device_id, "worker-a");
+        assert!(enrolled_workers[0].capabilities.is_empty());
+        assert!(store.list_worker_devices("tenant-b").unwrap().is_empty());
+        let replay_challenge = store.issue_challenge("tenant-a", 102, 60).unwrap();
+        assert!(matches!(
+            store.register_worker_device(
+                "tenant-a",
+                &enrollment,
+                &replay_challenge.id,
+                &replay_challenge.nonce,
+                "worker-b",
+                "Worker B",
+                "pem-b",
+                "thumb-worker-b",
+                103,
+            ),
+            Err(SecurityStoreError::InvalidInvitation)
+        ));
+    }
+
+    #[test]
     fn socket_ticket_is_path_bound_short_lived_and_single_use() {
         let store = SecurityStore::in_memory().unwrap();
         register(&store, "tenant-a", "device-a", 100);
@@ -1791,6 +2003,29 @@ mod tests {
                 .unwrap(),
             vec!["host.admin", "host.observe", "scheduler.manage"]
         );
+    }
+
+    #[test]
+    fn agent_worker_is_assignable_but_never_inherited_from_agent_control() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "owner-a", 100);
+        assert!(!store
+            .has_capability("tenant-a", "owner-a", "agent.worker")
+            .unwrap());
+
+        let capabilities = vec!["host.admin".into(), "agent.worker".into()];
+        store
+            .replace_device_capabilities("tenant-a", "owner-a", "owner-a", &capabilities, 110)
+            .unwrap();
+        assert!(store
+            .has_capability("tenant-a", "owner-a", "agent.worker")
+            .unwrap());
+        assert!(!store
+            .has_capability("tenant-a", "owner-a", "agent.run")
+            .unwrap());
+        assert!(!store
+            .has_capability("tenant-a", "owner-a", "terminal.open")
+            .unwrap());
     }
 
     #[test]

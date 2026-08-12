@@ -289,8 +289,28 @@ const OPENCODE: AgentManifest = AgentManifest {
     answers_questions: false,
 };
 
+/// Cognia-managed AgentTeam sessions are inserted directly as a Fleet read
+/// model, not through hook ingress. Their controls remain on AgentTeam.
+const COGNIA: AgentManifest = AgentManifest {
+    agent: FleetAgent::Cognia,
+    descriptor_version: 1,
+    descriptor_source: "builtin:cognia",
+    session_id_keys: &[],
+    event_map: &[],
+    capabilities: FleetCapabilities {
+        approve_permission: false,
+        send_message: false,
+        focus_terminal: false,
+        open_transcript: false,
+        interrupt: false,
+    },
+    decision_shape: DecisionShape::HookSpecificOutput,
+    multi_session_host: true,
+    answers_questions: false,
+};
+
 /// Every manifest, in display order.
-pub const MANIFESTS: &[AgentManifest] = &[CLAUDE_CODE, CODEX, OPENCODE];
+pub const MANIFESTS: &[AgentManifest] = &[CLAUDE_CODE, CODEX, OPENCODE, COGNIA];
 
 /// The manifest for an agent. Total — every [`FleetAgent`] variant has one,
 /// which the `every_agent_has_a_manifest` test pins.
@@ -314,6 +334,7 @@ mod tests {
             FleetAgent::ClaudeCode,
             FleetAgent::Codex,
             FleetAgent::Opencode,
+            FleetAgent::Cognia,
         ] {
             assert_eq!(manifest_for(agent).agent, agent);
             assert!(manifest_for(agent).descriptor_version > 0);

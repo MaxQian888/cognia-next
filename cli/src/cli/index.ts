@@ -18,6 +18,7 @@ import { sdkCommand as defaultSdk } from "./sdk-command"
 import { serveCommand as defaultServe } from "../serve/serve-command"
 import { xCommand as defaultX } from "./x-command"
 import { rpcCommand as defaultRpc } from "./rpc-command"
+import { workerCommand as defaultWorker } from "./worker-command"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
 
@@ -58,6 +59,10 @@ Usage:
                      typed Claude Agent SDK management (never raw option JSON)
   cognia-agent rpc [--model m] [--provider p] [--backend id]
   Bidirectional JSON-RPC 2.0 host on stdin/stdout (for @cognia/agent)
+  cognia-agent worker <enroll|bind|list|remove|connect>
+                     [--repository-ref ref] [--path path] [--config file]
+                     [--server-url u] [--tenant-id id] [--enrollment token]
+                     [--max-active-turns n] [--json]
   cognia-agent serve [--server-url u] [--account id] [--home dir]
                      [--flush-debounce ms]           headless brain for cognia-server
                      (COGNIA_SERVER_URL / COGNIA_SERVICE_TOKEN / COGNIA_BRIDGE_URL /
@@ -101,6 +106,7 @@ const KNOWN_COMMANDS = new Set([
   "sdk",
   "x",
   "rpc",
+  "worker",
 ])
 
 export interface MainDeps {
@@ -118,6 +124,7 @@ export interface MainDeps {
   sdk?: typeof defaultSdk
   x?: typeof defaultX
   rpc?: typeof defaultRpc
+  worker?: typeof defaultWorker
   out?: OutputSink
 }
 
@@ -191,6 +198,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.x ?? defaultX)(args, { out })
     case "rpc":
       return (deps.rpc ?? defaultRpc)(args, { out })
+    case "worker":
+      return (deps.worker ?? defaultWorker)(args, { out })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2

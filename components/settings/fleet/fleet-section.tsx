@@ -79,15 +79,16 @@ import {
 } from "@/components/settings/common/related-sections-strip"
 import { FleetHistoryPanel } from "./fleet-history-panel"
 import { AgentLivenessChip } from "./agent-liveness-chip"
-import { useFleetStream } from "@/hooks/fleet/use-fleet-stream"
+import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
 import { createLogger } from "@cognia/logging"
+import { ExecutionWorkersCard } from "./execution-workers-card"
 
 const log = createLogger("settings.fleet")
 
 export function FleetSection() {
   const t = useTranslations("settings.fleet")
   // Liveness rides the same snapshot stream the island uses — no second poll.
-  const { snapshot } = useFleetStream()
+  const { snapshot } = useFleetSnapshot()
   const livenessFor = (agent: string) => snapshot.liveness?.find((l) => l.agent === agent)
   const [loaded, setLoaded] = useState(false)
   const [monitorEnabled, setMonitorEnabled] = useState(false)
@@ -652,6 +653,8 @@ export function FleetSection() {
           </Button>
         </div>
       </Card>
+
+      <ExecutionWorkersCard hosts={snapshot.hosts ?? []} />
 
       <Card className="p-3">
         <FleetHistoryPanel />

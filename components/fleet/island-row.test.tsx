@@ -67,6 +67,10 @@ beforeEach(() => {
 })
 
 describe("IslandRow", () => {
+  it("shows a lightweight authenticated host badge for managed sessions", () => {
+    render(<IslandRow session={session({ hostRef: "device:worker-a" })} />)
+    expect(screen.getByTestId("island-host-badge")).toHaveTextContent("device:worker-a")
+  })
   it("focuses the terminal on row click when capable", () => {
     render(<IslandRow session={session()} />)
     const row = screen.getByTestId("island-row-claude-code-s1")

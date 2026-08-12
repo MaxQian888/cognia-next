@@ -14,6 +14,7 @@ const AGENT_STYLES: Record<FleetAgent, string> = {
   "claude-code": "bg-orange-500/20 text-orange-300 border-orange-400/30",
   codex: "bg-sky-500/20 text-sky-300 border-sky-400/30",
   opencode: "bg-emerald-500/20 text-emerald-300 border-emerald-400/30",
+  cognia: "bg-violet-500/20 text-violet-300 border-violet-400/30",
 }
 
 export function AgentBadge({ agent, className }: { agent: FleetAgent; className?: string }) {

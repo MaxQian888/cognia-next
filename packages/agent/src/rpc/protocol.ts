@@ -1,5 +1,7 @@
 import * as v from "valibot"
 
+import { isHandoffEnvelope, type HandoffEnvelope } from "../handoff-envelope"
+
 export type JsonRpcId = string | number
 
 export interface JsonRpcRequest {
@@ -145,6 +147,24 @@ const inputSchema = v.union([
   v.looseObject({ prompt: nonEmptyString, attachments: v.optional(v.array(v.unknown())) }),
 ])
 
+export const agentWorkerManifestV1Schema = v.looseObject({
+  manifestVersion: v.literal(1),
+  runtime: nonEmptyString,
+  models: v.array(nonEmptyString),
+  hardCapabilities: v.array(nonEmptyString),
+  maxActiveTurns: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  credentialProfileRefs: v.array(nonEmptyString),
+  workspaceBindingRefs: v.array(nonEmptyString),
+  taskWorkspace: v.object({ enabled: v.boolean() }),
+  sandbox: v.object({ capabilities: v.array(nonEmptyString) }),
+  platform: v.object({ os: nonEmptyString, arch: nonEmptyString }),
+})
+
+const handoffEnvelopeSchema = v.custom<HandoffEnvelope>(
+  isHandoffEnvelope,
+  "handoff must be a valid stable ref-only envelope"
+)
+
 const registrationSchema = v.looseObject({
   handlerId: nonEmptyString,
   name: nonEmptyString,
@@ -179,6 +199,7 @@ export const rpcMethodSchemas = {
       methods: v.array(v.picklist(RPC_METHODS)),
       capabilities: v.array(nonEmptyString),
       limits: objectResult,
+      workerManifest: v.optional(agentWorkerManifestV1Schema),
     }),
   },
   initialized: { params: emptyParams, result: okResult },
@@ -196,13 +217,19 @@ export const rpcMethodSchemas = {
   "auth/status": { params: emptyParams, result: objectResult },
   "session/create": {
     params: v.looseObject({
+      commandId: optionalCommandId,
       name: v.optional(nonEmptyString),
       cwd: v.optional(nonEmptyString),
       model: v.optional(nonEmptyString),
       permissionMode: v.optional(nonEmptyString),
       tags: v.optional(v.array(nonEmptyString)),
+      handoff: v.optional(handoffEnvelopeSchema),
     }),
-    result: v.looseObject({ sessionId: nonEmptyString, spec: objectResult }),
+    result: v.looseObject({
+      sessionId: nonEmptyString,
+      spec: objectResult,
+      commandId: v.optional(nonEmptyString),
+    }),
   },
   "session/open": {
     params: sessionParams,

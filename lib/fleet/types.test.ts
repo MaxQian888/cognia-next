@@ -28,3 +28,25 @@ describe("fleet runtime constants", () => {
     expect(FLEET_PERMISSION_WAIT_MS).toBeLessThan(25_000)
   })
 })
+
+describe("fleet worker compatibility", () => {
+  it("keeps worker hosts additive for old snapshots", () => {
+    const oldSnapshot: import("./types").FleetSnapshot = { sessions: [], generatedAt: 1 }
+    expect(oldSnapshot.hosts).toBeUndefined()
+    const current: import("./types").FleetSnapshot = {
+      ...oldSnapshot,
+      hosts: [
+        {
+          hostRef: "device:a",
+          online: true,
+          maxActiveTurns: 2,
+          usedSlots: 1,
+          runtime: "cognia-agent",
+          workspaceBindingReady: true,
+          lastSeenAt: 1,
+        },
+      ],
+    }
+    expect(current.hosts?.[0]).toMatchObject({ hostRef: "device:a", usedSlots: 1 })
+  })
+})

@@ -12,7 +12,7 @@ use crate::{
     ResourceKind, RunState, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
     TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceState, TransferChunk,
     TransferRegistry, UploadHandle, WatchManager, WorkspaceBaseSpec, WorkspaceOwnerType,
-    WorkspaceRecord, WorkspaceRegistry, WorkspaceState,
+    WorkspaceRecord, WorkspaceRegistry, WorkspaceSourceBinding, WorkspaceState,
 };
 use parking_lot::Mutex;
 use std::{
@@ -87,6 +87,91 @@ impl TaskWorkspaceService {
         };
         service.recover_incomplete_runs()?;
         Ok(service)
+    }
+
+    /// Bind a stable repository ref to an explicitly trusted, device-local Git root.
+    pub fn bind_workspace_source(
+        &self,
+        binding_ref: &str,
+        source_root: &Path,
+        now: i64,
+    ) -> Result<WorkspaceSourceBinding, String> {
+        validate_repository_binding_ref(binding_ref)?;
+        let inspected = inspect_workspace_source(source_root)?;
+        self.reject_registry_owned_source(&inspected.source_root)?;
+        let existing = self
+            .store
+            .lock()
+            .get_workspace_source_binding(binding_ref)?;
+        let binding = WorkspaceSourceBinding {
+            binding_ref: binding_ref.to_string(),
+            source_root: inspected.source_root.to_string_lossy().into_owned(),
+            git_common_dir: inspected.git_common_dir.to_string_lossy().into_owned(),
+            repository_fingerprint: inspected.repository_fingerprint,
+            created_at: existing.map_or(now, |entry| entry.created_at),
+            updated_at: now,
+        };
+        self.store.lock().put_workspace_source_binding(&binding)?;
+        Ok(binding)
+    }
+
+    pub fn list_workspace_source_bindings(&self) -> Result<Vec<WorkspaceSourceBinding>, String> {
+        self.store.lock().list_workspace_source_bindings()
+    }
+
+    pub fn remove_workspace_source_binding(&self, binding_ref: &str) -> Result<bool, String> {
+        validate_repository_binding_ref(binding_ref)?;
+        self.store
+            .lock()
+            .delete_workspace_source_binding(binding_ref)
+    }
+
+    /// Resolve and revalidate a binding immediately before a worker run.
+    pub fn resolve_workspace_source(
+        &self,
+        binding_ref: &str,
+    ) -> Result<WorkspaceSourceBinding, String> {
+        validate_repository_binding_ref(binding_ref)?;
+        let binding = self
+            .store
+            .lock()
+            .get_workspace_source_binding(binding_ref)?
+            .ok_or_else(|| format!("workspace source is not bound: {binding_ref}"))?;
+        let inspected = inspect_workspace_source(Path::new(&binding.source_root))?;
+        self.reject_registry_owned_source(&inspected.source_root)?;
+        if inspected.repository_fingerprint != binding.repository_fingerprint
+            || inspected.git_common_dir.to_string_lossy() != binding.git_common_dir
+        {
+            return Err(format!(
+                "workspace source binding changed and must be rebound: {binding_ref}"
+            ));
+        }
+        Ok(binding)
+    }
+
+    /// Start an isolated run from a stable worker-local binding.
+    pub fn begin_bound_run(
+        &self,
+        binding_ref: &str,
+        mut input: BeginTaskRun,
+    ) -> Result<TaskRun, String> {
+        let binding = self.resolve_workspace_source(binding_ref)?;
+        input.workspace_root = binding.source_root;
+        self.begin_run(input)
+    }
+
+    fn reject_registry_owned_source(&self, source_root: &Path) -> Result<(), String> {
+        for workspace in self.registry.list().map_err(|error| error.to_string())? {
+            let execution_root = PathBuf::from(&workspace.execution_root);
+            let execution_root = execution_root.canonicalize().unwrap_or(execution_root);
+            if source_root.starts_with(&execution_root) {
+                return Err(format!(
+                    "workspace source is a Registry-owned execution root: {}",
+                    source_root.display()
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub fn begin_run(&self, input: BeginTaskRun) -> Result<TaskRun, String> {
@@ -1730,6 +1815,114 @@ fn git_common_dir(workspace_root: &Path) -> Option<String> {
         .map(|path| path.to_string_lossy().into_owned())
 }
 
+struct InspectedWorkspaceSource {
+    source_root: PathBuf,
+    git_common_dir: PathBuf,
+    repository_fingerprint: String,
+}
+
+fn inspect_workspace_source(source_root: &Path) -> Result<InspectedWorkspaceSource, String> {
+    if workspace_path_contains_symlink(source_root)? {
+        return Err(format!(
+            "workspace source must not contain a symlink: {}",
+            source_root.display()
+        ));
+    }
+    let source_root = source_root
+        .canonicalize()
+        .map_err(|error| format!("canonicalize workspace source: {error}"))?;
+    if !source_root.is_dir() {
+        return Err(format!(
+            "workspace source is not a directory: {}",
+            source_root.display()
+        ));
+    }
+    let repository = git2::Repository::discover(&source_root)
+        .map_err(|error| format!("workspace source is not a Git repository: {error}"))?;
+    let workdir = repository
+        .workdir()
+        .ok_or_else(|| "workspace source must not be a bare Git repository".to_string())?
+        .canonicalize()
+        .map_err(|error| format!("canonicalize Git worktree root: {error}"))?;
+    if workdir != source_root {
+        return Err(format!(
+            "workspace source must be the exact Git worktree root: {}",
+            workdir.display()
+        ));
+    }
+    let git_common_dir = repository
+        .commondir()
+        .canonicalize()
+        .map_err(|error| format!("canonicalize Git common dir: {error}"))?;
+    let origin = repository
+        .find_remote("origin")
+        .ok()
+        .and_then(|remote| remote.url().ok().map(str::to_owned))
+        .unwrap_or_default();
+    let mut digest = sha2::Sha256::new();
+    use sha2::Digest;
+    digest.update(source_root.to_string_lossy().as_bytes());
+    digest.update([0]);
+    digest.update(git_common_dir.to_string_lossy().as_bytes());
+    digest.update([0]);
+    digest.update(origin.as_bytes());
+    Ok(InspectedWorkspaceSource {
+        source_root,
+        git_common_dir,
+        repository_fingerprint: format!("sha256:{}", hex::encode(digest.finalize())),
+    })
+}
+
+fn workspace_path_contains_symlink(path: &Path) -> Result<bool, String> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("resolve current directory: {error}"))?
+            .join(path)
+    };
+    let mut prefix = PathBuf::new();
+    for component in absolute.components() {
+        prefix.push(component);
+        let metadata = match prefix.symlink_metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "inspect workspace source component {}: {error}",
+                    prefix.display()
+                ))
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            #[cfg(target_os = "macos")]
+            if prefix == Path::new("/var") {
+                continue;
+            }
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn validate_repository_binding_ref(binding_ref: &str) -> Result<(), String> {
+    let segments = binding_ref.split(':').collect::<Vec<_>>();
+    if segments.len() != 3
+        || segments[0] != "repository"
+        || segments[1..].iter().any(|segment| {
+            segment.is_empty()
+                || !segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        })
+    {
+        return Err(format!(
+            "invalid repository binding ref (expected repository:<projectId>:<repositoryId>): {binding_ref}"
+        ));
+    }
+    Ok(())
+}
+
 fn lock_git_worktree(
     workspace_root: &Path,
     execution_root: &Path,
@@ -2076,6 +2269,133 @@ mod tests {
             surface: None,
             tracking_policy: ResourceTrackingPolicy::default(),
         }
+    }
+
+    fn seed_git_repository(root: &Path) {
+        use git2::{IndexAddOption, Repository, Signature};
+
+        let repository = Repository::open(root).unwrap();
+        fs::write(root.join("README.md"), "seed\n").unwrap();
+        let mut index = repository.index().unwrap();
+        index
+            .add_all(["README.md"], IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = Signature::now("Task Workspace Test", "task@example.com").unwrap();
+        repository
+            .commit(Some("HEAD"), &signature, &signature, "seed", &tree, &[])
+            .unwrap();
+    }
+
+    #[test]
+    fn source_bindings_resolve_only_exact_pretrusted_git_roots() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        fs::create_dir(repository.path().join("nested")).unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+
+        let binding = service
+            .bind_workspace_source("repository:project-1:repo-1", repository.path(), 10)
+            .unwrap();
+        assert_eq!(binding.binding_ref, "repository:project-1:repo-1");
+        assert!(!binding.repository_fingerprint.is_empty());
+        assert_eq!(
+            service.list_workspace_source_bindings().unwrap(),
+            vec![binding.clone()]
+        );
+        assert_eq!(
+            service
+                .resolve_workspace_source("repository:project-1:repo-1")
+                .unwrap(),
+            binding
+        );
+
+        let nested = service
+            .bind_workspace_source(
+                "repository:project-1:nested",
+                &repository.path().join("nested"),
+                11,
+            )
+            .unwrap_err();
+        assert!(nested.contains("exact Git worktree root"));
+
+        service
+            .remove_workspace_source_binding("repository:project-1:repo-1")
+            .unwrap();
+        assert!(service
+            .resolve_workspace_source("repository:project-1:repo-1")
+            .unwrap_err()
+            .contains("not bound"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_bindings_reject_symlink_roots_and_managed_execution_roots() {
+        use std::os::unix::fs::symlink;
+
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(repository.path());
+        let alias_parent = TempDir::new().unwrap();
+        let alias = alias_parent.path().join("repository-link");
+        symlink(repository.path(), &alias).unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+
+        assert!(service
+            .bind_workspace_source("repository:project-1:symlink", &alias, 10)
+            .unwrap_err()
+            .contains("symlink"));
+
+        let nested_parent = TempDir::new().unwrap();
+        fs::create_dir(nested_parent.path().join("real")).unwrap();
+        let nested_repository = nested_parent.path().join("real/repository");
+        fs::create_dir(&nested_repository).unwrap();
+        git2::Repository::init(&nested_repository).unwrap();
+        symlink(
+            nested_parent.path().join("real"),
+            nested_parent.path().join("alias"),
+        )
+        .unwrap();
+        assert!(service
+            .bind_workspace_source(
+                "repository:project-1:nested-symlink",
+                &nested_parent.path().join("alias/repository"),
+                10,
+            )
+            .unwrap_err()
+            .contains("symlink"));
+
+        let run = service
+            .begin_run(input(&repository, "task-owned", "run-owned"))
+            .unwrap();
+        assert!(service
+            .bind_workspace_source(
+                "repository:project-1:managed",
+                Path::new(&run.execution_root),
+                11,
+            )
+            .unwrap_err()
+            .contains("Registry-owned execution root"));
+    }
+
+    #[test]
+    fn bound_runs_fail_before_isolation_when_the_binding_is_missing() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+
+        let error = service
+            .begin_bound_run(
+                "repository:project-1:missing",
+                input(&repository, "task-missing", "run-missing"),
+            )
+            .unwrap_err();
+        assert!(error.contains("not bound"));
+        assert!(service.list_tasks(None).unwrap().is_empty());
     }
 
     #[test]

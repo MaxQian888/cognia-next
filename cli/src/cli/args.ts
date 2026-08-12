@@ -59,6 +59,7 @@ export const GROUPED_COMMANDS = new Set([
   "eval",
   "durability",
   "sdk",
+  "worker",
 ])
 
 const SHORT_ALIAS: Record<string, string> = {

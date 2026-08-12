@@ -373,6 +373,7 @@ pub fn expected_process_names(agent: super::registry::FleetAgent) -> &'static [&
         // Declared non-interruptible (one server hosts every session), listed
         // for completeness so a future reverse-channel abort has a home.
         FleetAgent::Opencode => &["opencode"],
+        FleetAgent::Cognia => &[],
     }
 }
 
@@ -755,6 +756,7 @@ mod tests {
         assert_eq!(expected_process_names(FleetAgent::ClaudeCode), &["claude"]);
         assert_eq!(expected_process_names(FleetAgent::Codex), &["codex"]);
         assert_eq!(expected_process_names(FleetAgent::Opencode), &["opencode"]);
+        assert!(expected_process_names(FleetAgent::Cognia).is_empty());
     }
 
     #[test]

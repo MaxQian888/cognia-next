@@ -4,7 +4,7 @@
  * kebab-case — pinned by the Rust serde tests.
  */
 
-export type FleetAgent = "claude-code" | "codex" | "opencode"
+export type FleetAgent = "claude-code" | "codex" | "opencode" | "cognia"
 
 export type FleetStatus =
   "idle" | "working" | "waiting-input" | "waiting-permission" | "plan-pending" | "ended"
@@ -148,6 +148,25 @@ export interface FleetSession {
   startSource?: string | null
   /** Current git branch of `cwd`, captured once per turn by the runtime. */
   gitBranch?: string | null
+  /** Additive remote-dispatch placement and existing authority lineage. */
+  hostRef?: string
+  origin?: "local-external" | "managed-team"
+  agentTeamRunId?: string
+  agentTeamId?: string
+  agentTeamChildRunId?: string
+  executionRunId?: string
+  reviewEvidenceRef?: string
+}
+
+export interface FleetHost {
+  hostRef: string
+  online: boolean
+  maxActiveTurns: number
+  usedSlots?: number
+  runtime: string
+  workspaceBindingReady: boolean
+  workspaceBindingRefs?: string[]
+  lastSeenAt: number
 }
 
 /**
@@ -171,6 +190,8 @@ export interface AgentLiveness {
 
 export interface FleetSnapshot {
   sessions: FleetSession[]
+  /** Optional for snapshots produced before worker-dispatch v1. */
+  hosts?: FleetHost[]
   /** Present for every agent that has sent an event this process lifetime. */
   liveness?: AgentLiveness[]
   generatedAt: number

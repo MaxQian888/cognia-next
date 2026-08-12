@@ -212,6 +212,78 @@ describe("createAgentRuntimeService", () => {
     await service.close()
   })
 
+  it("fails closed on unsupported handoff and deduplicates worker session creation", async () => {
+    const handoff = {
+      envelopeVersion: 1 as const,
+      identity: {
+        parentRunId: "run-parent",
+        childRunId: "run-child",
+        depth: 1,
+        parentChain: ["run-parent"],
+      },
+      task: { prompt: "Implement the child task" },
+      execution: { mode: "orchestrated" as const },
+      resources: [{ kind: "repository", ref: "repository:project-1:repo-1" }],
+      createdAt: "2026-08-12T00:00:00.000Z",
+    }
+    const unsupported = createAgentRuntimeService({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
+      home,
+    })
+    await expect(
+      unsupported.handle("session/create", { commandId: "lease-1", handoff }, context as never)
+    ).rejects.toMatchObject({ structuredError: { code: "unsupported_capability" } })
+    await unsupported.close()
+
+    const resolveHandoffWorkspace = jest.fn(async () => path.join(home, "isolated-workspace"))
+    const workerManifest = {
+      manifestVersion: 1 as const,
+      runtime: "builtin",
+      models: ["test-model"],
+      hardCapabilities: ["filesystem.write"],
+      maxActiveTurns: 1,
+      credentialProfileRefs: ["credential:test"],
+      workspaceBindingRefs: ["repository:project-1:repo-1"],
+      taskWorkspace: { enabled: true },
+      sandbox: { capabilities: ["filesystem.write"] },
+      platform: { os: "linux", arch: "x64" },
+    }
+    const worker = createAgentRuntimeService({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
+      home,
+      mintSessionId: () => "remote-session-1",
+      workerDispatch: { manifest: workerManifest, resolveHandoffWorkspace },
+    })
+
+    const first = await worker.handle(
+      "session/create",
+      { commandId: "lease-2", handoff },
+      context as never
+    )
+    const duplicate = await worker.handle(
+      "session/create",
+      { commandId: "lease-2", handoff },
+      context as never
+    )
+
+    expect(duplicate).toEqual(first)
+    expect(first).toMatchObject({ sessionId: "remote-session-1", commandId: "lease-2" })
+    expect(resolveHandoffWorkspace).toHaveBeenCalledTimes(1)
+    await worker.close()
+
+    const restarted = createAgentRuntimeService({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
+      home,
+      mintSessionId: () => "must-not-create-another-session",
+      workerDispatch: { manifest: workerManifest, resolveHandoffWorkspace },
+    })
+    await expect(
+      restarted.handle("session/create", { commandId: "lease-2", handoff }, context as never)
+    ).resolves.toEqual(first)
+    expect(resolveHandoffWorkspace).toHaveBeenCalledTimes(1)
+    await restarted.close()
+  })
+
   it("persists tags and command receipts across host restarts", async () => {
     const config = { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" }
     const first = createAgentRuntimeService({

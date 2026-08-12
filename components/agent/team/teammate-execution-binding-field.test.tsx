@@ -137,4 +137,17 @@ describe("TeammateExecutionBindingField", () => {
     // baseline ⇒ orchestrated.
     expect(screen.getByTestId("delegation-mode-preview")).toHaveTextContent("deployment-differs")
   })
+
+  it("preserves an offline pinned host and warns that dispatch will wait", () => {
+    renderField({
+      value: {
+        mode: "inherit",
+        executionTarget: { mode: "pinned", hostRef: "device:offline" },
+      },
+    })
+    expect(screen.getByTestId("execution-host-target")).toHaveTextContent("device:offline")
+    expect(
+      screen.getByText("Pinned host is offline; the child will remain queued.")
+    ).toBeInTheDocument()
+  })
 })

@@ -7,6 +7,12 @@ import type { AgentTeam } from "@/types/agent/agent-team"
 let liveValue: unknown = null
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => liveValue }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+const retryChildMock = jest.fn<Promise<void>, [string, string?]>(async () => undefined)
+jest.mock("@/lib/ai/agent/agent-team", () => ({
+  agentTeamManager: {
+    retryChild: (childRunId: string, hostRef?: string) => retryChildMock(childRunId, hostRef),
+  },
+}))
 
 jest.mock("@/lib/ai/agent/execution/local-tauri-environment", () => ({
   createLocalTauriExecutionEnvironment: () => ({ preflight: () => ({ ok: true, missing: [] }) }),
@@ -97,5 +103,49 @@ describe("DurableOperations", () => {
 
     await user.click(screen.getByRole("button", { name: /open terminal/i }))
     expect(onOpenTerminal).toHaveBeenCalledWith("/repo/.worktrees/child-1")
+  })
+
+  it("shows remote lineage and routes same-host recovery through the manager", async () => {
+    const user = userEvent.setup()
+    liveValue = {
+      run: {
+        id: "run-1",
+        status: "needs_input",
+        decisionVersion: 0,
+        resourceUsage: { totalTokens: 0 },
+      },
+      children: [
+        {
+          id: "child-remote",
+          repositoryId: "primary",
+          status: "needs_input",
+          hostRef: "device:worker-a",
+          remoteSessionId: "remote-session-1",
+          waitingReason: "recovery_required",
+          dispatchLeaseId: "lease-1",
+          dispatchLeaseExpiresAt: Date.now() + 60_000,
+        },
+      ],
+      decisions: [],
+      evidence: [],
+      graph: undefined,
+      deliveryNodes: [],
+      retrospectives: [],
+      environment: undefined,
+    }
+    render(
+      <DurableOperations
+        team={team("durable-v2")}
+        onOpenEditor={jest.fn()}
+        onOpenTerminal={jest.fn()}
+        onOpenBrowser={jest.fn()}
+        onMigrate={jest.fn()}
+      />
+    )
+
+    expect(screen.getByText(/device:worker-a/)).toBeInTheDocument()
+    expect(screen.getByText(/remote-session-1/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /retry same host/i }))
+    expect(retryChildMock).toHaveBeenCalledWith("child-remote", "device:worker-a")
   })
 })

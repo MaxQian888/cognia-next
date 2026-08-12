@@ -11,6 +11,10 @@ publish = false
 name = "cognia_task_workspace"
 path = "src/lib.rs"
 
+[[bin]]
+name = "cognia-task-workspace-worker"
+path = "src/bin/cognia-task-workspace-worker.rs"
+
 [dependencies]
 base64 = "0.23"
 flate2 = "1"

@@ -291,4 +291,53 @@ describe("durable dispatch bridge", () => {
     expect(environment.resourceHealth(dispatch.childRunId)?.state).toBe("terminated")
     expect(settle).toHaveBeenCalledWith("cancelled")
   })
+
+  it("keeps an unavailable remote child queued and marks the run as waiting", async () => {
+    const coordinator = createDurableTeamCoordinator({ now: () => 50 })
+    await coordinator.prepareRun(team, "run-waiting")
+    const dispatch = await beginDurableDispatch({
+      coordinator,
+      team,
+      runId: "run-waiting",
+      teammateId: "mate",
+      taskId: "task-waiting",
+      access: "read",
+      repositoryId: "primary",
+      now: () => 51,
+    })
+
+    await dispatch.wait("pinned_host_offline", "device:worker-a")
+
+    expect(await getDb().agentTeamChildRuns.get(dispatch.childRunId)).toMatchObject({
+      status: "queued",
+      hostRef: "device:worker-a",
+      waitingReason: "pinned_host_offline",
+    })
+    expect(await getDb().agentTeamRuns.get("run-waiting")).toMatchObject({
+      status: "needs_input",
+      recoveryReason: "worker_waiting:pinned_host_offline",
+    })
+  })
+
+  it("records a safe durable checkpoint after remote pause reaches idle", async () => {
+    const coordinator = createDurableTeamCoordinator({ now: () => 60 })
+    await coordinator.prepareRun(team, "run-pause-checkpoint")
+    const dispatch = await beginDurableDispatch({
+      coordinator,
+      team,
+      runId: "run-pause-checkpoint",
+      teammateId: "mate",
+      taskId: "task-pause-checkpoint",
+      access: "read",
+      repositoryId: "primary",
+      now: () => 61,
+    })
+
+    await expect(dispatch.checkpointPause()).resolves.toBe(true)
+    const checkpoint = await getDb()
+      .agentTeamCheckpoints.where("childRunId")
+      .equals(dispatch.childRunId)
+      .last()
+    expect(checkpoint).toMatchObject({ replay: "safe", sideEffects: [] })
+  })
 })

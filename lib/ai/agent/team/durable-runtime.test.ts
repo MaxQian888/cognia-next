@@ -4,6 +4,11 @@ import { __enableDbRuntimeForTesting, __resetDbForTesting, getDb } from "@/lib/d
 import type { AgentTeam, AgentTeamConfig } from "@/types/agent/agent-team"
 import { createDurableTeamCoordinator } from "./durable-runtime"
 
+const removeManagedFleetSession = jest.fn<Promise<boolean>, [sessionId: string]>(async () => true)
+jest.mock("@/lib/fleet/managed-session-projection", () => ({
+  removeManagedFleetSession: (sessionId: string) => removeManagedFleetSession(sessionId),
+}))
+
 const config = (overrides: Partial<AgentTeamConfig> = {}): AgentTeamConfig => ({
   maxTeammates: 3,
   maxConcurrentTeammates: 2,
@@ -207,11 +212,15 @@ describe("durable AgentTeam coordinator", () => {
 
     await coordinator.pauseChild("child-control")
     await coordinator.resumeChild("child-control")
+    await getDb().agentTeamChildRuns.update("child-control", {
+      remoteSessionId: "remote-control",
+    })
     await coordinator.terminateChild("child-control")
 
     expect(pause).toHaveBeenCalledTimes(1)
     expect(resume).toHaveBeenCalledTimes(1)
     expect(terminate).toHaveBeenCalledTimes(1)
+    expect(removeManagedFleetSession).toHaveBeenCalledWith("remote-control")
     expect((await getDb().agentTeamChildRuns.get("child-control"))?.status).toBe("terminated")
   })
 
@@ -254,5 +263,83 @@ describe("durable AgentTeam coordinator", () => {
         { runId: "run-uncertain", status: "needs_input" },
       ])
     )
+  })
+
+  it("retries on the same host but requires a safe checkpoint to migrate", async () => {
+    let now = 500
+    const coordinator = createDurableTeamCoordinator({ now: () => now })
+    await coordinator.prepareRun(team(), "run-retry")
+    await coordinator.registerChild({
+      runId: "run-retry",
+      childRunId: "child-retry",
+      teammateId: "mate-1",
+      taskId: "task-1",
+      repositoryId: "primary",
+      access: "write",
+    })
+    await getDb().agentTeamChildRuns.update("child-retry", {
+      hostRef: "device:a",
+      status: "needs_input",
+      dispatchLeaseId: "dispatch:old-attempt",
+      dispatchLeaseExpiresAt: 60_000,
+    })
+
+    await expect(coordinator.retryChild("child-retry", "device:b")).rejects.toThrow(
+      "Cross-host retry requires a safe checkpoint"
+    )
+    const sameHost = await coordinator.retryChild("child-retry", "device:a")
+    expect(sameHost).toMatchObject({
+      status: "queued",
+      waitingReason: "retry_host:device:a",
+    })
+    expect(sameHost.dispatchLeaseId).toBeUndefined()
+    expect(sameHost.dispatchLeaseExpiresAt).toBeUndefined()
+
+    now = 550
+    await coordinator.checkpoint("child-retry", {
+      trajectorySequence: 0,
+      replay: "safe",
+      sideEffects: [],
+    })
+    const migrated = await coordinator.retryChild("child-retry", "device:b")
+    expect(migrated.waitingReason).toBe("retry_host:device:b")
+    expect((await getDb().agentTeamRuns.get("run-retry"))?.status).toBe("recovering")
+  })
+
+  it("resumes a remote session only from a safe checkpoint and increments its attempt", async () => {
+    const coordinator = createDurableTeamCoordinator({ now: () => 1_000 })
+    await coordinator.prepareRun(team(), "run-remote-resume")
+    await coordinator.registerChild({
+      runId: "run-remote-resume",
+      childRunId: "child-remote-resume",
+      teammateId: "mate-1",
+      taskId: "task-1",
+      repositoryId: "primary",
+      access: "read",
+    })
+    await getDb().agentTeamChildRuns.update("child-remote-resume", {
+      remoteSessionId: "remote-session-1",
+      attempt: 1,
+    })
+    const resume = jest.fn(async () => undefined)
+    coordinator.attachLiveControl("child-remote-resume", {
+      steer: jest.fn(async () => undefined),
+      resume,
+    })
+
+    await expect(coordinator.resumeChild("child-remote-resume")).rejects.toThrow("safe checkpoint")
+    await coordinator.checkpoint("child-remote-resume", {
+      trajectorySequence: 0,
+      replay: "safe",
+      sideEffects: [],
+    })
+    await coordinator.resumeChild("child-remote-resume")
+
+    expect(resume).toHaveBeenCalledTimes(1)
+    expect(await getDb().agentTeamChildRuns.get("child-remote-resume")).toMatchObject({
+      status: "running",
+      attempt: 2,
+      remoteSessionId: "remote-session-1",
+    })
   })
 })

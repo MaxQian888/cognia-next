@@ -72,6 +72,12 @@ describe("main", () => {
     expect(sdk.mock.calls[0][0].subcommand).toBe("capabilities")
   })
 
+  it("dispatches worker workspace management", async () => {
+    const worker = jest.fn().mockResolvedValue(0)
+    await main(["worker", "list"], { worker })
+    expect(worker.mock.calls[0][0].subcommand).toBe("list")
+  })
+
   it("lists durability in the help text", async () => {
     const s = sink()
     await main(["--help"], { out: s.out })

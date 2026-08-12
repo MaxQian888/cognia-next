@@ -2387,20 +2387,37 @@
     "openWorkspace": "打开工作区",
     "operations": {
       "children": {
+        "cancel": "取消子任务",
+        "cancelled": "子任务已取消。",
         "commandsPlaceholder": "人工命令，每行一条",
         "diffPlaceholder": "人工 diff 或编辑摘要",
+        "host": "执行主机：{value}",
+        "lease": "分发租约：{value}",
+        "leaseExpired": "已过期",
+        "leaseFresh": "有效",
+        "localHost": "本机",
+        "noLease": "无",
+        "noRemoteSession": "无",
         "noWorkspace": "工作区待创建",
         "openBrowser": "打开浏览器",
         "openEditor": "打开编辑器",
         "openTerminal": "打开终端",
+        "recoveryRequired": "该子任务需要操作员确认恢复方式后才能继续。",
+        "remoteSession": "远程会话：{value}",
         "resume": "创建检查点并恢复",
+        "retryHostLabel": "兼容的重试主机",
+        "retrySameHost": "在原主机重试",
+        "retrySelectedHost": "在所选主机重试",
+        "retryStarted": "子任务重试已开始。",
+        "selectHost": "选择兼容主机",
         "steer": "发送引导",
         "steerPlaceholder": "在下一个安全边界引导该子任务",
         "steered": "引导已记录。",
         "takeover": "开始接管",
         "takeoverCompleted": "人工接管已创建检查点。",
         "takeoverStarted": "子任务已暂停，可人工接管。",
-        "title": "子会话与人工接管"
+        "title": "子会话与人工接管",
+        "waitingReason": "等待原因：{value}"
       },
       "decisions": {
         "accept": "接受",
@@ -2911,6 +2928,12 @@
         "deploymentRefPlaceholder": "部署 id（如 dep-vendor-a）",
         "description": "该成员的运行时、部署与凭证如何绑定。仅引用——端点与密钥保存在 Provider Profile 中。",
         "flagOffHint": "在统一执行 resolver 开关（agentExecutionResolverV2）开启前不生效——关闭时派发忽略此绑定。",
+        "hostAuto": "自动",
+        "hostLocal": "本机",
+        "hostPinned": "{host}",
+        "hostPinnedOffline": "{host}（离线）",
+        "hostTarget": "执行主机",
+        "hostWaitingWarning": "固定主机已离线；子任务会保持排队状态。",
         "modeInherit": "继承团队默认",
         "modePinned": "固定绑定",
         "modePool": "候选池",
@@ -9462,6 +9485,7 @@
     "agents": {
       "claude-code": "Claude Code",
       "codex": "Codex",
+      "cognia": "Cognia",
       "opencode": "OpenCode"
     },
     "island": {
@@ -9521,6 +9545,7 @@
         "turn": "本轮失败"
       },
       "focusTerminal": "聚焦终端",
+      "host": "执行主机：{host}",
       "interrupt": {
         "error": {
           "interrupt_identity_mismatch": "该进程已不是这个 Agent，未发送任何信号。",
@@ -12911,6 +12936,11 @@
     "fleet": {
       "connectFirst": "连接到你的桌面以查看其智能体队列。",
       "empty": "暂无活动 Agent。",
+      "hostCapacity": "{used}/{total} 个槽位",
+      "hostEmpty": "此主机暂无活动会话。",
+      "hostOffline": "离线",
+      "hostOnline": "在线",
+      "localHost": "本地主机",
       "permission": {
         "allow": "允许",
         "allowed": "已允许",
@@ -12944,6 +12974,7 @@
         },
         "focus": "聚焦终端",
         "focusFailed": "无法聚焦终端。",
+        "openTeam": "打开 AgentTeam 运行",
         "status": {
           "ended": "会话已结束",
           "idle": "空闲",
@@ -12956,7 +12987,9 @@
       },
       "summary": "{total} 个 Agent",
       "title": "智能体队列",
-      "waiting": "{count} 个待处理"
+      "waiting": "{count} 个待处理",
+      "workspaceMissing": "缺少仓库绑定",
+      "workspaceReady": "工作区就绪"
     },
     "home": {
       "actions": {
@@ -26260,7 +26293,26 @@
         "unavailable": "未找到 Claude Code"
       },
       "summaryAria": "{count} 项集成已启用",
-      "title": "Agent 舰队监控"
+      "title": "Agent 舰队监控",
+      "workers": {
+        "bindingHint": "仓库路径只保留在各 worker 本机。请在本机运行 cognia-agent worker bind；此界面不接受绝对路径。",
+        "capacity": "{used}/{total} 个槽位",
+        "copied": "Worker 注册命令已复制。",
+        "copy": "复制命令",
+        "copyFailed": "无法复制命令。",
+        "description": "注册最小权限的 Agent RPC worker，并查看其就绪状态。",
+        "empty": "尚未注册执行 worker。",
+        "enroll": "注册 worker",
+        "error": "Worker 操作失败：{detail}",
+        "expires": "一次性注册码将在 {time} 失效。",
+        "notConnected": "请先将此浏览器连接到 Companion 主机。",
+        "offline": "离线",
+        "online": "在线",
+        "qrAria": "Worker 注册二维码",
+        "revoke": "撤销 worker",
+        "revoked": "Worker 权限已撤销。",
+        "title": "执行 Worker"
+      }
     },
     "gateway": {
       "add": "添加",

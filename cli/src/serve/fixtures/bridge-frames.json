@@ -1,29 +1,29 @@
 {
   "$comment": "Golden fixtures for the ADR-0059 bridge WebSocket protocol (GET /internal/bridge). This file is the cross-language wire contract: asserted by BOTH src-tauri/src/companion_api/ws_bridge.rs (include_str! serde-roundtrip test) and cli/src/serve/protocol.test.ts. The bridge WS carries ONLY the three bridges' request/respond plus lifecycle frames; all other server->brain events ride /ws/events. Event payloads are byte-identical to the desktop Tauri event payloads: sync is snake_case, messages/writes are camelCase. Respond payloads are the Tauri response-command args verbatim (camelCase requestId, as the TS installers send today). Do not edit casually.",
-  "protocol": 2,
+  "protocol": 3,
   "frames": {
     "hello": {
-      "v": 2,
+      "v": 3,
       "type": "hello",
       "role": "brain",
       "brainVersion": "0.1.0",
-      "protocol": 2,
+      "protocol": 3,
       "accountId": "local_acct_a",
       "capabilities": ["sync", "messages", "writes"],
-      "catalogHash": "d6a9b1421313c4339bc790ab5b1cccd5486811186750d8970774dc884f0bb355",
+      "catalogHash": "f88a74f52d6325ff6603320907b6084d33574095824fbe719e405508168d4802",
       "contractVersion": 1
     },
     "helloAck": {
-      "v": 2,
+      "v": 3,
       "type": "hello_ack",
       "serverVersion": "0.9.0",
-      "protocol": 2,
+      "protocol": 3,
       "accountId": "local_acct_a",
-      "catalogHash": "d6a9b1421313c4339bc790ab5b1cccd5486811186750d8970774dc884f0bb355",
+      "catalogHash": "f88a74f52d6325ff6603320907b6084d33574095824fbe719e405508168d4802",
       "contractVersion": 1
     },
     "eventSyncPull": {
-      "v": 2,
+      "v": 3,
       "type": "event",
       "event": "companion://sync-pull-request",
       "payload": {
@@ -34,7 +34,7 @@
       }
     },
     "eventSessionList": {
-      "v": 2,
+      "v": 3,
       "type": "event",
       "event": "companion://session-list-request",
       "payload": {
@@ -45,7 +45,7 @@
       }
     },
     "eventDesktopWrite": {
-      "v": 2,
+      "v": 3,
       "type": "event",
       "event": "companion://desktop-write-request",
       "payload": {
@@ -57,7 +57,7 @@
       }
     },
     "respondSyncPull": {
-      "v": 2,
+      "v": 3,
       "type": "respond",
       "command": "companion_sync_pull_response",
       "payload": {
@@ -71,7 +71,7 @@
       }
     },
     "respondMessage": {
-      "v": 2,
+      "v": 3,
       "type": "respond",
       "command": "companion_message_response",
       "payload": {
@@ -84,7 +84,7 @@
       }
     },
     "respondDesktopWrite": {
-      "v": 2,
+      "v": 3,
       "type": "respond",
       "command": "companion_desktop_write_response",
       "payload": {
@@ -94,21 +94,44 @@
       }
     },
     "ping": {
-      "v": 2,
+      "v": 3,
       "type": "ping",
       "ts": 1751400000000
     },
     "pong": {
-      "v": 2,
+      "v": 3,
       "type": "pong",
       "ts": 1751400000000,
       "rssBytes": 123456789,
       "lastFlushAt": 1751399990000
     },
     "tokenRefresh": {
-      "v": 2,
+      "v": 3,
       "type": "token_refresh",
       "token": "eyJhbGciOiJIUzI1NiJ9.example.signature"
+    },
+    "workerAttach": {
+      "v": 3,
+      "type": "worker_attach",
+      "connectionId": "connection-1",
+      "hostRef": "device:worker-a",
+      "manifest": {
+        "manifestVersion": 1,
+        "maxActiveTurns": 1
+      }
+    },
+    "workerFrame": {
+      "v": 3,
+      "type": "worker_frame",
+      "connectionId": "connection-1",
+      "frame": "{\"jsonrpc\":\"2.0\",\"id\":1}"
+    },
+    "workerDetach": {
+      "v": 3,
+      "type": "worker_detach",
+      "connectionId": "connection-1",
+      "hostRef": "device:worker-a",
+      "reason": "socket_closed"
     }
   }
 }
