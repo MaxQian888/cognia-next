@@ -251,7 +251,7 @@ export default function ServersPage() {
     )
   }
 
-  if (!client) {
+  if (!client || !connection) {
     return (
       <div className="grid h-full w-full place-items-center overflow-y-auto p-4">
         <section className="w-full max-w-lg border-y py-6">

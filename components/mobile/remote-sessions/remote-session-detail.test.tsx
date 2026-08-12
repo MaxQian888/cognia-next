@@ -6,12 +6,16 @@ import { useConnectionState } from "@/hooks/companion/use-connection-state"
 import type { RemoteSessionStream } from "@/hooks/data/use-remote-session-stream"
 import type { ConnectionState } from "@/lib/tauri/transport-companion"
 
-const transcriptListMock = jest.fn(() => <div data-testid="remote-transcript-list" />)
+const transcriptListMock = jest.fn((..._args: unknown[]) => (
+  <div data-testid="remote-transcript-list" />
+))
 jest.mock("@/components/chat/transcript-message-list", () => ({
   TranscriptMessageList: (props: unknown) => transcriptListMock(props),
 }))
 
-const timelineSurfaceMock = jest.fn(() => <div data-testid="remote-timeline-surface" />)
+const timelineSurfaceMock = jest.fn((..._args: unknown[]) => (
+  <div data-testid="remote-timeline-surface" />
+))
 jest.mock("@/components/chat/transcript-timeline-surface", () => ({
   TranscriptTimelineSurface: (props: unknown) => timelineSurfaceMock(props),
 }))

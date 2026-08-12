@@ -107,7 +107,7 @@ export async function injectTwinContext(input: TwinInjectionInput): Promise<Twin
       styleSampleCount: result.applied.metadata.styleSampleIds.length,
       tokensApprox: estimateFallbackTokens(systemPrompt),
       durationMs: Date.now() - startedAt,
-      chunkIds: result.retrievedChunks.map((chunk) => chunk.id),
+      chunkIds: result.retrievedChunks.map(({ chunk }) => chunk.id),
       chunkScores: result.retrievedChunks.map((chunk) => chunk.score),
       styleSampleIds: result.selectedStyleSamples.map((sample) => sample.id),
     })

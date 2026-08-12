@@ -9,7 +9,7 @@ import {
 import { buildAgentRoleLlmClient } from "./agent-role-client"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
-const mockHasNoLeakingPiiDeep = jest.fn(() => true)
+const mockHasNoLeakingPiiDeep = jest.fn((..._args: unknown[]) => true)
 
 jest.mock("./agent-role-client", () => ({
   buildAgentRoleLlmClient: jest.fn(),
@@ -146,7 +146,7 @@ describe("runTitleTask", () => {
   }
 
   it("generates and persists a title", async () => {
-    mockBuild.mockReturnValue(clientReturning("Refactor message list"))
+    mockBuild.mockResolvedValue(clientReturning("Refactor message list"))
     const persist = jest.fn()
     const out = await runTitleTask({ ...base, persist })
     expect(out).toBe("Refactor message list")
@@ -186,7 +186,7 @@ describe("runTitleTask", () => {
   })
 
   it("returns null when no client can be resolved", async () => {
-    mockBuild.mockReturnValue(null)
+    mockBuild.mockResolvedValue(null)
     const persist = jest.fn()
     const out = await runTitleTask({ ...base, persist })
     expect(out).toBeNull()
@@ -194,7 +194,7 @@ describe("runTitleTask", () => {
   })
 
   it("returns null when the model yields an empty title", async () => {
-    mockBuild.mockReturnValue(clientReturning("   "))
+    mockBuild.mockResolvedValue(clientReturning("   "))
     const persist = jest.fn()
     const out = await runTitleTask({ ...base, persist })
     expect(out).toBeNull()
@@ -202,7 +202,7 @@ describe("runTitleTask", () => {
   })
 
   it("skips persisting when the title is equivalent to the current one (smoothing)", async () => {
-    mockBuild.mockReturnValue(clientReturning("refactor   message list"))
+    mockBuild.mockResolvedValue(clientReturning("refactor   message list"))
     const persist = jest.fn()
     const out = await runTitleTask({
       ...base,
@@ -214,7 +214,7 @@ describe("runTitleTask", () => {
   })
 
   it("aborts when the row is no longer auto-managed", async () => {
-    mockBuild.mockReturnValue(clientReturning("New title"))
+    mockBuild.mockResolvedValue(clientReturning("New title"))
     const persist = jest.fn()
     const out = await runTitleTask({
       ...base,
@@ -226,7 +226,7 @@ describe("runTitleTask", () => {
   })
 
   it("persists when isStillAuto resolves true", async () => {
-    mockBuild.mockReturnValue(clientReturning("New title"))
+    mockBuild.mockResolvedValue(clientReturning("New title"))
     const persist = jest.fn()
     const out = await runTitleTask({ ...base, isStillAuto: () => true, persist })
     expect(out).toBe("New title")
@@ -234,7 +234,7 @@ describe("runTitleTask", () => {
   })
 
   it("swallows errors from persist and never throws", async () => {
-    mockBuild.mockReturnValue(clientReturning("New title"))
+    mockBuild.mockResolvedValue(clientReturning("New title"))
     const persist = jest.fn(() => {
       throw new Error("boom")
     })
@@ -244,7 +244,7 @@ describe("runTitleTask", () => {
 
   it("forwards the work kind to the generator", async () => {
     const client = clientReturning("Build the report")
-    mockBuild.mockReturnValue(client)
+    mockBuild.mockResolvedValue(client)
     await runTitleTask({
       ...base,
       sourceText: "generate the weekly report",
@@ -265,7 +265,7 @@ describe("runTitleTask", () => {
           })
       ),
     }
-    mockBuild.mockReturnValue(slowClient)
+    mockBuild.mockResolvedValue(slowClient)
     const persist = jest.fn()
 
     // Start first call (will hang on complete).
@@ -283,19 +283,19 @@ describe("runTitleTask", () => {
   })
 
   it("dedupKey is cleared after completion so sequential calls work", async () => {
-    mockBuild.mockReturnValue(clientReturning("Title A"))
+    mockBuild.mockResolvedValue(clientReturning("Title A"))
     const persist = jest.fn()
 
     await runTitleTask({ ...base, dedupKey: "s2", persist })
     expect(persist).toHaveBeenCalledWith("Title A")
 
-    mockBuild.mockReturnValue(clientReturning("Title B"))
+    mockBuild.mockResolvedValue(clientReturning("Title B"))
     await runTitleTask({ ...base, dedupKey: "s2", persist })
     expect(persist).toHaveBeenCalledWith("Title B")
   })
 
   it("dedupKey is cleared even on failure", async () => {
-    mockBuild.mockReturnValue(null) // will cause null return
+    mockBuild.mockResolvedValue(null) // will cause null return
     const persist = jest.fn()
 
     await runTitleTask({ ...base, dedupKey: "s3", persist })

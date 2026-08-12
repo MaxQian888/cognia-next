@@ -76,7 +76,11 @@ export type ManageMemoryCommand =
 export type ManageMemoryResult =
   /** `clearedCount` is only set by `clear` — how many rows the query matched. */
   | { ok: true; memoryId?: string; piiRedacted?: boolean; clearedCount?: number }
-  | { ok: false; reason: "not_found" | "disabled" | "temporary" | "pii_blocked" }
+  | {
+      ok: false
+      reason:
+        "not_found" | "disabled" | "temporary" | "pii_blocked" | "policy_denied" | "scope_denied"
+    }
 
 export async function manageMemory(command: ManageMemoryCommand): Promise<ManageMemoryResult> {
   if (command.kind === "create") {

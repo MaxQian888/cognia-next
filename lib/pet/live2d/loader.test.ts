@@ -27,6 +27,10 @@ const MANIFEST: Live2DManifest = {
   texturePaths: ["model/tex/t0.png"],
   motionGroups: ["Idle"],
   expressionIds: [],
+  motionPaths: [],
+  expressionPaths: [],
+  soundPaths: [],
+  metadataPaths: [],
 }
 
 function entries(): ModelFileEntry[] {

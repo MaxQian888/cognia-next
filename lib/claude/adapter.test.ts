@@ -1257,7 +1257,7 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
       twinId: "twin_a",
       retrievedChunks: [
         {
-          chunk: { vectorDocId: "v1", content: "doc content", sourceId: "src1" },
+          chunk: { id: "v1", vectorDocId: "v1", contentRedacted: "doc content", sourceId: "src1" },
           score: 0.9,
           sourceTitle: "migration.md",
         },
@@ -1302,7 +1302,7 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
       twinId: "twin_a",
       retrievedChunks: [
         {
-          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          chunk: { id: "v1", vectorDocId: "v1", contentRedacted: "doc", sourceId: "src1" },
           score: 0.8,
           sourceTitle: "doc.md",
         },
@@ -1322,7 +1322,7 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
       twinId: "twin_a",
       retrievedChunks: [
         {
-          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          chunk: { id: "v1", vectorDocId: "v1", contentRedacted: "doc", sourceId: "src1" },
           score: 0.8,
           sourceTitle: "doc.md",
         },
@@ -1364,7 +1364,7 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
       twinId: "twin_a",
       retrievedChunks: [
         {
-          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          chunk: { id: "v1", vectorDocId: "v1", contentRedacted: "doc", sourceId: "src1" },
           score: 0.5,
           sourceTitle: "doc.md",
         },
@@ -1399,7 +1399,7 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
       twinId: "twin_a",
       retrievedChunks: [
         {
-          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          chunk: { id: "v1", vectorDocId: "v1", contentRedacted: "doc", sourceId: "src1" },
           score: 0.5,
           sourceTitle: "doc.md",
         },
@@ -1557,7 +1557,7 @@ describe("mergeMemorySourcesIntoLastAssistant", () => {
       twinId: "twin_a",
       retrievedChunks: [
         {
-          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          chunk: { id: "v1", vectorDocId: "v1", contentRedacted: "doc", sourceId: "src1" },
           score: 0.5,
           sourceTitle: "doc.md",
         },

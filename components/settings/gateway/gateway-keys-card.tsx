@@ -258,7 +258,9 @@ export function GatewayKeysCard({ onChanged }: { onChanged?: () => void }) {
                       aria-label={t("copyKey")}
                       title={t("copyKey")}
                       onCopy={() => toast.success(t("keyCopied"))}
-                      onError={(error) => toast.error(error.message)}
+                      onError={(error) =>
+                        toast.error(error instanceof Error ? error.message : t("copyFailed"))
+                      }
                     />
                   </Snippet>
                   <Button

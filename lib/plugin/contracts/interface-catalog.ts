@@ -12,13 +12,18 @@ export interface EffectivePluginApiMethodContract extends PluginApiMethodContrac
   namespace: PluginApiNamespaceContract
 }
 
-export interface PluginApiPolicyDecision {
-  allowed: boolean
+interface PluginApiPolicyDecisionBase {
   mode: "shadow" | "active"
-  reason: "allowed" | "unmapped" | "runtime" | "platform" | "permission"
   missingPermissions: PluginPermission[]
   descriptor?: EffectivePluginApiMethodContract
 }
+
+export type PluginApiPolicyDecision =
+  | (PluginApiPolicyDecisionBase & { allowed: true; reason: "allowed" })
+  | (PluginApiPolicyDecisionBase & {
+      allowed: false
+      reason: "unmapped" | "runtime" | "platform" | "permission"
+    })
 
 export interface PluginApiAuditEvent {
   pluginId: string
@@ -75,13 +80,10 @@ export function evaluatePluginApiCall(input: {
   const missingPermissions = descriptor.requiredPermissions.filter(
     (permission) => !input.hasPermission(permission as PluginPermission)
   ) as PluginPermission[]
-  return {
-    allowed: missingPermissions.length === 0,
-    mode,
-    reason: missingPermissions.length === 0 ? "allowed" : "permission",
-    missingPermissions,
-    descriptor,
+  if (missingPermissions.length === 0) {
+    return { allowed: true, mode, reason: "allowed", missingPermissions, descriptor }
   }
+  return { allowed: false, mode, reason: "permission", missingPermissions, descriptor }
 }
 
 export function subscribePluginApiAudit(

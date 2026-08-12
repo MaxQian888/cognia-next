@@ -75,6 +75,7 @@ function translateStageTitle(
     "wasm-preload": "wasmPreload",
     "hot-reload": "hotReload",
     "local-install": "localInstall",
+    adapter: "adapter",
   }
   return t(stageKey[stage], { pluginName })
 }

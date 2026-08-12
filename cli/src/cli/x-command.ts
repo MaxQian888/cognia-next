@@ -223,10 +223,10 @@ function buildProxyConfig(
   for (const [, prov] of Object.entries(providers)) {
     if (prov.apiKey) {
       // Heuristic: match protocol to determine which key it is
-      if (prov.protocol === "anthropic" || prov.baseUrl?.includes("anthropic")) {
+      if (prov.protocol === "anthropic" || prov.baseURL?.includes("anthropic")) {
         anthropicKey ??= prov.apiKey
       }
-      if (prov.protocol === "openai" || prov.baseUrl?.includes("openai")) {
+      if (prov.protocol === "openai" || prov.baseURL?.includes("openai")) {
         openaiKey ??= prov.apiKey
       }
     }

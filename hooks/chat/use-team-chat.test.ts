@@ -13,10 +13,12 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriMock(),
 }))
 
-const sendPromptMock = jest.fn().mockResolvedValue(undefined)
+const sendPromptMock = jest.fn<Promise<undefined>, [subId: string, ...args: unknown[]]>(
+  async (..._args) => undefined
+)
 const interruptSessionMock = jest.fn().mockResolvedValue(undefined)
 const closeSessionIpcMock = jest.fn().mockResolvedValue(undefined)
-const approveToolMock = jest.fn().mockResolvedValue(undefined)
+const approveToolMock = jest.fn(async (..._args: unknown[]) => undefined)
 const onClaudeUnsub = jest.fn()
 const onClaudeMessageMock = jest.fn(async (_cb: (evt: unknown) => void) => onClaudeUnsub)
 
@@ -25,7 +27,7 @@ jest.mock("@/lib/claude/ipc", () => ({
   closeSession: (id: string) => closeSessionIpcMock(id),
   interruptSession: (id: string) => interruptSessionMock(id),
   onClaudeMessage: (cb: (evt: unknown) => void) => onClaudeMessageMock(cb),
-  sendPrompt: (...a: unknown[]) => sendPromptMock(...a),
+  sendPrompt: (...a: unknown[]) => sendPromptMock(...(a as [string, ...unknown[]])),
 }))
 
 jest.mock("@/lib/claude/adapter", () => ({
@@ -106,9 +108,9 @@ jest.mock("@/lib/claude/team-primary-router", () => ({
     selectPrimaryResponderMock(...(args as [{ members: unknown[] }])),
 }))
 
-const buildUtilityLlmClientMock = jest.fn(() => null)
+const buildUtilityLlmClientMock = jest.fn<null, [args: unknown]>(() => null)
 jest.mock("@/lib/ai/generation/utility-client", () => ({
-  buildUtilityLlmClient: (...args: unknown[]) => buildUtilityLlmClientMock(...args),
+  buildUtilityLlmClient: (args: unknown) => buildUtilityLlmClientMock(args),
 }))
 
 const persistMessagesMock = jest.fn().mockResolvedValue(undefined)
@@ -1229,7 +1231,7 @@ describe("useTeamChat — send coverage", () => {
     })
 
     // Only bob should have sendPrompt called
-    const subIds = sendPromptMock.mock.calls.map((c: string[]) => c[0])
+    const subIds = sendPromptMock.mock.calls.map((c) => c[0])
     expect(subIds.some((id: string) => id.includes("bob"))).toBe(true)
     expect(subIds.some((id: string) => id.includes("alice"))).toBe(false)
   })
@@ -2315,7 +2317,7 @@ describe("useTeamChat — error path branches", () => {
     })
 
     // skip-tgt's sendPrompt should NOT have been called
-    const subIds = sendPromptMock.mock.calls.map((c: string[]) => c[0])
+    const subIds = sendPromptMock.mock.calls.map((c) => c[0])
     expect(subIds.some((id: string) => id.includes("skip-tgt"))).toBe(false)
   })
 })
@@ -2638,7 +2640,7 @@ describe("useTeamChat — content helpers", () => {
     })
 
     // nonexistent target should not produce a sub-session call
-    const subIds = sendPromptMock.mock.calls.map((c: string[]) => c[0])
+    const subIds = sendPromptMock.mock.calls.map((c) => c[0])
     expect(subIds.every((id: string) => !id.includes("nonexistent"))).toBe(true)
   })
 

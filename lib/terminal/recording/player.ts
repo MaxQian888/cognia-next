@@ -47,7 +47,8 @@ export interface PlayerDeps {
 export function createPlayer(recording: TerminalRecording, deps: PlayerDeps): Player {
   const { onFrame } = deps
   const clock = deps.now ?? Date.now
-  const schedule = deps.scheduleTimer ?? setTimeout
+  const schedule: NonNullable<PlayerDeps["scheduleTimer"]> =
+    deps.scheduleTimer ?? ((callback, ms) => setTimeout(callback, ms))
   const cancelSchedule = deps.cancelTimer ?? clearTimeout
 
   const frames = recording.frames

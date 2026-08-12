@@ -39,6 +39,11 @@ jest.mock("@/lib/a2ui/data-model", () => ({
     typeof value === "string" && value.startsWith("/") ? value : null
   ),
 }))
+jest.mock("@/components/ui/calendar", () => ({
+  Calendar: ({ autoFocus }: { autoFocus?: boolean }) => (
+    <div data-testid="calendar" data-auto-focus={String(autoFocus)} />
+  ),
+}))
 
 const createMockComponent = (
   overrides: Partial<A2UIDatePickerComponent> = {}
@@ -162,15 +167,14 @@ describe("A2UIDatePicker", () => {
   })
 
   describe("popover interaction", () => {
-    it("should open calendar on button click", async () => {
+    it("should open an auto-focused calendar on button click", async () => {
       render(
         <A2UIDatePicker {...defaultProps} component={createMockComponent()} onAction={jest.fn()} />
       )
 
       fireEvent.click(screen.getByRole("button"))
 
-      // Calendar should appear in popover
-      // Note: Full calendar testing would require more complex setup
+      expect(screen.getByTestId("calendar")).toHaveAttribute("data-auto-focus", "true")
     })
   })
 })

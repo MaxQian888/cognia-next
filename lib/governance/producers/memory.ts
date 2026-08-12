@@ -117,7 +117,7 @@ export async function recordMemoryConflictGovernance(
         canonicalization: "memory-resolution-evidence-v1",
       },
       observedAt: input.resolutionEvidence.createdAt,
-      review: { status: "verified", reviewerRef: ref("user", input.actorId) },
+      review: { status: "verified", reviewedBy: ref("user", input.actorId) },
       contamination: "clean",
       privacy,
     })

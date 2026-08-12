@@ -7,7 +7,7 @@ import type { UIMessage } from "ai"
 import { BranchNavigator } from "./branch-navigator"
 import { useChatStore } from "@/stores/chat/chat-store"
 
-const mockPersistBranchSelection = jest.fn(async () => undefined)
+const mockPersistBranchSelection = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("@/lib/db/sessions", () => ({
   setSessionActiveBranchSelection: (...args: unknown[]) => mockPersistBranchSelection(...args),
 }))

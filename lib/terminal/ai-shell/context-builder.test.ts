@@ -14,9 +14,9 @@ import type { TerminalCommandRecord } from "@/stores/terminal/terminal-store"
 
 function makeRow(
   overrides?: Partial<{ cwd: string | null; shell: string; lastCommands: TerminalCommandRecord[] }>
-) {
+): { cwd: string | null; shell: string; lastCommands: TerminalCommandRecord[] } {
   return {
-    cwd: overrides && "cwd" in overrides ? overrides.cwd : "/home/user/project",
+    cwd: overrides?.cwd === undefined ? "/home/user/project" : overrides.cwd,
     shell: overrides?.shell ?? "zsh",
     lastCommands: overrides?.lastCommands ?? [],
   }

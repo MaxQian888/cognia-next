@@ -166,6 +166,7 @@ function nativeSpec(): ResolvedAgentExecutionSpec {
     },
     executionFingerprint: "fp-native",
     executionKind: "agent",
+    fallbackPolicy: "none",
     runtimeAdapter: "claude-agent-sdk",
     runtimePolicySource: "explicit",
     modelBindings: { primary: "sonnet" },

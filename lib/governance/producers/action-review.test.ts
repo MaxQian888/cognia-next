@@ -26,7 +26,7 @@ function receipt(
       requestId: `request-${channel}`,
       origin: {
         channel,
-        scope: channel === "workflow" ? "workflow" : "chat",
+        scope: channel === "workflow-step" ? "workflow" : "chat",
         id: "origin-1",
         sessionId: "session-1",
         runId: "run-1",
@@ -38,7 +38,7 @@ function receipt(
       verdictExplicit: true,
       tier: "high",
       surfaces: [{ id: "native-command", evidence: "shell" }],
-      recommendation: { suggests: "deny", confidence: 0.9, source: "policy" },
+      recommendation: { suggests: "deny", confidence: "high", source: "policy" },
       requestedAt: 90,
     },
     decision: {
@@ -59,7 +59,7 @@ function receipt(
 
 it.each([
   ["chat-tool", "human", "tool-authorization"],
-  ["workflow", "policy", "human-approval"],
+  ["workflow-step", "policy-rule", "human-approval"],
 ] as const)(
   "projects %s review decisions and redacted policy evidence",
   async (channel, authority, kind) => {

@@ -91,45 +91,55 @@ export function createEnvelopeOrderTracker(): {
  * canonical event. Unknown kinds become controlled diagnostics — never
  * dropped silently.
  */
-export function canonicalEventFromExternalEvent(event: {
-  type: string
-  [key: string]: unknown
-}): CanonicalAgentEvent {
-  switch (event.type) {
+export function canonicalEventFromExternalEvent(event: unknown): CanonicalAgentEvent {
+  const record =
+    event && typeof event === "object"
+      ? (event as Record<string, unknown>)
+      : ({ type: "unknown", value: event } satisfies Record<string, unknown>)
+  switch (record.type) {
     case "text":
     case "text_delta":
-      return { kind: "text-delta", delta: String(event.text ?? event.delta ?? "") }
+      return { kind: "text-delta", delta: String(record.text ?? record.delta ?? "") }
+    case "message_delta": {
+      const delta =
+        record.delta && typeof record.delta === "object"
+          ? (record.delta as Record<string, unknown>)
+          : undefined
+      return delta?.type === "thinking"
+        ? { kind: "thinking-delta", delta: String(delta.text ?? "") }
+        : { kind: "text-delta", delta: String(delta?.text ?? "") }
+    }
     case "thinking":
     case "reasoning":
-      return { kind: "thinking-delta", delta: String(event.text ?? event.delta ?? "") }
+      return { kind: "thinking-delta", delta: String(record.text ?? record.delta ?? "") }
     case "commentary_delta":
       return {
         kind: "commentary-delta",
-        delta: String(event.text ?? event.delta ?? ""),
-        ...(typeof event.messageId === "string" ? { messageId: event.messageId } : {}),
-        ...(typeof event.done === "boolean" ? { done: event.done } : {}),
+        delta: String(record.text ?? record.delta ?? ""),
+        ...(typeof record.messageId === "string" ? { messageId: record.messageId } : {}),
+        ...(typeof record.done === "boolean" ? { done: record.done } : {}),
       }
     case "tool_call":
       return {
         kind: "tool-call",
-        toolName: String(event.name ?? event.toolName ?? "unknown"),
-        input: (event.input as Record<string, unknown>) ?? {},
-        toolCallId: typeof event.id === "string" ? event.id : undefined,
+        toolName: String(record.name ?? record.toolName ?? "unknown"),
+        input: (record.input as Record<string, unknown>) ?? {},
+        toolCallId: typeof record.id === "string" ? record.id : undefined,
       }
     case "tool_result":
       return {
         kind: "tool-result",
-        toolName: String(event.name ?? event.toolName ?? "unknown"),
-        toolCallId: typeof event.id === "string" ? event.id : undefined,
-        result: event.result,
-        isError: event.isError === true,
+        toolName: String(record.name ?? record.toolName ?? "unknown"),
+        toolCallId: typeof record.id === "string" ? record.id : undefined,
+        result: record.result,
+        isError: record.isError === true,
       }
     case "permission_request":
       return {
         kind: "permission-request",
-        requestId: String(event.requestId ?? ""),
-        toolName: String(event.toolName ?? "unknown"),
-        input: event.input as Record<string, unknown> | undefined,
+        requestId: String(record.requestId ?? ""),
+        toolName: String(record.toolName ?? "unknown"),
+        input: record.input as Record<string, unknown> | undefined,
       }
     case "session_started":
       return { kind: "lifecycle", phase: "started" }
@@ -139,11 +149,11 @@ export function canonicalEventFromExternalEvent(event: {
     case "error":
       return {
         kind: "failure",
-        code: String(event.code ?? "external_error"),
-        message: String(event.message ?? "external agent error"),
+        code: String(record.code ?? "external_error"),
+        message: String(record.message ?? "external agent error"),
       }
     default:
-      return { kind: "diagnostic", runtime: "external", payload: event }
+      return { kind: "diagnostic", runtime: "external", payload: record }
   }
 }
 

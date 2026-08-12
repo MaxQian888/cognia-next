@@ -260,6 +260,18 @@ describe("GatewayOverviewPanel", () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("copy denied"))
   })
 
+  it("uses the translated fallback for a non-Error snippet copy rejection", async () => {
+    const user = userEvent.setup()
+    const writeText = jest.fn().mockRejectedValueOnce({ reason: "denied" })
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    const { toast } = jest.requireMock("sonner")
+    setup()
+
+    await user.click(screen.getByRole("button", { name: "copy anthropicSnippet" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("copyFailed"))
+  })
+
   it("prefers the bound port over the configured one in the snippets", () => {
     setup(status({ running: true, boundPort: 50505 }))
     expect(screen.getByRole("textbox", { name: "anthropicSnippet" })).toHaveValue(

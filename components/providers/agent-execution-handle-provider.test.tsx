@@ -2,7 +2,11 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { renderToString } from "react-dom/server"
 
-import type { AgentExecutionHandle } from "@/lib/ai/agent/execution/agent-execution-handle"
+import {
+  createAgentExecutionHandle,
+  type AgentExecutionHandle,
+} from "@/lib/ai/agent/execution/agent-execution-handle"
+import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
 import {
   AgentExecutionHandleProvider,
   useAgentExecutionHandle,
@@ -10,14 +14,27 @@ import {
 } from "./agent-execution-handle-provider"
 
 const reloadPlugins = jest.fn().mockResolvedValue(undefined)
-const handle = {
-  sessionId: "session-1",
-  reloadPlugins,
-} as AgentExecutionHandle
-const replacementHandle = {
-  sessionId: "session-1",
-  reloadPlugins: jest.fn().mockResolvedValue(undefined),
-} as AgentExecutionHandle
+const spec: ResolvedAgentExecutionSpec = {
+  specVersion: 2,
+  identity: { sessionId: "session-1", runId: "run-1", turnId: "turn-1", attemptId: "attempt-1" },
+  executionFingerprint: "test-fingerprint",
+  executionKind: "agent",
+  fallbackPolicy: "none",
+  runtimeAdapter: "claude-agent-sdk",
+  runtimePolicySource: "explicit",
+  modelBindings: { primary: "sonnet" },
+  route: { kind: "direct", routePolicy: "direct" },
+  hostRef: "desktop-sidecar",
+  compatibility: { evidence: "native" },
+  capabilities: { effective: [], disabledOptional: [], support: {} },
+}
+
+function createTestHandle(reload: AgentExecutionHandle["reloadPlugins"]): AgentExecutionHandle {
+  return Object.assign(createAgentExecutionHandle("session-1", spec), { reloadPlugins: reload })
+}
+
+const handle = createTestHandle(reloadPlugins)
+const replacementHandle = createTestHandle(jest.fn().mockResolvedValue(undefined))
 
 function RegisterHandle() {
   const directory = useAgentExecutionHandleDirectory()

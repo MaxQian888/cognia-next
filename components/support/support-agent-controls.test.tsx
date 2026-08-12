@@ -1,11 +1,14 @@
 /** @jest-environment jsdom */
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
-const getDiagnostics = jest.fn(async () => ({ status: "ok", health: { sidecar: { status: "ok" } } }))
+const getDiagnostics = jest.fn(async () => ({
+  status: "ok",
+  health: { sidecar: { status: "ok" } },
+}))
 jest.mock("@/lib/native/local-runtime", () => ({
   getLocalRuntimeDiagnostics: () => getDiagnostics(),
 }))
-const trackEvent = jest.fn(async () => true)
+const trackEvent = jest.fn(async (..._args: unknown[]) => true)
 jest.mock("@/lib/telemetry/events/track-event", () => ({
   trackEvent: (...args: unknown[]) => trackEvent(...args),
 }))

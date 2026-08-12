@@ -239,8 +239,8 @@ registerHeadlessRuntime({
   start: (ctx) => {
     const prevInvoker = setConnectorCommandInvoker(headlessConnectorInvoker)
     const prevListen = setConnectorListen(headlessConnectorListen)
-    let dispose = () => undefined
-    let disposeLarkOAuth = () => undefined
+    let dispose: () => void = () => undefined
+    let disposeLarkOAuth: () => void = () => undefined
     const acquireRuntimeLock = createHeadlessConnectorRuntimeLease(
       ctx.log,
       () => dispose(),

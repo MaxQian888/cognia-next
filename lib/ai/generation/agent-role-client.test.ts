@@ -1,24 +1,40 @@
-const resolveCharacterById = jest.fn()
-const buildUtilityLlmClient = jest.fn(() => ({ complete: jest.fn() }))
+import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
+
+const resolveCharacterById = jest.fn<Promise<Character | undefined>, [id: string]>(
+  async () => undefined
+)
+const buildUtilityLlmClient = jest.fn((_args: unknown) => ({ complete: jest.fn() }))
 
 jest.mock("@/lib/db/characters", () => ({
-  resolveCharacterById: (...args: unknown[]) => resolveCharacterById(...args),
+  resolveCharacterById: (id: string) => resolveCharacterById(id),
 }))
 jest.mock("@/lib/ai/generation/utility-client", () => ({
-  buildUtilityLlmClient: (...args: unknown[]) => buildUtilityLlmClient(...args),
+  buildUtilityLlmClient: (args: unknown) => buildUtilityLlmClient(args),
 }))
 
 import { buildAgentRoleLlmClient } from "./agent-role-client"
-import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 beforeEach(() => jest.clearAllMocks())
 
-it("uses the bound Agent planning target and provider", async () => {
-  resolveCharacterById.mockResolvedValue({
+function character(overrides: Partial<Character> = {}): Character {
+  return {
     id: "agent-1",
-    providerId: "openai",
-    modelRouting: { plan: "planner-alias" },
-  })
+    name: "Agent",
+    avatarColor: "oklch(0.7 0.15 240)",
+    systemPrompt: "Help the user.",
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  }
+}
+
+it("uses the bound Agent planning target and provider", async () => {
+  resolveCharacterById.mockResolvedValue(
+    character({
+      providerId: "openai",
+      modelRouting: { plan: "planner-alias" },
+    })
+  )
   const session = { id: "session-1", characterId: "agent-1" } as ChatSession
 
   await buildAgentRoleLlmClient({
@@ -37,11 +53,12 @@ it("uses the bound Agent planning target and provider", async () => {
 })
 
 it("keeps a feature override above the Agent target", async () => {
-  resolveCharacterById.mockResolvedValue({
-    id: "agent-1",
-    providerId: "openai",
-    modelRouting: { plan: "planner-alias" },
-  })
+  resolveCharacterById.mockResolvedValue(
+    character({
+      providerId: "openai",
+      modelRouting: { plan: "planner-alias" },
+    })
+  )
 
   await buildAgentRoleLlmClient({
     role: "plan",
@@ -59,11 +76,12 @@ it("keeps a feature override above the Agent target", async () => {
 })
 
 it("keeps an explicit session model above the Agent semantic target", async () => {
-  resolveCharacterById.mockResolvedValue({
-    id: "agent-1",
-    providerId: "openai",
-    modelRouting: { plan: "planner-alias" },
-  })
+  resolveCharacterById.mockResolvedValue(
+    character({
+      providerId: "openai",
+      modelRouting: { plan: "planner-alias" },
+    })
+  )
 
   await buildAgentRoleLlmClient({
     role: "plan",
@@ -84,7 +102,7 @@ it("keeps an explicit session model above the Agent semantic target", async () =
 })
 
 it("retains the existing cheap utility fallback when the Agent has no utility target", async () => {
-  resolveCharacterById.mockResolvedValue({ id: "agent-1", providerId: "openai" })
+  resolveCharacterById.mockResolvedValue(character({ providerId: "openai" }))
 
   await buildAgentRoleLlmClient({
     role: "utility",

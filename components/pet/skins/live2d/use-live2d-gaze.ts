@@ -39,6 +39,8 @@ export function useLive2dGaze(
       }
     }
     internal.on(MODEL_UPDATE_EVENT, handler)
-    return () => internal.off!(MODEL_UPDATE_EVENT, handler)
+    return () => {
+      internal.off!(MODEL_UPDATE_EVENT, handler)
+    }
   }, [active, mapping, model, target])
 }

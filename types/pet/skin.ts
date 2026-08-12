@@ -121,7 +121,8 @@ export interface PetSkinRenderProps {
 }
 
 export interface PetSkin {
-  id: PetSkinId
+  /** Registry key. Built-ins use PetSkinId; plugins may register custom keys. */
+  id: string
   capabilities: PetSkinCapabilities
   render(props: PetSkinRenderProps): ReactNode
 }

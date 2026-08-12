@@ -230,7 +230,7 @@ describe("runTurn", () => {
   })
 
   it("commits canonical multi-round prose between its tool call and result cells", async () => {
-    let state = createInitialState(DEFAULT_RESOLVED_CONFIG, "s-order")
+    let state = createInitialState({ ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }, "s-order")
     const events: CanonicalAgentEvent[] = [
       { kind: "text-delta", delta: "I will inspect the project." },
       { kind: "tool-call", toolCallId: "t1", toolName: "Read", input: {} },

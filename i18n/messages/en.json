@@ -3012,6 +3012,11 @@
     "running": "Running child",
     "title": "Agent threads"
   },
+  "aiElements": {
+    "agent": {
+      "noDescription": "No description"
+    }
+  },
   "artifactCreateButton": {
     "asChart": "As Chart",
     "asCode": "As Code",
@@ -6555,6 +6560,7 @@
         "web": "Web"
       },
       "labels": {
+        "agentKnowledge": "Agent knowledge",
         "anthropic": "Web",
         "document": "Document",
         "file": "File",
@@ -10432,6 +10438,7 @@
       "cancel": "Cancel",
       "markdownPlaceholder": "Draft markdown…",
       "reject": "Reject",
+      "segmentFallback": "Unsupported draft segment",
       "textPlaceholder": "Draft text…"
     },
     "extensionPoints": {
@@ -10978,6 +10985,7 @@
           "errors": "Errors",
           "inputTokens": "Input tokens",
           "loading": "Loading agent trace stats…",
+          "modelRuns": "{count, plural, one {# run} other {# runs}}",
           "outputHint": "Output: {count}",
           "regionLabel": "Agent trace stats — {window}",
           "title": "Agent traces",
@@ -13089,6 +13097,7 @@
     },
     "inbox": {
       "tabs": {
+        "draftCountOverflow": "99+",
         "drafts": "Drafts",
         "messages": "Messages"
       },
@@ -16755,6 +16764,7 @@
     },
     "errors": {
       "activation": "Couldn't activate {pluginName}",
+      "adapter": "Plugin adapter failed for {pluginName}",
       "config": "Couldn't apply settings for {pluginName}",
       "disable": "Couldn't disable {pluginName}",
       "enable": "Couldn't enable {pluginName}",
@@ -20767,6 +20777,7 @@
   },
   "servers": {
     "actions": {
+      "backToServers": "Back to servers",
       "backup": "Create backup",
       "deploy": "Deploy server",
       "refresh": "Refresh",
@@ -20792,6 +20803,11 @@
       "controllerPlaceholder": "https://ops.example.com",
       "controllerUrl": "Controller URL",
       "description": "Connect to the cloud-neutral Operations Controller. Credentials stay in memory and are never persisted by this page.",
+      "disconnect": "Disconnect",
+      "disconnectFailed": "Could not disconnect from the Operations Controller",
+      "disconnected": "Disconnected from the Operations Controller",
+      "eventsConnected": "Live events connected",
+      "eventsReconnecting": "Reconnecting live events…",
       "failed": "Could not connect to the Operations Controller",
       "targetId": "Default target ID",
       "title": "Connect Operations Controller",
@@ -20801,6 +20817,7 @@
     "description": "Deploy, observe, back up, restore, and secure Compose or Kubernetes targets from one cloud-neutral workspace.",
     "errors": {
       "authenticationRequired": "Your OIDC session is missing or expired. Sign in again and reconnect.",
+      "capabilities": "Could not load server capabilities",
       "detail": "Could not load server details",
       "networkUnavailable": "The controller is unavailable. Check its URL, TLS certificate, and network route.",
       "operation": "The server operation could not be queued",
@@ -20884,6 +20901,7 @@
       "ingress": "Ingress TLS",
       "kubernetes": "Kubernetes",
       "kubernetes-csi": "Kubernetes CSI",
+      "none": "None",
       "vault": "Vault"
     },
     "overview": {
@@ -20910,16 +20928,21 @@
       "cancel": "Cancel",
       "controllerUrl": "Controller URL",
       "credentialsNotice": "Only credential references are stored. Cloud keys, kubeconfig files, SSH keys, object-store secrets, and enrollment tokens never enter this configuration or the browser cache.",
+      "custom": "Custom",
       "deploymentRoot": "Deployment root",
       "description": "Configure a versioned DeploymentTarget. Provider presets are normalized to the same cloud-neutral contract.",
+      "guided": "Guided",
       "identitySection": "OIDC identity",
       "imagesSection": "Immutable images",
       "ingressClass": "Ingress class",
+      "invalid": "Review the highlighted deployment settings",
       "label": "Display label",
       "namespace": "Namespace",
       "objectStoreBucket": "Bucket",
       "objectStoreCredentialRef": "Object-store credential reference",
       "objectStoreEndpoint": "S3-compatible endpoint",
+      "objectStorePathStyle": "Use path-style object-store URLs",
+      "objectStorePathStyleHelp": "Enable for S3-compatible services that require the bucket name in the URL path.",
       "objectStoreRegion": "Object-store region",
       "oidcAudience": "OIDC audience",
       "oidcIssuer": "OIDC issuer",
@@ -20945,6 +20968,7 @@
       },
       "platformSection": "Platform settings",
       "projectName": "Compose project name",
+      "providerCredentialsRequired": "Complete the required provider credential references before deploying.",
       "publicUrl": "Public URL",
       "runnerImage": "Runner image digest",
       "runtimeClass": "Runtime class",
@@ -26423,9 +26447,13 @@
       "cooldownsRefresh": "Refresh",
       "copied": "Copied",
       "copy": "Copy",
+      "copyFailed": "Could not copy to the clipboard",
       "copyKey": "Copy key",
       "costUnknown": "—",
       "createKey": "Create key",
+      "customApplied": "Custom gateway settings applied",
+      "customHeading": "Custom configuration",
+      "customHelp": "Edit and validate the complete gateway configuration as JSON or YAML.",
       "deleteKey": "Delete key",
       "deleteKeyConfirm": "Delete this key? Tools using it will stop working immediately.",
       "description": "Expose your configured providers as a local OpenAI- and Anthropic-compatible endpoint so external tools can borrow Cognia's routing and credentials.",
@@ -26449,6 +26477,8 @@
       "fieldStripAllowPlaceholder": "openai:service_tier",
       "fieldStripHeading": "Outbound field stripping",
       "fieldStripHelp": "Request fields removed before the body reaches an upstream.",
+      "gatewayLocalRoutingV2": "Use gateway-local routing",
+      "gatewayLocalRoutingV2Help": "Resolve routes inside the gateway from the current policy instead of a legacy published snapshot.",
       "hide": "Hide",
       "hideRawModels": "List aliases only",
       "hideRawModelsHelp": "Hide raw provider model ids from /v1/models — advertise routing aliases only. Direct provider:model calls still work.",
@@ -26499,9 +26529,12 @@
       "maxConcurrentPerUpstreamKeyHelp": "Simultaneous upstream calls allowed per pooled account, shared across all endpoints. 0 = unlimited. A streaming chat holds its slot until the stream ends.",
       "maxRetries": "Max attempts",
       "maxRetriesHelp": "Cap on candidates tried per request. 0 = walk the whole fallback chain.",
+      "maxRetryWait": "Maximum retry wait (ms)",
+      "maxRetryWaitHelp": "Cap the total delay spent waiting between upstream retry attempts. 0 disables the cap.",
       "nav": {
         "badgeNoKeyAria": "No usable API key",
         "badgeParkedKeysAria": "{count, plural, one {# parked upstream key} other {# parked upstream keys}}",
+        "badgeRestartRequiredAria": "Gateway restart required",
         "groups": {
           "observabilityGroup": "Observability",
           "routingGroup": "Routing & protection",
@@ -26562,9 +26595,16 @@
       "requestTimeoutHelp": "Total cap for non-streaming requests. 0 disables it; streaming responses are never capped.",
       "requiresKey": "Create an API key before enabling the gateway.",
       "resetQuota": "Reset usage",
+      "respectRetryAfter": "Respect Retry-After",
+      "respectRetryAfterHelp": "Honor an upstream Retry-After delay when it fits within the configured retry wait cap.",
       "restartListener": "Restart listener",
       "restartRequired": "The running listener still uses the previous values. Restart it to apply these changes.",
+      "restartRequiredBadge": "Restart required",
       "restarted": "Listener restarted",
+      "retryBackoffBase": "Retry backoff base (ms)",
+      "retryBackoffBaseHelp": "Initial exponential backoff delay before trying another upstream candidate.",
+      "retryBackoffMax": "Retry backoff maximum (ms)",
+      "retryBackoffMaxHelp": "Maximum exponential backoff delay between upstream attempts.",
       "retryStatusCodes": "Retry on statuses",
       "retryStatusCodesHelp": "Upstream HTTP statuses that fail over to the next provider instead of surfacing.",
       "retryStatusCodesPlaceholder": "429, 503",
@@ -28197,6 +28237,7 @@
         "title": "Auto-lock"
       },
       "contextInspector": {
+        "auditGap": "Some governance evidence is unavailable for this decision.",
         "conflicts": "Conflicts",
         "decisionListLabel": "Recent governance decisions",
         "description": "Inspect why an action was chosen, which evidence and policy supported it, and whether facts remain in conflict.",
@@ -31157,6 +31198,19 @@
     "trustedDomainPlaceholder": "example.com",
     "trustedDomains": "Trusted",
     "verificationMode": "Mode"
+  },
+  "structuredConfig": {
+    "apply": "Apply",
+    "download": "Download",
+    "editorDescription": "Edit the structured configuration, validate it, then apply the changes.",
+    "editorLabel": "Structured configuration editor",
+    "format": "Format",
+    "import": "Import",
+    "invalid": "The configuration is invalid: {message}",
+    "json": "JSON",
+    "reset": "Reset",
+    "validate": "Validate",
+    "yaml": "YAML"
   },
   "subscription": {
     "account": {

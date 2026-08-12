@@ -159,7 +159,7 @@ export function buildSmartSnapshotFiles(
     const ext = state.screenshot.format === "jpeg" ? "jpg" : "png"
     files.unshift(
       new File(
-        [base64ToBytes(state.screenshot.bytes)],
+        [new Uint8Array(base64ToBytes(state.screenshot.bytes)).buffer],
         makeFileName("smart-snapshot", appName, ext, capturedAt),
         {
           lastModified: capturedAt,

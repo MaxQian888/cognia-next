@@ -6,6 +6,7 @@ import {
 } from "./twin-context"
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
+import type { IVectorStore } from "@cognia/vector/store"
 
 // ── Module mocks (all dynamically imported inside twin-context.ts) ─────────
 const tryBuildTwinDepsMock = jest.fn()
@@ -55,8 +56,26 @@ jest.mock("@/types/twin", () => ({
   DEFAULT_TWIN_SETTINGS: DEFAULT_TWIN_SETTINGS_FIXTURE,
 }))
 
+function makeVectorStore(
+  searchByEmbedding: NonNullable<IVectorStore["searchByEmbedding"]> = jest.fn(async () => [])
+): IVectorStore {
+  return {
+    provider: "native",
+    addDocuments: jest.fn(async () => undefined),
+    updateDocuments: jest.fn(async () => undefined),
+    deleteDocuments: jest.fn(async () => undefined),
+    searchDocuments: jest.fn(async () => []),
+    searchByEmbedding,
+    getDocuments: jest.fn(async () => []),
+    createCollection: jest.fn(async () => undefined),
+    deleteCollection: jest.fn(async () => undefined),
+    listCollections: jest.fn(async () => []),
+    getCollectionInfo: jest.fn(async () => ({ name: "test", documentCount: 0 })),
+  }
+}
+
 const twinDepsFixture: TwinRuntimeDepsForBuild = {
-  store: { searchByEmbedding: jest.fn() },
+  store: makeVectorStore(),
   embedding: { provider: "openai", model: "text-embedding-3-small", apiKey: "key" },
 }
 

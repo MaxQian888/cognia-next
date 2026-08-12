@@ -8,7 +8,13 @@ jest.mock("dexie-react-hooks", () => ({
 
 let dragEnd: ((event: unknown) => void) | undefined
 jest.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children, onDragEnd }: { children: React.ReactNode; onDragEnd: (event: unknown) => void }) => {
+  DndContext: ({
+    children,
+    onDragEnd,
+  }: {
+    children: React.ReactNode
+    onDragEnd: (event: unknown) => void
+  }) => {
     dragEnd = onDragEnd
     return <div>{children}</div>
   },
@@ -16,7 +22,13 @@ jest.mock("@dnd-kit/core", () => ({
   closestCorners: jest.fn(),
   useSensor: jest.fn(() => ({})),
   useSensors: jest.fn(() => []),
-  useDraggable: jest.fn(() => ({ attributes: {}, listeners: {}, setNodeRef: jest.fn(), transform: null, isDragging: false })),
+  useDraggable: jest.fn(() => ({
+    attributes: {},
+    listeners: {},
+    setNodeRef: jest.fn(),
+    transform: null,
+    isDragging: false,
+  })),
   useDroppable: jest.fn(() => ({ setNodeRef: jest.fn(), isOver: false })),
 }))
 
@@ -39,7 +51,9 @@ jest.mock("@/lib/agent-tasks/runtime", () => ({
   resumeAgentTask: jest.fn(),
   cancelAgentTask: jest.fn(),
 }))
-const skillSuggestionCardMock = jest.fn(() => <div data-testid="run-skill-suggestion" />)
+const skillSuggestionCardMock = jest.fn((..._args: unknown[]) => (
+  <div data-testid="run-skill-suggestion" />
+))
 jest.mock("@/components/chat/skill-suggestion-card", () => ({
   SkillSuggestionCard: (props: unknown) => skillSuggestionCardMock(props),
 }))
@@ -83,7 +97,11 @@ it("creates an immediate durable task from the board form", async () => {
 
   await waitFor(() =>
     expect(createAgentTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({ agentId: "agent-1", title: "Research", description: "Find sources" })
+      expect.objectContaining({
+        agentId: "agent-1",
+        title: "Research",
+        description: "Find sources",
+      })
     )
   )
   expect(ensureScheduleMock).not.toHaveBeenCalled()
@@ -97,9 +115,7 @@ it("starts a pending card through the shared Scheduler runtime", async () => {
 })
 
 it("uses guarded drag transitions for review verdicts", async () => {
-  useLiveQueryMock
-    .mockReturnValueOnce([{ ...baseTask, status: "review" }])
-    .mockReturnValueOnce([])
+  useLiveQueryMock.mockReturnValueOnce([{ ...baseTask, status: "review" }]).mockReturnValueOnce([])
   render(<AgentTaskBoard agentId="agent-1" />)
   dragEnd?.({ active: { id: "task-1" }, over: { id: "status:completed" } })
   await waitFor(() => expect(moveAgentTaskMock).toHaveBeenCalledWith("task-1", "completed"))
@@ -107,15 +123,15 @@ it("uses guarded drag transitions for review verdicts", async () => {
 
 it("offers successful run attempts to the Skill review flow", async () => {
   const completedAttempts = [
-      {
-        id: "attempt-1",
-        taskId: "task-1",
-        agentId: "agent-1",
-        attemptNo: 1,
-        status: "completed",
-        result: "done",
-      },
-    ]
+    {
+      id: "attempt-1",
+      taskId: "task-1",
+      agentId: "agent-1",
+      attemptNo: 1,
+      status: "completed",
+      result: "done",
+    },
+  ]
   useLiveQueryMock.mockImplementation((_query: unknown, deps: unknown[]) =>
     deps[0] === "agent-1" ? [{ ...baseTask, status: "completed" }] : completedAttempts
   )

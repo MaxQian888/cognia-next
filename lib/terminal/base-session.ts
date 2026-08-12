@@ -76,7 +76,10 @@ export abstract class BaseTerminalSession {
   // a fresh xterm only renders the latest screen anyway.
   private pendingData: Uint8Array[] = []
   private pendingBytes = 0
+  private recentData: Uint8Array[] = []
+  private recentBytes = 0
   private static readonly MAX_PENDING_BYTES = 1024 * 1024
+  private static readonly MAX_RECENT_BYTES = 256 * 1024
 
   /** Stable session id from the info block. */
   get id(): string {
@@ -91,6 +94,18 @@ export abstract class BaseTerminalSession {
   /** Exit code, or `null` if the process was killed by signal / not yet exited. */
   get lastExitCode(): number | null {
     return this.exitCode
+  }
+
+  /** Recent terminal output retained for context-aware features such as AI Shell. */
+  getLastOutput(): string {
+    if (this.recentData.length === 0) return ""
+    const bytes = new Uint8Array(this.recentBytes)
+    let offset = 0
+    for (const chunk of this.recentData) {
+      bytes.set(chunk, offset)
+      offset += chunk.length
+    }
+    return new TextDecoder().decode(bytes)
   }
 
   // ── Subscriber API ────────────────────────────────────────────────
@@ -188,6 +203,7 @@ export abstract class BaseTerminalSession {
   // ── Fan-out helpers for subclasses ───────────────────────────────
 
   protected dispatchData(bytes: Uint8Array): void {
+    this.bufferRecentData(bytes)
     if (this.dataListeners.size === 0) {
       this.bufferPendingData(bytes)
       return
@@ -198,6 +214,17 @@ export abstract class BaseTerminalSession {
       } catch (err) {
         console.warn(`terminal-session(${this.info.id}): data listener threw:`, err)
       }
+    }
+  }
+
+  private bufferRecentData(bytes: Uint8Array): void {
+    if (bytes.length === 0) return
+    const retained = bytes.slice()
+    this.recentData.push(retained)
+    this.recentBytes += retained.length
+    while (this.recentBytes > BaseTerminalSession.MAX_RECENT_BYTES && this.recentData.length > 1) {
+      const dropped = this.recentData.shift()
+      if (dropped) this.recentBytes -= dropped.length
     }
   }
 

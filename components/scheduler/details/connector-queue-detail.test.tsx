@@ -25,12 +25,13 @@ describe("ConnectorQueueDetail", () => {
     useLiveQuery.mockReturnValueOnce(3).mockReturnValueOnce({})
     const run = {
       unifiedId: "connector:run-1",
+      itemUnifiedId: "connector:queue",
       kind: "connector",
       itemName: "Daily digest",
       status: "succeeded",
-      startedAt: "2026-08-10T01:00:00.000Z",
-      origin: { nativeId: "run-1" },
-    } as UnifiedExecutionRun
+      startedAt: Date.parse("2026-08-10T01:00:00.000Z"),
+      origin: { tableName: "connectorAudit", nativeId: "run-1" },
+    } satisfies UnifiedExecutionRun
     mockRuns.push(run)
     const onSelectRun = jest.fn()
 

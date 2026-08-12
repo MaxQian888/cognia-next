@@ -1353,7 +1353,9 @@ async function registerInlineTwinSources(payload: Record<string, unknown>, twinI
         },
       ]
     } else {
-      const file = new File([decodeBase64(payload.base64)], filename, { type: mime })
+      const file = new File([new Uint8Array(decodeBase64(payload.base64)).buffer], filename, {
+        type: mime,
+      })
       const result = await stageFile(file, twinId)
       if (result.error) throw new Error(`Twin source staging failed: ${result.error.code}`)
       staged = result.staged

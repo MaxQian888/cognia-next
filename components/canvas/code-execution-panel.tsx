@@ -50,6 +50,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils"
 import { useCopy } from "@/hooks/ui"
 import type { CodeSandboxExecutionResult } from "@/hooks/canvas/use-code-execution"
+import type { BundledLanguage } from "shiki"
 
 interface CodeExecutionPanelProps {
   result: CodeSandboxExecutionResult | null
@@ -75,6 +76,12 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
   const t = useTranslations("canvas")
   const { copy, isCopying } = useCopy()
   const terminalOutput = [result?.stdout, result?.stderr].filter(Boolean).join("\n\n")
+  const highlightedLanguage: BundledLanguage =
+    language === "javascript" || language === "typescript" || language === "python"
+      ? language
+      : language === "svg"
+        ? "xml"
+        : "markdown"
 
   const handleCopyOutput = async () => {
     if (terminalOutput) {
@@ -146,7 +153,7 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
             </SandboxTabsList>
           </SandboxTabsBar>
           <SandboxTabContent value="input" className="p-3">
-            <CodeBlock code={code} language={language} />
+            <CodeBlock code={code} language={highlightedLanguage} />
           </SandboxTabContent>
           <SandboxTabContent value="output">
             <Terminal

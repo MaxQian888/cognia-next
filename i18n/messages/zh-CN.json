@@ -3012,6 +3012,11 @@
     "running": "运行中的子线程",
     "title": "智能体线程"
   },
+  "aiElements": {
+    "agent": {
+      "noDescription": "暂无描述"
+    }
+  },
   "artifactCreateButton": {
     "asChart": "作为图表",
     "asCode": "作为代码",
@@ -6555,6 +6560,7 @@
         "web": "网页"
       },
       "labels": {
+        "agentKnowledge": "智能体知识库",
         "anthropic": "网页",
         "document": "文档",
         "file": "文件",
@@ -10432,6 +10438,7 @@
       "cancel": "取消",
       "markdownPlaceholder": "草稿 Markdown…",
       "reject": "拒绝",
+      "segmentFallback": "不支持的草稿片段",
       "textPlaceholder": "草稿文本…"
     },
     "extensionPoints": {
@@ -10978,6 +10985,7 @@
           "errors": "错误",
           "inputTokens": "输入 token",
           "loading": "正在加载 Agent 追踪统计…",
+          "modelRuns": "{count} 次运行",
           "outputHint": "输出：{count}",
           "regionLabel": "Agent 追踪统计 — {window}",
           "title": "Agent 追踪",
@@ -13089,6 +13097,7 @@
     },
     "inbox": {
       "tabs": {
+        "draftCountOverflow": "99+",
         "drafts": "草稿",
         "messages": "消息"
       },
@@ -16755,6 +16764,7 @@
     },
     "errors": {
       "activation": "{pluginName} 激活失败",
+      "adapter": "{pluginName} 的插件适配器运行失败",
       "config": "{pluginName} 设置应用失败",
       "disable": "{pluginName} 禁用失败",
       "enable": "{pluginName} 启用失败",
@@ -20767,6 +20777,7 @@
   },
   "servers": {
     "actions": {
+      "backToServers": "返回服务器",
       "backup": "创建备份",
       "deploy": "部署服务器",
       "refresh": "刷新",
@@ -20792,6 +20803,11 @@
       "controllerPlaceholder": "https://ops.example.com",
       "controllerUrl": "控制器地址",
       "description": "连接云中立运维控制器。凭据仅保留在内存中，此页面不会持久化凭据。",
+      "disconnect": "断开连接",
+      "disconnectFailed": "无法断开与运维控制器的连接",
+      "disconnected": "已断开与运维控制器的连接",
+      "eventsConnected": "实时事件已连接",
+      "eventsReconnecting": "正在重新连接实时事件…",
       "failed": "无法连接运维控制器",
       "targetId": "默认目标 ID",
       "title": "连接运维控制器",
@@ -20801,6 +20817,7 @@
     "description": "在一个云中立工作区中部署、观测、备份、恢复并保护 Compose 或 Kubernetes 目标。",
     "errors": {
       "authenticationRequired": "OIDC 会话缺失或已过期，请重新登录后连接。",
+      "capabilities": "无法加载服务器能力",
       "detail": "无法加载服务器详情",
       "networkUnavailable": "运维控制器不可用，请检查地址、TLS 证书和网络路由。",
       "operation": "无法将服务器操作加入队列",
@@ -20884,6 +20901,7 @@
       "ingress": "Ingress TLS",
       "kubernetes": "Kubernetes",
       "kubernetes-csi": "Kubernetes CSI",
+      "none": "无",
       "vault": "Vault"
     },
     "overview": {
@@ -20910,16 +20928,21 @@
       "cancel": "取消",
       "controllerUrl": "控制器地址",
       "credentialsNotice": "配置仅保存凭据引用。云平台密钥、kubeconfig、SSH 密钥、对象存储密钥和 enrollment token 都不会进入此配置或浏览器缓存。",
+      "custom": "自定义",
       "deploymentRoot": "部署根目录",
       "description": "配置版本化 DeploymentTarget。所有云厂商预设最终都会转换为同一云中立协议。",
+      "guided": "引导配置",
       "identitySection": "OIDC 身份认证",
       "imagesSection": "不可变镜像",
       "ingressClass": "IngressClass",
+      "invalid": "请检查标记出的部署设置",
       "label": "显示名称",
       "namespace": "命名空间",
       "objectStoreBucket": "存储桶",
       "objectStoreCredentialRef": "对象存储凭据引用",
       "objectStoreEndpoint": "S3-compatible 地址",
+      "objectStorePathStyle": "使用路径式对象存储 URL",
+      "objectStorePathStyleHelp": "为要求在 URL 路径中包含存储桶名称的 S3 兼容服务启用。",
       "objectStoreRegion": "对象存储区域",
       "oidcAudience": "OIDC audience",
       "oidcIssuer": "OIDC issuer",
@@ -20945,6 +20968,7 @@
       },
       "platformSection": "平台设置",
       "projectName": "Compose 项目名称",
+      "providerCredentialsRequired": "部署前请补全必需的提供商凭据引用。",
       "publicUrl": "公网地址",
       "runnerImage": "Runner 镜像摘要",
       "runtimeClass": "RuntimeClass",
@@ -26423,9 +26447,13 @@
       "cooldownsRefresh": "刷新",
       "copied": "已复制",
       "copy": "复制",
+      "copyFailed": "无法复制到剪贴板",
       "copyKey": "复制密钥",
       "costUnknown": "—",
       "createKey": "创建密钥",
+      "customApplied": "已应用自定义网关设置",
+      "customHeading": "自定义配置",
+      "customHelp": "以 JSON 或 YAML 编辑并验证完整的网关配置。",
       "deleteKey": "删除密钥",
       "deleteKeyConfirm": "删除此密钥？正在使用它的工具会立即失效。",
       "description": "把你配置好的服务商暴露成本地 OpenAI / Anthropic 兼容端点，让外部工具借用 Cognia 的路由和凭据。",
@@ -26449,6 +26477,8 @@
       "fieldStripAllowPlaceholder": "openai:service_tier",
       "fieldStripHeading": "出站字段剥离",
       "fieldStripHelp": "请求体到达上游前会被移除的字段。",
+      "gatewayLocalRoutingV2": "使用网关本地路由",
+      "gatewayLocalRoutingV2Help": "在网关内根据当前策略解析路由，而不是使用旧版已发布快照。",
       "hide": "隐藏",
       "hideRawModels": "仅列出别名",
       "hideRawModelsHelp": "在 /v1/models 中隐藏原始服务商模型 id，只公布路由别名。直接的 provider:model 调用仍然有效。",
@@ -26499,9 +26529,12 @@
       "maxConcurrentPerUpstreamKeyHelp": "每个池内上游账号允许的同时在途调用数，所有端点共用同一并发上限。0 = 不限。流式对话会占用并发槽直到整条流结束。",
       "maxRetries": "最大尝试数",
       "maxRetriesHelp": "每个请求尝试的候选上限。0 = 走完整条回退链。",
+      "maxRetryWait": "最大重试等待时间（毫秒）",
+      "maxRetryWaitHelp": "限制上游重试之间等待的总时间。0 表示不限制。",
       "nav": {
         "badgeNoKeyAria": "没有可用的 API 密钥",
         "badgeParkedKeysAria": "{count} 个上游密钥已停用",
+        "badgeRestartRequiredAria": "需要重启网关",
         "groups": {
           "observabilityGroup": "可观测",
           "routingGroup": "路由与保护",
@@ -26562,9 +26595,16 @@
       "requestTimeoutHelp": "非流式请求的总时长上限。0 表示不限；流式响应永不受此约束。",
       "requiresKey": "启用网关前请先创建 API 密钥。",
       "resetQuota": "重置用量",
+      "respectRetryAfter": "遵循 Retry-After",
+      "respectRetryAfterHelp": "当上游的 Retry-After 延迟不超过已配置的重试等待上限时遵循该延迟。",
       "restartListener": "重启监听器",
       "restartRequired": "运行中的监听器仍在使用旧配置，重启后这些修改才会生效。",
+      "restartRequiredBadge": "需要重启",
       "restarted": "监听器已重启",
+      "retryBackoffBase": "重试退避基数（毫秒）",
+      "retryBackoffBaseHelp": "尝试下一个上游候选项前的初始指数退避延迟。",
+      "retryBackoffMax": "最大重试退避（毫秒）",
+      "retryBackoffMaxHelp": "上游尝试之间允许的最大指数退避延迟。",
       "retryStatusCodes": "触发重试的状态码",
       "retryStatusCodesHelp": "遇到这些上游 HTTP 状态码时转移到下一个服务商，而非直接返回。",
       "retryStatusCodesPlaceholder": "429, 503",
@@ -28197,6 +28237,7 @@
         "title": "自动锁定"
       },
       "contextInspector": {
+        "auditGap": "此决策的部分治理证据不可用。",
         "conflicts": "冲突",
         "decisionListLabel": "最近的治理决策",
         "description": "查看某次行动为何被选中、有哪些证据和策略支持，以及是否仍有事实冲突待处理。",
@@ -31157,6 +31198,19 @@
     "trustedDomainPlaceholder": "example.com",
     "trustedDomains": "信任",
     "verificationMode": "模式"
+  },
+  "structuredConfig": {
+    "apply": "应用",
+    "download": "下载",
+    "editorDescription": "编辑结构化配置，验证后应用更改。",
+    "editorLabel": "结构化配置编辑器",
+    "format": "格式",
+    "import": "导入",
+    "invalid": "配置无效：{message}",
+    "json": "JSON",
+    "reset": "重置",
+    "validate": "验证",
+    "yaml": "YAML"
   },
   "subscription": {
     "account": {

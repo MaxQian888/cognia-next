@@ -12,7 +12,7 @@
 import { LocalProviderSettings } from "./local-provider-settings"
 
 export function ModelManager() {
-  return <LocalProviderSettings />
+  return <LocalProviderSettings providerId="ollama" />
 }
 
 export default ModelManager

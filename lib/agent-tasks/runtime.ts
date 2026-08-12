@@ -103,7 +103,15 @@ export function reconcileAgentTaskRuntime(
   providedDeps?: AgentTaskRuntimeDeps
 ): Promise<{ interrupted: string[]; settled: string[] }> {
   const deps = providedDeps ?? defaultDeps()
-  return deps.reconcile(deps.getExecution, deps.now())
+  return deps.reconcile(async (executionId) => {
+    const execution = await deps.getExecution(executionId)
+    if (!execution) return null
+    return {
+      status: execution.status === "skipped" ? "cancelled" : execution.status,
+      output: execution.output,
+      error: execution.error,
+    }
+  }, deps.now())
 }
 
 function defaultDeps(): AgentTaskRuntimeDeps {

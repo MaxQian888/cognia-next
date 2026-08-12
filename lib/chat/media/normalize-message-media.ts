@@ -43,7 +43,7 @@ export async function normalizeMessageMedia(message: UIMessage): Promise<UIMessa
         width: ingested.width,
         height: ingested.height,
         byteSize: ingested.byteSize,
-      } as typeof part
+      } as unknown as typeof part
     })
   )
 

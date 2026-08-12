@@ -252,7 +252,7 @@ describe("applyAgentKnowledgeContext", () => {
       tokenBudget: 100,
       precomputedQueryEmbedding: [1, 0],
       runtimeDeps: {
-        store: {},
+        store: { getCollectionInfo: jest.fn() },
         embedding: { provider: "openai", model: "embedding", apiKey: "key" },
         vectorBackend: "native",
       },

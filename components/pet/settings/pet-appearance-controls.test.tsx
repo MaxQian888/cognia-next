@@ -12,7 +12,7 @@ jest.mock("@/components/settings/pet/pet-sprite-pack-manager", () => ({
 }))
 
 import { PetAppearanceControls } from "./pet-appearance-controls"
-import { DEFAULT_PET_SETTINGS } from "@/types/pet"
+import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 
 beforeEach(() => {
   coreAvailable = true
@@ -94,7 +94,7 @@ describe("PetAppearanceControls", () => {
   })
 
   it("offers and mounts the v2 sprite pack manager", () => {
-    const pet = { ...DEFAULT_PET_SETTINGS, skinId: "sprite-v2" }
+    const pet: PetSettings = { ...DEFAULT_PET_SETTINGS, skinId: "sprite-v2" }
     render(<PetAppearanceControls pet={pet} patch={jest.fn()} />)
     expect(screen.getByRole("radio", { name: /v2|sprite/i })).toBeInTheDocument()
     expect(screen.getByTestId("pet-sprite-pack-manager")).toBeInTheDocument()

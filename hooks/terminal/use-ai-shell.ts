@@ -151,9 +151,9 @@ export function useAiShell(sessionId: string | null): UseAiShellReturn {
 
   /** Resolve an LlmClient from current settings. */
   const getClient = useCallback((): LlmClient | null => {
-    const { settings, activeSession } = useSettingsStore.getState()
+    const { settings } = useSettingsStore.getState()
     return buildUtilityLlmClient({
-      session: activeSession,
+      session: null,
       appSettings: settings,
       featureId: "terminal.aiShell",
     })

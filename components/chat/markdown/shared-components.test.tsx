@@ -583,7 +583,7 @@ describe("table actions", () => {
       configurable: true,
       value: { writeText },
     })
-    const createObjectURL = jest.fn(() => "blob:table")
+    const createObjectURL = jest.fn((_blob: Blob) => "blob:table")
     const revokeObjectURL = jest.fn()
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL })
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL })
@@ -620,7 +620,7 @@ describe("table actions", () => {
             const reader = new FileReader()
             reader.addEventListener("load", () => resolve(String(reader.result)))
             reader.addEventListener("error", () => reject(reader.error))
-            reader.readAsText(blob as Blob)
+            reader.readAsText(blob)
           })
       )
     )

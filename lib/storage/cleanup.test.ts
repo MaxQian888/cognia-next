@@ -124,7 +124,7 @@ describe("quickCleanup", () => {
     const result = await quickCleanup()
 
     expect(result.deletedItems).toBeGreaterThanOrEqual(1)
-    expect(await getDb().chatSearchState.get("cache")).toBeUndefined()
+    expect(await getDb().chatSearchState.get("singleton")).toBeUndefined()
     expect(await getDb().chatGoals.get("goal")).toBeDefined()
   })
 })

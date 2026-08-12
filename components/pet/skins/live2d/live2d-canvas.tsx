@@ -188,6 +188,7 @@ export default function Live2dCanvas({
     if (!ready) return
     const canvas = canvasRef.current
     if (!canvas) return
+    const captureCanvas = canvas
 
     let cancelled = false
     let app: PixiAppLike | null = null
@@ -360,7 +361,10 @@ export default function Live2dCanvas({
         setModel(loaded)
         snapshotFrame = requestAnimationFrame(() => {
           try {
-            getPetSkinRuntime().publishSnapshot(`live2d:${modelId}`, canvas.toDataURL("image/png"))
+            getPetSkinRuntime().publishSnapshot(
+              `live2d:${modelId}`,
+              captureCanvas.toDataURL("image/png")
+            )
           } catch {
             // A snapshot is an optimization; rendering remains live if capture fails.
           }

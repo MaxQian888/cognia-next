@@ -12,7 +12,7 @@ jest.mock("@cognia/provider-embedding/embedding", () => ({
   generateEmbeddings: jest.fn(async () => ({ embeddings: [], usage: undefined })),
 }))
 
-const mockHasNoLeakingPiiDeep = jest.fn(() => true)
+const mockHasNoLeakingPiiDeep = jest.fn((..._args: unknown[]) => true)
 jest.mock("@cognia/redact", () => ({
   ...jest.requireActual("@cognia/redact"),
   hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
@@ -23,6 +23,7 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { readTwinInjectLog, __resetTwinInjectLog } from "@/lib/twin/runtime/inject-log"
 import type { Character } from "@cognia/agent-config-types"
 import type { TwinRuntimeDepsForBuild } from "./build-options"
+import type { IVectorStore } from "@cognia/vector/store"
 
 const dbFixture = createDbTestFixture()
 
@@ -44,10 +45,26 @@ const baseCharacter: Character = {
   updatedAt: 1,
 }
 
+function makeVectorStore(
+  searchByEmbedding: NonNullable<IVectorStore["searchByEmbedding"]> = async () => []
+): IVectorStore {
+  return {
+    provider: "native",
+    addDocuments: async () => undefined,
+    updateDocuments: async () => undefined,
+    deleteDocuments: async () => undefined,
+    searchDocuments: async () => [],
+    searchByEmbedding,
+    getDocuments: async () => [],
+    createCollection: async () => undefined,
+    deleteCollection: async () => undefined,
+    listCollections: async () => [],
+    getCollectionInfo: async () => ({ name: "test", documentCount: 0 }),
+  }
+}
+
 const fakeDeps: TwinRuntimeDepsForBuild = {
-  store: {
-    searchByEmbedding: async () => [],
-  },
+  store: makeVectorStore(),
   embedding: {
     provider: "openai",
     model: "text-embedding-3-small",
@@ -100,11 +117,9 @@ describe("resolveSendOptions twin injection", () => {
   it("records a degraded inject-log entry when the vector store throws", async () => {
     const explodingDeps: TwinRuntimeDepsForBuild = {
       ...fakeDeps,
-      store: {
-        searchByEmbedding: async () => {
-          throw new Error("boom")
-        },
-      },
+      store: makeVectorStore(async () => {
+        throw new Error("boom")
+      }),
     }
     await resolveSendOptions({
       character: baseCharacter,
@@ -165,11 +180,9 @@ describe("resolveSendOptions twin injection", () => {
   it("falls back to baseSystem if the twin runtime throws", async () => {
     const explodingDeps: TwinRuntimeDepsForBuild = {
       ...fakeDeps,
-      store: {
-        searchByEmbedding: async () => {
-          throw new Error("boom")
-        },
-      },
+      store: makeVectorStore(async () => {
+        throw new Error("boom")
+      }),
     }
     const opts = await resolveSendOptions({
       character: baseCharacter,
@@ -195,11 +208,9 @@ describe("resolveSendOptions twin injection", () => {
   it("stamps opts.twinContext with degraded=true when the vector store throws", async () => {
     const explodingDeps: TwinRuntimeDepsForBuild = {
       ...fakeDeps,
-      store: {
-        searchByEmbedding: async () => {
-          throw new Error("boom")
-        },
-      },
+      store: makeVectorStore(async () => {
+        throw new Error("boom")
+      }),
     }
     const opts = await resolveSendOptions({
       character: baseCharacter,

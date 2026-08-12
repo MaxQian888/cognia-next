@@ -694,6 +694,8 @@ describe("ContextWorkbench", () => {
           activatedPanelIds: ["resource-chat"],
           pendingPanelIds: [],
           lastUsedAt: Date.now(),
+          splitPanelId: null,
+          splitRatio: 50,
         },
       },
     })

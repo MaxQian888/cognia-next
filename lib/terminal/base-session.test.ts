@@ -75,6 +75,29 @@ function makeSession(): TestableTerminalSession {
 }
 
 describe("BaseTerminalSession.onData", () => {
+  it("retains decoded output even before subscribers attach", () => {
+    const session = makeSession()
+    expect(session.getLastOutput()).toBe("")
+
+    session.pushData(new TextEncoder().encode("first "))
+    session.onData(() => {})
+    session.pushData(new TextEncoder().encode("second"))
+
+    expect(session.getLastOutput()).toBe("first second")
+  })
+
+  it("bounds retained output by evicting the oldest chunks", () => {
+    const session = makeSession()
+    session.pushData(new Uint8Array(150 * 1024).fill("a".charCodeAt(0)))
+    session.pushData(new Uint8Array(150 * 1024).fill("b".charCodeAt(0)))
+    session.pushData(new Uint8Array(150 * 1024).fill("c".charCodeAt(0)))
+
+    const output = session.getLastOutput()
+    expect(output).toHaveLength(150 * 1024)
+    expect(output.startsWith("c")).toBe(true)
+    expect(output).not.toContain("a")
+  })
+
   it("fans out to every subscriber", () => {
     const session = makeSession()
     const a: Uint8Array[] = []

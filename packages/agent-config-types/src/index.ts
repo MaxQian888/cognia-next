@@ -861,7 +861,7 @@ export interface SendOptions {
   twinContext?: {
     twinId: string
     retrievedChunks: Array<{
-      chunk: { vectorDocId: string; content: string; sourceId: string }
+      chunk: { id: string; vectorDocId: string; contentRedacted: string; sourceId: string }
       score: number
       sourceTitle?: string
     }>

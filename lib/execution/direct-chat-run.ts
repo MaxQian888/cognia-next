@@ -126,7 +126,8 @@ export async function projectDirectChatSdkMessage(
       ) {
         continue
       }
-      active.toolCalls.set(toolBlock.id, { name: toolBlock.name, input: toolBlock.input })
+      const input = toolBlock.input as Record<string, unknown>
+      active.toolCalls.set(toolBlock.id, { name: toolBlock.name, input })
       if (active.seenToolCalls.has(toolBlock.id)) continue
       active.seenToolCalls.add(toolBlock.id)
       await active.producer.onCaptureEvent(
@@ -134,7 +135,7 @@ export async function projectDirectChatSdkMessage(
           type: "tool-call",
           id: toolBlock.id,
           toolName: toolBlock.name,
-          input: toolBlock.input,
+          input,
         },
         ts
       )

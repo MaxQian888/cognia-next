@@ -16,7 +16,7 @@ export function mergeFleetSnapshots(
   canonical: ReadonlyMap<string, FleetSession>,
   generatedAt = external.generatedAt
 ): FleetSnapshot {
-  const sessions = external.sessions.map((session) => ({
+  const sessions: FleetSession[] = external.sessions.map((session) => ({
     ...session,
     origin: session.origin ?? ("external" as const),
   }))

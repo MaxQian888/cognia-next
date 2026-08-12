@@ -4,6 +4,7 @@ import {
   ensureAgentTaskSchedule,
   reconcileAgentTaskRuntime,
   runAgentTaskNow,
+  type AgentTaskRuntimeDeps,
 } from "./runtime"
 
 function task(overrides: Partial<AgentTask> = {}): AgentTask {
@@ -33,7 +34,14 @@ function fixture(row = task()) {
   const deleteTask = jest.fn(async () => true)
   const bindSchedule = jest.fn(async () => undefined)
   const moveTask = jest.fn(async () => row)
-  const reconcile = jest.fn(async () => ({ interrupted: [], settled: [] }))
+  const getExecution = jest.fn<
+    ReturnType<AgentTaskRuntimeDeps["getExecution"]>,
+    Parameters<AgentTaskRuntimeDeps["getExecution"]>
+  >(async () => null)
+  const reconcile = jest.fn<
+    ReturnType<AgentTaskRuntimeDeps["reconcile"]>,
+    Parameters<AgentTaskRuntimeDeps["reconcile"]>
+  >(async () => ({ interrupted: [], settled: [] }))
   return {
     deps: {
       now: () => 100,
@@ -45,7 +53,7 @@ function fixture(row = task()) {
       pauseTask: jest.fn(async () => true),
       resumeTask: jest.fn(async () => true),
       deleteTask,
-      getExecution: jest.fn(async () => null),
+      getExecution,
       reconcile,
     },
     createTask,
@@ -54,6 +62,7 @@ function fixture(row = task()) {
     bindSchedule,
     moveTask,
     reconcile,
+    getExecution,
   }
 }
 
@@ -94,6 +103,39 @@ describe("single-Agent task Scheduler runtime", () => {
   it("reconciles persisted attempts against Scheduler execution history", async () => {
     const fx = fixture()
     await reconcileAgentTaskRuntime(fx.deps)
-    expect(fx.reconcile).toHaveBeenCalledWith(fx.deps.getExecution, 100)
+    expect(fx.reconcile).toHaveBeenCalledWith(expect.any(Function), 100)
+  })
+
+  it("normalizes skipped Scheduler executions to cancelled attempts", async () => {
+    const fx = fixture()
+    fx.getExecution.mockResolvedValue({
+      id: "execution-1",
+      taskId: "scheduled-1",
+      taskName: "Research",
+      taskType: "agent",
+      status: "skipped",
+      output: { reason: "overlap" },
+      error: undefined,
+      retryAttempt: 0,
+      startedAt: new Date(0),
+      logs: [],
+    })
+
+    await reconcileAgentTaskRuntime(fx.deps)
+    const resolveExecution = fx.reconcile.mock.calls[0][0]
+
+    await expect(resolveExecution("execution-1")).resolves.toEqual({
+      status: "cancelled",
+      output: { reason: "overlap" },
+      error: undefined,
+    })
+  })
+
+  it("keeps missing Scheduler executions unresolved", async () => {
+    const fx = fixture()
+    await reconcileAgentTaskRuntime(fx.deps)
+    const resolveExecution = fx.reconcile.mock.calls[0][0]
+
+    await expect(resolveExecution("missing")).resolves.toBeNull()
   })
 })

@@ -1,7 +1,7 @@
 import { render, waitFor } from "@testing-library/react"
 import { PetRenderer } from "./pet-renderer"
 import type { PetBones } from "@/types/pet"
-import { registerSkin } from "./skins/registry"
+import { getSkin, registerSkin } from "./skins/registry"
 import { resetPetSkinRuntimeForTests } from "@/lib/pet/skin-runtime"
 
 function makeBones(overrides: Partial<PetBones> = {}): PetBones {
@@ -56,7 +56,11 @@ describe("PetRenderer", () => {
 
   it("does not rerender an unchanged skin during parent animation frames", () => {
     const renderSkin = jest.fn(() => <div data-testid="memo-skin" />)
-    registerSkin({ id: "memo-test", render: renderSkin })
+    registerSkin({
+      id: "memo-test",
+      capabilities: getSkin("svg").capabilities,
+      render: renderSkin,
+    })
     const bones = makeBones()
     const { rerender } = render(
       <PetRenderer bones={bones} stage="adult" state="idle" skinId="memo-test" reducedMotion />

@@ -1,9 +1,9 @@
 /** @jest-environment jsdom */
 
 const getDiagnostics = jest.fn(async () => ({ status: "ok" }))
-const buildDraft = jest.fn(() => ({ filename: "feedback.md", markdown: "safe" }))
-const downloadBlob = jest.fn()
-const trackEvent = jest.fn(async () => true)
+const buildDraft = jest.fn((..._args: unknown[]) => ({ filename: "feedback.md", markdown: "safe" }))
+const downloadBlob = jest.fn((..._args: unknown[]) => undefined)
+const trackEvent = jest.fn(async (..._args: unknown[]) => true)
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("@/lib/native/local-runtime", () => ({

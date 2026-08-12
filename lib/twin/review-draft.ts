@@ -1,7 +1,7 @@
 import { createCharacter } from "@/lib/db/characters"
 import { createSkill } from "@/lib/db/skills"
 import { getTwinDraft, markTwinDraftAccepted, markTwinDraftRejected } from "@/lib/db/twin-drafts"
-import { updatePlaybook } from "@/lib/db/twin-profile"
+import { getTwinProfile, updatePlaybook } from "@/lib/db/twin-profile"
 import type { TwinDraftPayload } from "@/types/twin"
 
 export type TwinDraftReviewInput =
@@ -21,6 +21,7 @@ interface ReviewDeps {
   createSkill: typeof createSkill
   accept: typeof markTwinDraftAccepted
   reject: typeof markTwinDraftRejected
+  getProfile: typeof getTwinProfile
   updatePlaybook: typeof updatePlaybook
 }
 
@@ -30,6 +31,7 @@ const defaultDeps: ReviewDeps = {
   createSkill,
   accept: markTwinDraftAccepted,
   reject: markTwinDraftRejected,
+  getProfile: getTwinProfile,
   updatePlaybook,
 }
 
@@ -79,7 +81,14 @@ async function performTwinDraftReview(
     acceptedAsId = skill.id
     const sourcePlaybookId = payload.sourcePlaybookId
     if (sourcePlaybookId) {
-      await deps.updatePlaybook(draft.twinId, sourcePlaybookId, { promotedToSkillId: skill.id })
+      const profile = await deps.getProfile(draft.twinId)
+      const sourcePlaybook = profile?.playbooks.find((playbook) => playbook.id === sourcePlaybookId)
+      if (sourcePlaybook) {
+        await deps.updatePlaybook(draft.twinId, sourcePlaybookId, {
+          ...sourcePlaybook,
+          promotedToSkillId: skill.id,
+        })
+      }
     }
   }
   await deps.accept(draft.id, acceptedAsId, input.reviewerNote)

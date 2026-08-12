@@ -177,17 +177,17 @@ function CompactChangeRow({
   onUnstage?: () => void
   onDiscard?: () => void
 }) {
-  const { dir, file } = splitPath(change.path)
-  const { letter, color } = statusDecoration(change.status)
+  const { dir, name } = splitPath(change.path)
+  const { letter, colorClass } = statusDecoration(change.status)
 
   return (
     <div
       className="group flex items-center gap-1.5 px-3 py-1 hover:bg-accent/50"
       data-testid={`change-row-${change.path}`}
     >
-      <span className={cn("w-4 shrink-0 text-center text-xs font-mono", color)}>{letter}</span>
+      <span className={cn("w-4 shrink-0 text-center text-xs font-mono", colorClass)}>{letter}</span>
       <span className="min-w-0 flex-1 truncate text-xs">
-        <span className="text-foreground">{file}</span>
+        <span className="text-foreground">{name}</span>
         {dir && <span className="ml-1 text-muted-foreground">{dir}</span>}
       </span>
       <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">

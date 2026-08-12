@@ -19,7 +19,7 @@ const stdout = new Writable({
 stdout.columns = 80
 stdout.rows = 24
 stdout.isTTY = true
-const stdin = new PassThrough() as NodeJS.ReadStream
+const stdin = new PassThrough() as unknown as NodeJS.ReadStream
 stdin.isTTY = true
 stdin.setRawMode = () => stdin
 stdin.ref = () => stdin

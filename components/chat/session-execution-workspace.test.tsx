@@ -35,13 +35,14 @@ jest.mock("@/lib/task-workspace/managed-workspace", () => ({
 jest.mock("@/lib/files/save-export", () => ({ saveExport: jest.fn() }))
 
 import { SessionExecutionWorkspace } from "./session-execution-workspace"
+import type { ChatSession } from "@cognia/agent-config-types"
 
-const session = {
+const session: ChatSession = {
   id: "session-1",
   title: "Task",
-  createdAt: new Date(),
-  updatedAt: new Date(),
-} as never
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+}
 
 beforeEach(() => {
   gitStatusMock.mockReset().mockResolvedValue({
@@ -135,7 +136,9 @@ it("offers explicit materialization when a synced managed workspace is missing",
     />
   )
 
-  expect(screen.getByText("Missing on this device — rebind or import to continue.")).toBeInTheDocument()
+  expect(
+    screen.getByText("Missing on this device — rebind or import to continue.")
+  ).toBeInTheDocument()
   fireEvent.click(screen.getByRole("button", { name: "Create on this device" }))
   await waitFor(() => expect(materializeManagedMock).toHaveBeenCalledWith("session-1"))
   expect(await screen.findByText("Available on this device")).toBeInTheDocument()

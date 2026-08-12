@@ -22,10 +22,10 @@ function stableRef(value: string): string {
   // 64-bit FNV-1a: this is an opaque correlation ref, not a security digest. Hashing
   // keeps a provider-controlled session id (which can contain a path/email) out
   // of the durable journal while remaining stable across monitor restarts.
-  let hash = 0xcbf29ce484222325n
+  let hash = BigInt("0xcbf29ce484222325")
   for (let index = 0; index < value.length; index += 1) {
     hash ^= BigInt(value.charCodeAt(index))
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+    hash = BigInt.asUintN(64, hash * BigInt("0x100000001b3"))
   }
   return hash.toString(16).padStart(16, "0")
 }

@@ -36,6 +36,7 @@ import {
 type FilterLevel = LogLevel | "all"
 
 const LEVEL_COLORS: Record<LogLevel, string> = {
+  fatal: "text-destructive",
   error: "text-destructive",
   warn: "text-yellow-600 dark:text-yellow-500",
   info: "text-blue-600 dark:text-blue-400",
@@ -44,6 +45,7 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
 }
 
 const LEVEL_ICONS: Record<LogLevel, React.ComponentType<{ className?: string }>> = {
+  fatal: XCircleIcon,
   error: XCircleIcon,
   warn: AlertTriangleIcon,
   info: InfoIcon,

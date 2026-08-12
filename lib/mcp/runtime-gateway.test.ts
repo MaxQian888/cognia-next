@@ -1,9 +1,12 @@
 /** @jest-environment node */
 import type { McpServer } from "@cognia/agent-config-types"
 
-const mockAppendMcpAuditLog = jest.fn(async (_draft: unknown) => undefined)
+const mockAppendMcpAuditLog = jest.fn(
+  async (_draft: { phase: string; [key: string]: unknown }) => undefined
+)
 jest.mock("@/lib/db/mcp-audit-log", () => ({
-  appendMcpAuditLog: (draft: unknown) => mockAppendMcpAuditLog(draft),
+  appendMcpAuditLog: (draft: { phase: string; [key: string]: unknown }) =>
+    mockAppendMcpAuditLog(draft),
 }))
 
 const mockCapabilityCache = new Map<string, unknown>()

@@ -9,7 +9,6 @@ import { createDiagnostic } from "@cognia/diagnostics"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
 import {
   applySdkEvent,
-  contentPreview,
   makeUserMessage,
   mergeMemorySourcesIntoLastAssistant,
   type MemorySourcesContext,
@@ -1455,7 +1454,10 @@ async function handleTeamEvent(
               .filter((message) => message.role === "assistant")
               .map((message) => ({
                 id: message.id,
-                text: contentPreview(message),
+                text: message.parts
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join(" "),
                 existing: existingIds.has(message.id),
               }))
           )

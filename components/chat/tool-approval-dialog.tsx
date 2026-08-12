@@ -179,7 +179,7 @@ export function ToolApprovalDialog({ approval, onRespond, onDismiss, onCancelRun
           ) : (
             approval && (
               <Confirmation
-                approval={{ id: approval.id }}
+                approval={{ id: approval.requestId }}
                 className="w-full border-0 p-0"
                 state="approval-requested"
               >

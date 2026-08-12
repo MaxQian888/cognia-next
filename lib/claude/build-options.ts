@@ -12,6 +12,7 @@ import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
 import type { MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
+import type { IVectorStore } from "@cognia/vector/store"
 import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
@@ -698,13 +699,7 @@ export interface InboxSendPolicy {
  * (importing twin code) when it actually opts in via `ctx.twinDeps`.
  */
 export interface TwinRuntimeDepsForBuild {
-  store: {
-    searchByEmbedding?: (
-      collection: string,
-      embedding: number[],
-      options?: { limit?: number }
-    ) => Promise<Array<{ id: string; content: string; score: number }>>
-  }
+  store: IVectorStore
   embedding: {
     provider: RagEmbeddingProvider
     model: string
@@ -1434,7 +1429,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             ? estimateFallbackTokens(result.applied.systemPrompt ?? baseSystem)
             : 0,
         durationMs: Date.now() - twinStartedAt,
-        chunkIds: result.retrievedChunks.map((chunk) => chunk.id),
+        chunkIds: result.retrievedChunks.map(({ chunk }) => chunk.id),
         chunkScores: result.retrievedChunks.map((chunk) => chunk.score),
         styleSampleIds: result.selectedStyleSamples.map((sample) => sample.id),
         ...(ctx.session?.id ? { sessionId: ctx.session.id } : {}),

@@ -451,12 +451,15 @@ describe("active model positioning", () => {
       .find((element) => element !== null)
 
     expect(autoItem).not.toBeNull()
-    const centeredAutoCalls = scrollIntoView.mock.contexts.filter(
-      (context, index) =>
+    const centeredAutoCalls = scrollIntoView.mock.contexts.filter((context, index) => {
+      const options = scrollIntoView.mock.calls[index]?.[0]
+      return (
         context === autoItem &&
-        scrollIntoView.mock.calls[index]?.[0]?.behavior === "auto" &&
-        scrollIntoView.mock.calls[index]?.[0]?.block === "center"
-    )
+        typeof options === "object" &&
+        options.behavior === "auto" &&
+        options.block === "center"
+      )
+    })
     expect(centeredAutoCalls).toHaveLength(1)
   })
 })

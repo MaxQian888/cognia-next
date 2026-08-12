@@ -33,7 +33,7 @@ jest.mock("@/components/error/diagnostic-card", () => ({
 jest.mock("./message-list", () => ({
   MessageList: jest.fn(() => null),
 }))
-const companionTranscriptMessagesMock = jest.fn(() => null)
+const companionTranscriptMessagesMock = jest.fn((..._args: unknown[]) => null)
 jest.mock("./companion-transcript-messages", () => ({
   CompanionTranscriptMessages: (props: Record<string, unknown>) =>
     companionTranscriptMessagesMock(props),

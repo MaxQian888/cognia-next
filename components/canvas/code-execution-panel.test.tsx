@@ -13,6 +13,13 @@ import { CodeExecutionPanel } from "./code-execution-panel"
 import type { CodeSandboxExecutionResult } from "@/hooks/canvas/use-code-execution"
 
 jest.mock("@/components/ui/tooltip")
+jest.mock("@/components/ai-elements/code-block", () => ({
+  CodeBlock: ({ code, language }: { code: string; language: string }) => (
+    <pre data-testid="code-block" data-language={language}>
+      {code}
+    </pre>
+  ),
+}))
 
 const mockCopy = jest.fn().mockResolvedValue(undefined)
 let mockIsCopying = false
@@ -97,6 +104,20 @@ describe("CodeExecutionPanel — idle / ready", () => {
 })
 
 describe("CodeExecutionPanel — executing", () => {
+  it.each([
+    ["typescript", "typescript"],
+    ["svg", "xml"],
+    ["ruby", "markdown"],
+  ])("maps %s input to the %s bundled highlighter", async (language, expected) => {
+    const user = userEvent.setup()
+    render(
+      <CodeExecutionPanel {...baseProps} code="sample" language={language} result={makeResult()} />
+    )
+
+    await user.click(screen.getByRole("tab", { name: "input" }))
+    expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", expected)
+  })
+
   it("swaps to a stop button while executing and calls onCancel", async () => {
     render(<CodeExecutionPanel {...baseProps} isExecuting={true} />)
     const stop = screen.getByRole("button", { name: /stop/i })

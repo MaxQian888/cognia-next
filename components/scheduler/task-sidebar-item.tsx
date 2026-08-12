@@ -206,6 +206,11 @@ const taskTypeConfig: Record<
     bg: "bg-emerald-500/10",
     color: "text-emerald-500",
   },
+  "connection:housekeeping:connector-retention": {
+    icon: <Database className="h-3.5 w-3.5" />,
+    bg: "bg-slate-500/10",
+    color: "text-slate-500",
+  },
 }
 
 const statusDotColor: Record<ScheduledTaskStatus, string> = {

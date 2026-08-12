@@ -158,6 +158,11 @@ describe("SessionSourcesPanel", () => {
               { id: "rag", title: "Twin chunk", origin: "twin-rag" },
               { id: "style", title: "Style sample", origin: "twin-style" },
               {
+                id: "agent-knowledge",
+                title: "Agent handbook",
+                origin: "agent-knowledge-base",
+              },
+              {
                 id: "note",
                 title: "Linked footnote",
                 origin: "footnote",
@@ -215,6 +220,8 @@ describe("SessionSourcesPanel", () => {
     ).toBe(true)
     expect(screen.getByText("Twin chunk")).toBeInTheDocument()
     expect(screen.getByText("Style sample")).toBeInTheDocument()
+    expect(screen.getByText("Agent handbook")).toBeInTheDocument()
+    expect(screen.getByText("labels.agentKnowledge")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Linked footnote/ })).toBeInTheDocument()
     expect(screen.getByText("Provider context")).toBeInTheDocument()
     expect(screen.getByText("read_file")).toBeInTheDocument()

@@ -5,7 +5,8 @@
  */
 
 export type FleetAgent = "claude-code" | "codex" | "opencode" | "cognia"
-export type FleetOrigin = "built-in" | "team" | "workflow" | "external"
+export type FleetOrigin =
+  "built-in" | "team" | "workflow" | "external" | "local-external" | "managed-team"
 
 export type FleetStatus =
   | "idle"
@@ -164,7 +165,6 @@ export interface FleetSession {
   gitBranch?: string | null
   /** Additive remote-dispatch placement and existing authority lineage. */
   hostRef?: string
-  origin?: "local-external" | "managed-team"
   agentTeamRunId?: string
   agentTeamId?: string
   agentTeamChildRunId?: string

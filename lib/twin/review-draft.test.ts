@@ -5,9 +5,21 @@ function deps(draft: Record<string, unknown>) {
     getDraft: jest.fn(async () => draft),
     createCharacter: jest.fn(async () => ({ id: "character-1" })),
     createSkill: jest.fn(async () => ({ id: "skill-1" })),
-    accept: jest.fn(async () => undefined),
-    reject: jest.fn(async () => undefined),
-    updatePlaybook: jest.fn(async () => undefined),
+    accept: jest.fn(async (..._args: unknown[]) => undefined),
+    reject: jest.fn(async (..._args: unknown[]) => undefined),
+    getProfile: jest.fn(async () => ({
+      playbooks: [
+        {
+          id: "playbook-1",
+          title: "Triage",
+          trigger: "Issue arrives",
+          steps: [],
+          examples: [],
+          confidence: 0.9,
+        },
+      ],
+    })),
+    updatePlaybook: jest.fn(async (..._args: unknown[]) => undefined),
   }
 }
 
@@ -44,6 +56,12 @@ it("accepts a Skill and marks its source playbook promoted", async () => {
 
   expect(result.acceptedAsId).toBe("skill-1")
   expect(d.updatePlaybook).toHaveBeenCalledWith("twin-1", "playbook-1", {
+    id: "playbook-1",
+    title: "Triage",
+    trigger: "Issue arrives",
+    steps: [],
+    examples: [],
+    confidence: 0.9,
     promotedToSkillId: "skill-1",
   })
 })
@@ -89,9 +107,10 @@ it("coalesces concurrent reviews of the same draft into one artifact", async () 
     acceptedAsId,
     payload: { kind: "character", data: { name: "Alice" } },
   }))
-  d.accept.mockImplementation(async (_draftId, artifactId) => {
+  d.accept.mockImplementation(async (...args) => {
+    const artifactId = args[1]
     status = "accepted"
-    acceptedAsId = artifactId
+    acceptedAsId = typeof artifactId === "string" ? artifactId : undefined
   })
 
   const results = await Promise.all([

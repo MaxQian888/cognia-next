@@ -116,6 +116,8 @@ const FALLBACK_CONTEXT_WORKBENCH_LAYOUT: ContextWorkbenchLayout = {
   activatedPanelIds: [],
   pendingPanelIds: [],
   lastUsedAt: 0,
+  splitPanelId: null,
+  splitRatio: 50,
 }
 
 const FOCUS_TAKEOVER_DURATION_MS = 200
@@ -407,6 +409,7 @@ function SortableActivityButton({
           type="button"
           size="icon-sm"
           variant="ghost"
+          {...attributes}
           aria-label={label}
           aria-pressed={isActive}
           data-workbench-activity-button
@@ -417,7 +420,6 @@ function SortableActivityButton({
             isActive && "text-foreground"
           )}
           style={style}
-          {...attributes}
           {...listeners}
         >
           <MotionSelectionIndicator

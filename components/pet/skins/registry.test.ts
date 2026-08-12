@@ -15,7 +15,11 @@ describe("skin registry", () => {
   })
 
   it("registers and lists a new skin", () => {
-    const fake: PetSkin = { id: "fake-skin", render: () => null }
+    const fake: PetSkin = {
+      id: "fake-skin",
+      capabilities: getSkin("svg").capabilities,
+      render: () => null,
+    }
     registerSkin(fake)
     expect(getSkin("fake-skin")).toBe(fake)
     expect(listSkinIds()).toContain("fake-skin")

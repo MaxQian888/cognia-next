@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
-import { fn } from "storybook/test"
 
 import { LocalProviderSettings } from "./local-provider-settings"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
@@ -24,7 +23,7 @@ const meta = {
       </div>
     ),
   ],
-  args: { onProviderSelect: fn() },
+  args: { providerId: "ollama" },
 } satisfies Meta<typeof LocalProviderSettings>
 
 export default meta

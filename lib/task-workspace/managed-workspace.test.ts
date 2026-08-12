@@ -15,8 +15,8 @@ function session(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: "session-1",
     title: "Task",
-    createdAt: new Date(0),
-    updatedAt: new Date(0),
+    createdAt: 0,
+    updatedAt: 0,
     executionContext: createManagedWorkspaceContext("session-1", 10),
     ...overrides,
   }
@@ -71,7 +71,15 @@ function fixture() {
     createProject: (rootDir: string) => ({ id: "project-new", rootDir }),
     addSessionToProject: jest.fn(),
   }
-  return { deps, directories, files, updates, get row() { return row } }
+  return {
+    deps,
+    directories,
+    files,
+    updates,
+    get row() {
+      return row
+    },
+  }
 }
 
 describe("managed workspace lifecycle", () => {

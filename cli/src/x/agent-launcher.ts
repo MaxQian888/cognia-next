@@ -123,7 +123,7 @@ export async function launchAgent(
   const agentConfig =
     config.agent === "claude" ? buildClaudeConfig(config) : buildCodexConfig(config)
 
-  const mergedEnv: Record<string, string | undefined> = {
+  const mergedEnv: NodeJS.ProcessEnv = {
     ...process.env,
     ...agentConfig.env,
   }

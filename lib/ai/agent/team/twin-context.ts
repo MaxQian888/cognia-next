@@ -216,7 +216,7 @@ export async function applyTeammateTwinContext(
       styleSampleCount: result.applied.metadata.styleSampleIds.length,
       tokensApprox: estimateFallbackTokens(systemPrompt),
       durationMs: Date.now() - ts,
-      chunkIds: result.retrievedChunks.map((chunk) => chunk.id),
+      chunkIds: result.retrievedChunks.map(({ chunk }) => chunk.id),
       chunkScores: result.retrievedChunks.map((chunk) => chunk.score),
       styleSampleIds: result.selectedStyleSamples.map((sample) => sample.id),
     })

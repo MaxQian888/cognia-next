@@ -705,6 +705,9 @@ interface WizardState {
   projectName: string
   deploymentRoot: string
 }
+type StringWizardKey = {
+  [K in keyof WizardState]: WizardState[K] extends string ? K : never
+}[keyof WizardState]
 const INITIAL_WIZARD: WizardState = {
   id: "staging",
   label: "",
@@ -770,7 +773,7 @@ function DeploymentWizard({
       setSubmitting(false)
     }
   }
-  const textFields: Array<[keyof WizardState, string, string]> = [
+  const textFields: Array<[StringWizardKey, string, string]> = [
     ["id", "wizard.targetId", "wizard.placeholders.targetId"],
     ["label", "wizard.label", "wizard.placeholders.label"],
     ["controllerUrl", "wizard.controllerUrl", "wizard.placeholders.controllerUrl"],
@@ -947,31 +950,35 @@ function DeploymentWizard({
                 </legend>
                 {state.topology === "kubernetes" ? (
                   <>
-                    {[
-                      ["namespace", "wizard.namespace"],
-                      ["ingressClassName", "wizard.ingressClass"],
-                      ["storageClassName", "wizard.storageClass"],
-                      ["runtimeClassName", "wizard.runtimeClass"],
-                    ].map(([key, label]) => (
+                    {(
+                      [
+                        ["namespace", "wizard.namespace"],
+                        ["ingressClassName", "wizard.ingressClass"],
+                        ["storageClassName", "wizard.storageClass"],
+                        ["runtimeClassName", "wizard.runtimeClass"],
+                      ] satisfies Array<[StringWizardKey, string]>
+                    ).map(([key, label]) => (
                       <TextField
                         key={key}
                         label={t(label)}
-                        value={state[key as keyof WizardState]}
-                        onChange={(value) => update(key as keyof WizardState, value)}
+                        value={state[key]}
+                        onChange={(value) => update(key, value)}
                       />
                     ))}
                   </>
                 ) : (
                   <>
-                    {[
-                      ["projectName", "wizard.projectName"],
-                      ["deploymentRoot", "wizard.deploymentRoot"],
-                    ].map(([key, label]) => (
+                    {(
+                      [
+                        ["projectName", "wizard.projectName"],
+                        ["deploymentRoot", "wizard.deploymentRoot"],
+                      ] satisfies Array<[StringWizardKey, string]>
+                    ).map(([key, label]) => (
                       <TextField
                         key={key}
                         label={t(label)}
-                        value={state[key as keyof WizardState]}
-                        onChange={(value) => update(key as keyof WizardState, value)}
+                        value={state[key]}
+                        onChange={(value) => update(key, value)}
                       />
                     ))}
                   </>
@@ -1052,7 +1059,7 @@ function TextField({
     </div>
   )
 }
-function SelectField({
+function SelectField<T extends string>({
   label,
   value,
   onChange,
@@ -1060,23 +1067,23 @@ function SelectField({
   t,
 }: {
   label: string
-  value: string
-  onChange: (value: string) => void
-  options: string[]
+  value: T
+  onChange: (value: T) => void
+  options: T[]
   t: ReturnType<typeof useTranslations>
 }) {
   const id = `server-select-${label.replace(/\W/g, "-")}`
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
-      <Select value={value} onValueChange={onChange}>
+      <Select value={value} onValueChange={(next) => onChange(next as T)}>
         <SelectTrigger id={id} className="w-full" aria-label={label}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {options.map((option) => (
             <SelectItem key={option} value={option}>
-              {t(`options.${option}`)}
+              {t(`options.${option}` as Parameters<typeof t>[0])}
             </SelectItem>
           ))}
         </SelectContent>

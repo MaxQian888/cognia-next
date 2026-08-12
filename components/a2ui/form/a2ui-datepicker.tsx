@@ -101,7 +101,7 @@ export const A2UIDatePicker = memo(function A2UIDatePicker({
               if (maxDate && d > maxDate) return true
               return false
             }}
-            initialFocus
+            autoFocus
           />
         </PopoverContent>
       </Popover>

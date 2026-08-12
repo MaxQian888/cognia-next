@@ -66,6 +66,7 @@ test("dispatches a role-preserving snapshot and opens the imported Codex task", 
       { type: "text", text: "I found it" },
       {
         type: "tool-shell",
+        toolCallId: "tool-1",
         input: { command: "env" },
         output: "OPENAI_API_KEY=secret",
         state: "output-available",

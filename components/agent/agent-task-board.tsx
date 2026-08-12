@@ -29,7 +29,13 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { SkillSuggestionCard } from "@/components/chat/skill-suggestion-card"
 import {
@@ -60,6 +66,7 @@ const STATUSES: readonly AgentTaskStatus[] = [
   "failed",
   "cancelled",
 ]
+const EMPTY_TASKS: AgentTask[] = []
 
 function TaskCard({ task }: { task: AgentTask }) {
   const t = useTranslations("agentTaskBoard")
@@ -79,7 +86,9 @@ function TaskCard({ task }: { task: AgentTask }) {
     <Card
       ref={setNodeRef}
       className={cn("space-y-2 p-2.5", isDragging && "opacity-50")}
-      style={transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined}
+      style={
+        transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined
+      }
       data-testid={`agent-task-${task.id}`}
     >
       <button
@@ -90,10 +99,14 @@ function TaskCard({ task }: { task: AgentTask }) {
         {...attributes}
       >
         <p className="text-xs font-medium">{task.title}</p>
-        {task.description && <p className="line-clamp-2 text-[10px] text-muted-foreground">{task.description}</p>}
+        {task.description && (
+          <p className="line-clamp-2 text-[10px] text-muted-foreground">{task.description}</p>
+        )}
       </button>
       <div className="flex flex-wrap gap-1">
-        <Badge variant="secondary" className="text-[10px]">{t(`priority.${task.priority}`)}</Badge>
+        <Badge variant="secondary" className="text-[10px]">
+          {t(`priority.${task.priority}`)}
+        </Badge>
         {task.scheduledFor && (
           <Badge variant="outline" className="gap-1 text-[10px]">
             <CalendarClockIcon className="size-3" />
@@ -108,36 +121,68 @@ function TaskCard({ task }: { task: AgentTask }) {
       </div>
       <div className="flex flex-wrap gap-1">
         {(["pending", "failed"] as AgentTaskStatus[]).includes(task.status) && (
-          <Button size="sm" className="h-7 text-[11px]" onClick={() => void run(() => runAgentTaskNow(task.id))}>
+          <Button
+            size="sm"
+            className="h-7 text-[11px]"
+            onClick={() => void run(() => runAgentTaskNow(task.id))}
+          >
             <PlayIcon className="size-3" /> {task.status === "failed" ? t("retry") : t("start")}
           </Button>
         )}
         {task.status === "paused" && (
-          <Button size="sm" className="h-7 text-[11px]" onClick={() => void run(() => resumeAgentTask(task.id))}>
+          <Button
+            size="sm"
+            className="h-7 text-[11px]"
+            onClick={() => void run(() => resumeAgentTask(task.id))}
+          >
             {t("resume")}
           </Button>
         )}
         {task.status === "in_progress" && (
-          <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => void run(() => pauseAgentTask(task.id))}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-[11px]"
+            onClick={() => void run(() => pauseAgentTask(task.id))}
+          >
             {t("pause")}
           </Button>
         )}
         {task.status === "review" && (
           <>
-            <Button size="sm" className="h-7 text-[11px]" onClick={() => void run(() => moveAgentTask(task.id, "completed"))}>
+            <Button
+              size="sm"
+              className="h-7 text-[11px]"
+              onClick={() => void run(() => moveAgentTask(task.id, "completed"))}
+            >
               {t("approve")}
             </Button>
-            <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => void run(() => moveAgentTask(task.id, "failed"))}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[11px]"
+              onClick={() => void run(() => moveAgentTask(task.id, "failed"))}
+            >
               {t("reject")}
             </Button>
           </>
         )}
         {allowedAgentTaskMoves(task.status).includes("cancelled") && (
-          <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => void run(() => cancelAgentTask(task.id))}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-[11px]"
+            onClick={() => void run(() => cancelAgentTask(task.id))}
+          >
             {t("cancel")}
           </Button>
         )}
-        <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => setExpanded((value) => !value)}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 text-[11px]"
+          onClick={() => setExpanded((value) => !value)}
+        >
           <MessageSquareIcon className="size-3" />
           {t("details", { attempts: attempts.length, comments: task.comments.length })}
         </Button>
@@ -172,10 +217,17 @@ function TaskCard({ task }: { task: AgentTask }) {
             </div>
           ))}
           {task.comments.map((entry) => (
-            <p key={entry.id} className="rounded bg-muted px-2 py-1 text-[10px]">{entry.text}</p>
+            <p key={entry.id} className="rounded bg-muted px-2 py-1 text-[10px]">
+              {entry.text}
+            </p>
           ))}
           <div className="flex gap-1">
-            <Input value={comment} onChange={(event) => setComment(event.target.value)} placeholder={t("commentPlaceholder")} className="h-7 text-[11px]" />
+            <Input
+              value={comment}
+              onChange={(event) => setComment(event.target.value)}
+              placeholder={t("commentPlaceholder")}
+              className="h-7 text-[11px]"
+            />
             <Button
               size="sm"
               variant="outline"
@@ -183,7 +235,11 @@ function TaskCard({ task }: { task: AgentTask }) {
               disabled={!comment.trim()}
               onClick={() =>
                 void run(async () => {
-                  await addAgentTaskComment(task.id, { id: crypto.randomUUID(), author: "user", text: comment })
+                  await addAgentTaskComment(task.id, {
+                    id: crypto.randomUUID(),
+                    author: "user",
+                    text: comment,
+                  })
                   setComment("")
                 })
               }
@@ -201,19 +257,33 @@ function TaskColumn({ status, tasks }: { status: AgentTaskStatus; tasks: AgentTa
   const t = useTranslations("agentTaskBoard")
   const { setNodeRef, isOver } = useDroppable({ id: `status:${status}` })
   return (
-    <section ref={setNodeRef} className={cn("w-64 shrink-0 space-y-2 rounded-lg bg-muted/40 p-2", isOver && "ring-2 ring-primary/40")} data-testid={`agent-task-column-${status}`}>
+    <section
+      ref={setNodeRef}
+      className={cn(
+        "w-64 shrink-0 space-y-2 rounded-lg bg-muted/40 p-2",
+        isOver && "ring-2 ring-primary/40"
+      )}
+      data-testid={`agent-task-column-${status}`}
+    >
       <div className="flex items-center justify-between px-1 text-xs font-medium">
-        <span>{t(`status.${status}`)}</span><span className="text-muted-foreground">{tasks.length}</span>
+        <span>{t(`status.${status}`)}</span>
+        <span className="text-muted-foreground">{tasks.length}</span>
       </div>
-      {tasks.map((task) => <TaskCard key={task.id} task={task} />)}
-      {tasks.length === 0 && <p className="rounded border border-dashed p-2 text-center text-[10px] text-muted-foreground">{t("emptyColumn")}</p>}
+      {tasks.map((task) => (
+        <TaskCard key={task.id} task={task} />
+      ))}
+      {tasks.length === 0 && (
+        <p className="rounded border border-dashed p-2 text-center text-[10px] text-muted-foreground">
+          {t("emptyColumn")}
+        </p>
+      )}
     </section>
   )
 }
 
 export function AgentTaskBoard({ agentId }: { agentId: string }) {
   const t = useTranslations("agentTaskBoard")
-  const tasks = useLiveQuery(() => listAgentTasks(agentId), [agentId])
+  const tasks = useLiveQuery(() => listAgentTasks(agentId), [agentId]) ?? EMPTY_TASKS
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [priority, setPriority] = useState<AgentTaskPriority>("normal")
@@ -225,7 +295,7 @@ export function AgentTaskBoard({ agentId }: { agentId: string }) {
     () =>
       STATUSES.map((status) => ({
         status,
-        tasks: (tasks ?? []).filter((task) => task.status === status),
+        tasks: tasks.filter((task) => task.status === status),
       })),
     [tasks]
   )
@@ -268,32 +338,136 @@ export function AgentTaskBoard({ agentId }: { agentId: string }) {
   return (
     <div className="space-y-4" data-testid="agent-task-board">
       <div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-2">
-        <div className="space-y-1"><Label htmlFor={`agent-task-title-${agentId}`}>{t("titleLabel")}</Label><Input id={`agent-task-title-${agentId}`} value={title} onChange={(event) => setTitle(event.target.value)} /></div>
-        <div className="space-y-1"><Label>{t("priorityLabel")}</Label><Select value={priority} onValueChange={(value) => setPriority(value as AgentTaskPriority)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(["low", "normal", "high", "critical"] as const).map((value) => <SelectItem key={value} value={value}>{t(`priority.${value}`)}</SelectItem>)}</SelectContent></Select></div>
-        <div className="space-y-1 sm:col-span-2"><Label htmlFor={`agent-task-description-${agentId}`}>{t("descriptionLabel")}</Label><Textarea id={`agent-task-description-${agentId}`} value={description} onChange={(event) => setDescription(event.target.value)} /></div>
-        <div className="space-y-1"><Label>{t("approvalLabel")}</Label><Select value={approvalPolicy} onValueChange={(value) => setApprovalPolicy(value as AgentTask["approvalPolicy"])}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(["auto", "on-risk", "manual"] as const).map((value) => <SelectItem key={value} value={value}>{t(`approval.${value}`)}</SelectItem>)}</SelectContent></Select></div>
-        <div className="space-y-1"><Label htmlFor={`agent-task-schedule-${agentId}`}>{t("scheduleLabel")}</Label><Input id={`agent-task-schedule-${agentId}`} type="datetime-local" value={scheduledFor} onChange={(event) => setScheduledFor(event.target.value)} /></div>
-        {tasks.length > 0 && <div className="space-y-1 sm:col-span-2"><Label>{t("dependenciesLabel")}</Label><div className="flex flex-wrap gap-2">{tasks.map((task) => <label key={task.id} className="flex items-center gap-1 text-xs"><Checkbox checked={dependencies.includes(task.id)} onCheckedChange={(checked) => setDependencies((current) => checked ? [...current, task.id] : current.filter((id) => id !== task.id))} />{task.title}</label>)}</div></div>}
-        <Button disabled={!title.trim()} onClick={() => void create()} className="sm:col-span-2">{t("create")}</Button>
+        <div className="space-y-1">
+          <Label htmlFor={`agent-task-title-${agentId}`}>{t("titleLabel")}</Label>
+          <Input
+            id={`agent-task-title-${agentId}`}
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>{t("priorityLabel")}</Label>
+          <Select
+            value={priority}
+            onValueChange={(value) => setPriority(value as AgentTaskPriority)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(["low", "normal", "high", "critical"] as const).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {t(`priority.${value}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label htmlFor={`agent-task-description-${agentId}`}>{t("descriptionLabel")}</Label>
+          <Textarea
+            id={`agent-task-description-${agentId}`}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>{t("approvalLabel")}</Label>
+          <Select
+            value={approvalPolicy}
+            onValueChange={(value) => setApprovalPolicy(value as AgentTask["approvalPolicy"])}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(["auto", "on-risk", "manual"] as const).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {t(`approval.${value}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`agent-task-schedule-${agentId}`}>{t("scheduleLabel")}</Label>
+          <Input
+            id={`agent-task-schedule-${agentId}`}
+            type="datetime-local"
+            value={scheduledFor}
+            onChange={(event) => setScheduledFor(event.target.value)}
+          />
+        </div>
+        {tasks.length > 0 && (
+          <div className="space-y-1 sm:col-span-2">
+            <Label>{t("dependenciesLabel")}</Label>
+            <div className="flex flex-wrap gap-2">
+              {tasks.map((task) => (
+                <label key={task.id} className="flex items-center gap-1 text-xs">
+                  <Checkbox
+                    checked={dependencies.includes(task.id)}
+                    onCheckedChange={(checked) =>
+                      setDependencies((current) =>
+                        checked ? [...current, task.id] : current.filter((id) => id !== task.id)
+                      )
+                    }
+                  />
+                  {task.title}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        <Button disabled={!title.trim()} onClick={() => void create()} className="sm:col-span-2">
+          {t("create")}
+        </Button>
       </div>
       {tasks.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-8 text-center"><ListTodoIcon className="mx-auto mb-2 size-6 text-muted-foreground" /><p className="text-sm font-medium">{t("emptyTitle")}</p><p className="text-xs text-muted-foreground">{t("emptyDescription")}</p></div>
+        <div className="rounded-lg border border-dashed p-8 text-center">
+          <ListTodoIcon className="mx-auto mb-2 size-6 text-muted-foreground" />
+          <p className="text-sm font-medium">{t("emptyTitle")}</p>
+          <p className="text-xs text-muted-foreground">{t("emptyDescription")}</p>
+        </div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
-          <div className="flex gap-2 overflow-x-auto pb-2">{columns.map((column) => <TaskColumn key={column.status} {...column} />)}</div>
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {columns.map((column) => (
+              <TaskColumn key={column.status} {...column} />
+            ))}
+          </div>
         </DndContext>
       )}
     </div>
   )
 }
 
-export function AgentTaskBoardDialog({ agentId, agentName }: { agentId: string; agentName: string }) {
+export function AgentTaskBoardDialog({
+  agentId,
+  agentName,
+}: {
+  agentId: string
+  agentName: string
+}) {
   const t = useTranslations("agentTaskBoard")
   return (
     <Dialog>
-      <DialogTrigger asChild><Button variant="ghost" size="icon" className="size-7" aria-label={t("openAria", { name: agentName })} title={t("open")}><ListTodoIcon className="size-3.5" /></Button></DialogTrigger>
+      <DialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label={t("openAria", { name: agentName })}
+          title={t("open")}
+        >
+          <ListTodoIcon className="size-3.5" />
+        </Button>
+      </DialogTrigger>
       <DialogContent className="max-h-[90vh] max-w-[95vw] overflow-y-auto sm:max-w-5xl">
-        <DialogHeader><DialogTitle>{t("dialogTitle", { name: agentName })}</DialogTitle><DialogDescription>{t("dialogDescription")}</DialogDescription></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>{t("dialogTitle", { name: agentName })}</DialogTitle>
+          <DialogDescription>{t("dialogDescription")}</DialogDescription>
+        </DialogHeader>
         <AgentTaskBoard agentId={agentId} />
       </DialogContent>
     </Dialog>

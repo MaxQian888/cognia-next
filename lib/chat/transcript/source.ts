@@ -56,15 +56,21 @@ function isMethodNotFound(error: unknown): boolean {
   )
 }
 
-async function loadLegacyMessages(transport: Transport, sessionId: string): Promise<StoredMessage[]> {
+async function loadLegacyMessages(
+  transport: Transport,
+  sessionId: string
+): Promise<StoredMessage[]> {
   const rows: StoredMessage[] = []
   let offset: number | undefined = 0
   do {
-    const page = await transport.call<LegacyMessagePage>("message_get_by_session", {
-      session_id: sessionId,
-      limit: 200,
-      offset,
-    })
+    const page: LegacyMessagePage = await transport.call<LegacyMessagePage>(
+      "message_get_by_session",
+      {
+        session_id: sessionId,
+        limit: 200,
+        offset,
+      }
+    )
     rows.push(...page.rows)
     offset = page.next_offset
   } while (offset !== undefined)

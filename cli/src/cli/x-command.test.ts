@@ -5,11 +5,12 @@
 import { parseArgv } from "./args"
 import { xCommand } from "./x-command"
 import type { ResolvedConfig } from "../config/schema"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
 const MOCK_CONFIG: ResolvedConfig = {
   provider: "anthropic",
   permissionMode: "default",
-  builtinTools: { Read: true, Edit: true, Write: true, Bash: true, Glob: true, Grep: true },
+  builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   providers: {
     anthropic: { protocol: "anthropic", apiKey: "sk-ant-test-key" },
     openai: { protocol: "openai", apiKey: "sk-openai-test-key" },
@@ -27,6 +28,7 @@ function createOutput() {
     sink: {
       write: (s: string) => lines.push(s),
       error: (s: string) => errors.push(s),
+      json: (value: unknown) => lines.push(JSON.stringify(value)),
     },
     lines,
     errors,

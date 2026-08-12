@@ -3,7 +3,7 @@ import { getSession, updateSession } from "@/lib/db/sessions"
 import { registerDialogPathInRust } from "@/lib/files/allowed-roots-sync"
 import { isTauri } from "@/lib/platform/detect"
 import { decodeBase64, encodeBase64 } from "@/lib/share/encoding"
-import type { SessionExecutionContext } from "@/types/execution-context"
+import type { SessionExecutionContext, SessionWorkspaceBinding } from "@/types/execution-context"
 import {
   createSessionExecutionContext,
   resolveSessionWorkspaceRoot,
@@ -57,7 +57,9 @@ function safeWorkspaceSegment(workspaceId: string): string {
 function joinPath(...segments: string[]): string {
   return segments
     .filter(Boolean)
-    .map((segment, index) => (index === 0 ? segment.replace(/\/+$/, "") : segment.replace(/^\/+|\/+$/g, "")))
+    .map((segment, index) =>
+      index === 0 ? segment.replace(/\/+$/, "") : segment.replace(/^\/+|\/+$/g, "")
+    )
     .filter(Boolean)
     .join("/")
 }
@@ -117,12 +119,16 @@ export function mergePortableManagedContext(
   return portableExecutionContext(incoming)
 }
 
-function requireManagedContext(session: ChatSession | undefined): SessionExecutionContext {
+type ManagedExecutionContext = SessionExecutionContext & {
+  workspaceBinding: Extract<SessionWorkspaceBinding, { kind: "managed" }>
+}
+
+function requireManagedContext(session: ChatSession | undefined): ManagedExecutionContext {
   const context = session?.executionContext
   if (context?.workspaceBinding?.kind !== "managed") {
     throw new Error("Session is not bound to a managed workspace")
   }
-  return context
+  return context as ManagedExecutionContext
 }
 
 async function persistContext(
@@ -245,7 +251,8 @@ export async function restoreManagedWorkspace(
   }
   const baseRoot = await deps.managedBaseRoot()
   const localRoot = joinPath(baseRoot, safeWorkspaceSegment(context.workspaceBinding!.workspaceId))
-  if (await deps.exists(localRoot)) throw new Error("Managed workspace restore target already exists")
+  if (await deps.exists(localRoot))
+    throw new Error("Managed workspace restore target already exists")
   await deps.rename(deletedRoot, localRoot)
   await deps.registerAllowedRoot(localRoot)
   return persistContext(
@@ -282,7 +289,9 @@ async function collectArchiveFiles(
   const files: ManagedWorkspaceArchiveFile[] = []
   let totalBytes = 0
   const visit = async (directory: string, prefix: string): Promise<void> => {
-    const entries = [...(await deps.readDir(directory))].sort((a, b) => a.name.localeCompare(b.name))
+    const entries = [...(await deps.readDir(directory))].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )
     for (const entry of entries) {
       if (entry.isSymlink) throw new Error("Managed workspace archives do not follow symlinks")
       const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name
@@ -411,8 +420,7 @@ async function defaultManagedWorkspaceDeps(): Promise<ManagedWorkspaceDeps> {
     readFile: fs.readFile,
     writeFile: fs.writeFile,
     registerAllowedRoot: registerDialogPathInRust,
-    createProject: (rootDir, name) =>
-      useProjectStore.getState().createProject({ name, rootDir }),
+    createProject: (rootDir, name) => useProjectStore.getState().createProject({ name, rootDir }),
     addSessionToProject: (projectId, sessionId) =>
       useProjectStore.getState().addSessionToProject(projectId, sessionId),
   }

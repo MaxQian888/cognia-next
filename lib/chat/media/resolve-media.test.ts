@@ -45,7 +45,9 @@ beforeEach(() => {
   })
 })
 
-function row(over: Record<string, unknown> = {}) {
+function row(
+  over: Record<string, unknown> = {}
+): NonNullable<Awaited<ReturnType<typeof getMessageMedia>>> {
   return {
     hash: "h",
     mediaType: "image/jpeg",
@@ -56,7 +58,7 @@ function row(over: Record<string, unknown> = {}) {
     createdAt: 1,
     lastUsedAt: 1,
     ...over,
-  } as Awaited<ReturnType<typeof getMessageMedia>>
+  } as NonNullable<Awaited<ReturnType<typeof getMessageMedia>>>
 }
 
 describe("acquireMedia", () => {
@@ -101,7 +103,7 @@ describe("acquireMedia", () => {
 
   it("requests only the thumbnail variant for a visible gallery tile", async () => {
     getMedia.mockResolvedValue(undefined)
-    const loadMissing = jest.fn(async () =>
+    const loadMissing = jest.fn(async (_request: unknown) =>
       row({
         hash: "remote-thumb",
         canonicalAvailable: false,
@@ -122,7 +124,9 @@ describe("acquireMedia", () => {
     getMedia.mockResolvedValue(
       row({ hash: "partial", canonicalAvailable: false, thumbBlob: { size: 40 } as Blob })
     )
-    const loadMissing = jest.fn(async () => row({ hash: "partial", canonicalAvailable: true }))
+    const loadMissing = jest.fn(async (_request: unknown) =>
+      row({ hash: "partial", canonicalAvailable: true })
+    )
 
     await acquireMedia(mediaRef("partial"), { loadMissing })
 

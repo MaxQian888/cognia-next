@@ -108,7 +108,12 @@ function withActionSnapshot(result: BrowserActionResult) {
 }
 
 function isDialogPending(result: unknown): result is BrowserDialogState & { dialogPending: true } {
-  return !!result && typeof result === "object" && result.dialogPending === true
+  return (
+    !!result &&
+    typeof result === "object" &&
+    "dialogPending" in result &&
+    result.dialogPending === true
+  )
 }
 
 function pendingDialogResponse(result: BrowserDialogState) {

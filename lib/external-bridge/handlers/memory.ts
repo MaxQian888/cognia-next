@@ -68,7 +68,10 @@ export interface MemorySearchInput {
 
 export type MemorySearchResult =
   | { ok: true; hits: Array<{ memory: MemoryWireRow; relevance: number; score: number }> }
-  | { ok: false; reason: "disabled" | "temporary" | "backend_unavailable" }
+  | {
+      ok: false
+      reason: "disabled" | "temporary" | "policy_denied" | "backend_unavailable"
+    }
 
 export async function memorySearch(input: MemorySearchInput): Promise<MemorySearchResult> {
   const query = requireText(input.query, "query", MAX_MEMORY_TEXT_CHARS)

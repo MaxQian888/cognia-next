@@ -107,6 +107,18 @@ describe("canonicalEventFromExternalEvent", () => {
     })
     expect(
       canonicalEventFromExternalEvent({
+        type: "message_delta",
+        delta: { type: "text", text: "hello" },
+      })
+    ).toEqual({ kind: "text-delta", delta: "hello" })
+    expect(
+      canonicalEventFromExternalEvent({
+        type: "message_delta",
+        delta: { type: "thinking", text: "considering" },
+      })
+    ).toEqual({ kind: "thinking-delta", delta: "considering" })
+    expect(
+      canonicalEventFromExternalEvent({
         type: "tool_call",
         name: "Bash",
         input: { c: 1 },
@@ -151,6 +163,19 @@ describe("canonicalEventFromExternalEvent", () => {
       kind: "diagnostic",
       runtime: "external",
       payload: { type: "vendor_specific", weird: true },
+    })
+  })
+
+  it("normalizes primitive and null external payloads into diagnostic records", () => {
+    expect(canonicalEventFromExternalEvent(null)).toEqual({
+      kind: "diagnostic",
+      runtime: "external",
+      payload: { type: "unknown", value: null },
+    })
+    expect(canonicalEventFromExternalEvent("raw event")).toEqual({
+      kind: "diagnostic",
+      runtime: "external",
+      payload: { type: "unknown", value: "raw event" },
     })
   })
 })

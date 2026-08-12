@@ -34,12 +34,13 @@ describe("BackupDetail", () => {
     const onSelectRun = jest.fn()
     const run = {
       unifiedId: "backup:run-1",
+      itemUnifiedId: "backup:settings",
       kind: "backup",
       itemName: "Backup",
       status: "succeeded",
-      startedAt: "2026-08-10T01:00:00.000Z",
-      origin: { nativeId: "run-1" },
-    } as UnifiedExecutionRun
+      startedAt: Date.parse("2026-08-10T01:00:00.000Z"),
+      origin: { tableName: "backupHistory", nativeId: "run-1" },
+    } satisfies UnifiedExecutionRun
     mockRuns.push(run)
 
     render(<BackupDetail onSelectRun={onSelectRun} />)

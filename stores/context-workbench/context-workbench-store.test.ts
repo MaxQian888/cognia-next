@@ -104,6 +104,8 @@ describe("context workbench layout store", () => {
           activatedPanelIds: [],
           pendingPanelIds: [],
           lastUsedAt: now - index,
+          splitPanelId: null,
+          splitRatio: 50,
         },
       ])
     )
@@ -132,6 +134,8 @@ describe("context workbench layout store", () => {
         activatedPanelIds: ["comments"],
         pendingPanelIds: [],
         lastUsedAt: Date.now(),
+        splitPanelId: null,
+        splitRatio: 50,
       },
     }
 
@@ -314,6 +318,8 @@ describe("context workbench layout store", () => {
             activatedPanelIds: ["comments"],
             pendingPanelIds: [],
             lastUsedAt: now,
+            splitPanelId: null,
+            splitRatio: 50,
           },
         },
         now

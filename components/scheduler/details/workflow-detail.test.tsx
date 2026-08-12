@@ -36,12 +36,13 @@ describe("WorkflowDetail", () => {
       .mockReturnValueOnce({ name: "Morning workflow" })
     const run = {
       unifiedId: "workflow:run-1",
+      itemUnifiedId: "workflow:workflow-1",
       kind: "workflow",
       itemName: "Morning workflow",
       status: "succeeded",
-      startedAt: "2026-08-10T01:00:00.000Z",
-      origin: { nativeId: "run-1" },
-    } as UnifiedExecutionRun
+      startedAt: Date.parse("2026-08-10T01:00:00.000Z"),
+      origin: { tableName: "workflowRuns", nativeId: "run-1" },
+    } satisfies UnifiedExecutionRun
     mockRuns.push(run)
     const onSelectRun = jest.fn()
 

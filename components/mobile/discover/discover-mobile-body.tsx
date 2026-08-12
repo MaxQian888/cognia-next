@@ -143,7 +143,7 @@ export function DiscoverMobileBody() {
   const [preferredTwinId, setPreferredTwinId] = useState<string | null>(null)
   const twins = useLiveQuery(() => observeTwins(), [], undefined) ?? []
   const selectedTwin =
-    twins.find((twin) => twin.id === preferredTwinId) ?? twins.find((twin) => !twin.archivedAt)
+    twins.find((twin) => twin.id === preferredTwinId) ?? twins.find((twin) => !twin.archived)
 
   const { favoriteKeys } = useDiscoverFavorites()
   const { layout } = useDiscoverLayout()

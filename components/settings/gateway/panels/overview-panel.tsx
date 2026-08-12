@@ -166,7 +166,9 @@ export function GatewayOverviewPanel({
                 aria-label={`${t("copy")} ${snippet.label}`}
                 title={t("copy")}
                 onCopy={() => toast.success(t("copied"))}
-                onError={(error) => toast.error(error.message)}
+                onError={(error) =>
+                  toast.error(error instanceof Error ? error.message : t("copyFailed"))
+                }
               />
             </Snippet>
           </div>

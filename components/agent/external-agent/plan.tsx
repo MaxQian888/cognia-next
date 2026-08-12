@@ -148,7 +148,7 @@ export function ExternalAgentPlan({
         <div className="min-w-0 flex-1">
           <PlanTitle>{t("executionPlan")}</PlanTitle>
           <PlanDescription className="mt-1">
-            {completedCount}/{entries.length} {t("stepsCompleted")}
+            {`${completedCount}/${entries.length} ${t("stepsCompleted")}`}
           </PlanDescription>
           <Progress value={progress} className="mt-2 h-1" />
         </div>

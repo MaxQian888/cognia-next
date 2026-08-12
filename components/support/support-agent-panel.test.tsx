@@ -15,7 +15,7 @@ jest.mock("./support-feedback-dialog", () => ({
     <div data-testid="support-feedback">{initialSummary}</div>
   ),
 }))
-const trackEvent = jest.fn(async () => true)
+const trackEvent = jest.fn(async (..._args: unknown[]) => true)
 jest.mock("@/lib/telemetry/events/track-event", () => ({
   trackEvent: (...args: unknown[]) => trackEvent(...args),
 }))

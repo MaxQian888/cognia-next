@@ -34,7 +34,7 @@ export interface GatewayConnectDeps {
   /** Override the gateway API key (from env/file). */
   gatewayApiKey?: string
   /** Injectable HTTP probe for testing. */
-  probe?: (url: string) => Promise<GatewayProbeResult>
+  probe?: (port: number) => Promise<GatewayProbeResult>
   /** Injectable proxy factory for testing. */
   startProxy?: typeof startProxyServer
 }

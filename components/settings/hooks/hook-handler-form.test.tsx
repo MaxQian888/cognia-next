@@ -352,6 +352,11 @@ describe("validateHandler", () => {
     expect(validateHandler({ type: "http", url: "https://example.com/hook" })).toBeNull()
   })
 
+  it("leaves HTTP handler validation to its runtime-specific boundary", () => {
+    expect(validateHandler({ type: "http", url: "" })).toBeNull()
+    expect(validateHandler({ type: "http", url: "not a url" })).toBeNull()
+  })
+
   it("rejects an empty URL", () => {
     expect(validateHandler({ type: "webhook", url: "" })).toBe("urlRequired")
     expect(validateHandler({ type: "webhook", url: "   " })).toBe("urlRequired")

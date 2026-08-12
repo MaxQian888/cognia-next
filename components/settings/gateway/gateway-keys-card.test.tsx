@@ -203,6 +203,20 @@ describe("GatewayKeysCard", () => {
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("copy denied"))
     })
 
+    it("uses the translated fallback for a non-Error clipboard rejection", async () => {
+      const writeText = jest.fn().mockRejectedValue({ reason: "denied" })
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+      render(<GatewayKeysCard />)
+      await screen.findByText("CLI")
+
+      fireEvent.change(screen.getByLabelText("keyName"), { target: { value: "Laptop" } })
+      fireEvent.click(screen.getByRole("button", { name: "createKey" }))
+      await screen.findByTestId("gateway-fresh-key")
+      fireEvent.click(screen.getByRole("button", { name: "copyKey" }))
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("copyFailed"))
+    })
+
     it("dismisses the banner", async () => {
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")

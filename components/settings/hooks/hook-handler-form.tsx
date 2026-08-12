@@ -278,6 +278,7 @@ export function validateHandler(
   if (h.type === "prompt" || h.type === "agent") {
     return h.prompt.trim() ? null : "promptRequired"
   }
+  if (h.type !== "webhook") return null
   const url = h.url.trim()
   if (url === "") return "urlRequired"
   try {

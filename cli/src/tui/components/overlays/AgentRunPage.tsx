@@ -104,7 +104,7 @@ function TimelineSegment({
     )
   }
   const badge = agentRowBadge(segment.status)
-  const timing = [segment.status]
+  const timing: string[] = [segment.status]
   if (runStartedAt !== undefined && segment.startedAt !== undefined) {
     timing.push(`+${formatElapsed(segment.startedAt - runStartedAt)}`)
   }

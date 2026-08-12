@@ -21,6 +21,7 @@ type SessionSourceLabel =
   | "anthropic"
   | "twinRag"
   | "twinStyle"
+  | "agentKnowledge"
   | "memory"
   | "footnote"
 
@@ -39,6 +40,7 @@ const HTTP_URL_RE = /^https?:\/\//i
 function sourceLabel(origin: SourcesPartItem["origin"]): SessionSourceLabel {
   if (origin === "twin-rag") return "twinRag"
   if (origin === "twin-style") return "twinStyle"
+  if (origin === "agent-knowledge-base") return "agentKnowledge"
   return origin
 }
 

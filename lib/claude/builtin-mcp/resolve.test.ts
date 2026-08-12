@@ -25,6 +25,11 @@ function row(partial: Partial<McpServer>): McpServer {
   }
 }
 
+/** Models rows persisted before MCP config values were narrowed to serializable strings. */
+function legacyConfig(value: Record<string, unknown>): McpServer["config"] {
+  return value as unknown as McpServer["config"]
+}
+
 describe("resolveBuiltinMcpConfig", () => {
   it("replaces the placeholder in command", () => {
     const out = resolveBuiltinMcpConfig(
@@ -57,7 +62,10 @@ describe("resolveBuiltinMcpConfig", () => {
 
   it("leaves non-string args entries untouched", () => {
     const args = [42, true, null, { foo: "bar" }]
-    const out = resolveBuiltinMcpConfig(row({ config: { command: "node", args } }), ctx)
+    const out = resolveBuiltinMcpConfig(
+      row({ config: legacyConfig({ command: "node", args }) }),
+      ctx
+    )
     // Identity: nothing to substitute, no env to inject — original returned.
     expect(out.config.args).toBe(args)
   })
@@ -65,14 +73,14 @@ describe("resolveBuiltinMcpConfig", () => {
   it("replaces the placeholder in env values and leaves non-string env values intact", () => {
     const out = resolveBuiltinMcpConfig(
       row({
-        config: {
+        config: legacyConfig({
           command: "node",
           env: {
             EXTRA: `${COGNIA_SIDECAR_DIR_TOKEN}/lib`,
             COUNT: 3,
             FLAG: true,
           },
-        },
+        }),
       }),
       ctx
     )

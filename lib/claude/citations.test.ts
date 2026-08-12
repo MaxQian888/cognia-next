@@ -101,12 +101,12 @@ describe("extractTwinRagSources", () => {
   it("maps retrieved chunks to source items with origin=twin-rag", () => {
     const chunks: TwinRetrievedChunk[] = [
       {
-        chunk: { vectorDocId: "v1", content: "chunk body 1", sourceId: "s1" },
+        chunk: { id: "v1", vectorDocId: "v1", contentRedacted: "chunk body 1", sourceId: "s1" },
         score: 0.87,
         sourceTitle: "doc-a.md",
       },
       {
-        chunk: { vectorDocId: "v2", content: "chunk body 2", sourceId: "s1" },
+        chunk: { id: "v2", vectorDocId: "v2", contentRedacted: "chunk body 2", sourceId: "s1" },
         score: 0.5,
       },
     ]

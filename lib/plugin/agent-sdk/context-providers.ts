@@ -113,7 +113,7 @@ export async function queryTwinMemory(
       deps: deps as unknown as Parameters<typeof applyTwinContext>[0]["deps"],
     })
     return result.retrievedChunks.map((c) => ({
-      content: c.chunk.content,
+      content: c.chunk.contentRedacted,
       score: c.score,
       ...(c.sourceTitle ? { sourceTitle: c.sourceTitle } : {}),
     }))
