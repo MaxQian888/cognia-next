@@ -1,9 +1,9 @@
 {
-  "latestVersion": 150,
-  "versionDeclarations": 148,
-  "schemaHistorySha256": "4ad64ce3093b7971b6569df58211c59b526b4c81e4d368e64e69e507c4b60b83",
-  "staticTableCount": 234,
-  "companionSyncTableCount": 21,
+  "latestVersion": 159,
+  "versionDeclarations": 157,
+  "schemaHistorySha256": "b286ee8950fdb078978829df4a74baf6408643cbad389805fc0f3800b731cea5",
+  "staticTableCount": 251,
+  "companionSyncTableCount": 22,
   "companionSyncTables": [
     "adapterInstances",
     "agentTaskAttempts",
@@ -11,6 +11,7 @@
     "agentTeamBoard",
     "characters",
     "conversationOverrides",
+    "executionRuns",
     "goals",
     "mcpServers",
     "memories",

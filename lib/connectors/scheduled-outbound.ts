@@ -23,7 +23,7 @@
  */
 
 import { registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getCharacter } from "@/lib/db/characters"

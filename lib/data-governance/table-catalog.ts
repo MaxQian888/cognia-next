@@ -40,7 +40,7 @@ export interface DataTableCatalogEntry {
   queryBudget: { hotReadMaxMs: number; pageSize: number }
 }
 
-/** Static Dexie stores declared by CogniaDB v157. Kept explicit so review and
+/** Static Dexie stores declared by the current CogniaDB schema. Kept explicit so review and
  * CI can detect both an ungoverned new table and a stale catalog entry. */
 export const CORE_TABLE_NAMES = [
   "a2uiApps",
@@ -224,7 +224,9 @@ export const CORE_TABLE_NAMES = [
   "radarReports",
   "remoteControlAudit",
   "remoteControlRunStatus",
+  "runLearningProposals",
   "runRecords",
+  "runRetrospectives",
   "sandboxConnections",
   "sessionFolders",
   "sessionPeerMessages",
@@ -403,9 +405,11 @@ const CACHE_TABLES = new Set<CoreTableName>([
   "agentTeamBoard",
   "chatSearchState",
   "chatSearchText",
+  "chatTranscriptIndexState",
   "hostSyncCursors",
   "knowledgeBaseChunks",
   "modelsDevCatalog",
+  "mcpCapabilityCache",
   "openVsxCache",
   "openrouterCatalog",
   "projectChunks",
@@ -429,6 +433,9 @@ const PROJECTION_TABLES = new Set<CoreTableName>([
   "agentCompatibilityRecords",
   "agentTeamBoard",
   "chatSearchText",
+  "chatTurnSummaries",
+  "mcpServerSummaries",
+  "messageMediaRefs",
   "profileStoreMeta",
   "providerCostDaily",
   "remoteControlRunStatus",
@@ -442,8 +449,11 @@ const QUICK_CLEANUP_TABLES = new Set<CoreTableName>([
   "a2uiSurfaces",
   "chatSearchState",
   "chatSearchText",
+  "chatTranscriptIndexState",
   "knowledgeBaseChunks",
   "modelsDevCatalog",
+  "mcpCapabilityCache",
+  "mcpServerSummaries",
   "openVsxCache",
   "openrouterCatalog",
   "projectChunks",
@@ -558,12 +568,19 @@ const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>
   settings: "settings",
   sessions: "session",
   messages: "chat",
+  messageMediaRefs: "chat",
+  chatTranscriptIndexState: "chat",
+  chatTurnSummaries: "chat",
   sessionState: "chat",
+  sessionPeerMessages: "session",
   characters: "character",
   skills: "skill",
   skillResources: "skill",
   teams: "team",
   mcpServers: "mcp",
+  mcpCapabilityCache: "mcp",
+  mcpServerSummaries: "mcp",
+  mcpSyncJobs: "mcp",
   promptPresets: "preset",
   canvasDocuments: "canvas",
   canvasVersions: "canvas",
@@ -614,6 +631,26 @@ function backupFor(
 }
 
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  connectorAudit: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "domain",
+    reason:
+      "Connector housekeeping applies 7-day diagnostic, 14-day operational, and 30-day security tiers.",
+  },
+  connectorHeartbeats: {
+    mode: "ttl",
+    days: 2,
+    enforcement: "domain",
+    reason: "Connector housekeeping prunes the dedicated heartbeat table after 48 hours.",
+  },
+  connectorInboundJobs: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "domain",
+    reason:
+      "Terminal inbound jobs are compacted immediately and retained for 7 or 30 days by outcome.",
+  },
   agentTraces: {
     mode: "ttl",
     days: 30,

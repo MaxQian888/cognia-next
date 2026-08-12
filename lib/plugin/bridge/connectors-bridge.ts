@@ -53,6 +53,7 @@ import {
   registerRunningAdapter,
   unregisterRunningAdapter,
 } from "@/lib/connectors/lifecycle"
+import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervisor"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -89,25 +90,38 @@ async function startPluginAdapter(
   if (getRunningAdapter(adapter.id)) {
     throw new Error(`Adapter id is already running: ${adapter.id}`)
   }
-  const abortController = new AbortController()
-  try {
-    await adapter.start(
-      buildAdapterContext({
-        adapterId: adapter.id,
-        signal: abortController.signal,
-        bus,
-      })
-    )
-  } catch (error) {
-    abortController.abort()
-    throw error
-  }
-  registerRunningAdapter(adapter.id, {
-    adapter,
-    abortController,
+  const supervisor = getConnectorRuntimeSupervisor()
+  supervisor.setDefinition({
+    id: adapter.id,
     owner: "plugin",
-    restart: async () => startPluginAdapter(adapter, bus),
+    desiredState: () => "enabled",
+    build: async () => adapter,
+    registerRust: async () => undefined,
+    unregisterRust: async () => undefined,
+    start: async (built, signal) => {
+      await built.start(buildAdapterContext({ adapterId: built.id, signal, bus }))
+    },
+    publish: (built) => {
+      bus.registerAdapter(built)
+      const active = supervisor.getRunningAdapter(built.id)
+      if (!active) throw new Error(`Supervisor did not fence plugin adapter: ${built.id}`)
+      registerRunningAdapter(built.id, {
+        adapter: built,
+        abortController: active.abortController,
+        owner: "plugin",
+        restart: () => supervisor.restartAdapter(built.id, "compatibility_restart"),
+      })
+    },
+    unpublish: (adapterId) => {
+      unregisterRunningAdapter(adapterId)
+      bus.unregisterAdapter(adapterId)
+    },
   })
+  await supervisor.reconcileAdapter(adapter.id, "plugin_enabled")
+  const observed = supervisor.getSnapshot(adapter.id)?.observedState
+  if (observed !== "running" && observed !== "starting" && observed !== "degraded") {
+    throw new Error(`Plugin adapter failed to start: ${adapter.id}`)
+  }
 }
 
 /**
@@ -241,11 +255,9 @@ export async function registerPluginAdapters(
       continue
     }
 
-    bus.registerAdapter(adapter)
     try {
       await startPluginAdapter(adapter, bus)
     } catch (err) {
-      bus.unregisterAdapter(adapter.id)
       console.error(
         `[connectors-bridge] plugin ${pluginId}: adapter "${adapter.id}" failed to start —`,
         err
@@ -271,10 +283,10 @@ export async function registerPluginAdapters(
 export function unregisterPluginAdapters(pluginId: string): void {
   const ids = pluginAdapterIds.get(pluginId)
   if (!ids) return
-  const bus = getBus()
   for (const id of ids) {
     unregisterRunningAdapter(id)
-    bus.unregisterAdapter(id)
+    getBus().unregisterAdapter(id)
+    void getConnectorRuntimeSupervisor().removeDefinition(id, "plugin_disabled")
   }
   pluginAdapterIds.delete(pluginId)
   unregisterPluginConnectorKindsByPlugin(pluginId)

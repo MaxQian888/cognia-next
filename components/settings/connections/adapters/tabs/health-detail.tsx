@@ -10,7 +10,7 @@
  * lifecycle registry.
  */
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import {
   ActivityIcon,
@@ -31,6 +31,8 @@ import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
 import { requeueAdapter } from "@/lib/connectors/lifecycle"
 import type { HealthCellState } from "@/lib/connectors/health/derive-history"
 import { healthReasonLabel } from "./health-reason-label"
+import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervisor"
+import { getExecutionBroker } from "@/lib/execution/broker"
 
 const STATE_TINT: Record<HealthCellState, string> = {
   running: "bg-emerald-500",
@@ -73,6 +75,25 @@ export function HealthDetail({ adapterId }: HealthDetailProps) {
   // during render (react-hooks/purity). 1s cadence matches a refill timer's
   // resolution without flooding renders.
   const [now, setNow] = useState<number>(() => Date.now())
+  const supervisor = getConnectorRuntimeSupervisor()
+  const subscribeRuntime = useCallback(
+    (notify: () => void) =>
+      supervisor.subscribe((snapshot) => {
+        if (snapshot.id === adapterId) notify()
+      }),
+    [adapterId, supervisor]
+  )
+  const readRuntime = useCallback(() => supervisor.getSnapshot(adapterId), [adapterId, supervisor])
+  const runtime = useSyncExternalStore(subscribeRuntime, readRuntime, () => undefined)
+  const broker = getExecutionBroker()
+  const executionSnapshot = useSyncExternalStore(
+    broker.subscribe,
+    broker.getSnapshot,
+    broker.getSnapshot
+  )
+  const connectorExecutions = executionSnapshot.filter((leg) => leg.kind === "connector")
+  const connectorRunning = connectorExecutions.filter((leg) => leg.state === "running").length
+  const connectorWaiting = connectorExecutions.filter((leg) => leg.state === "queued").length
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
@@ -150,11 +171,46 @@ export function HealthDetail({ adapterId }: HealthDetailProps) {
           </div>
 
           <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
+            {runtime && (
+              <>
+                <div className="flex items-center gap-1.5" data-testid="health-runtime-state">
+                  <span className="text-muted-foreground">{t("desiredObserved")}:</span>
+                  <span className="font-mono">
+                    {t(`desiredState.${runtime.desiredState}`)} /{" "}
+                    {t(`observedState.${runtime.observedState}`)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5" data-testid="health-runtime-generation">
+                  <span className="text-muted-foreground">{t("generation")}:</span>
+                  <span className="font-mono">{runtime.generation}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">{t("restartReason")}:</span>
+                  <span className="font-mono">{runtime.reasonCode}</span>
+                </div>
+                {runtime.nextRetryAt && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-muted-foreground">{t("retryEta")}:</span>
+                    <span className="font-mono">
+                      {t("retryInSeconds", {
+                        seconds: Math.max(0, Math.ceil((runtime.nextRetryAt - now) / 1000)),
+                      })}
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
             <div className="flex items-center gap-1.5">
               <CheckCircle2Icon className="h-3.5 w-3.5 text-emerald-500" />
               <span className="text-muted-foreground">{t("lastOk")}:</span>
               <span className="font-mono">
                 {lastOk ? new Date(lastOk.at).toLocaleTimeString() : t("noData")}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5" data-testid="health-connector-executions">
+              <span className="text-muted-foreground">{t("connectorExecutions")}:</span>
+              <span className="font-mono">
+                {t("executionCounts", { running: connectorRunning, waiting: connectorWaiting })}
               </span>
             </div>
             <div className="flex items-center gap-1.5">

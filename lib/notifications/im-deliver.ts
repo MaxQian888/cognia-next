@@ -20,7 +20,7 @@
  */
 
 import type { NotificationRecord } from "@/types/notifications"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { appendAudit } from "@/lib/connectors/audit"
 import { findSessionByConversationKey } from "@/lib/connectors/session-bindings"
 import { readForResolution } from "@/lib/db/conversation-overrides"

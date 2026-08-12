@@ -31,6 +31,7 @@ import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
 import {
   enqueueOutbound,
+  enqueueOutboundMany,
   markSending,
   markFailed,
   markDeadlettered,
@@ -44,6 +45,7 @@ import {
   ConversationLane,
   DEFAULT_OUTBOUND_TUNING,
   getAdapterRuntimeStateSnapshot,
+  MAX_ACTIVE_PLATFORM_SENDS,
   sanitizeOutboundTuning,
   startOutboundRunner,
 } from "./outbound-runner"
@@ -1083,6 +1085,58 @@ async function waitForJobs(
   }
   return jobs
 }
+
+describe("outbound-runner — structural scheduler budgets", () => {
+  it("bounds platform sends, due batches, and evicts idle lanes", async () => {
+    const adapterId = "tg-bounded"
+    await seedInstance(adapterId, {
+      outboundTuning: { rateCapacity: 100, rateRefillPerSec: 100 },
+    })
+    await enqueueOutboundMany(
+      Array.from({ length: 40 }, (_, index) => ({
+        adapterId,
+        conversationKey: `telegram:${adapterId}:chat-${index}`,
+        request: {
+          conversationRef: { platform: "telegram" as const, adapterId },
+          segments: [{ type: "text" as const, text: `message ${index}` }],
+          metadata: { idempotencyKey: `bounded-${index}` },
+        },
+        source: "workflow" as const,
+      }))
+    )
+    let wireActive = 0
+    let maxWireActive = 0
+    const adapter = makeAdapter(adapterId, async () => {
+      wireActive += 1
+      maxWireActive = Math.max(maxWireActive, wireActive)
+      await new Promise<void>((resolve) => setTimeout(resolve, 15))
+      wireActive -= 1
+      return { ok: true, platformMessageId: crypto.randomUUID() }
+    })
+    const snapshots: Array<{ activeSends: number; laneCount: number; dueBatchSize: number }> = []
+    const controller = new AbortController()
+    const promise = startOutboundRunner({
+      adapters: new Map([[adapterId, adapter]]),
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      jitter: () => 0,
+      onSchedulerState: (state) => snapshots.push(state),
+    })
+
+    const jobs = await waitForJobs((rows) => rows.every((row) => row.status === "sent"))
+    await new Promise<void>((resolve) => setTimeout(resolve, 20))
+    controller.abort()
+    await promise
+
+    expect(jobs).toHaveLength(40)
+    expect(maxWireActive).toBeLessThanOrEqual(MAX_ACTIVE_PLATFORM_SENDS)
+    expect(Math.max(...snapshots.map((state) => state.activeSends))).toBeLessThanOrEqual(
+      MAX_ACTIVE_PLATFORM_SENDS
+    )
+    expect(Math.max(...snapshots.map((state) => state.dueBatchSize))).toBeLessThanOrEqual(128)
+    expect(snapshots.at(-1)?.laneCount).toBe(0)
+  })
+})
 
 describe("sanitizeOutboundTuning", () => {
   it("returns the runner defaults for an absent tuning block", () => {

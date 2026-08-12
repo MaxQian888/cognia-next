@@ -147,6 +147,7 @@
     "version:sync:test": "node --test scripts/sync/version-sync.test.mjs",
     "test": "jest",
     "test:watch": "jest --watch",
+    "benchmark:connectors": "cross-env CONNECTOR_BENCHMARK=1 jest lib/connectors/outbound-runner.benchmark.test.ts --runInBand",
     "provider-diagnostics:live": "node scripts/provider-diagnostics-live.mjs",
     "test:changed": "jest --changedSince=origin/dev",
     "test:coverage": "node scripts/test/run-coverage.mjs",

@@ -47,6 +47,9 @@ const enqueueOutboundMock = jest.fn()
 jest.mock("@/lib/db/outbound-jobs", () => ({
   enqueueOutbound: (...a: unknown[]) => enqueueOutboundMock(...a),
 }))
+jest.mock("@/lib/connectors/delivery-gateway", () => ({
+  enqueueGoverned: (...a: unknown[]) => enqueueOutboundMock(...a),
+}))
 const appendAuditMock = jest.fn()
 jest.mock("@/lib/connectors/audit", () => ({
   appendAudit: (...a: unknown[]) => appendAuditMock(...a),

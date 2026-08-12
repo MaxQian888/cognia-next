@@ -23,10 +23,25 @@ jest.mock("@/lib/db/execution-runs", () => ({
   sweepExecutionRunEventRetention: (...args: unknown[]) => sweepExecutionRunEventRetention(...args),
 }))
 
+const sweepTerminalConnectorInboundJobs = jest.fn()
+jest.mock("@/lib/db/connector-inbound-jobs", () => ({
+  sweepTerminalConnectorInboundJobs: (...args: unknown[]) =>
+    sweepTerminalConnectorInboundJobs(...args),
+}))
+const sweepConnectorAuditRetention = jest.fn()
+jest.mock("@/lib/db/connector-audit", () => ({
+  sweepConnectorAuditRetention: (...args: unknown[]) => sweepConnectorAuditRetention(...args),
+}))
+const sweepConnectorHeartbeats = jest.fn()
+jest.mock("@/lib/connectors/health/heartbeat", () => ({
+  sweepConnectorHeartbeats: (...args: unknown[]) => sweepConnectorHeartbeats(...args),
+}))
+
 import {
   CALLBACK_BINDING_CLEANUP_TASK_TYPE,
   CONNECTOR_HOUSEKEEPING_EVENT,
   EXECUTION_RUN_RETENTION_TASK_TYPE,
+  CONNECTOR_RETENTION_TASK_TYPE,
   HOUSEKEEPING_CLOCK_TASK_TYPE,
   OUTBOUND_RETENTION_TASK_TYPE,
   installConnectorHousekeepingSchedule,
@@ -44,9 +59,12 @@ beforeEach(() => {
   })
   sweepTerminalOutboundRows.mockResolvedValue(4)
   sweepExecutionRunEventRetention.mockResolvedValue(5)
+  sweepTerminalConnectorInboundJobs.mockResolvedValue(6)
+  sweepConnectorAuditRetention.mockResolvedValue(7)
+  sweepConnectorHeartbeats.mockResolvedValue(8)
 })
 
-it("installs one durable clock plus three event-triggered housekeeping tasks", async () => {
+it("installs one durable clock plus bounded event-triggered housekeeping tasks", async () => {
   await installConnectorHousekeepingSchedule()
 
   expect(registerTaskExecutor.mock.calls.map(([type]) => type)).toEqual([
@@ -54,8 +72,9 @@ it("installs one durable clock plus three event-triggered housekeeping tasks", a
     OUTBOUND_RETENTION_TASK_TYPE,
     CALLBACK_BINDING_CLEANUP_TASK_TYPE,
     EXECUTION_RUN_RETENTION_TASK_TYPE,
+    CONNECTOR_RETENTION_TASK_TYPE,
   ])
-  expect(createTask).toHaveBeenCalledTimes(4)
+  expect(createTask).toHaveBeenCalledTimes(5)
   expect(createTask).toHaveBeenCalledWith(
     expect.objectContaining({
       type: HOUSEKEEPING_CLOCK_TASK_TYPE,
@@ -66,6 +85,7 @@ it("installs one durable clock plus three event-triggered housekeeping tasks", a
     OUTBOUND_RETENTION_TASK_TYPE,
     CALLBACK_BINDING_CLEANUP_TASK_TYPE,
     EXECUTION_RUN_RETENTION_TASK_TYPE,
+    CONNECTOR_RETENTION_TASK_TYPE,
   ]) {
     expect(createTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -87,6 +107,7 @@ it("does not duplicate durable tasks that already exist", async () => {
     { type: OUTBOUND_RETENTION_TASK_TYPE },
     { type: CALLBACK_BINDING_CLEANUP_TASK_TYPE },
     { type: EXECUTION_RUN_RETENTION_TASK_TYPE },
+    { type: CONNECTOR_RETENTION_TASK_TYPE },
   ])
 
   await installConnectorHousekeepingSchedule()
@@ -122,4 +143,10 @@ it("registers executors that emit the daily event and run each sweep", async () 
   await expect(
     executorFor(EXECUTION_RUN_RETENTION_TASK_TYPE)(task, execution, signal)
   ).resolves.toEqual({ success: true, output: { deleted: 5 } })
+  await expect(
+    executorFor(CONNECTOR_RETENTION_TASK_TYPE)(task, execution, signal)
+  ).resolves.toEqual({
+    success: true,
+    output: { inboundDeleted: 6, auditDeleted: 7, heartbeatDeleted: 8 },
+  })
 })

@@ -12,7 +12,12 @@
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
-import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_RETENTION_MS, recordHeartbeatNow } from "./heartbeat"
+import {
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_RETENTION_MS,
+  recordHeartbeatNow,
+  sweepConnectorHeartbeats,
+} from "./heartbeat"
 
 const mockGetAdapterRuntimeStateSnapshot = jest.fn()
 
@@ -112,6 +117,22 @@ describe("recordHeartbeatNow", () => {
         source: "ai-run",
       },
       {
+        id: "ob-failed",
+        adapterId: "lark-pend",
+        conversationKey: "lark:lark-pend:2",
+        request: {
+          conversationRef: { platform: "lark", adapterId: "lark-pend", chatId: "2" },
+          segments: [{ type: "text", text: "retry" }],
+          metadata: { idempotencyKey: "k-failed" },
+        },
+        status: "failed",
+        attempts: 1,
+        createdAt: now,
+        nextAttemptAt: now,
+        idempotencyKey: "k-failed",
+        source: "ai-run",
+      },
+      {
         id: "ob-sent",
         adapterId: "lark-pend",
         conversationKey: "lark:lark-pend:1",
@@ -133,7 +154,7 @@ describe("recordHeartbeatNow", () => {
     await recordHeartbeatNow(adapter, { now: () => now })
 
     const row = await getDb().connectorHeartbeats.where("adapterId").equals("lark-pend").first()
-    expect(row?.fields?.pendingOutboundCount).toBe(2)
+    expect(row?.fields?.pendingOutboundCount).toBe(3)
   })
 
   it("degrades to {state: 'degraded', reason} when adapter.health() throws", async () => {
@@ -197,7 +218,7 @@ describe("recordHeartbeatNow", () => {
     })
   })
 
-  it("prunes older heartbeats past retentionMs without touching connectorAudit", async () => {
+  it("keeps heartbeat writes cheap and prunes old rows from housekeeping", async () => {
     const now = 100_000_000
     // Ancient heartbeat lives in the dedicated table and should be pruned.
     await getDb().connectorHeartbeats.put({
@@ -217,7 +238,11 @@ describe("recordHeartbeatNow", () => {
     })
 
     const adapter = makeAdapter("lark-prune")
-    await recordHeartbeatNow(adapter, { now: () => now, retentionMs: 60_000 })
+    await recordHeartbeatNow(adapter, { now: () => now })
+    expect(await getDb().connectorHeartbeats.get("hb-ancient")).toBeDefined()
+    await expect(
+      sweepConnectorHeartbeats({ now, retentionMs: 60_000, batchLimit: 10 })
+    ).resolves.toBe(1)
 
     const heartbeats = await getDb()
       .connectorHeartbeats.where("adapterId")

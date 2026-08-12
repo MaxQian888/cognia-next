@@ -267,7 +267,9 @@ describe("dispatchCommand: connector_approve_draft", () => {
       status: "pending",
       createdAt: Date.now(),
     } as never)
-    const add = jest.spyOn(db.outboundQueue, "add").mockRejectedValueOnce(new Error("disk full"))
+    const add = jest
+      .spyOn(db.outboundQueue, "bulkAdd")
+      .mockRejectedValueOnce(new Error("disk full"))
 
     await expect(
       dispatchCommand("connector_approve_draft", { draftId: "d-enqueue-fails" })

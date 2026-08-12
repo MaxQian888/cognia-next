@@ -53,6 +53,7 @@ export type ScheduledTaskType =
   // growing TaskTriggerType with subsystem-specific timer variants.
   | "connection:housekeeping:clock"
   | "connection:housekeeping:outbound-retention"
+  | "connection:housekeeping:connector-retention"
   | "connection:housekeeping:callback-bindings"
   | "connection:housekeeping:execution-runs"
   // Usage-presence refresh (token-usage status on IM platforms) — registered

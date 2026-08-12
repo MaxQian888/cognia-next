@@ -9,6 +9,7 @@
 import { installConnectorRuntime } from "./install-connector-runtime"
 import { isTauri } from "@/lib/tauri"
 import { hasTaskExecutor, unregisterTaskExecutor } from "@/lib/scheduler"
+import { __resetConnectorRuntimeSupervisorForTesting } from "@/lib/connectors/runtime-supervisor"
 import type { NormalizedInboundEvent } from "@/types/connectors"
 
 // ── Mock isTauri ─────────────────────────────────────────────────────────────
@@ -151,19 +152,7 @@ const mockRegisterRunning = jest.fn((id: string, entry: unknown) => {
   lifecycleRegistry.set(id, entry as MockLifecycleEntry)
 })
 const mockUnregisterRunning = jest.fn((id: string) => {
-  const entry = lifecycleRegistry.get(id)
   lifecycleRegistry.delete(id)
-  if (!entry) return
-  entry.abortController.abort()
-  // Same fire-and-forget shape as the production implementation,
-  // including the error log so the "swallows adapter.stop()" test passes.
-  void entry.adapter.stop().catch((err: unknown) => {
-    console.error(
-      `[lifecycle] adapter ${id} failed to stop: ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    )
-  })
 })
 const mockListRunning = jest.fn(() => Array.from(lifecycleRegistry.values()))
 const suspendedLifecycleRegistry = new Map<string, MockLifecycleEntry>()
@@ -233,7 +222,7 @@ const makeFakeAdapter = (id: string) => ({
   // `jest.fn()` returns undefined which trips the catch chain.
   start: jest.fn().mockResolvedValue(undefined),
   stop: jest.fn().mockResolvedValue(undefined),
-  health: jest.fn(),
+  health: jest.fn().mockReturnValue({ state: "running" }),
   send: jest.fn(),
   a2uiCapability: jest.fn().mockReturnValue({}),
 })
@@ -260,6 +249,7 @@ const install = (...args: Parameters<typeof installConnectorRuntime>) => {
 }
 
 beforeEach(() => {
+  __resetConnectorRuntimeSupervisorForTesting()
   jest.clearAllMocks()
   mockIsPiiSafeSendContent.mockReturnValue(true)
   mockSteerSession.mockResolvedValue({ accepted: true })
@@ -713,7 +703,7 @@ describe("installConnectorRuntime", () => {
     expect(mockResumeSuspendedByOwner).toHaveBeenCalledWith("plugin")
   })
 
-  it("does not call adapter.stop() for adapters whose start() failed", async () => {
+  it("stops a partially started adapter when start() fails", async () => {
     mockedIsTauri.mockReturnValue(true)
     const row = makeTelegramRow("cai_stop_skip")
     const adapter = makeFakeAdapter(row.id)
@@ -729,10 +719,10 @@ describe("installConnectorRuntime", () => {
     })
 
     dispose()
-    // adapter.stop() must NOT fire — start failed, so the adapter never
-    // entered the startedAdapters list.
+    // A failed start may already have opened transport resources. The
+    // supervisor always cleans the built instance before publishing failure.
     await new Promise((r) => setTimeout(r, 30))
-    expect(adapter.stop).not.toHaveBeenCalled()
+    expect(adapter.stop).toHaveBeenCalledTimes(1)
     errSpy.mockRestore()
   })
 
@@ -746,7 +736,6 @@ describe("installConnectorRuntime", () => {
     mockBuildAdapterFromRow.mockResolvedValue(adapter)
     mockListAdapters.mockReturnValue([adapter])
 
-    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
     const dispose = install()
     await waitFor(() => {
       expect(adapter.start).toHaveBeenCalledTimes(1)
@@ -754,11 +743,10 @@ describe("installConnectorRuntime", () => {
 
     expect(() => dispose()).not.toThrow()
     await waitFor(() => {
-      expect(errSpy).toHaveBeenCalledWith(
-        expect.stringContaining(`adapter ${row.id} failed to stop`)
+      expect(mockAppendAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ adapterId: row.id, kind: "adapter.error", reason: "stop_failed" })
       )
     })
-    errSpy.mockRestore()
   })
 
   // v51 — consolidated heartbeat sweep + lifecycle registry wiring.
@@ -1021,7 +1009,7 @@ describe("installConnectorRuntime", () => {
     await waitFor(() => expect(mockUnregisterAdapterCmd).toHaveBeenCalledWith(row.id))
   })
 
-  it("keeps booting when webhook registration throws (best-effort)", async () => {
+  it("fails closed when webhook registration throws", async () => {
     mockedIsTauri.mockReturnValue(true)
     mockRegisterAdapterCmd.mockRejectedValueOnce(new Error("register bombed"))
     const row = makeWebhookRow("cai_wh_register_fail")
@@ -1029,12 +1017,18 @@ describe("installConnectorRuntime", () => {
     mockListEnabled.mockResolvedValue([row])
     mockBuildAdapterFromRow.mockResolvedValue(adapter)
     mockListAdapters.mockReturnValue([adapter])
-    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
     install()
-    // A register failure must not block the transport start or the server boot.
-    await waitFor(() => expect(adapter.start).toHaveBeenCalledTimes(1))
-    expect(mockStartServer).toHaveBeenCalledTimes(1)
-    errSpy.mockRestore()
+    await waitFor(() =>
+      expect(mockAppendAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          adapterId: row.id,
+          kind: "adapter.error",
+          reason: "start_failed",
+        })
+      )
+    )
+    expect(adapter.start).not.toHaveBeenCalled()
+    expect(mockStartServer).not.toHaveBeenCalled()
   })
 
   // Installer-only options: skipHostGate / rowFilter / log.

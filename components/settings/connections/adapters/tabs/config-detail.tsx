@@ -172,7 +172,7 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * bus path the runner uses. Lives here (not in the create dialog)
        * because the adapter must be registered with the running bus —
        * which only happens after the row is enabled. Reuses
-       * `getBus().sendOutbound` for full-pipeline coverage. */}
+       * the governed delivery gateway for durable end-to-end coverage. */}
       <SendTestMessageSection adapterId={row.id} platform={row.type} />
 
       {/* Edit-credentials dialogs — only the dialog matching the row's

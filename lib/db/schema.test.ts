@@ -913,6 +913,74 @@ describe("getDb", () => {
   )
 
   fullSchemaIt(
+    "v159 backfills stable outbound order and connector retention indexes",
+    async () => {
+      const name = `cognia-connector-queue-v159-${Date.now()}`
+      const legacy = new Dexie(name)
+      legacy.version(158).stores({
+        outboundQueue:
+          "&id, conversationKey, [conversationKey+createdAt], status, nextAttemptAt, idempotencyKey, [adapterId+status], createdAt, [status+nextAttemptAt], projectId, [projectId+status]",
+        connectorInboundJobs:
+          "&id, &[adapterId+platformMessageId], [conversationKey+status+receivedAt], adapterId, conversationKey, status, leaseExpiresAt, executionRunId, receivedAt",
+      })
+      await legacy.open()
+      const base = {
+        adapterId: "adapter-1",
+        conversationKey: "slack:adapter-1:C1",
+        request: {
+          conversationRef: { platform: "slack", adapterId: "adapter-1" },
+          segments: [{ type: "text", text: "hello" }],
+          metadata: { idempotencyKey: "legacy" },
+        },
+        status: "pending",
+        attempts: 0,
+        createdAt: 10,
+        nextAttemptAt: 10,
+        source: "ai-run",
+      }
+      await legacy.table("outboundQueue").bulkPut([
+        { ...base, id: "job-b", idempotencyKey: "b" },
+        { ...base, id: "job-a", idempotencyKey: "a" },
+        {
+          ...base,
+          id: "job-c",
+          conversationKey: "slack:adapter-1:C2",
+          idempotencyKey: "c",
+          status: "sending",
+        },
+      ])
+      legacy.close()
+
+      const upgraded = new CogniaDB(name)
+      await upgraded.open()
+
+      expect(upgraded.verno).toBeGreaterThanOrEqual(159)
+      expect(upgraded.outboundQueue.schema.indexes.map((index) => index.name)).toEqual(
+        expect.arrayContaining(["[conversationKey+orderSeq]", "[status+claimedAt]"])
+      )
+      expect(upgraded.connectorInboundJobs.schema.indexes.map((index) => index.name)).toContain(
+        "[status+updatedAt]"
+      )
+      expect(
+        (
+          await upgraded.outboundQueue
+            .where("[conversationKey+orderSeq]")
+            .between(["slack:adapter-1:C1", 0], ["slack:adapter-1:C1", Infinity])
+            .toArray()
+        ).map((row) => [row.id, row.orderSeq])
+      ).toEqual([
+        ["job-a", 1],
+        ["job-b", 2],
+      ])
+      expect((await upgraded.outboundQueue.get("job-c"))?.claimedAt).toBe(10)
+
+      upgraded.close()
+      await Dexie.delete(name)
+    },
+    30_000
+  )
+
+  fullSchemaIt(
     "v143 splits sandbox connections into provider/driver, keeping legacy mirrors",
     async () => {
       const name = `cognia-v143-sandbox-${Date.now()}`

@@ -17,7 +17,7 @@
 import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { getDb } from "@/lib/db/schema"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { parseConversationKey } from "@/types/connectors/event"
 import { startWorkflowFromIM } from "@/lib/workflow/runtime/start-from-im"
 import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"

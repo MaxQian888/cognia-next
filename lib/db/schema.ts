@@ -3820,6 +3820,41 @@ export class CogniaDB extends Dexie {
         if (proposals.length > 0) await tx.table("runLearningProposals").bulkPut(proposals)
       })
 
+    // v159 — bounded connector queue scheduling and terminal inbound cleanup.
+    // `orderSeq` removes same-millisecond FIFO ambiguity; `claimedAt` makes
+    // stale-send recovery an indexed bounded range scan; inbound `updatedAt`
+    // supports the tiered 7/30-day terminal retention sweep.
+    this.version(159)
+      .stores({
+        outboundQueue:
+          "&id, conversationKey, [conversationKey+createdAt], [conversationKey+orderSeq], status, nextAttemptAt, idempotencyKey, [adapterId+status], createdAt, [status+nextAttemptAt], [status+claimedAt], projectId, [projectId+status]",
+        connectorInboundJobs:
+          "&id, &[adapterId+platformMessageId], [conversationKey+status+receivedAt], adapterId, conversationKey, status, leaseExpiresAt, executionRunId, receivedAt, [status+updatedAt]",
+      })
+      .upgrade(async (tx) => {
+        const outbound = tx.table<OutboundJobRow, string>("outboundQueue")
+        const rows = await outbound.toArray()
+        rows.sort((left, right) =>
+          left.conversationKey === right.conversationKey
+            ? left.createdAt - right.createdAt || left.id.localeCompare(right.id)
+            : left.conversationKey.localeCompare(right.conversationKey)
+        )
+        let conversationKey = ""
+        let sequence = 0
+        for (const row of rows) {
+          if (row.conversationKey !== conversationKey) {
+            conversationKey = row.conversationKey
+            sequence = 0
+          }
+          sequence += 1
+          row.orderSeq = sequence
+          if (row.status === "sending" && row.claimedAt === undefined) {
+            row.claimedAt = row.createdAt
+          }
+        }
+        if (rows.length > 0) await outbound.bulkPut(rows)
+      })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {

@@ -21,7 +21,7 @@
 import { registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { getBus } from "@/lib/connectors/bus"
 import { appendAudit } from "@/lib/connectors/audit"
 import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"

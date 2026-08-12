@@ -10,6 +10,8 @@ function renderWithProvider(ui: React.ReactElement) {
 }
 
 const mockUseAdapterHealth = jest.fn()
+let mockRuntimeSnapshot: Record<string, unknown> | undefined
+let mockBrokerSnapshot: Array<Record<string, unknown>> = []
 
 jest.mock("@/hooks/connectors/use-adapter-health", () => ({
   useAdapterHealth: (...args: unknown[]) => mockUseAdapterHealth(...args),
@@ -20,6 +22,20 @@ jest.mock("@/lib/connectors/lifecycle", () => ({
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+
+jest.mock("@/lib/connectors/runtime-supervisor", () => ({
+  getConnectorRuntimeSupervisor: () => ({
+    subscribe: () => () => undefined,
+    getSnapshot: () => mockRuntimeSnapshot,
+  }),
+}))
+
+jest.mock("@/lib/execution/broker", () => ({
+  getExecutionBroker: () => ({
+    subscribe: () => () => undefined,
+    getSnapshot: () => mockBrokerSnapshot,
+  }),
+}))
 
 import { HealthDetail } from "./health-detail"
 
@@ -43,6 +59,8 @@ function makeResult(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   mockUseAdapterHealth.mockReset()
+  mockRuntimeSnapshot = undefined
+  mockBrokerSnapshot = []
 })
 
 describe("HealthDetail — base render", () => {
@@ -74,6 +92,29 @@ describe("HealthDetail — base render", () => {
     )
     renderWithProvider(<HealthDetail adapterId="tg-1" />)
     expect(screen.getByText("socket hang up")).toBeInTheDocument()
+  })
+
+  it("shows supervisor truth and connector broker occupancy", () => {
+    mockUseAdapterHealth.mockReturnValue(makeResult())
+    mockRuntimeSnapshot = {
+      id: "tg-1",
+      desiredState: "enabled",
+      observedState: "degraded",
+      generation: 7,
+      reasonCode: "credentials_rotated",
+      changedAt: Date.now(),
+    }
+    mockBrokerSnapshot = [
+      { id: "one", kind: "connector", state: "running" },
+      { id: "two", kind: "connector", state: "queued" },
+      { id: "three", kind: "chat", state: "running" },
+    ]
+
+    renderWithProvider(<HealthDetail adapterId="tg-1" />)
+
+    expect(screen.getByTestId("health-runtime-state")).toHaveTextContent(/enabled.*degraded/i)
+    expect(screen.getByTestId("health-runtime-generation")).toHaveTextContent("7")
+    expect(screen.getByTestId("health-connector-executions")).toHaveTextContent(/1.*1/)
   })
 })
 
