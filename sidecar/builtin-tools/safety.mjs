@@ -12,6 +12,7 @@
 
 import path from "node:path"
 import fs from "node:fs"
+import { parse as parseBash } from "unbash"
 
 // ---- Path traversal -------------------------------------------------------
 
@@ -350,6 +351,111 @@ export const DANGEROUS_PATTERNS = [
   /`[^`]*(rm|rmdir|del|format|shutdown|reboot)[^`]*`/i,
   /\$\([^)]*(rm|rmdir|del|format|shutdown|reboot)[^)]*\)/i,
 ]
+
+const DESTRUCTIVE_SHELL_COMMANDS = new Set([
+  "rm",
+  "rmdir",
+  "del",
+  "erase",
+  "format",
+  "shutdown",
+  "reboot",
+  "halt",
+  "poweroff",
+])
+
+const SAFE_DEVICE_REDIRECT = /^\/dev\/(?:null|stdout|stderr|fd\/\d+)$/
+const WRITE_REDIRECTS = new Set([">", ">>", ">|", "<>", "&>", "&>>"])
+
+/**
+ * Parse a Bash command and return the first structurally dangerous fragment.
+ * Unlike the legacy regex scan this distinguishes real redirects / nested
+ * commands from identical text inside a quoted argument. `unbash` is a parser,
+ * not a policy engine; the allow/block decisions remain explicit here.
+ *
+ * @param {string} source
+ * @returns {{ fragment: string, kind: "command" | "deviceRedirect" } | null}
+ */
+export function findDangerousShellFragment(source) {
+  if (typeof source !== "string" || source.length === 0) return null
+
+  let script
+  try {
+    script = parseBash(source)
+  } catch {
+    // A parser failure must not weaken the existing defence-in-depth rule.
+    for (const pattern of DANGEROUS_PATTERNS) {
+      const match = source.match(pattern)
+      if (match) return { fragment: match[0], kind: "command" }
+    }
+    return null
+  }
+
+  /** @type {{ fragment: string, kind: "command" | "deviceRedirect" } | null} */
+  let found = null
+  const seen = new WeakSet()
+
+  /** @param {unknown} value */
+  const visit = (value) => {
+    if (found || value == null || typeof value !== "object") return
+    if (seen.has(value)) return
+    seen.add(value)
+
+    if (value.type === "Command") {
+      const commandName = value.name?.value
+      if (typeof commandName === "string" && DESTRUCTIVE_SHELL_COMMANDS.has(commandName)) {
+        const nameStart = value.name.pos ?? value.pos ?? 0
+        const boundary = source.slice(0, nameStart).match(/(?:&&|\|\||[;|])\s*$/)
+        found = {
+          fragment: source.slice(
+            boundary ? nameStart - boundary[0].length : nameStart,
+            value.name.end ?? value.end
+          ),
+          kind: "command",
+        }
+        return
+      }
+    }
+
+    if (WRITE_REDIRECTS.has(value.operator) && value.target) {
+      const target = value.target.value
+      if (
+        typeof target === "string" &&
+        target.startsWith("/dev/") &&
+        !SAFE_DEVICE_REDIRECT.test(target)
+      ) {
+        found = {
+          fragment: source.slice(value.pos ?? value.target.pos ?? 0, value.end ?? value.target.end),
+          kind: "deviceRedirect",
+        }
+        return
+      }
+    }
+
+    for (const child of Object.values(value)) visit(child)
+    // Word expansion parts are deliberately lazy/non-enumerable in unbash, so
+    // read them explicitly to reach $(...), backticks, and nested redirects.
+    try {
+      if (Array.isArray(value.parts)) visit(value.parts)
+      if (Array.isArray(value.indexParts)) visit(value.indexParts)
+    } catch {
+      // Malformed lazy expansion: the root/partial AST is still useful.
+    }
+  }
+
+  visit(script)
+  if (found) return found
+
+  // Tolerant parsing can return a partial AST. Preserve the old fail-closed
+  // scan only for malformed input; valid quoted text never reaches this path.
+  if (Array.isArray(script.errors) && script.errors.length > 0) {
+    for (const pattern of DANGEROUS_PATTERNS) {
+      const match = source.match(pattern)
+      if (match) return { fragment: match[0], kind: "command" }
+    }
+  }
+  return null
+}
 
 /**
  * Validate that a command name + argv is safe to execute under the

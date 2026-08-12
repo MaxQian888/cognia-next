@@ -84,6 +84,29 @@ test("bash hard-rejects destructive chaining patterns", async () => {
   assert.match(textOf(res), /&& rm/)
 })
 
+test("bash allows safe device sinks and quoted shell-looking text", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  for (const command of [
+    "printf safe >/dev/null && printf ok",
+    "printf safe 2>/dev/null",
+    "printf safe &>/dev/null",
+    "printf safe > /dev/stderr",
+    "printf '%s' '>/dev/sda'",
+    'printf "%s" "&& rm -rf /"',
+  ]) {
+    const res = await tool.handler({ command }, {})
+    assert.equal(res.isError, undefined, `${command}: ${textOf(res)}`)
+  }
+})
+
+test("bash rejects actual writes to device nodes but not the same text in an argument", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const res = await tool.handler({ command: "printf unsafe >/dev/sda" }, {})
+  assert.equal(res.isError, true)
+  assert.match(textOf(res), /device redirect/)
+  assert.match(textOf(res), />\/dev\/sda/)
+})
+
 test("bash redirects an interactive command to a PTY and never spawns it", async () => {
   // The interactive guard returns before any spawn: assert the PTY-redirect
   // message (only the early guard can produce it) and that no spill file is

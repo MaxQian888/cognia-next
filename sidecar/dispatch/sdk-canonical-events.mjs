@@ -40,7 +40,15 @@ import { classifyStructuredOutcome } from "@cognia/agent-config-types/claude-age
  * @param {{ expectStructuredOutput?: boolean }} [opts]
  */
 export function createSdkMappingState(opts = {}) {
-  return { sawStreamEvents: false, expectStructuredOutput: opts.expectStructuredOutput === true }
+  return {
+    // Backward-compatible latch for content deltas that arrived without a
+    // message_start/id. Scoped streams use `streamedMessageIds` below so one
+    // streamed assistant round cannot mute every later round in the attempt.
+    sawStreamEvents: false,
+    activeStreamMessageId: undefined,
+    streamedMessageIds: new Set(),
+    expectStructuredOutput: opts.expectStructuredOutput === true,
+  }
 }
 
 const asString = (v) => (typeof v === "string" ? v : undefined)
@@ -63,6 +71,10 @@ function contentBlocks(message) {
 /** Assistant turn: tool calls always, text only when nothing streamed it. */
 function fromAssistant(evt, state) {
   const events = []
+  const messageId = asString(evt.message?.id)
+  const streamedThisMessage = messageId
+    ? state.streamedMessageIds instanceof Set && state.streamedMessageIds.has(messageId)
+    : state.sawStreamEvents
   for (const block of contentBlocks(evt.message)) {
     if (block?.type === "tool_use") {
       events.push(
@@ -73,9 +85,9 @@ function fromAssistant(evt, state) {
           toolCallId: asString(block.id),
         })
       )
-    } else if (!state.sawStreamEvents && block?.type === "text" && block.text) {
+    } else if (!streamedThisMessage && block?.type === "text" && block.text) {
       events.push({ kind: "text-delta", delta: String(block.text) })
-    } else if (!state.sawStreamEvents && block?.type === "thinking" && block.thinking) {
+    } else if (!streamedThisMessage && block?.type === "thinking" && block.thinking) {
       events.push({ kind: "thinking-delta", delta: String(block.thinking) })
     }
   }
@@ -124,14 +136,27 @@ function fromUser(evt) {
   return events
 }
 
-/** Token-level partials. Also latches the flag that mutes assistant text. */
+/** Token-level partials. Only actual content deltas mute the matching snapshot. */
 function fromStreamEvent(evt, state) {
-  state.sawStreamEvents = true
+  const streamEvent = evt.event
+  if (streamEvent?.type === "message_start") {
+    state.activeStreamMessageId = asString(streamEvent.message?.id)
+  }
   const delta = evt.event?.delta
   if (delta?.type === "text_delta" && delta.text) {
+    if (state.activeStreamMessageId && state.streamedMessageIds instanceof Set) {
+      state.streamedMessageIds.add(state.activeStreamMessageId)
+    } else {
+      state.sawStreamEvents = true
+    }
     return [{ kind: "text-delta", delta: String(delta.text) }]
   }
   if (delta?.type === "thinking_delta" && delta.thinking) {
+    if (state.activeStreamMessageId && state.streamedMessageIds instanceof Set) {
+      state.streamedMessageIds.add(state.activeStreamMessageId)
+    } else {
+      state.sawStreamEvents = true
+    }
     return [{ kind: "thinking-delta", delta: String(delta.thinking) }]
   }
   const start = evt.event?.content_block
@@ -513,7 +538,7 @@ function fromSystem(evt) {
  * Map one raw `SDKMessage` to zero or more canonical agent events.
  *
  * @param {any} evt
- * @param {{ sawStreamEvents: boolean }} state per-attempt, from {@link createSdkMappingState}
+ * @param {{ sawStreamEvents: boolean, activeStreamMessageId?: string, streamedMessageIds?: Set<string> }} state per-attempt, from {@link createSdkMappingState}
  * @returns {any[]}
  */
 export function canonicalEventsFromSdkMessage(evt, state = createSdkMappingState()) {

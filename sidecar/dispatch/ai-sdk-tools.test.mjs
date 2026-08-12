@@ -87,6 +87,39 @@ test("buildAiSdkTools wires plugin tools that round-trip through the renderer", 
   assert.equal(result, "plugin says hi")
 })
 
+test("AI SDK plugin tools honor the manifest timeout instead of the 120s default", async () => {
+  const pendingPluginToolCalls = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      pluginTools: [
+        {
+          name: "short_deadline",
+          description: "test timeout propagation",
+          jsonSchema: { type: "object", properties: {} },
+          pluginId: "test",
+          timeoutMs: 5,
+        },
+      ],
+    },
+    emit: () => {},
+    sessionId: "s-timeout",
+    pendingPluginToolCalls,
+  })
+
+  const outcome = await Promise.race([
+    tools.short_deadline.execute({}).then(
+      (value) => ({ value }),
+      (error) => ({ error })
+    ),
+    new Promise((resolve) => setTimeout(() => resolve({ stalled: true }), 40)),
+  ])
+
+  assert.equal("stalled" in outcome, false, "manifest timeout was ignored")
+  assert.match(String(outcome.error), /timed out after 5ms/)
+  assert.equal(pendingPluginToolCalls.size, 0)
+})
+
 test("plugin tool image results pass through as content blocks the model can see", async () => {
   const pendingPluginToolCalls = new Map()
   const tools = buildAiSdkTools({
@@ -200,7 +233,7 @@ test("plugin tool resource-only results pass through with embedded text and blob
   })
 })
 
-test("plugin rich results are blocked before model output when they contain PII", async () => {
+test("plugin rich results are redacted before model output when they contain PII", async () => {
   const pendingPluginToolCalls = new Map()
   const tools = buildAiSdkTools({
     sendOptions: {
@@ -231,7 +264,46 @@ test("plugin rich results are blocked before model output when they contain PII"
     },
   })
 
-  await assert.rejects(execPromise, /PII redaction gate/)
+  const result = await execPromise
+  assert.equal(result.content[0].resource.text, "Contact <EMAIL_001>")
+  assert.doesNotMatch(JSON.stringify(result), /alice@example\.com/)
+})
+
+test("textual resource blobs are decoded and redacted before model output", async () => {
+  const pendingPluginToolCalls = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      pluginTools: [
+        { name: "read_resource", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls,
+  })
+  const execPromise = tools.read_resource.execute({})
+  await Promise.resolve()
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  pending.resolve({
+    result: {
+      content: [
+        {
+          type: "resource",
+          resource: {
+            uri: "file:///repo/contacts.txt",
+            blob: Buffer.from("Contact alice@example.com").toString("base64"),
+            mimeType: "text/plain; charset=utf-8",
+          },
+        },
+      ],
+    },
+  })
+
+  const result = await execPromise
+  const decoded = Buffer.from(result.content[0].resource.blob, "base64").toString("utf8")
+  assert.equal(decoded, "Contact <EMAIL_001>")
+  assert.doesNotMatch(decoded, /alice@example\.com/)
 })
 
 test("resource links remain visible text without authorizing provider-side fetches", () => {
@@ -291,6 +363,31 @@ test("plugin tool execute throws on an error response", async () => {
   const [, pending] = [...pendingPluginToolCalls.entries()][0]
   pending.resolve({ error: "plugin failed" })
   await assert.rejects(execPromise, /plugin failed/)
+})
+
+test("plugin tool errors are redacted before they reach the model", async () => {
+  const pendingPluginToolCalls = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      pluginTools: [
+        { name: "boom", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls,
+  })
+  const execPromise = tools.boom.execute({})
+  await Promise.resolve()
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  pending.resolve({ error: "Contact alice@example.com" })
+
+  await assert.rejects(execPromise, (error) => {
+    assert.match(error.message, /Contact <EMAIL_001>/)
+    assert.doesNotMatch(error.message, /alice@example\.com/)
+    return true
+  })
 })
 
 test("buildAiSdkTools returns keys in sorted order regardless of registration order", () => {
@@ -1197,6 +1294,62 @@ test("execute-layer review can rewrite an error message; undefined passes throug
   }
   const t2 = __testing__.builtinDefToAiSdkTool(ok, null, 0, async () => undefined)
   assert.equal(await t2.execute({}, {}), "kept")
+})
+
+test("built-in thrown and isError failures are redacted before they reach the model", async () => {
+  const thrown = {
+    name: "thrown_pii",
+    description: "",
+    inputSchema: {},
+    handler: async () => {
+      throw new Error("Contact alice@example.com")
+    },
+  }
+  const errorResult = {
+    name: "result_pii",
+    description: "",
+    inputSchema: {},
+    handler: async () => ({
+      isError: true,
+      content: [{ type: "text", text: "Contact bob@example.com" }],
+    }),
+  }
+
+  for (const definition of [thrown, errorResult]) {
+    const subject = __testing__.builtinDefToAiSdkTool(definition, null, 0)
+    await assert.rejects(
+      () => subject.execute({}, {}),
+      (error) => {
+        assert.match(error.message, /Contact <EMAIL_001>/)
+        assert.doesNotMatch(error.message, /@(example\.com)/)
+        return true
+      }
+    )
+  }
+})
+
+test("JSON-string tool results remain valid while nested PII is redacted", async () => {
+  const definition = {
+    name: "json_pii",
+    description: "",
+    inputSchema: {},
+    handler: async () => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ createdAt: 1_754_000_000_000, contact: "alice@example.com" }),
+        },
+      ],
+    }),
+  }
+  const subject = __testing__.builtinDefToAiSdkTool(definition, null, 0)
+
+  const output = await subject.execute({}, {})
+
+  assert.deepEqual(JSON.parse(output), {
+    createdAt: 1_754_000_000_000,
+    contact: "<EMAIL_001>",
+  })
 })
 
 test("a throwing reviewer fails open (original output preserved)", async () => {

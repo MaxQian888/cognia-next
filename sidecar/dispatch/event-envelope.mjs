@@ -23,7 +23,7 @@ import { canonicalEventsFromSdkMessage, createSdkMappingState } from "./sdk-cano
  * several canonical events, which is why this returns a list.
  *
  * @param {any} msg
- * @param {{ sawStreamEvents: boolean }} [state] per-attempt SDK mapping state
+ * @param {{ sawStreamEvents: boolean, activeStreamMessageId?: string, streamedMessageIds?: Set<string> }} [state] per-attempt SDK mapping state
  */
 export function canonicalEventsFromWireMessage(msg, state) {
   if (!msg || typeof msg !== "object") return []
@@ -68,7 +68,7 @@ export function canonicalEventsFromWireMessage(msg, state) {
  * first projection. Returns null when there is none.
  *
  * @param {any} msg
- * @param {{ sawStreamEvents: boolean }} [state]
+ * @param {{ sawStreamEvents: boolean, activeStreamMessageId?: string, streamedMessageIds?: Set<string> }} [state]
  */
 export function canonicalEventFromWireMessage(msg, state) {
   return canonicalEventsFromWireMessage(msg, state)[0] ?? null

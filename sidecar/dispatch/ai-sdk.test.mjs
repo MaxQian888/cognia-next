@@ -1761,6 +1761,49 @@ test("interrupt ends the current turn but keeps the multi-turn session for the n
   assert.equal(turn, 2)
 })
 
+test("interrupt preserves usage from completed steps before the abort", async () => {
+  const { events, emit } = captureEmit()
+  const stream = (args) => ({
+    fullStream: (async function* () {
+      yield {
+        type: "finish-step",
+        usage: { inputTokens: 120, outputTokens: 30, cachedInputTokens: 40 },
+      }
+      while (!args?.abortSignal?.aborted) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      throw new DOMException("Aborted", "AbortError")
+    })(),
+    usage: Promise.resolve({}),
+  })
+  const session = dispatchAiSdk({
+    provider: "deepseek",
+    sessionId: "s-usage-interrupt",
+    firstPrompt: "inspect the project",
+    sendOptions: {
+      model: "deepseek-v4-flash",
+      providerCredentials: {
+        apiKey: "k",
+        protocol: "openai",
+        baseURL: "https://api.deepseek.com/v1",
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: stream,
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  await session.q.interrupt()
+  await waitForEvent(events, (event) => event.type === "session_ended")
+
+  const result = events.find((event) => event.type === "event" && event.event?.type === "result")
+  assert.equal(result.event.usage.input_tokens, 120)
+  assert.equal(result.event.usage.output_tokens, 30)
+  assert.equal(result.event.usage.context_input_tokens, 120)
+  assert.equal(result.event.usage.cache_read_input_tokens, 40)
+})
+
 const compactStream = () =>
   makeFakeStream(
     [

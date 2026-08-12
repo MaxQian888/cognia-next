@@ -208,6 +208,60 @@ test("assistant text is suppressed once partials have streamed it", () => {
   )
 })
 
+test("control-only stream frames do not suppress an assistant text snapshot", () => {
+  const state = createSdkMappingState()
+
+  canonicalEventsFromSdkMessage(
+    {
+      type: "stream_event",
+      event: { type: "message_start", message: { id: "m-control" } },
+    },
+    state
+  )
+  canonicalEventsFromSdkMessage({ type: "stream_event", event: { type: "step_start" } }, state)
+
+  assert.deepEqual(
+    canonicalEventsFromSdkMessage(
+      {
+        type: "assistant",
+        message: { id: "m-control", content: [{ type: "text", text: "snapshot fallback" }] },
+      },
+      state
+    ),
+    [{ kind: "text-delta", delta: "snapshot fallback" }]
+  )
+})
+
+test("a streamed assistant message does not suppress a later snapshot-only round", () => {
+  const state = createSdkMappingState()
+
+  canonicalEventsFromSdkMessage(
+    {
+      type: "stream_event",
+      event: { type: "message_start", message: { id: "m-streamed" } },
+    },
+    state
+  )
+  canonicalEventsFromSdkMessage(
+    {
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "first" } },
+    },
+    state
+  )
+
+  assert.deepEqual(
+    canonicalEventsFromSdkMessage(
+      {
+        type: "assistant",
+        message: { id: "m-snapshot", content: [{ type: "text", text: "second round" }] },
+      },
+      state
+    ),
+    [{ kind: "text-delta", delta: "second round" }]
+  )
+})
+
 test("a user turn splits text from tool results", () => {
   const events = canonicalEventsFromSdkMessage(
     {

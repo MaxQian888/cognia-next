@@ -1022,6 +1022,42 @@ export function dispatchAiSdk({
     // Clear any leftover interrupt from a previous turn so this turn streams.
     cancelled = false
     active = true
+    // Usage normally arrives on the closing `result.usage` promise. If the user
+    // interrupts, that promise commonly rejects and used to erase every token
+    // already billed by completed steps. Keep a per-step fallback while the
+    // stream is alive, then emit it before the clean interrupted session end.
+    let accInputTokens = 0
+    let accOutputTokens = 0
+    let lastUsageForFinish = null
+    let currentLegStepInputTokens = 0
+    let currentLegStepOutputTokens = 0
+    let currentLegLastInputTokens = 0
+    let currentLegStepUsage = null
+    const recordCompletedStepUsage = (usage) => {
+      if (!usage || typeof usage !== "object") return
+      const input = usage.inputTokens ?? usage.promptTokens
+      const output = usage.outputTokens ?? usage.completionTokens
+      if (typeof input === "number" && input > 0) {
+        currentLegStepInputTokens += input
+        currentLegLastInputTokens = input
+      }
+      if (typeof output === "number" && output > 0) currentLegStepOutputTokens += output
+      currentLegStepUsage = usage
+    }
+    const finishUsageSnapshot = () => {
+      const inputTokens = accInputTokens + currentLegStepInputTokens
+      const outputTokens = accOutputTokens + currentLegStepOutputTokens
+      const base = lastUsageForFinish ?? currentLegStepUsage
+      if (!base && inputTokens <= 0 && outputTokens <= 0) return undefined
+      return {
+        ...(base ?? {}),
+        ...(inputTokens > 0 ? { inputTokens } : {}),
+        ...(outputTokens > 0 ? { outputTokens } : {}),
+        ...(currentLegLastInputTokens > 0 || lastInputTokens > 0
+          ? { contextInputTokens: currentLegLastInputTokens || lastInputTokens }
+          : {}),
+      }
+    }
     // Reset per-turn so identical-but-legitimate calls repeated across turns
     // don't trip the doom-loop threshold (the guards persist with the cached
     // tools map). Empty on turn 1 — the build below populates them.
@@ -1178,13 +1214,12 @@ export function dispatchAiSdk({
       let stepsUsed = 0
       let turnError = null
       let cappedWhileBusy = false
-      // Summed usage across legs, so the trailing `result` reports the whole turn.
-      let accInputTokens = 0
-      let accOutputTokens = 0
-      let lastUsageForFinish = null
-
       // eslint-disable-next-line no-constant-condition
       while (true) {
+        currentLegStepInputTokens = 0
+        currentLegStepOutputTokens = 0
+        currentLegLastInputTokens = 0
+        currentLegStepUsage = null
         // Fresh content block per leg (new messageId) so the renderer keeps each
         // leg's text/tool calls distinct instead of merging them into one block.
         adapter.reset()
@@ -1289,6 +1324,9 @@ export function dispatchAiSdk({
           if (cancelled) break
           if (evt?.type === "error") streamError = evt.error
           if (evt?.type === "finish") finishReason = evt.finishReason ?? finishReason
+          if (evt?.type === "finish-step") {
+            recordCompletedStepUsage(evt.usage ?? evt.totalUsage)
+          }
           // NB: the PostToolUse review no longer intercepts here — it runs at
           // the tool EXECUTE layer (see `reviewToolOutput`), so tool-result
           // events already carry the reviewed output the model will see.
@@ -1383,6 +1421,13 @@ export function dispatchAiSdk({
           const outTok = usage.outputTokens ?? usage.completionTokens
           if (typeof outTok === "number" && outTok > 0) accOutputTokens += outTok
           lastUsageForFinish = usage
+          // The resolved leg usage is authoritative and already includes the
+          // completed steps observed above; clear the fallback to avoid counting
+          // both paths on a normal completion.
+          currentLegStepInputTokens = 0
+          currentLegStepOutputTokens = 0
+          currentLegLastInputTokens = 0
+          currentLegStepUsage = null
         }
 
         if (cancelled || turnError) break
@@ -1434,14 +1479,7 @@ export function dispatchAiSdk({
       // is what actually occupies the window after the turn. The renderer's
       // window math reads `contextInputTokens`; cost/session totals keep using
       // the summed `inputTokens`.
-      const finishUsage = lastUsageForFinish
-        ? {
-            ...lastUsageForFinish,
-            ...(accInputTokens > 0 ? { inputTokens: accInputTokens } : {}),
-            ...(accOutputTokens > 0 ? { outputTokens: accOutputTokens } : {}),
-            ...(lastInputTokens > 0 ? { contextInputTokens: lastInputTokens } : {}),
-          }
-        : undefined
+      const finishUsage = finishUsageSnapshot()
       const finishEvents = adapter.finish({ usage: finishUsage })
       flushAdapter(finishEvents)
       if (turnError && !cancelled) {
@@ -1467,6 +1505,8 @@ export function dispatchAiSdk({
       // An aborted turn (user interrupt) is a clean stop, not a failure —
       // streamText rejects with an AbortError once the signal fires.
       if (cancelled || err?.name === "AbortError" || err?.name === "TimeoutError") {
+        const partialUsage = finishUsageSnapshot()
+        if (partialUsage) flushAdapter(adapter.finish({ usage: partialUsage }))
         emit({ type: "session_ended", sessionId })
       } else {
         emit({

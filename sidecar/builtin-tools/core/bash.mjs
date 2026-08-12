@@ -15,7 +15,7 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import { toolError, toolText, DANGEROUS_PATTERNS } from "../safety.mjs"
+import { toolError, toolText, DANGEROUS_PATTERNS, findDangerousShellFragment } from "../safety.mjs"
 import { tailTruncate } from "../shared/truncate.mjs"
 import { pickStreamDecoder } from "../shared/console-decode.mjs"
 import {
@@ -180,14 +180,29 @@ export function createBashTool({ cwd, bgShells, shell }) {
           )
         }
       }
-      for (const pattern of DANGEROUS_PATTERNS) {
-        const match = args.command.match(pattern)
-        if (match) {
-          return toolError(
-            `command rejected: matched destructive shell fragment ${JSON.stringify(match[0])}. ` +
-              "Run the destructive step through the dedicated file/process tools so it gets its own approval."
-          )
+      // Parse Bash structurally so quoted examples and safe sinks such as
+      // >/dev/null are not confused with executable destructive fragments.
+      // PowerShell/cmd use their own grammar, so retain the legacy fail-closed
+      // scan on Windows rather than pretending a Bash AST represents them.
+      let dangerous = null
+      if (descriptor.isWin) {
+        for (const pattern of DANGEROUS_PATTERNS) {
+          const match = args.command.match(pattern)
+          if (match) {
+            dangerous = { fragment: match[0], kind: "command" }
+            break
+          }
         }
+      } else {
+        dangerous = findDangerousShellFragment(args.command)
+      }
+      if (dangerous) {
+        const category =
+          dangerous.kind === "deviceRedirect" ? "unsafe device redirect" : "destructive command"
+        return toolError(
+          `command rejected: matched ${category} ${JSON.stringify(dangerous.fragment)}. ` +
+            "Run the destructive step through the dedicated file/process tools so it gets its own approval."
+        )
       }
       const workdir = resolveToolPath(cwd, args.workdir ?? ".")
       const { isWin, shell, shellArgs, env } = resolveShellInvocation(args.command, descriptor)

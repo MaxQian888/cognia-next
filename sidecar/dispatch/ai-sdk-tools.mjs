@@ -15,7 +15,7 @@
 import { tool, jsonSchema } from "ai"
 import { z } from "zod"
 import { randomUUID } from "node:crypto"
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 
 import {
   collectCogniaToolDefs,
@@ -455,11 +455,133 @@ function binaryModelPart(data, mediaType, filename) {
   }
 }
 
-function assertModelSafeToolOutput(output) {
-  if (!hasNoLeakingPiiDeep(output)) {
+function isTextualMediaType(mediaType) {
+  const mime = String(mediaType ?? "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase()
+  return (
+    mime.startsWith("text/") ||
+    mime === "application/json" ||
+    mime.endsWith("+json") ||
+    mime === "application/xml" ||
+    mime.endsWith("+xml") ||
+    mime === "application/javascript" ||
+    mime === "application/x-www-form-urlencoded"
+  )
+}
+
+function decodeBase64Utf8(data) {
+  const compact = data.replace(/\s/g, "")
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(compact) || compact.length % 4 === 1) {
     throw new Error(TOOL_RESULT_PII_ERROR)
   }
-  return output
+  const bytes = Buffer.from(compact, "base64")
+  const canonical = bytes.toString("base64").replace(/=+$/, "")
+  if (canonical !== compact.replace(/=+$/, "")) throw new Error(TOOL_RESULT_PII_ERROR)
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+  } catch {
+    throw new Error(TOOL_RESULT_PII_ERROR)
+  }
+}
+
+function redactTextualResourceBlobs(value, seen = new WeakSet()) {
+  if (value === null || value === undefined || typeof value !== "object") return value
+  if (value instanceof Date) return value
+  if (seen.has(value)) return "[circular tool output omitted]"
+  seen.add(value)
+  if (Array.isArray(value)) {
+    return value.map((item) => redactTextualResourceBlobs(item, seen))
+  }
+  if (value instanceof Map) {
+    return new Map(
+      [...value.entries()].map(([key, inner]) => [
+        redactTextualResourceBlobs(key, seen),
+        redactTextualResourceBlobs(inner, seen),
+      ])
+    )
+  }
+  if (value instanceof Set) {
+    return new Set([...value].map((item) => redactTextualResourceBlobs(item, seen)))
+  }
+  const copy = {}
+  for (const [key, inner] of Object.entries(value)) {
+    copy[key] = redactTextualResourceBlobs(inner, seen)
+  }
+  if (
+    value.type === "resource" &&
+    value.resource &&
+    typeof value.resource === "object" &&
+    typeof value.resource.blob === "string" &&
+    isTextualMediaType(value.resource.mimeType)
+  ) {
+    const decoded = decodeBase64Utf8(value.resource.blob)
+    copy.resource.blob = Buffer.from(redactText(decoded).redacted, "utf8").toString("base64")
+  }
+  return copy
+}
+
+function redactToolOutputDeep(value, seen = new WeakSet()) {
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    // Text-only tools often flatten structured output to JSON. Redacting the
+    // entire serialized string can classify long numeric timestamps as PII and
+    // splice placeholders into number tokens, producing invalid JSON. Parse
+    // object/array JSON first so only its actual string values are redacted.
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return JSON.stringify(redactToolOutputDeep(JSON.parse(value), seen))
+      } catch {
+        // Ordinary text can begin with a brace; fall through to text redaction.
+      }
+    }
+    return redactText(value).redacted
+  }
+  if (value === null || value === undefined) return value
+  if (typeof value !== "object" || value instanceof Date) return value
+  if (seen.has(value)) return "[circular tool output omitted]"
+  seen.add(value)
+  if (Array.isArray(value)) return value.map((item) => redactToolOutputDeep(item, seen))
+  if (value instanceof Map) {
+    return new Map(
+      [...value.entries()].map(([key, inner]) => [
+        redactToolOutputDeep(key, seen),
+        redactToolOutputDeep(inner, seen),
+      ])
+    )
+  }
+  if (value instanceof Set) {
+    return new Set([...value].map((item) => redactToolOutputDeep(item, seen)))
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, inner]) => [key, redactToolOutputDeep(inner, seen)])
+  )
+}
+
+function hasNoLeakingPiiToolOutput(output) {
+  if (typeof output === "string") {
+    const trimmed = output.trim()
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return hasNoLeakingPiiDeep(JSON.parse(output))
+      } catch {
+        // Not valid structured output; scan it as ordinary text below.
+      }
+    }
+  }
+  return hasNoLeakingPiiDeep(output)
+}
+
+function assertModelSafeToolOutput(output) {
+  // Embedded textual resources cross the provider boundary as base64 file
+  // parts. Decode them before scanning; otherwise the encoded bytes look like
+  // an opaque safe token while the model decodes the original PII.
+  const decodedSafe = redactTextualResourceBlobs(output)
+  if (hasNoLeakingPiiToolOutput(decodedSafe)) return decodedSafe
+  const redacted = redactToolOutputDeep(decodedSafe)
+  if (!hasNoLeakingPiiToolOutput(redacted)) throw new Error(TOOL_RESULT_PII_ERROR)
+  return redacted
 }
 
 /**
@@ -548,8 +670,8 @@ function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
           msg,
           true
         )
-        assertModelSafeToolOutput(reviewed)
-        throw reviewed === msg ? err : new Error(String(reviewed))
+        const safe = String(assertModelSafeToolOutput(reviewed))
+        throw reviewed === msg && safe === msg ? err : new Error(safe)
       }
       if (result && result.isError) {
         const msg = callToolResultToText(result) || `${def.name} failed`
@@ -560,8 +682,8 @@ function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
           msg,
           true
         )
-        assertModelSafeToolOutput(reviewed)
-        throw new Error(String(reviewed))
+        const safe = assertModelSafeToolOutput(reviewed)
+        throw new Error(String(safe))
       }
       // Structured content passes through as the raw MCP object for
       // toModelOutput; text-only results keep the established flattening.
@@ -598,7 +720,17 @@ function pluginToolToAiSdkTool(
         ? await gate(namespaced, args ?? {}, options?.abortSignal)
         : (args ?? {})
       const toolUseId = randomUUID()
-      const pending = awaitPluginToolResponse(pendingPluginToolCalls, toolUseId, manifest.name)
+      // Preserve the manifest's lifecycle contract on the AI SDK rail just as
+      // buildPluginToolsServer does on the Anthropic rail. In particular,
+      // dispatch_agent/ask_user declare `timeoutMs: 0`: the child run or human
+      // interaction owns its own bounds, so the generic 120s relay timeout must
+      // not sever a still-live round-trip while the renderer keeps working.
+      const pending = awaitPluginToolResponse(
+        pendingPluginToolCalls,
+        toolUseId,
+        manifest.name,
+        typeof manifest.timeoutMs === "number" ? manifest.timeoutMs : undefined
+      )
       emit({
         type: "plugin_tool_exec",
         sessionId,
@@ -617,8 +749,8 @@ function pluginToolToAiSdkTool(
           msg,
           true
         )
-        assertModelSafeToolOutput(reviewed)
-        throw new Error(String(reviewed))
+        const safe = assertModelSafeToolOutput(reviewed)
+        throw new Error(String(safe))
       }
       const payload = response ? response.result : null
       // A plugin that already speaks MCP passes its content blocks straight

@@ -8,6 +8,7 @@ import {
   ALLOWED_COMMANDS,
   BLOCKED_COMMANDS,
   DANGEROUS_PATTERNS,
+  findDangerousShellFragment,
   assertPathInside,
   normaliseAbsolutePath,
   toolError,
@@ -168,6 +169,13 @@ test("DANGEROUS_PATTERNS does not misclassify a malformed find expression", () =
     DANGEROUS_PATTERNS.some((pattern) => pattern.test(command)),
     false
   )
+})
+
+test("findDangerousShellFragment uses shell structure instead of matching quoted text", () => {
+  assert.equal(findDangerousShellFragment("printf ok >/dev/null"), null)
+  assert.equal(findDangerousShellFragment("echo '>/dev/sda && rm -rf /'"), null)
+  assert.match(findDangerousShellFragment("printf bad >/dev/sda")?.fragment ?? "", />\/dev\/sda/)
+  assert.match(findDangerousShellFragment("echo $(rm -rf /)")?.fragment ?? "", /rm/)
 })
 
 test("toolText wraps a string in MCP content shape", () => {
