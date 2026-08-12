@@ -33,11 +33,26 @@ export async function probeConfiguredBootCapabilities(
   dependencies: StartupProbeDependencies = defaultDependencies
 ): Promise<BootCapability[]> {
   const database = dependencies.getDatabase()
-  const [plugins, adapters, memoryJobs, twinJobs, scheduledTasks, twinSettings] = await Promise.all([
+  const [
+    plugins,
+    adapters,
+    memoryJobs,
+    twinJobs,
+    pendingGoalVerifications,
+    scheduledTasks,
+    twinSettings,
+  ] = await Promise.all([
     database.plugins.toArray(),
     database.adapterInstances.toArray(),
     database.memoryJobs.toArray(),
     database.twinJobs.toArray(),
+    database.chatGoals
+      .filter(
+        (goal) =>
+          Boolean(goal.config.verificationWorkflow) &&
+          (goal.verification?.status === "requested" || goal.verification?.status === "running")
+      )
+      .count(),
     dependencies.listScheduledTasks(),
     dependencies.getTwinRuntimeSettings(),
   ])
@@ -56,7 +71,7 @@ export async function probeConfiguredBootCapabilities(
   ) {
     capabilities.add("plugin-runtime")
   }
-  if (scheduledTasks.some((task) => task.status === "active")) {
+  if (scheduledTasks.some((task) => task.status === "active") || pendingGoalVerifications > 0) {
     capabilities.add("workflow-automation")
   }
   if (adapters.some((adapter) => adapter.enabled)) {

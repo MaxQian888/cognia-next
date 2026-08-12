@@ -21,6 +21,7 @@ it("requests runtimes only for configured background work", async () => {
         adapterInstances: { toArray: async () => [{ enabled: true }] },
         memoryJobs: { toArray: async () => [{ status: "queued" }] },
         twinJobs: { toArray: async () => [] },
+        chatGoals: { filter: () => ({ count: async () => 0 }) },
       }) as never,
     listScheduledTasks: async () => [{ status: "active" }],
     getTwinRuntimeSettings: async () => ({ workerEnabled: false }),
@@ -42,6 +43,7 @@ it("keeps main startup light when no optional background work is configured", as
         adapterInstances: { toArray: async () => [{ enabled: false }] },
         memoryJobs: { toArray: async () => [{ status: "completed" }] },
         twinJobs: { toArray: async () => [] },
+        chatGoals: { filter: () => ({ count: async () => 0 }) },
       }) as never,
     listScheduledTasks: async () => [{ status: "paused" }],
     getTwinRuntimeSettings: async () => ({ workerEnabled: false }),
@@ -60,6 +62,7 @@ it.each(["queued", "running"])(
           adapterInstances: { toArray: async () => [] },
           memoryJobs: { toArray: async () => [] },
           twinJobs: { toArray: async () => [{ status }] },
+          chatGoals: { filter: () => ({ count: async () => 0 }) },
         }) as never,
       listScheduledTasks: async () => [],
       getTwinRuntimeSettings: async () => ({ workerEnabled: false }),
@@ -77,10 +80,28 @@ it("boots knowledge agents for an enabled Twin worker without queued jobs", asyn
         adapterInstances: { toArray: async () => [] },
         memoryJobs: { toArray: async () => [] },
         twinJobs: { toArray: async () => [] },
+        chatGoals: { filter: () => ({ count: async () => 0 }) },
       }) as never,
     listScheduledTasks: async () => [],
     getTwinRuntimeSettings: async () => ({ workerEnabled: true }),
   })
 
   expect(capabilities).toEqual(["knowledge-agents"])
+})
+
+it("boots workflow automation to reconcile an admitted Goal verifier", async () => {
+  const capabilities = await probeConfiguredBootCapabilities({
+    getDatabase: () =>
+      ({
+        plugins: { toArray: async () => [] },
+        adapterInstances: { toArray: async () => [] },
+        memoryJobs: { toArray: async () => [] },
+        twinJobs: { toArray: async () => [] },
+        chatGoals: { filter: () => ({ count: async () => 1 }) },
+      }) as never,
+    listScheduledTasks: async () => [],
+    getTwinRuntimeSettings: async () => ({ workerEnabled: false }),
+  })
+
+  expect(capabilities).toEqual(["workflow-automation"])
 })
