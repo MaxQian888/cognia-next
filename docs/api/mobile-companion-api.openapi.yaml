@@ -14670,6 +14670,124 @@ paths:
                 $ref: "#/components/schemas/RpcError"
       security:
         - dpopAccess: []
+  /api/_rpc/fleet_question_reject:
+    post:
+      operationId: publicRpcFleetQuestionReject
+      tags:
+        - rpc-dispatch
+      summary: fleet_question_reject (workspace.write)
+      description: "Device-reachable side-effect command. Risk: high; approval: interactive."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - requestId
+              properties:
+                requestId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
   /api/_rpc/fleet_question_respond:
     post:
       operationId: publicRpcFleetQuestionRespond
@@ -43480,6 +43598,7 @@ components:
           - fleet_interrupt_session
           - fleet_opencode_send_message
           - fleet_permission_respond
+          - fleet_question_reject
           - fleet_question_respond
           - fleet_worker_enrollment_create
           - fleet_worker_list
@@ -45287,9 +45406,9 @@ x-cognia-generated:
     - protocol/companion-request-schemas.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  publicCommandCount: 333
-  generatedRequestSchemaCount: 333
+  publicCommandCount: 334
+  generatedRequestSchemaCount: 334
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 333
+  contractRequestSchemaCount: 334
   genericRequestSchemaCount: 0
   legacyCompatibility: false

@@ -440,6 +440,39 @@ test("the synthetic hook_fire subtype maps even though the SDK does not declare 
   assert.equal(ev.blockReason, "denied by policy")
 })
 
+test("the synthetic hook_audit subtype preserves structured policy metadata", () => {
+  const [ev] = canonicalEventsFromSdkMessage(
+    {
+      type: "system",
+      subtype: "hook_audit",
+      hookId: "h-2",
+      hookEvent: "Stop",
+      provider: "claude",
+      handlerType: "http",
+      policyClass: "managed",
+      outcome: "warning",
+      latencyMs: 12,
+      redacted: true,
+      error: "timeout",
+    },
+    createSdkMappingState()
+  )
+  assert.deepEqual(ev, {
+    kind: "hook",
+    phase: "completed",
+    hookId: "h-2",
+    hookName: "http",
+    hookEvent: "Stop",
+    outcome: "error",
+    provider: "claude",
+    handlerType: "http",
+    policyClass: "managed",
+    latencyMs: 12,
+    redacted: true,
+    error: "timeout",
+  })
+})
+
 test("an unknown member is preserved as a diagnostic rather than dropped", () => {
   const [ev] = canonicalEventsFromSdkMessage(
     { type: "teleport", payload: 1 },

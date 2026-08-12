@@ -16,8 +16,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card } from "@/components/ui/card"
-import type { HookGroup, HookHandler } from "@/lib/claude/hooks"
-import { HookHandlerForm } from "./hook-handler-form"
+import type { HookGroup, HookHandler, HookHandlerType } from "@/lib/claude/hooks"
+import { knownHookRuntimeCapabilities } from "@/lib/claude/hooks/runtime-capabilities"
+import { emptyHandlerForType, HookHandlerForm } from "./hook-handler-form"
+
+const DEFAULT_HANDLER_TYPES = knownHookRuntimeCapabilities("claude").handlerTypes
 
 interface Props {
   value: HookGroup
@@ -25,9 +28,16 @@ interface Props {
   onRemove: () => void
   /** Focus the matcher input on mount — set for a freshly added group. */
   autoFocus?: boolean
+  supportedHandlerTypes?: readonly HookHandlerType[]
 }
 
-export function HookGroupEditor({ value, onChange, onRemove, autoFocus }: Props) {
+export function HookGroupEditor({
+  value,
+  onChange,
+  onRemove,
+  autoFocus,
+  supportedHandlerTypes = DEFAULT_HANDLER_TYPES,
+}: Props) {
   const t = useTranslations("settings.hooks.group")
 
   const matcherError = useMemo(() => validateMatcher(value.matcher), [value.matcher])
@@ -40,9 +50,11 @@ export function HookGroupEditor({ value, onChange, onRemove, autoFocus }: Props)
     onChange({ ...value, hooks: value.hooks.filter((_, i) => i !== idx) })
   }
   const addHandler = () => {
+    const type = supportedHandlerTypes[0]
+    if (!type) return
     onChange({
       ...value,
-      hooks: [...value.hooks, { type: "command", command: "" }],
+      hooks: [...value.hooks, emptyHandlerForType(type)],
     })
   }
 
@@ -97,6 +109,7 @@ export function HookGroupEditor({ value, onChange, onRemove, autoFocus }: Props)
               value={h}
               onChange={(next) => updateHandler(i, next)}
               onRemove={() => removeHandler(i)}
+              supportedHandlerTypes={supportedHandlerTypes}
             />
           ))
         )}
@@ -104,6 +117,7 @@ export function HookGroupEditor({ value, onChange, onRemove, autoFocus }: Props)
           variant="outline"
           size="sm"
           onClick={addHandler}
+          disabled={supportedHandlerTypes.length === 0}
           data-testid="group-add-handler"
           className="text-xs"
         >

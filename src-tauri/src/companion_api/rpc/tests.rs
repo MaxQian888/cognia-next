@@ -316,6 +316,7 @@ fn fleet_writes_are_control_gated() {
     for cmd in [
         "fleet_permission_respond",
         "fleet_question_respond",
+        "fleet_question_reject",
         "fleet_opencode_send_message",
         "fleet_focus_terminal",
         "fleet_interrupt_session",

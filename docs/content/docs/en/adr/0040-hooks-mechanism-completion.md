@@ -1,64 +1,96 @@
 ---
-title: ADR-0040 — Hooks mechanism completion (built-in agent + external agents)
-description: "Completes the Claude-Code-style settings.json hook runtime (ADR Phase-1 wired only UserPromptSubmit + PreToolUse). A pure Rust classifier maps the built-in agent's SDK event stream onto the full lifecycle (PostToolUse/Failure, Stop/StopFailure, SessionStart/End, SubagentStop, Notification, PostCompact, Task*, PermissionRequest/Denied, PostToolBatch); a thin run_agent_hook Tauri command lets the TS external-agent manager (claude-code/codex/opencode) reach the SAME runtime; webhook handlers are implemented; project/local-scope hooks load behind a Rust-enforced workspace-trust gate; and the two orphaned System-A plugin hooks (onExternalAgentToolCall / onExternalAgentPermissionRequest) are wired."
+title: ADR-0040 — Hooks mechanism completion
+description: "Defines one capability-aware lifecycle Hook architecture for the Claude Agent SDK, Codex, OpenCode, and external agents, including native handler execution, failure policy, PII controls, recursion limits, and canonical audit events."
 ---
 
 # ADR-0040 — Hooks mechanism completion
 
-**Status**: Accepted (2026-06-01)
-**Authors**: Max Qian + Claude Opus 4.8
-**Extends**: the Phase-1 hooks runtime in `src-tauri/src/hooks/` (which wired only `UserPromptSubmit` + `PreToolUse`)
-**Affects**: `src-tauri/src/hooks/{mod,classify,commands,trust,webhook,command,types}.rs`, `src-tauri/src/claude/{sidecar,commands}.rs`, `src-tauri/src/lib.rs`, `lib/ai/agent/external/{agent-hooks,manager}.ts`, `lib/claude/hook-trust-sync.ts`, `lib/db/trusted-workspaces.ts`, `components/providers/hook-trust-sync-provider.tsx`, `components/settings/hooks/hooks-section.tsx`, `app/layout.tsx`, `i18n/messages/{en,zh-CN}.json`
+**Status:** Accepted (2026-06-01), amended (2026-08-06)
+**Research record:** `docs/research/hooks-agent-fleet-gap-analysis-2026-08-06.md`
 
 ## Context
 
-Two parallel "hook" systems exist:
+Cognia historically had two partially overlapping systems:
 
-- **System A** — in-process plugin hooks (`lib/plugin/messaging/hooks-system.ts`, 74+ kinds). Mature, but `dispatchExternalAgentToolCall` / `dispatchExternalAgentPermissionRequest` were defined and never called (orphans).
-- **System B** — the Claude-Code-style `settings.json` hook runtime in Rust (`src-tauri/src/hooks/`). Its own comments marked it **Phase 1**: only `UserPromptSubmit` (in `claude_send`) and `PreToolUse` (in the sidecar's `permission_request` handler) fired. The remaining 25 events round-tripped through settings but never fired; webhook handlers were stubbed; project/local scope was never loaded (`cwd: None` hardcoded); external agents (claude-code/codex/opencode) had zero hook integration.
+- in-process product/plugin hooks in TypeScript; and
+- Claude-Code-style lifecycle hooks loaded from `settings.json`.
 
-This ADR completes System B across the built-in agent **and** the external agents, and closes the System-A orphans.
+The lifecycle implementation was split again between a Rust compatibility runner, SDK events in the Node sidecar, and provider-specific external-agent bridges. That split produced duplicate execution for some built-in events, a static and incomplete event catalog, inconsistent handler support, and incomplete outbound-data and audit controls.
+
+The 2026-08-06 review checked the pinned Claude Agent SDK `0.3.220`, local Codex `0.145.0`, and OpenCode SDK `1.17.13` against their primary upstream contracts. Claude exposes 31 hook events; the local Codex schema proves 11. Provider version strings alone do not prove which events or controls are usable at runtime.
 
 ## Decision
 
-### Injection model — one runtime, reached two ways
+### One semantic core, one owner per runtime path
 
-The Rust `external_agent` module is a pure stdio pass-through: it never parses ACP/opencode messages, so it cannot see external-agent tool/permission events — those are parsed only in TS. The built-in agent's sidecar, by contrast, forwards the full SDK event stream to Rust. Therefore:
+Every native event is normalized into Cognia's canonical hook envelope. Matching, decisions, policy, redaction, diagnostics, and audit use one semantic contract, but each runtime path has exactly one execution owner:
 
-| Agent | Injection layer | Rationale |
-|---|---|---|
-| Built-in (sidecar) | **Rust** — `claude::sidecar` stdout reader + `claude_send` | Rust already sees the SDK stream and already hosts PreToolUse/UserPromptSubmit. |
-| External (claude-code/codex/opencode) | **TS** — `manager.ts` (`executeStreaming` + `execute`), calling the new `run_agent_hook` Tauri command into the SAME Rust runtime | Only TS has the parsed events; the command reuses the runtime instead of duplicating it. |
-| System-A orphans | **TS** — same `manager.ts` seams | Pure in-process plugin dispatch. |
+| Runtime path | Execution owner | Reason |
+| --- | --- | --- |
+| Built-in Claude Agent SDK | SDK-native hooks in the Node sidecar | The SDK supplies the complete event and decision contract; Rust must not pre-run the same event. |
+| Rust compatibility/external bridge | Rust hook runtime reached through typed commands | External adapters already parse their provider protocol and reuse the shared settings/trust boundary. |
+| Product/plugin hooks | Existing TypeScript dispatch | This remains a separate in-process extension API, not a second lifecycle-hook executor. |
 
-Rejected: registering the SDK's native `hooks` option inside the sidecar (Node) — it would bypass and duplicate the Rust settings.json runtime.
+The built-in `UserPromptSubmit` duplicate Rust pre-run is removed. Native SDK callbacks are the sole built-in lifecycle owner.
 
-### Built-in agent event mapping (Rust)
+### Capability negotiation
 
-`hooks/classify.rs` is a pure, exhaustively-tested classifier over the forwarded SDK messages:
+A static provider manifest is a safety ceiling, never proof of runtime support. The effective capability set is the intersection of:
 
-- `system/init` → SessionStart; `system/compact_boundary` → PostCompact; `system/notification` → Notification; `system/task_started` → TaskCreated; `system/task_notification` → TaskCompleted + SubagentStop.
-- `result/success` → Stop; `result/error_*` → StopFailure; `tool_use_summary` → PostToolBatch; `session_ended` → SessionEnd (+ StopFailure on error).
-- `tool_use` (assistant) blocks are recorded per session; the matching `tool_result` (user) block fires PostToolUse, or PostToolUseFailure when `is_error`.
-- `PermissionRequest` + `PermissionDenied` fire alongside the existing PreToolUse on the `permission_request` path.
+1. the audited Cognia event and handler catalog;
+2. the installed runtime's probed schema or SDK surface; and
+3. the selected runtime adapter's implemented controls.
 
-Observational hooks can contribute `additionalContext` (surfaced as a compact log line) but cannot re-inject mid-stream; blocking stays on the permission round-trip.
+The pinned Claude SDK catalog contains 31 events:
 
-### External agent mapping (TS)
+`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `Notification`, `UserPromptSubmit`, `UserPromptExpansion`, `SessionStart`, `SessionEnd`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `PreCompact`, `PostCompact`, `PermissionRequest`, `PermissionDenied`, `Setup`, `TeammateIdle`, `TaskCreated`, `TaskCompleted`, `Elicitation`, `ElicitationResult`, `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`, `InstructionsLoaded`, `CwdChanged`, `FileChanged`, `DirectoryAdded`, and `MessageDisplay`.
 
-`lib/ai/agent/external/agent-hooks.ts` fires, per `ExternalAgentEvent`: SessionStart (`session_start`), PostToolUse/Failure (`tool_result`), Stop + SessionEnd (`done`), StopFailure (`error`), plus the System-A `onExternalAgentToolCall` (`tool_use_start`). On `permission_request` it runs a blocking PreToolUse: in `executeStreaming` a block denies the permission and `continue`s (true suppression); in the headless `execute` path the deny is still enforced (no permission UI to suppress).
+Codex installation probes `codex app-server generate-json-schema` and intersects the discovered `HookEventName` enum with Cognia's audited 11-event ceiling. Probe failure degrades to no installable Codex events instead of guessing.
 
-### Trust gate (Rust-enforced)
+### Handler contract
 
-`hooks/trust.rs` holds a process-global trusted-path set seeded from the Dexie ledger via `set_trusted_workspaces`. `resolve_trusted_cwd` returns a project `cwd` only when trusted, else `None` (user scope only). Enforced in Rust so a compromised renderer cannot load project/local hooks from an untrusted dir. The frontend syncs the ledger at startup (`HookTrustSyncProvider`) and after every trust change (`trustWorkspace` / `revokeWorkspaceTrust`).
+The canonical handler kinds are:
 
-### Webhooks
+- `command` — local subprocess with the event JSON on stdin;
+- `http` — outbound HTTP POST; legacy `webhook` remains a read-compatible alias;
+- `mcp_tool` — one declared MCP tool call;
+- `prompt` — one model-backed hook evaluation;
+- `agent` — a bounded model-backed agent task.
 
-`hooks/webhook.rs` implements the previously-stubbed webhook handler: HTTP POST of the JSON payload with configured headers + timeout, reusing the command handler's response-decision parser so `permissionDecision` / `additionalContext` semantics are identical.
+Settings UI choices are filtered by the effective runtime capabilities. Unsupported kinds remain visible only with an explicit reason; they are never silently accepted as working.
 
-### Events with no trigger source
+### Failure and security policy
 
-`PreCompact`, `ConfigChange`, `FileChanged`, `WorktreeCreate/Remove`, `CwdChanged`, `InstructionsLoaded`, `Elicitation(Result)`, `UserPromptExpansion`, `TeammateIdle` have no real source in the agent path today. They remain round-trippable in settings but are **explicitly annotated** in the settings UI ("no trigger source yet") rather than silently stubbed.
+User-authored hooks fail open on timeout, process failure, network failure, or unavailable native adapters, and emit visible diagnostics. Hooks with `policyClass: "managed"` fail closed for the same conditions.
+
+Before any `http`, `webhook`, `mcp_tool`, `prompt`, or `agent` handler receives locally derived text, Cognia redacts the serialized payload and then applies a residual deep PII check. Remaining sensitive content blocks dispatch rather than crossing the outbound boundary.
+
+Project/local hook settings still pass the Rust-enforced trusted-workspace gate. An untrusted or unsynchronized workspace loads user-scope hooks only.
+
+### Model-backed handlers
+
+Native handlers run through the pinned Claude Agent SDK adapter with:
+
+- `<hook-origin depth="1" />` injected into the prompt;
+- `settingSources: []` and no nested hooks, making recursive hook execution impossible by construction;
+- bounded turns (`prompt`: 1, `mcp_tool`: 2, `agent`: 3);
+- a shared hook budget governor (default USD 0.25 per execution context); and
+- tool narrowing (`prompt`: none, `mcp_tool`: exactly the requested MCP tool).
+
+A depth greater than or equal to one is rejected. Budget exhaustion blocks the handler instead of starting an unaccounted model turn.
+
+### Canonical audit
+
+Every matched handler emits a structured canonical hook audit event containing at least:
+
+- hook id and event;
+- provider and handler kind;
+- policy class and outcome;
+- latency;
+- whether outbound data was redacted;
+- block reason or warning.
+
+The SDK canonical-event mapper persists this as a `kind: "hook"`, `phase: "completed"` event. Logs and UI notices are projections, not the audit authority.
 
 ## Consequences
 
@@ -85,3 +117,19 @@ Unsupported handlers and outputs are explicit diagnostics rather than silent no-
 `webhook` settings remain readable as Cognia's HTTP-handler compatibility form. Every outbound
 HTTP/model/MCP path is subject to the shared PII gate, and persisted traces contain only
 sanitized inputs, decisions, timing, and errors.
+
+- Built-in lifecycle hooks no longer execute twice.
+- Event and handler choices follow runtime evidence rather than provider-name assumptions.
+- All five current Claude handler kinds execute through a bounded, audited path.
+- User customization remains fail-open, while centrally managed policy is fail-closed.
+- Outbound hook handlers cannot bypass the PII gate.
+- External adapters keep their protocol-specific ingestion but converge on the same semantic decisions and trust rules.
+- `webhook` remains compatible for existing settings, while all new configuration writes use `http`.
+
+## Primary sources
+
+- [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)
+- [Claude Agent SDK TypeScript](https://github.com/anthropics/claude-agent-sdk-typescript)
+- [Codex advanced configuration: hooks](https://developers.openai.com/codex/config-advanced/#hooks)
+- [OpenAI Codex](https://github.com/openai/codex)
+- [OpenCode](https://github.com/anomalyco/opencode)

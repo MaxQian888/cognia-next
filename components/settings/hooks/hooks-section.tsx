@@ -63,6 +63,10 @@ import {
 } from "@/lib/claude/settings"
 import type { HookEvent, HookGroup, HooksConfig } from "@/lib/claude/hooks"
 import {
+  knownHookRuntimeCapabilities,
+  type HookRuntimeCapabilities,
+} from "@/lib/claude/hooks/runtime-capabilities"
+import {
   HOOK_EVENTS,
   HOOK_EVENT_CATEGORIES,
   hookEventsByCategory,
@@ -97,9 +101,12 @@ const CATEGORY_ICONS: Record<HookEventCategory, ComponentType<LucideProps>> = {
 interface Props {
   /** Override for tests — when omitted, the project/local scopes use this cwd. */
   cwd?: string
+  runtimeCapabilities?: HookRuntimeCapabilities
 }
 
-export function HooksSection({ cwd }: Props) {
+const DEFAULT_RUNTIME_CAPABILITIES = knownHookRuntimeCapabilities("claude")
+
+export function HooksSection({ cwd, runtimeCapabilities = DEFAULT_RUNTIME_CAPABILITIES }: Props) {
   const t = useTranslations("settings.hooks")
   // Localized event labels / descriptions / category names live in the shared
   // `hooks` namespace (single catalog source), alongside the chat hook-notice.
@@ -481,6 +488,7 @@ export function HooksSection({ cwd }: Props) {
                   autoFocus={i === autoFocusIdx}
                   onChange={(next) => updateGroup(activeEvent, i, next)}
                   onRemove={() => removeGroup(activeEvent, i)}
+                  supportedHandlerTypes={runtimeCapabilities.handlerTypes}
                 />
               ))
             )}

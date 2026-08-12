@@ -82,6 +82,12 @@ import type {
   ExternalAgentCompactionOptions,
   ExternalAgentProviderUndoCapability,
 } from "./session-capabilities"
+import {
+  canonicalEventFromExternalEvent,
+  createEnvelopeSequencer,
+  redactAgentEventEnvelope,
+} from "@/lib/ai/agent/execution/event-envelope"
+import { appendCanonicalEnvelopes } from "@/lib/ai/agent/recovery/canonical-log"
 
 const externalAgentManagerLogger = loggers.agent.child("external-manager")
 
@@ -2071,6 +2077,16 @@ export class ExternalAgentManager {
 
     const session = await this.resolveExecutionSession(adapter, instance, options)
 
+    const canonicalRunId = options?.traceContext?.traceId ?? session.id
+    const canonicalEnvelope = createEnvelopeSequencer({
+      sessionId: session.id,
+      runId: canonicalRunId,
+      attemptId: options?.traceContext?.spanId ?? `external:${startTime}`,
+      hostRef: "external-agent-manager",
+      runtime: instance.config.protocol,
+      turnId: options?.traceContext?.turnId ?? `turn:${startTime}`,
+    })
+
     const effectivePermissionMode = this.resolveEffectivePermissionMode(
       instance,
       options?.permissionMode
@@ -2129,6 +2145,11 @@ export class ExternalAgentManager {
         }
 
         const event = nextResult.value
+        await appendCanonicalEnvelopes(canonicalRunId, [
+          redactAgentEventEnvelope(
+            canonicalEnvelope(canonicalEventFromExternalEvent(event as unknown as { type: string }))
+          ),
+        ])
         if (event.type === "session_start" && event.tools) {
           instance.tools = event.tools
         }

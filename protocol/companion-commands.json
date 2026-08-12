@@ -4658,6 +4658,19 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "fleet_question_reject",
+      "since": 1,
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "fleet_opencode_send_message",
       "target": "execution",
       "operation": "side-effect",

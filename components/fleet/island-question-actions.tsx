@@ -13,9 +13,9 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckIcon } from "lucide-react"
+import { CheckIcon, XIcon } from "lucide-react"
 import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
-import { fleetQuestionRespond } from "@/lib/tauri/fleet"
+import { fleetQuestionReject, fleetQuestionRespond } from "@/lib/tauri/fleet"
 import { truncateLine } from "@/lib/fleet/format"
 import {
   FLEET_PERMISSION_WAIT_MS,
@@ -40,6 +40,7 @@ export function IslandQuestionActions({
   const [selections, setSelections] = useState<number[][]>(() => questions.map(() => []))
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [rejected, setRejected] = useState(false)
 
   const remainingSec = useMemo(() => {
     const deadline = request.requestedAt + FLEET_PERMISSION_WAIT_MS
@@ -51,7 +52,7 @@ export function IslandQuestionActions({
     Math.max(0, (remainingSec * 1000) / FLEET_PERMISSION_WAIT_MS)
   )
 
-  const locked = submitting || submitted || expired
+  const locked = submitting || submitted || rejected || expired
 
   // `selections` is keyed to the request (island-row remounts on a new
   // requestId) and questions are stable within a request, so `selections[qi]`
@@ -84,6 +85,16 @@ export function IslandQuestionActions({
     try {
       const ok = await fleetQuestionRespond(request.requestId, selections)
       if (ok) setSubmitted(true)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const reject = async () => {
+    setSubmitting(true)
+    try {
+      const ok = await fleetQuestionReject(request.requestId)
+      if (ok) setRejected(true)
     } finally {
       setSubmitting(false)
     }
@@ -149,6 +160,10 @@ export function IslandQuestionActions({
           <span className="text-[11px] text-white/60" data-testid="question-submitted">
             {t("question.submitted")}
           </span>
+        ) : rejected ? (
+          <span className="text-[11px] text-white/60" data-testid="question-rejected">
+            {t("question.rejected")}
+          </span>
         ) : expired ? (
           <span className="text-[11px] text-white/40" data-testid="question-expired">
             {t("question.expired")}
@@ -161,20 +176,32 @@ export function IslandQuestionActions({
             >
               {t("permission.countdown", { seconds: remainingSec })}
             </span>
-            <button
-              type="button"
-              data-testid="question-submit"
-              disabled={submitting || !allAnswered}
-              onClick={() => void submit()}
-              className="rounded-md bg-amber-500/90 px-2 py-0.5 text-[11px] font-semibold text-slate-900 hover:bg-amber-400 disabled:opacity-50"
-            >
-              {t("question.submit")}
-            </button>
+            <span className="flex items-center gap-1">
+              <button
+                type="button"
+                data-testid="question-reject"
+                disabled={submitting}
+                onClick={() => void reject()}
+                className="inline-flex items-center gap-1 rounded-md bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white/70 hover:bg-white/20 disabled:opacity-50"
+              >
+                <XIcon className="size-2.5" aria-hidden />
+                {t("question.reject")}
+              </button>
+              <button
+                type="button"
+                data-testid="question-submit"
+                disabled={submitting || !allAnswered}
+                onClick={() => void submit()}
+                className="rounded-md bg-amber-500/90 px-2 py-0.5 text-[11px] font-semibold text-slate-900 hover:bg-amber-400 disabled:opacity-50"
+              >
+                {t("question.submit")}
+              </button>
+            </span>
           </>
         )}
       </div>
 
-      {!submitted && !expired ? (
+      {!submitted && !rejected && !expired ? (
         <div
           className="h-0.5 w-full overflow-hidden rounded-full bg-white/10"
           data-testid="question-progress-track"

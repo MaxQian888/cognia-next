@@ -44,7 +44,7 @@ const EVENT_META: Record<HookEvent, { category: HookEventCategory; dormant?: boo
   SessionStart: { category: "session" },
   SessionEnd: { category: "session" },
   UserPromptSubmit: { category: "session" },
-  UserPromptExpansion: { category: "session", dormant: true },
+  UserPromptExpansion: { category: "session" },
   Stop: { category: "session" },
   StopFailure: { category: "session" },
   Notification: { category: "session" },
@@ -52,25 +52,25 @@ const EVENT_META: Record<HookEvent, { category: HookEventCategory; dormant?: boo
   // permissions
   PermissionRequest: { category: "permissions" },
   PermissionDenied: { category: "permissions" },
-  Elicitation: { category: "permissions", dormant: true },
-  ElicitationResult: { category: "permissions", dormant: true },
+  Elicitation: { category: "permissions" },
+  ElicitationResult: { category: "permissions" },
   // tasks
   TaskCreated: { category: "tasks" },
   TaskCompleted: { category: "tasks" },
-  SubagentStop: { category: "tasks" },
   SubagentStart: { category: "tasks" },
-  TeammateIdle: { category: "tasks", dormant: true },
+  SubagentStop: { category: "tasks" },
+  TeammateIdle: { category: "tasks" },
   // lifecycle
   PreCompact: { category: "lifecycle" },
   PostCompact: { category: "lifecycle" },
-  WorktreeCreate: { category: "lifecycle", dormant: true },
-  WorktreeRemove: { category: "lifecycle", dormant: true },
-  FileChanged: { category: "lifecycle", dormant: true },
+  Setup: { category: "lifecycle" },
+  WorktreeCreate: { category: "lifecycle" },
+  WorktreeRemove: { category: "lifecycle" },
+  FileChanged: { category: "lifecycle" },
+  DirectoryAdded: { category: "lifecycle" },
   CwdChanged: { category: "lifecycle" },
   InstructionsLoaded: { category: "lifecycle" },
   ConfigChange: { category: "lifecycle" },
-  Setup: { category: "lifecycle" },
-  DirectoryAdded: { category: "lifecycle" },
 }
 
 /** Stable category order for the settings panel sections. */

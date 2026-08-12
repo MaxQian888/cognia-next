@@ -148,9 +148,10 @@ describe("fleetStatusSummary", () => {
         session({ status: "working" }),
         session({ status: "working" }),
         session({ status: "idle" }),
+        session({ status: "detached" }),
         session({ status: "ended" }),
       ])
-    ).toEqual({ attention: 3, working: 2, idle: 1, ended: 1, total: 7 })
+    ).toEqual({ attention: 3, working: 2, idle: 1, detached: 1, ended: 1, total: 8 })
   })
 
   it("is all-zero for an empty fleet", () => {
@@ -158,6 +159,7 @@ describe("fleetStatusSummary", () => {
       attention: 0,
       working: 0,
       idle: 0,
+      detached: 0,
       ended: 0,
       total: 0,
     })

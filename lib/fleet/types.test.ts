@@ -49,4 +49,57 @@ describe("fleet worker compatibility", () => {
     }
     expect(current.hosts?.[0]).toMatchObject({ hostRef: "device:a", usedSlots: 1 })
   })
+
+  it("accepts canonical lifecycle metadata and runtime-proven capabilities", () => {
+    const snapshot: import("./types").FleetSnapshot = {
+      sessions: [
+        {
+          agent: "cognia",
+          origin: "workflow",
+          lifecycleConfidence: "native",
+          sessionId: "session-1",
+          status: "detached",
+          cwd: null,
+          projectName: null,
+          lastPrompt: null,
+          activity: null,
+          permissionMode: null,
+          model: null,
+          terminal: null,
+          transcriptPath: null,
+          agentPid: null,
+          pendingPermission: null,
+          capabilities: { sendMessage: false, interrupt: false },
+          startedAt: 1,
+          lastEventAt: 2,
+          toolUseCount: 0,
+          turnCount: 0,
+        },
+      ],
+      runtimeCapabilities: [
+        {
+          agent: "opencode",
+          sendMessage: true,
+          interrupt: true,
+          answersQuestions: true,
+          interruptMode: "native-sdk",
+          questionMode: "native-sdk",
+          observedAt: 2,
+        },
+      ],
+      generatedAt: 2,
+    }
+
+    expect(snapshot.sessions[0]).toMatchObject({
+      agent: "cognia",
+      origin: "workflow",
+      lifecycleConfidence: "native",
+      status: "detached",
+    })
+    expect(snapshot.runtimeCapabilities?.[0]).toMatchObject({
+      agent: "opencode",
+      interrupt: true,
+      answersQuestions: true,
+    })
+  })
 })

@@ -18,7 +18,7 @@ use axum::{
 use std::net::SocketAddr;
 
 use super::registry::{FleetAgent, FleetEvent, RegistryEffect};
-use super::PermissionBehavior;
+use super::{PermissionBehavior, QuestionResponse};
 
 pub const FLEET_TOKEN_HEADER: &str = "x-cognia-fleet-token";
 
@@ -31,8 +31,12 @@ pub fn router() -> Router {
             post(opencode_commands_handler),
         )
         .route(
-            "/api/fleet/opencode/commands/ack",
-            post(opencode_commands_ack_handler),
+            "/api/v1/fleet/opencode/commands/ack",
+            post(opencode_command_ack_handler),
+        )
+        .route(
+            "/api/v1/fleet/opencode/commands/nack",
+            post(opencode_command_nack_handler),
         )
 }
 
@@ -41,38 +45,6 @@ pub fn router() -> Router {
 struct CommandPollBody {
     #[serde(default)]
     session_ids: Vec<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct CommandAckBody {
-    #[serde(default)]
-    command_ids: Vec<String>,
-}
-
-async fn opencode_commands_ack_handler(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-    Json(body): Json<CommandAckBody>,
-) -> Response {
-    if !addr.ip().is_loopback() {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    let runtime = super::runtime();
-    let presented = headers
-        .get(FLEET_TOKEN_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
-    if !runtime.token_matches(presented) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    match runtime.ack_opencode_commands(&body.command_ids) {
-        Ok(acked) => Json(serde_json::json!({ "acked": acked })).into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": error })),
-        )
-            .into_response(),
-    }
 }
 
 /// `POST /api/fleet/opencode/commands` — the OpenCode plugin long-polls for
@@ -94,10 +66,81 @@ async fn opencode_commands_handler(
     if !runtime.token_matches(presented) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let commands = runtime
+    match runtime
         .poll_opencode_commands(&body.session_ids, super::command_poll_wait_ms())
-        .await;
-    Json(serde_json::json!({ "commands": commands })).into_response()
+        .await
+    {
+        Ok(commands) => Json(serde_json::json!({ "commands": commands })).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": error })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommandAckBody {
+    id: String,
+    result: Option<serde_json::Value>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommandNackBody {
+    id: String,
+    error: String,
+}
+
+fn authorize_command_route(addr: SocketAddr, headers: &HeaderMap) -> Result<(), StatusCode> {
+    if !addr.ip().is_loopback() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let presented = headers
+        .get(FLEET_TOKEN_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !super::runtime().token_matches(presented) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    Ok(())
+}
+
+async fn opencode_command_ack_handler(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<CommandAckBody>,
+) -> Response {
+    if let Err(status) = authorize_command_route(addr, &headers) {
+        return status.into_response();
+    }
+    match super::runtime()
+        .ack_opencode_command(body.id, body.result)
+        .await
+    {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
+}
+
+async fn opencode_command_nack_handler(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<CommandNackBody>,
+) -> Response {
+    if let Err(status) = authorize_command_route(addr, &headers) {
+        return status.into_response();
+    }
+    match super::runtime()
+        .nack_opencode_command(body.id, body.error)
+        .await
+    {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
 }
 
 /// `POST /api/fleet/hook` — Claude/Codex hook envelope ingress.
@@ -159,10 +202,15 @@ async fn hook_handler(
                 .wait_for_question(&request_id, raw_questions, super::permission_wait_ms())
                 .await
             {
-                Some(updated_input) => match question_decision(agent, updated_input) {
-                    Some(decision) => Json(decision).into_response(),
-                    None => StatusCode::NO_CONTENT.into_response(),
-                },
+                Some(QuestionResponse::Answer(updated_input)) => {
+                    match question_decision(agent, updated_input) {
+                        Some(decision) => Json(decision).into_response(),
+                        None => StatusCode::NO_CONTENT.into_response(),
+                    }
+                }
+                Some(QuestionResponse::Reject) => {
+                    Json(permission_decision(agent, PermissionBehavior::Deny)).into_response()
+                }
                 None => StatusCode::NO_CONTENT.into_response(),
             }
         }
@@ -512,10 +560,13 @@ mod tests {
     #[tokio::test]
     async fn opencode_commands_poll_returns_queued_command() {
         let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let tmp = tempfile::tempdir().unwrap();
         let token = arm("routes-cmd-drain-token");
         let rt = runtime();
-        rt.take_opencode_commands(&["route-cmd-sess".into()]);
-        rt.queue_opencode_command("route-cmd-sess".into(), "please continue".into())
+        rt.replace_opencode_outbox_for_tests(tmp.path().join("commands.json"));
+        let command_id = rt
+            .queue_opencode_command("route-cmd-sess".into(), "please continue".into())
+            .await
             .unwrap();
 
         let resp = router()
@@ -540,6 +591,86 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(json["commands"][0]["sessionId"], "route-cmd-sess");
         assert_eq!(json["commands"][0]["text"], "please continue");
+
+        let ack = router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/fleet/opencode/commands/ack")
+                    .header("content-type", "application/json")
+                    .header(FLEET_TOKEN_HEADER, &token)
+                    .extension(loopback_peer())
+                    .body(axum::body::Body::from(
+                        serde_json::json!({"id": command_id, "result": {"ok": true}}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ack.status(), StatusCode::NO_CONTENT);
+        assert!(rt
+            .take_opencode_commands(vec!["route-cmd-sess".into()])
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn opencode_command_settlement_requires_auth_and_nack_redelivers() {
+        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let token = arm("routes-cmd-settle-token");
+        let rt = runtime();
+        rt.replace_opencode_outbox_for_tests(tmp.path().join("commands.json"));
+        let id = rt
+            .queue_opencode_command("route-nack-sess".into(), "retry".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rt.take_opencode_commands(vec!["route-nack-sess".into()])
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let request = |peer: ConnectInfo<SocketAddr>, token: Option<&str>| {
+            let mut builder = axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/v1/fleet/opencode/commands/nack")
+                .header("content-type", "application/json");
+            if let Some(token) = token {
+                builder = builder.header(FLEET_TOKEN_HEADER, token);
+            }
+            builder
+                .extension(peer)
+                .body(axum::body::Body::from(
+                    serde_json::json!({"id": id, "error": "offline"}).to_string(),
+                ))
+                .unwrap()
+        };
+
+        let forbidden = router()
+            .oneshot(request(lan_peer(), Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+        let unauthorized = router()
+            .oneshot(request(loopback_peer(), Some("wrong")))
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        let nacked = router()
+            .oneshot(request(loopback_peer(), Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(nacked.status(), StatusCode::NO_CONTENT);
+        let redelivered = rt
+            .take_opencode_commands(vec!["route-nack-sess".into()])
+            .await
+            .unwrap();
+        assert_eq!(redelivered.len(), 1);
+        assert_eq!(redelivered[0].last_error.as_deref(), Some("offline"));
     }
 
     #[test]
@@ -584,6 +715,6 @@ mod tests {
         let updated = serde_json::json!({ "questions": [], "answers": {} });
         assert!(question_decision(FleetAgent::ClaudeCode, updated.clone()).is_some());
         assert!(question_decision(FleetAgent::Codex, updated.clone()).is_some());
-        assert!(question_decision(FleetAgent::Opencode, updated).is_none());
+        assert!(question_decision(FleetAgent::Opencode, updated).is_some());
     }
 }

@@ -9,8 +9,12 @@
       "brainVersion": "0.1.0",
       "protocol": 3,
       "accountId": "local_acct_a",
-      "capabilities": ["sync", "messages", "writes"],
-      "catalogHash": "f88a74f52d6325ff6603320907b6084d33574095824fbe719e405508168d4802",
+      "capabilities": [
+        "sync",
+        "messages",
+        "writes"
+      ],
+      "catalogHash": "905f109efefada0bc04a5c07e5c1fa3d79882bec53edc58d412721454f3f0600",
       "contractVersion": 1
     },
     "helloAck": {
@@ -19,7 +23,7 @@
       "serverVersion": "0.9.0",
       "protocol": 3,
       "accountId": "local_acct_a",
-      "catalogHash": "f88a74f52d6325ff6603320907b6084d33574095824fbe719e405508168d4802",
+      "catalogHash": "905f109efefada0bc04a5c07e5c1fa3d79882bec53edc58d412721454f3f0600",
       "contractVersion": 1
     },
     "eventSyncPull": {

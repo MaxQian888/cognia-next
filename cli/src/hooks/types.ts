@@ -21,6 +21,8 @@ export type HookEvent =
   | "PostToolUse"
   | "UserPromptSubmit"
   | "Stop"
+  | "Setup"
+  | "SubagentStart"
   | "SubagentStop"
   | "SessionStart"
   | "SessionEnd"
@@ -34,6 +36,7 @@ export type HookEvent =
   | "WorktreeCreate"
   | "WorktreeRemove"
   | "FileChanged"
+  | "DirectoryAdded"
   | "CwdChanged"
   | "InstructionsLoaded"
   | "ConfigChange"
@@ -44,9 +47,6 @@ export type HookEvent =
   | "StopFailure"
   | "TeammateIdle"
   | "UserPromptExpansion"
-  | "Setup"
-  | "SubagentStart"
-  | "DirectoryAdded"
   | "MessageDisplay"
 
 /** Every recognized {@link HookEvent} name, for runtime validation. */
@@ -55,6 +55,8 @@ export const HOOK_EVENTS: readonly HookEvent[] = [
   "PostToolUse",
   "UserPromptSubmit",
   "Stop",
+  "Setup",
+  "SubagentStart",
   "SubagentStop",
   "SessionStart",
   "SessionEnd",
@@ -68,6 +70,7 @@ export const HOOK_EVENTS: readonly HookEvent[] = [
   "WorktreeCreate",
   "WorktreeRemove",
   "FileChanged",
+  "DirectoryAdded",
   "CwdChanged",
   "InstructionsLoaded",
   "ConfigChange",
@@ -78,9 +81,6 @@ export const HOOK_EVENTS: readonly HookEvent[] = [
   "StopFailure",
   "TeammateIdle",
   "UserPromptExpansion",
-  "Setup",
-  "SubagentStart",
-  "DirectoryAdded",
   "MessageDisplay",
 ]
 
@@ -136,10 +136,10 @@ const httpHandlerSchema = z
     type: z.literal("http"),
     url: z.string(),
     headers: z.record(z.string(), z.string()).optional(),
+    allowedEnvVars: z.array(z.string()).optional(),
     timeout: z.number().optional(),
   })
   .passthrough()
-
 /** Unknown handler `type` — preserved verbatim, inert at run time. */
 const otherHandlerSchema = z.object({ type: z.string() }).passthrough()
 

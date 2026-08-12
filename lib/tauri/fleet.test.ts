@@ -27,9 +27,12 @@ import {
   fleetCodexHooksInstall,
   fleetCodexHooksUninstall,
   fleetCodexHooksStatus,
+  fleetCodexHooksCapabilities,
   fleetCodexUninstall,
   fleetOpencodeInstall,
   fleetOpencodeStatus,
+  fleetOpencodeOutboxStatus,
+  fleetOpencodeOutboxRepair,
   fleetOpencodeUninstall,
   fleetOpencodeSendMessage,
   fleetFocusTerminal,
@@ -40,6 +43,7 @@ import {
   fleetMonitorStop,
   fleetPermissionRespond,
   fleetQuestionRespond,
+  fleetQuestionReject,
   fleetRevealTranscript,
   islandListMonitors,
   fleetInterruptSession,
@@ -75,6 +79,7 @@ describe("off Tauri (web)", () => {
     expect(await fleetGetSnapshot()).toEqual({ sessions: [], generatedAt: 0 })
     expect(await fleetPermissionRespond("r", "allow")).toBe(false)
     expect(await fleetQuestionRespond("r", [[0]])).toBe(false)
+    expect(await fleetQuestionReject("r")).toBe(false)
     expect(await fleetFocusTerminal("claude-code", "s")).toBe(false)
     expect(await fleetCodexStatus()).toEqual({
       status: "unavailable",
@@ -94,9 +99,25 @@ describe("off Tauri (web)", () => {
     expect(await fleetCodexHooksStatus()).toBe("unavailable")
     expect(await fleetCodexHooksInstall()).toBe("unavailable")
     expect(await fleetCodexHooksUninstall()).toBe("unavailable")
+    expect(await fleetCodexHooksCapabilities()).toEqual({
+      state: "degraded",
+      ceilingEvents: [],
+      effectiveEvents: [],
+      diagnostic: null,
+    })
     expect(await fleetOpencodeStatus()).toEqual({ status: "unavailable", pluginPath: null })
     expect(await fleetOpencodeInstall()).toEqual({ status: "unavailable", pluginPath: null })
     expect(await fleetOpencodeUninstall()).toEqual({ status: "unavailable", pluginPath: null })
+    expect(await fleetOpencodeOutboxStatus()).toEqual({
+      health: "unavailable",
+      path: null,
+      error: null,
+    })
+    expect(await fleetOpencodeOutboxRepair()).toEqual({
+      health: "unavailable",
+      path: null,
+      error: null,
+    })
     expect(await fleetOpencodeSendMessage("s", "hi")).toBeNull()
     expect(await openIslandWindow()).toBe(false)
     expect(await closeIslandWindow()).toBe(false)
@@ -161,6 +182,14 @@ describe("on Tauri", () => {
     })
   })
 
+  it("passes question rejection through", async () => {
+    invokeMock.mockResolvedValue(true)
+    expect(await fleetQuestionReject("req-3")).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_question_reject", {
+      requestId: "req-3",
+    })
+  })
+
   it("passes Codex integration calls through", async () => {
     const status = { status: "installed", configPath: "/c", scriptPath: "/s" }
     invokeMock.mockResolvedValue(status)
@@ -172,6 +201,15 @@ describe("on Tauri", () => {
     expect(invokeMock).toHaveBeenCalledWith("fleet_codex_status")
   })
 
+  it("diagnoses and repairs the OpenCode durable command queue", async () => {
+    const status = { health: "healthy", path: "/tmp/outbox.json", error: null }
+    invokeMock.mockResolvedValue(status)
+    await expect(fleetOpencodeOutboxStatus()).resolves.toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_opencode_outbox_status")
+    await expect(fleetOpencodeOutboxRepair()).resolves.toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_opencode_outbox_repair")
+  })
+
   it("passes Codex hooks calls through", async () => {
     invokeMock.mockResolvedValue("installed")
     expect(await fleetCodexHooksInstall()).toBe("installed")
@@ -180,6 +218,18 @@ describe("on Tauri", () => {
     expect(invokeMock).toHaveBeenCalledWith("fleet_codex_hooks_uninstall")
     expect(await fleetCodexHooksStatus()).toBe("installed")
     expect(invokeMock).toHaveBeenCalledWith("fleet_codex_hooks_status")
+  })
+
+  it("returns the runtime-probed Codex hook capability report", async () => {
+    const report = {
+      state: "probed",
+      ceilingEvents: ["SessionStart", "SessionEnd"],
+      effectiveEvents: ["SessionStart"],
+      diagnostic: null,
+    }
+    invokeMock.mockResolvedValue(report)
+    await expect(fleetCodexHooksCapabilities()).resolves.toEqual(report)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_codex_hooks_capabilities")
   })
 
   it("surfaces the stale hooks state verbatim", async () => {

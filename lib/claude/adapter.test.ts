@@ -515,6 +515,18 @@ describe("applySdkEvent — hook fire", () => {
     expect(part.outcome).toBe("warning")
     expect(part.warnings).toEqual([])
   })
+
+  it("keeps hook audit events out of the transcript without completing the turn", () => {
+    const existing = [{ id: "u1", role: "user", parts: [] }] as unknown as UIMessage[]
+    const result = applySdkEvent(existing, {
+      type: "system",
+      subtype: "hook_audit",
+      session_id: "session-1",
+    } as unknown as SDKResultMessage)
+
+    expect(result.messages).toBe(existing)
+    expect(result.turnComplete).toBe(false)
+  })
 })
 
 describe("applySdkEvent — permission denied dedup", () => {

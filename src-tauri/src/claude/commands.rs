@@ -435,8 +435,6 @@ pub async fn claude_send_with_host(
         .get("cwd")
         .and_then(|v| v.as_str())
         .map(String::from);
-    // Remember the send-time cwd so the sidecar's lifecycle-hook observer can
-    // resolve project/local-scope settings for this session's later events.
     // Project/local hooks load only for a trusted cwd; untrusted → user scope.
     let trusted_cwd = hooks::trust::resolve_trusted_cwd(cwd.as_deref());
     let settings = hooks::load_effective_settings(trusted_cwd.as_deref());

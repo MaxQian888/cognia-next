@@ -12,7 +12,7 @@
 
 import { useSyncExternalStore } from "react"
 import { isTauri } from "@/lib/tauri"
-import { fleetStreamStore } from "@/lib/fleet/fleet-stream-store"
+import { unifiedFleetStore } from "@/lib/fleet/unified-fleet-store"
 import type { FleetSnapshot } from "@/lib/fleet/types"
 
 export interface UseFleetStreamResult {
@@ -24,9 +24,9 @@ export interface UseFleetStreamResult {
 export function useFleetStream(): UseFleetStreamResult {
   const available = isTauri()
   const snapshot = useSyncExternalStore(
-    fleetStreamStore.subscribe,
-    fleetStreamStore.getSnapshot,
-    fleetStreamStore.getServerSnapshot
+    unifiedFleetStore.subscribe,
+    unifiedFleetStore.getSnapshot,
+    unifiedFleetStore.getServerSnapshot
   )
   return { snapshot, available }
 }

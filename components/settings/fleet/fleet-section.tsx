@@ -50,6 +50,7 @@ import {
 } from "@/components/ui/select"
 import {
   closeIslandWindow,
+  fleetCodexHooksCapabilities,
   fleetCodexHooksInstall,
   fleetCodexHooksStatus,
   fleetCodexHooksUninstall,
@@ -59,6 +60,8 @@ import {
   fleetMonitorStatus,
   fleetMonitorStop,
   fleetOpencodeInstall,
+  fleetOpencodeOutboxRepair,
+  fleetOpencodeOutboxStatus,
   fleetOpencodeStatus,
   fleetOpencodeUninstall,
   islandDebugGeometry,
@@ -69,8 +72,10 @@ import {
   islandSetMonitor,
   openIslandWindow,
   type CodexHooksStatus,
+  type CodexHookCapabilityReport,
   type IslandMonitorInfo,
   type OpencodeStatus,
+  type OpencodeOutboxStatus,
 } from "@/lib/tauri/fleet"
 import { subscribeClaudeSettings } from "@/lib/claude/settings"
 import {
@@ -90,13 +95,25 @@ export function FleetSection() {
   // Liveness rides the same snapshot stream the island uses — no second poll.
   const { snapshot } = useFleetSnapshot()
   const livenessFor = (agent: string) => snapshot.liveness?.find((l) => l.agent === agent)
+  const opencodeCapabilities = snapshot.runtimeCapabilities?.find(
+    (capability) => capability.agent === "opencode"
+  )
+  const opencodeCapabilityState = !opencodeCapabilities
+    ? "unproven"
+    : opencodeCapabilities.sendMessage &&
+        opencodeCapabilities.interrupt &&
+        opencodeCapabilities.answersQuestions
+      ? "proven"
+      : "degraded"
   const [loaded, setLoaded] = useState(false)
   const [monitorEnabled, setMonitorEnabled] = useState(false)
   const [monitorPort, setMonitorPort] = useState<number | null>(null)
   const [installState, setInstallState] = useState<FleetHooksInstallState>("not-installed")
   const [scriptStale, setScriptStale] = useState(false)
   const [codexStatus, setCodexStatus] = useState<CodexHooksStatus>("not-installed")
+  const [codexCapabilities, setCodexCapabilities] = useState<CodexHookCapabilityReport | null>(null)
   const [opencodeStatus, setOpencodeStatus] = useState<OpencodeStatus>("not-installed")
+  const [opencodeOutbox, setOpencodeOutbox] = useState<OpencodeOutboxStatus | null>(null)
   const [islandOpen, setIslandOpen] = useState(false)
   const [islandMonitors, setIslandMonitors] = useState<IslandMonitorInfo[]>([])
   const [islandHideOnFullscreen, setIslandHideOnFullscreen] = useState(false)
@@ -107,23 +124,36 @@ export function FleetSection() {
   // stay on the right side of the effect's await boundary.
   const fetchStatus = useCallback(async () => {
     try {
-      const [monitor, hooks, codex, opencode, island, monitors, hideOnFullscreen] =
-        await Promise.all([
-          fleetMonitorStatus(),
-          readFleetHooksStatus(),
-          fleetCodexHooksStatus(),
-          fleetOpencodeStatus(),
-          isIslandWindowOpen(),
-          islandListMonitors(),
-          islandGetHideOnFullscreen(),
-        ])
+      const [
+        monitor,
+        hooks,
+        codex,
+        codexProbe,
+        opencode,
+        outbox,
+        island,
+        monitors,
+        hideOnFullscreen,
+      ] = await Promise.all([
+        fleetMonitorStatus(),
+        readFleetHooksStatus(),
+        fleetCodexHooksStatus(),
+        fleetCodexHooksCapabilities(),
+        fleetOpencodeStatus(),
+        fleetOpencodeOutboxStatus(),
+        isIslandWindowOpen(),
+        islandListMonitors(),
+        islandGetHideOnFullscreen(),
+      ])
       return {
         monitorEnabled: monitor.enabled,
         monitorPort: monitor.port,
         installState: hooks.install,
         scriptStale: hooks.scripts.claudeScript === "stale",
         codexStatus: codex,
+        codexCapabilities: codexProbe,
         opencodeStatus: opencode.status,
+        opencodeOutbox: outbox,
         islandOpen: island,
         islandMonitors: monitors,
         islandHideOnFullscreen: hideOnFullscreen,
@@ -141,7 +171,9 @@ export function FleetSection() {
       setInstallState(s.installState)
       setScriptStale(s.scriptStale)
       setCodexStatus(s.codexStatus)
+      setCodexCapabilities(s.codexCapabilities)
       setOpencodeStatus(s.opencodeStatus)
+      setOpencodeOutbox(s.opencodeOutbox)
       setIslandOpen(s.islandOpen)
       setIslandMonitors(s.islandMonitors)
       setIslandHideOnFullscreen(s.islandHideOnFullscreen)
@@ -251,6 +283,21 @@ export function FleetSection() {
     },
     [busy, refresh, t]
   )
+
+  const repairOpencodeOutbox = useCallback(async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const status = await fleetOpencodeOutboxRepair()
+      setOpencodeOutbox(status)
+      toast.success(t("opencode.outbox.repaired"))
+    } catch (error) {
+      log.error("opencode_outbox_repair_failed", { error: String(error) })
+      toast.error(t("error", { detail: String(error) }))
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, t])
 
   const toggleOpencode = useCallback(
     async (next: boolean) => {
@@ -500,6 +547,19 @@ export function FleetSection() {
                 liveness={livenessFor("codex")}
                 installed={codexStatus === "installed" || codexStatus === "stale"}
               />
+              {codexStatus === "installed" ? (
+                <Badge
+                  variant={codexCapabilities?.state === "probed" ? "default" : "outline"}
+                  className="h-4 px-1.5 text-[10px]"
+                  data-testid={`fleet-codex-capabilities-${codexCapabilities?.state ?? "degraded"}`}
+                >
+                  {t(
+                    codexCapabilities?.state === "probed"
+                      ? "capabilities.proven"
+                      : "capabilities.degraded"
+                  )}
+                </Badge>
+              ) : null}
             </div>
             <p className="text-[11px] text-muted-foreground">{t("codex.desc")}</p>
             {codexStatus === "installed" || codexStatus === "stale" ? (
@@ -535,8 +595,39 @@ export function FleetSection() {
                   {t(`status.${opencodeBadge.key}`)}
                 </Badge>
               ) : null}
+              <AgentLivenessChip
+                agent="opencode"
+                liveness={livenessFor("opencode")}
+                installed={opencodeStatus === "installed" || opencodeStatus === "stale"}
+              />
+              {opencodeStatus === "installed" ? (
+                <Badge
+                  variant={opencodeCapabilityState === "proven" ? "default" : "outline"}
+                  className="h-4 px-1.5 text-[10px]"
+                  data-testid={`fleet-opencode-capabilities-${opencodeCapabilityState}`}
+                >
+                  {t(`capabilities.${opencodeCapabilityState}`)}
+                </Badge>
+              ) : null}
             </div>
             <p className="text-[11px] text-muted-foreground">{t("opencode.desc")}</p>
+            {opencodeOutbox && opencodeOutbox.health !== "healthy" ? (
+              <div className="flex items-center gap-2" data-testid="fleet-opencode-outbox-warning">
+                <p className="text-[11px] text-destructive">
+                  {t(`opencode.outbox.${opencodeOutbox.health}`)}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || opencodeOutbox.path === null}
+                  onClick={() => void repairOpencodeOutbox()}
+                  data-testid="fleet-opencode-outbox-repair"
+                >
+                  {t("opencode.outbox.repair")}
+                </Button>
+              </div>
+            ) : null}
           </div>
           <Switch
             id="fleet-opencode"

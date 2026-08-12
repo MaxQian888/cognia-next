@@ -8,6 +8,7 @@ import {
   HOOK_PII_BLOCK_REASON,
   SUPPORTED_EVENTS,
   buildAgentHooks,
+  buildHookAuditPayload,
   buildHookFirePayload,
   extractDecision,
   hookFireOutcome,
@@ -218,14 +219,52 @@ test("runWebhookHandler: 2xx JSON body parsed, non-2xx warns", async () => {
   }
 })
 
-test("runWebhookHandler: refuses a PII-bearing lifecycle payload before fetch", async () => {
-  const out = await runWebhookHandler(
-    "http://127.0.0.1:1/unreachable",
-    undefined,
-    5,
-    JSON.stringify({ prompt: "email alice@example.com" })
-  )
-  assert.deepEqual(out, { block: HOOK_PII_BLOCK_REASON })
+test("runWebhookHandler: redacts a PII-bearing lifecycle payload before fetch", async () => {
+  let received = ""
+  const server = http.createServer((req, res) => {
+    req.on("data", (chunk) => (received += chunk))
+    req.on("end", () => {
+      res.writeHead(204)
+      res.end()
+    })
+  })
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const { port } = server.address()
+  try {
+    const out = await runWebhookHandler(
+      `http://127.0.0.1:${port}/hook`,
+      undefined,
+      5,
+      JSON.stringify({ prompt: "email alice@example.com" })
+    )
+    assert.equal(out.block, undefined)
+    assert.doesNotMatch(received, /alice@example\.com/)
+    assert.match(received, /<EMAIL_001>/)
+  } finally {
+    server.close()
+  }
+})
+
+test("runGroups: canonical http handler executes like the legacy webhook alias", async () => {
+  let calls = 0
+  const server = http.createServer((_req, res) => {
+    calls += 1
+    res.writeHead(204)
+    res.end()
+  })
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const { port } = server.address()
+  try {
+    const dec = await runGroups(
+      [{ hooks: [{ type: "http", url: `http://127.0.0.1:${port}/hook` }] }],
+      "",
+      "{}"
+    )
+    assert.equal(dec.block, undefined)
+    assert.equal(calls, 1)
+  } finally {
+    server.close()
+  }
 })
 
 test("runGroups: executes the canonical http handler spelling", async () => {
@@ -266,7 +305,7 @@ test("runGroups: matcher filters, block short-circuits later handlers", async ()
   assert.equal(dec.additionalContext, undefined)
 })
 
-test("runGroups: unsupported handler types emit actionable diagnostics", async () => {
+test("runGroups: missing native adapters warn while unknown handler types stay inert", async () => {
   const dec = await runGroups(
     [
       {
@@ -283,10 +322,9 @@ test("runGroups: unsupported handler types emit actionable diagnostics", async (
   )
   assert.equal(dec.block, undefined)
   assert.deepEqual(dec.warnings, [
-    "unsupported hook handler type: prompt",
-    "unsupported hook handler type: mcp_tool",
-    "unsupported hook handler type: agent",
-    "unsupported hook handler type: mystery",
+    "hook prompt runtime adapter unavailable",
+    "hook mcp_tool runtime adapter unavailable",
+    "hook agent runtime adapter unavailable",
   ])
 })
 
@@ -516,6 +554,120 @@ test("runGroups: handlers run in parallel but merge deterministically in config 
   assert.ok(Date.now() - started < 5000)
 })
 
+test("runGroups: model-backed handlers use the native adapter and parse decision output", async () => {
+  const seen = []
+  const dec = await runGroups(
+    [{ hooks: [{ type: "prompt", prompt: "review" }] }],
+    "",
+    '{"hook_event_name":"Stop"}',
+    undefined,
+    undefined,
+    {
+      hookDepth: 0,
+      executeNativeHandler: async (handler, payload, context) => {
+        seen.push({ handler, payload, context })
+        return { output: '{"additionalContext":"native"}' }
+      },
+    }
+  )
+  assert.equal(dec.additionalContext, "native")
+  assert.equal(seen[0].context.depth, 0)
+})
+
+test("runGroups: redacts lifecycle payloads before model-backed handlers", async () => {
+  let received = ""
+  await runGroups(
+    [{ hooks: [{ type: "prompt", prompt: "review" }] }],
+    "",
+    JSON.stringify({ email: "alice@example.com", safe: "ok" }),
+    undefined,
+    undefined,
+    {
+      executeNativeHandler: async (_handler, payload) => {
+        received = payload
+        return { output: "{}" }
+      },
+    }
+  )
+  assert.ok(!received.includes("alice@example.com"))
+  assert.match(received, /<EMAIL_001>/)
+})
+
+test("runGroups: managed hook failures fail closed while user hooks stay open", async () => {
+  const executeNativeHandler = async () => ({ warning: "provider unavailable" })
+  const managed = await runGroups(
+    [{ hooks: [{ type: "agent", prompt: "review", policyClass: "managed" }] }],
+    "",
+    "{}",
+    undefined,
+    undefined,
+    { executeNativeHandler }
+  )
+  const user = await runGroups(
+    [{ hooks: [{ type: "agent", prompt: "review" }] }],
+    "",
+    "{}",
+    undefined,
+    undefined,
+    { executeNativeHandler }
+  )
+  assert.match(managed.block, /Managed hook failed closed/)
+  assert.equal(user.block, undefined)
+  assert.deepEqual(user.warnings, ["provider unavailable"])
+})
+
+test("runGroups: a crashing native adapter follows the same failure policy", async () => {
+  const dec = await runGroups(
+    [{ hooks: [{ type: "prompt", prompt: "review" }] }],
+    "",
+    "{}",
+    undefined,
+    undefined,
+    {
+      executeNativeHandler: () => {
+        throw new Error("boom")
+      },
+    }
+  )
+  assert.deepEqual(dec.warnings, ["hook prompt failed: boom"])
+  assert.equal(dec.block, undefined)
+})
+
+test("buildAgentHooks emits a structured audit for each matched handler", async () => {
+  const audits = []
+  const map = buildAgentHooks(
+    { Stop: [{ hooks: [{ type: "prompt", prompt: "review", policyClass: "managed" }] }] },
+    {
+      sessionId: "sess",
+      emit() {},
+      emitAudit: (event) => audits.push(event),
+      executeNativeHandler: async () => ({ output: "{}" }),
+    }
+  )
+  await map.Stop[0].hooks[0]({ hook_event_name: "Stop" }, undefined, {})
+  assert.equal(audits.length, 1)
+  assert.equal(audits[0].event.subtype, "hook_audit")
+  assert.equal(audits[0].event.handlerType, "prompt")
+  assert.equal(audits[0].event.policyClass, "managed")
+  assert.equal(audits[0].event.outcome, "allowed")
+})
+
+test("buildHookAuditPayload creates a persistence-ready system event", () => {
+  const payload = buildHookAuditPayload("s", {
+    hookId: "h",
+    hookEvent: "Stop",
+    provider: "claude",
+    handlerType: "command",
+    policyClass: "user",
+    outcome: "allowed",
+    latencyMs: 2,
+    redacted: false,
+  })
+  assert.equal(payload.sessionId, "s")
+  assert.equal(payload.event.subtype, "hook_audit")
+  assert.equal(payload.event.latencyMs, 2)
+})
+
 // ---- full lifecycle coverage (SDK-parity plan §3) ---------------------------
 
 test("every SDK lifecycle event can be configured, not just the three tool ones", async () => {
@@ -546,13 +698,10 @@ test("hookMatchTarget reads each event's own discriminator", () => {
   assert.equal(hookMatchTarget("SessionStart", { tool_name: "Bash" }), "")
 })
 
-test("an event with no discriminator only matches an omitted or * matcher", () => {
-  // Returning the tool name for every event would have made `matcher: "Bash"`
-  // on `Stop` fire on every stop of a session that had ever run Bash.
-  assert.equal(hookMatchTarget("Stop", { tool_name: "Bash" }), "")
-  assert.equal(matcherMatches(undefined, ""), true)
-  assert.equal(matcherMatches("*", ""), true)
-  assert.equal(matcherMatches("Bash", ""), false)
+test("an event without matcher support ignores configured matchers", () => {
+  // Claude Code ignores matcher configuration for these lifecycle events.
+  // Returning null tells runGroups to execute the group unconditionally.
+  assert.equal(hookMatchTarget("Stop", { tool_name: "Bash" }), null)
 })
 
 test("a lifecycle event blocks and injects context through the generic mapping", () => {

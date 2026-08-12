@@ -31,33 +31,30 @@ const ALL_EVENTS: HookEvent[] = [
   "ElicitationResult",
   "TaskCreated",
   "TaskCompleted",
-  "SubagentStop",
   "SubagentStart",
+  "SubagentStop",
   "TeammateIdle",
   "PreCompact",
   "PostCompact",
+  "Setup",
   "WorktreeCreate",
   "WorktreeRemove",
   "FileChanged",
+  "DirectoryAdded",
   "CwdChanged",
   "InstructionsLoaded",
   "ConfigChange",
-  "Setup",
-  "DirectoryAdded",
 ]
 
-// The dormant set as it stood before the catalog folded it in.
-const DORMANT_EVENTS: HookEvent[] = [
-  "WorktreeCreate",
-  "WorktreeRemove",
-  "FileChanged",
-  "Elicitation",
-  "ElicitationResult",
-  "UserPromptExpansion",
-  "TeammateIdle",
-]
+const DORMANT_EVENTS: HookEvent[] = []
 
 describe("HOOK_EVENT_CATALOG", () => {
+  it("tracks the complete Claude Agent SDK 0.3.220 lifecycle surface", () => {
+    expect(HOOK_EVENTS).toHaveLength(31)
+    expect(HOOK_EVENTS).toEqual(
+      expect.arrayContaining(["Setup", "SubagentStart", "DirectoryAdded", "MessageDisplay"])
+    )
+  })
   it("contains every HookEvent exactly once", () => {
     expect(HOOK_EVENT_CATALOG).toHaveLength(ALL_EVENTS.length)
     const events = HOOK_EVENT_CATALOG.map((m) => m.event)
@@ -90,8 +87,8 @@ describe("isDormantEvent", () => {
     expect([...dormant].sort()).toEqual([...DORMANT_EVENTS].sort())
   })
 
-  it("returns true for a dormant event and false for an active one", () => {
-    expect(isDormantEvent("WorktreeCreate")).toBe(true)
+  it("marks SDK-native events active", () => {
+    expect(isDormantEvent("WorktreeCreate")).toBe(false)
     expect(isDormantEvent("PreToolUse")).toBe(false)
   })
 })

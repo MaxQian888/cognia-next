@@ -50,6 +50,10 @@ function session(over: Partial<FleetSession> = {}): FleetSession {
 }
 
 describe("MobileFleetRow", () => {
+  it("labels a session whose monitor is detached", () => {
+    render(<MobileFleetRow session={session({ status: "detached", activity: null })} />)
+    expect(screen.getByText("Monitoring detached")).toBeInTheDocument()
+  })
   it("renders project name, model chip, and a status line", () => {
     render(
       <MobileFleetRow

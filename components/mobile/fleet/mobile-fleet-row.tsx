@@ -30,6 +30,7 @@ const STATUS_DOT: Record<FleetStatus, string> = {
   "plan-pending": "bg-sky-500",
   "waiting-input": "bg-amber-500",
   idle: "bg-muted-foreground/40",
+  detached: "bg-slate-500/40",
   ended: "bg-muted-foreground/25",
 }
 
@@ -59,6 +60,8 @@ export function MobileFleetRow({ session }: { session: FleetSession }) {
         return t("status.waitingInput")
       case "ended":
         return t("status.ended")
+      case "detached":
+        return t("status.detached")
       case "idle":
         return activity ?? t("status.idle")
       case "working":

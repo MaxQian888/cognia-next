@@ -821,6 +821,9 @@
     "fleet_question_respond": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "fleet_question_reject": {
+      "$ref": "#/$defs/LegacyResult"
+    },
     "fs_copy_workspace_entry": {
       "$ref": "#/$defs/NullResult"
     },

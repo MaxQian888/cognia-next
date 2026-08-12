@@ -453,6 +453,7 @@ describe("IslandShell", () => {
           session({ sessionId: "a", status: "working" }),
           session({ sessionId: "b", status: "waiting-input" }),
           session({ sessionId: "c", status: "idle" }),
+          session({ sessionId: "d", status: "detached" }),
         ],
       }
       render(<IslandShell />)
@@ -467,6 +468,9 @@ describe("IslandShell", () => {
       )
       expect(screen.getByTestId("island-legend-idle").textContent).toContain(
         'legend.idle:{"count":1}'
+      )
+      expect(screen.getByTestId("island-legend-detached").textContent).toContain(
+        'legend.detached:{"count":1}'
       )
     })
 

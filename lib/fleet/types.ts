@@ -5,9 +5,16 @@
  */
 
 export type FleetAgent = "claude-code" | "codex" | "opencode" | "cognia"
+export type FleetOrigin = "built-in" | "team" | "workflow" | "external"
 
 export type FleetStatus =
-  "idle" | "working" | "waiting-input" | "waiting-permission" | "plan-pending" | "ended"
+  | "idle"
+  | "working"
+  | "waiting-input"
+  | "waiting-permission"
+  | "plan-pending"
+  | "detached"
+  | "ended"
 
 export type TerminalAppId =
   | "iterm"
@@ -38,8 +45,9 @@ export interface FleetCapabilities {
   /**
    * Whether the island may interrupt this session's current turn. Narrowed hard
    * by Rust: needs a known agent pid, a live (non-ended) session, and a platform
-   * where a single SIGINT means "cancel the turn" — so it is false on Windows
-   * and for OpenCode (one server process hosts every session).
+   * where the integration has a verified per-session interrupt path. Process
+   * signaling is disabled for OpenCode's shared server; its native SDK control
+   * is enabled only after the runtime capability probe succeeds.
    */
   interrupt: boolean
 }
@@ -91,6 +99,8 @@ export interface FleetSubagent {
   /** True for run_in_background tasks, which outlive their tool call. */
   background: boolean
   startedAt: number
+  /** Native provider event or Task-tool heuristic. */
+  lifecycleConfidence?: "native" | "inferred"
 }
 
 /** Whether an error came from a single tool call or a failed turn. */
@@ -110,6 +120,10 @@ export interface FleetError {
 
 export interface FleetSession {
   agent: FleetAgent
+  /** Execution-authority origin. Legacy external snapshots omit this field. */
+  origin?: FleetOrigin
+  /** Whether lifecycle came from a native canonical event or a heuristic. */
+  lifecycleConfidence?: "native" | "inferred"
   sessionId: string
   status: FleetStatus
   cwd: string | null
@@ -188,12 +202,25 @@ export interface AgentLiveness {
   acceptedCount: number
 }
 
+/** Runtime-proven provider controls, intersected with the static manifest. */
+export interface AgentRuntimeCapabilities {
+  agent: FleetAgent
+  sendMessage: boolean
+  interrupt: boolean
+  answersQuestions: boolean
+  interruptMode?: string
+  questionMode?: string
+  observedAt: number
+}
+
 export interface FleetSnapshot {
   sessions: FleetSession[]
   /** Optional for snapshots produced before worker-dispatch v1. */
   hosts?: FleetHost[]
   /** Present for every agent that has sent an event this process lifetime. */
   liveness?: AgentLiveness[]
+  /** Missing means the runtime has not proven its native SDK controls yet. */
+  runtimeCapabilities?: AgentRuntimeCapabilities[]
   generatedAt: number
 }
 

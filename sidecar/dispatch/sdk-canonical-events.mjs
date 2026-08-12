@@ -510,6 +510,26 @@ function fromSystem(evt) {
         }),
       ]
 
+    case "hook_audit":
+      return [
+        compact({
+          kind: "hook",
+          phase: "completed",
+          hookId: String(evt.hookId ?? ""),
+          hookName: String(evt.handlerType ?? "unknown"),
+          hookEvent: String(evt.hookEvent ?? ""),
+          outcome: evt.outcome === "blocked" || evt.outcome === "warning" ? "error" : "success",
+          blocked: evt.outcome === "blocked" ? true : undefined,
+          blockReason: asString(evt.blockReason),
+          provider: asString(evt.provider),
+          handlerType: asString(evt.handlerType),
+          policyClass: evt.policyClass === "managed" ? "managed" : "user",
+          latencyMs: asNumber(evt.latencyMs),
+          redacted: evt.redacted === true ? true : undefined,
+          error: asString(evt.error),
+        }),
+      ]
+
     // `hook_fire` is synthesized by the Rust hook runtime, not the SDK
     // (src-tauri/src/claude/sidecar.rs:emit_hook_fire), so it is not in the
     // union the gate checks — but it rides the same channel and must map.

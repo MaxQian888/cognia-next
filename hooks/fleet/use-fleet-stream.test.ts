@@ -14,6 +14,11 @@ jest.mock("@/lib/tauri/fleet", () => ({
   fleetGetSnapshot: () => snapshotMock(),
 }))
 
+const canonicalUnlistenMock = jest.fn()
+jest.mock("@/lib/claude/ipc", () => ({
+  subscribeAgentEvents: () => Promise.resolve(canonicalUnlistenMock),
+}))
+
 type Handler = (e: { payload: unknown }) => void
 const handlers = new Map<string, Handler>()
 const unlistenSpies = new Map<string, jest.Mock>()
@@ -37,6 +42,7 @@ jest.mock("@tauri-apps/api/event", () => ({
 import { useFleetStream } from "./use-fleet-stream"
 import { fleetStreamStore } from "@/lib/fleet/fleet-stream-store"
 import { FLEET_UPDATE_EVENT } from "@/lib/fleet/types"
+import { unifiedFleetStore } from "@/lib/fleet/unified-fleet-store"
 
 function snap(generatedAt: number, ids: string[] = []) {
   return {
@@ -54,6 +60,7 @@ beforeEach(() => {
   isTauriMock.mockReturnValue(true)
   snapshotMock.mockResolvedValue(snap(0))
   // The store is module-level — drop cross-test listener/snapshot state.
+  unifiedFleetStore.resetForTests()
   fleetStreamStore.resetForTests()
 })
 
@@ -100,6 +107,7 @@ describe("useFleetStream", () => {
     await waitFor(() => expect(unlistenSpies.has(FLEET_UPDATE_EVENT)).toBe(true))
     unmount()
     expect(unlistenSpies.get(FLEET_UPDATE_EVENT)).toHaveBeenCalled()
+    expect(canonicalUnlistenMock).toHaveBeenCalled()
   })
 
   it("shares ONE Tauri listener across two concurrent consumers", async () => {

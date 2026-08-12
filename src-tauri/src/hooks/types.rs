@@ -16,6 +16,8 @@ pub enum HookEvent {
     PostToolUse,
     UserPromptSubmit,
     Stop,
+    Setup,
+    SubagentStart,
     SubagentStop,
     SessionStart,
     SessionEnd,
@@ -29,6 +31,7 @@ pub enum HookEvent {
     WorktreeCreate,
     WorktreeRemove,
     FileChanged,
+    DirectoryAdded,
     CwdChanged,
     InstructionsLoaded,
     ConfigChange,
@@ -39,9 +42,6 @@ pub enum HookEvent {
     StopFailure,
     TeammateIdle,
     UserPromptExpansion,
-    Setup,
-    SubagentStart,
-    DirectoryAdded,
     MessageDisplay,
 }
 
@@ -165,4 +165,39 @@ pub struct HookEventPayload {
     /// Free-form bag of event-specific fields (prompt text, tool name + input, etc.).
     #[serde(flatten)]
     pub fields: Value,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_new_sdk_events() {
+        for (name, expected) in [
+            ("Setup", HookEvent::Setup),
+            ("SubagentStart", HookEvent::SubagentStart),
+            ("DirectoryAdded", HookEvent::DirectoryAdded),
+            ("MessageDisplay", HookEvent::MessageDisplay),
+        ] {
+            let event: HookEvent = serde_json::from_value(Value::String(name.into())).unwrap();
+            assert_eq!(event, expected);
+        }
+    }
+
+    #[test]
+    fn deserializes_canonical_http_and_legacy_webhook_handlers() {
+        let http: HookHandler = serde_json::from_value(serde_json::json!({
+            "type": "http",
+            "url": "https://example.test/hook"
+        }))
+        .unwrap();
+        let webhook: HookHandler = serde_json::from_value(serde_json::json!({
+            "type": "webhook",
+            "url": "https://example.test/hook"
+        }))
+        .unwrap();
+
+        assert!(matches!(http, HookHandler::Http { .. }));
+        assert!(matches!(webhook, HookHandler::Webhook { .. }));
+    }
 }

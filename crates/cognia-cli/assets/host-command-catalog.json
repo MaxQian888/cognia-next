@@ -7479,6 +7479,47 @@
       "outputTyped": true
     },
     {
+      "name": "fleet_question_reject",
+      "category": "agents",
+      "resource": "fleet",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "fleet_question_reject (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "requestId"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
+        "x-cognia-schema-owner": "fleet"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "fleet_question_respond",
       "category": "agents",
       "resource": "fleet",
@@ -23350,5 +23391,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "f88a74f52d6325ff6603320907b6084d33574095824fbe719e405508168d4802"
+  "catalogHash": "905f109efefada0bc04a5c07e5c1fa3d79882bec53edc58d412721454f3f0600"
 }

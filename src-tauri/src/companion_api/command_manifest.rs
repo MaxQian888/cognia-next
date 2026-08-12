@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn shared_manifest_is_complete_and_validated() {
-        assert_eq!(commands().len(), 1049);
+        assert_eq!(commands().len(), 1050);
         assert_eq!(command_names().len(), commands().len());
         assert_eq!(DESCRIPTORS.len(), commands().len());
     }

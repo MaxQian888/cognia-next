@@ -4,7 +4,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { HookHandler } from "@/lib/claude/hooks"
-import { HookHandlerForm, validateHandler } from "./hook-handler-form"
+import { emptyHandlerForType, HookHandlerForm, validateHandler } from "./hook-handler-form"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -50,7 +50,7 @@ describe("HookHandlerForm", () => {
     expect((screen.getByTestId("handler-command") as HTMLTextAreaElement).value).toBe("echo hi")
   })
 
-  it("switching type from command to http resets fields to HTTP defaults", () => {
+  it("switching type from command to HTTP creates the canonical handler", () => {
     const onChange = jest.fn()
     render(
       <HookHandlerForm
@@ -65,13 +65,11 @@ describe("HookHandlerForm", () => {
       .closest("div")!
       .querySelector("button")!
     fireEvent.click(hiddenSelect)
-    // Radix select renders options to a portal; click the canonical HTTP option.
-    fireEvent.click(screen.getByText("typeHttp"))
+    fireEvent.click(screen.getByText("types.http"))
     expect(onChange).toHaveBeenCalledWith({
       type: "http",
       url: "",
       headers: {},
-      timeout: undefined,
     })
   })
 
@@ -253,21 +251,58 @@ describe("HookHandlerForm", () => {
 
     rerender(
       <HookHandlerForm
-        value={{ type: "webhook", url: "https://x.test" }}
-        onChange={() => undefined}
-        onRemove={() => undefined}
-      />
-    )
-    expect(screen.getByTestId("handler-http-capability")).toBeInTheDocument()
-
-    rerender(
-      <HookHandlerForm
         value={{ type: "http", url: "https://x.test" }}
         onChange={() => undefined}
         onRemove={() => undefined}
       />
     )
     expect(screen.getByTestId("handler-http-capability")).toBeInTheDocument()
+  })
+
+  it("limits the type selector to runtime-proven handler kinds", () => {
+    render(
+      <HookHandlerForm
+        value={{ type: "command", command: "echo hi" }}
+        onChange={() => undefined}
+        onRemove={() => undefined}
+        supportedHandlerTypes={["command", "http"]}
+      />
+    )
+    fireEvent.click(screen.getByTestId("handler-type-select"))
+    expect(screen.getAllByText("types.command")).toHaveLength(2)
+    expect(screen.getByText("types.http")).toBeInTheDocument()
+    expect(screen.queryByText("types.agent")).toBeNull()
+  })
+
+  it("edits MCP tool fields", () => {
+    const onChange = jest.fn()
+    render(
+      <HookHandlerForm
+        value={{ type: "mcp_tool", server: "policy", tool: "check", input: {} }}
+        onChange={onChange}
+        onRemove={() => undefined}
+      />
+    )
+    fireEvent.change(screen.getByTestId("handler-tool"), { target: { value: "scan" } })
+    expect(onChange).toHaveBeenCalledWith({
+      type: "mcp_tool",
+      server: "policy",
+      tool: "scan",
+      input: {},
+    })
+  })
+
+  it("edits prompt and agent handlers", () => {
+    const onChange = jest.fn()
+    render(
+      <HookHandlerForm
+        value={{ type: "agent", prompt: "inspect" }}
+        onChange={onChange}
+        onRemove={() => undefined}
+      />
+    )
+    fireEvent.change(screen.getByTestId("handler-prompt"), { target: { value: "audit" } })
+    expect(onChange).toHaveBeenCalledWith({ type: "agent", prompt: "audit" })
   })
 
   it("surfaces an inline error for an empty command", () => {
@@ -325,5 +360,27 @@ describe("validateHandler", () => {
   it("rejects a non-parseable or non-http(s) URL", () => {
     expect(validateHandler({ type: "webhook", url: "not a url" })).toBe("urlInvalid")
     expect(validateHandler({ type: "webhook", url: "ftp://example.com" })).toBe("urlInvalid")
+  })
+
+  it("validates MCP and model-backed handler requirements", () => {
+    expect(validateHandler({ type: "mcp_tool", server: "", tool: "scan" })).toBe("serverRequired")
+    expect(validateHandler({ type: "mcp_tool", server: "policy", tool: "" })).toBe("toolRequired")
+    expect(validateHandler({ type: "prompt", prompt: "" })).toBe("promptRequired")
+    expect(validateHandler({ type: "agent", prompt: "inspect" })).toBeNull()
+  })
+})
+
+describe("emptyHandlerForType", () => {
+  it("creates valid editable shapes for every runtime-proven handler type", () => {
+    expect(emptyHandlerForType("command")).toEqual({ type: "command", command: "" })
+    expect(emptyHandlerForType("http")).toEqual({ type: "http", url: "", headers: {} })
+    expect(emptyHandlerForType("mcp_tool")).toEqual({
+      type: "mcp_tool",
+      server: "",
+      tool: "",
+      input: {},
+    })
+    expect(emptyHandlerForType("prompt")).toEqual({ type: "prompt", prompt: "" })
+    expect(emptyHandlerForType("agent")).toEqual({ type: "agent", prompt: "" })
   })
 })

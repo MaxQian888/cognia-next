@@ -862,6 +862,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "fleet_remove_managed_session",
     "fleet_permission_respond",
     "fleet_question_respond",
+    "fleet_question_reject",
     "fleet_opencode_send_message",
     "fleet_focus_terminal",
     "fleet_interrupt_session",
@@ -1348,6 +1349,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     // controls above.
     "fleet_permission_respond",
     "fleet_question_respond",
+    "fleet_question_reject",
     "fleet_opencode_send_message",
     "fleet_focus_terminal",
     "fleet_interrupt_session",
