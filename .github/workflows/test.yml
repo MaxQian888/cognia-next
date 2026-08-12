@@ -65,7 +65,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
@@ -130,7 +130,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
@@ -253,7 +253,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
@@ -282,7 +282,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
@@ -313,13 +313,13 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
 
       - name: Cache Next.js build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .next/cache
@@ -372,7 +372,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
@@ -381,7 +381,7 @@ jobs:
       # changes the compiled output, so the two builds must not share
       # incremental state.
       - name: Cache Next.js build (E2E)
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .next/cache
@@ -432,7 +432,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
@@ -441,7 +441,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -515,7 +515,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
@@ -575,7 +575,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
@@ -623,7 +623,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
@@ -677,7 +677,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
       - name: Setup Node.js 26.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: "pnpm"
