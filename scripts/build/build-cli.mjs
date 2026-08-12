@@ -129,10 +129,17 @@ await esbuild.build({
 
 const launcherName = process.platform === "win32" ? "cognia-external-agent-launcher.exe" : "cognia-external-agent-launcher"
 const launcherSource = path.join(root, "target", "release", launcherName)
+const workspaceHelperName = process.platform === "win32" ? "cognia-task-workspace-worker.exe" : "cognia-task-workspace-worker"
+const workspaceHelperSource = path.join(root, "target", "release", workspaceHelperName)
 if (!fs.existsSync(launcherSource)) {
   throw new Error(`build-cli: missing ${path.relative(root, launcherSource)}; run pnpm cli:external-host:build`)
 }
 fs.copyFileSync(launcherSource, path.join(outdir, launcherName))
 if (process.platform !== "win32") fs.chmodSync(path.join(outdir, launcherName), 0o755)
+if (!fs.existsSync(workspaceHelperSource)) {
+  throw new Error(`build-cli: missing ${path.relative(root, workspaceHelperSource)}; run pnpm cli:worker-workspace:build`)
+}
+fs.copyFileSync(workspaceHelperSource, path.join(outdir, workspaceHelperName))
+if (process.platform !== "win32") fs.chmodSync(path.join(outdir, workspaceHelperName), 0o755)
 
 console.log(`build-cli: wrote ${path.relative(root, outdir)}/cognia-agent.js`)

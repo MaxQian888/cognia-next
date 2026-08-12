@@ -166,7 +166,17 @@ impl WorkspaceStore {
                    reason TEXT
                  );
                  CREATE INDEX IF NOT EXISTS idx_workspace_sensitive_audit_ws
-                   ON workspace_sensitive_audit(workspace_id, decided_at);",
+                   ON workspace_sensitive_audit(workspace_id, decided_at);
+                 CREATE TABLE IF NOT EXISTS workspace_source_bindings (
+                   binding_ref TEXT PRIMARY KEY,
+                   source_root TEXT NOT NULL,
+                   git_common_dir TEXT NOT NULL,
+                   repository_fingerprint TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
+                 );
+                 CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_source_binding_root
+                   ON workspace_source_bindings(source_root);",
             )
             .map_err(|error| format!("apply workspace registry migration: {error}"))
     }
@@ -819,6 +829,78 @@ impl WorkspaceStore {
             .map_err(|error| format!("delete workspace {workspace_id}: {error}"))
     }
 
+    pub fn put_workspace_source_binding(
+        &self,
+        binding: &crate::WorkspaceSourceBinding,
+    ) -> Result<(), String> {
+        self.connection
+            .execute(
+                "INSERT INTO workspace_source_bindings (
+                   binding_ref, source_root, git_common_dir, repository_fingerprint,
+                   created_at, updated_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6)
+                 ON CONFLICT(binding_ref) DO UPDATE SET
+                   source_root=excluded.source_root,
+                   git_common_dir=excluded.git_common_dir,
+                   repository_fingerprint=excluded.repository_fingerprint,
+                   updated_at=excluded.updated_at",
+                params![
+                    binding.binding_ref,
+                    binding.source_root,
+                    binding.git_common_dir,
+                    binding.repository_fingerprint,
+                    binding.created_at,
+                    binding.updated_at,
+                ],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("put workspace source binding: {error}"))
+    }
+
+    pub fn get_workspace_source_binding(
+        &self,
+        binding_ref: &str,
+    ) -> Result<Option<crate::WorkspaceSourceBinding>, String> {
+        self.connection
+            .query_row(
+                "SELECT binding_ref, source_root, git_common_dir, repository_fingerprint,
+                        created_at, updated_at
+                   FROM workspace_source_bindings WHERE binding_ref=?1",
+                [binding_ref],
+                map_workspace_source_binding_row,
+            )
+            .optional()
+            .map_err(|error| format!("get workspace source binding {binding_ref}: {error}"))
+    }
+
+    pub fn list_workspace_source_bindings(
+        &self,
+    ) -> Result<Vec<crate::WorkspaceSourceBinding>, String> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT binding_ref, source_root, git_common_dir, repository_fingerprint,
+                        created_at, updated_at
+                   FROM workspace_source_bindings ORDER BY binding_ref",
+            )
+            .map_err(|error| format!("prepare workspace source bindings: {error}"))?;
+        let rows = statement
+            .query_map([], map_workspace_source_binding_row)
+            .map_err(|error| format!("query workspace source bindings: {error}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read workspace source bindings: {error}"))
+    }
+
+    pub fn delete_workspace_source_binding(&self, binding_ref: &str) -> Result<bool, String> {
+        self.connection
+            .execute(
+                "DELETE FROM workspace_source_bindings WHERE binding_ref=?1",
+                [binding_ref],
+            )
+            .map(|changed| changed > 0)
+            .map_err(|error| format!("delete workspace source binding {binding_ref}: {error}"))
+    }
+
     /// Persist one root lease for a bundle.
     pub fn put_root_lease(
         &self,
@@ -999,6 +1081,19 @@ fn deserialize_enum<T: serde::de::DeserializeOwned>(
 
 /// Row-mapper for `workspace_registry`. Bubbles rusqlite errors through the
 /// `Result` returned by `query_map`.
+fn map_workspace_source_binding_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<crate::WorkspaceSourceBinding> {
+    Ok(crate::WorkspaceSourceBinding {
+        binding_ref: row.get(0)?,
+        source_root: row.get(1)?,
+        git_common_dir: row.get(2)?,
+        repository_fingerprint: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+    })
+}
+
 fn map_workspace_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<Result<crate::WorkspaceRecord, String>> {

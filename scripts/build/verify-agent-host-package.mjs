@@ -26,6 +26,16 @@ export function verifyAgentHostPackage(root, targetName) {
   if (targetName !== "win32-x64" && (fs.statSync(executable).mode & 0o111) === 0) {
     throw new Error(`${path.relative(root, executable)} is not executable`)
   }
+  const helperName = targetName === "win32-x64"
+    ? "cognia-task-workspace-worker.exe"
+    : "cognia-task-workspace-worker"
+  const helper = path.join(packageRoot, "bin", helperName)
+  if (!fs.statSync(helper, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error(`missing ${path.relative(root, helper)}; worker dispatch requires Task Workspace`)
+  }
+  if (targetName !== "win32-x64" && (fs.statSync(helper).mode & 0o111) === 0) {
+    throw new Error(`${path.relative(root, helper)} is not executable`)
+  }
   return executable
 }
 

@@ -577,6 +577,19 @@ pub struct WorkspaceRecord {
     pub created_at: i64,
 }
 
+/// A worker-local mapping from a stable repository ref to a trusted Git root.
+/// Paths never leave the worker; remote callers use `binding_ref` only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSourceBinding {
+    pub binding_ref: String,
+    pub source_root: String,
+    pub git_common_dir: String,
+    pub repository_fingerprint: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 /// The role a logical root plays inside a Bundle.
 ///
 /// Exactly one lease must be `Primary`; the rest are `Additional` (forwarded

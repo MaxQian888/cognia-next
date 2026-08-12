@@ -14,6 +14,15 @@ function fixture(target, executable) {
     path.join(packageRoot, "package.json"),
     JSON.stringify({ bin: { "cognia-agent": `bin/${executable}` } })
   )
+  const helper = path.join(
+    packageRoot,
+    "bin",
+    target === "win32-x64"
+      ? "cognia-task-workspace-worker.exe"
+      : "cognia-task-workspace-worker"
+  )
+  fs.writeFileSync(helper, "workspace helper")
+  if (target !== "win32-x64") fs.chmodSync(helper, 0o755)
   return { root, packageRoot }
 }
 
@@ -44,6 +53,19 @@ test("accepts the Windows executable without a Unix mode bit", () => {
     const executable = path.join(packageRoot, "bin", "cognia-agent.exe")
     fs.writeFileSync(executable, "host", { mode: 0o644 })
     assert.equal(verifyAgentHostPackage(root, "win32-x64"), executable)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("blocks packing a worker host without the Task Workspace helper", () => {
+  const { root, packageRoot } = fixture("darwin-arm64", "cognia-agent")
+  try {
+    const executable = path.join(packageRoot, "bin", "cognia-agent")
+    fs.writeFileSync(executable, "host")
+    fs.chmodSync(executable, 0o755)
+    fs.rmSync(path.join(packageRoot, "bin", "cognia-task-workspace-worker"))
+    assert.throws(() => verifyAgentHostPackage(root, "darwin-arm64"), /Task Workspace/)
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
