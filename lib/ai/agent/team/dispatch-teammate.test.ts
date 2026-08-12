@@ -586,9 +586,9 @@ describe("dispatchTeammate — remote durable worker", () => {
         },
       },
     ])
-    claimDispatchLeaseMock.mockImplementation(async (input: { leaseId: string }) => ({
+    claimDispatchLeaseMock.mockImplementation(async (input: unknown) => ({
       id: "child-remote",
-      dispatchLeaseId: input.leaseId,
+      dispatchLeaseId: (input as { leaseId: string }).leaseId,
     }))
     getAgentTeamChildRunMock.mockResolvedValue({ dispatchLeaseId: "dispatch:existing" })
     remoteRunMock.mockImplementation(async (input: RemoteWorkerRunInput) => {

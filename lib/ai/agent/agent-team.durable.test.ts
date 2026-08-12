@@ -2,9 +2,12 @@ import type { AgentTeam } from "@/types/agent/agent-team"
 
 const recover = jest.fn(async () => [{ runId: "run-1", status: "needs_input" as const }])
 const retryChild = jest.fn(async () => undefined)
-const runTeamLifecycle = jest.fn(async () => ({ runId: "run-1", status: "failed" as const }))
-const settleAgentTeamExecutionRun = jest.fn(async () => undefined)
-const emitSchedulerEvent = jest.fn(async () => undefined)
+const runTeamLifecycle = jest.fn<
+  Promise<{ runId: string; status: "failed" }>,
+  [teamId: string, options: unknown]
+>(async () => ({ runId: "run-1", status: "failed" }))
+const settleAgentTeamExecutionRun = jest.fn<Promise<void>, unknown[]>(async () => undefined)
+const emitSchedulerEvent = jest.fn<Promise<void>, unknown[]>(async () => undefined)
 const listAgentTeamRuns = jest.fn<Promise<Array<{ id: string; status: string }>>, [teamId: string]>(
   async () => [{ id: "run-1", status: "running" }]
 )
@@ -55,7 +58,7 @@ jest.mock("@/lib/db/agent-team-runtime", () => ({
 
 jest.mock("./agent-team-runtime", () => ({
   abortTeam: jest.fn(),
-  runTeamLifecycle: (...args: unknown[]) => runTeamLifecycle(...args),
+  runTeamLifecycle: (teamId: string, options: unknown) => runTeamLifecycle(teamId, options),
 }))
 
 jest.mock("@/lib/execution/agent-team-bridge", () => ({

@@ -1,12 +1,14 @@
 import type { AgentTeam, AgentTeamTask, AgentTeammate } from "@/types/agent/agent-team"
 
 const prepareRun = jest.fn(async () => "run-durable")
-const prepareEnvironment = jest.fn(async () => {
+const prepareEnvironment = jest.fn(async (): Promise<{ runtime: string }> => {
   throw new Error("Execution environment cannot enforce: sandbox")
 })
-const runWorkflow = jest.fn(async () => ({ runId: "run-durable", status: "succeeded" as const }))
+const runWorkflow = jest.fn<Promise<{ runId: string; status: "succeeded" }>, unknown[]>(
+  async () => ({ runId: "run-durable", status: "succeeded" })
+)
 const dispatchOnTeamComplete = jest.fn()
-const dispatchTeamCompletedTriggers = jest.fn(async () => undefined)
+const dispatchTeamCompletedTriggers = jest.fn<Promise<void>, unknown[]>(async () => undefined)
 let persistedRunStatus: "running" | "needs_input" = "running"
 const updateAgentTeamRun = jest.fn<Promise<boolean>, [runId: string, patch: unknown]>(
   async () => true

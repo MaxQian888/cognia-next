@@ -4,9 +4,9 @@ import { __enableDbRuntimeForTesting, __resetDbForTesting, getDb } from "@/lib/d
 import type { AgentTeam, AgentTeamConfig } from "@/types/agent/agent-team"
 import { createDurableTeamCoordinator } from "./durable-runtime"
 
-const removeManagedFleetSession = jest.fn(async () => true)
+const removeManagedFleetSession = jest.fn<Promise<boolean>, [sessionId: string]>(async () => true)
 jest.mock("@/lib/fleet/managed-session-projection", () => ({
-  removeManagedFleetSession: (...args: unknown[]) => removeManagedFleetSession(...args),
+  removeManagedFleetSession: (sessionId: string) => removeManagedFleetSession(sessionId),
 }))
 
 const config = (overrides: Partial<AgentTeamConfig> = {}): AgentTeamConfig => ({
