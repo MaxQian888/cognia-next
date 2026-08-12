@@ -13,7 +13,7 @@ import type { Character, ChatSession, Skill, SystemPromptPreset } from "@cognia/
 /** Patch type accepted by `updateSession`. Mirrors the shape that
  * `lib/db/sessions.ts:updateSession` already accepts so callers don't need to
  * change their argument shape after the refactor. */
-export type SessionPatch = Partial<Omit<ChatSession, "id" | "createdAt">>
+export type SessionPatch = Partial<Omit<ChatSession, "id" | "createdAt" | "workingSet">>
 
 /**
  * The full surface that chat components need from persistence. Each adapter
