@@ -57,6 +57,8 @@ import {
   type RpcMethod,
   type RpcMethodMap,
 } from "@/packages/agent/src/protocol"
+import type { HandoffEnvelope } from "@/packages/agent/src/handoff-envelope"
+import type { AgentWorkerManifestV1 } from "@/packages/agent/src/types"
 import { createRpcAuditStore, type RpcAuditEntry } from "./observability"
 
 const SUPPORTED_METHODS = [
@@ -184,6 +186,10 @@ export interface AgentRuntimeServiceOptions {
   compact?: typeof compactSession
   restore?: typeof restoreSession
   compactionTimeoutMs?: number
+  workerDispatch?: {
+    manifest: AgentWorkerManifestV1
+    resolveHandoffWorkspace(handoff: HandoffEnvelope): string | Promise<string>
+  }
 }
 
 export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): AgentRpcService {
@@ -203,6 +209,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
   const registeredTools = new Map<string, { pluginId: string; toolName: string }>()
   const registeredHooks = new Map<string, { pluginId: string }>()
   const deletedCommands = new Map<string, Record<string, unknown>>()
+  const createCommands = new Map<string, Promise<Record<string, unknown>>>()
   const traceSubscriptions = new Map<
     string,
     { sessionId?: string; context: AgentRpcServiceContext }
@@ -210,6 +217,9 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
   const compactionSnapshots = new Map<string, CompactionSnapshot>()
   let configuredMcpServers: McpServer[] | null = null
   let closing = false
+  const serviceCapabilities = options.workerDispatch
+    ? [...SERVICE_CAPABILITIES, "worker-dispatch-v1"]
+    : SERVICE_CAPABILITIES
 
   function readEntries(params: Record<string, unknown>): Record<string, unknown> {
     const sessionId = requireString(params, "sessionId")
@@ -313,9 +323,10 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           status: "ready",
           openSessions: sessions.size,
           activeTurns: [...sessions.values()].filter((session) => session.busy).length,
+          ...(options.workerDispatch ? { workerManifest: options.workerDispatch.manifest } : {}),
         })
       case "runtime/capabilities":
-        return result({ methods: SUPPORTED_METHODS, capabilities: SERVICE_CAPABILITIES })
+        return result({ methods: SUPPORTED_METHODS, capabilities: serviceCapabilities })
       case "model/list":
       case "model/refresh":
         return result({
@@ -330,7 +341,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           configured: Boolean(options.config.providers[options.config.provider]?.apiKey),
         })
       case "session/create":
-        return result(createSession(params))
+        return result(await createSession(params))
       case "session/open": {
         const session = materialize(requireString(params, "sessionId"))
         return result({ sessionId: session.id, spec: session.spec })
@@ -1065,11 +1076,51 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     }
   }
 
-  function createSession(params: Record<string, unknown>) {
+  async function createSession(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const commandId = commandIdFrom(params)
+    const commandKey = `session/create:${commandId}`
+    const inFlight = createCommands.get(commandKey)
+    if (inFlight) return inFlight
+    const persisted = findPersistedCreateResult(commandKey)
+    if (persisted) {
+      const replay = Promise.resolve(persisted)
+      createCommands.set(commandKey, replay)
+      return replay
+    }
+
+    const pending = createSessionOnce(params, commandId, commandKey)
+    createCommands.set(commandKey, pending)
+    try {
+      return await pending
+    } catch (error) {
+      createCommands.delete(commandKey)
+      throw error
+    }
+  }
+
+  async function createSessionOnce(
+    params: Record<string, unknown>,
+    commandId: string,
+    commandKey: string
+  ): Promise<Record<string, unknown>> {
+    const handoff = params.handoff as HandoffEnvelope | undefined
+    if (handoff && !options.workerDispatch) {
+      throw structured("unsupported_capability", "host does not support worker-dispatch-v1")
+    }
+    if (handoff && typeof params.cwd === "string") {
+      throw structured("usage_error", "remote handoff session creation does not accept cwd")
+    }
     const base = options.config
+    const handoffWorkspace = handoff
+      ? await options.workerDispatch!.resolveHandoffWorkspace(handoff)
+      : undefined
     const config: ResolvedConfig = {
       ...base,
-      ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}),
+      ...(handoffWorkspace
+        ? { cwd: handoffWorkspace }
+        : typeof params.cwd === "string"
+          ? { cwd: params.cwd }
+          : {}),
       ...(typeof params.model === "string" ? { model: params.model } : {}),
       ...(typeof params.permissionMode === "string"
         ? { permissionMode: params.permissionMode as ResolvedConfig["permissionMode"] }
@@ -1113,7 +1164,26 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       })
     }
     sessions.set(id, session)
-    return { sessionId: id, spec }
+    const createdResult = { sessionId: id, spec, commandId }
+    durableState.update(id, (state) => {
+      state.commandResults[commandKey] = createdResult
+    })
+    return createdResult
+  }
+
+  function findPersistedCreateResult(commandKey: string): Record<string, unknown> | undefined {
+    for (const summary of store.list()) {
+      const value = durableState.read(summary.sessionId).commandResults[commandKey]
+      if (
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        typeof (value as Record<string, unknown>).sessionId === "string"
+      ) {
+        return value as Record<string, unknown>
+      }
+    }
+    return undefined
   }
 
   async function runSession(
@@ -1480,7 +1550,8 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
 
   return {
     methods: SUPPORTED_METHODS,
-    capabilities: SERVICE_CAPABILITIES,
+    capabilities: serviceCapabilities,
+    ...(options.workerDispatch ? { workerManifest: options.workerDispatch.manifest } : {}),
     handle,
     close,
   }

@@ -2,11 +2,12 @@ import { createInterface } from "node:readline"
 import { PassThrough } from "node:stream"
 
 import { createCogniaClient, IncompatibleHostError } from "./client"
-import { RPC_METHODS, RPC_PROTOCOL_VERSION } from "./rpc/protocol"
+import { RPC_ERROR_CODES, RPC_METHODS, RPC_PROTOCOL_VERSION } from "./rpc/protocol"
 
 function createHostHarness(
   overrides: {
     protocolVersion?: number
+    capabilities?: string[]
     onRequest?: (request: Record<string, unknown>) => unknown
   } = {}
 ) {
@@ -29,7 +30,7 @@ function createHostHarness(
           runtimeVersion: "0.1.0",
           instanceId: "host-1",
           methods: RPC_METHODS,
-          capabilities: ["tools", "hooks", "event-replay"],
+          capabilities: overrides.capabilities ?? ["tools", "hooks", "event-replay"],
           limits: {
             maxOpenSessions: 32,
             maxActiveTurns: 8,
@@ -104,6 +105,42 @@ describe("createCogniaClient", () => {
     ).rejects.toBeInstanceOf(IncompatibleHostError)
 
     host.close()
+  })
+
+  it("requires worker-dispatch-v1 and sends an idempotent handoff without cwd", async () => {
+    const handoff = {
+      envelopeVersion: 1 as const,
+      identity: {
+        parentRunId: "run-parent",
+        childRunId: "run-child",
+        depth: 1,
+        parentChain: ["run-parent"],
+      },
+      task: { prompt: "Implement the child task" },
+      execution: { mode: "orchestrated" as const },
+      resources: [{ kind: "repository", ref: "repository:project-1:repo-1" }],
+      createdAt: "2026-08-12T00:00:00.000Z",
+    }
+    const oldHost = createHostHarness()
+    const oldClient = await createCogniaClient({ host: { kind: "streams", ...oldHost.streams } })
+    await expect(
+      oldClient.sessions.create({ commandId: "lease-1", handoff })
+    ).rejects.toMatchObject({ code: RPC_ERROR_CODES.capabilityError })
+    await oldClient.close()
+    oldHost.close()
+
+    const worker = createHostHarness({ capabilities: ["worker-dispatch-v1"] })
+    const client = await createCogniaClient({ host: { kind: "streams", ...worker.streams } })
+    await expect(
+      client.sessions.create({ commandId: "lease-2", cwd: "/tmp/repo", handoff })
+    ).rejects.toMatchObject({ code: RPC_ERROR_CODES.invalidParams })
+
+    await client.sessions.create({ commandId: "lease-3", handoff })
+    expect(worker.requests.find((request) => request.method === "session/create")).toMatchObject({
+      params: { commandId: "lease-3", handoff },
+    })
+    await client.close()
+    worker.close()
   })
 
   it("routes deduplicated session events to the async event stream", async () => {

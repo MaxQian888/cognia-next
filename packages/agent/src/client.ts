@@ -733,9 +733,21 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
     },
     sessions: {
       async create(createOptions = {}) {
+        if (createOptions.handoff && createOptions.cwd) {
+          throw new RpcError(
+            RPC_ERROR_CODES.invalidParams,
+            "remote handoff session creation does not accept cwd"
+          )
+        }
+        if (createOptions.handoff && !initialized.capabilities.includes("worker-dispatch-v1")) {
+          throw new RpcError(
+            RPC_ERROR_CODES.capabilityError,
+            "host does not support worker-dispatch-v1"
+          )
+        }
         const result = await peer.call(
           "session/create",
-          { ...createOptions },
+          { ...createOptions, commandId: createOptions.commandId ?? randomUUID() },
           {
             timeoutMs: requestTimeoutMs,
           }

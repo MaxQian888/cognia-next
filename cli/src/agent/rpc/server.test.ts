@@ -24,7 +24,19 @@ describe("createAgentRpcServer", () => {
       diagnostic: new PassThrough(),
       service: {
         methods: ["session/create"],
-        capabilities: ["event-replay"],
+        capabilities: ["event-replay", "worker-dispatch-v1"],
+        workerManifest: {
+          manifestVersion: 1,
+          runtime: "builtin",
+          models: ["test-model"],
+          hardCapabilities: ["filesystem.write"],
+          maxActiveTurns: 1,
+          credentialProfileRefs: ["credential:test"],
+          workspaceBindingRefs: ["repository:project-1:repo-1"],
+          taskWorkspace: { enabled: true },
+          sandbox: { capabilities: ["filesystem.write"] },
+          platform: { os: "linux", arch: "x64" },
+        },
         handle,
         close: jest.fn(async () => undefined),
       },
@@ -69,6 +81,11 @@ describe("createAgentRpcServer", () => {
           result: expect.objectContaining({
             protocolVersion: 2,
             methods: ["initialize", "initialized", "shutdown", "session/create"],
+            capabilities: ["event-replay", "worker-dispatch-v1"],
+            workerManifest: expect.objectContaining({
+              manifestVersion: 1,
+              maxActiveTurns: 1,
+            }),
           }),
         }),
         expect.objectContaining({ id: 3, error: expect.objectContaining({ code: -32006 }) }),

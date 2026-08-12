@@ -19,6 +19,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@cognia/agent": "workspace:*"
+  },
   "peerDependencies": {
     "ai": "*"
   },

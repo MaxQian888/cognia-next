@@ -6,6 +6,7 @@ import {
   HOST_REQUEST_METHODS,
   parseHostRequestParams,
   parseRpcMethodParams,
+  parseRpcMethodResult,
   isJsonRpcRequest,
   isJsonRpcNotification,
   makeErrorResponse,
@@ -168,6 +169,59 @@ describe("RPC protocol", () => {
       })
       expect(() => parseRpcMethodParams("session/state", {})).toThrow(/sessionId/i)
       expect(() => parseRpcMethodParams("turn/run", { sessionId: "session-1" })).toThrow(/input/i)
+    })
+
+    it("validates the additive worker dispatch contract", () => {
+      const handoff = {
+        envelopeVersion: 1 as const,
+        identity: {
+          parentRunId: "run-parent",
+          childRunId: "run-child",
+          depth: 1,
+          parentChain: ["run-parent"],
+        },
+        task: { prompt: "Implement the child task" },
+        execution: { mode: "orchestrated" as const },
+        resources: [{ kind: "repository", ref: "repository:project-1:repo-1" }],
+        createdAt: "2026-08-12T00:00:00.000Z",
+      }
+
+      expect(
+        parseRpcMethodParams("session/create", { commandId: "lease-1", handoff })
+      ).toMatchObject({ commandId: "lease-1", handoff })
+      expect(() =>
+        parseRpcMethodParams("session/create", {
+          commandId: "lease-2",
+          handoff: {
+            ...handoff,
+            resources: [{ kind: "repository", ref: "/tmp/repository" }],
+          },
+        })
+      ).toThrow(/stable ref/i)
+
+      expect(
+        parseRpcMethodResult("initialize", {
+          protocolVersion: 2,
+          host: { name: "worker", version: "0.1.0" },
+          runtimeVersion: "0.1.0",
+          instanceId: "worker-1",
+          methods: RPC_METHODS,
+          capabilities: ["worker-dispatch-v1"],
+          limits: {},
+          workerManifest: {
+            manifestVersion: 1,
+            runtime: "builtin",
+            models: ["test-model"],
+            hardCapabilities: ["filesystem.write"],
+            maxActiveTurns: 1,
+            credentialProfileRefs: ["credential:test"],
+            workspaceBindingRefs: ["repository:project-1:repo-1"],
+            taskWorkspace: { enabled: true },
+            sandbox: { capabilities: ["filesystem.write"] },
+            platform: { os: "linux", arch: "x64" },
+          },
+        }).workerManifest
+      ).toMatchObject({ manifestVersion: 1, maxActiveTurns: 1 })
     })
 
     it("validates host callback parameters independently", () => {

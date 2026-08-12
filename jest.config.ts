@@ -199,6 +199,8 @@ const projectCommon: Config = {
     "^@cognia/web-search(.*)$": "<rootDir>/packages/web-search/src$1",
     "^@cognia/tts(.*)$": "<rootDir>/packages/tts/src$1",
     "^@cognia/logging(.*)$": "<rootDir>/packages/logging/src$1",
+    "^@cognia/agent$": "<rootDir>/packages/agent/src/index.ts",
+    "^@cognia/agent/protocol$": "<rootDir>/packages/agent/src/protocol.ts",
     "^@cognia/agent-config-types(.*)$": "<rootDir>/packages/agent-config-types/src$1",
     "^@cognia/memory(.*)$": "<rootDir>/packages/memory/src$1",
     "^@cognia/ocr(.*)$": "<rootDir>/packages/ocr/src$1",

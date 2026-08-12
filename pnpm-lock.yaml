@@ -879,6 +879,9 @@ importers:
 
   packages/agent-config-types:
     dependencies:
+      '@cognia/agent':
+        specifier: workspace:*
+        version: link:../agent
       ai:
         specifier: '*'
         version: 7.0.48(zod@4.4.3)

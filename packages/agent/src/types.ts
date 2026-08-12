@@ -189,11 +189,13 @@ export interface CloneOptions extends CommandOptions {
 }
 
 export interface SessionCreateOptions {
+  commandId?: string
   name?: string
   cwd?: string
   model?: string
   permissionMode?: AgentPermissionMode
   tags?: string[]
+  handoff?: import("./handoff-envelope").HandoffEnvelope
 }
 
 export interface SessionSummary {
@@ -290,6 +292,19 @@ export interface ProtocolLimits {
   maxOutboundBufferBytes: number
 }
 
+export interface AgentWorkerManifestV1 {
+  manifestVersion: 1
+  runtime: string
+  models: readonly string[]
+  hardCapabilities: readonly string[]
+  maxActiveTurns: number
+  credentialProfileRefs: readonly string[]
+  workspaceBindingRefs: readonly string[]
+  taskWorkspace: { enabled: boolean }
+  sandbox: { capabilities: readonly string[] }
+  platform: { os: string; arch: string }
+}
+
 export interface InitializeResult {
   protocolVersion: 2
   host: { name: string; version: string }
@@ -298,4 +313,5 @@ export interface InitializeResult {
   methods: readonly string[]
   capabilities: readonly string[]
   limits: ProtocolLimits
+  workerManifest?: AgentWorkerManifestV1
 }

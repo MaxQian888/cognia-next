@@ -19,6 +19,7 @@ import {
   type RpcMethod,
   type RpcMethodMap,
 } from "@/packages/agent/src/protocol"
+import type { AgentWorkerManifestV1 } from "@/packages/agent/src/types"
 
 export interface AgentRpcServiceContext {
   emit(method: HostNotificationMethod, params: Record<string, unknown>): Promise<void>
@@ -32,6 +33,7 @@ export interface AgentRpcServiceContext {
 export interface AgentRpcService {
   readonly methods: readonly RpcMethod[]
   readonly capabilities: readonly string[]
+  readonly workerManifest?: AgentWorkerManifestV1
   handle<Method extends RpcMethod>(
     method: Method,
     params: RpcMethodMap[Method]["params"],
@@ -264,6 +266,9 @@ export function createAgentRpcServer(options: AgentRpcServerOptions): AgentRpcSe
           methods: publicMethods,
           capabilities: options.service.capabilities,
           limits,
+          ...(options.service.workerManifest
+            ? { workerManifest: options.service.workerManifest }
+            : {}),
         })
       )
     } catch (error) {
