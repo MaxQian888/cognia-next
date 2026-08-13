@@ -19,7 +19,8 @@ proxy-agents) kept out of the app bundle. See `webclone/VENDOR.md`. Build:
 `pnpm sidecar:webclone:build` (auto-runs on `prebuild`); test:
 `pnpm sidecar:webclone:test`.
 
-Requires Node.js **≥ 20**.
+Requires Node.js **≥ 26** when run outside Cognia's default bundled-runtime
+desktop profile.
 
 ## Scripts (run from repo root)
 

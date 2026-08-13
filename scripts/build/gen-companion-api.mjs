@@ -159,6 +159,60 @@ function clone(value) {
   return structuredClone(value)
 }
 
+function rewriteRemoteGitRequestSchema(name, schema, descriptor) {
+  if (!name.startsWith("git_")) return schema
+  if (name === "git_workspace_list") {
+    return { type: "object", properties: {}, additionalProperties: false }
+  }
+  const next = clone(schema)
+  next.type = "object"
+  next.properties = { ...(next.properties ?? {}) }
+  const required = new Set(next.required ?? [])
+  const remove = (property) => {
+    delete next.properties[property]
+    required.delete(property)
+  }
+  const add = (property, propertySchema, isRequired = false) => {
+    next.properties[property] = propertySchema
+    if (isRequired) required.add(property)
+  }
+  add("workspaceId", { type: "string", minLength: 1 }, true)
+
+  if (name === "git_clone") {
+    remove("destination")
+    add("destinationRelativePath", { type: "string", minLength: 1 }, true)
+  } else if (name === "git_init") {
+    remove("path")
+    add("relativePath", { type: "string" })
+  } else if (name === "git_worktree_add") {
+    remove("repoPath")
+    remove("path")
+    add("relativePath", { type: "string" })
+    add("destinationRelativePath", { type: "string", minLength: 1 }, true)
+  } else if (name === "git_worktree_remove") {
+    remove("repoPath")
+    remove("path")
+    add("relativePath", { type: "string" })
+    add("worktreeRelativePath", { type: "string", minLength: 1 }, true)
+  } else if (name === "git_worktree_commit") {
+    remove("worktreePath")
+    add("worktreeRelativePath", { type: "string", minLength: 1 }, true)
+  } else {
+    remove("repoPath")
+    add("relativePath", { type: "string" })
+  }
+  if (name === "git_set_identity" && next.properties.global) {
+    next.properties.global = { type: "boolean", const: false }
+  }
+  if (descriptor?.approval === "interactive") {
+    add("adminLease", { type: "string", minLength: 1 }, true)
+  }
+  next.required = [...required]
+  if (next.required.length === 0) delete next.required
+  next.additionalProperties = false
+  return next
+}
+
 function rewriteLegacyComponentReferences(value) {
   if (typeof value === "string") {
     return value.replace(
@@ -321,7 +375,8 @@ const HOST_CATEGORIES = [
     title: "System and security",
     description: "Host capabilities, service secrets, backups, sync, logs, and bridge administration.",
     skill: "cognia-host-system",
-    pattern: /^(app_|backup_|companion_|device_|external_bridge_|host_|keyring_|logs_|secret_|sync_)/,
+    pattern:
+      /^(app_|backup_|companion_|device_|external_bridge_|host_|keyring_|logs_|perf_|secret_|sync_)/,
   },
 ]
 
@@ -357,6 +412,7 @@ const HOST_RESOURCE_ALIASES = [
   [/^provider_catalog_/, "provider-catalog"],
   [/^provider_diagnostics_/, "provider-diagnostics"],
   [/^provider_profiles_/, "provider-profiles"],
+  [/^perf_/, "performance"],
   [/^project_environment_/, "project-environments"],
   [/^scheduled_task_/, "scheduled-tasks"],
   [/^(?:skill_|skills_)/, "skills"],
@@ -2712,26 +2768,51 @@ export function inspectCommittedContract() {
   )
   const runtimeRoutes = runtime.routes
   const remoteNames = extractKnownCommands(readRepo(RPC_SOURCE_PATH))
+  const byName = new Map(manifest.commands.map((command) => [command.name, command]))
   const commandCoverageErrors = validateCommandCoverage(manifest, remoteNames)
   const inferredArgumentSchemas = new Map(
     RPC_DISPATCH_SOURCE_PATHS.flatMap((sourcePath) => [
       ...extractCommandArgumentSchemas(readRepo(sourcePath)),
     ])
   )
+  if (remoteNames.has("git_workspace_list")) {
+    inferredArgumentSchemas.set("git_workspace_list", {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    })
+  }
   const argumentSchemas = new Map(
     [...inferredArgumentSchemas].map(([name, schema]) => [
       name,
-      { source: "runtime-inferred", schema },
+      {
+        source: "runtime-inferred",
+        schema: rewriteRemoteGitRequestSchema(name, schema, byName.get(name)),
+      },
     ])
   )
   for (const [name, schema] of Object.entries(requestSchemaCatalog.commands)) {
-    argumentSchemas.set(name, { source: "contract", schema })
+    argumentSchemas.set(name, {
+      source: "contract",
+      schema: rewriteRemoteGitRequestSchema(name, schema, byName.get(name)),
+    })
   }
   const zodRequestSchemas = buildCompanionRequestSchemaContracts()
   for (const [name, schema] of zodRequestSchemas) {
     argumentSchemas.set(name, { source: "zod-contract", schema })
   }
-  const promotedRequestSchemas = { ...requestSchemaCatalog.commands }
+  const headlessArgumentSchemas = new Map(argumentSchemas)
+  for (const [name, schema] of inferredArgumentSchemas) {
+    if (name.startsWith("git_")) {
+      headlessArgumentSchemas.set(name, { source: "runtime-inferred", schema })
+    }
+  }
+  const promotedRequestSchemas = Object.fromEntries(
+    Object.entries(requestSchemaCatalog.commands).map(([name, schema]) => [
+      name,
+      rewriteRemoteGitRequestSchema(name, schema, byName.get(name)),
+    ])
+  )
   for (const [name, schema] of inferredArgumentSchemas) {
     if (
       remoteNames.has(name) &&
@@ -2765,7 +2846,7 @@ export function inspectCommittedContract() {
     contract,
     manifest,
     remoteNames,
-    argumentSchemas,
+    headlessArgumentSchemas,
     responseSchemaCatalog,
   )
   const desiredPublicSource = renderSpec(desiredPublicSpec)

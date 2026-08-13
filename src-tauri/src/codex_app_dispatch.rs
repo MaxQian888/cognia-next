@@ -1043,7 +1043,8 @@ async fn run_cdp_control(app: &AppHandle, operation: &str, payload: Value) -> Re
             script.display()
         )
     }
-    let mut child = Command::new("node")
+    let node = cognia_core::node_runtime::node_executable().map_err(anyhow::Error::new)?;
+    let mut child = Command::new(&node)
         .arg(&script)
         .arg(operation)
         .current_dir(&sidecar_dir)
@@ -1052,7 +1053,12 @@ async fn run_cdp_control(app: &AppHandle, operation: &str, payload: Value) -> Re
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .with_context(|| format!("failed to launch Codex App control operation {operation}"))?;
+        .with_context(|| {
+            format!(
+                "failed to launch Codex App control operation {operation} with Node.js at {}",
+                node.display()
+            )
+        })?;
     let request = serde_json::to_vec(&payload)?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin

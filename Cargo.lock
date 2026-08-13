@@ -2065,8 +2065,11 @@ dependencies = [
 name = "cognia-core"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
+ "tempfile",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -2225,6 +2228,7 @@ dependencies = [
  "axum",
  "chrono",
  "cognia-automation",
+ "cognia-core",
  "futures-util",
  "hex",
  "log",
@@ -2383,7 +2387,6 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sha1 0.11.0",
- "sha2 0.10.9",
  "sha2 0.11.0",
  "subtle",
  "sysinfo 0.39.6",

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -154,44 +154,49 @@ impl SidecarState {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Probe `node --version` once and verify Node >= [`MIN_NODE_MAJOR`] before
-    /// the first spawn. Without this gate a too-old (or missing) Node fails
-    /// late and opaquely deep inside the Agent SDK; here we surface a clear,
-    /// actionable error. The happy result is cached; a failure re-checks next
-    /// time so the user can recover by installing Node without restarting.
-    async fn ensure_node_version(&self) -> Result<(), String> {
+    /// Probe the host-resolved Node executable once and verify Node >=
+    /// [`MIN_NODE_MAJOR`] before the first spawn. The desktop host supplies the
+    /// verified bundled runtime; headless deployments retain their explicit
+    /// `node`-on-`PATH` contract.
+    async fn ensure_node_version(&self, node_executable: &Path) -> Result<(), String> {
         use std::sync::atomic::Ordering;
         if self.node_version_ok.load(Ordering::Relaxed) {
             return Ok(());
         }
-        let output = Command::new("node")
+        let output = Command::new(node_executable)
             .arg("--version")
             .output()
             .await
             .map_err(|e| {
                 format!(
-                    "Node.js was not found on PATH — install Node.js >= {MIN_NODE_MAJOR}, \
-                     which the chat sidecar requires ({e})"
+                    "failed to execute Node.js at {} — the chat sidecar requires Node.js >= \
+                     {MIN_NODE_MAJOR} ({e})",
+                    node_executable.display()
                 )
             })?;
         if !output.status.success() {
             return Err(format!(
-                "`node --version` failed (exit {:?}) — install Node.js >= {MIN_NODE_MAJOR}",
+                "`{} --version` failed (exit {:?}) — the chat sidecar requires Node.js >= \
+                 {MIN_NODE_MAJOR}",
+                node_executable.display(),
                 output.status.code()
             ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let major = parse_node_major(&stdout).ok_or_else(|| {
             format!(
-                "could not parse Node.js version from {:?} — install Node.js >= {MIN_NODE_MAJOR}",
-                stdout.trim()
+                "could not parse Node.js version from {:?} at {} — the chat sidecar requires \
+                 Node.js >= {MIN_NODE_MAJOR}",
+                stdout.trim(),
+                node_executable.display()
             )
         })?;
         if major < MIN_NODE_MAJOR {
             return Err(format!(
-                "Node.js {} is too old — the chat sidecar requires Node.js >= {MIN_NODE_MAJOR}; \
-                 please upgrade Node.js",
-                stdout.trim()
+                "Node.js {} at {} is too old — the chat sidecar requires Node.js >= \
+                 {MIN_NODE_MAJOR}",
+                stdout.trim(),
+                node_executable.display()
             ));
         }
         self.node_version_ok.store(true, Ordering::Relaxed);
@@ -305,8 +310,7 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
     // Release: bundled resources directory.
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let candidate = resource_dir.join("sidecar");
-        if candidate.exists() {
+        if let Some(candidate) = packaged_sidecar_dir(&resource_dir) {
             return Ok(candidate);
         }
     }
@@ -319,6 +323,20 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
         "sidecar directory not found at {}",
         candidate.display()
     ))
+}
+
+/// Resolve either an explicitly remapped `sidecar/` resource or Tauri's
+/// encoded destination for config entries that begin with `../sidecar`.
+/// Tauri replaces each parent component with `_up_` in array-form resources.
+fn packaged_sidecar_dir(resource_dir: &Path) -> Option<PathBuf> {
+    [
+        resource_dir.join("sidecar"),
+        resource_dir.join("_up_").join("sidecar"),
+    ]
+    .into_iter()
+    .find(|candidate| {
+        candidate.join("agent-host.mjs").is_file() || candidate.join("claude-host.mjs").is_file()
+    })
 }
 
 fn checkout_sidecar_dir() -> Result<PathBuf, String> {
@@ -387,9 +405,11 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
         ));
     }
 
+    let node_executable = host.resolve_node_executable()?;
+
     // Fail fast with an actionable message if Node is missing or too old,
     // rather than letting the spawn (or the SDK) blow up later and opaquely.
-    state.ensure_node_version().await?;
+    state.ensure_node_version(&node_executable).await?;
 
     let script = host.resolve_script()?;
     let cwd = script
@@ -397,8 +417,7 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
         .ok_or_else(|| "sidecar script has no parent dir".to_string())?
         .to_path_buf();
 
-    // On Windows, `node` is typically `node.exe` and discoverable via PATH.
-    let mut cmd = Command::new("node");
+    let mut cmd = Command::new(&node_executable);
     cmd.arg(&script)
         .current_dir(&cwd)
         .stdin(Stdio::piped())
@@ -438,9 +457,12 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("failed to spawn sidecar (is Node >= 20 on PATH?): {}", e))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        format!(
+            "failed to spawn sidecar with Node.js at {}: {e}",
+            node_executable.display()
+        )
+    })?;
 
     let stdout = child
         .stdout
@@ -1021,5 +1043,28 @@ mod tests {
         let sidecar = checkout_sidecar_dir().expect("checkout sidecar path");
         assert!(sidecar.join("claude-host.mjs").is_file());
         assert!(sidecar.join("node_modules").is_dir());
+    }
+
+    #[test]
+    fn packaged_sidecar_resolves_tauri_encoded_parent_resource() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let encoded = tmp.path().join("_up_").join("sidecar");
+        std::fs::create_dir_all(&encoded).expect("create encoded sidecar directory");
+        std::fs::write(encoded.join("agent-host.mjs"), "// stub").expect("write packaged entry");
+
+        assert_eq!(packaged_sidecar_dir(tmp.path()), Some(encoded));
+    }
+
+    #[test]
+    fn packaged_sidecar_ignores_incomplete_direct_resource() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("sidecar"))
+            .expect("create incomplete direct resource");
+        let encoded = tmp.path().join("_up_").join("sidecar");
+        std::fs::create_dir_all(&encoded).expect("create encoded sidecar directory");
+        std::fs::write(encoded.join("claude-host.mjs"), "// stub")
+            .expect("write packaged compatibility entry");
+
+        assert_eq!(packaged_sidecar_dir(tmp.path()), Some(encoded));
     }
 }

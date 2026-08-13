@@ -2,11 +2,11 @@
 //! (ADR-0059 W4, slice R6).
 //!
 //! `sidecar::spawn` historically took a raw `tauri::AppHandle`, coupling the
-//! supervisor to the WebView shell in exactly three ways: script resolution
-//! (`resource_dir`), provider-env injection (`app.try_state::<ApiKeyState>`),
-//! and event emission (`app.emit`). This trait collapses all three:
+//! supervisor to the WebView shell through resource resolution, provider-env
+//! injection (`app.try_state::<ApiKeyState>`), and event emission
+//! (`app.emit`). This trait collapses those host-specific seams:
 //!
-//! - [`TauriSidecarHost`] — the desktop app, byte-identical to the old flow.
+//! - [`TauriSidecarHost`] — the desktop app, using bundled scripts and Node.
 //! - [`HeadlessSidecarHost`] — the `cognia-server` binary. The script comes
 //!   from `COGNIA_SIDECAR_SCRIPT`; events publish into the companion
 //!   [`EventBus`], riding `/ws/v1/events` to every connected client with the
@@ -36,6 +36,13 @@ use crate::companion_api::event_bus::EventBus;
 pub trait SidecarHost: Send + Sync + 'static {
     /// Absolute path to `claude-host.mjs` for this host.
     fn resolve_script(&self) -> Result<PathBuf, String>;
+
+    /// Node executable used to probe and launch the sidecar. Headless hosts
+    /// keep the deployment contract of resolving `node` from `PATH`; desktop
+    /// hosts override this with the verified runtime bundled by Tauri.
+    fn resolve_node_executable(&self) -> Result<PathBuf, String> {
+        Ok(PathBuf::from("node"))
+    }
 
     /// Deliver a sidecar event (`claude://message`, `a2ui://dispatch`) to
     /// whoever hosts the UI. Fire-and-forget: implementations log failures.
@@ -81,14 +88,18 @@ pub(crate) async fn inject_provider_env(api_keys: &ApiKeyState, cmd: &mut Comman
 // Desktop host
 // ---------------------------------------------------------------------------
 
-/// Desktop host: resource-dir script, Tauri-managed [`ApiKeyState`], events
-/// via `AppHandle::emit` — today's behavior, unchanged.
+/// Desktop host: resource-dir script + Node runtime, Tauri-managed
+/// [`ApiKeyState`], and events via `AppHandle::emit`.
 pub struct TauriSidecarHost(pub tauri::AppHandle);
 
 #[async_trait]
 impl SidecarHost for TauriSidecarHost {
     fn resolve_script(&self) -> Result<PathBuf, String> {
         super::sidecar::resolve_sidecar_script(&self.0)
+    }
+
+    fn resolve_node_executable(&self) -> Result<PathBuf, String> {
+        cognia_core::node_runtime::node_executable().map_err(|error| error.to_string())
     }
 
     fn emit(&self, channel: &str, payload: &Value) {
@@ -191,6 +202,7 @@ pub(crate) mod test_support {
     pub struct RecordingSidecarHost {
         pub emitted: Mutex<Vec<(String, Value)>>,
         pub script: Option<PathBuf>,
+        pub node_executable: Option<PathBuf>,
     }
 
     impl RecordingSidecarHost {
@@ -198,6 +210,15 @@ pub(crate) mod test_support {
             Arc::new(Self {
                 emitted: Mutex::new(Vec::new()),
                 script: Some(script),
+                node_executable: None,
+            })
+        }
+
+        pub fn with_script_and_node(script: PathBuf, node_executable: PathBuf) -> Arc<Self> {
+            Arc::new(Self {
+                emitted: Mutex::new(Vec::new()),
+                script: Some(script),
+                node_executable: Some(node_executable),
             })
         }
 
@@ -212,6 +233,13 @@ pub(crate) mod test_support {
             self.script
                 .clone()
                 .ok_or_else(|| "recording host has no script".to_string())
+        }
+
+        fn resolve_node_executable(&self) -> Result<PathBuf, String> {
+            Ok(self
+                .node_executable
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("node")))
         }
 
         fn emit(&self, channel: &str, payload: &Value) {
@@ -360,6 +388,20 @@ mod tests {
         std::fs::write(&script, "// stub").expect("write stub");
         let host = HeadlessSidecarHost::new(script.clone(), EventBus::new(), ApiKeyState::new());
         assert_eq!(host.resolve_script().expect("resolves"), script);
+    }
+
+    #[test]
+    fn headless_host_keeps_the_explicit_path_node_contract() {
+        let host = HeadlessSidecarHost::new(
+            PathBuf::from("does-not-matter.mjs"),
+            EventBus::new(),
+            ApiKeyState::new(),
+        );
+
+        assert_eq!(
+            host.resolve_node_executable().expect("headless node"),
+            PathBuf::from("node")
+        );
     }
 
     #[test]

@@ -286,6 +286,7 @@ pub async fn plugin_load_vscode(
         None => resolve_lsp_host_script(&app_handle)
             .map_err(|error| VscodeCommandError::new("host_script_missing", error))?,
     };
+    let node_binary = host_node_binary(node_binary)?;
     let app_for_events = app_handle.clone();
     state.configure_host(
         script,
@@ -302,6 +303,20 @@ pub async fn plugin_load_vscode(
         plugin_path,
     )
     .await
+}
+
+fn host_node_binary(requested: Option<String>) -> Result<Option<String>, VscodeCommandError> {
+    if requested.is_some() {
+        log::warn!("plugin_load_vscode ignored a renderer-supplied Node.js override");
+    }
+    Ok(Some(
+        cognia_core::node_runtime::node_executable()
+            .map_err(|error| {
+                VscodeCommandError::new("node_runtime_unavailable", error.to_string())
+            })?
+            .to_string_lossy()
+            .into_owned(),
+    ))
 }
 
 pub async fn plugin_load_vscode_for_state(
@@ -751,6 +766,14 @@ pub fn plugin_vscode_send_response_for_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renderer_cannot_override_the_host_node_runtime() {
+        assert_eq!(
+            host_node_binary(Some("untrusted-node".into())).expect("host runtime"),
+            Some("node".into())
+        );
+    }
 
     #[test]
     fn error_helpers_round_trip() {

@@ -27,6 +27,12 @@ use tokio::sync::Mutex;
 
 use super::types::McpServerError;
 
+fn node_command() -> Result<Command, McpServerError> {
+    let executable = cognia_core::node_runtime::node_executable()
+        .map_err(|error| McpServerError::SidecarSpawn(error.to_string()))?;
+    Ok(Command::new(executable))
+}
+
 /// Buffered read side of a sidecar's stdout (newline-framed JSON-RPC lines).
 pub(crate) type SidecarLines = BufReader<ChildStdout>;
 
@@ -76,7 +82,7 @@ impl SidecarProcess {
                 "MCP sidecar path is not a file: '{sidecar_path}'"
             )));
         }
-        let mut cmd = Command::new("node");
+        let mut cmd = node_command()?;
         cmd.arg(sidecar_path)
             .env("COGNIA_BRIDGED", "1")
             .env("COGNIA_BRIDGE_SETTINGS", settings_json)
@@ -181,7 +187,7 @@ pub(crate) async fn spawn_streaming_node(
             "MCP streaming sidecar is unavailable at '{sidecar_path}'"
         )));
     }
-    let mut cmd = Command::new("node");
+    let mut cmd = node_command()?;
     cmd.arg(sidecar_path)
         .env("COGNIA_BRIDGED", "1")
         .env("COGNIA_BRIDGE_SETTINGS", settings_json)

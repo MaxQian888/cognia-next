@@ -413,10 +413,10 @@ fn filtered_headers(headers: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
 fn to_tungstenite(message: Message) -> Option<tokio_tungstenite::tungstenite::Message> {
     use tokio_tungstenite::tungstenite::Message as Target;
     match message {
-        Message::Text(value) => Some(Target::Text(value.to_string())),
-        Message::Binary(value) => Some(Target::Binary(value.to_vec())),
-        Message::Ping(value) => Some(Target::Ping(value.to_vec())),
-        Message::Pong(value) => Some(Target::Pong(value.to_vec())),
+        Message::Text(value) => Some(Target::Text(value.to_string().into())),
+        Message::Binary(value) => Some(Target::Binary(value)),
+        Message::Ping(value) => Some(Target::Ping(value)),
+        Message::Pong(value) => Some(Target::Pong(value)),
         Message::Close(frame) => Some(Target::Close(frame.map(|frame| {
             tokio_tungstenite::tungstenite::protocol::CloseFrame {
                 code: frame.code.into(),
@@ -429,7 +429,7 @@ fn to_tungstenite(message: Message) -> Option<tokio_tungstenite::tungstenite::Me
 fn to_axum(message: tokio_tungstenite::tungstenite::Message) -> Option<Message> {
     use tokio_tungstenite::tungstenite::Message as Source;
     match message {
-        Source::Text(value) => Some(Message::Text(value.into())),
+        Source::Text(value) => Some(Message::Text(value.to_string().into())),
         Source::Binary(value) => Some(Message::Binary(value.into())),
         Source::Ping(value) => Some(Message::Ping(value.into())),
         Source::Pong(value) => Some(Message::Pong(value.into())),

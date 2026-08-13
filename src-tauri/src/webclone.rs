@@ -112,7 +112,8 @@ pub async fn web_clone_snapshot(
             .min(MAX_TIMEOUT_MS),
     );
 
-    let mut cmd = Command::new("node");
+    let node = cognia_core::node_runtime::node_executable().map_err(|error| error.to_string())?;
+    let mut cmd = Command::new(&node);
     cmd.arg(&runner)
         .arg("-") // read the job JSON from stdin
         .stdin(std::process::Stdio::piped())
@@ -126,9 +127,12 @@ pub async fn web_clone_snapshot(
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("failed to spawn node for web-clone runner: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        format!(
+            "failed to spawn Node.js at {} for web-clone runner: {e}",
+            node.display()
+        )
+    })?;
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin

@@ -47,13 +47,18 @@ pub mod download;
 pub mod handlers;
 pub mod release_key;
 pub mod renderer_bridge;
+#[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
 pub mod server;
 
-use ::anyhow::{Context, Result};
+#[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
+use ::anyhow::Context;
+use ::anyhow::Result;
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+#[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::watch;
@@ -140,6 +145,7 @@ pub fn endpoint_file_path() -> Option<PathBuf> {
 
 /// Write `cli-endpoint.json` so the CLI can discover us. Best-effort —
 /// failure is logged but does not abort app startup.
+#[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
 pub fn write_endpoint_file(path: &Path, base_url: &str, dev_token: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -170,6 +176,7 @@ pub fn write_endpoint_file(path: &Path, base_url: &str, dev_token: &str) -> Resu
 /// Failure to spawn is non-fatal — the rest of cognia continues to
 /// boot. The CLI will simply return "no running cognia detected" until
 /// the next launch.
+#[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
 pub async fn init(app_handle: tauri::AppHandle, state: &CliBridgeServerState) -> Result<u16> {
     // Dev convenience: in debug builds, make a locally-built `cognia`
     // (dropped into the shared workspace target dir by `cargo build -p
@@ -409,6 +416,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
     fn write_endpoint_file_round_trips() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("cli-endpoint.json");
@@ -426,6 +434,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
     fn write_endpoint_file_creates_parent_dir() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp

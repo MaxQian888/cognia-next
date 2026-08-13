@@ -281,7 +281,6 @@ tower-http = { version = "0.7", features = ["limit", "trace", "cors"] }
 hmac = "0.13"
 sha1 = "0.11"
 sha2 = "0.11"
-sha2-v10 = { package = "sha2", version = "0.10" }
 hkdf = "0.13"
 p256 = { version = "0.14", features = ["ecdsa", "ecdh"] }
 argon2 = "0.5"
@@ -364,16 +363,12 @@ clap = { version = "4", features = ["derive"] }
 # `crates/cognia-automation`.
 dial9-tokio-telemetry = "0.3"
 
-# WebRTC stack (ADR-0021) — full ICE/DTLS/SCTP suite that integrates with
-# the existing tokio runtime. The desktop side of the WAN transport acts
-# as the "peer" counterpart of every mobile client in its rendezvous room;
-# `webrtc-rs` is the only mature pure-Rust crate that ships the full
-# data-channel stack out of the box. Pinned to 0.17 (re-verified 2026-05-18:
-# latest stable is 0.17.1) — the 0.20.x alpha line is still experimenting
-# with runtime flexibility (Tokio/Smol) and not yet ready for production.
-# Heavy compile cost (~50 transitive deps) is acceptable for the
-# connectivity win.
-webrtc = "0.20"
+# WebRTC stack (ADR-0021) — the current 0.20 API uses a runtime-agnostic
+# PeerConnection builder, one event-handler object per connection, and polled
+# DataChannel events. The desktop side of the WAN transport acts as the peer
+# counterpart of every mobile client in its rendezvous room. Keep the minimum
+# on the patched 0.20.2 release; Cargo may take compatible 0.20.x fixes.
+webrtc = "0.20.2"
 
 # ADR-0067 Phase 3 — native OCR subsystem (ADR-0024) lives in `crates/cognia-ocr`.
 # The optional ocrs/rten/rten-imageproc/oar-ocr/ort/image deps and the 5 `ocr-*`
@@ -533,6 +528,9 @@ urlencoding = "2"
 # dispatch table dense without making an unavailable backend routable.
 [features]
 default = ["ocr-paddle"]
+# Lightweight desktop flavor: do not bundle Node.js. Tauri setup resolves and
+# validates one system Node.js >= 26 executable for every app-owned JS child.
+system-node-runtime = []
 # Explicit opt-in for the authenticated loopback agent debugging surface.
 # Never enable this in release packaging: it intentionally exposes raw
 # renderer evaluation and window capture to the per-launch CLI bridge token.

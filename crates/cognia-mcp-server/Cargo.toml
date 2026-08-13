@@ -15,6 +15,7 @@ name = "cognia_mcp_server"
 path = "src/lib.rs"
 
 [dependencies]
+cognia-core = { path = "../cognia-core" }
 cognia-automation = { path = "../cognia-automation" }
 tauri = { version = "=2.11.5" }
 serde = { version = "1.0", features = ["derive"] }

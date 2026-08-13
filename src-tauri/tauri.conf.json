@@ -7,7 +7,7 @@
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "pnpm terminal-host:prepare:dev && pnpm plugin-node:prepare && node scripts/dev/free-port.mjs 3000 && pnpm dev",
-    "beforeBuildCommand": "pnpm terminal-host:prepare && pnpm plugin-node:prepare && pnpm build"
+    "beforeBuildCommand": "pnpm terminal-host:prepare && pnpm plugin-node:prepare && pnpm build && pnpm tauri:frontend:check"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -41,6 +41,7 @@
     "externalBin": ["binaries/cognia-server"],
     "targets": "all",
     "resources": [
+      "../sidecar/agent-host.mjs",
       "../sidecar/claude-host.mjs",
       "../sidecar/a2ui-mcp.mjs",
       "../sidecar/cognia-mcp.mjs",

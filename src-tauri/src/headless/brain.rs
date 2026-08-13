@@ -252,7 +252,9 @@ impl BrainSupervisor {
         }
         let token = self.mint_token()?;
 
-        let mut cmd = Command::new("node");
+        let node =
+            cognia_core::node_runtime::node_executable().map_err(|error| error.to_string())?;
+        let mut cmd = Command::new(&node);
         cmd.arg(&self.config.entry)
             .arg("serve")
             .stdin(Stdio::null())
@@ -268,8 +270,12 @@ impl BrainSupervisor {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
-        cmd.spawn()
-            .map_err(|e| format!("failed to spawn brain (is Node >= 20 on PATH?): {e}"))
+        cmd.spawn().map_err(|e| {
+            format!(
+                "failed to spawn brain with Node.js at {}: {e}",
+                node.display()
+            )
+        })
     }
 
     async fn supervise_child(

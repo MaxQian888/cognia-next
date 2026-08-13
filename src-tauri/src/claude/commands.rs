@@ -1087,6 +1087,36 @@ mod tests {
         )
         .expect("write echo script");
 
+        #[cfg(unix)]
+        let (host, node_marker) = {
+            use std::os::unix::fs::PermissionsExt;
+
+            let node = crate::external_agent::command_resolver::resolve_command_path("node")
+                .expect("node path after availability probe");
+            let marker = tmp.path().join("bundled-node-used");
+            let wrapper = tmp.path().join("bundled-node");
+            let shell_quote =
+                |path: &std::path::Path| path.to_string_lossy().replace('\'', "'\\''");
+            std::fs::write(
+                &wrapper,
+                format!(
+                    "#!/bin/sh\nprintf used > '{}'\nexec '{}' \"$@\"\n",
+                    shell_quote(&marker),
+                    shell_quote(&node)
+                ),
+            )
+            .expect("write bundled-node wrapper");
+            let mut permissions = std::fs::metadata(&wrapper)
+                .expect("wrapper metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&wrapper, permissions).expect("make wrapper executable");
+            (
+                RecordingSidecarHost::with_script_and_node(script, wrapper),
+                marker,
+            )
+        };
+        #[cfg(not(unix))]
         let host = RecordingSidecarHost::with_script(script);
         let state = SidecarState::new();
         crate::proxy_config::apply_current(Default::default())
@@ -1118,6 +1148,11 @@ mod tests {
         assert_eq!(echoed["payload"]["type"], "send");
         assert_eq!(echoed["payload"]["sessionId"], "sess-echo");
         assert_eq!(echoed["payload"]["prompt"], "hello from headless");
+        #[cfg(unix)]
+        assert!(
+            node_marker.is_file(),
+            "the sidecar must use the Node executable resolved by its host"
+        );
 
         super::super::sidecar::kill_sidecar(state).await;
     }

@@ -362,7 +362,15 @@ fn validate_node_runtime(path: PathBuf) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn resolve_node_runtime(resource_dir: Option<&Path>) -> Result<PathBuf> {
+/// Resolve and validate Cognia's pinned Node runtime from a Tauri resource
+/// directory (or the development checkout fallback).
+///
+/// The desktop Agent host shares this resolver with JavaScript plugins so all
+/// bundled Node workloads use the same absolute executable and version gate.
+pub fn resolve_node_runtime(resource_dir: Option<&Path>) -> Result<PathBuf> {
+    if let Some(configured) = cognia_core::node_runtime::configured_node_executable() {
+        return configured.map_err(|error| PluginError::InvalidArgument(error.to_string()));
+    }
     let executable = if cfg!(windows) { "node.exe" } else { "node" };
     if let Some(resource_dir) = resource_dir {
         for candidate in [

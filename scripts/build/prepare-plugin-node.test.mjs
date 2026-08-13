@@ -34,11 +34,12 @@ test("verifyArchive rejects bytes that do not match the pinned digest", () => {
   assert.throws(() => verifyArchive(Buffer.from("tampered"), "0".repeat(64)), /checksum mismatch/)
 })
 
-test("Tauri build and dev commands prepare and bundle the verified runtime", () => {
+test("Tauri build and dev commands bundle the verified runtime and Agent host", () => {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
   const config = JSON.parse(readFileSync(resolve(root, "src-tauri/tauri.conf.json"), "utf8"))
 
   assert.match(config.build.beforeBuildCommand, /plugin-node:prepare/)
   assert.match(config.build.beforeDevCommand, /plugin-node:prepare/)
   assert.ok(config.bundle.resources.includes("resources/plugin-node/**/*"))
+  assert.ok(config.bundle.resources.includes("../sidecar/agent-host.mjs"))
 })

@@ -44,7 +44,8 @@ async fn run_helper_process(
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
-    let mut child = Command::new("node")
+    let node = cognia_core::node_runtime::node_executable().map_err(|error| error.to_string())?;
+    let mut child = Command::new(&node)
         .arg(helper_path)
         .arg(mode)
         .stdin(std::process::Stdio::piped())
@@ -52,7 +53,12 @@ async fn run_helper_process(
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| format!("spawn oauth helper failed: {e}"))?;
+        .map_err(|e| {
+            format!(
+                "spawn OAuth helper with Node.js at {} failed: {e}",
+                node.display()
+            )
+        })?;
 
     if let Some(mut stdin) = child.stdin.take() {
         let line = format!("{input}\n");
