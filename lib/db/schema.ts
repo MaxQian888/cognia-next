@@ -34,6 +34,7 @@ import type {
   RetrievalJobRow,
   RetrievalMigrationJournalRow,
   RetrievalProfileRow,
+  RetrievalRuntimeStateRow,
   RetrievalTombstoneRow,
   RetrievalTraceRow,
 } from "./retrieval-control-types"
@@ -3951,6 +3952,12 @@ export class CogniaDB extends Dexie {
         "&id, twinId, sourceId, vectorDocId, generationId, [twinId+sourceId], [twinId+generationId], [twinId+createdAt]",
     })
 
+    // v163 — one durable rollout kill switch shared by kernel, ingest, and
+    // promotion. Safe lexical reads and recovery operations remain available.
+    this.version(163).stores({
+      retrievalRuntimeState: "&id, killSwitchEngaged, changedAt",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3995,6 +4002,7 @@ export class CogniaDB extends Dexie {
   retrievalEncryptedContent!: Table<RetrievalEncryptedContentRow, string>
   retrievalTombstones!: Table<RetrievalTombstoneRow, string>
   retrievalMigrationJournal!: Table<RetrievalMigrationJournalRow, string>
+  retrievalRuntimeState!: Table<RetrievalRuntimeStateRow, "global">
   // v61 — companion sync tombstones (deletions). See `lib/sync/tombstones.ts`.
   syncTombstones!: Table<SyncTombstoneRow, [SyncableTable, string]>
   // v49 — Inbox telemetry ring buffer (cap 3000). See `lib/db/inbox-telemetry.ts`.

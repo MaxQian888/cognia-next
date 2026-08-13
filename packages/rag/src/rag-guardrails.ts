@@ -60,6 +60,31 @@ const INJECTION_PATTERNS = [
   /<\/SYS>>/gi,
 ]
 
+export interface RetrievedContentTrustAssessment {
+  trust: "untrusted" | "quarantined"
+  risk: "none" | "high"
+  reasonCodes: string[]
+}
+
+/** Detect high-risk instructions without modifying or silently sanitizing evidence. */
+export function assessRetrievedContentTrust(content: string): RetrievedContentTrustAssessment {
+  const reasonCodes: string[] = []
+  for (const pattern of INJECTION_PATTERNS) {
+    pattern.lastIndex = 0
+    if (pattern.test(content)) reasonCodes.push("instruction_override")
+    pattern.lastIndex = 0
+  }
+  if (/<\/?(?:system|assistant|tool|developer)(?:\s|>)/i.test(content)) {
+    reasonCodes.push("role_boundary_markup")
+  }
+  const unique = [...new Set(reasonCodes)]
+  return {
+    trust: unique.length > 0 ? "quarantined" : "untrusted",
+    risk: unique.length > 0 ? "high" : "none",
+    reasonCodes: unique,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Query Sanitization
 // ---------------------------------------------------------------------------

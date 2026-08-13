@@ -19,9 +19,9 @@ import { getSession } from "@/lib/db/sessions"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveMemoryConfig } from "@/types/memory/memory"
-import { updateMemory } from "@/lib/db/memories"
 import {
   appendMemoryAuditEvent,
+  bindMemoryGovernanceOutcome,
   claimMemoryJob,
   finishMemoryJob,
   createMemoryEvidence,
@@ -189,35 +189,36 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
               ? operation.targetId
               : undefined
         if (!memoryId) continue
-        await updateMemory(memoryId, {
-          evidenceState: "supported",
-          reviewStatus:
-            operation.op === "CONFLICT"
-              ? "conflict"
-              : operation.op === "ADD" && operation.memory.type === "procedural"
-                ? "pending_instruction"
-                : "unreviewed",
-          contaminationState,
-          sensitivity: "normal",
-        })
-        await createMemoryEvidence({
+        await bindMemoryGovernanceOutcome({
           memoryId,
-          kind: "message",
-          sourceId: turnIdentity,
-          sessionId,
-          contaminationState,
-          reviewed: false,
-        })
-        await appendMemoryAuditEvent({
-          action:
-            operation.op === "CONFLICT"
-              ? "conflict"
-              : operation.op === "ADD"
-                ? "created"
-                : "revised",
-          memoryId,
-          sessionId,
-          reason: "automatic_learning",
+          patch: {
+            evidenceState: "supported",
+            reviewStatus:
+              operation.op === "CONFLICT"
+                ? "conflict"
+                : operation.op === "ADD" && operation.memory.type === "procedural"
+                  ? "pending_instruction"
+                  : "unreviewed",
+            contaminationState,
+            sensitivity: "normal",
+          },
+          evidence: {
+            kind: "message",
+            sourceId: turnIdentity,
+            sessionId,
+            contaminationState,
+            reviewed: false,
+          },
+          audit: {
+            action:
+              operation.op === "CONFLICT"
+                ? "conflict"
+                : operation.op === "ADD"
+                  ? "created"
+                  : "revised",
+            sessionId,
+            reason: "automatic_learning",
+          },
         })
       }
       const producedOutput = result.applied.some((operation) => operation.op !== "NOOP")

@@ -17,6 +17,7 @@ import type {
   RetrievalEncryptedContentRow,
   RetrievalGenerationRow,
   RetrievalJobRow,
+  RetrievalMigrationJournalRow,
   RetrievalProfileRow,
   RetrievalTombstoneRow,
   RetrievalTraceRow,
@@ -274,4 +275,207 @@ export async function acknowledgeRetrievalTombstone(
     await db.retrievalTombstones.put(next)
     return next
   })
+}
+
+export async function startRetrievalMigrationPhase(
+  input: Pick<RetrievalMigrationJournalRow, "id" | "phase"> & { now?: number }
+): Promise<RetrievalMigrationJournalRow> {
+  const db = getDb()
+  const now = input.now ?? Date.now()
+  return db.transaction("rw", db.retrievalMigrationJournal, async () => {
+    const existing = await db.retrievalMigrationJournal.get(input.id)
+    if (existing?.status === "succeeded") return existing
+    const row: RetrievalMigrationJournalRow = {
+      id: input.id,
+      phase: input.phase,
+      status: "running",
+      watermark: existing?.watermark,
+      processedCount: existing?.processedCount ?? 0,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    }
+    await db.retrievalMigrationJournal.put(row)
+    return row
+  })
+}
+
+export async function checkpointRetrievalMigration(input: {
+  id: string
+  watermark: string
+  processedDelta: number
+  now?: number
+}): Promise<RetrievalMigrationJournalRow> {
+  if (!input.watermark || !Number.isInteger(input.processedDelta) || input.processedDelta < 0) {
+    throw new Error("A migration watermark and non-negative processed delta are required")
+  }
+  const db = getDb()
+  return db.transaction("rw", db.retrievalMigrationJournal, async () => {
+    const row = await db.retrievalMigrationJournal.get(input.id)
+    if (!row || row.status !== "running") throw new Error("Migration phase is not running")
+    const next: RetrievalMigrationJournalRow = {
+      ...row,
+      watermark: input.watermark,
+      processedCount: row.processedCount + input.processedDelta,
+      updatedAt: input.now ?? Date.now(),
+    }
+    await db.retrievalMigrationJournal.put(next)
+    return next
+  })
+}
+
+export async function finishRetrievalMigrationPhase(input: {
+  id: string
+  status: "succeeded" | "failed"
+  failureCode?: string
+  now?: number
+}): Promise<RetrievalMigrationJournalRow> {
+  const db = getDb()
+  return db.transaction("rw", db.retrievalMigrationJournal, async () => {
+    const row = await db.retrievalMigrationJournal.get(input.id)
+    if (!row || row.status !== "running") throw new Error("Migration phase is not running")
+    if (input.status === "failed" && !input.failureCode) {
+      throw new Error("Failed migration phases require a bounded failure code")
+    }
+    const next: RetrievalMigrationJournalRow = {
+      ...row,
+      status: input.status,
+      failureCode: input.status === "failed" ? input.failureCode : undefined,
+      updatedAt: input.now ?? Date.now(),
+    }
+    await db.retrievalMigrationJournal.put(next)
+    return next
+  })
+}
+
+export interface RetrievalReconcileReport {
+  corpusId: string
+  activeGenerationId?: string
+  pointerRepaired: boolean
+  remoteWithoutLocalIds: string[]
+  localWithoutRemoteIds: string[]
+  countMismatch: boolean
+}
+
+export async function reconcileRetrievalCorpus(input: {
+  corpusId: string
+  localVectorIds: readonly string[]
+  remoteVectorIds: readonly string[]
+  now?: number
+}): Promise<RetrievalReconcileReport> {
+  const db = getDb()
+  const now = input.now ?? Date.now()
+  let pointerRepaired = false
+  let active = await getActiveRetrievalGeneration(input.corpusId)
+  if (!active || active.status !== "active") {
+    const candidates = await db.retrievalGenerations
+      .where("[corpusId+status]")
+      .equals([input.corpusId, "active"])
+      .toArray()
+    active = candidates.sort(
+      (left, right) => (right.activatedAt ?? right.createdAt) - (left.activatedAt ?? left.createdAt)
+    )[0]
+    if (active) {
+      await db.retrievalActivePointers.put({
+        corpusId: input.corpusId,
+        generationId: active.id,
+        domain: active.domain,
+        profileFingerprint: active.profileFingerprint,
+        updatedAt: now,
+      })
+    } else {
+      await db.retrievalActivePointers.delete(input.corpusId)
+    }
+    pointerRepaired = true
+  }
+
+  const local = new Set(input.localVectorIds)
+  const remote = new Set(input.remoteVectorIds)
+  const remoteWithoutLocalIds = [...remote].filter((id) => !local.has(id)).sort()
+  const localWithoutRemoteIds = [...local].filter((id) => !remote.has(id)).sort()
+  return {
+    corpusId: input.corpusId,
+    activeGenerationId: active?.id,
+    pointerRepaired,
+    remoteWithoutLocalIds,
+    localWithoutRemoteIds,
+    countMismatch:
+      active?.validation?.count !== undefined && active.validation.count !== local.size,
+  }
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const SHORT_RETENTION_STATUSES: RetrievalJobStatus[] = ["succeeded", "no_output"]
+
+export async function pruneRetrievalControlData(
+  now: number = Date.now(),
+  caps: { jobs?: number; traces?: number } = {}
+): Promise<{ jobsDeleted: number; tracesDeleted: number }> {
+  const db = getDb()
+  return db.transaction("rw", [db.retrievalJobs, db.retrievalTraces], async () => {
+    const jobs = await db.retrievalJobs.toArray()
+    const jobsToDelete = new Set(
+      jobs
+        .filter((job) => {
+          const completedAt = job.completedAt ?? job.queuedAt
+          const retention = SHORT_RETENTION_STATUSES.includes(job.status) ? 30 : 90
+          return completedAt < now - retention * DAY_MS
+        })
+        .map((job) => job.id)
+    )
+    const retainedCompleted = jobs
+      .filter((job) => SHORT_RETENTION_STATUSES.includes(job.status) && !jobsToDelete.has(job.id))
+      .sort((left, right) => (right.completedAt ?? 0) - (left.completedAt ?? 0))
+    for (const job of retainedCompleted.slice(caps.jobs ?? 20_000)) jobsToDelete.add(job.id)
+
+    const traces = await db.retrievalTraces.orderBy("createdAt").reverse().toArray()
+    const traceIds = traces
+      .filter((trace, index) => trace.expiresAt <= now || index >= (caps.traces ?? 20_000))
+      .map((trace) => trace.traceId)
+    await db.retrievalJobs.bulkDelete([...jobsToDelete])
+    await db.retrievalTraces.bulkDelete(traceIds)
+    return { jobsDeleted: jobsToDelete.size, tracesDeleted: traceIds.length }
+  })
+}
+
+export type RetrievalOperation =
+  "kernel" | "ingest" | "promotion" | "decrypt" | "export" | "delete" | "reconcile" | "lexical_read"
+
+const KILL_SWITCH_ALLOWED = new Set<RetrievalOperation>([
+  "decrypt",
+  "export",
+  "delete",
+  "reconcile",
+  "lexical_read",
+])
+
+export async function setRetrievalKillSwitch(input: {
+  engaged: boolean
+  changedBy: "user" | "migration" | "safety"
+  reasonCode?: string
+  now?: number
+}): Promise<void> {
+  if (input.engaged && !input.reasonCode) {
+    throw new Error("Engaging the retrieval kill switch requires a bounded reason code")
+  }
+  await getDb().retrievalRuntimeState.put({
+    id: "global",
+    killSwitchEngaged: input.engaged,
+    changedAt: input.now ?? Date.now(),
+    changedBy: input.changedBy,
+    reasonCode: input.engaged ? input.reasonCode : undefined,
+  })
+}
+
+export async function isRetrievalKillSwitchEngaged(): Promise<boolean> {
+  return (await getDb().retrievalRuntimeState.get("global"))?.killSwitchEngaged ?? false
+}
+
+export async function assertRetrievalOperationAllowed(
+  operation: RetrievalOperation
+): Promise<void> {
+  if ((await isRetrievalKillSwitchEngaged()) && !KILL_SWITCH_ALLOWED.has(operation)) {
+    const error = new Error(`Retrieval ${operation} is disabled by the rollout kill switch`)
+    error.name = "RetrievalKillSwitchError"
+    throw error
+  }
 }

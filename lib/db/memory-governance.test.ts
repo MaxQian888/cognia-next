@@ -1,6 +1,7 @@
 import { createDbTestFixture } from "./test-fixture"
 import {
   appendMemoryAuditEvent,
+  bindMemoryGovernanceOutcome,
   claimMemoryJob,
   claimNextMemoryJob,
   cancelMemoryJob,
@@ -16,7 +17,9 @@ import {
   listMemoryAuditEventsSince,
   listMemoryEvidence,
   listMemoryJobs,
+  pruneMemoryGovernanceData,
 } from "./memory-governance"
+import { createMemory, getMemory } from "./memories"
 
 const dbFixture = createDbTestFixture()
 
@@ -49,6 +52,42 @@ describe("memory evidence and audit", () => {
       metadata: { candidateCount: 2 },
     })
     expect(await listMemoryAuditEvents({ sessionId: "session-1" })).toEqual([event])
+  })
+
+  it("binds governance, evidence, and content-free audit in one transaction", async () => {
+    await createMemory({
+      id: "m-atomic",
+      scope: "global",
+      type: "semantic",
+      text: "fact",
+      importance: 5,
+      provenance: "user",
+      evidenceState: "legacy",
+      reviewStatus: "unreviewed",
+      contaminationState: "unknown",
+      sensitivity: "unknown",
+    })
+    await bindMemoryGovernanceOutcome({
+      memoryId: "m-atomic",
+      patch: { evidenceState: "supported", contaminationState: "clean" },
+      evidence: {
+        id: "e-atomic",
+        kind: "message",
+        sourceId: "message-1",
+        contaminationState: "clean",
+        reviewed: false,
+      },
+      audit: { id: "a-atomic", action: "created", reason: "automatic_learning" },
+      now: 10,
+    })
+
+    expect(await getMemory("m-atomic")).toMatchObject({
+      evidenceState: "supported",
+      contaminationState: "clean",
+      updatedAt: 10,
+    })
+    expect(await listMemoryEvidence("m-atomic")).toHaveLength(1)
+    expect(await listMemoryAuditEvents({ memoryId: "m-atomic" })).toHaveLength(1)
   })
 })
 
@@ -216,5 +255,32 @@ describe("insight readers", () => {
     expect(jobs.map((j) => j.id)).toEqual(["j-new", "j-old"])
     // Completed jobs are retained, which is what makes "last run" reportable.
     expect(jobs[1]).toMatchObject({ status: "succeeded", completedAt: 150 })
+  })
+
+  it("enforces job and content-free audit retention", async () => {
+    const now = 200 * 24 * 60 * 60 * 1000
+    const base = {
+      kind: "turn-extraction" as const,
+      scope: "global" as const,
+      provenance: "user" as const,
+      evidenceIds: [],
+    }
+    await enqueueMemoryJob({
+      ...base,
+      id: "old-success",
+      dedupeKey: "old-success",
+      status: "succeeded",
+      queuedAt: 1,
+    })
+    await appendMemoryAuditEvent({
+      id: "old-audit",
+      action: "deleted",
+      reason: "user_requested",
+      createdAt: 1,
+    })
+    await expect(pruneMemoryGovernanceData(now)).resolves.toEqual({
+      jobsDeleted: 1,
+      auditsDeleted: 1,
+    })
   })
 })

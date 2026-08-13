@@ -1,5 +1,6 @@
 import type { Memory } from "@/types/memory/memory"
 import { createDbTestFixture } from "./test-fixture"
+import { getDb } from "./schema"
 import {
   clearMemories,
   countActive,
@@ -295,10 +296,28 @@ describe("listing & scope-union", () => {
 })
 
 describe("delete & clear", () => {
-  it("hardDeleteMemory removes a row entirely", async () => {
+  it("hardDeleteMemory cascades evidence and ciphertext while retaining a tombstone and audit", async () => {
     await createMemory(buildInput({ id: "m1" }))
+    await getDb().memoryEvidence.add({
+      id: "e1",
+      memoryId: "m1",
+      kind: "message",
+      sourceId: "message-1",
+      contaminationState: "clean",
+      reviewed: false,
+      createdAt: 1,
+    })
     await hardDeleteMemory("m1")
     expect(await getMemory("m1")).toBeUndefined()
+    expect(await getDb().memoryEvidence.where("memoryId").equals("m1").count()).toBe(0)
+    expect(await getDb().retrievalTombstones.get("memory:m1")).toMatchObject({
+      entityType: "memory",
+      entityId: "m1",
+    })
+    expect(await getDb().memoryAuditEvents.where("memoryId").equals("m1").last()).toMatchObject({
+      action: "deleted",
+      reason: "user_requested",
+    })
   })
 
   it("clearMemories deletes matching rows and returns the count", async () => {

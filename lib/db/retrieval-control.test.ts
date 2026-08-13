@@ -5,15 +5,22 @@ import { getDb } from "./schema"
 import {
   acknowledgeRetrievalTombstone,
   activateRetrievalGeneration,
+  assertRetrievalOperationAllowed,
   claimNextRetrievalJob,
+  checkpointRetrievalMigration,
   deleteRetrievalEntity,
   enqueueRetrievalJob,
   failRetrievalGeneration,
   getActiveRetrievalGeneration,
   heartbeatStoredRetrievalJob,
   markRetrievalGenerationValidating,
+  finishRetrievalMigrationPhase,
+  pruneRetrievalControlData,
+  reconcileRetrievalCorpus,
+  setRetrievalKillSwitch,
   saveRetrievalProfile,
   stageRetrievalGeneration,
+  startRetrievalMigrationPhase,
   storeRetrievalEncryptedContent,
 } from "./retrieval-control"
 
@@ -145,5 +152,127 @@ describe("retrieval control repository", () => {
     expect((await acknowledgeRetrievalTombstone(tombstone.id, "desktop", 30)).eligiblePurgeAt).toBe(
       30 + 30 * 24 * 60 * 60 * 1000
     )
+  })
+
+  it("resumes migration phases from a durable watermark", async () => {
+    await startRetrievalMigrationPhase({
+      id: "migration:encrypt",
+      phase: "encrypt_content",
+      now: 1,
+    })
+    await checkpointRetrievalMigration({
+      id: "migration:encrypt",
+      watermark: "memory:100",
+      processedDelta: 100,
+      now: 2,
+    })
+    await startRetrievalMigrationPhase({
+      id: "migration:encrypt",
+      phase: "encrypt_content",
+      now: 3,
+    })
+    expect(await getDb().retrievalMigrationJournal.get("migration:encrypt")).toMatchObject({
+      watermark: "memory:100",
+      processedCount: 100,
+      status: "running",
+    })
+    await finishRetrievalMigrationPhase({ id: "migration:encrypt", status: "succeeded", now: 4 })
+    await expect(
+      startRetrievalMigrationPhase({ id: "migration:encrypt", phase: "encrypt_content", now: 5 })
+    ).resolves.toMatchObject({ status: "succeeded", watermark: "memory:100" })
+  })
+
+  it("repairs a missing active pointer and reports both reconciliation directions", async () => {
+    await stageRetrievalGeneration({
+      id: "g-reconcile",
+      corpusId: "twin:1",
+      domain: "twin",
+      profileFingerprint: "fingerprint",
+      createdAt: 1,
+    })
+    await markRetrievalGenerationValidating("g-reconcile", {
+      count: 2,
+      contentHash: "hash",
+      valid: true,
+    })
+    await activateRetrievalGeneration("g-reconcile", 2)
+    await getDb().retrievalActivePointers.delete("twin:1")
+
+    await expect(
+      reconcileRetrievalCorpus({
+        corpusId: "twin:1",
+        localVectorIds: ["shared", "local-only"],
+        remoteVectorIds: ["shared", "remote-only"],
+        now: 3,
+      })
+    ).resolves.toEqual({
+      corpusId: "twin:1",
+      activeGenerationId: "g-reconcile",
+      pointerRepaired: true,
+      remoteWithoutLocalIds: ["remote-only"],
+      localWithoutRemoteIds: ["local-only"],
+      countMismatch: false,
+    })
+  })
+
+  it("prunes terminal jobs and traces by age and configured caps", async () => {
+    const now = 100 * 24 * 60 * 60 * 1000
+    await getDb().retrievalJobs.bulkAdd([
+      {
+        id: "old-success",
+        dedupeKey: "old-success",
+        kind: "reindex",
+        corpusId: "project:1",
+        status: "succeeded",
+        queuedAt: 1,
+        completedAt: 1,
+        attempt: 1,
+        maxAttempts: 1,
+      },
+      {
+        id: "new-success",
+        dedupeKey: "new-success",
+        kind: "reindex",
+        corpusId: "project:1",
+        status: "succeeded",
+        queuedAt: now - 1,
+        completedAt: now - 1,
+        attempt: 1,
+        maxAttempts: 1,
+      },
+    ])
+    const trace = (traceId: string, createdAt: number, expiresAt: number) =>
+      ({ traceId, createdAt, expiresAt }) as never
+    await getDb().retrievalTraces.bulkAdd([
+      trace("expired", 1, now - 1),
+      trace("newest", now - 1, now + 1),
+      trace("second", now - 2, now + 1),
+    ])
+
+    await expect(pruneRetrievalControlData(now, { jobs: 1, traces: 1 })).resolves.toEqual({
+      jobsDeleted: 1,
+      tracesDeleted: 2,
+    })
+    expect((await getDb().retrievalJobs.toArray()).map((row) => row.id)).toEqual(["new-success"])
+    expect((await getDb().retrievalTraces.toArray()).map((row) => row.traceId)).toEqual(["newest"])
+  })
+
+  it("stops new retrieval work but leaves recovery and lexical reads available", async () => {
+    await setRetrievalKillSwitch({
+      engaged: true,
+      changedBy: "safety",
+      reasonCode: "migration_guard",
+      now: 1,
+    })
+    await expect(assertRetrievalOperationAllowed("ingest")).rejects.toMatchObject({
+      name: "RetrievalKillSwitchError",
+    })
+    await expect(assertRetrievalOperationAllowed("promotion")).rejects.toThrow("kill switch")
+    await expect(assertRetrievalOperationAllowed("decrypt")).resolves.toBeUndefined()
+    await expect(assertRetrievalOperationAllowed("reconcile")).resolves.toBeUndefined()
+    await expect(assertRetrievalOperationAllowed("lexical_read")).resolves.toBeUndefined()
+
+    await setRetrievalKillSwitch({ engaged: false, changedBy: "user", now: 2 })
+    await expect(assertRetrievalOperationAllowed("ingest")).resolves.toBeUndefined()
   })
 })

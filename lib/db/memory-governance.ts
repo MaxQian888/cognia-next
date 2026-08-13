@@ -46,6 +46,41 @@ export async function appendMemoryAuditEvent(
   return row
 }
 
+export async function bindMemoryGovernanceOutcome(input: {
+  memoryId: string
+  patch: Partial<
+    Pick<
+      import("@/types/memory/memory").Memory,
+      "evidenceState" | "reviewStatus" | "contaminationState" | "sensitivity"
+    >
+  >
+  evidence: MemoryEvidenceDraft
+  audit: MemoryAuditEventDraft
+  now?: number
+}): Promise<{ evidence: MemoryEvidence; audit: MemoryAuditEvent }> {
+  const db = getDb()
+  const now = input.now ?? Date.now()
+  return db.transaction("rw", [db.memories, db.memoryEvidence, db.memoryAuditEvents], async () => {
+    if (!(await db.memories.get(input.memoryId))) throw new Error("Memory not found")
+    const evidence: MemoryEvidence = {
+      ...input.evidence,
+      memoryId: input.memoryId,
+      id: input.evidence.id ?? newId("mev"),
+      createdAt: input.evidence.createdAt ?? now,
+    }
+    const audit: MemoryAuditEvent = {
+      ...input.audit,
+      memoryId: input.memoryId,
+      id: input.audit.id ?? newId("mau"),
+      createdAt: input.audit.createdAt ?? now,
+    }
+    await db.memories.update(input.memoryId, { ...input.patch, updatedAt: now })
+    await db.memoryEvidence.add(evidence)
+    await db.memoryAuditEvents.add(audit)
+    return { evidence, audit }
+  })
+}
+
 export async function listMemoryAuditEvents(
   query: { memoryId?: string; sessionId?: string } = {}
 ): Promise<MemoryAuditEvent[]> {
@@ -313,4 +348,38 @@ export async function failMemoryJob(
     resultCode: "retry_exhausted",
   })
   return "failed"
+}
+
+export async function pruneMemoryGovernanceData(
+  now: number = Date.now(),
+  cap = 20_000
+): Promise<{ jobsDeleted: number; auditsDeleted: number }> {
+  const db = getDb()
+  const dayMs = 24 * 60 * 60 * 1000
+  return db.transaction("rw", [db.memoryJobs, db.memoryAuditEvents], async () => {
+    const jobs = await db.memoryJobs.toArray()
+    const jobsToDelete = new Set(
+      jobs
+        .filter((job) => {
+          const terminalAt = job.completedAt ?? job.queuedAt
+          const shortRetention = job.status === "succeeded" || job.status === "no_output"
+          return terminalAt < now - (shortRetention ? 30 : 90) * dayMs
+        })
+        .map((job) => job.id)
+    )
+    const successful = jobs
+      .filter(
+        (job) =>
+          (job.status === "succeeded" || job.status === "no_output") && !jobsToDelete.has(job.id)
+      )
+      .sort((left, right) => (right.completedAt ?? 0) - (left.completedAt ?? 0))
+    for (const job of successful.slice(cap)) jobsToDelete.add(job.id)
+    const auditIds = (await db.memoryAuditEvents
+      .where("createdAt")
+      .below(now - 180 * dayMs)
+      .primaryKeys()) as string[]
+    await db.memoryJobs.bulkDelete([...jobsToDelete])
+    await db.memoryAuditEvents.bulkDelete(auditIds)
+    return { jobsDeleted: jobsToDelete.size, auditsDeleted: auditIds.length }
+  })
 }

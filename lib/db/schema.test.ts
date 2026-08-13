@@ -409,6 +409,7 @@ describe("getDb", () => {
     expect(db.retrievalEncryptedContent).toBeDefined()
     expect(db.retrievalTombstones).toBeDefined()
     expect(db.retrievalMigrationJournal).toBeDefined()
+    expect(db.retrievalRuntimeState).toBeDefined()
     expect(db.petSpritePacks).toBeDefined()
     expect(db.connectorConversationStates).toBeDefined()
     expect(db.connectorInboundJobs).toBeDefined()
@@ -455,6 +456,12 @@ describe("getDb", () => {
     for (const table of [db.projectChunks, db.knowledgeBaseChunks, db.twinChunks]) {
       expect(table.schema.indexes.map((index) => index.name)).toContain("generationId")
     }
+  })
+
+  it("v163 opens the durable retrieval rollout kill switch", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.retrievalRuntimeState.schema.primKey.name).toBe("id")
   })
 
   it("v123 opens the certification projection table", async () => {

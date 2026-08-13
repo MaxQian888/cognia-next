@@ -15,6 +15,7 @@
 
 import { getDb } from "./schema"
 import { enqueueInboundMaterialization } from "./inbound-materializations"
+import { assertRetrievalOperationAllowed } from "./retrieval-control"
 
 export type InboundDraftKind = "lesson" | "skill" | "note"
 
@@ -134,23 +135,30 @@ export async function acceptInboundDraft(
 ): Promise<InboundDraftRow> {
   const db = getDb()
   const now = options.now ?? Date.now()
-  return db.transaction("rw", db.inboundDrafts, db.inboundMaterializations, async () => {
-    const row = await db.inboundDrafts.get(id)
-    if (!row) throw new InboundDraftTransitionError(id, "missing", "accepted")
-    // Compare-and-set. Anything already terminal loses the race and stays put.
-    if (row.status !== "pending") {
-      throw new InboundDraftTransitionError(id, row.status, "accepted")
+  return db.transaction(
+    "rw",
+    [db.inboundDrafts, db.inboundMaterializations, db.retrievalRuntimeState],
+    async () => {
+      const row = await db.inboundDrafts.get(id)
+      if (!row) throw new InboundDraftTransitionError(id, "missing", "accepted")
+      // Compare-and-set. Anything already terminal loses the race and stays put.
+      if (row.status !== "pending") {
+        throw new InboundDraftTransitionError(id, row.status, "accepted")
+      }
+      if (row.metadata?.origin === "agent-finding") {
+        await assertRetrievalOperationAllowed("promotion")
+      }
+      const accepted: InboundDraftRow = {
+        ...row,
+        status: "accepted",
+        reviewedAt: now,
+        ...(options.editedBody !== undefined ? { editedBody: options.editedBody } : {}),
+      }
+      await db.inboundDrafts.put(accepted)
+      await enqueueInboundMaterialization(id, row.kind, now)
+      return accepted
     }
-    const accepted: InboundDraftRow = {
-      ...row,
-      status: "accepted",
-      reviewedAt: now,
-      ...(options.editedBody !== undefined ? { editedBody: options.editedBody } : {}),
-    }
-    await db.inboundDrafts.put(accepted)
-    await enqueueInboundMaterialization(id, row.kind, now)
-    return accepted
-  })
+  )
 }
 
 /**

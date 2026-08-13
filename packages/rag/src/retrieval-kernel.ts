@@ -1,5 +1,6 @@
 import { reciprocalRankFusion } from "./hybrid-search"
 import { sha256Hex, type RetrievalProfileV1 } from "./retrieval-profile"
+import { assessRetrievedContentTrust } from "./rag-guardrails"
 
 export type RetrievalDomain = "memory" | "twin" | "project" | "kb" | "external"
 export type RetrievalTrust = "trusted" | "untrusted" | "quarantined"
@@ -66,6 +67,7 @@ export type RetrievalDegradeCode =
   | "token_budget_exhausted"
   | "content_missing"
   | "content_quarantined"
+  | "kill_switch_active"
 
 export interface RetrievalDegradeReason {
   code: RetrievalDegradeCode
@@ -139,6 +141,8 @@ export interface RetrievalKernelDependencies {
   ) => Promise<Array<{ id: string; score: number }>>
   now?: () => number
   createTraceId?: () => string
+  /** Rollout kill switch: keep safe lexical reads, stop embedding/vector work. */
+  killSwitchEngaged?: () => boolean | Promise<boolean>
 }
 
 function uniqueCandidates(candidates: RetrievalCandidate[]): RetrievalCandidate[] {
@@ -180,6 +184,7 @@ export function createRetrievalKernel(dependencies: RetrievalKernelDependencies)
       const candidateLimit = Math.max(topK * 4, topK)
       const reasons: RetrievalDegradeReason[] = []
       const exclusions: RetrievalTraceV1["exclusions"] = []
+      const killSwitchEngaged = (await dependencies.killSwitchEngaged?.()) ?? false
 
       const lexicalCandidates = await dependencies.lexicalSearch(
         request.query,
@@ -188,7 +193,13 @@ export function createRetrievalKernel(dependencies: RetrievalKernelDependencies)
       )
 
       let queryEmbedding = request.precomputedEmbedding
-      if (!queryEmbedding && dependencies.embedQuery) {
+      if (killSwitchEngaged) {
+        addReason(reasons, {
+          code: "kill_switch_active",
+          stage: "vector",
+          retryable: false,
+        })
+      } else if (!queryEmbedding && dependencies.embedQuery) {
         try {
           queryEmbedding = await dependencies.embedQuery(request.query, request.signal)
         } catch {
@@ -201,7 +212,9 @@ export function createRetrievalKernel(dependencies: RetrievalKernelDependencies)
       }
 
       let vectorCandidates: RetrievalCandidate[] = []
-      if (!dependencies.vectorSearch) {
+      if (killSwitchEngaged) {
+        // Safe BM25-only mode is intentional while the rollout is stopped.
+      } else if (!dependencies.vectorSearch) {
         addReason(reasons, {
           code: "vector_not_configured",
           stage: "vector",
@@ -274,7 +287,8 @@ export function createRetrievalKernel(dependencies: RetrievalKernelDependencies)
           addReason(reasons, { code: "content_missing", stage: "content", retryable: true })
           continue
         }
-        if (content.trust === "quarantined") {
+        const trustAssessment = assessRetrievedContentTrust(content.content)
+        if (content.trust === "quarantined" || trustAssessment.trust === "quarantined") {
           exclusions.push({ id: candidate.id, reason: "content_quarantined" })
           addReason(reasons, {
             code: "content_quarantined",
@@ -341,6 +355,7 @@ export function createRetrievalKernel(dependencies: RetrievalKernelDependencies)
             "vector_unavailable",
             "vector_dimension_mismatch",
             "retrieval_timeout",
+            "kill_switch_active",
           ].includes(reason.code)
         ),
         reasons,

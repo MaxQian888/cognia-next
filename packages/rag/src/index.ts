@@ -13,6 +13,7 @@ export * from "./retrieval-profile"
 export * from "./safe-embedding-gateway"
 export * from "./retrieval-kernel"
 export * from "./control-plane"
+export * from "./grounding"
 
 // Hybrid Search
 export {

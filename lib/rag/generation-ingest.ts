@@ -1,5 +1,6 @@
 import {
   activateRetrievalGeneration,
+  assertRetrievalOperationAllowed,
   failRetrievalGeneration,
   markRetrievalGenerationValidating,
   stageRetrievalGeneration,
@@ -40,6 +41,7 @@ export interface RunGenerationSwapResult<T> {
 export async function runGenerationSwap<T>(
   input: RunGenerationSwapInput<T>
 ): Promise<RunGenerationSwapResult<T>> {
+  await assertRetrievalOperationAllowed("ingest")
   const now = input.now ?? Date.now()
   const generationId = `${input.idPrefix}_${now.toString(36)}_${crypto.randomUUID()}`
   await stageRetrievalGeneration({

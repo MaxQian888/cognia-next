@@ -77,3 +77,11 @@ export interface RetrievalMigrationJournalRow {
   createdAt: number
   updatedAt: number
 }
+
+export interface RetrievalRuntimeStateRow {
+  id: "global"
+  killSwitchEngaged: boolean
+  changedAt: number
+  changedBy: "user" | "migration" | "safety"
+  reasonCode?: string
+}

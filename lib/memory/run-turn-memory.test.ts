@@ -1,6 +1,7 @@
 import { resolveAutomaticMemoryScope, runTurnMemory } from "./run-turn-memory"
 
 const mockCreateEvidence = jest.fn()
+const mockBindOutcome = jest.fn()
 const mockEnqueueJob = jest.fn()
 const mockClaimJob = jest.fn()
 const mockCompleteJob = jest.fn()
@@ -26,13 +27,13 @@ jest.mock("@/lib/memory/lifecycle/maintenance", () => ({
 }))
 jest.mock("@/lib/db/memory-governance", () => ({
   appendMemoryAuditEvent: jest.fn(async (event) => event),
+  bindMemoryGovernanceOutcome: (...args: unknown[]) => mockBindOutcome(...args),
   createMemoryEvidence: (...args: unknown[]) => mockCreateEvidence(...args),
   enqueueMemoryJob: (...args: unknown[]) => mockEnqueueJob(...args),
   claimMemoryJob: (...args: unknown[]) => mockClaimJob(...args),
   finishMemoryJob: (...args: unknown[]) => mockCompleteJob(...args),
   failMemoryJob: (...args: unknown[]) => mockFailJob(...args),
 }))
-jest.mock("@/lib/db/memories", () => ({ updateMemory: jest.fn() }))
 
 import { getSession } from "@/lib/db/sessions"
 import { useSettingsStore } from "@/stores/settings"
@@ -43,7 +44,6 @@ import {
 } from "@/lib/memory/write/run-memory-extraction"
 import { scheduleMemoryMaintenance } from "@/lib/memory/lifecycle/maintenance"
 import { appendMemoryAuditEvent } from "@/lib/db/memory-governance"
-import { updateMemory } from "@/lib/db/memories"
 
 const mockGetSession = getSession as jest.Mock
 const mockGetState = useSettingsStore.getState as jest.Mock
@@ -52,7 +52,6 @@ const mockRunExtraction = runMemoryExtraction as jest.Mock
 const mockProvenance = sessionProvenance as jest.Mock
 const mockSchedule = scheduleMemoryMaintenance as jest.Mock
 const mockAppendAudit = appendMemoryAuditEvent as jest.Mock
-const mockUpdateMemory = updateMemory as jest.Mock
 
 const TRANSCRIPT = [
   { role: "user", text: "remember my timezone is UTC+8" },
@@ -72,6 +71,7 @@ const INPUT = {
 beforeEach(() => {
   jest.clearAllMocks()
   mockCreateEvidence.mockReset()
+  mockBindOutcome.mockReset().mockResolvedValue(undefined)
   mockEnqueueJob.mockReset()
   mockClaimJob.mockReset()
   mockCompleteJob.mockReset()
@@ -244,9 +244,11 @@ describe("runTurnMemory", () => {
       1,
       expect.objectContaining({ contaminationState: "external-context" })
     )
-    expect(mockUpdateMemory).toHaveBeenCalledWith(
-      "mem-external",
-      expect.objectContaining({ contaminationState: "external-context" })
+    expect(mockBindOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memoryId: "mem-external",
+        patch: expect.objectContaining({ contaminationState: "external-context" }),
+      })
     )
     expect(mockSchedule).toHaveBeenCalledWith(
       expect.objectContaining({ contaminationState: "external-context" })
