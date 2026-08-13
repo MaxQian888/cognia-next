@@ -62,4 +62,31 @@ describe("Claude chat send-option seam", () => {
       })
     ).toThrow("PII gate")
   })
+
+  it("places the encrypted checkpoint before the current working set", () => {
+    const recovery = buildWorkingSetPostCompaction(
+      2,
+      {
+        contractVersion: 1,
+        revision: 1,
+        updatedAt: 20,
+        entries: [
+          {
+            id: "active",
+            kind: "fact",
+            summary: "Current state",
+            status: "active",
+            origin: "agent",
+            refs: [],
+            createdAt: 10,
+            updatedAt: 20,
+          },
+        ],
+      },
+      "Compaction checkpoint compact-1"
+    )
+    expect(recovery?.durableInstructions?.indexOf("Compaction checkpoint")).toBeLessThan(
+      recovery?.durableInstructions?.indexOf("Active run working set") ?? 0
+    )
+  })
 })

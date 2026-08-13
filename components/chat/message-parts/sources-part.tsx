@@ -53,6 +53,7 @@ const ORIGIN_LABEL_KEY: Record<SourcesPartItem["origin"], string> = {
   "twin-rag": "twinRag",
   "twin-style": "twinStyle",
   "agent-knowledge-base": "agentKnowledgeBase",
+  "project-knowledge": "projectKnowledge",
   memory: "memory",
   footnote: "footnote",
 }
@@ -63,6 +64,7 @@ const AUTO_OPEN_ORIGINS: SourcesPartItem["origin"][] = [
   "twin-rag",
   "twin-style",
   "agent-knowledge-base",
+  "project-knowledge",
   "memory",
 ]
 
@@ -75,15 +77,17 @@ function partition(sources: SourcesPartItem[]) {
   const twinStyle: SourcesPartItem[] = []
   const memory: SourcesPartItem[] = []
   const agentKnowledge: SourcesPartItem[] = []
+  const projectKnowledge: SourcesPartItem[] = []
   const other: SourcesPartItem[] = []
   for (const s of sources) {
     if (s.origin === "twin-rag") twinRag.push(s)
     else if (s.origin === "twin-style") twinStyle.push(s)
     else if (s.origin === "memory") memory.push(s)
     else if (s.origin === "agent-knowledge-base") agentKnowledge.push(s)
+    else if (s.origin === "project-knowledge") projectKnowledge.push(s)
     else other.push(s)
   }
-  return { twinRag, twinStyle, agentKnowledge, memory, other }
+  return { twinRag, twinStyle, agentKnowledge, projectKnowledge, memory, other }
 }
 
 export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) {
@@ -115,7 +119,7 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
   // Default-open when the only sources are twin-* so the user discovers the
   // retrieval feedback without an extra click. Explicit prop wins.
   const open = defaultOpen ?? isRetrievalOnly
-  const { twinRag, twinStyle, agentKnowledge, memory, other } = buckets
+  const { twinRag, twinStyle, agentKnowledge, projectKnowledge, memory, other } = buckets
 
   return (
     <>
@@ -185,6 +189,21 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
               </h4>
               <div className="flex flex-col gap-1">
                 {agentKnowledge.map((source) => (
+                  <SourceRow key={source.id} source={source} />
+                ))}
+              </div>
+            </section>
+          )}
+          {projectKnowledge.length > 0 && (
+            <section
+              className="flex flex-col gap-2"
+              data-testid="sources-part-section-project-knowledge"
+            >
+              <h4 className="text-[11px] font-medium text-muted-foreground">
+                {t("projectKnowledgeHeader", { count: projectKnowledge.length })}
+              </h4>
+              <div className="flex flex-col gap-1">
+                {projectKnowledge.map((source) => (
                   <SourceRow key={source.id} source={source} />
                 ))}
               </div>

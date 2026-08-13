@@ -13,7 +13,6 @@ export * from "./retrieval-profile"
 export * from "./safe-embedding-gateway"
 export * from "./retrieval-kernel"
 export * from "./control-plane"
-export * from "./grounding"
 
 // Hybrid Search
 export {
@@ -243,10 +242,17 @@ export {
 export {
   type GroundingCheckConfig,
   type GroundingCheckResult,
+  type GroundingPath,
+  type GroundingClaim,
+  type ClaimSupport,
+  type GroundingResult,
+  type GroundingOptions,
   checkGroundingHeuristic,
   checkGroundingLLM,
   checkAnswerGrounding,
   isAnswerGrounded,
+  groundAnswer,
+  attachGroundingToTrace,
 } from "./answer-grounding"
 
 // RAG Evaluator (Quality Metrics)

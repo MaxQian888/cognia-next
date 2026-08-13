@@ -127,6 +127,15 @@ describe("CompactBoundaryMarker", () => {
     expect(screen.queryByTestId("compact-effectiveness")).not.toBeInTheDocument()
   })
 
+  it("shows the encrypted checkpoint persistence state", () => {
+    render(
+      <CompactBoundaryMarker
+        message={boundary({ checkpointId: "compact-1", checkpointState: "locked" })}
+      />
+    )
+    expect(screen.getByTestId("compact-checkpoint-state")).toHaveTextContent("checkpoint.locked")
+  })
+
   it("does not show an undo button without a live snapshot", () => {
     render(<CompactBoundaryMarker message={boundary({ undoToken: "compact-1" })} />)
     expect(screen.queryByTestId("compact-undo")).not.toBeInTheDocument()

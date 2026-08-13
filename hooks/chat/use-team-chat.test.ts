@@ -38,7 +38,10 @@ jest.mock("@/lib/claude/adapter", () => ({
     role: "user",
     parts: [{ type: "text", text: c }],
   })),
+  mergeAgentKnowledgeSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
   mergeMemorySourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
+  mergeProjectKnowledgeSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
+  mergeTwinSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
 }))
 
 const runTurnMemoryMock = jest.fn().mockResolvedValue(undefined)

@@ -3,6 +3,7 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getDb } from "@/lib/db/schema"
 import {
   loadCompactionCheckpoint,
+  renderCompactionCheckpointForRecovery,
   orderCheckpointReinjection,
   storeCompactionCheckpoint,
 } from "./compaction-checkpoint"
@@ -76,5 +77,15 @@ describe("compaction checkpoints", () => {
       })
     ).rejects.toThrow("unique and versioned")
     expect(orderCheckpointReinjection(checkpoint())[0].kind).toBe("policy")
+  })
+
+  it("renders every checkpoint field in deterministic reinjection order", () => {
+    const rendered = renderCompactionCheckpointForRecovery(checkpoint())
+    expect(rendered).toContain("Goal: Complete the retrieval migration")
+    expect(rendered).toContain("Completed work:")
+    expect(rendered.indexOf("policy:policy-1")).toBeLessThan(
+      rendered.indexOf("working_set:session-1")
+    )
+    expect(rendered).toContain("Token transition: 12000 -> 2000")
   })
 })

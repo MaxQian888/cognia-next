@@ -25,13 +25,19 @@ import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import { renderWorkingSetForCompaction } from "@/lib/chat/working-set"
+import { loadCapturedCompactionCheckpoint } from "@/lib/rag/compaction-runtime"
+import { renderCompactionCheckpointForRecovery } from "@/lib/rag/compaction-checkpoint"
 
 export function buildWorkingSetPostCompaction(
   phaseNumber: number | null,
-  workingSet: ChatSession["workingSet"]
+  workingSet: ChatSession["workingSet"],
+  checkpointInstructions = ""
 ): { phaseNumber: number; durableInstructions?: string } | undefined {
   if (phaseNumber === null) return undefined
-  const durableInstructions = workingSet ? renderWorkingSetForCompaction(workingSet) : ""
+  const workingSetInstructions = workingSet ? renderWorkingSetForCompaction(workingSet) : ""
+  const durableInstructions = [checkpointInstructions.trim(), workingSetInstructions]
+    .filter(Boolean)
+    .join("\n\n")
   return {
     phaseNumber,
     ...(durableInstructions ? { durableInstructions } : {}),
@@ -177,7 +183,30 @@ export async function buildSendOptions(
       : (chatState.sessions[session.id]?.messages ?? [])
     : chatState.messages
   const recoveryPhase = pendingRecoveryPhase(sessionMessages)
-  const postCompaction = buildWorkingSetPostCompaction(recoveryPhase, session?.workingSet)
+  const recoveryBoundaryId =
+    recoveryPhase === null
+      ? undefined
+      : [...sessionMessages]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === "system" &&
+              (message.parts[0] as { type?: string } | undefined)?.type === "compact-boundary"
+          )?.id
+  let checkpointInstructions = ""
+  if (recoveryBoundaryId && session?.id) {
+    try {
+      const checkpoint = await loadCapturedCompactionCheckpoint(recoveryBoundaryId, session.id)
+      if (checkpoint) checkpointInstructions = renderCompactionCheckpointForRecovery(checkpoint)
+    } catch {
+      // Locked Vault and corrupt/missing checkpoints never downgrade to plaintext.
+    }
+  }
+  const postCompaction = buildWorkingSetPostCompaction(
+    recoveryPhase,
+    session?.workingSet,
+    checkpointInstructions
+  )
   const memoryBranch = useGitStore.getState().status?.branch ?? undefined
   const primaryRoot = activeProject ? primaryRootOf(activeProject)?.path : undefined
   const referencedMemoryPath =

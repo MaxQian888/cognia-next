@@ -6,6 +6,7 @@ import {
   extractUsage,
   mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
+  mergeProjectKnowledgeSourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
 import { createDiagnostic } from "@cognia/diagnostics"
@@ -56,6 +57,8 @@ import {
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { bumpUnread } from "@/lib/db/session-state"
 import { type AgentExecutionHandle } from "@/lib/ai/agent/execution/agent-execution-handle"
+import { attachInteractiveGrounding } from "@/lib/rag/chat-grounding"
+import { attachCheckpointCapture, captureCompactionCheckpoint } from "@/lib/rag/compaction-runtime"
 import {
   dispatchTokenUsage as dispatchPluginTokenUsage,
   dispatchPostChatReceive as dispatchPluginPostChatReceive,
@@ -661,6 +664,29 @@ export async function handleEvent(
       // the freshly-appended assistant message. The tag is one-shot — once
       // consumed we drop it so subsequent assistant turns are untouched.
       let nextMessages = appliedMessages
+      const systemEvent = env.event as {
+        type?: string
+        subtype?: string
+        compact_metadata?: { pre_tokens?: number; post_tokens?: number }
+      }
+      if (systemEvent.type === "system" && systemEvent.subtype === "compact_boundary") {
+        const boundary = [...appliedMessages]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === "system" &&
+              (message.parts[0] as { type?: string } | undefined)?.type === "compact-boundary"
+          )
+        if (boundary) {
+          const checkpoint = await captureCompactionCheckpoint({
+            boundaryId: boundary.id,
+            sessionId,
+            metadata: systemEvent.compact_metadata ?? {},
+            options: useChatStore.getState().lastSendBySession[sessionId]?.options,
+          })
+          nextMessages = attachCheckpointCapture(nextMessages, checkpoint)
+        }
+      }
       const pendingTag = pendingBranchTagRef.current.get(sessionId)
       if (pendingTag && appliedMessages !== current && appliedMessages.length > current.length) {
         const lastIdx = appliedMessages.length - 1
@@ -739,6 +765,14 @@ export async function handleEvent(
             nextMessages = withMemory
           }
         }
+        const projectKnowledgeCtx = last?.options.projectKnowledgeContext
+        if (projectKnowledgeCtx) {
+          const withProjectKnowledge = mergeProjectKnowledgeSourcesIntoLastAssistant(
+            nextMessages,
+            projectKnowledgeCtx
+          )
+          if (withProjectKnowledge !== nextMessages) nextMessages = withProjectKnowledge
+        }
         const agentKnowledgeCtx = last?.options.agentKnowledgeContext
         if (agentKnowledgeCtx) {
           const withAgentKnowledge = mergeAgentKnowledgeSourcesIntoLastAssistant(
@@ -747,6 +781,7 @@ export async function handleEvent(
           )
           if (withAgentKnowledge !== nextMessages) nextMessages = withAgentKnowledge
         }
+        nextMessages = attachInteractiveGrounding(nextMessages, last?.options)
       }
 
       if (nextMessages !== current) {

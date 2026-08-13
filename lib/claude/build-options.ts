@@ -2986,6 +2986,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // durable notes ahead of a compaction boundary. The generic (AI-SDK) path
   // honours every field; the Anthropic path only reads `focus`.
   {
+    opts.compactionCheckpointContext = {
+      selectedSkills: skills.map((skill) => ({
+        id: skill.id,
+        version: skill.version ?? skill.syncFingerprint ?? skill.marketplaceHash ?? "unknown",
+      })),
+      policyVersions: [
+        {
+          id: "workspace-trust",
+          version: ctx.workspaceRestricted ? "restricted-v1" : "trusted-v1",
+        },
+      ],
+    }
     const appComp = appSettings?.compaction
     const strategy = appComp?.strategyId ? getCompactionStrategy(appComp.strategyId) : undefined
     const draft = resolveCompaction({

@@ -96,3 +96,31 @@ export async function loadCompactionCheckpoint(
   validateCheckpoint(checkpoint)
   return { ...checkpoint, reinjection: orderCheckpointReinjection(checkpoint) }
 }
+
+/** Deterministic post-compaction state block; input is already encrypted-at-rest and PII-safe. */
+export function renderCompactionCheckpointForRecovery(checkpoint: CompactionCheckpointV1): string {
+  const lines = [
+    `Compaction checkpoint ${checkpoint.id} (version ${checkpoint.schemaVersion}):`,
+    `Goal: ${checkpoint.goal}`,
+  ]
+  const append = (label: string, values: string[]) => {
+    if (values.length > 0) lines.push(`${label}:`, ...values.map((value) => `- ${value}`))
+  }
+  append("Completed work", checkpoint.completedWork)
+  append("Active state", checkpoint.activeState)
+  append(
+    "Decisions",
+    checkpoint.decisions.map((item) => `${item.decision} — ${item.rationale}`)
+  )
+  append("Evidence", checkpoint.evidenceRefs)
+  append("Blockers", checkpoint.blockers)
+  append("Next steps", checkpoint.nextSteps)
+  append("Constraints", checkpoint.constraints)
+  append("Do not repeat", checkpoint.doNotRepeat)
+  append(
+    "Reinjection versions",
+    orderCheckpointReinjection(checkpoint).map((item) => `${item.kind}:${item.id}@${item.version}`)
+  )
+  lines.push(`Token transition: ${checkpoint.tokensBefore} -> ${checkpoint.tokensAfter}`)
+  return lines.join("\n")
+}

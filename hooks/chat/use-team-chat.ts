@@ -10,8 +10,10 @@ import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
 import {
   applySdkEvent,
   makeUserMessage,
+  mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
-  type MemorySourcesContext,
+  mergeProjectKnowledgeSourcesIntoLastAssistant,
+  mergeTwinSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
 import {
   runTitleTask,
@@ -35,6 +37,7 @@ import type { ApplyMemoryContextDeps } from "@/lib/memory/runtime/apply-memory-c
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { tryBuildTwinDeps, type TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
+import { attachInteractiveGrounding } from "@/lib/rag/chat-grounding"
 import {
   buildSupervisorRoster,
   parseDispatches,
@@ -61,6 +64,7 @@ import type {
   ClaudeEvent,
   PendingApproval,
   SendContent,
+  SendOptions,
   Team,
   TeamMember,
 } from "@cognia/agent-config-types"
@@ -1186,10 +1190,9 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     model: opts.model,
     extraMetadata: messageMetadata,
     postProcessText,
-    // Recalled-memory transparency: direct chat folds this into the assistant
-    // message's SourcesPart at turnComplete; the team path seals per member in
-    // `handleTeamEvent`, so thread the context through the resolver ctx.
-    memoryContext: baseOpts.memoryContext,
+    // Thread the exact retrieval context through the per-member seal so source
+    // transparency and grounding match direct chat.
+    options: baseOpts,
     onRoutingCommit: () => controller?.commit(),
   }
   subResolverCtx.set(sub, ctx)
@@ -1257,8 +1260,8 @@ interface SubResolverCtx {
   model?: string
   extraMetadata?: Record<string, unknown>
   postProcessText?: (text: string) => string
-  /** Recalled long-term memories for this member's turn (SourcesPart merge). */
-  memoryContext?: MemorySourcesContext
+  /** Exact retrieval context used for this member's SourcesPart and grounding pass. */
+  options: SendOptions
   /** Marks the first visible assistant frame/tool dispatch as replay-unsafe. */
   onRoutingCommit?: () => void
 }
@@ -1469,7 +1472,17 @@ async function handleTeamEvent(
           if (duplicateIds.size > 0) {
             tagged = tagged.filter((message) => !duplicateIds.has(message.id))
           }
-          tagged = mergeMemorySourcesIntoLastAssistant(tagged, ctx?.memoryContext)
+          tagged = mergeTwinSourcesIntoLastAssistant(tagged, ctx?.options.twinContext)
+          tagged = mergeMemorySourcesIntoLastAssistant(tagged, ctx?.options.memoryContext)
+          tagged = mergeProjectKnowledgeSourcesIntoLastAssistant(
+            tagged,
+            ctx?.options.projectKnowledgeContext
+          )
+          tagged = mergeAgentKnowledgeSourcesIntoLastAssistant(
+            tagged,
+            ctx?.options.agentKnowledgeContext
+          )
+          tagged = attachInteractiveGrounding(tagged, ctx?.options)
           await persistMessages(teamSessionId, tagged)
           if (isOpen) {
             useChatStore.getState().replaceSessionMessages(teamSessionId, tagged)

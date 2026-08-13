@@ -1623,6 +1623,33 @@ export interface AgentKnowledgeSourcesContext {
   }>
 }
 
+export interface ProjectKnowledgeSourcesContext {
+  retrievedChunks: Array<{
+    fileId: string
+    fileName?: string
+    content: string
+    score: number
+  }>
+  degraded?: boolean
+}
+
+/** Merge workspace-scoped knowledge excerpts into the same persisted SourcesPart. */
+export function mergeProjectKnowledgeSourcesIntoLastAssistant(
+  messages: UIMessage[],
+  context: ProjectKnowledgeSourcesContext | undefined | null
+): UIMessage[] {
+  if (!context || context.retrievedChunks.length === 0) return messages
+  const sources: SourcesPartItem[] = context.retrievedChunks.map((chunk) => ({
+    id: `project-knowledge-${chunk.fileId}`,
+    title: chunk.fileName?.trim() || chunk.fileId,
+    snippet:
+      chunk.content.length > 200 ? `${chunk.content.slice(0, 199).trimEnd()}…` : chunk.content,
+    origin: "project-knowledge",
+    score: chunk.score,
+  }))
+  return appendSourcesToLastAssistant(messages, sources)
+}
+
 /** Merge reusable Agent Knowledge Base citations into the assistant SourcesPart. */
 export function mergeAgentKnowledgeSourcesIntoLastAssistant(
   messages: UIMessage[],

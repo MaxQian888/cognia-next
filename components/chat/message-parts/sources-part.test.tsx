@@ -131,6 +131,27 @@ describe("SourcesPart", () => {
     expect(screen.getByText("Agent KB")).toBeTruthy()
   })
 
+  it("renders project knowledge in its own source section", () => {
+    render(
+      <SourcesPart
+        part={{
+          type: "sources",
+          sources: [
+            {
+              id: "project-1",
+              title: "ARCHITECTURE.md",
+              origin: "project-knowledge",
+              snippet: "Workspace context",
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByTestId("sources-part-section-project-knowledge")).toBeTruthy()
+    expect(screen.getByText("originLabel.projectKnowledge")).toBeTruthy()
+  })
+
   it("renders a View source link for twin-rag items with chunkRef", () => {
     const part: SourcesPartType = {
       type: "sources",

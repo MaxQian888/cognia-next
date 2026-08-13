@@ -962,6 +962,12 @@ export interface SendOptions {
     degraded: boolean
   }
 
+  /** Content-free version identities captured into an encrypted compaction checkpoint. */
+  compactionCheckpointContext?: {
+    selectedSkills: Array<{ id: string; version: string }>
+    policyVersions: Array<{ id: string; version: string }>
+  }
+
   /**
    * Agent-trace correlation identifiers — set by the chat hook before the
    * sidecar call so downstream events (tool spans, sub-agent spans,

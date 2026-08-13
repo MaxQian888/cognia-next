@@ -6,6 +6,7 @@
  */
 
 import {
+  GroundingGateBlocked,
   PiiGateBlocked,
   _resetSystemPromptPiiCacheForTest,
   hasNoLeakingPiiCached,
@@ -165,6 +166,35 @@ describe("safeSendPrompt", () => {
     await expect(safeSendPrompt("sess_1", "clean", undefined, auditCtx)).rejects.toThrow("kaboom")
     // No PII gate audit: the failure happened past the gate.
     expect(mockAudit).not.toHaveBeenCalled()
+  })
+
+  it("blocks a retrieval-backed outbound reply with unsupported claims", async () => {
+    mockRun.mockResolvedValueOnce({
+      text: "The workspace uses pnpm. Revenue doubled yesterday.",
+      messageId: "msg-grounding",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+    })
+
+    await expect(
+      safeSendPrompt(
+        "sess_1",
+        "clean",
+        {
+          projectKnowledgeContext: {
+            retrievedChunks: [{ fileId: "package", content: "The workspace uses pnpm.", score: 1 }],
+            degraded: false,
+          },
+        },
+        auditCtx
+      )
+    ).rejects.toBeInstanceOf(GroundingGateBlocked)
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "grounding_below_threshold",
+        fields: { supportedClaims: 1, unsupportedClaims: 1 },
+      })
+    )
   })
 
   it("passes signal + timeoutMs through to the underlying call", async () => {

@@ -1,10 +1,38 @@
 import {
   hasMcpContent,
+  isGroundingPart,
   isSubagentPart,
   isToolUseSummaryPart,
   type McpResultBlock,
   type SubagentPart,
 } from "./parts-extensions"
+
+describe("parts-extensions — isGroundingPart", () => {
+  it("accepts a persisted claim-to-chunk assessment", () => {
+    expect(
+      isGroundingPart({
+        type: "grounding",
+        supportRatio: 0.5,
+        action: "annotate",
+        claims: [
+          {
+            id: "claim-1",
+            text: "A claim.",
+            startOffset: 0,
+            endOffset: 8,
+            supported: false,
+            hitIds: [],
+          },
+        ],
+      })
+    ).toBe(true)
+  })
+
+  it("rejects malformed grounding parts", () => {
+    expect(isGroundingPart({ type: "grounding", supportRatio: "half", claims: [] })).toBe(false)
+    expect(isGroundingPart(null)).toBe(false)
+  })
+})
 
 describe("parts-extensions — isToolUseSummaryPart", () => {
   it("accepts a persisted aggregate tool summary", () => {
