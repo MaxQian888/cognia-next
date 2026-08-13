@@ -3958,6 +3958,14 @@ export class CogniaDB extends Dexie {
       retrievalRuntimeState: "&id, killSwitchEngaged, changedAt",
     })
 
+    // v164 — bounded Companion memory mirroring. The host pages cold-start and
+    // incremental encrypted memory sync through updatedAt instead of scanning
+    // the full long-term store.
+    this.version(164).stores({
+      memories:
+        "&id, scope, type, characterId, projectId, agentId, status, reviewStatus, staleness, expiresAt, updatedAt, lastAccessedAt, vectorDocId, sourceSessionId, sourceMessageId, pinned, [scope+type], [scope+status], [type+status], [projectId+status], [agentId+status]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {

@@ -8,7 +8,7 @@ import type { Memory } from "@/types/memory/memory"
 import { getDb } from "@/lib/db/schema"
 import { createMemorySyncRowV1, type EncryptedMemorySyncRowV1 } from "../memory-content-protocol"
 
-import { ensurePairedMemoryDek, syncMemories } from "./memory"
+import { ensurePairedMemoryDek, pruneMobileMemoryCache, syncMemories } from "./memory"
 
 function makeTransport(
   rows: EncryptedMemorySyncRowV1[],
@@ -168,5 +168,37 @@ describe("ensurePairedMemoryDek", () => {
       ensurePairedMemoryDek(transport, "memory-shared", "dek-1", store)
     ).rejects.toMatchObject({ code: "upgrade_required" })
     expect(store.importPaired).not.toHaveBeenCalled()
+  })
+})
+
+describe("pruneMobileMemoryCache", () => {
+  it("keeps a hard bound while preferring pinned and recently hit memories", async () => {
+    const row = (id: string, pinned: boolean, lastAccessedAt: number): Memory => ({
+      id,
+      scope: "global",
+      type: "semantic",
+      text: id,
+      tags: [],
+      importance: 5,
+      createdAt: 1,
+      updatedAt: 1,
+      lastAccessedAt,
+      accessCount: 0,
+      version: 1,
+      status: "active",
+      pinned,
+      provenance: "user",
+    })
+    await getDb().memories.bulkPut([
+      row("old", false, 1),
+      row("recent", false, 10),
+      row("pinned", true, 0),
+    ])
+
+    await expect(pruneMobileMemoryCache(2)).resolves.toBe(1)
+    expect((await getDb().memories.toArray()).map(({ id }) => id).sort()).toEqual([
+      "pinned",
+      "recent",
+    ])
   })
 })

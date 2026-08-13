@@ -14,6 +14,24 @@ interface ProfileDekPairingResponseV1 {
   rawKey: string
 }
 
+export const MOBILE_MEMORY_CACHE_LIMIT = 1_000
+
+export async function pruneMobileMemoryCache(limit = MOBILE_MEMORY_CACHE_LIMIT): Promise<number> {
+  if (!Number.isInteger(limit) || limit < 1) throw new Error("Memory cache limit must be positive")
+  const rows = await getDb().memories.toArray()
+  if (rows.length <= limit) return 0
+  rows.sort(
+    (left, right) =>
+      Number(right.pinned) - Number(left.pinned) ||
+      right.lastAccessedAt - left.lastAccessedAt ||
+      right.updatedAt - left.updatedAt ||
+      left.id.localeCompare(right.id)
+  )
+  const deleteIds = rows.slice(limit).map((row) => row.id)
+  await getDb().memories.bulkDelete(deleteIds)
+  return deleteIds.length
+}
+
 function decodeBase64(value: string): Uint8Array {
   if (typeof atob === "function") {
     const binary = atob(value)
@@ -84,6 +102,7 @@ export function syncMemories(
           memories.push(await openMemorySyncRowV1(row, key))
         }
         await getDb().memories.bulkPut(memories)
+        await pruneMobileMemoryCache()
       },
     },
     transport,

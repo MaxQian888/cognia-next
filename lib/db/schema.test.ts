@@ -464,6 +464,12 @@ describe("getDb", () => {
     expect(db.retrievalRuntimeState.schema.primKey.name).toBe("id")
   })
 
+  it("v164 indexes memory updatedAt for bounded companion sync", async () => {
+    const db = getDb()
+    const indexNames = db.memories.schema.indexes.map((index) => index.name)
+    expect(indexNames).toContain("updatedAt")
+  })
+
   it("v123 opens the certification projection table", async () => {
     const db = getDb()
     await db.open()

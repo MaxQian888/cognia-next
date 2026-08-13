@@ -42,6 +42,7 @@ import { createMemorySyncRowV1, MEMORY_SYNC_PROFILE_ID } from "./memory-content-
 
 /** Page size for paged tables (messages). One round-trip pulls at most this many rows. */
 const MESSAGES_PAGE_SIZE = 500
+export const MEMORY_COLD_START_LIMIT = 500
 
 interface SyncPullRequestEvent {
   request_id: string
@@ -49,6 +50,11 @@ interface SyncPullRequestEvent {
   since: number
   account_id?: string
   content_protocol_version?: number
+}
+
+interface DesktopSyncContentDeps {
+  getMemoryDek: () => Promise<ProfileDekHandle>
+  memoryColdStartLimit?: number
 }
 
 const REQUEST_EVENT = "companion://sync-pull-request"
@@ -131,7 +137,7 @@ export async function readDexieDelta(
   table: SyncableTable | string,
   since: number,
   contentProtocolVersion?: number,
-  contentDeps: { getMemoryDek: () => Promise<ProfileDekHandle> } = {
+  contentDeps: DesktopSyncContentDeps = {
     getMemoryDek: () => createProfileDekStore().getOrCreate(MEMORY_SYNC_PROFILE_ID),
   }
 ): Promise<SyncDelta<unknown>> {
@@ -375,13 +381,16 @@ async function readGoalsDelta(since: number): Promise<SyncDelta<unknown>> {
 
 async function readMemoriesDelta(
   since: number,
-  contentDeps: { getMemoryDek: () => Promise<ProfileDekHandle> }
+  contentDeps: DesktopSyncContentDeps
 ): Promise<SyncDelta<unknown>> {
-  // memories has an `updatedAt` field but NOT an index on it (schema indexes
-  // scope/type/status/…), so we can't `.where("updatedAt").above`. Read all
-  // and filter — mirrors readPluginsDelta. The personal memory store is small.
-  const all = await getDb().memories.toArray()
-  const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
+  const coldStartLimit = contentDeps.memoryColdStartLimit ?? MEMORY_COLD_START_LIMIT
+  if (!Number.isInteger(coldStartLimit) || coldStartLimit < 1) {
+    throw new Error("Memory cold-start limit must be positive")
+  }
+  const rows =
+    since === 0
+      ? await getDb().memories.orderBy("updatedAt").reverse().limit(coldStartLimit).toArray()
+      : await getDb().memories.where("updatedAt").above(since).toArray()
   if (rows.length === 0) return finalizeDelta("memories", [], since)
   const dek = await contentDeps.getMemoryDek()
   const encryptedRows = await Promise.all(rows.map((row) => createMemorySyncRowV1(row, dek)))

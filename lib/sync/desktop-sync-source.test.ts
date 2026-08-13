@@ -108,6 +108,40 @@ describe("readDexieDelta", () => {
     expect(serialized).not.toContain("private memory statement")
   })
 
+  it("bounds a cold-start memory snapshot to the newest rows", async () => {
+    const row = (id: string, updatedAt: number) => ({
+      id,
+      scope: "global" as const,
+      type: "semantic" as const,
+      text: `private ${id}`,
+      tags: [],
+      importance: 5,
+      createdAt: 1,
+      updatedAt,
+      lastAccessedAt: updatedAt,
+      accessCount: 0,
+      version: 1,
+      status: "active" as const,
+      pinned: false,
+      provenance: "user" as const,
+    })
+    await getDb().memories.bulkAdd([row("oldest", 1), row("middle", 2), row("newest", 3)])
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ])
+
+    const delta = await readDexieDelta("memories", 0, 1, {
+      getMemoryDek: async () => ({ profileId: "memory-shared", keyId: "dek-1", key }),
+      memoryColdStartLimit: 2,
+    })
+
+    expect(delta.rows.map((value) => (value as { id: string }).id).sort()).toEqual([
+      "middle",
+      "newest",
+    ])
+  })
+
   it("returns characters whose updatedAt > since", async () => {
     const db = getDb()
     await db.characters.bulkPut([
