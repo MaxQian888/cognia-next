@@ -89,6 +89,24 @@ async fn fetch_attachment_into(
     headers: Option<HashMap<String, String>>,
     max_bytes: usize,
 ) -> Result<AttachmentRef, String> {
+    fetch_attachment_into_with_transform(
+        cache_dir, adapter_id, remote_ref, source_url, headers, max_bytes, Ok,
+    )
+    .await
+}
+
+async fn fetch_attachment_into_with_transform<F>(
+    cache_dir: &Path,
+    adapter_id: &str,
+    remote_ref: String,
+    source_url: &str,
+    headers: Option<HashMap<String, String>>,
+    max_bytes: usize,
+    transform: F,
+) -> Result<AttachmentRef, String>
+where
+    F: FnOnce(Vec<u8>) -> Result<Vec<u8>, String>,
+{
     std::fs::create_dir_all(cache_dir).map_err(|e| format!("create cache dir failed: {e}"))?;
 
     let cache_key = compute_cache_key(adapter_id, &remote_ref);
@@ -143,6 +161,9 @@ async fn fetch_attachment_into(
         bytes.extend_from_slice(&chunk);
     }
 
+    // Encrypted Matrix media is transformed here, before the shared at-rest
+    // encryption/cache write. Plain fetches pass the identity transform.
+    let bytes = transform(bytes)?;
     let ciphertext = encrypt_bytes(&bytes)?;
     std::fs::write(&enc_path, &ciphertext).map_err(|e| format!("cache write failed: {e}"))?;
     std::fs::write(&raw_path, &bytes).map_err(|e| format!("raw write failed: {e}"))?;
@@ -151,6 +172,26 @@ async fn fetch_attachment_into(
         local_url: raw_path.to_string_lossy().to_string(),
         remote_ref,
     })
+}
+
+/// Fetch encrypted Matrix media through the shared bounded downloader, verify
+/// and decrypt it, then write only plaintext through the existing encrypted
+/// attachment-cache boundary.
+pub async fn fetch_matrix_encrypted_attachment(
+    req: super::types::MatrixEncryptedMediaFetchRequest,
+) -> Result<AttachmentRef, String> {
+    let cache_dir = resolve_cache_dir()?;
+    let file = req.file;
+    fetch_attachment_into_with_transform(
+        &cache_dir,
+        &req.adapter_id,
+        req.remote_ref,
+        &req.source_url,
+        req.headers,
+        MAX_ATTACHMENT_BYTES,
+        move |bytes| super::matrix_crypto::decrypt_attachment_bytes(bytes, file),
+    )
+    .await
 }
 
 /// Proxy-aware HTTP client for attachment fetches — honours the user's proxy
@@ -412,6 +453,39 @@ mod tests {
         let cache_key = compute_cache_key("test-adapter", &unique_ref);
         assert!(!dir.path().join(format!("{cache_key}.enc")).exists());
         assert!(!dir.path().join(&cache_key).exists());
+    }
+
+    #[tokio::test]
+    async fn matrix_encrypted_fetch_decrypts_before_at_rest_cache_encryption() {
+        proxy_config::apply_current(proxy_config::ProxyConfig::default()).unwrap();
+        let (encrypted, mut file) =
+            super::super::matrix_crypto::encrypt_attachment_bytes(b"matrix secret".to_vec())
+                .unwrap();
+        file.as_object_mut().unwrap().insert(
+            "url".to_string(),
+            serde_json::Value::String("mxc://example.org/encrypted".to_string()),
+        );
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/encrypted"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(encrypted))
+            .mount(&mock_server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = fetch_attachment_into_with_transform(
+            dir.path(),
+            "mx-1",
+            "mxc://example.org/encrypted".to_string(),
+            &format!("{}/encrypted", mock_server.uri()),
+            None,
+            MAX_ATTACHMENT_BYTES,
+            move |bytes| super::super::matrix_crypto::decrypt_attachment_bytes(bytes, file),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(std::fs::read(result.local_url).unwrap(), b"matrix secret");
     }
 
     #[tokio::test]

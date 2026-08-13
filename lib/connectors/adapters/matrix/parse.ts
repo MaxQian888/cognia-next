@@ -19,7 +19,7 @@
 
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
 import { buildConversationKey } from "@/types/connectors/event"
-import type { MessageSegment } from "@/types/connectors/segment"
+import type { MatrixEncryptedFile, MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
 import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
 import { buildMatrixMessageId } from "./ids"
@@ -44,12 +44,15 @@ export interface MatrixMentions {
 }
 
 export interface MatrixEventContent {
+  [key: string]: unknown
   msgtype?: string
   body?: string
   format?: string
   formatted_body?: string
   /** mxc:// URI for media messages. */
   url?: string
+  /** Encrypted Matrix media (`url` is used only for plaintext media). */
+  file?: MatrixEncryptedFile
   filename?: string
   info?: {
     mimetype?: string
@@ -58,6 +61,7 @@ export interface MatrixEventContent {
     w?: number
     h?: number
     thumbnail_url?: string
+    thumbnail_file?: MatrixEncryptedFile
   }
   "m.relates_to"?: MatrixRelatesTo
   /** Replacement content for `m.replace` edits. */
@@ -73,6 +77,7 @@ export interface MatrixTimelineEvent {
   sender: string
   origin_server_ts: number
   content: MatrixEventContent
+  state_key?: string
   /** Legacy redaction target (pre-v11 rooms put it at the top level). */
   redacts?: string
   unsigned?: { redacted_because?: unknown; transaction_id?: string }
@@ -86,6 +91,7 @@ export interface MatrixRoomTimeline {
 
 export interface MatrixJoinedRoom {
   timeline?: MatrixRoomTimeline
+  state?: { events?: MatrixTimelineEvent[] }
 }
 
 export interface MatrixSyncResponse {
@@ -95,6 +101,10 @@ export interface MatrixSyncResponse {
     /** Pending invites; the transport auto-joins these. */
     invite?: Record<string, unknown>
   }
+  to_device?: { events?: unknown[] }
+  device_lists?: { changed?: string[]; left?: string[] }
+  device_one_time_keys_count?: Record<string, number>
+  unused_fallback_key_types?: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -150,11 +160,12 @@ function buildSegments(
 ): MessageSegment[] {
   const segments: MessageSegment[] = []
   const msgtype = content.msgtype ?? "m.text"
+  const mediaUrl = content.file?.url ?? content.url
 
   switch (msgtype) {
     case "m.image":
-      if (content.url) {
-        const media = resolveMediaUrl(content.url, options.homeserver)
+      if (mediaUrl) {
+        const media = resolveMediaUrl(mediaUrl, options.homeserver)
         segments.push({
           type: "image",
           url: media.url,
@@ -163,30 +174,36 @@ function buildSegments(
           width: content.info?.w,
           height: content.info?.h,
           mimeType: content.info?.mimetype,
+          matrixEncryptedFile: content.file,
         })
         return segments
       }
       break
     case "m.video":
-      if (content.url) {
-        const media = resolveMediaUrl(content.url, options.homeserver)
+      if (mediaUrl) {
+        const media = resolveMediaUrl(mediaUrl, options.homeserver)
+        const thumbnailUrl = content.info?.thumbnail_file?.url ?? content.info?.thumbnail_url
         segments.push({
           type: "video",
           url: media.url,
           rawUrl: media.rawUrl,
-          thumbnailUrl: content.info?.thumbnail_url,
+          thumbnailUrl: thumbnailUrl
+            ? resolveMediaUrl(thumbnailUrl, options.homeserver).url
+            : undefined,
           durationSec:
             content.info?.duration !== undefined
               ? Math.round(content.info.duration / 1000)
               : undefined,
           mimeType: content.info?.mimetype,
+          matrixEncryptedFile: content.file,
+          matrixEncryptedThumbnailFile: content.info?.thumbnail_file,
         })
         return segments
       }
       break
     case "m.audio":
-      if (content.url) {
-        const media = resolveMediaUrl(content.url, options.homeserver)
+      if (mediaUrl) {
+        const media = resolveMediaUrl(mediaUrl, options.homeserver)
         segments.push({
           type: "voice",
           url: media.url,
@@ -196,13 +213,14 @@ function buildSegments(
               ? Math.round(content.info.duration / 1000)
               : undefined,
           mimeType: content.info?.mimetype,
+          matrixEncryptedFile: content.file,
         })
         return segments
       }
       break
     case "m.file":
-      if (content.url) {
-        const media = resolveMediaUrl(content.url, options.homeserver)
+      if (mediaUrl) {
+        const media = resolveMediaUrl(mediaUrl, options.homeserver)
         segments.push({
           type: "file",
           url: media.url,
@@ -210,6 +228,7 @@ function buildSegments(
           name: content.filename ?? content.body ?? "file",
           mimeType: content.info?.mimetype ?? "application/octet-stream",
           sizeBytes: content.info?.size ?? 0,
+          matrixEncryptedFile: content.file,
         })
         return segments
       }

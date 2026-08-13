@@ -1060,7 +1060,7 @@ function DeliveryFields(p: DeliveryFieldsProps) {
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => router.push("/settings/companion#tunnel")}
+                      onClick={() => router.push("/settings?section=connections&connectionsTab=tunnel")}
                 aria-label={t("openCompanionAria")}
                 data-testid="lark-open-companion"
               >

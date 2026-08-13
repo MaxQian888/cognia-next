@@ -273,6 +273,20 @@ pub async fn connectors_media_upload(
     super::media_upload::upload_media(req).await
 }
 
+#[tauri::command]
+pub async fn connectors_matrix_encrypted_media_upload(
+    req: super::types::MatrixEncryptedMediaUploadRequest,
+) -> Result<super::types::MatrixEncryptedMediaUploadResponse, String> {
+    super::media_upload::upload_matrix_encrypted_media(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_encrypted_media_fetch(
+    req: super::types::MatrixEncryptedMediaFetchRequest,
+) -> Result<super::attachments::AttachmentRef, String> {
+    super::attachments::fetch_matrix_encrypted_attachment(req).await
+}
+
 /// Discord multipart media upload — fetch each source URL and POST the bytes as
 /// `multipart/form-data` to `/channels/{id}/messages`, returning the created
 /// message id. Handles voice messages via the IS_VOICE_MESSAGE flag.
@@ -288,6 +302,11 @@ pub async fn connectors_matrix_crypto_init(
     req: super::matrix_crypto::MatrixCryptoInitRequest,
 ) -> Result<(), String> {
     super::matrix_crypto::matrix_crypto_init(req).await
+}
+
+#[tauri::command]
+pub async fn connectors_matrix_crypto_close(adapter_id: String) -> Result<(), String> {
+    super::matrix_crypto::matrix_crypto_close(&adapter_id).await
 }
 
 #[tauri::command]

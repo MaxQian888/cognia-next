@@ -73,7 +73,7 @@ describe("IdentityMergeDialog", () => {
 
   it("clicking Merge calls mergeIdentities and closes dialog", async () => {
     const merged = { ...IDENTITY_A, mergedFromIds: ["pid_b"] }
-    mockMerge.mockResolvedValue(merged)
+    mockMerge.mockResolvedValue({ ok: true, primary: merged })
 
     const onOpenChange = jest.fn()
     const onMerged = jest.fn()
@@ -97,7 +97,7 @@ describe("IdentityMergeDialog", () => {
   })
 
   it("shows error when merge fails", async () => {
-    mockMerge.mockRejectedValue(new Error("Merge conflict"))
+    mockMerge.mockResolvedValue({ ok: false, reason: "secondary_missing" })
 
     render(
       <IdentityMergeDialog open onOpenChange={jest.fn()} identities={[IDENTITY_A, IDENTITY_B]} />
@@ -106,7 +106,33 @@ describe("IdentityMergeDialog", () => {
     fireEvent.click(screen.getByTestId("merge-btn"))
 
     await waitFor(() => {
-      expect(screen.getByTestId("merge-error")).toHaveTextContent("Merge conflict")
+      expect(screen.getByTestId("merge-error")).toHaveTextContent(/no longer available/i)
     })
+  })
+
+  it("locks the conversation identity as primary", () => {
+    render(
+      <IdentityMergeDialog
+        open
+        onOpenChange={jest.fn()}
+        identities={[IDENTITY_A, IDENTITY_B]}
+        lockedPrimaryId="pid_a"
+      />
+    )
+    fireEvent.click(screen.getByTestId("identity-card-pid_b"))
+    expect(screen.getByTestId("primary-badge-pid_a")).toBeInTheDocument()
+    expect(screen.queryByTestId("primary-badge-pid_b")).not.toBeInTheDocument()
+  })
+
+  it("resets primary state when the identity tuple changes", () => {
+    const identityC = makeIdentity("pid_c", "Carol")
+    const { rerender } = render(
+      <IdentityMergeDialog open onOpenChange={jest.fn()} identities={[IDENTITY_A, IDENTITY_B]} />
+    )
+    fireEvent.click(screen.getByTestId("identity-card-pid_b"))
+    rerender(
+      <IdentityMergeDialog open onOpenChange={jest.fn()} identities={[identityC, IDENTITY_A]} />
+    )
+    expect(screen.getByTestId("primary-badge-pid_c")).toBeInTheDocument()
   })
 })

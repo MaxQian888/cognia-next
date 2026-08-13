@@ -323,6 +323,45 @@ describe("installConnectorRuntime", () => {
     expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
   })
 
+  it("atomically persists both capability caches after the initial build", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow("cai_caps_initial")
+    const adapter = makeFakeAdapter(row.id)
+    adapter.a2uiCapability.mockReturnValue({ button: "native" })
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+
+    install()
+
+    await waitFor(() =>
+      expect(mockAdapterInstancesUpdate).toHaveBeenCalledWith(row.id, {
+        lastKnownCapabilities: { button: "native" },
+        lastKnownSkillCapabilities: [],
+        updatedAt: expect.any(Number),
+      })
+    )
+    expect(mockAdapterInstancesUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not partially update capability caches when the skill probe throws", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow("cai_caps_throw")
+    const adapter = {
+      ...makeFakeAdapter(row.id),
+      platformSkillCapabilities: jest.fn(() => {
+        throw new Error("skill probe failed")
+      }),
+    }
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+
+    install()
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(mockAdapterInstancesUpdate).not.toHaveBeenCalled()
+    expect(mockRegisterAdapter).not.toHaveBeenCalledWith(adapter)
+  })
+
   it("wires durable PII-gated live steer into the installed runtime", async () => {
     mockedIsTauri.mockReturnValue(true)
     mockListEnabled.mockResolvedValue([])
@@ -1348,7 +1387,7 @@ describe("installConnectorRuntime", () => {
       expect(bBoots).toHaveLength(1)
     })
 
-    it("still boots a hot-added adapter when the capability refresh write fails", async () => {
+    it("fails a hot build when the atomic capability cache write fails", async () => {
       const rowA = makeTelegramRow("cai_A")
       const { fire } = await installWithWatch([rowA])
       await waitFor(() =>
@@ -1359,10 +1398,8 @@ describe("installConnectorRuntime", () => {
       const rowB = makeTelegramRow("cai_B")
       mockListEnabled.mockResolvedValue([rowA, rowB])
       fire()
-      // The best-effort capability write threw, but boot proceeds regardless.
-      await waitFor(() =>
-        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_B", expect.anything())
-      )
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(mockRegisterRunning).not.toHaveBeenCalledWith("cai_B", expect.anything())
     })
 
     it("unsubscribes the watcher on teardown", async () => {

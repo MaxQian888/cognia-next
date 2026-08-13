@@ -9,6 +9,7 @@ import {
   listMergedGroups,
   listByAdapter,
   getByPlatformUser,
+  listMergeCandidates,
 } from "./platform-identities"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
@@ -85,9 +86,11 @@ describe("platform-identities", () => {
       ...baseInput(),
       remoteUserId: "secondary_user",
     })
-    const merged = await mergeIdentities(primary.id, secondary.id)
-    expect(merged.id).toBe(primary.id)
-    expect(merged.mergedFromIds).toContain(secondary.id)
+    const result = await mergeIdentities(primary.id, secondary.id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.primary.id).toBe(primary.id)
+    expect(result.primary.mergedFromIds).toContain(secondary.id)
     // secondary row should be deleted
     const db = getDb()
     const secondaryRow = await db.platformIdentities.get(secondary.id)
@@ -99,14 +102,19 @@ describe("platform-identities", () => {
     const sec1 = await upsertIdentity({ ...baseInput(), remoteUserId: "sec1" })
     const sec2 = await upsertIdentity({ ...baseInput(), remoteUserId: "sec2" })
     await mergeIdentities(primary.id, sec1.id)
-    const merged = await mergeIdentities(primary.id, sec2.id)
-    expect(merged.mergedFromIds).toContain(sec1.id)
-    expect(merged.mergedFromIds).toContain(sec2.id)
+    const result = await mergeIdentities(primary.id, sec2.id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.primary.mergedFromIds).toContain(sec1.id)
+    expect(result.primary.mergedFromIds).toContain(sec2.id)
   })
 
-  it("mergeIdentities throws if primary does not exist", async () => {
+  it("mergeIdentities returns a typed outcome if primary does not exist", async () => {
     const secondary = await upsertIdentity(baseInput())
-    await expect(mergeIdentities("nope", secondary.id)).rejects.toThrow()
+    await expect(mergeIdentities("nope", secondary.id)).resolves.toEqual({
+      ok: false,
+      reason: "primary_missing",
+    })
   })
 
   it("mergeIdentities snapshots the secondary for lossless unmerge", async () => {
@@ -117,9 +125,14 @@ describe("platform-identities", () => {
       remoteUserId: "s",
       displayName: "Alice on Discord",
     })
-    const merged = await mergeIdentities(primary.id, secondary.id)
-    expect(merged.mergedSnapshots).toHaveLength(1)
-    expect(merged.mergedSnapshots?.[0]).toMatchObject({ id: secondary.id, platform: "discord" })
+    const result = await mergeIdentities(primary.id, secondary.id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.primary.mergedSnapshots).toHaveLength(1)
+    expect(result.primary.mergedSnapshots?.[0]).toMatchObject({
+      id: secondary.id,
+      platform: "discord",
+    })
   })
 
   it("unmergeIdentity restores the secondary exactly and cleans the primary", async () => {
@@ -134,7 +147,10 @@ describe("platform-identities", () => {
     await mergeIdentities(primary.id, secondary.id)
 
     const restored = await unmergeIdentity(primary.id, secondary.id)
-    expect(restored).toMatchObject({ id: secondary.id, displayName: "Alice on Discord" })
+    expect(restored).toMatchObject({
+      ok: true,
+      restored: { id: secondary.id, displayName: "Alice on Discord" },
+    })
 
     const reloadedSecondary = await getDb().platformIdentities.get(secondary.id)
     expect(reloadedSecondary).toMatchObject({ platform: "discord", avatarUrl: "https://x/d.png" })
@@ -143,10 +159,16 @@ describe("platform-identities", () => {
     expect(reloadedPrimary?.mergedSnapshots ?? []).toHaveLength(0)
   })
 
-  it("unmergeIdentity is a no-op for unknown primary or non-absorbed secondary", async () => {
+  it("unmergeIdentity returns typed stale outcomes", async () => {
     const primary = await upsertIdentity(baseInput())
-    expect(await unmergeIdentity("nope", "x")).toBeNull()
-    expect(await unmergeIdentity(primary.id, "never-merged")).toBeNull()
+    expect(await unmergeIdentity("nope", "x")).toEqual({
+      ok: false,
+      reason: "primary_missing",
+    })
+    expect(await unmergeIdentity(primary.id, "never-merged")).toEqual({
+      ok: false,
+      reason: "snapshot_missing",
+    })
   })
 
   it("listMergedGroups groups primaries with their absorbed identities", async () => {
@@ -164,5 +186,127 @@ describe("platform-identities", () => {
     const lone = groups.find((g) => g.primary.id === solo.id)
     expect(merged?.merged.map((m) => m.id)).toEqual([secondary.id])
     expect(lone?.merged).toEqual([])
+  })
+
+  it("resolves inbound traffic for an absorbed identity to the primary and updates its snapshot", async () => {
+    const primary = await upsertIdentity({ ...baseInput(), remoteUserId: "p" })
+    const secondary = await upsertIdentity({
+      platform: "discord",
+      adapterId: "d1",
+      remoteUserId: "s",
+      displayName: "Old name",
+    })
+    expect((await mergeIdentities(primary.id, secondary.id)).ok).toBe(true)
+
+    const resolved = await upsertIdentity({
+      platform: "discord",
+      adapterId: "d2",
+      remoteUserId: "s",
+      displayName: "Fresh name",
+    })
+
+    expect(resolved.id).toBe(primary.id)
+    expect(resolved.mergedSnapshots?.[0]).toMatchObject({
+      id: secondary.id,
+      adapterId: "d2",
+      displayName: "Fresh name",
+    })
+    expect(await getByPlatformUser("discord", "s")).toMatchObject({ id: primary.id })
+    expect(await getDb().platformIdentities.count()).toBe(1)
+
+    const unmerged = await unmergeIdentity(primary.id, secondary.id)
+    expect(unmerged).toMatchObject({ ok: true, restored: { displayName: "Fresh name" } })
+  })
+
+  it("preserves nested merge history through merge and unmerge", async () => {
+    const primary = await upsertIdentity({ ...baseInput(), remoteUserId: "p" })
+    const secondary = await upsertIdentity({
+      platform: "discord",
+      adapterId: "d1",
+      remoteUserId: "s",
+    })
+    const nested = await upsertIdentity({
+      platform: "slack",
+      adapterId: "sl1",
+      remoteUserId: "nested",
+    })
+    expect((await mergeIdentities(secondary.id, nested.id)).ok).toBe(true)
+    const merged = await mergeIdentities(primary.id, secondary.id)
+    expect(merged).toMatchObject({
+      ok: true,
+      primary: { mergedFromIds: expect.arrayContaining([secondary.id, nested.id]) },
+    })
+
+    await upsertIdentity({
+      platform: "slack",
+      adapterId: "sl2",
+      remoteUserId: "nested",
+      displayName: "Nested updated",
+    })
+    const unmerged = await unmergeIdentity(primary.id, secondary.id)
+    expect(unmerged).toMatchObject({ ok: true })
+    expect(await getByPlatformUser("slack", "nested")).toMatchObject({
+      id: secondary.id,
+      mergedSnapshots: [expect.objectContaining({ displayName: "Nested updated" })],
+    })
+  })
+
+  it("rejects self merge, missing secondary, and already-absorbed identities", async () => {
+    const primary = await upsertIdentity({ ...baseInput(), remoteUserId: "p" })
+    const secondary = await upsertIdentity({ ...baseInput(), remoteUserId: "s" })
+    expect(await mergeIdentities(primary.id, primary.id)).toEqual({
+      ok: false,
+      reason: "same_identity",
+    })
+    expect(await mergeIdentities(primary.id, "missing")).toEqual({
+      ok: false,
+      reason: "secondary_missing",
+    })
+    expect((await mergeIdentities(primary.id, secondary.id)).ok).toBe(true)
+    expect(await mergeIdentities(primary.id, secondary.id)).toEqual({
+      ok: false,
+      reason: "secondary_absorbed",
+    })
+  })
+
+  it("does not restore an alias whose compound identity was concurrently claimed", async () => {
+    const primary = await upsertIdentity({ ...baseInput(), remoteUserId: "p" })
+    const secondary = await upsertIdentity({
+      platform: "discord",
+      adapterId: "d1",
+      remoteUserId: "s",
+    })
+    expect((await mergeIdentities(primary.id, secondary.id)).ok).toBe(true)
+    await getDb().platformIdentities.add({
+      ...secondary,
+      id: "conflicting-row",
+      mergedFromIds: [],
+    })
+
+    expect(await unmergeIdentity(primary.id, secondary.id)).toEqual({
+      ok: false,
+      reason: "identity_conflict",
+    })
+    expect(await getDb().platformIdentities.get(primary.id)).toMatchObject({
+      mergedFromIds: expect.arrayContaining([secondary.id]),
+    })
+  })
+
+  it("lists only top-level non-conflicting merge candidates", async () => {
+    const primary = await upsertIdentity({ ...baseInput(), remoteUserId: "p" })
+    const candidate = await upsertIdentity({
+      platform: "discord",
+      adapterId: "d1",
+      remoteUserId: "candidate",
+    })
+    const absorbed = await upsertIdentity({
+      platform: "slack",
+      adapterId: "s1",
+      remoteUserId: "absorbed",
+    })
+    expect((await mergeIdentities(candidate.id, absorbed.id)).ok).toBe(true)
+    expect((await listMergeCandidates(primary.id)).map((identity) => identity.id)).toEqual([
+      candidate.id,
+    ])
   })
 })

@@ -5,6 +5,27 @@ import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MatrixTimelineEvent } from "./parse"
 
+const mockE2EEInitialize = jest.fn(async () => undefined)
+const mockE2EEClose = jest.fn(async () => undefined)
+const mockE2EEReceiveSync = jest.fn(async () => undefined)
+const mockE2EEPrepareRoomEvent = jest.fn(
+  async (_roomId: string, eventType: string, content: unknown) => ({ eventType, content })
+)
+const mockE2EEDecryptOrQueue = jest.fn(async (_roomId: string, event: MatrixTimelineEvent) => event)
+const mockE2EEIsRoomEncrypted = jest.fn(async () => false)
+
+jest.mock("./e2ee", () => ({
+  MatrixE2EERuntime: jest.fn().mockImplementation(() => ({
+    initialize: mockE2EEInitialize,
+    close: mockE2EEClose,
+    receiveSync: mockE2EEReceiveSync,
+    prepareRoomEvent: mockE2EEPrepareRoomEvent,
+    decryptOrQueue: mockE2EEDecryptOrQueue,
+    isRoomEncrypted: mockE2EEIsRoomEncrypted,
+    canAdvanceCursor: () => true,
+  })),
+}))
+
 // Deterministic gate: defaults to pass-through (the no-gate-configured
 // behavior); individual tests flip it to assert gate-first ordering.
 jest.mock("@/lib/connectors/at-gate", () => ({
@@ -58,13 +79,14 @@ function makeCtx(): { ctx: AdapterContext; emitted: NormalizedInboundEvent[] } {
   return { ctx, emitted }
 }
 
-function adapter(selfId = "@bot:matrix.org") {
+function adapter(selfId = "@bot:matrix.org", deviceId = "DEVICE") {
   return createMatrixAdapter({
     id: "mx-1",
     displayName: "Matrix Bot",
     homeserver: "https://matrix.org",
     accessToken: async () => "tok",
     selfId,
+    deviceId,
   })
 }
 
@@ -97,6 +119,18 @@ describe("createMatrixAdapter", () => {
     mockGetInstance.mockResolvedValue(undefined)
     mockUpdateInstance.mockReset()
     mockUpdateInstance.mockResolvedValue(undefined)
+    mockE2EEInitialize.mockClear()
+    mockE2EEClose.mockClear()
+    mockE2EEReceiveSync.mockClear()
+    mockE2EEPrepareRoomEvent.mockReset()
+    mockE2EEPrepareRoomEvent.mockImplementation(async (_roomId, eventType, content) => ({
+      eventType,
+      content,
+    }))
+    mockE2EEDecryptOrQueue.mockReset()
+    mockE2EEDecryptOrQueue.mockImplementation(async (_roomId, event) => event)
+    mockE2EEIsRoomEncrypted.mockReset()
+    mockE2EEIsRoomEncrypted.mockResolvedValue(false)
   })
 
   it("exposes correct meta and initial health", () => {
@@ -129,7 +163,7 @@ describe("createMatrixAdapter", () => {
             },
           },
         })
-      await new Promise((r) => setTimeout(r, 50000))
+      await new Promise(() => undefined)
       return syncResp("s3", {})
     })
 
@@ -173,7 +207,7 @@ describe("createMatrixAdapter", () => {
             },
           },
         })
-      await new Promise((r) => setTimeout(r, 50000))
+      await new Promise(() => undefined)
       return syncResp("s3", {})
     })
 
@@ -220,7 +254,7 @@ describe("createMatrixAdapter", () => {
             },
           },
         })
-      await new Promise((r) => setTimeout(r, 50000))
+      await new Promise(() => undefined)
       return syncResp("s3", {})
     })
 
@@ -380,6 +414,57 @@ describe("createMatrixAdapter", () => {
     expect(body["m.relates_to"]).toMatchObject({ rel_type: "m.thread", event_id: "$root" })
   })
 
+  it("encrypts messages, edits, reactions, and encrypted media through one send boundary", async () => {
+    mockE2EEPrepareRoomEvent.mockImplementation(async (_roomId, _eventType, content) => ({
+      eventType: "m.room.encrypted",
+      content: { ciphertext: JSON.stringify(content) },
+    }))
+    mockE2EEIsRoomEncrypted.mockResolvedValue(true)
+    const encryptedFile = {
+      url: "mxc://matrix.org/encrypted",
+      key: { kty: "oct" },
+      iv: "iv",
+      hashes: { sha256: "digest" },
+      v: "v2",
+    }
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_matrix_encrypted_media_upload") {
+        return { contentUri: encryptedFile.url, file: encryptedFile }
+      }
+      if (cmd === "connectors_http_request") return httpResp(200, { event_id: "$sent" })
+      throw new Error(`unexpected command ${cmd}`)
+    })
+    const a = adapter()
+
+    await a.send(sendReq([{ type: "text", text: "message" }]))
+    await a.edit!("$orig", sendReq([{ type: "text", text: "edit" }]))
+    await a.addReaction!("!r:matrix.org|$orig", "👍")
+    await a.send(sendReq([{ type: "image", url: "https://example.com/a.png", alt: "encrypted" }]))
+
+    expect(mockE2EEPrepareRoomEvent.mock.calls.map(([, eventType]) => eventType)).toEqual([
+      "m.room.message",
+      "m.room.message",
+      "m.reaction",
+      "m.room.message",
+    ])
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "connectors_matrix_encrypted_media_upload",
+      expect.objectContaining({
+        req: expect.objectContaining({ contentType: "application/octet-stream" }),
+      })
+    )
+    const sends = mockInvoke.mock.calls.filter(
+      ([cmd, args]) =>
+        cmd === "connectors_http_request" &&
+        String((args as { req: { url: string } }).req.url).includes("/send/")
+    )
+    expect(sends).toHaveLength(4)
+    for (const [, args] of sends) {
+      expect((args as { req: { url: string } }).req.url).toContain("/send/m.room.encrypted/")
+    }
+    expect(mockE2EEPrepareRoomEvent.mock.calls[3][2]).toMatchObject({ file: encryptedFile })
+  })
+
   it("send() rejects a request without a roomId", async () => {
     const res = await adapter().send({
       conversationRef: { platform: "matrix", adapterId: "mx-1" },
@@ -502,8 +587,13 @@ describe("createMatrixAdapter", () => {
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 
-  it("warns once per room for encrypted events and emits nothing", async () => {
+  it("decrypts encrypted timeline events before parsing and emitting", async () => {
     let n = 0
+    mockE2EEDecryptOrQueue.mockImplementation(async (_roomId, event) => ({
+      ...event,
+      type: "m.room.message",
+      content: { msgtype: "m.text", body: `decrypted ${event.event_id}` },
+    }))
     mockInvoke.mockImplementation(async () => {
       n += 1
       const encrypted = (id: string): MatrixTimelineEvent => ({
@@ -522,7 +612,7 @@ describe("createMatrixAdapter", () => {
         return syncResp("s3", {
           "!enc:matrix.org": { timeline: { events: [encrypted("$e3")] } },
         })
-      await new Promise((r) => setTimeout(r, 50000))
+      await new Promise(() => undefined)
       return syncResp("s4", {})
     })
 
@@ -530,59 +620,30 @@ describe("createMatrixAdapter", () => {
     const { ctx, emitted } = makeCtx()
     await a.start(ctx)
     await until(() => n >= 4)
-    const warns = (ctx.logger.warn as jest.Mock).mock.calls.filter(([msg]) =>
-      String(msg).includes("encrypted room not supported")
-    )
-    expect(warns).toHaveLength(1)
-    expect(warns[0][1]).toMatchObject({ roomId: "!enc:matrix.org" })
-    expect(emitted).toHaveLength(0)
+    await until(() => emitted.length === 3)
+    expect(emitted.map((event) => event.plainText)).toEqual([
+      "decrypted $e1",
+      "decrypted $e2",
+      "decrypted $e3",
+    ])
     await a.stop()
   })
 
-  it("lazily re-probes whoami when selfId is empty so own echoes stay suppressed", async () => {
-    let syncCalls = 0
-    mockInvoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
-      const url = String((args as { req?: { url?: string } }).req?.url ?? "")
-      if (url.includes("/account/whoami")) {
-        return httpResp(200, { user_id: "@bot:matrix.org" })
-      }
-      syncCalls += 1
-      if (syncCalls === 1) return syncResp("s1", {})
-      if (syncCalls === 2)
-        return syncResp("s2", {
-          "!r:matrix.org": {
-            timeline: {
-              events: [
-                {
-                  type: "m.room.message",
-                  event_id: "$own",
-                  sender: "@bot:matrix.org",
-                  origin_server_ts: 1,
-                  content: { msgtype: "m.notice", body: "own echo" },
-                },
-                {
-                  type: "m.room.message",
-                  event_id: "$other",
-                  sender: "@alice:matrix.org",
-                  origin_server_ts: 2,
-                  content: { msgtype: "m.text", body: "real" },
-                },
-              ],
-            },
-          },
-        })
-      await new Promise((r) => setTimeout(r, 50000))
-      return syncResp("s3", {})
-    })
-
-    const a = adapter("") // startup whoami failed → empty selfId
-    const { ctx, emitted } = makeCtx()
+  it("fails closed without detailed whoami identity and never starts sync", async () => {
+    const a = adapter("")
+    const { ctx } = makeCtx()
     await a.start(ctx)
-    await until(() => emitted.length > 0)
-    // The bot's own echo must NOT surface; the human message must.
-    expect(emitted).toHaveLength(1)
-    expect(emitted[0].plainText).toBe("real")
-    expect(emitted[0].selfId).toBe("@bot:matrix.org")
+    expect(a.health()).toMatchObject({ state: "degraded", reason: "missing_device_identity" })
+    expect(mockInvoke).not.toHaveBeenCalled()
+    await a.stop()
+  })
+
+  it("fails closed when detailed whoami omits the device identity", async () => {
+    const a = adapter("@bot:matrix.org", "")
+    const { ctx } = makeCtx()
+    await a.start(ctx)
+    expect(a.health()).toMatchObject({ state: "degraded", reason: "missing_device_identity" })
+    expect(mockE2EEInitialize).not.toHaveBeenCalled()
     await a.stop()
   })
 
@@ -622,7 +683,7 @@ describe("createMatrixAdapter", () => {
             },
           },
         })
-      await new Promise((r) => setTimeout(r, 50000))
+      await new Promise(() => undefined)
       return syncResp("fresh-3", {})
     })
 
@@ -650,7 +711,7 @@ describe("createMatrixAdapter", () => {
     mockInvoke.mockImplementation(async () => {
       n += 1
       if (n <= 2) return syncResp(`tok-${n}`, {})
-      await new Promise((r) => setTimeout(r, 50000))
+      await new Promise(() => undefined)
       return syncResp("tok-x", {})
     })
     const a = adapter()
@@ -665,4 +726,42 @@ describe("createMatrixAdapter", () => {
     expect(persistedTokens).toContain("tok-1")
     expect(persistedTokens[persistedTokens.length - 1]).toBe("tok-2")
   })
+
+  it("awaits shutdown and fences a late in-flight sync response", async () => {
+    let resolveLate: ((value: ReturnType<typeof syncResp>) => void) | undefined
+    const late = new Promise<ReturnType<typeof syncResp>>((resolve) => {
+      resolveLate = resolve
+    })
+    let calls = 0
+    mockInvoke.mockImplementation(async () => {
+      calls += 1
+      if (calls === 1) return syncResp("s1", {})
+      return late
+    })
+    const a = adapter()
+    const { ctx, emitted } = makeCtx()
+    await a.start(ctx)
+    await until(() => calls === 2)
+
+    await a.stop()
+    resolveLate?.(
+      syncResp("s2", {
+        "!r:matrix.org": { timeline: { events: [textEventForLateSync()] } },
+      })
+    )
+    await Promise.resolve()
+
+    expect(emitted).toHaveLength(0)
+    expect(a.health().state).toBe("down")
+  })
 })
+
+function textEventForLateSync(): MatrixTimelineEvent {
+  return {
+    type: "m.room.message",
+    event_id: "$late",
+    sender: "@alice:matrix.org",
+    origin_server_ts: 1,
+    content: { msgtype: "m.text", body: "must not emit" },
+  }
+}

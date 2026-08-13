@@ -49,6 +49,25 @@ describe("MessageSegment", () => {
     expect(segmentsToPlainText(segs)).toBe(" [file:scan.pdf] PAGE ONE ")
   })
 
+  it("retains Matrix encrypted file metadata on media segments", () => {
+    const file = {
+      url: "mxc://matrix.example/encrypted",
+      key: { kty: "oct", alg: "A256CTR" },
+      iv: "iv",
+      hashes: { sha256: "digest" },
+      v: "v2",
+    }
+    const segment: MessageSegment = {
+      type: "video",
+      url: "https://matrix.example/download/encrypted",
+      matrixEncryptedFile: file,
+      matrixEncryptedThumbnailFile: { ...file, url: "mxc://matrix.example/thumb" },
+    }
+
+    expect(segment.matrixEncryptedFile).toBe(file)
+    expect(segment.matrixEncryptedThumbnailFile?.url).toBe("mxc://matrix.example/thumb")
+  })
+
   describe("a2ui segment", () => {
     const sample: A2UIMessageSegment = {
       type: "a2ui",

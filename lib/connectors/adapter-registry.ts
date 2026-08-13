@@ -25,7 +25,7 @@ import { createWeComAdapter } from "./adapters/wecom"
 import type { WeComAdapterSettings } from "./adapters/wecom/welcome"
 import { createWechatPersonalAdapter } from "./adapters/wechat-personal"
 import { createMatrixAdapter } from "./adapters/matrix"
-import { matrixWhoami } from "./adapters/matrix/auth"
+import { matrixWhoamiDetailed } from "./adapters/matrix/auth"
 import { createQQOfficialAdapter } from "./adapters/qq-official"
 import { getQQAccessToken } from "./adapters/qq-official/auth"
 import { createWechatOaAdapter } from "./adapters/wechat-oa"
@@ -374,11 +374,10 @@ export async function buildWechatPersonalAdapter(
  * Instantiate a Matrix PlatformAdapter from a persisted AdapterInstanceRow.
  *
  * Reads the access token from the keyring and the non-secret homeserver URL
- * from `settings.homeserver`, then calls `whoami` to resolve the bot's own
- * user id (selfId). If the probe fails the adapter still starts with an
- * empty selfId and lazily re-probes whoami itself once the homeserver is
- * reachable (an empty selfId would otherwise disable own-echo suppression
- * and self-mention detection until restart).
+ * from `settings.homeserver`, then calls detailed `whoami` to resolve both
+ * the user and device identity required by matrix-sdk-crypto. A missing
+ * device id is passed through as an empty value so the adapter enters its
+ * actionable degraded state without starting sync or sending plaintext.
  */
 export async function buildMatrixAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
   const settings = (row.settings ?? {}) as { homeserver?: string }
@@ -388,9 +387,13 @@ export async function buildMatrixAdapter(row: AdapterInstanceRow): Promise<Platf
   const accessToken = accessTokenRaw ?? ""
 
   let selfId = ""
+  let deviceId = ""
   try {
-    const resolved = await matrixWhoami(homeserver, accessToken)
-    if (resolved) selfId = resolved
+    const resolved = await matrixWhoamiDetailed(homeserver, accessToken)
+    if (resolved) {
+      selfId = resolved.userId
+      deviceId = resolved.deviceId ?? ""
+    }
   } catch {
     console.warn(`[adapter-registry] whoami failed for Matrix adapter ${row.id}`)
   }
@@ -401,6 +404,7 @@ export async function buildMatrixAdapter(row: AdapterInstanceRow): Promise<Platf
     homeserver,
     accessToken: () => connectorsKeyringGet(row.id, "accessToken").then((t) => t ?? ""),
     selfId,
+    deviceId,
   })
 }
 
@@ -412,20 +416,15 @@ export async function buildMatrixAdapter(row: AdapterInstanceRow): Promise<Platf
  * needed — the bot's id arrives on the gateway READY event (webhook mode has
  * no READY; selfId stays empty there).
  *
- * Webhook can be selected either by the row's first-class `transportMode` or
- * by `settings.transport` (the schema-driven form field — same convention as
- * the Lark builder); gateway stays the default so existing installs are
- * unaffected. Note the inbound axum server auto-start/registration keys off
- * `row.transportMode` only (`adapterNeedsInboundServer`).
+ * `transportMode` is the only transport source. Dexie v161 migrates and
+ * removes the former `settings.transport` field before runtime construction,
+ * keeping the adapter, inbound server, fingerprint, and UI in agreement.
  */
 export async function buildQQOfficialAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
-  const settingsTransport = (row.settings as Record<string, unknown> | undefined)?.transport
-  const transportMode =
-    row.transportMode === "webhook" || settingsTransport === "webhook" ? "webhook" : "gateway"
   return createQQOfficialAdapter({
     id: row.id,
     displayName: row.displayName,
-    transportMode,
+    transportMode: row.transportMode === "webhook" ? "webhook" : "gateway",
     accessToken: async () => {
       const appId = (await connectorsKeyringGet(row.id, "appId")) ?? ""
       const secret = (await connectorsKeyringGet(row.id, "clientSecret")) ?? ""

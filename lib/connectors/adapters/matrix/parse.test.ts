@@ -224,6 +224,40 @@ describe("parseMatrixEvent", () => {
     })
   })
 
+  it("models encrypted Matrix file and thumbnail_file media references", () => {
+    const file = {
+      url: "mxc://matrix.org/video",
+      key: { kty: "oct", k: "key" },
+      iv: "iv",
+      hashes: { sha256: "digest" },
+      v: "v2",
+    }
+    const thumbnailFile = { ...file, url: "mxc://matrix.org/thumb" }
+    const video = parseMatrixEvent(
+      ADAPTER,
+      SELF,
+      ROOM,
+      msg({
+        content: {
+          msgtype: "m.video",
+          body: "clip.mp4",
+          file,
+          info: { mimetype: "video/mp4", thumbnail_file: thumbnailFile },
+        },
+      }),
+      { homeserver: "matrix.org" }
+    )
+
+    expect(video!.segments[0]).toMatchObject({
+      type: "video",
+      url: "https://matrix.org/_matrix/client/v1/media/download/matrix.org/video",
+      rawUrl: file.url,
+      thumbnailUrl: "https://matrix.org/_matrix/client/v1/media/download/matrix.org/thumb",
+      matrixEncryptedFile: file,
+      matrixEncryptedThumbnailFile: thumbnailFile,
+    })
+  })
+
   it("captures reply target and strips the quote fallback", () => {
     const ev = msg({
       content: {

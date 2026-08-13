@@ -10,6 +10,7 @@
  * user (group chats, never-seen contacts) show an empty state.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
@@ -24,13 +25,20 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { UserRoundXIcon } from "lucide-react"
-import { getByPlatformUser, unmergeIdentity } from "@/lib/db/platform-identities"
+import {
+  getByPlatformUser,
+  listMergeCandidates,
+  unmergeIdentity,
+  type IdentityUnmergeFailureReason,
+} from "@/lib/db/platform-identities"
 import type { PlatformIdentityRow } from "@/lib/db/connector-types"
 import { parseConversationKey } from "@/types/connectors/event"
+import { IdentityMergeDialog } from "@/components/connectors/identity-merge-dialog"
 
 interface ContactGroup {
   primary: PlatformIdentityRow
   merged: PlatformIdentityRow[]
+  candidates: PlatformIdentityRow[]
 }
 
 export interface ContactProfileDrawerProps {
@@ -51,7 +59,11 @@ function useContact(conversationKey: string): ContactGroup | null {
       }
       const primary = await getByPlatformUser(parsed.platform, parsed.remoteChatId)
       if (!primary) return null
-      return { primary, merged: primary.mergedSnapshots ?? [] }
+      return {
+        primary,
+        merged: primary.mergedSnapshots ?? [],
+        candidates: await listMergeCandidates(primary.id),
+      }
     }, [conversationKey]) ?? null
   )
 }
@@ -63,13 +75,17 @@ export function ContactProfileDrawer({
 }: ContactProfileDrawerProps) {
   const t = useTranslations("inbox.contactProfile")
   const contact = useContact(conversationKey)
+  const [mergeCandidate, setMergeCandidate] = useState<PlatformIdentityRow | null>(null)
+
+  const unmergeError = (reason: IdentityUnmergeFailureReason) => t(`errors.${reason}`)
 
   const handleUnmerge = async (secondaryId: string) => {
     if (!contact) return
     try {
-      await unmergeIdentity(contact.primary.id, secondaryId)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      const result = await unmergeIdentity(contact.primary.id, secondaryId)
+      if (!result.ok) toast.error(unmergeError(result.reason))
+    } catch {
+      toast.error(t("errors.unexpected"))
     }
   }
 
@@ -141,9 +157,55 @@ export function ContactProfileDrawer({
                 </ItemGroup>
               </div>
             )}
+
+            {contact.candidates.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium">{t("candidatesTitle")}</p>
+                <ItemGroup className="divide-y border-y">
+                  {contact.candidates.map((candidate) => (
+                    <Item
+                      key={candidate.id}
+                      role="listitem"
+                      size="sm"
+                      className="rounded-none px-0"
+                    >
+                      <ItemContent>
+                        <ItemTitle className="block max-w-full truncate text-xs">
+                          {candidate.displayName ?? candidate.remoteUserId}
+                          <span className="ml-1 text-muted-foreground">({candidate.platform})</span>
+                        </ItemTitle>
+                      </ItemContent>
+                      <ItemActions>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => setMergeCandidate(candidate)}
+                        >
+                          {t("merge")}
+                        </Button>
+                      </ItemActions>
+                    </Item>
+                  ))}
+                </ItemGroup>
+              </div>
+            )}
           </div>
         )}
       </SheetContent>
+      {contact && mergeCandidate && (
+        <IdentityMergeDialog
+          key={`${contact.primary.id}:${mergeCandidate.id}`}
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setMergeCandidate(null)
+          }}
+          identities={[contact.primary, mergeCandidate]}
+          lockedPrimaryId={contact.primary.id}
+          onMerged={() => setMergeCandidate(null)}
+        />
+      )}
     </Sheet>
   )
 }

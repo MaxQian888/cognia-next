@@ -6,6 +6,14 @@
  *
  * Discriminator is `type`; renderer code switches on it.
  */
+export interface MatrixEncryptedFile {
+  url: string
+  key: Record<string, unknown>
+  iv: string
+  hashes: Record<string, string>
+  v: string
+}
+
 export type MessageSegment =
   | { type: "text"; text: string }
   | { type: "markdown"; md: string }
@@ -21,6 +29,7 @@ export type MessageSegment =
       dataBase64?: string
       /** MIME type for inline bytes or remote media. */
       mimeType?: string
+      matrixEncryptedFile?: MatrixEncryptedFile
       /**
        * Text extracted from the image by the inbound OCR step (ADR-0024).
        * Populated best-effort when the image carried inline bytes and OCR is
@@ -36,6 +45,8 @@ export type MessageSegment =
       thumbnailUrl?: string
       durationSec?: number
       mimeType?: string
+      matrixEncryptedFile?: MatrixEncryptedFile
+      matrixEncryptedThumbnailFile?: MatrixEncryptedFile
     }
   | {
       type: "voice"
@@ -44,6 +55,7 @@ export type MessageSegment =
       durationSec?: number
       transcript?: string
       mimeType?: string
+      matrixEncryptedFile?: MatrixEncryptedFile
     }
   | {
       type: "file"
@@ -52,6 +64,7 @@ export type MessageSegment =
       name: string
       mimeType: string
       sizeBytes: number
+      matrixEncryptedFile?: MatrixEncryptedFile
       /** OCR text extracted from an image/PDF file attachment (ADR-0024). */
       ocrText?: string
     }

@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
@@ -54,6 +55,9 @@ export function QQOfficialConfigDialog({
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [appId, setAppId] = useState("")
   const [clientSecret, setClientSecret] = useState("")
+  const [transportMode, setTransportMode] = useState<"gateway" | "webhook">(
+    row?.transportMode === "webhook" ? "webhook" : "gateway"
+  )
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [testing, setTesting] = useState(false)
@@ -67,6 +71,7 @@ export function QQOfficialConfigDialog({
     displayName.trim() !== row?.displayName ||
     appId.length > 0 ||
     clientSecret.length > 0 ||
+    transportMode !== (row?.transportMode === "webhook" ? "webhook" : "gateway") ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
 
@@ -114,7 +119,7 @@ export function QQOfficialConfigDialog({
           type: "qq-official",
           displayName: displayName.trim(),
           enabled: true,
-          transportMode: "gateway",
+          transportMode,
           settings: {},
           credentialsRef: {
             keyringService: "com.cognia.platforms",
@@ -130,6 +135,7 @@ export function QQOfficialConfigDialog({
         adapterId = row.id
         await updateAdapterInstance(adapterId, {
           displayName: displayName.trim(),
+          transportMode,
           muted,
           quietHours: quietHours ?? undefined,
         })
@@ -262,6 +268,39 @@ export function QQOfficialConfigDialog({
     ),
   }
 
+  const deliverySection: FormSection = {
+    id: "delivery",
+    label: t("sectionDelivery"),
+    description: t("sectionDeliveryDesc"),
+    defaultOpen: true,
+    children: (
+      <div className="space-y-2">
+        <Label>{t("transportLabel")}</Label>
+        <RadioGroup
+          value={transportMode}
+          onValueChange={(value) => setTransportMode(value as "gateway" | "webhook")}
+          disabled={saving}
+          className="gap-3"
+        >
+          <div className="flex items-start gap-3">
+            <RadioGroupItem id="qq-transport-gateway" value="gateway" />
+            <div className="space-y-0.5">
+              <Label htmlFor="qq-transport-gateway">{t("transportGateway")}</Label>
+              <p className="text-xs text-muted-foreground">{t("transportGatewayHelp")}</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <RadioGroupItem id="qq-transport-webhook" value="webhook" />
+            <div className="space-y-0.5">
+              <Label htmlFor="qq-transport-webhook">{t("transportWebhook")}</Label>
+              <p className="text-xs text-muted-foreground">{t("transportWebhookHelp")}</p>
+            </div>
+          </div>
+        </RadioGroup>
+      </div>
+    ),
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-3xl">
@@ -270,7 +309,7 @@ export function QQOfficialConfigDialog({
         </DialogHeader>
         <div className="-mx-6 flex-1 overflow-y-auto px-6">
           <AdapterFormSections
-            sections={[identitySection, advancedSection]}
+            sections={[identitySection, deliverySection, advancedSection]}
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}

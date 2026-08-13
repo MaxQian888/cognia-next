@@ -133,6 +133,22 @@ describe("startMatrixSync", () => {
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 
+  it("stops awaiting an in-flight non-cancellable Tauri sync request", async () => {
+    const controller = new AbortController()
+    mockInvoke.mockImplementation(() => new Promise(() => undefined))
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "tok",
+      signal: controller.signal,
+    })
+
+    const pending = gen.next()
+    await Promise.resolve()
+    controller.abort()
+
+    await expect(pending).resolves.toEqual({ done: true, value: undefined })
+  })
+
   it("sends a lazy-load filter (limit 1 while priming, 20 after) and set_presence=offline", async () => {
     const controller = new AbortController()
     mockInvoke
@@ -186,6 +202,42 @@ describe("startMatrixSync", () => {
     // Resumed cursor → long-poll from the first request (no timeout=0 prime).
     expect(firstReq.url).toContain("timeout=30000")
     expect(tokens).toContain("s2")
+  })
+
+  it("processes crypto sync changes before timeline events and can hold the cursor", async () => {
+    const controller = new AbortController()
+    let allowCursor = false
+    const order: string[] = []
+    mockInvoke
+      .mockResolvedValueOnce(
+        syncResp("s2", { "!r:s": { timeline: { events: [textEvent("$encrypted")] } } })
+      )
+      .mockImplementation(async () => {
+        allowCursor = true
+        return syncResp("s3", {})
+      })
+    const tokens: string[] = []
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "tok",
+      signal: controller.signal,
+      initialSince: "persisted",
+      onSyncResponse: async () => {
+        order.push("crypto")
+      },
+      canAdvanceCursor: () => allowCursor,
+      onNextBatch: (token) => tokens.push(token),
+      _backoffBaseMs: 1,
+    })
+
+    const next = await gen.next()
+    order.push("timeline")
+    expect(next.value?.event.event_id).toBe("$encrypted")
+    expect(order).toEqual(["crypto", "timeline"])
+    expect(tokens).toEqual([])
+    allowCursor = true
+    controller.abort()
+    await gen.return(undefined)
   })
 
   it("auto-joins invited rooms once — a failing join does not loop", async () => {

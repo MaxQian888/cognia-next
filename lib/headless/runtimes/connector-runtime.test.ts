@@ -14,7 +14,11 @@ import { bootstrapHeadlessRuntimes } from "../bootstrap"
 import { __resetHeadlessRuntimesForTesting } from "../registry"
 import type { HeadlessRuntimeContext, RuntimeBridge } from "../types"
 import { installConnectorRuntime } from "@/lib/connectors/bootstrap/install-connector-runtime"
-import { connectorsHttpRequest, connectorsStopServer } from "@/lib/connectors/tauri/commands"
+import {
+  connectorsHttpRequest,
+  connectorsMatrixCryptoClose,
+  connectorsStopServer,
+} from "@/lib/connectors/tauri/commands"
 import { connectorListen } from "@/lib/connectors/events"
 
 // The full connector bootstrap is covered by its own suite — here it is a
@@ -158,6 +162,10 @@ describe("connector-runtime (headless)", () => {
     const req = { url: "https://api.telegram.org/botX/sendMessage", method: "POST" }
     await expect(connectorsHttpRequest(req)).resolves.toEqual(response)
     expect(mockCall).toHaveBeenCalledWith("connectors_http_request", { req })
+    await connectorsMatrixCryptoClose("mx-headless")
+    expect(mockCall).toHaveBeenCalledWith("connectors_matrix_crypto_close", {
+      adapterId: "mx-headless",
+    })
     expect(mockTauriInvoke).not.toHaveBeenCalled()
     await stop()
   })

@@ -129,6 +129,45 @@ pub struct ConnectorMediaUploadRequest {
     pub content_type: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatrixEncryptedMediaUploadRequest {
+    pub upload_url: String,
+    pub headers: Option<HashMap<String, String>>,
+    pub source_url: Option<String>,
+    pub local_path: Option<String>,
+    pub content_type: Option<String>,
+}
+
+impl From<MatrixEncryptedMediaUploadRequest> for ConnectorMediaUploadRequest {
+    fn from(value: MatrixEncryptedMediaUploadRequest) -> Self {
+        Self {
+            upload_url: value.upload_url,
+            headers: value.headers,
+            source_url: value.source_url,
+            local_path: value.local_path,
+            content_type: value.content_type,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatrixEncryptedMediaUploadResponse {
+    pub content_uri: String,
+    pub file: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatrixEncryptedMediaFetchRequest {
+    pub adapter_id: String,
+    pub remote_ref: String,
+    pub source_url: String,
+    pub headers: Option<HashMap<String, String>>,
+    pub file: serde_json::Value,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

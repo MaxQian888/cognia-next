@@ -293,6 +293,20 @@ pub async fn matrix_crypto_init(req: MatrixCryptoInitRequest) -> Result<(), Stri
     Ok(())
 }
 
+/// Drop only the process-local machine for one adapter. The encrypted SQLite
+/// store remains on disk, so a clean stop or device rotation can re-open the
+/// same account without retaining a stale in-memory identity.
+pub async fn matrix_crypto_close(adapter_id: &str) -> Result<(), String> {
+    if adapter_id.trim().is_empty() {
+        return Err("adapterId is required".to_string());
+    }
+    // Serialize with init so a close racing an in-flight store open cannot
+    // return first and then have the stale machine inserted afterwards.
+    let _init_guard = init_lock().lock().await;
+    sessions().lock().remove(adapter_id);
+    Ok(())
+}
+
 pub async fn matrix_crypto_outgoing_requests(
     adapter_id: String,
 ) -> Result<Vec<MatrixCryptoOutgoingRequest>, String> {
@@ -490,6 +504,14 @@ pub async fn matrix_crypto_encrypt_attachment(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(req.bytes_base64)
         .map_err(|err| format!("invalid attachment base64: {err}"))?;
+    let (encrypted, info) = encrypt_attachment_bytes(bytes)?;
+    Ok(MatrixCryptoAttachmentEncryptResponse {
+        bytes_base64: base64::engine::general_purpose::STANDARD.encode(encrypted),
+        info,
+    })
+}
+
+pub(crate) fn encrypt_attachment_bytes(bytes: Vec<u8>) -> Result<(Vec<u8>, Value), String> {
     let mut cursor = Cursor::new(bytes);
     let mut encryptor = AttachmentEncryptor::new(&mut cursor);
     let mut encrypted = Vec::new();
@@ -498,10 +520,7 @@ pub async fn matrix_crypto_encrypt_attachment(
         .map_err(|err| format!("Matrix attachment encryption failed: {err}"))?;
     let info = serde_json::to_value(encryptor.finish())
         .map_err(|err| format!("serialize Matrix attachment info failed: {err}"))?;
-    Ok(MatrixCryptoAttachmentEncryptResponse {
-        bytes_base64: base64::engine::general_purpose::STANDARD.encode(encrypted),
-        info,
-    })
+    Ok((encrypted, info))
 }
 
 pub async fn matrix_crypto_decrypt_attachment(
@@ -510,7 +529,19 @@ pub async fn matrix_crypto_decrypt_attachment(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(req.bytes_base64)
         .map_err(|err| format!("invalid encrypted attachment base64: {err}"))?;
-    let info: MediaEncryptionInfo = serde_json::from_value(req.info)
+    let decrypted = decrypt_attachment_bytes(bytes, req.info)?;
+    Ok(MatrixCryptoAttachmentDecryptResponse {
+        bytes_base64: base64::engine::general_purpose::STANDARD.encode(decrypted),
+    })
+}
+
+pub(crate) fn decrypt_attachment_bytes(bytes: Vec<u8>, mut info: Value) -> Result<Vec<u8>, String> {
+    // Matrix event content stores the MXC URI next to the encryption fields in
+    // `file.url`; MediaEncryptionInfo owns only key/iv/hash/version.
+    if let Some(object) = info.as_object_mut() {
+        object.remove("url");
+    }
+    let info: MediaEncryptionInfo = serde_json::from_value(info)
         .map_err(|err| format!("invalid Matrix attachment info: {err}"))?;
     let mut cursor = Cursor::new(bytes);
     let mut decryptor = AttachmentDecryptor::new(&mut cursor, info)
@@ -519,9 +550,7 @@ pub async fn matrix_crypto_decrypt_attachment(
     decryptor
         .read_to_end(&mut decrypted)
         .map_err(|err| format!("Matrix attachment decryption failed: {err}"))?;
-    Ok(MatrixCryptoAttachmentDecryptResponse {
-        bytes_base64: base64::engine::general_purpose::STANDARD.encode(decrypted),
-    })
+    Ok(decrypted)
 }
 
 fn outgoing_request_to_descriptor(
@@ -738,6 +767,31 @@ mod tests {
         let err = matrix_crypto_init(changed).await.unwrap_err();
 
         assert!(err.contains("different Matrix identity"));
+    }
+
+    #[tokio::test]
+    async fn close_allows_device_rotation_without_deleting_the_store() {
+        matrix_crypto_reset_for_test("mx-rotate");
+        matrix_crypto_init(init_request("mx-rotate")).await.unwrap();
+
+        matrix_crypto_close("mx-rotate").await.unwrap();
+        assert!(get_machine("mx-rotate").is_err());
+
+        let mut changed = init_request("mx-rotate");
+        changed.device_id = "ROTATEDDEVICE".to_string();
+        matrix_crypto_init(changed).await.unwrap();
+        assert!(get_machine("mx-rotate").is_ok());
+    }
+
+    #[tokio::test]
+    async fn close_waits_for_an_in_flight_initialization() {
+        let guard = init_lock().lock().await;
+        let close = tokio::spawn(async { matrix_crypto_close("mx-close-race").await });
+        tokio::task::yield_now().await;
+        assert!(!close.is_finished());
+
+        drop(guard);
+        close.await.unwrap().unwrap();
     }
 
     #[tokio::test]

@@ -72,6 +72,7 @@ function adapters(): PlatformAdapter[] {
       homeserver: "https://matrix.example",
       accessToken: secret,
       selfId: "@bot:example",
+      deviceId: "DEVICE",
     }),
     createQQOfficialAdapter({
       id: "qq-official-contract",

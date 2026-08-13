@@ -16,7 +16,12 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
-import { connectorsHttpRequest, connectorsMediaUpload } from "@/lib/connectors/tauri/commands"
+import {
+  connectorsHttpRequest,
+  connectorsMatrixEncryptedMediaUpload,
+  connectorsMediaUpload,
+  type MatrixEncryptedMediaUploadResponse,
+} from "@/lib/connectors/tauri/commands"
 import { getBus } from "@/lib/connectors/bus"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
@@ -36,6 +41,7 @@ import {
   type MatrixSendContent,
 } from "./serialize"
 import { MatrixSyncAuthError, startMatrixSync } from "./transport-sync"
+import { MatrixE2EERuntime } from "./e2ee"
 
 export interface MatrixAdapterOptions {
   id: string
@@ -44,13 +50,10 @@ export interface MatrixAdapterOptions {
   homeserver: string
   /** Resolves the access token from the keyring on each call. */
   accessToken: () => Promise<string>
-  /**
-   * Bot's own user id (e.g. @bot:matrix.org) from whoami at startup. May be
-   * "" when the startup probe failed — the adapter then lazily re-probes
-   * whoami itself (an empty selfId disables own-echo suppression, so the bot
-   * would otherwise reply to its own messages until restart).
-   */
+  /** Bot's own user id (e.g. @bot:matrix.org) from detailed whoami. */
   selfId: string
+  /** Stable device identity required by matrix-sdk-crypto. */
+  deviceId: string
 }
 
 const CLIENT_V3 = "/_matrix/client/v3"
@@ -89,14 +92,15 @@ function mediaMimeType(seg: MatrixMediaChunk["segment"]): string | undefined {
 
 function buildMediaEventContent(
   seg: MatrixMediaChunk["segment"],
-  contentUri: string
+  upload: { contentUri: string; file?: MatrixEncryptedMediaUploadResponse["file"] }
 ): Record<string, unknown> {
+  const mediaReference = upload.file ? { file: upload.file } : { url: upload.contentUri }
   switch (seg.type) {
     case "image":
       return {
         msgtype: "m.image",
         body: seg.alt ?? "image",
-        url: contentUri,
+        ...mediaReference,
         info: {
           ...(seg.mimeType ? { mimetype: seg.mimeType } : {}),
           ...(seg.width !== undefined ? { w: seg.width } : {}),
@@ -107,7 +111,7 @@ function buildMediaEventContent(
       return {
         msgtype: "m.video",
         body: "video",
-        url: contentUri,
+        ...mediaReference,
         info: {
           ...(seg.mimeType ? { mimetype: seg.mimeType } : {}),
           ...(seg.durationSec !== undefined ? { duration: seg.durationSec * 1000 } : {}),
@@ -117,7 +121,7 @@ function buildMediaEventContent(
       return {
         msgtype: "m.audio",
         body: "audio",
-        url: contentUri,
+        ...mediaReference,
         info: {
           ...(seg.mimeType ? { mimetype: seg.mimeType } : {}),
           ...(seg.durationSec !== undefined ? { duration: seg.durationSec * 1000 } : {}),
@@ -128,7 +132,7 @@ function buildMediaEventContent(
         msgtype: "m.file",
         body: seg.name,
         filename: seg.name,
-        url: contentUri,
+        ...mediaReference,
         info: { mimetype: seg.mimeType, size: seg.sizeBytes },
       }
   }
@@ -136,8 +140,6 @@ function buildMediaEventContent(
 
 /** Persist the sync cursor at most this often (plus a flush on stop()). */
 const SYNC_TOKEN_PERSIST_INTERVAL_MS = 30_000
-/** Minimum gap between lazy whoami re-probe attempts. */
-const SELF_ID_REPROBE_INTERVAL_MS = 60_000
 /** Cap on the recently-sent own event-id set (reply-to-self detection). */
 const OWN_EVENT_IDS_CAP = 500
 
@@ -148,14 +150,12 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
   let healthReason: string | undefined
   let lastActivityAt: number | undefined
   let stopCalled = false
-  // Mutable so the lazy whoami re-probe can fill in a missing startup value.
-  let selfId = opts.selfId
-  let lastSelfProbeAt = 0
+  let generation = 0
+  let syncTask: Promise<void> | null = null
+  let e2ee: MatrixE2EERuntime | null = null
   // `next_batch` persistence state — throttled writes + flush on stop().
   let pendingSyncToken: string | null = null
   let lastTokenPersistAt = 0
-  // Rooms already warned about undecryptable (E2EE) traffic.
-  const warnedEncryptedRooms = new Set<string>()
   // Recently-sent own event ids (bare), for reply-to-self mention detection.
   const ownEventIds = new Set<string>()
 
@@ -201,25 +201,6 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     }
   }
 
-  /**
-   * Lazily resolve the bot's own user id when the startup whoami probe
-   * failed. Without it, own-echo suppression (`ev.sender === selfId`) is
-   * disabled and the bot can reply to its own messages. Throttled so a dead
-   * homeserver isn't hammered once per event.
-   */
-  async function ensureSelfId(): Promise<void> {
-    if (selfId !== "") return
-    const now = Date.now()
-    if (now - lastSelfProbeAt < SELF_ID_REPROBE_INTERVAL_MS) return
-    lastSelfProbeAt = now
-    try {
-      const body = await matrixRequest("GET", `${CLIENT_V3}/account/whoami`)
-      if (typeof body.user_id === "string" && body.user_id) selfId = body.user_id
-    } catch {
-      // Still unreachable / unauthorized — retry after the throttle window.
-    }
-  }
-
   async function matrixRequest(
     method: "GET" | "POST" | "PUT",
     path: string,
@@ -239,6 +220,9 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     try {
       body = JSON.parse(resp.body) as Record<string, unknown>
     } catch {
+      if (resp.status >= 200 && resp.status < 300) {
+        throw new Error(`Matrix ${method} ${path} returned a non-JSON success response`)
+      }
       body = {}
     }
     if (resp.status < 200 || resp.status >= 300) {
@@ -255,6 +239,20 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     return body
   }
 
+  // Keep the outbound boundary fail-closed even before start(): the real
+  // runtime rejects prepare calls until crypto initialization has completed.
+  e2ee = new MatrixE2EERuntime({
+    adapterId: opts.id,
+    userId: opts.selfId,
+    deviceId: opts.deviceId,
+    request: matrixRequest,
+    onRecoveredEvent: async () => undefined,
+    onDegraded: (reason) => {
+      healthState = "degraded"
+      healthReason = reason
+    },
+  })
+
   /** PUT a room event; returns the assigned event_id. */
   async function sendRoomEvent(
     roomId: string,
@@ -262,18 +260,24 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     txnId: string,
     content: unknown
   ): Promise<string> {
+    if (!e2ee) throw new Error("Matrix encryption runtime is not initialized")
+    const prepared = await e2ee.prepareRoomEvent(roomId, eventType, content)
     const body = await matrixRequest(
       "PUT",
-      `${CLIENT_V3}/rooms/${encodeURIComponent(roomId)}/send/${eventType}/${encodeURIComponent(txnId)}`,
-      content
+      `${CLIENT_V3}/rooms/${encodeURIComponent(roomId)}/send/${prepared.eventType}/${encodeURIComponent(txnId)}`,
+      prepared.content
     )
     return typeof body.event_id === "string" ? body.event_id : ""
   }
 
-  async function uploadMedia(seg: MatrixMediaChunk["segment"]): Promise<string> {
+  async function uploadMedia(
+    roomId: string,
+    seg: MatrixMediaChunk["segment"]
+  ): Promise<{ contentUri: string; file?: MatrixEncryptedMediaUploadResponse["file"] }> {
+    if (!e2ee) throw new Error("Matrix encryption runtime is not initialized")
     const token = await opts.accessToken()
     const mimeType = mediaMimeType(seg)
-    return connectorsMediaUpload({
+    const request = {
       uploadUrl: `${base}/_matrix/media/v3/upload?filename=${encodeURIComponent(mediaName(seg))}`,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -281,7 +285,14 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
       },
       sourceUrl: seg.url,
       contentType: mimeType,
-    })
+    }
+    if (await e2ee.isRoomEncrypted(roomId)) {
+      return connectorsMatrixEncryptedMediaUpload({
+        ...request,
+        contentType: "application/octet-stream",
+      })
+    }
+    return { contentUri: await connectorsMediaUpload(request) }
   }
 
   async function sendSerializedContent(
@@ -292,8 +303,8 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     if (content.kind === "media") {
       let mediaContent: Record<string, unknown>
       try {
-        const contentUri = await uploadMedia(content.segment)
-        mediaContent = buildMediaEventContent(content.segment, contentUri)
+        const upload = await uploadMedia(roomId, content.segment)
+        mediaContent = buildMediaEventContent(content.segment, upload)
       } catch {
         // Upload failed (media repo error, unfetchable source URL, or web
         // mode without the Tauri upload command) — degrade instead of
@@ -310,13 +321,107 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     return sendRoomEvent(roomId, "m.room.message", txnId, content)
   }
 
+  async function processTimelineEvent(
+    ctx: AdapterContext,
+    roomId: string,
+    incoming: Parameters<typeof parseMatrixEvent>[3],
+    runGeneration: number
+  ): Promise<void> {
+    if (runGeneration !== generation) return
+    let event = incoming
+    if (event.type === "m.room.encrypted") {
+      const decrypted = await e2ee?.decryptOrQueue(roomId, event)
+      if (!decrypted || runGeneration !== generation) return
+      event = decrypted
+    }
+
+    try {
+      const callback = await parseMatrixReplyCorrelation(opts.id, opts.selfId, roomId, event)
+      if (runGeneration !== generation) return
+      if (callback) {
+        lastActivityAt = Date.now()
+        await getBus().dispatchConnectorCallback(callback)
+        return
+      }
+    } catch (err) {
+      ctx.logger.warn("matrix:reply correlation failed", {
+        reason: err instanceof Error ? err.message : String(err),
+      })
+    }
+
+    try {
+      const normalized = parseMatrixEvent(opts.id, opts.selfId, roomId, event, {
+        homeserver: base,
+        ownEventIds,
+      })
+      if (!normalized || runGeneration !== generation) return
+      if (!(await gateInboundEvent(opts.id, normalized)) || runGeneration !== generation) return
+      await resolveInboundMatrixMedia(normalized, {
+        accessToken: await opts.accessToken(),
+      })
+      if (runGeneration !== generation) return
+      lastActivityAt = Date.now()
+      await ctx.emit(normalized)
+    } catch (err) {
+      ctx.logger.warn("matrix:event parse/dispatch failed", {
+        reason: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
   async function start(ctx: AdapterContext): Promise<void> {
-    if (abortController) return
+    if (abortController || syncTask) return
     stopCalled = false
+    if (!opts.selfId || !opts.deviceId) {
+      healthState = "degraded"
+      healthReason = "missing_device_identity"
+      ctx.logger.error("matrix:E2EE requires whoami user_id and device_id", {
+        hasUserId: Boolean(opts.selfId),
+        hasDeviceId: Boolean(opts.deviceId),
+      })
+      return
+    }
+
+    const runGeneration = ++generation
     abortController = new AbortController()
     const signal = abortController.signal
-    healthState = "running"
+    healthState = "starting"
     healthReason = undefined
+
+    const crypto = new MatrixE2EERuntime({
+      adapterId: opts.id,
+      userId: opts.selfId,
+      deviceId: opts.deviceId,
+      request: matrixRequest,
+      onRecoveredEvent: (roomId, event) => processTimelineEvent(ctx, roomId, event, runGeneration),
+      onDegraded: (reason) => {
+        if (runGeneration === generation) {
+          healthState = "degraded"
+          healthReason = reason
+        }
+      },
+      logger: ctx.logger,
+    })
+    e2ee = crypto
+    try {
+      await crypto.initialize()
+    } catch (err) {
+      if (runGeneration === generation) {
+        healthState = "degraded"
+        healthReason = "crypto_init_failed"
+        ctx.logger.error("matrix:crypto initialization failed", {
+          reason: err instanceof Error ? err.message : String(err),
+        })
+      }
+      abortController = null
+      e2ee = null
+      return
+    }
+    if (runGeneration !== generation) {
+      await crypto.close()
+      return
+    }
+    healthState = "running"
 
     // Resume from the persisted cursor when one exists (messages received
     // while the app was down are then delivered instead of discarded).
@@ -334,77 +439,25 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
       accessToken: opts.accessToken,
       signal,
       initialSince,
-      onNextBatch,
+      onNextBatch: (token) => {
+        if (runGeneration === generation) onNextBatch(token)
+      },
+      onSyncResponse: async (body, hasGap) => {
+        if (runGeneration !== generation) return
+        await crypto.receiveSync(body, hasGap)
+      },
+      canAdvanceCursor: () => runGeneration === generation && crypto.canAdvanceCursor(),
       logger: ctx.logger,
     })
-    ;(async () => {
+    syncTask = (async () => {
       try {
-        // The startup whoami probe may have failed (registry builds the
-        // adapter with selfId "") — re-probe before processing traffic so
-        // own-echo suppression works.
-        await ensureSelfId()
         for await (const { roomId, event } of feed) {
-          if (signal.aborted) break
-          await ensureSelfId()
-
-          // GAP: E2EE is not wired up yet. A full Rust crypto layer exists
-          // unused (the `connectorsMatrixCrypto*` commands; whoami already
-          // persists the deviceId) — until it is connected, encrypted rooms
-          // degrade honestly: nothing reaches the AI loop and we warn once
-          // per room instead of silently dropping the traffic.
-          if (event.type === "m.room.encrypted") {
-            if (!warnedEncryptedRooms.has(roomId)) {
-              warnedEncryptedRooms.add(roomId)
-              ctx.logger.warn("matrix:encrypted room not supported yet", { roomId })
-            }
-            continue
-          }
-
-          // A2UI reply-correlation: a reply to one of our surface messages is
-          // routed onto the surface as an `input` action.
-          try {
-            const callback = await parseMatrixReplyCorrelation(opts.id, selfId, roomId, event)
-            if (callback) {
-              lastActivityAt = Date.now()
-              await getBus().dispatchConnectorCallback(callback)
-              continue
-            }
-          } catch (err) {
-            ctx.logger.warn("matrix:reply correlation failed", {
-              reason: err instanceof Error ? err.message : String(err),
-            })
-          }
-
-          // Isolate per-event parse/dispatch failures: a single malformed or
-          // unexpected event must not throw out of the `for await` loop (which
-          // would flip health to "degraded" and stop delivering ALL further
-          // messages until restart), matching the reply-correlation guard above.
-          try {
-            const normalized = parseMatrixEvent(opts.id, selfId, roomId, event, {
-              homeserver: base,
-              ownEventIds,
-            })
-            if (normalized) {
-              // Gate BEFORE resolving media (like the Telegram / Discord
-              // adapters): in a busy room with a mention-gate, downloading +
-              // encrypting every bystander attachment would waste bandwidth and
-              // head-of-line-block gated messages behind serial media fetches.
-              if (!(await gateInboundEvent(opts.id, normalized))) continue
-              await resolveInboundMatrixMedia(normalized, {
-                accessToken: await opts.accessToken(),
-              })
-              lastActivityAt = Date.now()
-              await ctx.emit(normalized)
-            }
-          } catch (err) {
-            ctx.logger.warn("matrix:event parse/dispatch failed", {
-              reason: err instanceof Error ? err.message : String(err),
-            })
-          }
+          if (signal.aborted || runGeneration !== generation) break
+          await processTimelineEvent(ctx, roomId, event, runGeneration)
         }
-        if (!stopCalled) healthState = "down"
+        if (!stopCalled && runGeneration === generation) healthState = "down"
       } catch (err) {
-        if (!stopCalled) {
+        if (!stopCalled && runGeneration === generation) {
           healthState = "degraded"
           if (err instanceof MatrixSyncAuthError) {
             // Dead access token — the sync loop stopped itself; surface the
@@ -414,19 +467,33 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
             ctx.logger.error("matrix:sync stopped — access token rejected", {
               reason: err.message,
             })
+          } else {
+            healthReason = "sync_failed"
+            ctx.logger.error("matrix:sync stopped", {
+              reason: err instanceof Error ? err.message : String(err),
+            })
           }
         }
+      } finally {
+        if (runGeneration === generation) syncTask = null
       }
     })()
   }
 
   async function stop(): Promise<void> {
     stopCalled = true
+    generation += 1
     abortController?.abort()
+    const crypto = e2ee
+    e2ee = null
+    await crypto?.close()
+    await syncTask?.catch(() => undefined)
+    syncTask = null
     abortController = null
-    healthState = "down"
     // Flush the pending sync cursor so the next start resumes cleanly.
     await flushSyncToken()
+    healthState = "down"
+    healthReason = undefined
   }
 
   function health(): AdapterHealth {
@@ -583,10 +650,10 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     } catch {
       return
     }
-    if (!roomId || !selfId) return
+    if (!roomId || !opts.selfId) return
     await matrixRequest(
       "PUT",
-      `${CLIENT_V3}/rooms/${encodeURIComponent(roomId)}/typing/${encodeURIComponent(selfId)}`,
+      `${CLIENT_V3}/rooms/${encodeURIComponent(roomId)}/typing/${encodeURIComponent(opts.selfId)}`,
       { typing: on, timeout: on ? 30_000 : 0 }
     )
   }

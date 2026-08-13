@@ -12,7 +12,10 @@
  */
 
 import { fetchAttachment } from "@/lib/connectors/attachment-fetcher"
-import { connectorsAttachmentRead } from "@/lib/connectors/tauri/commands"
+import {
+  connectorsAttachmentRead,
+  connectorsMatrixEncryptedMediaFetch,
+} from "@/lib/connectors/tauri/commands"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 
@@ -30,14 +33,34 @@ export async function resolveInboundMatrixMedia(
     if (!isMatrixMediaSegment(seg)) continue
     try {
       const rawUrl = seg.rawUrl
-      await fetchAttachment({
-        adapterId: event.adapterId,
-        remoteRef: rawUrl,
-        sourceUrl: seg.url,
-        mimeType: mediaMimeType(seg),
-        sizeBytes: mediaSizeBytes(seg),
-        headers: { Authorization: `Bearer ${options.accessToken}` },
-      })
+      const headers = { Authorization: `Bearer ${options.accessToken}` }
+      if (seg.matrixEncryptedFile) {
+        await connectorsMatrixEncryptedMediaFetch({
+          adapterId: event.adapterId,
+          remoteRef: rawUrl,
+          sourceUrl: seg.url,
+          headers,
+          file: seg.matrixEncryptedFile,
+        })
+      } else {
+        await fetchAttachment({
+          adapterId: event.adapterId,
+          remoteRef: rawUrl,
+          sourceUrl: seg.url,
+          mimeType: mediaMimeType(seg),
+          sizeBytes: mediaSizeBytes(seg),
+          headers,
+        })
+      }
+      if (seg.type === "video" && seg.thumbnailUrl && seg.matrixEncryptedThumbnailFile?.url) {
+        await connectorsMatrixEncryptedMediaFetch({
+          adapterId: event.adapterId,
+          remoteRef: seg.matrixEncryptedThumbnailFile.url,
+          sourceUrl: seg.thumbnailUrl,
+          headers,
+          file: seg.matrixEncryptedThumbnailFile,
+        })
+      }
       if (seg.type === "image") {
         await inlineSmallImage(seg, event.adapterId, rawUrl)
       }

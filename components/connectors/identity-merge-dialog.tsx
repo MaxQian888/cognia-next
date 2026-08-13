@@ -7,8 +7,6 @@
  * which is primary and which is secondary, then click Merge to call
  * mergeIdentities(primaryId, secondaryId).
  *
- * Note: The spec mentions drag-and-drop; Phase 1 ships a button-based merge
- * for reliability across all environments. DnD can be layered on in Phase 2.
  */
 
 import { useState } from "react"
@@ -31,6 +29,7 @@ interface IdentityMergeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   identities: [PlatformIdentityRow, PlatformIdentityRow]
+  lockedPrimaryId?: string
   onMerged?: (merged: PlatformIdentityRow) => void
 }
 
@@ -38,25 +37,44 @@ export function IdentityMergeDialog({
   open,
   onOpenChange,
   identities,
+  lockedPrimaryId,
   onMerged,
 }: IdentityMergeDialogProps) {
   const t = useTranslations("connectors.identityMerge")
-  const [primaryId, setPrimaryId] = useState<string>(identities[0].id)
+  const tupleKey = identities.map((identity) => identity.id).join(":")
+  const initialPrimaryId =
+    lockedPrimaryId && identities.some((identity) => identity.id === lockedPrimaryId)
+      ? lockedPrimaryId
+      : identities[0].id
+  const stateKey = `${open ? "open" : "closed"}:${tupleKey}:${lockedPrimaryId ?? "unlocked"}`
+  const [primarySelection, setPrimarySelection] = useState({
+    key: stateKey,
+    id: initialPrimaryId,
+  })
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [errorState, setErrorState] = useState<{ key: string; message: string | null }>({
+    key: stateKey,
+    message: null,
+  })
+  const primaryId = primarySelection.key === stateKey ? primarySelection.id : initialPrimaryId
+  const error = errorState.key === stateKey ? errorState.message : null
 
-  const secondary = identities.find((i) => i.id !== primaryId)!
-  const primary = identities.find((i) => i.id === primaryId)!
+  const primary = identities.find((identity) => identity.id === primaryId) ?? identities[0]
+  const secondary = identities.find((identity) => identity.id !== primary.id) ?? identities[1]
 
   const handleMerge = async () => {
     setBusy(true)
-    setError(null)
+    setErrorState({ key: stateKey, message: null })
     try {
-      const merged = await mergeIdentities(primaryId, secondary.id)
-      onMerged?.(merged)
+      const result = await mergeIdentities(primary.id, secondary.id)
+      if (!result.ok) {
+        setErrorState({ key: stateKey, message: t(`errors.${result.reason}`) })
+        return
+      }
+      onMerged?.(result.primary)
       onOpenChange(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Merge failed")
+    } catch {
+      setErrorState({ key: stateKey, message: t("errors.unexpected") })
     } finally {
       setBusy(false)
     }
@@ -76,7 +94,10 @@ export function IdentityMergeDialog({
               key={identity.id}
               identity={identity}
               isPrimary={identity.id === primaryId}
-              onClick={() => setPrimaryId(identity.id)}
+              locked={Boolean(lockedPrimaryId)}
+              onClick={() => {
+                if (!lockedPrimaryId) setPrimarySelection({ key: stateKey, id: identity.id })
+              }}
             />
           ))}
         </div>
@@ -119,10 +140,12 @@ export function IdentityMergeDialog({
 function IdentityCard({
   identity,
   isPrimary,
+  locked,
   onClick,
 }: {
   identity: PlatformIdentityRow
   isPrimary: boolean
+  locked: boolean
   onClick: () => void
 }) {
   const t = useTranslations("connectors.identityMerge")
@@ -130,6 +153,7 @@ function IdentityCard({
     <button
       type="button"
       onClick={onClick}
+      disabled={locked}
       data-testid={`identity-card-${identity.id}`}
       className={cn(
         "flex-1 rounded-lg border-2 p-3 text-left transition-colors",

@@ -366,7 +366,7 @@ export function WechatOaConfigDialog({
               size="sm"
               variant="outline"
               className="self-start"
-              onClick={() => router.push("/settings/companion#tunnel")}
+                      onClick={() => router.push("/settings?section=connections&connectionsTab=tunnel")}
               aria-label={t("openCompanionAria")}
             >
               {t("openCompanion")}

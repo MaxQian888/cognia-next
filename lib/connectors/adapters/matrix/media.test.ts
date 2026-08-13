@@ -3,6 +3,7 @@ import { resolveInboundMatrixMedia } from "./media"
 
 const mockFetchAttachment = jest.fn()
 const mockAttachmentRead = jest.fn()
+const mockEncryptedFetch = jest.fn()
 
 jest.mock("@/lib/connectors/attachment-fetcher", () => ({
   fetchAttachment: (...args: unknown[]) => mockFetchAttachment(...args),
@@ -10,6 +11,7 @@ jest.mock("@/lib/connectors/attachment-fetcher", () => ({
 
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsAttachmentRead: (...args: unknown[]) => mockAttachmentRead(...args),
+  connectorsMatrixEncryptedMediaFetch: (...args: unknown[]) => mockEncryptedFetch(...args),
 }))
 
 function event(segment: NormalizedInboundEvent["segments"][number]): NormalizedInboundEvent {
@@ -40,6 +42,7 @@ function event(segment: NormalizedInboundEvent["segments"][number]): NormalizedI
 beforeEach(() => {
   mockFetchAttachment.mockReset()
   mockAttachmentRead.mockReset()
+  mockEncryptedFetch.mockReset()
 })
 
 describe("resolveInboundMatrixMedia", () => {
@@ -93,6 +96,44 @@ describe("resolveInboundMatrixMedia", () => {
     await resolveInboundMatrixMedia(inbound, { accessToken: "tok" })
 
     expect(inbound.segments[0]).not.toHaveProperty("dataBase64")
+  })
+
+  it("decrypts encrypted media and thumbnails through the shared Matrix cache command", async () => {
+    mockEncryptedFetch.mockResolvedValue({ localUrl: "/cache/plain", remoteRef: "mxc://s/media" })
+    const file = {
+      url: "mxc://s/media",
+      key: { kty: "oct", k: "key" },
+      iv: "iv",
+      hashes: { sha256: "hash" },
+      v: "v2",
+    }
+    const thumbnailFile = { ...file, url: "mxc://s/thumb" }
+    const inbound = event({
+      type: "video",
+      url: "https://s/_matrix/client/v1/media/download/s/media",
+      rawUrl: file.url,
+      thumbnailUrl: "https://s/_matrix/client/v1/media/download/s/thumb",
+      matrixEncryptedFile: file,
+      matrixEncryptedThumbnailFile: thumbnailFile,
+    })
+
+    await resolveInboundMatrixMedia(inbound, { accessToken: "tok" })
+
+    expect(mockFetchAttachment).not.toHaveBeenCalled()
+    expect(mockEncryptedFetch).toHaveBeenNthCalledWith(1, {
+      adapterId: "mx-1",
+      remoteRef: file.url,
+      sourceUrl: "https://s/_matrix/client/v1/media/download/s/media",
+      headers: { Authorization: "Bearer tok" },
+      file,
+    })
+    expect(mockEncryptedFetch).toHaveBeenNthCalledWith(2, {
+      adapterId: "mx-1",
+      remoteRef: thumbnailFile.url,
+      sourceUrl: "https://s/_matrix/client/v1/media/download/s/thumb",
+      headers: { Authorization: "Bearer tok" },
+      file: thumbnailFile,
+    })
   })
 
   it("does not inline non-image media", async () => {

@@ -35,8 +35,16 @@ jest.mock("./adapters/onebot", () => ({
   createOneBotAdapter: jest.fn().mockReturnValue({ platform: "onebot", id: "ob-mock" }),
 }))
 
+jest.mock("./adapters/matrix", () => ({
+  createMatrixAdapter: jest.fn().mockReturnValue({ platform: "matrix", id: "mx-mock" }),
+}))
+
 jest.mock("./adapters/dingtalk", () => ({
   createDingTalkAdapter: jest.fn().mockReturnValue({ platform: "dingtalk", id: "dt-mock" }),
+}))
+
+jest.mock("./adapters/qq-official", () => ({
+  createQQOfficialAdapter: jest.fn().mockReturnValue({ platform: "qq-official", id: "qq-mock" }),
 }))
 
 jest.mock("./adapters/dingtalk/auth", () => ({
@@ -49,14 +57,18 @@ import {
   buildSlackAdapter,
   buildLarkAdapter,
   buildOneBotAdapter,
+  buildMatrixAdapter,
   buildDingTalkAdapter,
+  buildQQOfficialAdapter,
 } from "./adapter-registry"
 import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
 import { createSlackAdapter } from "./adapters/slack"
 import { createLarkAdapter } from "./adapters/lark"
 import { createOneBotAdapter } from "./adapters/onebot"
+import { createMatrixAdapter } from "./adapters/matrix"
 import { createDingTalkAdapter } from "./adapters/dingtalk"
+import { createQQOfficialAdapter } from "./adapters/qq-official"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 
@@ -65,7 +77,9 @@ const mockCreateDiscordAdapter = createDiscordAdapter as jest.Mock
 const mockCreateSlackAdapter = createSlackAdapter as jest.Mock
 const mockCreateLarkAdapter = createLarkAdapter as jest.Mock
 const mockCreateOneBotAdapter = createOneBotAdapter as jest.Mock
+const mockCreateMatrixAdapter = createMatrixAdapter as jest.Mock
 const mockCreateDingTalkAdapter = createDingTalkAdapter as jest.Mock
+const mockCreateQQOfficialAdapter = createQQOfficialAdapter as jest.Mock
 
 function makeRow(overrides: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow {
   return {
@@ -140,7 +154,80 @@ beforeEach(() => {
   mockCreateSlackAdapter.mockClear()
   mockCreateLarkAdapter.mockClear()
   mockCreateOneBotAdapter.mockClear()
+  mockCreateMatrixAdapter.mockClear()
   mockCreateDingTalkAdapter.mockClear()
+  mockCreateQQOfficialAdapter.mockClear()
+})
+
+describe("buildQQOfficialAdapter", () => {
+  it("uses transportMode as the sole transport source", async () => {
+    const row = makeRow({
+      id: "qq-transport",
+      type: "qq-official",
+      transportMode: "gateway",
+      settings: { transport: "webhook" },
+    })
+
+    await buildQQOfficialAdapter(row)
+
+    expect(mockCreateQQOfficialAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ id: row.id, transportMode: "gateway" })
+    )
+  })
+})
+
+describe("buildMatrixAdapter", () => {
+  it("passes detailed whoami user and device identity into the E2EE adapter", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return "matrix-token"
+      if (cmd === "connectors_http_request") {
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({ user_id: "@bot:matrix.org", device_id: "DEVICE" }),
+        }
+      }
+      return null
+    })
+    const row = makeRow({
+      id: "mx-identity",
+      type: "matrix",
+      settings: { homeserver: "https://matrix.org" },
+    })
+
+    await buildMatrixAdapter(row)
+
+    expect(mockCreateMatrixAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: row.id,
+        homeserver: "https://matrix.org",
+        selfId: "@bot:matrix.org",
+        deviceId: "DEVICE",
+      })
+    )
+  })
+
+  it("preserves a missing device id so startup can fail closed", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return "matrix-token"
+      if (cmd === "connectors_http_request") {
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({ user_id: "@bot:matrix.org" }),
+        }
+      }
+      return null
+    })
+
+    await buildMatrixAdapter(
+      makeRow({ type: "matrix", settings: { homeserver: "https://matrix.org" } })
+    )
+
+    expect(mockCreateMatrixAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ selfId: "@bot:matrix.org", deviceId: "" })
+    )
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -292,26 +292,29 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       owner: "adapter-instance",
       desiredState: () => (runtimeRows.get(row.id)?.enabled === false ? "disabled" : "enabled"),
       build: async () => {
-        if (firstBuild) {
-          const adapter = firstBuild
+        let adapter = firstBuild
+        if (adapter) {
           firstBuild = undefined
-          return adapter
+        } else {
+          const currentRow = runtimeRows.get(row.id)
+          if (!currentRow) throw new Error(`Adapter row disappeared: ${row.id}`)
+          const rebuilt = await buildAdapterFromRow(currentRow)
+          if (!rebuilt) throw new Error(`Adapter factory unavailable: ${row.id}`)
+          adapter = rebuilt
         }
-        const currentRow = runtimeRows.get(row.id)
-        if (!currentRow) throw new Error(`Adapter row disappeared: ${row.id}`)
-        runtimeRows.set(row.id, currentRow)
-        const rebuilt = await buildAdapterFromRow(currentRow)
-        if (!rebuilt) throw new Error(`Adapter factory unavailable: ${row.id}`)
-        try {
-          const { getDb } = await import("@/lib/db/schema")
-          await getDb().adapterInstances.update(row.id, {
-            lastKnownCapabilities: rebuilt.a2uiCapability(),
-            updatedAt: Date.now(),
-          })
-        } catch {
-          // Capability refresh is diagnostic metadata, never a startup gate.
-        }
-        return rebuilt
+
+        // Probe both capability surfaces before writing either cache. A probe
+        // failure therefore leaves both prior values intact, while an absent
+        // platform-skill probe is an authoritative empty capability list.
+        const lastKnownCapabilities = adapter.a2uiCapability()
+        const lastKnownSkillCapabilities = adapter.platformSkillCapabilities?.() ?? []
+        const { getDb } = await import("@/lib/db/schema")
+        await getDb().adapterInstances.update(row.id, {
+          lastKnownCapabilities,
+          lastKnownSkillCapabilities,
+          updatedAt: Date.now(),
+        })
+        return adapter
       },
       registerRust: async (adapter) => {
         const currentRow = runtimeRows.get(row.id) ?? row

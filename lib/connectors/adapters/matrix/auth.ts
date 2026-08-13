@@ -31,11 +31,9 @@ export function normalizeHomeserver(url: string): string {
 
 /**
  * Resolve the bot's own `user_id` (e.g. `@bot:matrix.org`) for an access
- * token. Returns null on any non-2xx / parse failure so the adapter can
- * still start. NOTE: an empty selfId degrades BOTH self-mention detection
- * AND own-echo suppression (the bot would answer its own messages), so the
- * adapter lazily re-probes whoami at start / during the sync loop until it
- * resolves (see index.ts `ensureSelfId`).
+ * token. Returns null on any non-2xx / parse failure. The adapter consumes
+ * {@link matrixWhoamiDetailed} directly because E2EE startup also requires
+ * the homeserver-assigned `device_id` and fails closed when it is missing.
  */
 export async function matrixWhoami(
   homeserver: string,

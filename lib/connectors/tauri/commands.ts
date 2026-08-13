@@ -11,6 +11,7 @@
  * command wrapper, two hosts.
  */
 import { invoke } from "@tauri-apps/api/core"
+import type { MatrixEncryptedFile } from "@/types/connectors/segment"
 
 /**
  * Transport for the connectors_* command surface. `name` is always the
@@ -195,6 +196,21 @@ export interface MatrixCryptoAttachmentDecryptRequest {
 
 export interface MatrixCryptoAttachmentDecryptResponse {
   bytesBase64: string
+}
+
+export type MatrixEncryptedMediaUploadRequest = ConnectorMediaUploadRequest
+
+export interface MatrixEncryptedMediaUploadResponse {
+  contentUri: string
+  file: MatrixEncryptedFile
+}
+
+export interface MatrixEncryptedMediaFetchRequest {
+  adapterId: string
+  remoteRef: string
+  sourceUrl: string
+  headers?: Record<string, string>
+  file: MatrixEncryptedFile
 }
 
 // ---------------------------------------------------------------------------
@@ -417,6 +433,10 @@ export async function connectorsMatrixCryptoInit(req: MatrixCryptoInitRequest): 
   await invoker("connectors_matrix_crypto_init", { req })
 }
 
+export async function connectorsMatrixCryptoClose(adapterId: string): Promise<void> {
+  await invoker("connectors_matrix_crypto_close", { adapterId })
+}
+
 export async function connectorsMatrixCryptoOutgoingRequests(
   adapterId: string
 ): Promise<MatrixCryptoOutgoingRequest[]> {
@@ -485,6 +505,20 @@ export async function connectorsMatrixCryptoDecryptAttachment(
     "connectors_matrix_crypto_decrypt_attachment",
     { req }
   )
+}
+
+export async function connectorsMatrixEncryptedMediaUpload(
+  req: MatrixEncryptedMediaUploadRequest
+): Promise<MatrixEncryptedMediaUploadResponse> {
+  return invoker<MatrixEncryptedMediaUploadResponse>("connectors_matrix_encrypted_media_upload", {
+    req,
+  })
+}
+
+export async function connectorsMatrixEncryptedMediaFetch(
+  req: MatrixEncryptedMediaFetchRequest
+): Promise<AttachmentRef> {
+  return invoker<AttachmentRef>("connectors_matrix_encrypted_media_fetch", { req })
 }
 
 // ---------------------------------------------------------------------------

@@ -58,6 +58,10 @@ export interface MatrixSyncOptions {
   initialSince?: string
   /** Called with every accepted `next_batch` so the caller can persist it. */
   onNextBatch?: (token: string) => void
+  /** Process crypto/state changes before any timeline event from the batch. */
+  onSyncResponse?: (body: MatrixSyncResponse, hasGap: boolean) => Promise<void>
+  /** Fail-closed cursor gate used when the encrypted-event recovery queue is full. */
+  canAdvanceCursor?: () => boolean
   /** Sink for non-fatal transport warnings (failed invite joins, backfill). */
   logger?: { warn: (msg: string, fields?: Record<string, unknown>) => void }
   /** Long-poll timeout sent to the homeserver (ms). Default: 30000. */
@@ -83,6 +87,25 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
       clearTimeout(tid)
       reject(new DOMException("Aborted", "AbortError"))
     })
+  })
+}
+
+/** Stop awaiting a non-cancellable Tauri request as soon as the adapter stops. */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("Aborted", "AbortError"))
+    signal.addEventListener("abort", onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort)
+        reject(error)
+      }
+    )
   })
 }
 
@@ -118,17 +141,21 @@ async function backfillGap(
   roomId: string,
   prevBatch: string,
   lastSeenEventId: string | undefined,
-  logger: MatrixSyncOptions["logger"]
+  logger: MatrixSyncOptions["logger"],
+  signal: AbortSignal
 ): Promise<MatrixTimelineEvent[]> {
   const recovered: MatrixTimelineEvent[] = []
   let from = prevBatch
   for (let page = 0; page < BACKFILL_PAGE_CAP; page += 1) {
     const params = new URLSearchParams({ from, dir: "b", limit: String(BACKFILL_PAGE_LIMIT) })
-    const resp = await connectorsHttpRequest({
-      url: `${base}${CLIENT_V3}/rooms/${encodeURIComponent(roomId)}/messages?${params.toString()}`,
-      method: "GET",
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    const resp = await abortable(
+      connectorsHttpRequest({
+        url: `${base}${CLIENT_V3}/rooms/${encodeURIComponent(roomId)}/messages?${params.toString()}`,
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      signal
+    )
     if (resp.status < 200 || resp.status >= 300) {
       logger?.warn("matrix:sync gap backfill page failed", { roomId, status: resp.status })
       break
@@ -185,12 +212,15 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
     const url = `${base}${CLIENT_V3}/sync?${params.toString()}`
 
     try {
-      const resp = await connectorsHttpRequest({
-        url,
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-        timeoutMs: timeoutMs + 10_000,
-      })
+      const resp = await abortable(
+        connectorsHttpRequest({
+          url,
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+          timeoutMs: timeoutMs + 10_000,
+        }),
+        opts.signal
+      )
 
       if (resp.status >= 500) throw new Error(`Matrix sync ${resp.status}`)
       const body = JSON.parse(resp.body) as MatrixSyncResponse & {
@@ -215,6 +245,9 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
 
       attempts = 0
       const nextBatch = body.next_batch
+      const hasGap = Object.values(body.rooms?.join ?? {}).some(
+        (room) => room.timeline?.limited === true
+      )
 
       // Auto-join invited rooms (once per room; log + continue on failure).
       const invited = body.rooms?.invite ?? {}
@@ -222,12 +255,15 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
         if (attemptedJoins.has(roomId)) continue
         attemptedJoins.add(roomId)
         try {
-          const joinResp = await connectorsHttpRequest({
-            url: `${base}${CLIENT_V3}/join/${encodeURIComponent(roomId)}`,
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: "{}",
-          })
+          const joinResp = await abortable(
+            connectorsHttpRequest({
+              url: `${base}${CLIENT_V3}/join/${encodeURIComponent(roomId)}`,
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+              body: "{}",
+            }),
+            opts.signal
+          )
           if (joinResp.status < 200 || joinResp.status >= 300) {
             opts.logger?.warn("matrix:sync auto-join failed", {
               roomId,
@@ -241,6 +277,10 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
           })
         }
       }
+
+      // Olm to-device/device-list changes and authoritative room state must be
+      // applied before decrypting timeline events from the same sync batch.
+      await opts.onSyncResponse?.(body, hasGap)
 
       if (primed) {
         const joined = body.rooms?.join ?? {}
@@ -257,7 +297,8 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
                 roomId,
                 timeline.prev_batch,
                 lastSeenByRoom.get(roomId),
-                opts.logger
+                opts.logger,
+                opts.signal
               )
               if (gap.length > 0) events = [...gap, ...events]
             } catch (err) {
@@ -279,8 +320,15 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
         primed = true
       }
 
-      since = nextBatch
-      opts.onNextBatch?.(nextBatch)
+      if (opts.canAdvanceCursor?.() === false) {
+        opts.logger?.warn("matrix:sync cursor held for encrypted-event recovery", {
+          nextBatch,
+        })
+        await delay(1_000, opts.signal)
+      } else {
+        since = nextBatch
+        opts.onNextBatch?.(nextBatch)
+      }
     } catch (err) {
       if (opts.signal.aborted) return
       if (err instanceof DOMException && err.name === "AbortError") return

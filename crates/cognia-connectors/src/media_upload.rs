@@ -128,11 +128,13 @@ fn extract_content_uri(body: &str) -> Result<String, String> {
         .ok_or_else(|| "media upload response missing content_uri".to_string())
 }
 
-pub async fn upload_media(req: ConnectorMediaUploadRequest) -> Result<String, String> {
-    let bytes = read_source_bytes(&req, MAX_UPLOAD_BYTES).await?;
+async fn upload_bytes(
+    req: &ConnectorMediaUploadRequest,
+    bytes: bytes::Bytes,
+) -> Result<String, String> {
     let client = build_client(&req.upload_url)?;
     let builder = client.post(&req.upload_url).body(bytes);
-    let builder = apply_headers(builder, &req)?;
+    let builder = apply_headers(builder, req)?;
     let resp = builder
         .send()
         .await
@@ -146,6 +148,28 @@ pub async fn upload_media(req: ConnectorMediaUploadRequest) -> Result<String, St
         return Err(format!("media upload HTTP {status}: {body}"));
     }
     extract_content_uri(&body)
+}
+
+pub async fn upload_media(req: ConnectorMediaUploadRequest) -> Result<String, String> {
+    let bytes = read_source_bytes(&req, MAX_UPLOAD_BYTES).await?;
+    upload_bytes(&req, bytes).await
+}
+
+pub async fn upload_matrix_encrypted_media(
+    req: super::types::MatrixEncryptedMediaUploadRequest,
+) -> Result<super::types::MatrixEncryptedMediaUploadResponse, String> {
+    let req: ConnectorMediaUploadRequest = req.into();
+    let source = read_source_bytes(&req, MAX_UPLOAD_BYTES).await?;
+    let (encrypted, mut file) = super::matrix_crypto::encrypt_attachment_bytes(source.to_vec())?;
+    let content_uri = upload_bytes(&req, bytes::Bytes::from(encrypted)).await?;
+    let object = file
+        .as_object_mut()
+        .ok_or_else(|| "Matrix attachment info must be an object".to_string())?;
+    object.insert(
+        "url".to_string(),
+        serde_json::Value::String(content_uri.clone()),
+    );
+    Ok(super::types::MatrixEncryptedMediaUploadResponse { content_uri, file })
 }
 
 #[cfg(test)]
@@ -225,6 +249,41 @@ mod tests {
         .unwrap();
 
         assert_eq!(content_uri, "mxc://matrix.org/url");
+        mock_server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn encrypted_matrix_upload_reuses_bounded_reader_and_returns_file_object() {
+        proxy_config::apply_current(proxy_config::ProxyConfig::default()).unwrap();
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "content_uri": "mxc://matrix.org/enc" })),
+            )
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plain.bin");
+        std::fs::write(&path, b"secret media").unwrap();
+
+        let result =
+            upload_matrix_encrypted_media(super::super::types::MatrixEncryptedMediaUploadRequest {
+                upload_url: format!("{}/upload", mock_server.uri()),
+                headers: None,
+                source_url: None,
+                local_path: Some(path.to_string_lossy().into_owned()),
+                content_type: Some("application/octet-stream".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.content_uri, "mxc://matrix.org/enc");
+        assert_eq!(result.file["url"], "mxc://matrix.org/enc");
+        assert!(result.file.get("key").is_some());
+        assert!(result.file.get("hashes").is_some());
         mock_server.verify().await;
     }
 

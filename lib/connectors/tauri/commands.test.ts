@@ -25,6 +25,7 @@ import {
   connectorsMediaUpload,
   connectorsDiscordUpload,
   connectorsMatrixCryptoInit,
+  connectorsMatrixCryptoClose,
   connectorsMatrixCryptoOutgoingRequests,
   connectorsMatrixCryptoMarkRequestSent,
   connectorsMatrixCryptoReceiveSyncChanges,
@@ -35,6 +36,8 @@ import {
   connectorsMatrixCryptoGetMissingSessions,
   connectorsMatrixCryptoEncryptAttachment,
   connectorsMatrixCryptoDecryptAttachment,
+  connectorsMatrixEncryptedMediaUpload,
+  connectorsMatrixEncryptedMediaFetch,
   type AdapterRegistration,
   type ConnectorsHealth,
   type TauriHttpRequest,
@@ -339,6 +342,16 @@ describe("Matrix crypto command wrappers", () => {
     expect(mockInvoke).toHaveBeenCalledWith("connectors_matrix_crypto_init", { req })
   })
 
+  it("closes only the adapter's in-memory crypto session", async () => {
+    mockInvoke.mockResolvedValueOnce(undefined)
+
+    await connectorsMatrixCryptoClose("mx-1")
+
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_matrix_crypto_close", {
+      adapterId: "mx-1",
+    })
+  })
+
   it("returns pending outgoing crypto requests", async () => {
     const expected: MatrixCryptoOutgoingRequest[] = [
       {
@@ -413,6 +426,43 @@ describe("Matrix crypto command wrappers", () => {
 
     await expect(connectorsMatrixCryptoEncryptEvent(req)).resolves.toEqual(expected)
     expect(mockInvoke).toHaveBeenCalledWith("connectors_matrix_crypto_encrypt_event", { req })
+  })
+
+  it("uploads and fetches encrypted Matrix media through thin native wrappers", async () => {
+    const file = {
+      url: "mxc://matrix.org/encrypted",
+      key: { kty: "oct" },
+      iv: "iv",
+      hashes: { sha256: "digest" },
+      v: "v2",
+    }
+    const upload = {
+      uploadUrl: "https://matrix.org/_matrix/media/v3/upload",
+      sourceUrl: "https://example.com/a.png",
+    }
+    mockInvoke.mockResolvedValueOnce({ contentUri: file.url, file })
+    await expect(connectorsMatrixEncryptedMediaUpload(upload)).resolves.toEqual({
+      contentUri: file.url,
+      file,
+    })
+    expect(mockInvoke).toHaveBeenLastCalledWith("connectors_matrix_encrypted_media_upload", {
+      req: upload,
+    })
+
+    const fetch = {
+      adapterId: "mx-1",
+      remoteRef: file.url,
+      sourceUrl: "https://matrix.org/_matrix/client/v1/media/download/matrix.org/encrypted",
+      file,
+    }
+    mockInvoke.mockResolvedValueOnce({ localUrl: "/cache/plain", remoteRef: file.url })
+    await expect(connectorsMatrixEncryptedMediaFetch(fetch)).resolves.toEqual({
+      localUrl: "/cache/plain",
+      remoteRef: file.url,
+    })
+    expect(mockInvoke).toHaveBeenLastCalledWith("connectors_matrix_encrypted_media_fetch", {
+      req: fetch,
+    })
   })
 
   it("shares a room key and returns to-device requests", async () => {

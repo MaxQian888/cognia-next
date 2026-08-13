@@ -46,6 +46,7 @@ import {
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { CONNECTORS_SERVER_PORT } from "@/lib/connectors/server-transport"
+import { refreshCompanionEndpoints } from "@/lib/connectivity/endpoint-refresh"
 
 // The Rust axum connectors server binds plain HTTP on the loopback interface,
 // so the tunnel origin must be `http://` on the SAME port the provider starts
@@ -95,6 +96,7 @@ const ADAPTER_WEBHOOK_PATH: Record<string, (id: string) => string | null> = {
   slack: (id) => `/webhook/slack/${id}`,
   telegram: (id) => `/webhook/telegram/${id}`,
   "wechat-oa": (id) => `/webhook/wechat-oa/${id}`,
+  "qq-official": (id) => `/webhook/qq-official/${id}`,
   // Discord is gateway-only until the adapter starts an Interactions webhook
   // transport and handles Discord PING callbacks.
   discord: () => null,
@@ -126,6 +128,18 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
     let cancelled = false
     const refresh = async () => {
       try {
+        if (!desktop) {
+          const companion = await refreshCompanionEndpoints()
+          if (!cancelled) {
+            setInfo(
+              companion?.tunnelBaseUrl
+                ? { publicUrl: companion.tunnelBaseUrl, localUrl: defaultLocalUrl }
+                : null
+            )
+            setConfig(null)
+          }
+          return
+        }
         const [current, cfg] = await Promise.all([getTunnelInfo(), getTunnelConfig()])
         if (!cancelled) {
           setInfo(current)
@@ -144,7 +158,7 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
       cancelled = true
       clearInterval(id)
     }
-  }, [])
+  }, [defaultLocalUrl, desktop])
 
   const onStart = async () => {
     if (!desktop) {

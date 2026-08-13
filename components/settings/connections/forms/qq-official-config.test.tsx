@@ -4,6 +4,7 @@
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 const mockCreate = jest.fn().mockResolvedValue({ id: "qq-new" })
 const mockUpdate = jest.fn().mockResolvedValue(undefined)
@@ -110,5 +111,47 @@ describe("QQOfficialConfigDialog", () => {
     })
     expect(mockKeyringSet).toHaveBeenCalledWith("qq-new", "appId", "102000")
     expect(mockKeyringSet).toHaveBeenCalledWith("qq-new", "clientSecret", "secret")
+  })
+
+  it("creates a webhook adapter through the shared transport field", async () => {
+    render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "102000" } })
+    fireEvent.change(screen.getByLabelText(/client secret/i), { target: { value: "secret" } })
+    fireEvent.click(screen.getByLabelText(/https webhook/i))
+    fireEvent.click(screen.getByRole("button", { name: /add connector/i }))
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "qq-official", transportMode: "webhook" })
+      )
+    )
+  })
+
+  it("persists transport changes and enters the existing runtime rebuild path", async () => {
+    const row = {
+      id: "qq-existing",
+      type: "qq-official",
+      displayName: "QQ Existing",
+      enabled: true,
+      transportMode: "gateway",
+      settings: {},
+      credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+      trigger: {},
+      defaultMode: "auto",
+      createdAt: 1,
+      updatedAt: 2,
+    } as AdapterInstanceRow
+    render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={row} />)
+
+    fireEvent.click(screen.getByLabelText(/https webhook/i))
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+
+    await waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith(
+        "qq-existing",
+        expect.objectContaining({ transportMode: "webhook" })
+      )
+    )
+    expect(mockRotated).toHaveBeenCalledWith("qq-existing")
   })
 })

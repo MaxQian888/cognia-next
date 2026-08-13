@@ -17,11 +17,15 @@ const mockStart = jest.fn()
 const mockStop = jest.fn()
 const mockCurrent = jest.fn()
 const mockConfig = jest.fn()
+const mockRefreshEndpoints = jest.fn()
 jest.mock("@/lib/connectivity/tunnel-resolver", () => ({
   startTunnel: (...args: unknown[]) => mockStart(...args),
   stopTunnel: () => mockStop(),
   getTunnelInfo: () => mockCurrent(),
   getTunnelConfig: () => mockConfig(),
+}))
+jest.mock("@/lib/connectivity/endpoint-refresh", () => ({
+  refreshCompanionEndpoints: () => mockRefreshEndpoints(),
 }))
 
 jest.mock("sonner", () => ({
@@ -78,6 +82,8 @@ beforeEach(() => {
   mockCurrent.mockResolvedValue(null)
   mockConfig.mockReset()
   mockConfig.mockResolvedValue(null)
+  mockRefreshEndpoints.mockReset()
+  mockRefreshEndpoints.mockResolvedValue(null)
   mockUseLiveQuery.mockReset()
   // Default: no adapters registered.
   setAdapters([])
@@ -207,6 +213,30 @@ describe("TunnelTab", () => {
     )
   })
 
+  it("renders the QQ Official webhook callback URL", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCurrent.mockResolvedValue({
+      publicUrl: "https://abc.trycloudflare.com",
+      localUrl: "http://127.0.0.1:7842",
+    })
+    setAdapters([
+      baseAdapter({
+        id: "qq-1",
+        type: "qq-official",
+        displayName: "QQ Production",
+        transportMode: "webhook",
+      }),
+    ])
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tunnel-adapter-url-qq-1")).toHaveTextContent(
+        "https://abc.trycloudflare.com/webhook/qq-official/qq-1"
+      )
+    )
+  })
+
   it("does not advertise Slack URLs while Slack is in socket-mode", async () => {
     mockIsTauri.mockReturnValue(true)
     mockCurrent.mockResolvedValue({
@@ -255,5 +285,27 @@ describe("TunnelTab", () => {
     mockIsTauri.mockReturnValue(false)
     wrap(<TunnelTab />)
     await waitFor(() => expect(screen.getByTestId("tunnel-start")).toBeDisabled())
+  })
+
+  it("projects paired companion tunnel state read-only on web", async () => {
+    mockIsTauri.mockReturnValue(false)
+    mockRefreshEndpoints.mockResolvedValue({
+      baseUrl: "https://desktop.local",
+      deviceId: "paired-device",
+      pairedAt: 1,
+      tunnelBaseUrl: "https://paired.trycloudflare.com",
+    })
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tunnel-public-url")).toHaveTextContent(
+        "https://paired.trycloudflare.com"
+      )
+    )
+    expect(screen.getByTestId("tunnel-stop")).toBeDisabled()
+    expect(mockCurrent).not.toHaveBeenCalled()
+    expect(mockStart).not.toHaveBeenCalled()
+    expect(mockStop).not.toHaveBeenCalled()
   })
 })
