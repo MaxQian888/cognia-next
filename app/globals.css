@@ -2167,3 +2167,14 @@ select {
     animation: island-attention-flash-reduced 0.6s linear;
   }
 }
+
+/* Message-level rich-content controls share one visibility policy across
+ * finalized Markdown and the streaming renderer. Keyboard focus remains a
+ * reveal path for hover mode through each control group's focus-within rule. */
+[data-rich-controls="hidden"] [data-message-rich-control] {
+  display: none !important;
+}
+
+[data-rich-controls="always"] [data-message-rich-control] {
+  opacity: 1 !important;
+}
