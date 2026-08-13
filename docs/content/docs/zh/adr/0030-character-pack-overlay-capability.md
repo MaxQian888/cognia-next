@@ -259,3 +259,7 @@ RFC 8785 §3.2.3 要的是 UTF-16 码元序 —— `"1" < "10" < "2"`。Rust 的
 签入了一个由真实 `cognia pack sign` 二进制签名的包，Jest 用 Node 自带的
 Ed25519 校验它，因此测试证明的是真实产物上的互通，而不只是某人碰巧想到
 要写下来的那些向量。
+
+## 当前状态修订（2026-08-13）
+
+Character-pack storage、registry projection、signature、dependency dimensions 与 voice resolution 已接入 chat 和 pet TTS。portable `webDataUrl` 已取代历史 `tauriPath` 提案，因此旧 asset-hook follow-up 已关闭，不应据此新增第二条 asset path。

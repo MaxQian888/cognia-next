@@ -7,6 +7,10 @@ description: "它弥合了成熟OS-level沙盒（ADR-0028）与代理实际运�
 
 **状态**：已接受（2026-07-06） **作者**：Max Qian + Claude Opus 4.8 **基于**构建**：OS沙盒（ADR-0028、`src-tauri/src/sandbox/`）、权限模型（ADR-0020计算机使用、ADR-0041 命令自动模式）、单调权限上限级联（`lib/ai/agent/external/permission-cascade.ts`）和sidecar `canUseTool` 门禁（`sidecar/dispatch/{anthropic,ai-sdk-tools}.mjs`）。**灵感**：Anthropic的[`sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime)和[Claude Code sandboxed-Bash](https://code.claude.com/docs/en/sandboxing) filesystem/network模型（write=cwd，read=除凭证外整台机器），以及六步[Agent SDK权限evaluation](https://code.claude.com/docs/en/agent-sdk/permissions)。
 
+## 当前状态修订（2026-08-13）
+
+`TeammateConfigDialog` 现已复用现有 sandbox policy editor，展示继承的 team ceiling，并且只持久化经 `clampSandboxPolicy` 收紧后的 teammate override。没有新增 teammate 专用 sandbox schema。
+
 ## 背景
 
 仓库有**两个成熟但不相干的**约束系统，特工从它们之间的缝隙中掉落：

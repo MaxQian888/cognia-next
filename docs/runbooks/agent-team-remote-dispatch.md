@@ -8,12 +8,12 @@ Date: 2026-08-12
 - Companion pairing is enabled and the owner can create and revoke `agent.worker` grants.
 - `developer.taskWorkspace` and `agentExecutionResolverV2` are enabled before `agentTeamRemoteDispatch`.
 - Every worker has a trusted, pre-bound repository and a locally resolvable credential profile.
-- Fleet reports the worker online, its capacity, runtime, and workspace binding readiness.
+- Fleet reports the worker online, its capacity, canonical profile readiness, runtime, and workspace binding readiness.
 
 ## Enroll and bind a worker
 
 1. In Settings → Fleet → Execution Workers, create a one-time enrollment.
-2. Run the displayed `cognia-agent worker enroll` command on the worker. Treat the enrollment as a secret until consumed.
+2. Run the displayed `cognia-agent worker enroll` command on the worker. For a LAN self-signed server the generated command includes `--fingerprint`; do not remove it. Public-PKI servers omit the flag and use the standard CA path. Treat the enrollment as a secret until consumed.
 3. Bind the repository locally:
 
    ```bash
@@ -26,7 +26,7 @@ Date: 2026-08-12
    cognia-agent worker connect
    ```
 
-5. Confirm that Settings and Fleet show the authenticated `device:<id>`, expected slot count, runtime, and binding readiness. Never copy an absolute worker path into the brain.
+5. Confirm that Settings and Fleet show the derived authenticated `device:<sha256>`, expected slot count, runtime, profile readiness, and binding readiness. The value is returned by the management API and must never be reconstructed from raw `deviceId`. Never copy an absolute worker path into the brain.
 
 ## Rollout phases
 
@@ -42,7 +42,7 @@ Date: 2026-08-12
   opt-in tenant. P0 flag scope is process/deployment-wide; do not share that brain process with
   non-opt-in tenants during the canary.
 - Pin one teammate to one worker.
-- Verify session creation, event progression, usage/evidence settlement, steer, pause/checkpoint, resume, and terminate.
+- Verify session creation, event progression, usage/evidence settlement, steer, cooperative idle pause/checkpoint, rescheduled resume, and abort/idle/close termination.
 - Stop if any task falls back to local execution, if one `commandId` creates more than one session, or if a repository path appears over the wire.
 
 ### Phase C — two-worker auto canary

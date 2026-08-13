@@ -7,6 +7,10 @@ description: "第四阶段将集成终端（ADR-0031/0033）转变为辅助开�
 
 **状态**：已接受（2026-06-01）**作者**：Max Qian + Claude作品4.8**超前*：扩展ADR-0031+ADR-0033（不替代）;实现ADR-0033后续#4（“AI 命令协助——设计而非制造”）**影响**：`lib/terminal/completion/`、`lib/terminal/script-runner.ts`、`lib/terminal/shell-detect.ts`、`hooks/terminal/`、`components/terminal/terminal-instance.tsx`、`components/terminal/terminal-ghost-text.tsx`、`components/settings/terminal/terminal-card.tsx`、`lib/plugin/api/terminal-api.ts`、`lib/plugin/bridge/terminal-completion-bridge.ts`、`lib/plugin/contracts/module-bridge-map.ts`、`lib/plugin/core/validation.ts`、`lib/plugin/security/permission-guard.ts`、`types/plugin/plugin.ts`、`types/plugin/plugin-terminal-completion.ts`、`lib/claude/types.ts`、`crates/cognia-cli/src/cmd_lint.rs`、`i18n/messages/{en,zh-CN}.json`
 
+## 当前状态修订（2026-08-13）
+
+Inline explain/fix 已交付。Mobile autocomplete 继续依赖 ADR-0031 的 canonical OSC 633 cwd/command event stream；后续复用当前 completion engine，不新增 mobile-only engine。
+
 ## 背景
 
 ADR-0031/0033 发布了完整的集成终端（xterm.js 底座、`portable-pty`后端、OSC 633 标记、移动WS 传输、分割面板、命令导航、载入-还原、链接到编辑器），以及一波承诺的 shell 功能打磨（shell picker、启动配置文件、配色方案、渲染选项UTF-8代码页修复）。但仍有两个缺口：

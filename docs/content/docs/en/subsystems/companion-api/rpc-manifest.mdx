@@ -87,3 +87,14 @@ exist in the matching runtime set.
 
 Do not manually add a service command to the public YAML. Change the descriptor only when the trust
 and transport semantics genuinely changed, then let the generator update the artifact.
+
+## Performance command boundary
+
+Remote performance uses execution capability contracts for lease open, renew,
+close, snapshot and observation reads. The authenticated caller device ID is
+injected by the dispatcher and cannot be selected by request arguments. Legacy
+global `perf_start_sampling`, `perf_set_interval`, `perf_stop_sampling`, hotspot
+reset and trace-folder reveal stay local/internal compatibility commands and are
+not remotely advertised. Plugin `ctx.perf` is read-only: it may observe an
+already active stream and its source metadata, but cannot open leases, capture,
+reset state, read raw attachments or control a process.

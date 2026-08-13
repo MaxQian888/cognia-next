@@ -7,6 +7,10 @@ description: "从图片和PDFs中提取跨壳文本。在一个`extract()` 接�
 
 > **状态**：2026-05-18 接受。2026-08-08 修订，修复运行时能力、路由、模型交付和本地传输。`paddle-ocr` 使用 `oar-ocr` 0.9.x + ONNX Runtime 的 PP-OCRv6。
 
+## 当前状态修订（2026-08-13）
+
+OCR cache 过期清理由现有中央 storage-retention sweep 负责，并使用 catalog 中的 `ocrResults` executor。Provider 控件从 runtime capability 状态派生；不受支持的 placeholder 不可启用，只保留用于解释平台限制。Windows 原生 backend 仍是独立平台交付项。
+
 ## 背景
 
 Cognia-Next 提供三个外壳——浏览器（静态导出）、Tauri 2.9 桌面和 Capacitor 7 移动端——目前用户获取图像文本的唯一方式是将其转发到多模态模型。这既昂贵又耗PDFs慢，且即使用户只想要文字，模型也必须作为OCR引擎运行。

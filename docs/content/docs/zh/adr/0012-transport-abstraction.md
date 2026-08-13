@@ -158,3 +158,7 @@ mDNS/cloudflared 的 LAN+隧道暴露。移动 shell（M3 起）把
 - 移动客户端 tracker：[#56](https://github.com/MaxQian888/cognia-next/issues/56)
 - 计划文件（私有）：`~/.claude/plans/react-tauri-react-native-snug-hennessy.md`
 - Tauri Mobile sidecar 讨论：[tauri-apps/tauri#11454](https://github.com/tauri-apps/tauri/discussions/11454)（选 Capacitor 而非 Tauri Mobile 的动因）
+
+## 当前状态修订（2026-08-13）
+
+原始 seam 已演进为 local runtime、Companion transport、WebRTC transport 与 remote-host adapters。关于 deferred call sites 和 transport stub 的描述仅作为历史保留；新消费者必须扩展这些 canonical transport，不得新增另一套 transport abstraction。

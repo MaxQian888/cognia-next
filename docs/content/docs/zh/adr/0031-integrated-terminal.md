@@ -9,6 +9,10 @@ description: 在已有终端 dock 之上的 Wave 1-4 增强。(1) Agent 的 MCP 
 **作者**：Max Qian + Claude Opus 4.7
 **影响范围**：`lib/terminal/`、`lib/plugin/bridge/sidecar-tools-bridge.ts`、`lib/plugin/security/permission-guard.ts`、`lib/claude/plugin-tool-ipc.ts`、`lib/claude/build-options.ts`、`lib/workflow/nodes/`、`types/workflow/visual.ts`、`components/terminal/`、`components/mobile/mobile-terminal-screen.tsx`、`components/settings/terminal/`、`components/workflow/editor/inspector/`、`sidecar/builtin-tools/`、`src-tauri/src/terminal/`、`src-tauri/src/companion_api/ws_terminal.rs`、`src-tauri/resources/terminal/`、`plugins/github-delivery/plugin.json`
 
+## 当前状态修订（2026-08-13）
+
+Remote SSH session 现会探测受支持的 interactive shell，通过现有 PTY writer 注入经校验、nonce-bound 的 OSC 633 integration command，并在探测或注入失败时暴露明确的 degraded capability reason。事件继续进入唯一 canonical `Osc633Parser`；没有新增第二套 terminal transport 或 protocol。`cargo test -p cognia-terminal` 覆盖受支持 shell 与 nonce 校验路径。
+
 ## 背景
 
 Phase 1 在 `master` 上以未提交形式落地了约 80 个文件，覆盖完整 xterm.js dock、Rust `portable-pty` 后端、OSC 633 解析器、移动 WebSocket 传输、设置 UI、聊天交接、sidecar MCP 工具、插件 VSCode shim、agent-trust 同意闸。一次横切审计列出 23 个具体缺口。用户决定一次性交付，按四个主题：Agent dock 统一、移动/WAN 韧性、插件 + 工作流接入、Shell 平台均等。

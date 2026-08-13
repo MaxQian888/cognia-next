@@ -235,6 +235,43 @@ Schema 在 v18 → v38 之间增加了三个内容：
   `remote_idempotent`。Contract test 强制任何声明远端幂等的 adapter serializer 必须实际传递稳定
   idempotency key。
 
+---
+
+## 修订版 — 2026-08-13（共享连接器能力启用）
+
+本次仅将既有连接器能力安全接入现有入口，不新增 Adapter 或传输栈：
+
+- Runtime build 只有在两个能力探测都成功后，才通过一次更新同时持久化
+  `lastKnownCapabilities` 与 `lastKnownSkillCapabilities`。缺少 skill probe 表示权威空列表；
+  probe 抛错时保留两份旧缓存并使 build 失败。
+- `defaultMode` 统一由共享 Adapter detail editor 编辑；各平台表单仍只负责平台专属配置。
+- Dexie v161 将 QQ Official 旧的 `settings.transport` 归一化到
+  `AdapterInstanceRow.transportMode` 并移除旧字段。Runtime 构建、入站服务器注册、重建指纹以及
+  Gateway/Webhook 选择器都只读取这一字段。
+- Connections 在 `?connectionsTab=tunnel` 挂载既有 Tunnel 页面。QQ Official 使用
+  `/webhook/qq-official/:adapterId`，连接器配置链接统一跳转到该页签。Tauri 保留 start/stop；
+  配对的 Web/mobile 仅以只读方式投影主机 `companion_endpoints`。
+- `/status` 对当前字面 `/status` 事件复用 `matchDispatchRule` 与
+  `resolveImEffectiveConfig`，展示命中的规则、实际路由、回复 Adapter 与模型归属，并按优先级列出
+  启用规则，同时明确说明后续消息会独立重新匹配。
+
+## 修订版 — 2026-08-13（Matrix E2EE 完整接入）
+
+Matrix 现在把既有 matrix-sdk-crypto machine 作为强制传输边界：
+
+- 详细 `whoami` 必须同时返回 `user_id` 和 `device_id`。缺少设备身份时 Adapter 进入降级状态，
+  不启动 sync，也不发送明文。`connectors_matrix_crypto_close` 只移除进程内 machine，因此 awaited
+  stop 或设备轮换可以重新打开保留的磁盘 store。
+- 单个可中止 request pump 串行处理 key upload/query/claim 与 to-device 流量；只有验证 Matrix HTTP
+  响应后才标记请求已发送，并遵循 `retry_after_ms`。Sync state 先于 timeline 应用；重启、入群和 gap
+  通过 `/joined_members` 对齐权威 joined 成员集合。无法确定房间加密状态时 fail-closed。
+- 消息、编辑、reaction 与媒体统一通过 room-event 加密边界；redaction 和 typing 保留协议规定的路径。
+  加密 `file` 与 `thumbnail_file` 对象复用既有有界 uploader、downloader 和加密附件缓存。
+- Dexie v162 增加仅本地的 `matrixPendingEncryptedEvents` 恢复队列。无法解密的事件会在推进
+  `next_batch` 前持久化，按 Adapter/event id 去重，并在 key 变化、pump 完成、重启和有界 backoff
+  后重试；连续失败后保留为 `recovery_required`。活跃行达到 10,000 时暂停 cursor，使 homeserver
+  重放该批次而不是丢失事件。
+
 ## 参考文献
 
 - 原始规格：`C:\Users\qwdma\.claude\plans\d-project-agentforge-astrbot-fluttering-cerf.md`

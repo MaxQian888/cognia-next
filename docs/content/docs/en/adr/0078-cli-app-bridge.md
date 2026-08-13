@@ -7,6 +7,10 @@ description: Keep a dedicated authenticated loopback bridge for both local CLIs,
 
 **Status**: Accepted (2026-07-16)
 
+## Current state amendment (2026-08-13)
+
+The local CLI bridge listener, endpoint writer, and initializer are compile-gated to desktop non-mobile targets, and the Tauri setup hook cannot start them on Android or iOS. Mobile continues to use the Companion transports and never writes `cli-endpoint.json`.
+
 ## Context
 
 Cognia has two local command-line products with different responsibilities: the TypeScript

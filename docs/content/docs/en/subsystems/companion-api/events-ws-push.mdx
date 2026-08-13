@@ -53,3 +53,11 @@ active event socket, the server suppresses redundant push delivery.
 
 Legacy `/ws/v1/*?token=…` sockets are intentionally not mounted. Clients from before the `cgnp3`
 upgrade must re-pair and use single-use socket tickets.
+
+## High-frequency performance frames
+
+Performance frames use targeted ephemeral `companion_perf_frame` delivery to the
+device owning the lease. They are intentionally excluded from durable replay so
+diagnostic cadence cannot evict business events. Reconnect recovery reads the
+lease-bound performance snapshot, merges by host instance, sampling session and
+sequence, and records any unrecoverable sequence range as a `PerfGap`.

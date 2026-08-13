@@ -747,3 +747,7 @@ Several statements above are superseded (see ADR-0066 for the full design):
   soft-cancel still honored).
 - **Workspace tabs**: the `AgentTeamWorkspaceTab` union was corrected to the tabs
   actually rendered (the never-implemented `graph`/`analytics` values were removed).
+
+## Current-state amendment (2026-08-13)
+
+Manual retry, pause/resume, delegation, consensus, persistence, review, and remote dispatch are now delivered by the AgentTeam runtime and later ADRs. The durable external queue remains intentionally excluded. Current ownership is shared with ADR-0066, ADR-0071, ADR-0111, and ADR-0113; this ADR no longer represents an open request to build parallel orchestration state.

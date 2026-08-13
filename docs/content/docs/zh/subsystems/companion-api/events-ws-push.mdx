@@ -51,3 +51,7 @@ Ticket 只能使用一次且绑定路径。为 events 签发的 ticket 不能打
 
 旧 `/ws/v1/*?token=…` socket 被明确移除。`cgnp3` 升级前的客户端必须重新配对，并改用单次
 socket ticket。
+
+## 高频性能 Frame
+
+性能 frame 通过定向、临时的 `companion_perf_frame` 发送给持有 lease 的设备。它们明确不进入 durable replay，避免诊断 cadence 挤出业务事件。重连恢复读取绑定 lease 的性能 snapshot，按 host instance、sampling session 和 sequence 合并，并将无法恢复的 sequence 范围记录为 `PerfGap`。

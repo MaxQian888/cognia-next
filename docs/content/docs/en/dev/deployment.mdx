@@ -94,8 +94,23 @@ Tailwind v4's emitted CSS is hashed; long-cache it.
 ## Desktop build (Tauri)
 
 ```bash
-pnpm tauri build
+pnpm tauri:build:bundled
 ```
+
+The bundled profile is the default release profile: every app-owned JavaScript
+process uses the checksum-pinned Node 26 runtime shipped with Cognia. For a
+smaller installer, use `pnpm tauri:build:system-node`. That profile still ships
+the sidecar code and `node_modules`, but excludes the Node executable. On first
+launch it detects Node.js 26 or newer; if Node is missing or too old, Cognia
+stays open and offers a direct link to the official installer. The matching
+development commands are `pnpm tauri:dev:bundled` and
+`pnpm tauri:dev:system-node`.
+
+<Callout type="warn" title="Use the profile command">
+  Do not invoke `tauri build --features system-node-runtime` directly. The
+  package command also removes the bundled executable resource and its prepare
+  step; the Cargo feature only selects runtime behavior.
+</Callout>
 
 This:
 
@@ -173,7 +188,11 @@ Tauri supports cross-compilation only with significant setup (Docker images, sys
 ]
 ```
 
-The entire sidecar `node_modules/` is shipped because the sidecar runs as a separate Node process and needs its deps. Production users do not need Node installed — the bundled Node binary (or the host system's, if available) runs the sidecar.
+The entire sidecar `node_modules/` is shipped in both profiles because the
+sidecar runs as a separate Node process and needs its dependencies. The bundled
+profile never falls back to a system executable; the lightweight profile never
+falls back to the bundled runtime. This keeps agents, MCP helpers, webclone,
+OAuth helpers, and JavaScript plugins on one validated runtime per process.
 
 <Callout type="warn" title="tauri-build validates these paths at compile time">
   Every plain-file path in `bundle.resources` must exist wherever the Rust crate compiles — including the headless `Dockerfile.cognia-server` build. Adding a resource without extending the Dockerfile's COPY set breaks the container image; `images.yml`'s PR paths cover the compile inputs so this fails in CI, not at tag time.

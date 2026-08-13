@@ -16615,17 +16615,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - path
+                - workspaceId
               properties:
-                repoPath:
-                  type: string
                 path:
                   type: string
                 rev:
                   type:
                     - string
                     - "null"
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -16738,9 +16741,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -16857,13 +16863,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - name
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 name:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -16977,13 +16990,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - sha
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 sha:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -17098,12 +17118,21 @@ paths:
               type: object
               required:
                 - remoteUrl
-                - destination
+                - workspaceId
+                - destinationRelativePath
+                - adminLease
               properties:
                 remoteUrl:
                   type: string
-                destination:
+                workspaceId:
                   type: string
+                  minLength: 1
+                destinationRelativePath:
+                  type: string
+                  minLength: 1
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -17217,19 +17246,26 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - message
                 - amend
                 - signoff
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 message:
                   type: string
                 amend:
                   type: boolean
                 signoff:
                   type: boolean
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -17340,12 +17376,15 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - sha
+                - workspaceId
               properties:
-                repoPath:
-                  type: string
                 sha:
+                  type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -17459,9 +17498,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -17578,12 +17620,11 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - name
                 - checkout
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 name:
                   type: string
                 checkout:
@@ -17592,6 +17633,14 @@ paths:
                   type:
                     - string
                     - "null"
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -17705,11 +17754,10 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - name
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 name:
                   type: string
                 message:
@@ -17720,6 +17768,14 @@ paths:
                   type:
                     - string
                     - "null"
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -17833,16 +17889,23 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - name
                 - force
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 name:
                   type: string
                 force:
                   type: boolean
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -17956,13 +18019,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - name
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 name:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -18073,15 +18143,18 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - sha
                 - path
+                - workspaceId
               properties:
-                repoPath:
-                  type: string
                 sha:
                   type: string
                 path:
+                  type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -18195,16 +18268,19 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - path
                 - staged
+                - workspaceId
               properties:
-                repoPath:
-                  type: string
                 path:
                   type: string
                 staged:
                   type: boolean
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -18317,18 +18393,21 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - base
                 - target
                 - path
+                - workspaceId
               properties:
-                repoPath:
-                  type: string
                 base:
                   type: string
                 target:
                   type: string
                 path:
+                  type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -18442,15 +18521,18 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - base
                 - target
+                - workspaceId
               properties:
-                repoPath:
-                  type: string
                 base:
                   type: string
                 target:
+                  type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -18564,9 +18646,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -18680,9 +18765,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -18799,11 +18887,10 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - paths
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 paths:
                   type: array
                   items:
@@ -18812,6 +18899,14 @@ paths:
                   type:
                     - string
                     - "null"
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -18925,13 +19020,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - includeUntracked
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 includeUntracked:
                   type: boolean
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -19045,16 +19147,23 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 remote:
                   type:
                     - string
                     - "null"
                 prune:
                   type: boolean
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -19165,16 +19274,19 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - path
                 - maxCount
+                - workspaceId
               properties:
-                repoPath:
-                  type: string
                 path:
                   type: string
                 maxCount:
                   type: integer
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -19287,9 +19399,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -19406,13 +19521,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - pattern
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 pattern:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -19526,10 +19648,17 @@ paths:
             schema:
               type: object
               required:
-                - path
+                - workspaceId
+                - adminLease
               properties:
-                path:
+                workspaceId:
                   type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -19643,12 +19772,11 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - base
                 - entries
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 base:
                   type: string
                 entries:
@@ -19657,6 +19785,14 @@ paths:
                     type: object
                     additionalProperties: {}
                     example: {}
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -19767,9 +19903,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -19883,16 +20022,19 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - maxCount
                 - skip
+                - workspaceId
               properties:
-                repoPath:
-                  type: string
                 maxCount:
                   type: integer
                 skip:
                   type: integer
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -20008,13 +20150,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - branch
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 branch:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -20128,10 +20277,17 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
+                workspaceId:
                   type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -20245,10 +20401,9 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 remote:
                   type:
                     - string
@@ -20259,6 +20414,14 @@ paths:
                     - "null"
                 rebase:
                   type: boolean
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -20372,10 +20535,9 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 remote:
                   type:
                     - string
@@ -20388,6 +20550,14 @@ paths:
                   type: boolean
                 forceWithLease:
                   type: boolean
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -20501,16 +20671,23 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - remote
                 - name
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 remote:
                   type: string
                 name:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -20624,13 +20801,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - onto
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 onto:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -20741,12 +20925,15 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - base
+                - workspaceId
               properties:
-                repoPath:
-                  type: string
                 base:
+                  type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -20860,9 +21047,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -20979,16 +21169,23 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - name
                 - url
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 name:
                   type: string
                 url:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -21102,13 +21299,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - name
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 name:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -21219,9 +21423,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -21338,17 +21545,24 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - newName
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 newName:
                   type: string
                 old:
                   type:
                     - string
                     - "null"
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -21459,9 +21673,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -21578,16 +21795,23 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - mode
                 - target
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 mode:
                   type: string
                 target:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -21701,11 +21925,10 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - path
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 path:
                   type: string
                 mergedContent:
@@ -21719,6 +21942,14 @@ paths:
                   enum:
                     - ours
                     - theirs
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -21832,12 +22063,11 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - paths
                 - staged
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 paths:
                   type: array
                   items:
@@ -21848,6 +22078,14 @@ paths:
                   type:
                     - string
                     - "null"
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -21961,13 +22199,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - sha
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 sha:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -22081,10 +22326,17 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
+                workspaceId:
                   type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -22198,10 +22450,17 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
+                workspaceId:
                   type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -22315,19 +22574,27 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - name
                 - email
                 - global
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 name:
                   type: string
                 email:
                   type: string
                 global:
                   type: boolean
+                  const: false
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -22441,11 +22708,10 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - paths
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 paths:
                   type: array
                   items:
@@ -22454,6 +22720,14 @@ paths:
                   type:
                     - string
                     - "null"
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -22567,13 +22841,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - index
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 index:
                   type: integer
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -22687,13 +22968,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - index
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 index:
                   type: integer
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -22804,9 +23092,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -22923,13 +23214,20 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - index
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 index:
                   type: integer
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -23043,10 +23341,9 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 message:
                   type:
                     - string
@@ -23055,6 +23352,14 @@ paths:
                   type: boolean
                 keepIndex:
                   type: boolean
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -23165,9 +23470,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -23284,10 +23592,17 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
+                workspaceId:
                   type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -23398,9 +23713,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -23517,11 +23835,10 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
                 - paths
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
-                  type: string
                 paths:
                   type: array
                   items:
@@ -23530,6 +23847,14 @@ paths:
                   type:
                     - string
                     - "null"
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -23625,6 +23950,118 @@ paths:
                 $ref: "#/components/schemas/RpcError"
       security:
         - dpopAccess: []
+  /api/_rpc/git_workspace_list:
+    post:
+      operationId: publicRpcGitWorkspaceList
+      tags:
+        - rpc-dispatch
+      summary: git_workspace_list (workspace.read)
+      description: "Device-reachable read command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
   /api/_rpc/git_worktree_add:
     post:
       operationId: publicRpcGitWorktreeAdd
@@ -23643,20 +24080,28 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
-                - path
                 - branch
+                - workspaceId
+                - destinationRelativePath
+                - adminLease
               properties:
-                repoPath:
-                  type: string
-                path:
-                  type: string
                 branch:
                   type: string
                 baseRef:
                   type:
                     - string
                     - "null"
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                destinationRelativePath:
+                  type: string
+                  minLength: 1
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -23770,13 +24215,22 @@ paths:
             schema:
               type: object
               required:
-                - worktreePath
                 - message
+                - workspaceId
+                - worktreeRelativePath
+                - adminLease
               properties:
-                worktreePath:
-                  type: string
                 message:
                   type: string
+                workspaceId:
+                  type: string
+                  minLength: 1
+                worktreeRelativePath:
+                  type: string
+                  minLength: 1
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -23887,9 +24341,12 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
               properties:
-                repoPath:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
                   type: string
               additionalProperties: false
       responses:
@@ -24006,10 +24463,17 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
+                - workspaceId
+                - adminLease
               properties:
-                repoPath:
+                workspaceId:
                   type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -24123,20 +24587,28 @@ paths:
             schema:
               type: object
               required:
-                - repoPath
-                - path
                 - force
+                - workspaceId
+                - worktreeRelativePath
+                - adminLease
               properties:
-                repoPath:
-                  type: string
-                path:
-                  type: string
                 force:
                   type: boolean
                 deleteBranch:
                   type:
                     - string
                     - "null"
+                workspaceId:
+                  type: string
+                  minLength: 1
+                relativePath:
+                  type: string
+                worktreeRelativePath:
+                  type: string
+                  minLength: 1
+                adminLease:
+                  type: string
+                  minLength: 1
               additionalProperties: false
       responses:
         "200":
@@ -27153,6 +27625,1326 @@ paths:
                 $ref: "#/components/schemas/RpcError"
       security:
         - dpopAccess: []
+  /api/_rpc/perf_close_lease:
+    post:
+      operationId: publicRpcPerfCloseLease
+      tags:
+        - rpc-dispatch
+      summary: perf_close_lease (performance.capture)
+      description: "Device-reachable side-effect command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - leaseId
+              properties:
+                leaseId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+  /api/_rpc/perf_hotspots:
+    post:
+      operationId: publicRpcPerfHotspots
+      tags:
+        - rpc-dispatch
+      summary: perf_hotspots (performance.observe)
+      description: "Device-reachable read command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
+  /api/_rpc/perf_lease_snapshot:
+    post:
+      operationId: publicRpcPerfLeaseSnapshot
+      tags:
+        - rpc-dispatch
+      summary: perf_lease_snapshot (performance.observe)
+      description: "Device-reachable read command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - leaseId
+              properties:
+                leaseId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
+  /api/_rpc/perf_list_traces:
+    post:
+      operationId: publicRpcPerfListTraces
+      tags:
+        - rpc-dispatch
+      summary: perf_list_traces (performance.traces)
+      description: "Device-reachable read command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
+  /api/_rpc/perf_open_lease:
+    post:
+      operationId: publicRpcPerfOpenLease
+      tags:
+        - rpc-dispatch
+      summary: perf_open_lease (performance.capture)
+      description: "Device-reachable side-effect command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - input
+              properties:
+                input:
+                  type: object
+                  required:
+                    - clientId
+                    - deviceId
+                    - targetId
+                    - routingGeneration
+                    - purpose
+                    - requestedCadenceMs
+                  properties:
+                    clientId:
+                      type: string
+                      minLength: 1
+                    deviceId:
+                      type: string
+                      description: Overwritten by the authenticated RPC device identity.
+                    targetId:
+                      type: string
+                      minLength: 1
+                    routingGeneration:
+                      type: integer
+                      minimum: 0
+                    purpose:
+                      type: string
+                      enum:
+                        - live
+                        - capture
+                    requestedCadenceMs:
+                      type: integer
+                      minimum: 500
+                      maximum: 10000
+                    sourceId:
+                      type: string
+                      minLength: 1
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+  /api/_rpc/perf_read_observations:
+    post:
+      operationId: publicRpcPerfReadObservations
+      tags:
+        - rpc-dispatch
+      summary: perf_read_observations (performance.observe)
+      description: "Device-reachable read command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - leaseId
+              properties:
+                leaseId:
+                  type: string
+                  minLength: 1
+                afterSequence:
+                  type: integer
+                  minimum: 0
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
+  /api/_rpc/perf_renew_lease:
+    post:
+      operationId: publicRpcPerfRenewLease
+      tags:
+        - rpc-dispatch
+      summary: perf_renew_lease (performance.capture)
+      description: "Device-reachable side-effect command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - leaseId
+              properties:
+                leaseId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+  /api/_rpc/perf_system_details:
+    post:
+      operationId: publicRpcPerfSystemDetails
+      tags:
+        - rpc-dispatch
+      summary: perf_system_details (performance.observe)
+      description: "Device-reachable read command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
+  /api/_rpc/perf_trace_close:
+    post:
+      operationId: publicRpcPerfTraceClose
+      tags:
+        - rpc-dispatch
+      summary: perf_trace_close (performance.traces)
+      description: "Device-reachable side-effect command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - handleId
+              properties:
+                handleId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+  /api/_rpc/perf_trace_open:
+    post:
+      operationId: publicRpcPerfTraceOpen
+      tags:
+        - rpc-dispatch
+      summary: perf_trace_open (performance.traces)
+      description: "Device-reachable side-effect command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - traceId
+              properties:
+                traceId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+  /api/_rpc/perf_trace_read_chunk:
+    post:
+      operationId: publicRpcPerfTraceReadChunk
+      tags:
+        - rpc-dispatch
+      summary: perf_trace_read_chunk (performance.traces)
+      description: "Device-reachable read command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - handleId
+                - offset
+              properties:
+                handleId:
+                  type: string
+                  minLength: 1
+                offset:
+                  type: integer
+                  minimum: 0
+                length:
+                  type: integer
+                  minimum: 1
+                  maximum: 1048576
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
   /api/_rpc/plugin_api_batch_invoke:
     post:
       operationId: publicRpcPluginApiBatchInvoke
@@ -43672,6 +45464,7 @@ components:
           - git_sync
           - git_tags
           - git_unstage
+          - git_workspace_list
           - git_worktree_add
           - git_worktree_commit
           - git_worktree_list
@@ -43701,6 +45494,17 @@ components:
           - memory_search
           - memory_store
           - memory_update
+          - perf_close_lease
+          - perf_hotspots
+          - perf_lease_snapshot
+          - perf_list_traces
+          - perf_open_lease
+          - perf_read_observations
+          - perf_renew_lease
+          - perf_system_details
+          - perf_trace_close
+          - perf_trace_open
+          - perf_trace_read_chunk
           - plugin_api_batch_invoke
           - plugin_api_invoke
           - plugin_backup_create
@@ -45406,9 +47210,9 @@ x-cognia-generated:
     - protocol/companion-request-schemas.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  publicCommandCount: 334
-  generatedRequestSchemaCount: 334
+  publicCommandCount: 346
+  generatedRequestSchemaCount: 346
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 334
+  contractRequestSchemaCount: 346
   genericRequestSchemaCount: 0
   legacyCompatibility: false

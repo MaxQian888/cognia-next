@@ -147,6 +147,7 @@ const REGISTRY = [
   { script: "audit:companion-command-manifest", group: "audit" },
   { script: "audit:e2e-governance", group: "audit" },
   { script: "audit:docs-links", group: "audit" },
+  { script: "audit:adr-catalog", group: "audit" },
   { script: "audit:colocated-tests", group: "audit" },
   { script: "audit:loading-states", group: "audit" },
   { script: "audit:unreachable-components", group: "audit" },

@@ -63,3 +63,7 @@ description: "将Capacitor移动设置接口（/me）与桌面设置完全对等
 - 移动端设置UX现在正式依赖于`mobileRuntimeMode`：同一个`/me`列表显示的是独立和配对的不同代理面板。未来的读者如果在独立手机上看到代理面板“缺失”，应该参考D2，而不是把它当作bug。
 - 独立BYOK用户**不会**获得agent-runtime/MCP/tools设置，直到单独的引擎扩展计划发布。该ADR记录为有意排除。
 - 提供商 凭证仍然分裂：设备本地的BYOK密钥通过`/me/providers`（从未同步，也无法远程写入）与仅桌面的提供商配置。移动端永远不会成为桌面凭证的远程编辑。
+
+## 当前状态修订（2026-08-13）
+
+`/me/*` surfaces 已覆盖预期的 bucket 1/2/3 family，包括 Agent、MCP、plugins、skills、teams、workflows、hooks、network 与 external agents。“完全对等”仍需要生成的 field-level matrix 以及 paired/standalone 验证；bucket 4 按原决策保持 desktop-only。

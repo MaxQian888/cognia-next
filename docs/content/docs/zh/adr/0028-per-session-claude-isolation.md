@@ -7,6 +7,8 @@ description: "Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / 代理�
 
 **状态**：提议（2026-05-20）——**部分发货**;详见下方说明
 
+> **当前状态修订（2026-08-13）。** `WarmQuery` 与 prewarm 已存在。Rollout 验收改为验证 pool-key 隔离、取消、shutdown、stale claim 恢复及 feature flag 证据。macOS XPC backend 不属于本次 rollout。
+
 > **注 （2026-07-25）** 每会话/按角色*账号固定*的一半ADR是实时且用户可访问的，非推测：`accountIdOverride`由`lib/claude/env-resolver.ts`解决，从角色编辑器（`components/settings/characters-section.tsx`）和聊天会话设置表编辑，`components/settings/subscription/account-usage-chips.tsx`中显示为“正在使用”芯片，并有注册的`claude_env_for_account`/`claude_proxy_env_for_session` 命令支持。读者若仅凭字面理解前言，会认为这些内容根本不存在。执行沙盒部分尚未与该文档进行重新核实，因此整体状态保持提议，而非翻转为已接受。
 **Supersedes**：扩展ADR-0010（Claude订阅OAuth）、ADR-0020（计算机使用完整性）、ADR-0025（统一订阅模块）、ADR-0026（插件扩展点扩展）**作者**：Max Qian + Claude Opus 4.7
 

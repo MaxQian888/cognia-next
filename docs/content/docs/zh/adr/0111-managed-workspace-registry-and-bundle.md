@@ -9,6 +9,10 @@ description: 在复用现有 Task Workspace patch 引擎的前提下，统一 wo
 
 提议（2026-08-07）。修订 ADR-0086 与 ADR-0108。
 
+## 当前 rollout 修订（2026-08-13）
+
+Registry storage/state transition、bundle、typed base spec、sensitive grant、scheduler isolation 与 AgentTeam Task Workspace lease 均已实现。Legacy AgentTeam allocator/reconciler 仅为已记录的一发布周期 kill switch 与 Git reconciliation path 保留；consumer telemetry 未确认 fallback 为零前不得删除。Rollout 顺序仍为 ADR-0111 migration、ADR-0086 GA、再到 ADR-0113 canary。
+
 ## 背景
 
 Cognia 已经拥有 Task Workspace 的快照与 patch、Git worktree 通道、Workspace Trust、`Project` 级多根，以及 Agent Team 的 Git 隔离。对照 Codex Worktrees、Claude Code Worktrees、VS Code Worktrees 与原生 `git-worktree`，真正缺失的不是新的 patch 原语，而是统一的所有权、版本化的执行上下文、跨根的组合、敏感资源授权与产品级可发现性。证据见 `docs/research/managed-workspace-registry-gap-analysis-2026-08-07.md`。

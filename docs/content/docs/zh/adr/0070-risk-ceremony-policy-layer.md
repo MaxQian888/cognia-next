@@ -133,3 +133,7 @@ Tool/capability **存在感**是主要信号;关键词集是粗略的次级，�
 ## 超出范围（后期阶段）
 
 `/goal`与工作流程接线;LLM-assisted分类;与每个工具`bypassPermissions`的交互;一种独特的“即使在旁路中也有硬阻挡”审查流程;`riskGating`设置UI（第一阶段默认配置即可）。
+
+## 当前状态修订（2026-08-13）
+
+AgentTeam、Goal、Workflow risk gate 以及 `riskGating` settings UI 均已实现；“phase 2–3 planned”的描述对这些 surface 已陈旧。后续 policy 变化必须复用现有 ceremony classifier 与 gate，不得新增逐 surface 的 risk logic。

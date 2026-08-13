@@ -126,3 +126,7 @@ external-event-progress, resolve-acp-mcp-servers, presets, agent-sdk/dispatch,
 dispatch-teammate, resolve-external-backing, subagents, subagent-templates-tab).
 `tsc --noEmit`: zero errors in any changed file. i18n key parity 0/0 (en + zh-CN,
 aggregates rebuilt). Delivered as five independently-revertible commits.
+
+## Current-state amendment (2026-08-13)
+
+The historical five-runtime limitation is closed. `TeammateRuntime` consumes the executable preset catalog (excluding intentionally non-executable custom/preview entries), and auto-compose consumes external presets through the same runtime owner. Compatibility work must extend that catalog rather than reintroduce runtime-specific dispatch branches.

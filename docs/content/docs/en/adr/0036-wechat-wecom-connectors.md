@@ -3,6 +3,10 @@ title: 0036 — WeChat / WeCom Connectors
 description: Adds Enterprise WeChat (企业微信 / WeCom) over the 智能机器人 long connection (streaming replies, proactive push, template-card interactions) and Personal WeChat (个人微信) over the iLink gateway (QR login, reply-only HTTP long-poll, AES-128-ECB media) as native platform connectors; reuses the generic WS bridge and adds an additive onPartial / streamReply contract.
 ---
 
+## Status
+
+Accepted (2026-05-26). Implementation reconfirmed on 2026-08-12 against the adapter registry, WeCom and Personal WeChat adapters, shared capability map, and their contract tests.
+
 ## Context
 
 The Platform Connectors subsystem (ADR-0009 / 0025) shipped Telegram / Discord /

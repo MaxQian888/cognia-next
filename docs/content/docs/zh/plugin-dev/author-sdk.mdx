@@ -75,7 +75,7 @@ cognia plugin contract --plugin-type frontend --plugin-type hybrid --json
 
 `engines.cognia` 是兼容性权威。lint/install 会拒绝未知能力，也会拒绝低于任何已声明能力目录最低版本的下界。
 
-桌面 JavaScript 插件运行在 Cognia 校验固定 SHA-256 后随应用打包的 Node 26 runtime 中，最低已修补版本为 26.3.1；插件不能自行选择系统 Node。文件系统授权路径必须 canonical、无符号链接，每个路径使用独立的 Node permission flag，并且不得覆盖不可变安装树或宿主持有的权限账本。
+桌面 JavaScript 插件运行在 Cognia 的进程级 Node runtime profile 中。默认构建使用校验固定 SHA-256 后随应用打包的 Node 26，最低已修补版本为 26.3.1；轻量构建要求通过校验的系统 Node 26 或更高版本。插件不能自行选择或覆盖该 profile。文件系统授权路径必须 canonical、无符号链接，每个路径使用独立的 Node permission flag，并且不得覆盖不可变安装树或宿主持有的权限账本。
 
 ## 路径规则
 

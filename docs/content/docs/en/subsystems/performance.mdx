@@ -1,0 +1,73 @@
+---
+title: Performance diagnostics
+description: Versioned Renderer and selected-host metrics, demand leases, encrypted captures, portable evidence, and comparison rules.
+---
+
+## Source and surface contract
+
+The performance subsystem never treats “running Cognia” as one process or one
+clock. A full authenticated shell registers its local Renderer document source;
+lightweight, transparent, pairing, OAuth and overlay routes do not. The selected
+execution target may independently advertise a Rust/Tauri or Node/headless host
+source. Renderer and host data are never merged into one synthetic series.
+
+| Surface | Renderer | Captures | Selected host | Host controls |
+| --- | --- | --- | --- | --- |
+| Web full shell | available, including offline | available while account is unlocked | only when paired target advertises it | only advertised actions with a valid remote grant |
+| Capacitor full shell | available, including offline | available while account is unlocked | only when paired target advertises it | same host-owned challenge flow |
+| Tauri full WebView | one independent source per document | available | local Rust source | local owner routing; folder reveal is local-only |
+| Node/headless host | not applicable to the host process | host capture lease | process, heap, event-loop, RPC and managed workers | unsupported actions are omitted |
+| Lightweight/transparent route | excluded | an existing capture continues in the shell owner | excluded | excluded |
+
+Every capability resolves to `connecting`, `live`, `stale`, `error` or
+`unsupported`. A collection failure and a missing capability are explicit and
+are never projected as zero.
+
+## Demand lifecycle
+
+`PerfLease` replaces panel-owned start/stop state. Open is bound to device,
+target and routing generation, purpose and requested cadence. Renew runs every
+five seconds and remote expiry is 15 seconds. A normal unmount closes immediately.
+The host admits one live and one capture lease per device, 16 per host and no
+cadence faster than 500 ms. One physical sampler runs at the fastest admitted
+cadence and dispatches/down-samples independently per lease.
+
+Listeners attach before open and snapshot. Frames merge only when target,
+routing generation, host incarnation, sampling session and sequence match.
+Recoverable gaps trigger snapshot refill; unrecoverable gaps remain visible and
+are persisted with captures. Runtime rates use actual monotonic elapsed time and
+reset whenever cadence, source incarnation, boot/process/runtime session, sleep,
+clock or counter continuity changes.
+
+## Capture storage and portability
+
+The target database stores bounded encrypted frame chunks after five seconds,
+64 frames or 1 MiB. Default duration is 10 minutes and the hard limit is 60
+minutes or 512 MiB including explicitly selected attachments. Account quota is
+2 GiB with conservative cross-target reservations. Unpinned retention is 30 days
+and at most 20 captures per target; pinned evidence still consumes quota.
+
+The account security-generation barrier cancels demand and discards the
+unencrypted tail on lock. AES-GCM AAD binds namespace/version/account/target
+database/capture/ordinal/content type. Only structural state, timestamps, sizes,
+capability bits and digests are plaintext. `.cognia-perf` v1 validates manifest,
+paths, hashes, sizes, MIME and optional P-256 signature before any visible row is
+created. Redacted export is the default. Raw export requires an unlocked account
+and a digest-bound attachment-specific second confirmation.
+
+## Comparison contract
+
+A metric contributes one value per valid interval. Reset, discontinuous, missed
+or unsupported intervals are excluded. Results always include median, type-7
+p95, MAD, absolute delta and percent delta (`N/A` for a zero baseline). A budget
+verdict additionally requires 10 valid intervals, at least 90% expected coverage,
+matching definition/unit/source/schema/cadence, continuous incarnation and an
+immutable selected account budget. Environment equality is the default; an
+explicit recorded override may waive environment equality only.
+
+## Profiling build
+
+`pnpm build` emits the normal static `out/` used by Tauri and Capacitor.
+`pnpm build:profile` enables React profiling through `next build --profile`,
+marks the artifact and moves it to `out-profile/`. Tauri packaging runs
+`pnpm tauri:frontend:check` and rejects any profiling-marked `out/`.

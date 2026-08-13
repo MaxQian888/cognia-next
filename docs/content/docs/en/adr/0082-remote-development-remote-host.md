@@ -7,6 +7,10 @@ description: Desktop outbound transport routing, the remote-host registry, and t
 
 **Status**: Accepted (2026-07-17)
 
+## Current capability amendment (2026-08-13)
+
+The current matrix includes the code-server relay, Cloudflared transport, and remote external-Agent execution, which exceed the original gap description. Further remote-LSP work must extend the existing remote-host adapter only where a tested capability matrix proves a missing path; no parallel remote-development transport is authorized.
+
 ## Context
 
 `cognia-server serve` already stands up a complete headless Cognia on a remote
@@ -167,3 +171,19 @@ every response is also registered against a concrete pending request and
 session-scoped tool consent is available. Atomic Skill writes and host-managed
 Bridge lifecycle are likewise unadvertised while their remaining ownership,
 expiry, health, and migration requirements are incomplete.
+
+## 2026-08 Source Control security amendment
+
+Remote Git is no longer "remote for free" in the sense of forwarding renderer
+paths. The active account's project roots are registered as opaque workspaces;
+device clients address them by `workspaceId` plus validated relative paths.
+Only the host resolves absolute paths, and it re-authorizes the canonical
+worktree and Git directory to prevent nested-repository or upward-discovery
+escape. Responses redact host paths, and identity access is repository-local.
+
+`source-control.git` advertises every existing Git operation independently in
+`host_feature_manifest`. Interactive mutations require a device-bound,
+exact-command `host_admin_lease_issue` lease with a 120-second TTL. Clients do
+not auto-renew or retry an expired or uncertain mutation. The Source Control
+surface is shown on Tauri and paired clients, hidden on standalone Web, and
+uses five-second polling only while the remote surface is visible.

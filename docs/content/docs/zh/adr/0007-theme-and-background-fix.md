@@ -219,3 +219,7 @@ Light Default），并让它们走同一条 `parse-json` 流水线，
 - [Better dynamic themes in Tailwind with OKLCH (Evil Martians)](https://evilmartians.com/chronicles/better-dynamic-themes-in-tailwind-with-oklch-color-magic)
 - [WebAIM Contrast Checker](https://webaim.org/resources/contrastchecker/)
 - [APCA Contrast Calculator](https://apcacontrast.com/)
+
+## 当前状态修订（2026-08-13）
+
+作用域 applier 与主题/背景设置已经挂载到生产布局，原有 `Proposed` 标签对这部分已交付范围而言已经陈旧。slideshow、逐会话主题、Monaco CSS 重写和 `tokenColors` 仍是明确的 non-goal；本修订不扩大原决策。

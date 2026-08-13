@@ -10,6 +10,10 @@ description: "Phase 4 turns the integrated terminal (ADR-0031/0033) into an assi
 **Supersedes**: extends ADR-0031 + ADR-0033 (does not replace them); realises ADR-0033 follow-up #4 ("AI command assistance — designed, not built")
 **Affects**: `lib/terminal/completion/`, `lib/terminal/script-runner.ts`, `lib/terminal/shell-detect.ts`, `hooks/terminal/`, `components/terminal/terminal-instance.tsx`, `components/terminal/terminal-ghost-text.tsx`, `components/settings/terminal/terminal-card.tsx`, `lib/plugin/api/terminal-api.ts`, `lib/plugin/bridge/terminal-completion-bridge.ts`, `lib/plugin/contracts/module-bridge-map.ts`, `lib/plugin/core/validation.ts`, `lib/plugin/security/permission-guard.ts`, `types/plugin/plugin.ts`, `types/plugin/plugin-terminal-completion.ts`, `lib/claude/types.ts`, `crates/cognia-cli/src/cmd_lint.rs`, `i18n/messages/{en,zh-CN}.json`
 
+## Current state amendment (2026-08-13)
+
+Inline explain/fix is shipped. Mobile autocomplete remains dependent on the canonical OSC 633 cwd/command event stream from ADR-0031; it will reuse the current completion engine rather than create a mobile-only engine.
+
 ## Context
 
 ADR-0031/0033 shipped a complete integrated terminal (xterm.js dock, `portable-pty` backend, OSC 633 markers, mobile WS transport, split panes, command navigation, reload-restore, link-to-editor) plus a committed wave of shell-feature polish (shell picker, launch profiles, color schemes, render options, UTF-8 codepage fix). Two gaps remained:

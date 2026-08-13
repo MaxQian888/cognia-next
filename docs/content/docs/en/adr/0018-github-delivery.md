@@ -5,16 +5,24 @@ description: "把 AI 驱动的 PR 审阅、Issue → PR 闭环、Release 自动�
 
 # ADR 0018 — GitHub Delivery
 
-**Status:** Accepted — **removed 2026-07-28.** The built-in delivery stack (the
-Settings section, the `/github-delivery` board, the thirteen `action.github.*`
-workflow kinds, `trigger.github.webhook`, and `plugins/github-delivery/`) was
-removed in favour of the Marketplace Integration runtime (ADR-0026). A
-one-major-version compatibility installer ships at
-`packages/plugin-sdk/contract/compat/`. The generic pieces survive:
-`lib/github/pr-observe/` feeds Agent Team's PR feedback loop, and
-`lib/github/workspace-backend-registry.ts` is the plugin-facing workspace
-backend seam. This record is retained for its decision history — nothing below
-describes shipping code.
+**Status:** Accepted — revised 2026-08-13.
+
+**Current shipping boundary.** The former privileged, auto-enabled delivery
+stack was removed on 2026-07-28: its dedicated Settings section,
+`/github-delivery` board, direct connector, and plugin-owned privileged Git
+workspace implementation do not ship. The optional frontend plugin at
+`plugins/github-delivery/` does ship through the Marketplace Integration and
+workflow bridges described by ADR-0026. It is discoverable but requires an
+explicit user enable; it is never startup-activated. Its HTTP providers,
+normalizer, actions, projections, and workflow aliases run on supported
+integration hosts. Tauri is fully supported. Browser, mobile, and headless are
+degraded because `runIssueLoop` uses the host-owned local Git workspace and is
+therefore explicitly desktop-only. The remaining generic seams include
+`lib/github/pr-observe/` and `lib/github/workspace-backend-registry.ts`.
+
+The historical sections below describe the original delivery design. They are
+decision history, not a claim that the removed privileged UI or connector stack
+still ships; the optional plugin boundary above is authoritative.
 **Date:** 2026-05-12
 **Branch:** `feat/github-delivery`
 

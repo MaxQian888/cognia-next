@@ -352,16 +352,41 @@ beat it, so both paths agree on which watermark survives — a row already under
 the namespaced key wins — otherwise whichever ran second would rewind the
 other's.
 
+### D15 — Multi-Host collaboration is reachable in production (2026-08-13)
+
+The existing Runtime Target menu on Web and paired-servers Sheet on Mobile now
+call the Credential Book directly. Both surfaces can add a Host through
+`/pair?mode=add`, switch by stable `hostId`, show the active marker, and perform
+complete removal. `/pair?mode=recover` is also the common Web recovery surface
+for offline, incompatible, and missing-grant states; grant recovery names the
+exact capability and directs the user to Host → Settings → Companion → Paired
+Devices rather than implying that a browser can grant itself authority.
+
+Mobile binds companion work to `local_acct_a` and uses the stable `hostId` for
+the runtime context, Runtime Snapshot, outbound queue, and target database. A
+journaled adoption copies and verifies Credential Book records and secrets from
+`__local__`, preserves the active pointer, migrates legacy data into that Host's
+database, and attributes legacy Mobile queue rows before deleting source data.
+Other Host databases remain empty until their first authoritative sync.
+
+Switching quiesces the outbound runner before it tears down Host subscriptions,
+then changes the book/registry pointer, database and runtime context, reloads
+the transport, negotiates the manifest, runs authoritative sync, rebinds the
+Host services and publishes the snapshot. Failure restores all of those parts;
+an incomplete rollback clears the runtime context and transport cache so work
+cannot be dispatched through an ambiguous Host.
+
+Removal is remote-first. The client authenticates `DELETE /api/devices/{deviceId}`
+with the removed Host's explicit credential and TLS pin. Only success or the
+explicit `device_revoked` response permits local cleanup. Offline, timeout,
+generic authentication and `last_owner` failures keep the pairing, keys,
+database, mirrors, cursors and every queue state for retry. An active Host with
+alternatives requires an explicitly selected and validated fallback first;
+Web otherwise falls back to standalone, while sole-Host Mobile revokes while
+still active and then enters the unpaired flow.
+
 ## Not done
 
-- ~~**Multi-credential book on the phone.**~~ **Storage done (2026-08-02)** —
-  see D13, and D14 for the switching path. One thing is deliberately still
-  open, and it is visible from the book's own API: **no UI reaches `list()` /
-  `setActive()` yet.** The book holds several hosts, but every current caller
-  goes through the `CompanionConfig` adapter, which answers for the active host
-  only. The host list and switcher land with the Companion Settings
-  master/detail work; until then the multi-host half of the book is reachable
-  but not exercised in the product.
 - **Workflow placement (ADR-0061 P5 proper).** Nothing chooses *where* a run
   executes. A cron or webhook trigger fires in whichever process received it —
   `trigger-bridge` calls `runWorkflow()` in place — and there is no

@@ -7,6 +7,10 @@ description: "一个可移动、内容寻址的模板信封、一个按源代码
 
 **状态：** 已接受 **日期：** 2026-07-30
 
+## 信任修订（2026-08-13）
+
+Marketplace channel provenance 不得提升 publisher trust。签名正确的包只有在其内嵌公钥被现有 trusted-publisher ledger 精确信任时才是 `verified-publisher`，否则为 `signed-unknown`。Hydration 会重新检查 ledger，并原子降级已撤销或由旧 channel 推断出的 package 与 release provenance；模板内容不会删除，content hash 也不会改变。
+
 ## 背景
 
 “模板”意味着十二个无关的东西，每个都有自己的存储、内置概念和导入路径，或者根本没有。其中六个由带有`isBuiltIn`标志的商店或Dexie表支持——Agent Team模板（`BUILT_IN_TEAM_TEMPLATES`）、子代理模板（`BUILT_IN_SUBAGENT_TEMPLATES`）、自定义模式（`MODE_TEMPLATES`）、工作流程模板、角色和技能。另外六个仅以硬编码列表或定制表格的形式存在：A2UI应用、目标模板、调度任务模板、提示预设、订阅预设和文档。

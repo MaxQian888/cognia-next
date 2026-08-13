@@ -8,6 +8,10 @@ description: "One portable, content-addressed template envelope, one source-part
 **Status:** Accepted
 **Date:** 2026-07-30
 
+## Trust amendment (2026-08-13)
+
+Marketplace channel provenance never elevates publisher trust. A correctly signed package is `signed-unknown` unless the exact embedded public key is trusted by the existing trusted-publisher ledger. Hydration rechecks that ledger and atomically downgrades revoked or legacy channel-derived `verified-publisher` package and release provenance without deleting template content or changing its content hash.
+
 ## Context
 
 "Template" meant twelve unrelated things, each with its own storage, its own notion of built-in, and its own import path or none at all. Six were backed by a store or a Dexie table with an `isBuiltIn` flag — Agent Team templates (`BUILT_IN_TEAM_TEMPLATES`), subagent templates (`BUILT_IN_SUBAGENT_TEMPLATES`), custom modes (`MODE_TEMPLATES`), workflow templates, characters and skills. Six more existed only as a hard-coded list or a bespoke table: A2UI apps, goal templates, scheduler task templates, prompt presets, subscription presets and documents.

@@ -352,6 +352,49 @@ The connector delivery and lifecycle seams were tightened without changing the p
   `remote_idempotent`. A contract test now requires every remotely idempotent adapter serializer
   to transmit the stable idempotency key.
 
+---
+
+## Revision — 2026-08-13 (shared connector activation pass)
+
+This pass makes previously implemented connector controls reachable without introducing another
+adapter or transport stack:
+
+- Runtime builds now persist `lastKnownCapabilities` and
+  `lastKnownSkillCapabilities` in one update after both probes succeed. A missing skill probe is
+  the authoritative empty list; a thrown probe preserves both previous caches and fails the build.
+- The shared adapter detail editor owns `defaultMode`. Platform forms continue to own only
+  platform-specific configuration.
+- Dexie v161 normalizes QQ Official's legacy `settings.transport` into
+  `AdapterInstanceRow.transportMode` and removes the legacy field. Runtime construction,
+  inbound-server registration, rebuild fingerprints, and the Gateway/Webhook selector now read
+  that single field.
+- Connections exposes the existing Tunnel surface at `?connectionsTab=tunnel`. QQ Official uses
+  `/webhook/qq-official/:adapterId`; all connector links target this tab. Tauri retains start/stop,
+  while paired Web/mobile projects the host's `companion_endpoints` as read-only state.
+- `/status` applies `matchDispatchRule` and `resolveImEffectiveConfig` to the literal current event,
+  reports the matched rule and effective route (including response adapter and model ownership),
+  and lists enabled rules in priority order with an explicit warning that later messages are
+  matched independently.
+
+## Revision — 2026-08-13 (Matrix E2EE completion)
+
+Matrix now uses the existing matrix-sdk-crypto machine as a required transport boundary:
+
+- Detailed `whoami` must provide both `user_id` and `device_id`. Missing device identity leaves the
+  adapter degraded and prevents sync and plaintext sends. `connectors_matrix_crypto_close` removes
+  only the process-local machine, so an awaited stop or device rotation reopens the preserved store.
+- One abortable request pump serializes key upload/query/claim and to-device traffic, validates the
+  Matrix HTTP response before marking a request sent, and honors `retry_after_ms`. Sync state is
+  applied before timelines; `/joined_members` reconciles the authoritative joined set on restart,
+  joins, and gaps. Unknown encryption state fails closed.
+- Messages, edits, reactions, and media pass through the same room-event encryption boundary.
+  Redaction and typing retain their protocol-defined paths. Encrypted `file` and `thumbnail_file`
+  objects use the existing bounded uploader, downloader, and encrypted attachment cache.
+- Dexie v162 adds the local-only `matrixPendingEncryptedEvents` recovery queue. Undecryptable events
+  are persisted before `next_batch` advances, deduplicated by adapter/event id, retried after key
+  changes, pump completion, restart, and bounded backoff, and retained as `recovery_required` after
+  repeated failure. At 10,000 active rows the cursor is held so the homeserver replays the batch.
+
 ## References
 
 - Original spec: `C:\Users\qwdma\.claude\plans\d-project-agentforge-astrbot-fluttering-cerf.md`

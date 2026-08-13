@@ -3,6 +3,10 @@ title: 0034 — Workflow Editor Completeness & Plugin Parity
 description: Node-config completion, workflow-level settings, run observability, error-branch routing, and ADR-0032-parity plugin extensibility for Visual Workflows.
 ---
 
+## Status
+
+Accepted (2026-05-23). Implementation reconfirmed on 2026-08-12 against the mounted workflow editor sidebar, inspector registry, workflow runtime, and plugin capability registries.
+
 ## Context
 
 The Visual Workflows subsystem (ADR-0011/0017/0022) had a mature canvas + hybrid

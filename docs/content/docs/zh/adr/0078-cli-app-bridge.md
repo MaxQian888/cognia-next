@@ -7,6 +7,10 @@ description: 为两个本地 CLI 保留专用的经认证回环 bridge，只对 
 
 **状态**：已接受（2026-07-16）
 
+## 当前状态修订（2026-08-13）
+
+本地 CLI bridge listener、endpoint writer 与 initializer 已在编译期限制为非移动 desktop target，Tauri setup hook 也无法在 Android 或 iOS 上启动它们。Mobile 继续使用 Companion transport，且绝不写入 `cli-endpoint.json`。
+
 ## 背景
 
 Cognia 有两个职责不同的本地命令行产品：TypeScript `cognia-agent` 聊天 TUI 与 Rust

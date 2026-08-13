@@ -10,6 +10,10 @@ description: "Closes the gap between the mature OS-level sandbox (ADR-0028) and 
 **Builds on**: the OS sandbox (ADR-0028, `src-tauri/src/sandbox/`), the permission model (ADR-0020 computer-use, ADR-0041 command auto-mode), the monotonic permission-ceiling cascade (`lib/ai/agent/external/permission-cascade.ts`), and the sidecar `canUseTool` gates (`sidecar/dispatch/{anthropic,ai-sdk-tools}.mjs`).
 **Inspiration**: Anthropic's [`sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime) and the [Claude Code sandboxed-Bash](https://code.claude.com/docs/en/sandboxing) filesystem/network model (write=cwd, read=whole machine except credentials), and the six-step [Agent SDK permission evaluation](https://code.claude.com/docs/en/agent-sdk/permissions).
 
+## Current state amendment (2026-08-13)
+
+`TeammateConfigDialog` now exposes the existing sandbox policy editor, displays the inherited team ceiling, and persists only `clampSandboxPolicy`-narrowed overrides. This reuses the existing `SandboxResourcePolicy` schema and does not add a teammate-specific sandbox model.
+
 ## Context
 
 The repo had **two mature but disjoint** confinement systems, and agents fell through the gap between them:

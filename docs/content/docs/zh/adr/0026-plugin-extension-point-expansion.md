@@ -7,6 +7,10 @@ description: "新增6个平面清单字段，8个新运行时点，1个新hook�
 
 **状态：** 已接受 **日期：** 2026-05-19 **分支：** `feat/plugin-extension-points-v2`
 
+## 当前状态修订（2026-08-13）
+
+当前 plugin runtime 已具备从 URL/GitHub 安装与 sandboxed WebView contribution path，不应重复实现。`workspace-backend-registry` namespace 只随 workspace owner 原子迁移；历史目录位置不代表缺少运行时功能。
+
 ---
 
 ## 背景

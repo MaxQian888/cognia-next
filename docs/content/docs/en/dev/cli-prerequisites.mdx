@@ -52,10 +52,13 @@ A plugin can declare prerequisites in its manifest under
 adds a **Requirements** step listing anything missing, with a link to the
 relevant install guide. Install the tool, then click **I installed it — retry**.
 
-### Node.js (≥ 20)
+### Node.js (≥ 26)
 
-Required by the desktop sidecar itself. Install from
-[nodejs.org](https://nodejs.org/) or via a version manager.
+Required at runtime only by the lightweight `system-node` desktop profile.
+The default bundled profile ships its own validated Node 26.3.1 runtime.
+Install from [nodejs.org](https://nodejs.org/) or via a version manager, then
+fully restart Cognia so a GUI-launched app can refresh its executable search
+paths.
 
 import { Tab, Tabs } from "fumadocs-ui/components/tabs"
 

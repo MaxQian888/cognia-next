@@ -3,6 +3,10 @@ title: 0035 — Rust Performance Dashboard
 description: A Task-Manager-style /performance panel backed by a Rust perf subsystem — live process-tree + Tokio runtime sampling plus an opt-in span hotspot registry — for finding backend performance hotspots.
 ---
 
+## Status
+
+Accepted (2026-05-26). Superseded in implementation on 2026-08-13 by the capability-driven lease and capture model below; the original local commands remain one-release compatibility adapters only.
+
 ## Context
 
 The app already had rich observability for *adjacent* concerns — unified logging
@@ -85,3 +89,57 @@ opened panel's rolling graphs. Commands: `perf_snapshot`, `perf_start_sampling`,
   `app.emit` sampler is desktop-app-gated.
 - Span recording is two `Instant::now()` calls plus a tiny mutex section —
   intended for coarse boundaries only, never inner loops.
+
+## 2026-08-13 capability and evidence upgrade
+
+`/performance` is no longer a desktop-only sampler view. It is a diagnostic
+workspace with two deliberately separate source classes: the local Renderer
+document and the selected execution host. Each source publishes a versioned
+descriptor, capabilities, build/profile marker, independent clock origin and an
+explicit connection state. Web and mobile therefore retain Renderer metrics and
+encrypted captures offline; Rust/Tauri and Node/headless host sections appear
+only when the selected host advertises them. Unsupported metrics are absent, not
+zero.
+
+Sampling ownership is a `PerfLease`. A visible live consumer or explicit capture
+opens and heartbeats a lease; normal hide/unmount closes it immediately. Only an
+abnormally disconnected remote device may retain demand until the fixed 15-second
+TTL. The host admits a minimum 500 ms cadence, one live and one capture lease per
+device and 16 leases per host, runs one physical sampler at the fastest admitted
+cadence, and down-samples per lease. Frames carry immutable target/routing,
+source/session/sequence, requested and actual interval, monotonic time, missed
+ticks and reset/discontinuity flags. Event subscription precedes open/snapshot;
+late target generations are rejected and sequence loss becomes a persisted gap.
+
+Captures are target-database evidence with account-wide quota coordination. The
+target schema v160 stores structural rows, AES-GCM chunks, attachments and gaps;
+the account registry v2 stores conservative quota reservations and encrypted,
+immutable named budget profiles. The performance domain key is separate from
+evaluation artifacts. AAD binds account, target database, capture, ordinal and
+content type, and the account-security generation is checked after WebCrypto and
+inside the destination transaction. Plaintext contains structural IDs, state,
+timestamps, sizes, capability bits and digests only; source/build/environment,
+numeric data, names and budget snapshots stay encrypted.
+
+`.cognia-perf` v1 is the sole full-fidelity portable format. Import validates
+paths, duplicates, entry count, MIME, sizes, hashes, schema and P-256 signature
+before a second-pass invisible `importing` transaction becomes `ready`. Default
+exports reuse crash redaction plus performance pseudonymization and exclude trace
+bytes. Raw export requires an unlocked account and a second confirmation bound to
+the capture digest and explicit attachment selection. Imported evidence gets a
+new local ID and retains immutable origin digest/scope/trust provenance.
+
+The information architecture is Overview, Diagnose, Resources and Captures;
+existing process, managed, hotspot, runtime, system and `perf.panel` plugin
+surfaces remain nested within it. Captures continue across navigation and are
+controllable from the desktop status bar or mobile safe-area shell. Comparison
+uses one value per valid interval and always reports median, type-7 p95, MAD,
+absolute and percent delta. Budget verdicts additionally require 10 valid
+intervals, 90% coverage, matching definition/unit/source/schema/cadence,
+continuous incarnation, an immutable selected budget and matching environment
+unless the environment mismatch is explicitly recorded.
+
+Normal production retains lightweight Renderer instrumentation without React
+profiling. `pnpm build:profile` runs `next build --profile`, marks and moves the
+static artifact to `out-profile/`; Tauri always consumes `out/` and its packaging
+preflight rejects a profiling marker.

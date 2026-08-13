@@ -7,6 +7,8 @@ description: Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / proxy is
 
 **Status**: Proposed (2026-05-20) — **partially shipped**; see the note below
 
+> **Current-state amendment (2026-08-13).** `WarmQuery` and prewarm are present. Rollout acceptance is now based on pool-key isolation, cancellation, shutdown, stale-claim recovery, and feature-flag evidence. A macOS XPC backend is not part of this rollout.
+
 > **Note (2026-07-25).** The per-session / per-character *account pinning* half
 > of this ADR is live and user-reachable, not speculative: `accountIdOverride`
 > is resolved by `lib/claude/env-resolver.ts`, edited from the Character editor

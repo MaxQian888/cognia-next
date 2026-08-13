@@ -85,3 +85,7 @@ Capacitor 7 移动端外壳已发布 JWT 配对、WebRTC 通道、写入离线�
 2. Inbox / Backup / Twin Source 编辑器 —— 计划 F / G / H 节。
 3. `workflow_delete` 与 `workflow_schedule_pause` 的 RPC 镜像（需扩展 `MOBILE_OUTBOUND_COMMANDS` 与 Rust dispatcher），让移动端工作流 CRUD 能回到桌面端。
 4. Tauri SW 注册的 macOS / Win / Linux 验证 —— `tauri://localhost` scheme 未在文档中明确支持 SW，若注册失败则桌面端降级为无 PWA，无用户可见影响。
+
+## 当前状态修订（2026-08-13）
+
+PNG manifest、mobile Inbox、backup/import/reminder、Twin long-press/redaction/camera 流程，以及 workflow delete/pause RPC mirrors 均已存在。剩余开放项是真实 Tauri service worker 在 macOS、Windows、Linux 上的 smoke 证据；历史功能清单不应再被当作当前缺口。

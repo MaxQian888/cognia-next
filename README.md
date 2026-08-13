@@ -77,8 +77,10 @@ Two standalone services live under `services/`, each an independent deploy artif
 - `services/signaling-server/` — WebRTC rendezvous (axum + workers-rs).
 - `services/share-server/` — Cloudflare Worker + Vite viewer for public share links.
 
-The full subsystem catalogue, with one ADR per topic, lives under
-[`docs/content/docs/en/adr/`](./docs/content/docs/en/adr/).
+The Architecture Decision Record (ADR) catalogue for major cross-cutting
+decisions lives under [`docs/content/docs/en/adr/`](./docs/content/docs/en/adr/).
+Current behavior is documented in the subsystem pages and verified against the
+implementation and tests; an ADR records why a decision was made.
 
 ## Quick start
 

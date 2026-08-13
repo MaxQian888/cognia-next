@@ -46,9 +46,11 @@ cognia --help
 安装前审查会增加一个 **依赖工具** 步骤，列出缺失项并附带对应安装指南的链接。
 安装工具后，点击 **已安装，重新检测**。
 
-### Node.js（≥ 20）
+### Node.js（≥ 26）
 
-桌面 sidecar 本身所需。从 [nodejs.org](https://nodejs.org/) 或版本管理器安装。
+仅轻量 `system-node` 桌面模式在运行时需要。默认内置模式会随应用提供经过校验的
+Node 26.3.1。从 [nodejs.org](https://nodejs.org/) 或版本管理器安装后，请完整重启
+Cognia，以便从 GUI 启动的应用刷新可执行文件搜索路径。
 
 import { Tab, Tabs } from "fumadocs-ui/components/tabs"
 

@@ -5,14 +5,20 @@ description: "把 AI 驱动的 PR 审阅、Issue → PR 闭环、Release 自动�
 
 # ADR 0018 — GitHub 交付
 
-**状态：** 已接受 —— **2026-07-28 已移除。** 内置交付栈（Settings 区、
-`/github-delivery` 看板、13 个 `action.github.*` workflow kind、
-`trigger.github.webhook` 以及 `plugins/github-delivery/`）已移除，改由
-Marketplace Integration 运行时承接（ADR-0026）。兼容安装包位于
-`packages/plugin-sdk/contract/compat/`，保留一个 major 版本。通用部分留存：
-`lib/github/pr-observe/` 仍为 Agent Team 的 PR 反馈闭环供数，
-`lib/github/workspace-backend-registry.ts` 仍是面向插件的 workspace backend 接缝。
-本记录仅作决策史保留 —— 下文描述的均非在产代码。
+**状态：** 已接受 —— 2026-08-13 修订。
+
+**当前交付边界。** 旧的高权限、自动启用交付栈已于 2026-07-28 移除：专属 Settings
+区域、`/github-delivery` 看板、直接 Connector，以及插件自带的高权限 Git workspace
+实现均不再交付。`plugins/github-delivery/` 中的可选前端插件仍在交付，并通过 ADR-0026
+定义的 Marketplace Integration 与 workflow bridge 工作。插件可被发现，但必须由用户
+明确启用，启动时绝不自动激活。现有 HTTP provider、normalizer、action、projection 与
+workflow alias 可在支持 Integration bridge 的宿主运行。Tauri 完整支持；Browser、mobile
+和 headless 为降级支持，因为 `runIssueLoop` 依赖宿主持有的本地 Git workspace，因而被明确
+限制为桌面能力。通用接缝 `lib/github/pr-observe/` 与
+`lib/github/workspace-backend-registry.ts` 继续保留。
+
+下文保留原始交付设计作为决策历史，不表示已移除的高权限 UI 或 Connector 栈仍在交付；
+以上可选插件边界为当前权威说明。
 **日期：** 2026-05-12
 **分支：** `feat/github-delivery`
 

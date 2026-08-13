@@ -9,6 +9,10 @@ description: "cognia-next adds Rust-compiled WebAssembly plugins (wasmtime + WAS
 **Date:** 2026-05-14
 **Branch:** `feat/wasm-plugins`
 
+## Current state amendment (2026-08-13)
+
+`WasmHostServices` now exposes the AI/workflow bridge, clipboard, and notification services. The v0.1 WIT/ABI remains frozen and is not backfilled. Optional Sigstore trust remains outside the accepted scope; package signatures continue to use the existing Ed25519 trust path.
+
 ---
 
 ## Context

@@ -186,3 +186,7 @@ See `docs/plans/2026-06-03-unified-plan-execution-hub.md`. Each phase ships gree
 - **P3 — Chat → orchestration**: `teammate_dispatch` wired to `dispatchTeammate`; ExitPlanMode capture; explicit `CreatePlan`/`UpdatePlan` tool defs + renderer dispatch.
 - **P4 — Goal / Team projection**: `projections.ts` both directions; route Goal subgoals and Team tasks through the plan pipeline.
 - **P5 — Planner + replan + UI**: `decomposeIntoPlan`; all three refinement triggers; approval card, tracker panel, refinement controls; notifications.
+
+## Current-state amendment (2026-08-13)
+
+Plan persistence, approval, projections, execution, and the plan/goal/team integration are implemented. Several paths named by the proposal have since moved; the canonical owners are the current plan repository, projections, goal orchestration, and AgentTeam execution modules. No separate plan engine should be created from the historical path list.

@@ -21,23 +21,23 @@ AgentTeam durable-v2 已经拥有 child admission、attempt、checkpoint、evide
 
 2. **Agent RPC v2 是唯一 runtime protocol。** `session/create` 以 additive 方式接受 `commandId` 与可选 `HandoffEnvelope`。envelope 在 `@cognia/agent` 中只有一份 canonical 定义；`@cognia/agent-config-types/handoff-envelope` 仅保留兼容 re-export。远程 handoff 拒绝调用方控制的 `cwd`，并要求 `worker-dispatch-v1` capability。
 
-3. **已认证 worker identity 覆盖自报身份。** `cognia-agent worker enroll` 使用一次性 enrollment 换取 Companion device credential。`worker connect` 先用 DPoP 认证的 HTTP 请求换取短期、单次 socket ticket，再连接 `/ws/worker`。front door 从已认证 device 推导 `hostRef`，并要求窄权限 `agent.worker`。该 grant 不隐含 terminal、remote-control 或通用 agent-control 权限。
+3. **已认证 worker identity 覆盖自报身份。** `cognia-agent worker enroll` 使用一次性 enrollment 换取 Companion device credential。`worker connect` 先用 DPoP 认证的 HTTP 请求换取短期、单次 socket ticket，再连接 `/ws/worker`。公网 PKI 使用标准 CA 校验；局域网自签名部署固定对端 X.509 SPKI 的 SHA-256 指纹，且不会全局关闭 TLS 校验。每次重连都会重新签发 ticket 并重建 socket/RPC stream。front door 从已认证 device 推导 `hostRef`，管理 DTO 直接返回同一派生 ref。
 
 4. **bridge 保持 opaque。** Bridge protocol v3 增加版本化 worker attach、frame 与 detach envelope。它只 multiplex newline-delimited Agent RPC frame，并沿用已有 frame 与 backpressure 上限；不解析 prompt，也不持久化 task 状态。握手超时为 10 秒，heartbeat 为 25 秒，90 秒无活动即判定 worker 离线。
 
-5. **worker 发布可解析 capability。** `AgentWorkerManifestV1` 报告 runtime、model 与 hard capability、`maxActiveTurns`、opaque credential profile ref、opaque workspace binding ref、Task Workspace readiness、sandbox capability 与 platform。任何必要 capability 缺失时，都必须在模型执行前失败。
+5. **worker 发布唯一 canonical execution profile。** `AgentWorkerManifestV1.executionProfile` 由 `resolveWorkerExecutionProfile()` 生成，包含 backend adapter、runtime adapter、model bindings、deployment refs 与 canonical capabilities。resolver 会将 runtime 理论能力与 CLI backend 实际能力求交集。新 worker 必须携带 profile；旧 manifest 仍可读取但不能参与 P0 placement。manifest type、schema 与 guard 共享一个 Valibot authority。
 
 6. **repository path 仅保留在 device 本机。** P0 每个 child 只支持一个预绑定 Git repository，且不自动 clone。`cognia-agent worker bind` 把本地 source 记录到 Task Workspace 现有 SQLite database。brain 只看到稳定的 `repository:<projectId>:<repositoryId>` ref。绑定与执行会验证 Workspace Trust、Git root identity、symlink containment、Registry ownership 与 Task Workspace 可用性。
 
-7. **placement 是独立且冻结的 binding。** `TeammateExecutionBinding.executionTarget` 可取 `colocate`、`auto` 或 `pinned`。host identifier 不会编码进 deployment pool。`pinned` 只等待指定 host；`auto` 按 manifest compatibility 过滤，然后选择 active-turn load 最低者，并用已认证 `hostRef` 稳定打破并列。
+7. **placement 直接消费冻结 execution spec。** `TeammateExecutionBinding.executionTarget` 可取 `colocate`、`auto` 或 `pinned`。placement 统一校验 runtime、model、deployment、active credential ref、canonical capabilities、Task Workspace、repository binding、sandbox 与 capacity。`auto` 选中认证 host 后，只能通过 resolver-owned rebind helper 更新 `hostRef` 并重算 fingerprint。
 
 8. **不增加第二套 scheduler 或 lease authority。** `DurableTeamCoordinator.withChildAdmission` 继续负责 team admission。选中的 worker 通过本机 `ExecutionBroker` 执行。dispatch ownership 作为可选 compare-and-set 字段保存在现有 `AgentTeamChildRun` 上：lease 为 60 秒，每 20 秒续约。`commandId` 等于 `dispatchLeaseId`，重复创建 session 会返回原 receipt。
 
 9. **事件投影进入既有 durable record。** 远程 `eventId` 事务性推进 `lastRemoteEventId`。被接受的事件进入 durable dispatch capture、trajectory、checkpoint、evidence、usage、`ExecutionRun` journal 与 delivery graph。重复 event 与 terminal outcome 不得重复结算 usage、evidence 或 delivery。
 
-10. **恢复由 checkpoint 安全性决定。** 重启恢复会打开原 session，并从 `lastRemoteEventId` replay。safe checkpoint 可在原 host 重试；`auto` 也可以新 attempt 换到另一台 compatible host。unknown effect、non-idempotent intent 或等待人工输入会进入 `recovery_required`，绝不静默迁移。`retryChild` 只扩展现有 coordinator 与 manager。
+10. **暂停与恢复都由 checkpoint 安全性决定。** Pause 阻止新 admission、继续消费事件、等待当前 turn 自然 idle，再写 brain-owned checkpoint；不会 abort，也不会要求 worker snapshot。不安全副作用进入 `needs_input`，终态 child 不会被迟到的 pause 覆盖。Resume 只重新调度非终态工作，不调用 `session.open()`；后者只用于断线/重启恢复，并从 `lastRemoteEventId` 继续 replay。Terminate 保持 abort、等待 idle、再 close。
 
-11. **Fleet 继续是公开 operations surface。** `fleet_get_snapshot` 与 `fleet://update` 以可选字段增加 host 和 managed-session lineage，保持向后兼容。Fleet、Settings、AgentTeam 配置、durable operations、desktop island 与 mobile view 都消费这份投影。远程 UI 永远不能编辑 repository path。
+11. **Fleet 继续是公开 operations surface。** `fleet_get_snapshot` 与 `fleet://update` 以可选字段增加 host placement readiness/reason 和 managed-session lineage，保持向后兼容。Fleet 与 Settings 使用现有设置组件展示 enrollment、身份、在线状态、capacity、profile 不兼容与前置条件。只有 resolver v2、remote dispatch、Task Workspace 和 placement-ready profile 全部就绪时远程选择器才可选；已保存的离线 pin 仍会显示。
 
 12. **发布可逆。** `agentTeamRemoteDispatch` 默认关闭，并要求 resolver v2 与 Task Workspace 同时启用。关闭 flag 后不再开始新的 remote dispatch，但既有 session 仍可发送事件并接受控制。撤销 `agent.worker` 会立即断开 device，并让受影响 child 进入同一套 checkpoint 安全判断。所有 child 与 Fleet 字段均可选，因此回滚不需要 destructive migration。
 

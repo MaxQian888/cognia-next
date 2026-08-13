@@ -49,13 +49,25 @@ zero network transport compiled in. That hard-locks the split:
   agent all behave exactly as in the user's terminal — which git2 would bypass.
   This matches what VSCode itself does.
 
-### D2 — Repo binding from the active project; Open-Folder fallback
+### D2 — Local paths on desktop; opaque workspaces for paired clients
 
-The panel binds to the active project's `rootDir` (the same source the terminal
-uses for its cwd). When no project `rootDir` is set, an "Open Folder" picker
-(`pickDirectory` from `lib/files/file-bridge.ts`) lets the user point at any
-repo. A new `/source-control` route lives in the GuildRail activity bar
-(`AUXILIARY_ENTRIES`), hidden on the mobile shell like `/performance`.
+On Tauri, the panel still binds to the active project's `rootDir` and offers the
+native Open Folder picker. A paired Web or mobile renderer never receives that
+absolute path. The host registers current-account project roots and publishes
+only opaque `workspaceId`, display name, repository state, and operation
+availability. Every request resolves the handle on the host, validates a
+relative destination, and re-authorizes both the canonical discovered worktree
+and Git directory inside the granted root. Upward discovery, symlink escape,
+cross-account handles, and inherited global Git identity are denied. Standalone
+Web keeps Source Control hidden.
+
+Remote mutations use the existing exact-command admin lease. The lease is
+device-bound, issued only for the user's selected operation, expires after 120
+seconds, and is never renewed or replayed automatically. Controls are gated by
+their own command health and lease eligibility; `git_status` health does not
+imply that push, rebase, or worktree commands are available. The visible remote
+surface polls every five seconds and refreshes immediately after its own
+operations, while desktop retains the native watcher.
 
 ### D3 — Monaco DiffEditor for diffs and conflict resolution
 
@@ -92,7 +104,7 @@ URL-credential redactor (`exec::redact`) before it leaves the backend.
 | Layer    | Paths                                                                 |
 | -------- | --------------------------------------------------------------------- |
 | Backend  | `crates/cognia-git/src/` — `commands`, `read`, `exec`, `status`, `diff`, `diff_stat`, `stage`, `commit`, `branch`, `remote`, `stash`, `merge`, `history`, `blame`, `tag`, `reset`, `restore`, `sequencer`, `interactive_rebase`, `worktree`, `repo`, `watcher`, `error`, `types` (extracted from `src-tauri/src/git/` per ADR-0067 Phase 2) |
-| Seam     | `lib/git/` (`commands.ts`, `events.ts`, `types.ts`, `language-map.ts`, `load.ts`) |
+| Seam     | `lib/git/` (`commands.ts`, `target.ts`, `events.ts`, `types.ts`, `language-map.ts`, `load.ts`) |
 | State    | `stores/git/git-store.ts`, `hooks/git/{use-git-repo,use-git-actions,use-git-branch-indicator}.ts` |
 | UI       | `components/source-control/*` (incl. `blame-view`, `commit-graph-view`, `timeline-view`), `app/source-control/page.tsx`, GuildRail + StatusBar entries |
 

@@ -98,9 +98,9 @@ interface TTSProviderInfo {
 
 移动端推送注册外壳（M4.6）。`lib/push/push-notifications.ts` 包 `@capacitor/push-notifications`：
 
-- `requestPermission()` → OS 权限 prompt（`granted / denied / prompt / prompt-with-rationale`）。
-- `register()` → 触发 APNs / FCM 注册，返回 `RegistrationOutcome`（`registered + token + platform` / `permission_denied` / `unsupported` / `registration_failed`）。
-- `subscribePush(handler)` → 订阅入站推送事件，转给 UI 路由到 banner 或 inbox。
+- `registerPushNotifications({ requestPermission })` → 检查权限，仅在用户明确操作时可选弹窗，然后触发 APNs / FCM 注册并返回类型化的 `RegistrationOutcome`。
+- `reportPushTokenToDesktop(token, platform)` → 将 iOS/Android 映射为 companion RPC 契约要求的 `apns`/`fcm` provider。
+- `subscribeToPushNotifications(handler)` → 订阅入站推送事件；统一桥接会写入通知中心并处理后台点击路由。
 
 Web 模式下插件不存在，全套 API 返回 `unsupported`，调用方据此降级。Token 通过 `_rpc/register_push_token` 报回桌面端（companion server）；服务侧投递逻辑在 Rust 那侧的 HITL 工作量里，本模块只管"拿到 token + 路由入站消息"。
 

@@ -22,9 +22,11 @@ Scope是VSCode**内置**Git功能集。最初被限定为GitLens/Git-Graph领域
 - **阅读**（状态、差异、log/history、分支、远程、存储列表、冲突、blame）直接使用`git2`——快速、结构化，无子进程。它们运行在`spawn_blocking`上是因为libgit2是同步的。共享的读核心存储在crate的`read.rs`中（模块`twin/code_repo.rs`会在后续中迁移到该模块上）。
 - **变异+网络**（stage/unstage/discard、提交、分支switch/create/delete/rename、fetch/pull/push/sync、存储push/pop/apply/drop、标签、重置、恢复、sequencer/interactive-rebase、worktree、冲突解决）调用用户系统`git`通过crate的`exec.rs`。付费也使`pre-commit`/`commit-msg`/`pre-push` hook、GPG/SSH签名、gitattributes过滤器以及OS 凭证管理器/SSH代理的行为完全像用户终端——而git2会绕过这些。这与VSCode本身的做法相符。
 
-### D2 — 来自活跃项目的 仓库 绑定;Open-Folder 回退
+### D2 — 桌面使用本地路径；配对客户端使用不透明工作区
 
-面板绑定在当前项目的`rootDir`（终端用于其 cwd 的同一源）。当没有设置任何项目`rootDir`时，用户可以在 `lib/files/file-bridge.ts` `pickDirectory`“打开文件夹”中指向任意仓库。一个新的`/source-control`路线存在于GuildRail活动栏（`AUXILIARY_ENTRIES`），隐藏在移动壳上，像 `/performance` 一样。
+Tauri 上的面板继续绑定当前项目的 `rootDir`，并保留原生“打开文件夹”选择器。已配对的 Web 或移动端永远不会收到这个绝对路径。主机按当前账户注册项目根目录，对外只发布不透明 `workspaceId`、显示名、仓库状态和逐操作可用性。每个请求都由主机解析句柄、校验相对目标，并确认规范化后的 worktree 与 Git 目录仍在授权根内。向上发现仓库、符号链接逃逸、跨账户句柄以及继承的全局 Git 身份都会被拒绝；独立 Web 仍隐藏 Source Control。
+
+远程变更复用现有精确命令 admin lease：只在用户选择操作后签发，绑定设备和具体命令，120 秒过期，且不会自动续期或重放。每个控件根据自己的命令健康度和 lease 资格启用；`git_status` 健康不代表 push、rebase 或 worktree 可用。远程界面仅在可见时每五秒轮询，并在自己的操作后立即刷新；桌面继续使用原生 watcher。
 
 ### D3 — Monaco DiffEditor差异和冲突解决
 
@@ -43,7 +45,7 @@ crate的`error.rs`定义了`thiserror`枚举，序列为`{ kind, detail }`（`No
 | 层 | 路径 |
 | -------- | --------------------------------------------------------------------- |
 | 后端 | `crates/cognia-git/src/` — `commands`、`read`、`exec`、`status`、`diff`、`diff_stat`、`stage`、`commit`、`branch`、`remote`、`stash`、`merge`、`history`、`blame`、`tag`、`reset`、`restore`、`sequencer`、`interactive_rebase`、`worktree`、`repo`、`watcher`、`error`、`types`（根据ADR-0067阶段提取自`src-tauri/src/git/`） |
-| 缝隙 | `lib/git/`（`commands.ts`、`events.ts`、`types.ts`、`language-map.ts`、`load.ts`） |
+| 缝隙 | `lib/git/`（`commands.ts`、`target.ts`、`events.ts`、`types.ts`、`language-map.ts`、`load.ts`） |
 | 州际 | `stores/git/git-store.ts`，`hooks/git/{use-git-repo,use-git-actions,use-git-branch-indicator}.ts` |
 | UI | `components/source-control/*`（包括`blame-view`、`commit-graph-view`、`timeline-view`）、`app/source-control/page.tsx`、GuildRail + StatusBar条目 |
 

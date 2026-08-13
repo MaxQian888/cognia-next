@@ -47,3 +47,7 @@ The terminal-only write is the load-bearing constraint: `subagentSignature` (the
 - **Bounded snapshot.** The persisted subagent snapshot inherits the store's caps (~100 toolCalls / ~50 logs); a run with more keeps only the most recent.
 - **Pipeline coupling.** `adapter.ts` is now the single place that decides what survives to the renderer for generic tools — future rich-rendering work keys off `mcpContent`, not re-parsing strings.
 - **Related gap-closing in the same change** (not ADR-worthy, recorded for context): unknown-part fallback card, non-image file preview, word-level diff (`fast-diff`), subagent streaming text gated to detailed mode, progress-UX unification onto an honest tool-count, a shared `BackgroundedRunControls`, the OCR `ocr-result` chat part, and mounting the artifact dock on the mobile chat shell.
+
+## Current-state amendment (2026-08-13)
+
+Structured MCP content and durable terminal/subagent snapshots are implemented and covered by renderer tests. The two named defects are closed; the original `Proposed` status is retained only as history and must not be read as an invitation to add another renderer fallback pipeline.

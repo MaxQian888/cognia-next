@@ -9,6 +9,10 @@ description: "Adds 6 new flat manifest fields, 8 new runtime points, 1 new hook 
 **Date:** 2026-05-19
 **Branch:** `feat/plugin-extension-points-v2`
 
+## Current state amendment (2026-08-13)
+
+Install-from-URL/GitHub and the sandboxed WebView contribution path already exist in the current plugin runtime and must not be reimplemented. The `workspace-backend-registry` namespace moves only as part of an atomic workspace-owner migration; its historical location is not evidence of a missing runtime feature.
+
 ---
 
 ## Context

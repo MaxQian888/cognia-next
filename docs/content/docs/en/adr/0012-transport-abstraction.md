@@ -162,3 +162,7 @@ desktop's axum server through the same `transport` seam shipped here.
 - Mobile client tracker: [#56](https://github.com/MaxQian888/cognia-next/issues/56)
 - Plan file (private): `~/.claude/plans/react-tauri-react-native-snug-hennessy.md`
 - Tauri Mobile sidecar discussion: [tauri-apps/tauri#11454](https://github.com/tauri-apps/tauri/discussions/11454) (motivation for Capacitor over Tauri Mobile)
+
+## Current-state amendment (2026-08-13)
+
+The original seam has evolved into the local runtime, Companion transport, WebRTC transport, and remote-host adapters. Descriptions of deferred call sites and transport stubs are historical; new consumers must extend those canonical transports rather than introduce another transport abstraction.

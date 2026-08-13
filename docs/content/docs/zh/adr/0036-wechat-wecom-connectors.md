@@ -3,6 +3,10 @@ title: 0036 — 微信 / 企业微信 连接器
 description: 以原生平台连接器形式接入企业微信（WeCom）智能机器人长连接（流式回复、主动推送、模板卡片交互）与个人微信（iLink 网关：扫码登录、仅回复的 HTTP 长轮询、AES-128-ECB 媒体）；复用通用 WS 桥，并新增加性的 onPartial / streamReply 契约。
 ---
 
+## 状态
+
+已接受（2026-05-26）。2026-08-12 已对照 adapter registry、企业微信与个人微信 adapters、共享 capability map 及其 contract tests 再次确认实现。
+
 ## 背景
 
 平台连接器子系统（ADR-0009 / 0025）已交付 Telegram / Discord / Slack / Lark /

@@ -1,0 +1,228 @@
+---
+title: ADR 缺口审计 — 2026-08-12
+description: 基于证据审计 ADR 目录完整性、编号异常、状态偏移及其与当前实现的对齐情况。
+---
+
+# ADR 缺口审计 — 2026-08-12
+
+## 范围与方法
+
+本次审计覆盖 `docs/content/docs/{en,zh}/adr/` 下的全部文件、两个 ADR 侧栏、当前 Git 工作树，以及缺少状态或状态明显陈旧的记录所对应的实现。只有在代码、测试、runtime 注册入口或已挂载产品入口同时存在时，才把功能视为已实现。
+
+这是当前工作树的快照。审计开始时已存在的 ADR-0114 在途文件与侧栏条目也包含在统计内。
+
+## 已确认的目录问题
+
+| 检查项 | 结果 | 处理 |
+| --- | --- | --- |
+| Locale 对齐 | 112 个英文文件，以及 112 个同 slug 中文文件 | 无缺失翻译副本 |
+| 侧栏对齐 | 每个侧栏 112 项；无过期或遗漏 slug | 后续 review 继续采用基于文件的校验 |
+| 重复数字 ID | `0013`、`0025`、`0026` 均各有两个 slug | 保留历史 slug；链接时使用完整“编号 + slug” |
+| 未使用数字 ID | `0029`、`0080`、`0099`、`0103`、`0105` | 没有真实历史决策证据时不回填 |
+| 缺少状态字段 | ADR-0034、ADR-0035、ADR-0036 | 核对实现后已修复 |
+| 权威性措辞 | Overview 曾声明 ADR 覆盖与其冲突的文档 | 已改为：实现与测试定义当前行为，偏移必须显式记录 |
+
+## 已对照实现修复的状态
+
+### ADR-0034 — 工作流编辑器完整性与插件对等性
+
+已核对实际挂载的 `RightSidebar`、lazy-loaded `SettingsTab` 与 `RunsTab`、node inspector registry、workflow runtime、plugin workflow-template registry 和共址测试。记录现标注为 `Accepted (2026-05-23)`，并注明 2026-08-12 再次确认实现。
+
+### ADR-0035 — Rust 性能 dashboard
+
+已核对 `app/performance/page.tsx`、`components/performance/`、`lib/perf/backend/`、`src-tauri/src/perf/`、`PerfState` 管理和已注册的 `perf_*` Tauri commands。记录现标注为 `Accepted (2026-05-26)`，并注明 2026-08-12 再次确认实现。
+
+### ADR-0036 — 微信 / 企业微信 connectors
+
+已核对 `lib/connectors/adapter-registry.ts`、`wecom` 与 `wechat-personal` adapter 实现、共享 platform capabilities、runtime contract tests 和 adapter 专项测试。记录现标注为 `Accepted (2026-05-26)`，并注明 2026-08-12 再次确认实现。
+
+## 陈旧状态复核队列
+
+仍有 11 份记录包含 `Proposed` 标签。这不表示它们全部尚未实现，而是本次审计尚未安全地统一其决策状态。
+
+| ADR | 当前标签 | 已确认观察 | 下一步复核 |
+| --- | --- | --- | --- |
+| 0007 | Proposed（历史） | Theme 与 background appliers 已挂载到 `app/layout.tsx`，实现范围较广 | 已增加 2026-08-13 current-state amendment，并保留明确 non-goal |
+| 0016 | Proposed | Plugin completion 包含已交付 addenda，也包含明确 deferred/demoted surfaces | 拆分已接受核心与延期范围，或增加 rollout matrix |
+| 0022 | Proposed（历史） | Durable AgentTeam 实现已经显著超出原始计划 | 已增加 2026-08-13 amendment，并对齐 ADR-0066、ADR-0071、ADR-0111、ADR-0113 |
+| 0028 | Proposed, partially shipped | ADR 已区分上线的 account pinning 与未复核的 sandbox 范围 | sandbox 决策复核前保留 partial 标签 |
+| 0030 | Proposed（历史） | Character-pack registry、local store、projections、signatures 与测试均存在 | 已增加 2026-08-13 amendment，记录 `webDataUrl` 取代 `tauriPath` |
+| 0031 | Proposed | 记录本身称多个 wave 已交付，但仍保留相互矛盾的 deferred 文本 | 在不抹除原始决策历史的前提下重写 rollout notes |
+| 0045 | Proposed（历史） | Plan types、持久化、projections 与 UI 存在，但部分原定路径已变化 | 已增加 2026-08-13 owner amendment；后续仍以当前 plan/goal/team owner 为准 |
+| 0056 | Proposed（历史） | Mobile settings surfaces 已存在，但“完全对等”是产品级主张 | 已增加 2026-08-13 amendment；field-level matrix 仍是验收证据 |
+| 0057 | Proposed（历史） | Structured MCP content 与 terminal subagent snapshot 有实现测试 | 已增加 2026-08-13 amendment，关闭两个已命名 defect |
+| 0068 | Proposed | 部分 package extraction 已完成，但该 ADR 明确是多 track 计划 | 增加逐 track rollout table，而不是整体升级 |
+| 0111 | Proposed | Registry、bundle、storage tables、typed base specs 与 UI 已存在；旧 AgentTeam allocator 仍保留 | 对齐已交付 registry 工作与剩余 migration/removal 决策 |
+
+## 没有靠假设“修复”的缺口
+
+- 未为未使用编号创建 ADR。序列空洞不是架构证据。
+- 未重命名历史重复编号。重命名会破坏入站链接并掩盖仓库历史。
+- 未仅根据文件存在就批量升级旧 `Proposed` 记录。存在文件不等于 wiring、兼容性或 rollout 完整。
+- 本次审计未重写 ADR-0114。它属于工作树中已有的在途改动，本次只核对了目录收录与实现引用。
+
+## 后续顺序
+
+1. 先对齐 ADR-0031，因为其自身的 shipped/deferred 注记互相冲突。
+2. 对照遗留 workspace allocator 与实际 rollout gates 复核 ADR-0111。
+3. 修改状态前，将 ADR-0022 与 durable-v2、multi-host dispatch 对齐。
+4. 将 ADR-0007、ADR-0030 与 ADR-0057 作为较小的、实现证据较充分的状态升级候选。
+5. 增加仓库校验：强制 locale/侧栏对齐、slug 唯一且存在明确状态，同时允许已记录的历史数字 ID 冲突。
+
+## 逐条实现复核
+
+下表是目录审计后的第二轮逐条检查。结论含义如下：
+
+- **已闭环**：当前已接受/核心范围同时具备代码、测试和可达的 runtime 或产品入口，未确认到缺失功能。
+- **有限制**：核心可用，但仍有明确的平台限制或刻意排除的能力。
+- **部分完成**：至少一项已描述或延期能力仍缺实现、未接线，或只有 stub。
+- **Rollout**：实现已存在，但仍是实验、默认关闭、dark launch，或尚未达到 ADR 声明的 GA gate。
+- **文档漂移**：实现已超过 ADR 的状态或 follow-up 文本；问题是文档对齐，不是已确认的用户功能缺失。
+- **已取代 / 已移除**：行为已由后续架构接管，或产品明确移除。
+
+“有限制”不自动等于缺陷；保留它是为了让产品边界清晰。证据路径指向当前 owner，不一定沿用 ADR 中的历史路径。
+
+### ADR-0001 至 ADR-0028
+
+| ADR | 结论 | 当前缺口或确认结果 |
+| --- | --- | --- |
+| 0001 backup schema v3 | 有限制 | 备份、加密、完整性、streaming、历史与 domain transfer 均已接线。浏览器受平台限制不能静默定时写文件，改用提醒。 |
+| 0002 scheduler resolution | 部分完成 | `Run now`、remote data source、team dispatch resolution 与 session A2UI 已存在；`TaskForm` 仍不能编辑 per-teammate override 或显式 per-task A2UI。 |
+| 0003 employee twin | 已闭环 | `lib/twin/` 与 `lib/claude/build-options.ts` 中已有 importers、`applyTwinContext`、retry/dead-letter、cron reconciliation 与 runtime injection。 |
+| 0004 native vector backend | 部分完成 | Native admin parity 与 Agent vector tools 已交付；按 `json_extract` 建立 lazy metadata index 仍未实现，并明确等待真实性能数据。 |
+| 0005 remote control | 已取代 | 旧 subsystem 已明确 superseded；当前行为由 Companion、External Bridge、remote-host transport 与 scheduler/webhook owner 承担。 |
+| 0006 plugin system | 已闭环 | Core lifecycle、UI 入口、registries、permissions、diagnostics 与 desktop runtime 已上线；剩余 runtime-family 缺口归 ADR-0016。 |
+| 0007 theme/background | 文档已对齐 | 已增加 current-state amendment：Scope applier 与主题/背景界面已挂载；slideshow、per-conversation theme、Monaco CSS、`tokenColors` 保持 non-goal。 |
+| 0008 external bridge | 部分完成 | Rust/host MCP control 与 inbound write tools 已存在；未找到打包的 `packages/claude-code-plugin`、被动 Claude/Cursor/Cline 日志 producer 或 crawler，也无完整的 user-repository bridge enrollment 证据。 |
+| 0009 platform connectors | 已闭环 | Shared bus、原五个平台、attachments、A2UI、digest、OAuth、Lark media 与已注册 OneBot probe 均存在。 |
+| 0010 Claude subscription OAuth | 有限制 | OAuth 与 usage tracking 可用；外部 CLI credential-file 注入和真实 Anthropic billing 明确不在范围内。 |
+| 0011 visual workflows | 已闭环 | Editor、runtime、triggers、persistence、approvals、plugin points、callable workflows 与 cross-device execution 已由本 ADR 和后续 ADR 覆盖。 |
+| 0012 transport abstraction | 文档已对齐 | 已增加 current-state amendment：原始 seam 已演进为 local、Companion、WebRTC 与 remote-host transports，新消费者继续扩展 canonical owner。 |
+| 0013 command manifest | 已闭环 | Companion command classification、route parity、idempotency 及 generated/mobile mirrors 已存在并有测试。 |
+| 0013 WASM plugins | 有限制 | `WasmHostServices` 已覆盖 AI/workflow bridge、clipboard 与 notification；v0.1 ABI 保持冻结，Sigstore 明确不在范围内。 |
+| 0014 Capacitor shell | 已闭环 | Shell、secure pairing、platform façades、navigation 与 mobile build 已存在；后续移动 ADR 负责 parity。 |
+| 0015 mobile v2 | 已闭环 | WAN transport、sync、interaction、camera/network façades、drafts 与 mobile surfaces 均已存在。 |
+| 0016 plugin completion | 有限制 | Native media 已补齐 concatenate/effect/transition/export command 并复用 `cognia-media` ffmpeg owner；被 demote 的 hook family 仍明确延期。 |
+| 0017 workflow plugin points | 已闭环 | Trigger queue、plugin node/template registry、workflow hooks 与 editor/runtime consumption 已存在。 |
+| 0018 GitHub delivery | 已移除 | ADR 自身记录 2026-07-28 移除；Marketplace Integration 是当前受支持路径。 |
+| 0019 `/goal` | 有限制 | Goal persistence、subgoals、judge override、workflow linkage、scheduler execution 与手动 resume 可用；app 重启后不会自动 re-arm foreground interactive goal。 |
+| 0020 computer use | 部分完成 | Chat/MCP routing、picker commands、Docker target binding、consent 与 audit 已上线；macOS/Linux accessibility tree 和 chord parity、cloud/Lume provider、最终 composer target picker 仍延期。 |
+| 0021 WebRTC WAN | 已闭环 | Authenticated v2 signaling、encrypted envelope、recovery、replay/idempotency、fragmentation、capacity control 与 TURN handling 均存在。 |
+| 0022 AgentTeam hardening | 文档已对齐 | 已增加 current-state amendment：后续 ADR 已交付 runtime 能力；durable external queue 继续明确排除。 |
+| 0023 Rust cloud vector backends | 有限制 | Desktop cloud vector routing 可用；Web/SSR cloud vector 与八个 advanced native-only operation 不可用，部分 cloud filter 仍有 backend 限制。 |
+| 0024 OCR | 有限制 | OCR cache TTL 已进入中央 retention executor；provider UI 从 runtime capability 派生且不允许启用 unsupported placeholder。Windows native backend 仍待独立平台交付。 |
+| 0025 A2UI ⇄ IM | 已闭环 | Capability projection、callback bindings、platform callbacks、安全默认值与 durable connector dispatch 均存在。 |
+| 0025 unified subscription | 有限制 | Multi-account vault、switching、encrypted transfer、discovery、sync 与 limits tracking 已存在；完整 OpenCode Zen OAuth 仍等待 upstream flow。 |
+| 0026 built-in skills/Lark | 部分完成 | Calendar、Doc、Sheets、Base、Task、Wiki 与 authenticated CLI bridge 已存在；Mail、Drive、Slides、VC、Minutes、Whiteboard、Approval、Attendance、Contact、Event、OKR 不在 app 内 built-in family，Cognia UI 也不驱动 CLI login/setup。 |
+| 0026 plugin extension expansion | 文档漂移 | Workbench slots、tool renderers、registries、settings、install-from-URL/GitHub 与 sandboxed WebView 已上线；registry namespace 仅随 workspace migration 原子迁移。 |
+| 0027 mobile offline/discovery | 文档已对齐 | 已增加 current-state amendment：历史 feature open list 已关闭，仅保留真实 Tauri service-worker 跨平台 smoke。 |
+| 0028 per-session isolation | Rollout | Account pinning、OS confinement、sandbox runner、E2B/container backend、policy、telemetry、routing 与 WarmQuery/prewarm 已存在；仍需 pool key、取消、shutdown、stale claim 与 feature flag 证据，macOS XPC 不在本轮。 |
+
+### ADR-0030 至 ADR-0059
+
+| ADR | 结论 | 当前缺口或确认结果 |
+| --- | --- | --- |
+| 0030 character-pack overlay | 文档已对齐 | 已增加 current-state amendment：现有 registry/projection/signature/TTS owner 保持唯一，portable `webDataUrl` 取代 `tauriPath`。 |
+| 0031 integrated terminal phase 2 | 已闭环 | Local/WAN terminal、replay、reconnect 与 transport selection 可用；SSH 已探测 shell 并通过现有 PTY 注入 nonce-bound OSC 633，失败时降级并报告原因。 |
+| 0032 AgentTeam plugin integration | 已闭环 | Team/teammate overlay、capability resolution、templates、dependency diagnostics 与 preset editing 已接线。 |
+| 0033 integrated terminal phase 3 | 部分完成 | Dock、workflow、permalink、flow control 与 AI autocomplete integration 已存在；mobile OSC 633、server-side workflow consent、用 binary body 替代 JSON byte array 的 Tauri event 仍开放。 |
+| 0034 workflow editor completeness | 已闭环 | 已对照 mounted sidebar、inspector registry、runtime、plugin registries、variables 与 tests 再确认。 |
+| 0035 Rust performance dashboard | 已闭环 | 已对照 route、renderer transport、sampler state、commands、dashboard 与 tests 再确认。 |
+| 0036 WeChat/WeCom | 已闭环 | 已对照两个 adapters、registry wiring、capability map 与 contract tests 再确认；协议不支持的操作属于显式边界。 |
+| 0037 public share links | 有限制 | Zero-knowledge sharing 已上线；公开 A2UI 只能 download/import，不能渲染完整 interactive catalog。 |
+| 0038 source control panel | 部分完成 | Init/clone/worktrees/blame/graph/stash/review 已存在；multi-repo/submodule、reflog recovery、GPG signing、line/sub-hunk staging 仍缺失。 |
+| 0039 terminal autocomplete | 有限制 | Completion、script types、history、ghost text、provider integration 与 inline explain/fix 可用；mobile autocomplete 等待 ADR-0031 的 OSC 633 cwd/command 事件。 |
+| 0040 hooks completion | 有限制 | Hooks 已覆盖 built-in 与 external agents；不发出 permission request 就自动执行的 external tool 只能观测，不能在协议层阻止。 |
+| 0041 Agent command auto-mode | 已闭环 | Static/model policy、compound command、sidecar fast path、consent 与 audit 已接线。 |
+| 0042 notification center | 已闭环 | Unified persistence、preferences、dedup、DND、critical routing、toast/OS/webhook delivery 与 mounted UI 已存在。 |
+| 0043 provider execution | 已闭环 | Local/aggregator providers、AI SDK multi-step、timeouts、embeddings 与 routing 已接线。 |
+| 0044 unified LSP configuration | 有限制 | Shared config 可到达 Agent 与 editors；纯 built-in default 按设计不会在 editor 中 eager start，只有配置/override 的 server 会启动。 |
+| 0045 unified plan hub | 文档已对齐 | 已增加 current-state amendment，将历史路径映射到当前 plan repository、projection、goal 与 AgentTeam execution owner。 |
+| 0046 LSP maturity | 有限制 | Provisioning、health/restart、diagnostics revision 与 Skill-editor UI 已存在；provisioning 主要覆盖 npm，完整 editor coverage 仍小于长期设计。 |
+| 0047 project instruction files | 有限制 | Nested `CLAUDE.md`/`AGENTS.md`、imports、extra local paths 与 project agents 可用；不支持 remote-URL extra 或每次 file-read 注入 nearby instruction。 |
+| 0048 Codex support | 有限制 | Credential reuse、chat、headers 与 usage scheduler 已存在，native app-server 后续也已交付；windowed limits 以外的 provider credit/balance view 仍缺失。 |
+| 0049 external-agent process hardening | 有限制 | Resolver、lifecycle cleanup 与 Windows executable handling 已上线；Node sidecar spawn 统一和 project-local `node_modules/.bin` augmentation 明确排除。 |
+| 0050 CLI TUI operation experience | 有限制 | Editing、permissions、keybind validation、limits、long-task progress 与后续 rendering 已存在；width-aware edit history/undo 与 overlay back-stack 仍延期。 |
+| 0051 external-agent adapter plugin type | 已闭环 | Dynamic adapter registration 已贯通 preset discovery、session launch、renderer protocol 与 hardened native spawn。 |
+| 0052 CLI fixed-region layout | 已闭环 | Fullscreen layout、mouse modes、measured chrome、virtualization、grapheme-safe input 与 authoritative input ownership 已存在。 |
+| 0053 CLI rendering/tool invocation | 有限制 | Structured blocks、interactive cells、cache、diff/progress、batching 与安全 rendering 已存在；legacy search 名称仍需迁移到 canonical ripgrep/glob adapter。 |
+| 0054 local multi-account isolation | 有限制 | Physical Dexie account isolation 与 switching 可用；at-rest Dexie encryption 与 cloud identity/login 明确不在本地 ADR 范围。 |
+| 0055 Agent browser loop | 有限制 | Local shared browser tools 与 public-origin Playwright handoff 可用；cross-origin iframe、trusted event、response body、closed-shadow 有限制，且未记录真实 Tauri snapshot→act smoke。 |
+| 0056 mobile settings parity | 文档已对齐 | 已增加 current-state amendment：bucket 1/2/3 已广泛覆盖；仍需 field-level generated parity matrix，bucket 4 保持 desktop-only。 |
+| 0057 chat rendering completeness | 文档已对齐 | 已增加 current-state amendment：Structured MCP content 与 durable snapshot 已实现，两个已命名 defect 已关闭。 |
+| 0058 desktop pet | 已闭环 | Window ownership、hotkeys、events、voice、skins、state、settings 与 runtime initializer 已存在。 |
+| 0059 headless brain | Rollout | Headless bootstrap、protocol、standalone/companion web targets、runtime manifest 与 durability layers 已存在；cloud operation 仍受部署配置和后续 ADR 的 authority rollout 约束。 |
+
+### ADR-0060 至 ADR-0089
+
+| ADR | 结论 | 当前缺口或确认结果 |
+| --- | --- | --- |
+| 0060 personal knowledge capture | 部分完成 | Capture、enrichment、radar、wiki health、scheduler 与 pet integration 已存在；always-on-top capture window/hotkey、精确 Windows source process、image clipboard capture、hybrid BM25+dense wiki search 仍是 follow-up。 |
+| 0061 cross-device workflow | 有限制 | Durable waitpoint、remote mobile step、lease、cancel 与 cloud placement 可用；voice payload relay、OS background mobile runner、symmetric DataChannel fallback、通用 session/artifact handoff 仍延期。 |
+| 0062 external session import | 有限制 | Claude Code、Codex、OpenCode、watch re-import、plugin importer 与 subagent reconstruction 可用；Cursor、Cline、Gemini CLI 无 first-party adapter。 |
+| 0063 optical compaction | 已闭环 | Strategy、frame encoding、verification、budget gate、storage bound 与 restore path 已存在。 |
+| 0064 external CLI subagent dispatch | 文档已对齐 | 已增加 current-state amendment：`TeammateRuntime` 与 executable preset catalog 是唯一 owner，auto-compose 复用该路径。 |
+| 0065 workspace confinement | 已闭环 | Default confinement、credential block、permission unification、monotonic clamp 与 `TeammateConfigDialog` sandbox UI 均已接线；UI 展示 inherited ceiling 并复用现有 schema。 |
+| 0066 AgentTeam task board | 已闭环 | CQRS projection、move guard、retry、pause/resume、mobile steering、plugin feed 与 durable result reseeding 已存在。 |
+| 0067 Rust crate decomposition | 部分完成 | W1 与 Tier A/B 已落地；app-shell Tier C 与 `sccache` 仍延期。 |
+| 0068 frontend package extraction | 部分完成 | 多个 `@cognia/*` leaf 与 build/initializer 改善已落地，但这是多 track 计划，尚无证据表明每个 extraction/decomposition track 都已完成。 |
+| 0069 memory external APIs | 有限制 | Plugin、Companion、MCP surface 共用 policy 与 consolidation；独立 memory embedding 和 live cross-device evidence/job/audit sync 仍缺失，inbound IM write 按 policy 排除。 |
+| 0070 risk ceremony | 文档已对齐 | 已增加 current-state amendment：AgentTeam、Goal、Workflow risk gate 与 settings UI 已存在，后续继续复用统一 classifier/gate。 |
+| 0071 blocking lead review | 已闭环 | Opt-in lead review、revision loop、terminal status ownership、receipts 与 board behavior 已接线。 |
+| 0072 browser action recording | 有限制 | Recording、replay、exports、secret redaction、storage 与 UI 已存在；真实 WebView record→replay smoke 未执行，并继承 ADR-0055 的 cross-origin/trusted-event 限制。 |
+| 0073 Chromium cookie import | 有限制 | macOS Chromium import 与 security boundary 已实现；Windows、Linux、Firefox 以及真实 Keychain/WKWebView smoke 不在当前覆盖。 |
+| 0074 native OpenTelemetry | 已闭环 | Native export、credential ownership、cross-runtime correlation、feature gating 与 privacy default 已存在。 |
+| 0075 voice/TTS | 部分完成 | Streaming read-aloud、provider cleanup、structured failure、retry 与 pet voice 可用；真实 amplitude-driven pet lips 与更丰富 voice-segment producer 仍延期，voice cloning 明确排除。 |
+| 0076 local-provider management | 已闭环 | Native HTTP transport、scan/list/pull/delete/stop、progress 与 Ollama embeddings 已挂载，并有 boot-order coverage。 |
+| 0077 TUI external-agent hosting | 有限制 | Codex/Claude hosting 与统一 TUI rendering/approval 在受支持系统可用；Windows 等待严格的 stdio-preserving sandbox。 |
+| 0078 CLI ↔ App bridge | 已闭环 | Local discovery、auth、product separation 与 routes 可用；listener、endpoint writer、initializer 及 setup 启动均显式排除 Android/iOS。 |
+| 0079 scheduler extension contract | 已闭环 | Driver injection、exhaustive trigger/kind mapping、adapter registration、history aggregation 与 OS capability validation 已存在。 |
+| 0081 workflow callable/chained triggers | 已闭环 | Published workflow tool、completion trigger、cycle rejection、payload propagation 与 callable execution 已接线。 |
+| 0082 remote development host | 有限制 | Remote terminal/files/Git、external agents、code-server relay 与 Cloudflared 已存在；后续只补能力矩阵证明缺失的 remote LSP adapter。 |
+| 0083 Context Workbench | 有限制 | Shared hosts、panels、plugin slots、context/reveal APIs 与 rollback switches 已存在；sandboxed Webview panel 仍在设计外。 |
+| 0084 Cognia Sites | 有限制 | Desktop authoring/deployment lifecycle 与 Cloudflare provider ownership 已在 accepted 范围实现；mobile read-only projection 不存在，plain web 明确不拥有 local Sites metadata。 |
+| 0085 cloud shared browser | Rollout | Workspace runtime、remote Chromium engine、gateway、leases、quotas 与 security rules 已存在，但仍 experimental、依赖 image/health/config，且默认关闭。 |
+| 0086 task workspaces | Rollout | Reversible task workspace/patch engine 已在 `developer.taskWorkspace` 后接受；GA 仍依赖 runtime matrix 与 ADR-0111 migration。 |
+| 0087 Python plugin contributions | 部分完成 | 九个 supported contribution family 可通过真实 interpreter dispatch；re-entrant chat-middleware continuation/retry/fan-out 未实现，experimental family 默认关闭。 |
+| 0088 Pro IDE | 有限制 | Persistent code-server、proxy、health、file-open 与 extension trust separation 可用；跨 ecosystem extension sharing、自动 pinned-Code upgrade、多用户机器暴露不支持。 |
+| 0089 topic connector runtime | 已闭环 | Topic identity、queue/steer policy、durable inbound jobs、CardKit progress、callback authorization 与 connector state 已存在。 |
+
+### ADR-0090 至 ADR-0114
+
+| ADR | 结论 | 当前缺口或确认结果 |
+| --- | --- | --- |
+| 0090 unified Agent execution | 已闭环 | Agent Host/Gateway contract、compatibility evidence、capability fail-closed、routing、credential affinity 与 migration 已接线。 |
+| 0091 Lark unified identity | 已闭环 | Account isolation、binding/approval、dual entry、callback authorization 与 operator configuration 已存在。 |
+| 0092 official website workspace | 已闭环 | 独立 website/docs topology、aliases、data pipelines 与 build ownership 已存在。 |
+| 0093 selection toolbar sizing | 已闭环 | Renderer measurement、native placement、reveal ordering、six actions 与 platform handling 已接线。 |
+| 0094 conversation anchors/jump | 已闭环 | Timeline、anchors、private permalink、hydration 与 message-location integration 已存在。 |
+| 0095 desktop selection perception | 已闭环 | Opt-in selection events 与当前 platform backend 已注册到 workflow/event consumers。 |
+| 0096 loading motion/accessibility | 已闭环 | Shared loading primitives、reduced-motion policy 与 repository audit gate 已存在。 |
+| 0097 cross-device settings | 已闭环 | Generated contract、scoped mirror、browser WebRTC reach、host-scoped cursor 与 parity checks 已存在。 |
+| 0098 persistent Workbench rail | 已闭环 | Persistent/collapsed behavior、host-specific escape hatch、settings 与 mounted rails 已存在。 |
+| 0100 unified templates | 已闭环 | Envelope、catalog、lifecycle、preflight 与 adapters 已上线；publisher trust 由现有 trusted-publisher ledger 精确 pin key，channel 不提权，撤销会安全降级且不删除内容。 |
+| 0101 evaluation lab | 已闭环 | Evidence capture、uncertainty、cost accounting、review provenance、recommendation 与 reversible apply 已存在。 |
+| 0102 observability/crash diagnostics | Rollout | Unified correlation、crash recovery、receipts、retention 与 remote processing seam 已存在；remote processing 仍 feature-gated，并依赖部署与安全运维。 |
+| 0104 provider diagnostics | 已闭环 | Quick/precise probe、固定 PII-gated sample、capability/latency evidence 与 control-plane UI 已存在。 |
+| 0106 end-to-end skill recorder | 已闭环 | Scoped capture、preflight、append-only bundle、review、generated disabled skill、isolated trial 与 explicit enable 已接线。 |
+| 0107 coding-agent migration | 有限制 | Preview/apply 经 domain validator，支持当前 Claude/Codex/OpenCode artifacts；没有安全 Cognia 表达的 source-private concept 会报告但不应用。 |
+| 0108 Codex-inspired workflows | 已闭环 | Task workspace、setup、review、terminal/browser/CDP、restore 与 shared execution-root workflows 已集成，未复制第二套 engine。 |
+| 0109 plugin catalog governance | 有限制 | Canonical catalog、generated mirrors、lifecycle ownership 与 parity evidence 已存在；更强 renderer isolation 属于独立 security project。 |
+| 0110 MCP governance | 已闭环 | Registry、trust state、projection、credential、versioning、scoped inbound client、sync 与 runtime gateway 已存在。 |
+| 0111 managed workspace registry | Rollout | Registry/bundle/storage/base-spec/sensitive-resource、scheduler isolation 与 AgentTeam Task Workspace lease 已存在；legacy allocator/reconciler 仅按一发布周期 kill switch 保留，待零 fallback 证据后退役。 |
+| 0112 decision/provenance ledger | 已闭环 | Derived projection、source adapters、conflict review、replay 与 audit-gap behavior 已存在。 |
+| 0113 AgentTeam multi-host | Rollout | Durable remote child dispatch、admission、recovery、worker-local credential 与兼容性已用于 dark launch；remote dispatch 默认关闭，P0 明确排除 multi-user authority、auto-clone、multi-root child、PostgreSQL authority 与 deployment operation。 |
+| 0114 chat presentation | 已闭环 | Presentation resolver、density/provenance behavior、renderer integration、compatibility rule 与 tests 已存在于本次审计的工作树。 |
+
+## 最高价值功能缺口队列
+
+以下顺序来自逐条检查，已排除纯状态/文档清理：
+
+1. 补齐 native plugin media parity（ADR-0016），避免缺少 Rust command 的四个 TS 操作在运行时失败。
+2. 让 OCR 能力真实且可自维护（ADR-0024）：增加定时 TTL purge，并实现 Windows binding 或移除可选择的 placeholder。
+3. 补齐 External Bridge producer（ADR-0008）：Claude Code 打包分发、被动 IDE ingest、crawler 与明确的 user-repository enrollment。
+4. 补齐非 Windows Computer Use parity 与剩余 target UX（ADR-0020）。
+5. 完成 managed-workspace migration 并退役旧 AgentTeam allocator（ADR-0111），再推进 ADR-0086/0113 rollout gate。
+6. 决定 app 内 Lark tier 是否扩展到六个 family 之外（ADR-0026）；如果需要，应补 family contract，而不是依赖另行安装的 Codex skills。
+7. 处理 terminal remote integration/binary transport 债务（ADR-0031/0033）与 remote development 后续阶段（ADR-0082）。
+8. 为 Agent Browser、recorder、cookie import、mobile service worker、cloud browser 等 native-only seam 增加真实 shell smoke 证据。

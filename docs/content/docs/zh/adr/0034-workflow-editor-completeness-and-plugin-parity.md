@@ -3,6 +3,10 @@ title: 0034 — 工作流编辑器完整性 & 插件对等性
 description: 节点配置补全、工作流级设置、运行可观测性、错误分支路由，以及面向 Visual Workflows 的 ADR-0032 级插件可扩展性。
 ---
 
+## 状态
+
+已接受（2026-05-23）。2026-08-12 已对照工作流编辑器中实际挂载的侧栏、inspector registry、工作流 runtime 与插件 capability registry 再次确认实现。
+
 ## 背景
 
 Visual Workflows 子系统（ADR-0011/0017/0022）已拥有成熟的画布 + 混合运行时，但四个缺口阻碍了"功能完整"：

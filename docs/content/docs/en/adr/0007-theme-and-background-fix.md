@@ -222,3 +222,7 @@ four real theme JSONs, two real `.vsix` bundles, one truncated
 - [Better dynamic themes in Tailwind with OKLCH (Evil Martians)](https://evilmartians.com/chronicles/better-dynamic-themes-in-tailwind-with-oklch-color-magic)
 - [WebAIM Contrast Checker](https://webaim.org/resources/contrastchecker/)
 - [APCA Contrast Calculator](https://apcacontrast.com/)
+
+## Current-state amendment (2026-08-13)
+
+The scope applier and theme/background settings are mounted in the production layout. The original `Proposed` label is therefore stale for that delivered scope. Slideshows, per-conversation themes, Monaco CSS rewriting, and `tokenColors` remain explicit non-goals; this amendment does not broaden the decision.

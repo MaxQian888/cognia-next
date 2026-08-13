@@ -44,7 +44,7 @@ DI 风格(仿 `team-notifier`)，让编排无需 Dexie/sonner/Tauri 即可单测
 
 ### 入站接线
 
-被动的 `ConnectorBus.subscribeInbound` 观察者把有意义的消息(`kind = create`、非自身、非空)转为按 `conversationKey` 归类的中心通知；`mentions.selfMentioned`/私聊标记为 `directed`。**焦点感知**：窗口聚焦且正在看该会话时(由 `stores/inbox/active-conversation-store` 跟踪，inbox 路由设置)，抑制 OS 渠道而中心照常记录。移动端悬空的 `subscribeToPushNotifications` 消费者已接线(背景推送=仅 center，因 OS 已展示；前台=center+toast)。`use-session-notifications` 改走核心(center 记录 + OS)，web 端也记录。`installNotificationBridges()` 经 `TauriProvider` 一次性挂载 plugin/connector/push。
+被动的 `ConnectorBus.subscribeInbound` 观察者把有意义的消息(`kind = create`、非自身、非空)转为按 `conversationKey` 归类的中心通知；`mentions.selfMentioned`/私聊标记为 `directed`。**焦点感知**：窗口聚焦且正在看该会话时(由 `stores/inbox/active-conversation-store` 跟踪，inbox 路由设置)，抑制 OS 渠道而中心照常记录。移动端悬空的 `subscribeToPushNotifications` 消费者已接线：背景推送由 APNs/FCM 展示，前台推送由 Capacitor 使用现代原生选项展示，两者均仅写入 center，避免重复应用内 toast。`use-session-notifications` 改走核心(center 记录 + OS)，web 端也记录。OS 渠道按宿主适配：Tauri 使用桌面插件，Capacitor 调度本地原生通知并把 `href` 带入点击路由。两条路径均只检查权限、不主动弹窗，只有上下文 CTA 可以请求权限。此前未生效的出站 `push` 偏好现在会复用 Companion token 注册表与已配置的 APNs/FCM dispatcher。提供商 payload 刻意只带元数据(`notificationId`、来源、级别、应用内 `href`)并使用通用锁屏文案，因此本地/用户生成的标题和正文绝不会越过云推送边界；手机再把级别、来源、去重和导航元数据还原到通知中心记录。`installNotificationBridges()` 经 `TauriProvider` 一次性挂载与运行时无关的 plugin/connector 桥接；`CompanionBootProvider` 在整个移动会话中常驻 push 桥接，静默注册已授权 token，把 iOS/Android 映射为服务端契约的 `apns`/`fcm` provider，并在配对完成或权限授予后立即重试。
 
 ### UI
 

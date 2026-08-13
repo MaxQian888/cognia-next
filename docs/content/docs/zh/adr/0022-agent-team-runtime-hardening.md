@@ -724,3 +724,7 @@ rtk grep -r "runTeamLifecycle\|agentTeamManager.start" --include='*.ts' --includ
 - **“无新Dexie表”**：团队RUNS仍然适用（保持`workflowRuns`行）。还有两个相邻的表用于其他问题：`teamPrObservations`（v103，PR反馈）和`agentTeamBoard`（v104，移动同步的单向板镜——存储仍为单一写源）。
 - **波次跑者修复**：每波路径重用一个`runId`，后期ADR-0061 P4所有者守卫在第一波后将其视为终端——悄无声息地跳过后续波次。运行时现在重新打开波与波之间的行（伴随的软取消仍被遵守）。
 - **Workspace 标签页**：`AgentTeamWorkspaceTab` union 被更正为实际渲染的标签页（未实现的 `graph`/`analytics` 值被移除）。
+
+## 当前状态修订（2026-08-13）
+
+Manual retry、pause/resume、delegation、consensus、persistence、review 与 remote dispatch 已由 AgentTeam runtime 和后续 ADR 交付。durable external queue 仍被明确排除。当前 owner 需结合 ADR-0066、ADR-0071、ADR-0111 与 ADR-0113 理解；本 ADR 不再表示需要另建一套编排状态。

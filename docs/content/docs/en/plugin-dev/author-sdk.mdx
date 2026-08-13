@@ -75,7 +75,7 @@ Plugins own their displayed copy. Provide manifest i18n entries and localized ac
 
 `engines.cognia` is the compatibility authority. Lint and install reject unknown capabilities and a lower bound older than any declared capability's catalog minimum.
 
-Desktop JavaScript plugins execute under Cognia's checksum-pinned bundled Node 26 runtime, with 26.3.1 as the minimum patched version. A plugin cannot choose a system Node binary. Filesystem grants are canonical, symlink-free paths; each path is passed as a separate Node permission flag, and grants cannot overlap the immutable install tree or host-owned permission ledger.
+Desktop JavaScript plugins execute under Cognia's process-wide Node runtime profile. The default build uses the checksum-pinned bundled Node 26 runtime, with 26.3.1 as the minimum patched version; the lightweight build requires a validated system Node 26 or newer. A plugin cannot select or override that profile. Filesystem grants are canonical, symlink-free paths; each path is passed as a separate Node permission flag, and grants cannot overlap the immutable install tree or host-owned permission ledger.
 
 ## Path rules
 

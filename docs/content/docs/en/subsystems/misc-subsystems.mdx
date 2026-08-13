@@ -109,9 +109,9 @@ Key files: `lib/tts/{tts-orchestrator,tts-cache,tts-text-utils,speech-settings,a
 
 Mobile push registration shell (M4.6). `lib/push/push-notifications.ts` wraps `@capacitor/push-notifications`:
 
-- `requestPermission()` → OS permission prompt (`granted / denied / prompt / prompt-with-rationale`).
-- `register()` → triggers APNs / FCM registration, returns `RegistrationOutcome` (`registered + token + platform` / `permission_denied` / `unsupported` / `registration_failed`).
-- `subscribePush(handler)` → subscribes to inbound push events, forwarded to UI for routing to banner or inbox.
+- `registerPushNotifications({ requestPermission })` → checks permission, optionally prompts only on explicit user intent, then triggers APNs / FCM registration and returns a typed `RegistrationOutcome`.
+- `reportPushTokenToDesktop(token, platform)` → maps iOS/Android to the companion RPC's `apns`/`fcm` provider contract.
+- `subscribeToPushNotifications(handler)` → subscribes to inbound push events; the unified bridge records them in Notification Center and routes background taps.
 
 In web mode the plugin does not exist; the entire API returns `unsupported`, and callers degrade accordingly. The token is reported back to the desktop via `_rpc/register_push_token` (companion server); server-side delivery logic lives in the Rust HITL workload, while this module only handles "get token + route inbound messages".
 

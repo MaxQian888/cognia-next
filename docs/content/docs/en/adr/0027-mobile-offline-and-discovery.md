@@ -202,3 +202,7 @@ desktop server was unreachable, for three reasons:
    `tauri://localhost` scheme is not formally documented as
    SW-compatible; if registration fails silently the app degrades to
    no-PWA on desktop with zero user-visible impact.
+
+## Current-state amendment (2026-08-13)
+
+PNG manifest assets, mobile Inbox, backup/import/reminders, Twin long-press/redaction/camera flows, and workflow delete/pause RPC mirrors are now present. The remaining open item is real Tauri service-worker smoke coverage across macOS, Windows, and Linux; the historical feature checklist must not be treated as current missing functionality.

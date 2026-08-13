@@ -9,6 +9,10 @@ description: "让 cognia-agent TUI 的 markdown 渲染更自然、流式更顺�
 **作者**：Max Qian + Claude Opus 4.8
 **承接**：[Agent CLI TUI](../subsystems/cognia-agent-tui) 子系统、ADR-0050（操作体验加固），以及 sidecar 内置工具。
 
+## 当前状态修订（2026-08-13）
+
+Interactive transcript cells 已交付。剩余搜索工作属于兼容清理：在行为对等测试通过后，让 legacy `content_search` 与 `file_search` 名称委托到 canonical ripgrep/glob adapter，并在兼容期保留旧名称。
+
 ## 背景
 
 TUI 的 markdown 渲染、工具卡片与 sidecar 内置工具均可用，但经一轮调研（并参考 OpenCode / Crush / glamour）发现若干粗糙处：

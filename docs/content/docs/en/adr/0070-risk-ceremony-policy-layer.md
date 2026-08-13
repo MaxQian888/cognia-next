@@ -261,3 +261,7 @@ work is gated and existing work is untouched.
 `/goal` and Workflow wiring; LLM-assisted classification; interaction with
 per-tool `bypassPermissions`; a distinct "hard block even in bypass" ceremony; a
 settings UI for `riskGating` (the config default suffices for Phase 1).
+
+## Current-state amendment (2026-08-13)
+
+AgentTeam, Goal, and Workflow risk gates plus the `riskGating` settings UI are implemented. The statement that phases 2–3 are planned is stale for those surfaces. Future policy changes must reuse the existing ceremony classifier and gate instead of adding per-surface risk logic.

@@ -64,3 +64,7 @@ Codex（`@zed-industries/codex-acp` shim 和 native `codex app-server`）已经�
 ## 验证
 
 玩笑：在9个绿色套件中，共进行了207项测试（生态系统适配器、外部事件进度、resolve-acp-mcp-servers、预设、agent-sdk/dispatch、调度团队成员、解析-外部备份、子代理、子代理模板-标签）。`tsc --noEmit`：任何更改的文件都没有错误。i18N 密钥 对等性 0/0（en + zh-CN，聚合重建）。以五个独立可回退提交的形式交付。
+
+## 当前状态修订（2026-08-13）
+
+历史上的五 runtime 限制已经关闭。`TeammateRuntime` 消费可执行 preset catalog（明确排除不可执行的 custom/preview 条目），auto-compose 也通过同一 runtime owner 消费 external presets。兼容工作必须扩展该 catalog，不得重新引入按 runtime 分叉的 dispatch 路径。

@@ -83,3 +83,7 @@ pnpm companion-api:lint
 
 不要直接在公开 YAML 中手动加入 service 命令。只有信任与 transport 语义确实改变时才修改
 descriptor，然后交由生成器更新产物。
+
+## 性能命令边界
+
+远端性能使用 execution capability 合同完成 lease open、renew、close、snapshot 与 observation read。Dispatcher 注入已认证 caller device ID，请求参数不能自行指定。旧的全局 `perf_start_sampling`、`perf_set_interval`、`perf_stop_sampling`、hotspot reset 和 trace folder reveal 保持 local/internal 兼容命令，不会向远端声明。Plugin `ctx.perf` 保持只读：可以观察已活动 stream 及 source metadata，但不能 open lease、Capture、reset state、读取 raw attachment 或控制进程。

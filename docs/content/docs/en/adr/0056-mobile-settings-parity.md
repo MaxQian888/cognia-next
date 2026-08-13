@@ -65,3 +65,7 @@ Each wave ships with: co-located tests ≥90% lines/branches/functions, i18n key
 - Mobile settings UX now formally depends on `mobileRuntimeMode`: the same `/me` list shows a different set of agent panels in standalone vs paired. A future reader seeing an agent panel "missing" on a standalone phone should consult D2 here, not treat it as a bug.
 - Standalone BYOK users do **not** get agent-runtime/MCP/tools settings until the separate engine-extension initiative lands. This ADR records that exclusion as intentional.
 - Provider credentials remain split: device-local BYOK keys via `/me/providers` (never synced, never remotely writable) vs desktop-only provider config. Mobile never becomes a remote editor of desktop credentials.
+
+## Current-state amendment (2026-08-13)
+
+The `/me/*` surfaces now cover the intended bucket 1/2/3 families, including Agent, MCP, plugins, skills, teams, workflows, hooks, network, and external agents. “Complete parity” still requires a generated field-level matrix and paired/standalone verification. Bucket 4 remains desktop-only by decision.

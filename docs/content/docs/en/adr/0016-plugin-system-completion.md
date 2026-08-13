@@ -9,6 +9,10 @@ description: "Closes the desktop-runtime gap left by ADR 0006. Audits surface 82
 **Date:** 2026-05-09
 **Supersedes follow-up:** ADR 0006 §"Tauri backend gap"
 
+## Current state amendment (2026-08-13)
+
+The Plugin Media TypeScript surface now has registered native handlers for concatenate, effect, transition, and export. They reuse `cognia-media`'s validated ffmpeg process boundary, timeouts, temporary-path handling, and error model; no second JavaScript media API was introduced. Demoted hook families remain deferred.
+
 ---
 
 ## Context

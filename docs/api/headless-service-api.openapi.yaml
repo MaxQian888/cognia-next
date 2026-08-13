@@ -13098,6 +13098,1309 @@ paths:
               schema:
                 $ref: "#/components/schemas/RpcError"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_crypto_close:
+    post:
+      operationId: internalRpcConnectorsMatrixCryptoClose
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_crypto_close (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - adapter_id
+              properties:
+                adapter_id:
+                  type: string
+                  example: ""
+                  description: Also accepted as `adapterId`.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_crypto_decrypt_event:
+    post:
+      operationId: internalRpcConnectorsMatrixCryptoDecryptEvent
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_crypto_decrypt_event (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - req
+              properties:
+                req:
+                  type: object
+                  additionalProperties: {}
+                  example: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
+                  compatibility remains owned by that domain.
+                x-cognia-schema-owner: connectors
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_crypto_encrypt_event:
+    post:
+      operationId: internalRpcConnectorsMatrixCryptoEncryptEvent
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_crypto_encrypt_event (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - req
+              properties:
+                req:
+                  type: object
+                  additionalProperties: {}
+                  example: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
+                  compatibility remains owned by that domain.
+                x-cognia-schema-owner: connectors
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_crypto_get_missing_sessions:
+    post:
+      operationId: internalRpcConnectorsMatrixCryptoGetMissingSessions
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_crypto_get_missing_sessions (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - req
+              properties:
+                req:
+                  type: object
+                  additionalProperties: {}
+                  example: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type:
+                    - object
+                    - array
+                    - string
+                    - number
+                    - boolean
+                    - "null"
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                    command remains contract-covered at the JSON value boundary until its owning domain publishes a
+                    narrower stable wire type.
+                x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
+                x-cognia-schema-owner: connectors
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_crypto_init:
+    post:
+      operationId: internalRpcConnectorsMatrixCryptoInit
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_crypto_init (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - req
+              properties:
+                req:
+                  type: object
+                  additionalProperties: {}
+                  example: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_crypto_mark_request_sent:
+    post:
+      operationId: internalRpcConnectorsMatrixCryptoMarkRequestSent
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_crypto_mark_request_sent (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - req
+              properties:
+                req:
+                  type: object
+                  additionalProperties: {}
+                  example: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_crypto_outgoing_requests:
+    post:
+      operationId: internalRpcConnectorsMatrixCryptoOutgoingRequests
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_crypto_outgoing_requests (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - adapter_id
+              properties:
+                adapter_id:
+                  type: string
+                  example: ""
+                  description: Also accepted as `adapterId`.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type:
+                    - object
+                    - array
+                    - string
+                    - number
+                    - boolean
+                    - "null"
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                    command remains contract-covered at the JSON value boundary until its owning domain publishes a
+                    narrower stable wire type.
+                x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
+                x-cognia-schema-owner: connectors
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_crypto_receive_sync_changes:
+    post:
+      operationId: internalRpcConnectorsMatrixCryptoReceiveSyncChanges
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_crypto_receive_sync_changes (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - req
+              properties:
+                req:
+                  type: object
+                  additionalProperties: {}
+                  example: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_crypto_share_room_key:
+    post:
+      operationId: internalRpcConnectorsMatrixCryptoShareRoomKey
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_crypto_share_room_key (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - req
+              properties:
+                req:
+                  type: object
+                  additionalProperties: {}
+                  example: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type:
+                    - object
+                    - array
+                    - string
+                    - number
+                    - boolean
+                    - "null"
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                    command remains contract-covered at the JSON value boundary until its owning domain publishes a
+                    narrower stable wire type.
+                x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
+                x-cognia-schema-owner: connectors
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_crypto_update_tracked_users:
+    post:
+      operationId: internalRpcConnectorsMatrixCryptoUpdateTrackedUsers
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_crypto_update_tracked_users (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - req
+              properties:
+                req:
+                  type: object
+                  additionalProperties: {}
+                  example: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_encrypted_media_fetch:
+    post:
+      operationId: internalRpcConnectorsMatrixEncryptedMediaFetch
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_encrypted_media_fetch (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - req
+              properties:
+                req:
+                  type: object
+                  additionalProperties: {}
+                  example: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
+                  compatibility remains owned by that domain.
+                x-cognia-schema-owner: connectors
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_matrix_encrypted_media_upload:
+    post:
+      operationId: internalRpcConnectorsMatrixEncryptedMediaUpload
+      tags:
+        - headless-rpc
+      summary: connectors_matrix_encrypted_media_upload (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - req
+              properties:
+                req:
+                  type: object
+                  additionalProperties: {}
+                  example: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
+                  compatibility remains owned by that domain.
+                x-cognia-schema-owner: connectors
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/connectors_media_upload:
     post:
       operationId: internalRpcConnectorsMediaUpload
@@ -19134,7 +20437,7 @@ paths:
         - headless-rpc
       summary: git_blame (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -19147,12 +20450,12 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 path:
                   type: string
+                  example: ""
                 rev:
-                  type:
-                    - string
-                    - "null"
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -19254,7 +20557,7 @@ paths:
         - headless-rpc
       summary: git_branches (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -19266,6 +20569,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -19367,7 +20671,7 @@ paths:
         - headless-rpc
       summary: git_checkout_branch (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -19382,8 +20686,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 name:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -19472,7 +20778,7 @@ paths:
         - headless-rpc
       summary: git_cherry_pick (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -19487,8 +20793,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 sha:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -19577,7 +20885,7 @@ paths:
         - headless-rpc
       summary: git_clone (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -19592,8 +20900,10 @@ paths:
               properties:
                 remoteUrl:
                   type: string
+                  example: ""
                 destination:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -19601,7 +20911,16 @@ paths:
           content:
             application/json:
               schema:
-                type: string
+                type: object
+                required:
+                  - workspaceId
+                  - relativePath
+                properties:
+                  workspaceId:
+                    type: string
+                  relativePath:
+                    type: string
+                additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger.
           content:
@@ -19682,7 +21001,7 @@ paths:
         - headless-rpc
       summary: git_commit (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -19699,12 +21018,16 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 message:
                   type: string
+                  example: ""
                 amend:
                   type: boolean
+                  example: false
                 signoff:
                   type: boolean
+                  example: false
               additionalProperties: false
       responses:
         "200":
@@ -19797,7 +21120,7 @@ paths:
         - headless-rpc
       summary: git_commit_files (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -19810,8 +21133,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 sha:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -19913,7 +21238,7 @@ paths:
         - headless-rpc
       summary: git_conflicts (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -19925,6 +21250,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -20026,7 +21352,7 @@ paths:
         - headless-rpc
       summary: git_create_branch (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -20042,14 +21368,15 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 name:
                   type: string
+                  example: ""
                 checkout:
                   type: boolean
+                  example: false
                 from:
-                  type:
-                    - string
-                    - "null"
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -20138,7 +21465,7 @@ paths:
         - headless-rpc
       summary: git_create_tag (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -20153,16 +21480,14 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 name:
                   type: string
+                  example: ""
                 message:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 target:
-                  type:
-                    - string
-                    - "null"
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -20251,7 +21576,7 @@ paths:
         - headless-rpc
       summary: git_delete_branch (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -20267,10 +21592,13 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 name:
                   type: string
+                  example: ""
                 force:
                   type: boolean
+                  example: false
               additionalProperties: false
       responses:
         "200":
@@ -20359,7 +21687,7 @@ paths:
         - headless-rpc
       summary: git_delete_tag (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -20374,8 +21702,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 name:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -20464,7 +21794,7 @@ paths:
         - headless-rpc
       summary: git_diff_commit (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -20478,10 +21808,13 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 sha:
                   type: string
+                  example: ""
                 path:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -20574,7 +21907,7 @@ paths:
         - headless-rpc
       summary: git_diff_file (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -20588,10 +21921,13 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 path:
                   type: string
+                  example: ""
                 staged:
                   type: boolean
+                  example: false
               additionalProperties: false
       responses:
         "200":
@@ -20684,7 +22020,7 @@ paths:
         - headless-rpc
       summary: git_diff_refs_file (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -20699,12 +22035,16 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 base:
                   type: string
+                  example: ""
                 target:
                   type: string
+                  example: ""
                 path:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -20797,7 +22137,7 @@ paths:
         - headless-rpc
       summary: git_diff_refs_files (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -20811,10 +22151,13 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 base:
                   type: string
+                  example: ""
                 target:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -20907,7 +22250,7 @@ paths:
         - headless-rpc
       summary: git_diff_staged_all (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -20919,6 +22262,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -21007,7 +22351,7 @@ paths:
         - headless-rpc
       summary: git_diff_stat (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -21019,6 +22363,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -21111,7 +22456,7 @@ paths:
         - headless-rpc
       summary: git_discard (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -21126,14 +22471,14 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 paths:
                   type: array
                   items:
                     type: string
+                  example: []
                 hunkPatch:
-                  type:
-                    - string
-                    - "null"
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -21222,7 +22567,7 @@ paths:
         - headless-rpc
       summary: git_discard_all (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -21237,8 +22582,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 includeUntracked:
                   type: boolean
+                  example: false
               additionalProperties: false
       responses:
         "200":
@@ -21327,7 +22674,7 @@ paths:
         - headless-rpc
       summary: git_fetch (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -21341,10 +22688,9 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 remote:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 prune:
                   type: boolean
               additionalProperties: false
@@ -21435,7 +22781,7 @@ paths:
         - headless-rpc
       summary: git_file_history (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -21449,10 +22795,15 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 path:
                   type: string
+                  example: ""
                 maxCount:
                   type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
               additionalProperties: false
       responses:
         "200":
@@ -21554,7 +22905,7 @@ paths:
         - headless-rpc
       summary: git_identity (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -21566,6 +22917,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -21658,7 +23010,7 @@ paths:
         - headless-rpc
       summary: git_ignore_add (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -21673,8 +23025,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 pattern:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -21763,7 +23117,7 @@ paths:
         - headless-rpc
       summary: git_init (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -21777,6 +23131,7 @@ paths:
               properties:
                 path:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -21865,7 +23220,7 @@ paths:
         - headless-rpc
       summary: git_interactive_rebase (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -21881,14 +23236,17 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 base:
                   type: string
+                  example: ""
                 entries:
                   type: array
                   items:
                     type: object
                     additionalProperties: {}
                     example: {}
+                  example: []
               additionalProperties: false
       responses:
         "200":
@@ -21977,7 +23335,7 @@ paths:
         - headless-rpc
       summary: git_is_repo (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -21989,6 +23347,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -22077,7 +23436,7 @@ paths:
         - headless-rpc
       summary: git_log (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -22091,10 +23450,17 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 maxCount:
                   type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
                 skip:
                   type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
               additionalProperties: false
       responses:
         "200":
@@ -22196,7 +23562,7 @@ paths:
         - headless-rpc
       summary: git_merge (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -22211,8 +23577,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 branch:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -22301,7 +23669,7 @@ paths:
         - headless-rpc
       summary: git_merge_abort (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -22315,6 +23683,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -22403,7 +23772,7 @@ paths:
         - headless-rpc
       summary: git_pull (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -22417,14 +23786,11 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 remote:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 branch:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 rebase:
                   type: boolean
               additionalProperties: false
@@ -22515,7 +23881,7 @@ paths:
         - headless-rpc
       summary: git_push (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -22529,14 +23895,11 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 remote:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 branch:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 setUpstream:
                   type: boolean
                 forceWithLease:
@@ -22629,7 +23992,7 @@ paths:
         - headless-rpc
       summary: git_push_tag (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -22645,10 +24008,13 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 remote:
                   type: string
+                  example: ""
                 name:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -22737,7 +24103,7 @@ paths:
         - headless-rpc
       summary: git_rebase (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -22752,8 +24118,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 onto:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -22842,7 +24210,7 @@ paths:
         - headless-rpc
       summary: git_rebase_commits (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -22855,8 +24223,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 base:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -22958,7 +24328,7 @@ paths:
         - headless-rpc
       summary: git_refs (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -22970,6 +24340,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -23071,7 +24442,7 @@ paths:
         - headless-rpc
       summary: git_remote_add (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -23087,10 +24458,13 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 name:
                   type: string
+                  example: ""
                 url:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -23179,7 +24553,7 @@ paths:
         - headless-rpc
       summary: git_remote_remove (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -23194,8 +24568,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 name:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -23284,7 +24660,7 @@ paths:
         - headless-rpc
       summary: git_remotes (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -23296,6 +24672,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -23397,7 +24774,7 @@ paths:
         - headless-rpc
       summary: git_rename_branch (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -23412,12 +24789,12 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
+                old:
+                  type: string
                 newName:
                   type: string
-                old:
-                  type:
-                    - string
-                    - "null"
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -23506,7 +24883,7 @@ paths:
         - headless-rpc
       summary: git_repo_state (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -23518,6 +24895,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -23610,7 +24988,7 @@ paths:
         - headless-rpc
       summary: git_reset (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -23626,10 +25004,13 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 mode:
                   type: string
+                  example: ""
                 target:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -23718,7 +25099,7 @@ paths:
         - headless-rpc
       summary: git_resolve_conflict (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -23733,19 +25114,16 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 path:
                   type: string
+                  example: ""
                 mergedContent:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 side:
-                  type:
-                    - string
-                    - "null"
-                  enum:
-                    - ours
-                    - theirs
+                  type: object
+                  additionalProperties: {}
+                  example: {}
               additionalProperties: false
       responses:
         "200":
@@ -23834,7 +25212,7 @@ paths:
         - headless-rpc
       summary: git_restore (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -23850,16 +25228,17 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 paths:
                   type: array
                   items:
                     type: string
+                  example: []
                 staged:
                   type: boolean
+                  example: false
                 source:
-                  type:
-                    - string
-                    - "null"
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -23948,7 +25327,7 @@ paths:
         - headless-rpc
       summary: git_revert (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -23963,8 +25342,10 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 sha:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -24053,7 +25434,7 @@ paths:
         - headless-rpc
       summary: git_sequencer_abort (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -24067,6 +25448,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -24155,7 +25537,7 @@ paths:
         - headless-rpc
       summary: git_sequencer_continue (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -24169,6 +25551,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -24257,7 +25640,7 @@ paths:
         - headless-rpc
       summary: git_set_identity (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -24270,14 +25653,16 @@ paths:
                 - repoPath
                 - name
                 - email
-                - global
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 name:
                   type: string
+                  example: ""
                 email:
                   type: string
+                  example: ""
                 global:
                   type: boolean
               additionalProperties: false
@@ -24368,7 +25753,7 @@ paths:
         - headless-rpc
       summary: git_stage (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -24383,14 +25768,14 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 paths:
                   type: array
                   items:
                     type: string
+                  example: []
                 hunkPatch:
-                  type:
-                    - string
-                    - "null"
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -24479,7 +25864,7 @@ paths:
         - headless-rpc
       summary: git_stash_apply (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -24494,8 +25879,12 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 index:
                   type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
               additionalProperties: false
       responses:
         "200":
@@ -24584,7 +25973,7 @@ paths:
         - headless-rpc
       summary: git_stash_drop (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -24599,8 +25988,12 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 index:
                   type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
               additionalProperties: false
       responses:
         "200":
@@ -24689,7 +26082,7 @@ paths:
         - headless-rpc
       summary: git_stash_list (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -24701,6 +26094,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -24802,7 +26196,7 @@ paths:
         - headless-rpc
       summary: git_stash_pop (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -24817,8 +26211,12 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 index:
                   type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
               additionalProperties: false
       responses:
         "200":
@@ -24907,7 +26305,7 @@ paths:
         - headless-rpc
       summary: git_stash_push (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -24921,10 +26319,9 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 message:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 includeUntracked:
                   type: boolean
                 keepIndex:
@@ -25017,7 +26414,7 @@ paths:
         - headless-rpc
       summary: git_status (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -25029,6 +26426,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -25121,7 +26519,7 @@ paths:
         - headless-rpc
       summary: git_sync (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -25135,6 +26533,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -25233,7 +26632,7 @@ paths:
         - headless-rpc
       summary: git_tags (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -25245,6 +26644,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -25346,7 +26746,7 @@ paths:
         - headless-rpc
       summary: git_unstage (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -25361,14 +26761,14 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 paths:
                   type: array
                   items:
                     type: string
+                  example: []
                 hunkPatch:
-                  type:
-                    - string
-                    - "null"
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -25450,6 +26850,115 @@ paths:
               schema:
                 $ref: "#/components/schemas/RpcError"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/git_workspace_list:
+    post:
+      operationId: internalRpcGitWorkspaceList
+      tags:
+        - headless-rpc
+      summary: git_workspace_list (workspace.read)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: runtime-inferred
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type:
+                    - object
+                    - array
+                    - string
+                    - number
+                    - boolean
+                    - "null"
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                    command remains contract-covered at the JSON value boundary until its owning domain publishes a
+                    narrower stable wire type.
+                x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
+                x-cognia-schema-owner: git
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/git_worktree_add:
     post:
       operationId: internalRpcGitWorktreeAdd
@@ -25457,7 +26966,7 @@ paths:
         - headless-rpc
       summary: git_worktree_add (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -25473,14 +26982,15 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 path:
                   type: string
+                  example: ""
                 branch:
                   type: string
+                  example: ""
                 baseRef:
-                  type:
-                    - string
-                    - "null"
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -25569,7 +27079,7 @@ paths:
         - headless-rpc
       summary: git_worktree_commit (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -25584,8 +27094,10 @@ paths:
               properties:
                 worktreePath:
                   type: string
+                  example: ""
                 message:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -25678,7 +27190,7 @@ paths:
         - headless-rpc
       summary: git_worktree_list (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       requestBody:
         required: true
         content:
@@ -25690,6 +27202,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -25791,7 +27304,7 @@ paths:
         - headless-rpc
       summary: git_worktree_prune (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -25805,6 +27318,7 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
               additionalProperties: false
       responses:
         "200":
@@ -25893,7 +27407,7 @@ paths:
         - headless-rpc
       summary: git_worktree_remove (git.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: runtime-inferred
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -25909,14 +27423,15 @@ paths:
               properties:
                 repoPath:
                   type: string
+                  example: ""
                 path:
                   type: string
+                  example: ""
                 force:
                   type: boolean
+                  example: false
                 deleteBranch:
-                  type:
-                    - string
-                    - "null"
+                  type: string
               additionalProperties: false
       responses:
         "200":
@@ -32654,6 +34169,1826 @@ paths:
                 x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
                 x-cognia-schema-owner: ocr
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_close_lease:
+    post:
+      operationId: internalRpcPerfCloseLease
+      tags:
+        - headless-rpc
+      summary: perf_close_lease (performance.capture)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - leaseId
+              properties:
+                leaseId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_hotspots:
+    post:
+      operationId: internalRpcPerfHotspots
+      tags:
+        - headless-rpc
+      summary: perf_hotspots (performance.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type:
+                    - object
+                    - array
+                    - string
+                    - number
+                    - boolean
+                    - "null"
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                    command remains contract-covered at the JSON value boundary until its owning domain publishes a
+                    narrower stable wire type.
+                x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
+                x-cognia-schema-owner: performance
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_lease_snapshot:
+    post:
+      operationId: internalRpcPerfLeaseSnapshot
+      tags:
+        - headless-rpc
+      summary: perf_lease_snapshot (performance.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - leaseId
+              properties:
+                leaseId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - wireVersion
+                  - frames
+                  - oldestSequence
+                  - latestSequence
+                  - sources
+                  - leases
+                  - gaps
+                  - samples
+                  - running
+                  - intervalMs
+                properties:
+                  wireVersion:
+                    type: integer
+                    const: 1
+                  frames:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - wireVersion
+                        - sourceId
+                        - targetId
+                        - routingGeneration
+                        - hostInstanceId
+                        - samplingSessionId
+                        - sequence
+                        - requestedIntervalMs
+                        - actualIntervalMs
+                        - monotonicElapsedMs
+                        - wallStartMs
+                        - wallEndMs
+                        - collectionDurationMs
+                        - missedTicks
+                        - flags
+                        - tsMs
+                        - intervalMs
+                        - processes
+                        - runtime
+                        - topSpans
+                        - systemMemory
+                        - managed
+                      properties:
+                        wireVersion:
+                          type: integer
+                          const: 1
+                        sourceId:
+                          type: string
+                        targetId:
+                          type: string
+                        routingGeneration:
+                          type: integer
+                          minimum: 0
+                        hostInstanceId:
+                          type: string
+                        samplingSessionId:
+                          type: string
+                        leaseId:
+                          type: string
+                        sequence:
+                          type: integer
+                          minimum: 1
+                        requestedIntervalMs:
+                          type: integer
+                          minimum: 1
+                        actualIntervalMs:
+                          type: integer
+                          minimum: 0
+                        monotonicElapsedMs:
+                          type: integer
+                          minimum: 0
+                        wallStartMs:
+                          type: integer
+                        wallEndMs:
+                          type: integer
+                        collectionDurationMs:
+                          type: integer
+                          minimum: 0
+                        missedTicks:
+                          type: integer
+                          minimum: 0
+                        flags:
+                          type: object
+                          additionalProperties:
+                            type: boolean
+                        tsMs:
+                          type: integer
+                        intervalMs:
+                          type: integer
+                          minimum: 0
+                        processes:
+                          type: array
+                          items:
+                            type: object
+                            additionalProperties: true
+                        runtime:
+                          type: object
+                          additionalProperties: true
+                        topSpans:
+                          type: array
+                          items:
+                            type: object
+                            additionalProperties: true
+                        systemMemory:
+                          type:
+                            - object
+                            - "null"
+                          additionalProperties: true
+                        managed:
+                          type: array
+                          items:
+                            type: object
+                            additionalProperties: true
+                        observations:
+                          type: object
+                          additionalProperties:
+                            type:
+                              - number
+                              - "null"
+                      additionalProperties: false
+                  oldestSequence:
+                    type:
+                      - integer
+                      - "null"
+                    minimum: 0
+                  latestSequence:
+                    type:
+                      - integer
+                      - "null"
+                    minimum: 0
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - wireVersion
+                        - sourceId
+                        - kind
+                        - hostInstanceId
+                        - runtimeKind
+                        - build
+                        - metricSchemaVersion
+                        - capabilities
+                        - clock
+                        - connection
+                      properties:
+                        wireVersion:
+                          type: integer
+                          const: 1
+                        sourceId:
+                          type: string
+                        kind:
+                          type: string
+                          enum:
+                            - renderer
+                            - host
+                        hostInstanceId:
+                          type: string
+                        runtimeKind:
+                          type: string
+                          enum:
+                            - browser
+                            - tauri-rust
+                            - node-headless
+                        build:
+                          type: object
+                          additionalProperties: true
+                        metricSchemaVersion:
+                          type: integer
+                          minimum: 1
+                        capabilities:
+                          type: array
+                          items:
+                            type: string
+                          uniqueItems: true
+                        clock:
+                          type: object
+                          additionalProperties: true
+                        connection:
+                          type: object
+                          additionalProperties: true
+                      additionalProperties: false
+                  leases:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - wireVersion
+                        - leaseId
+                        - clientId
+                        - deviceId
+                        - targetId
+                        - routingGeneration
+                        - sourceId
+                        - purpose
+                        - requestedCadenceMs
+                        - samplingSessionId
+                        - openedAtMs
+                        - heartbeatAtMs
+                        - expiresAtMs
+                      properties:
+                        wireVersion:
+                          type: integer
+                          const: 1
+                        leaseId:
+                          type: string
+                        clientId:
+                          type: string
+                        deviceId:
+                          type: string
+                        targetId:
+                          type: string
+                        routingGeneration:
+                          type: integer
+                          minimum: 0
+                        sourceId:
+                          type:
+                            - string
+                            - "null"
+                        purpose:
+                          type: string
+                          enum:
+                            - live
+                            - capture
+                        requestedCadenceMs:
+                          type: integer
+                          minimum: 1
+                        samplingSessionId:
+                          type: string
+                        openedAtMs:
+                          type: integer
+                        heartbeatAtMs:
+                          type: integer
+                        expiresAtMs:
+                          type: integer
+                      additionalProperties: false
+                  gaps:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  samples:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - wireVersion
+                        - sourceId
+                        - targetId
+                        - routingGeneration
+                        - hostInstanceId
+                        - samplingSessionId
+                        - sequence
+                        - requestedIntervalMs
+                        - actualIntervalMs
+                        - monotonicElapsedMs
+                        - wallStartMs
+                        - wallEndMs
+                        - collectionDurationMs
+                        - missedTicks
+                        - flags
+                        - tsMs
+                        - intervalMs
+                        - processes
+                        - runtime
+                        - topSpans
+                        - systemMemory
+                        - managed
+                      properties:
+                        wireVersion:
+                          type: integer
+                          const: 1
+                        sourceId:
+                          type: string
+                        targetId:
+                          type: string
+                        routingGeneration:
+                          type: integer
+                          minimum: 0
+                        hostInstanceId:
+                          type: string
+                        samplingSessionId:
+                          type: string
+                        leaseId:
+                          type: string
+                        sequence:
+                          type: integer
+                          minimum: 1
+                        requestedIntervalMs:
+                          type: integer
+                          minimum: 1
+                        actualIntervalMs:
+                          type: integer
+                          minimum: 0
+                        monotonicElapsedMs:
+                          type: integer
+                          minimum: 0
+                        wallStartMs:
+                          type: integer
+                        wallEndMs:
+                          type: integer
+                        collectionDurationMs:
+                          type: integer
+                          minimum: 0
+                        missedTicks:
+                          type: integer
+                          minimum: 0
+                        flags:
+                          type: object
+                          additionalProperties:
+                            type: boolean
+                        tsMs:
+                          type: integer
+                        intervalMs:
+                          type: integer
+                          minimum: 0
+                        processes:
+                          type: array
+                          items:
+                            type: object
+                            additionalProperties: true
+                        runtime:
+                          type: object
+                          additionalProperties: true
+                        topSpans:
+                          type: array
+                          items:
+                            type: object
+                            additionalProperties: true
+                        systemMemory:
+                          type:
+                            - object
+                            - "null"
+                          additionalProperties: true
+                        managed:
+                          type: array
+                          items:
+                            type: object
+                            additionalProperties: true
+                        observations:
+                          type: object
+                          additionalProperties:
+                            type:
+                              - number
+                              - "null"
+                      additionalProperties: false
+                  running:
+                    type: boolean
+                  intervalMs:
+                    type: integer
+                    minimum: 1
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_list_traces:
+    post:
+      operationId: internalRpcPerfListTraces
+      tags:
+        - headless-rpc
+      summary: perf_list_traces (performance.traces)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type:
+                    - object
+                    - array
+                    - string
+                    - number
+                    - boolean
+                    - "null"
+                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                    command remains contract-covered at the JSON value boundary until its owning domain publishes a
+                    narrower stable wire type.
+                x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
+                x-cognia-schema-owner: performance
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_open_lease:
+    post:
+      operationId: internalRpcPerfOpenLease
+      tags:
+        - headless-rpc
+      summary: perf_open_lease (performance.capture)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - input
+              properties:
+                input:
+                  type: object
+                  required:
+                    - clientId
+                    - deviceId
+                    - targetId
+                    - routingGeneration
+                    - purpose
+                    - requestedCadenceMs
+                  properties:
+                    clientId:
+                      type: string
+                      minLength: 1
+                    deviceId:
+                      type: string
+                      description: Overwritten by the authenticated RPC device identity.
+                    targetId:
+                      type: string
+                      minLength: 1
+                    routingGeneration:
+                      type: integer
+                      minimum: 0
+                    purpose:
+                      type: string
+                      enum:
+                        - live
+                        - capture
+                    requestedCadenceMs:
+                      type: integer
+                      minimum: 500
+                      maximum: 10000
+                    sourceId:
+                      type: string
+                      minLength: 1
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - accepted
+                      - lease
+                      - source
+                    properties:
+                      accepted:
+                        const: true
+                      lease:
+                        type: object
+                        required:
+                          - wireVersion
+                          - leaseId
+                          - clientId
+                          - deviceId
+                          - targetId
+                          - routingGeneration
+                          - sourceId
+                          - purpose
+                          - requestedCadenceMs
+                          - samplingSessionId
+                          - openedAtMs
+                          - heartbeatAtMs
+                          - expiresAtMs
+                        properties:
+                          wireVersion:
+                            type: integer
+                            const: 1
+                          leaseId:
+                            type: string
+                          clientId:
+                            type: string
+                          deviceId:
+                            type: string
+                          targetId:
+                            type: string
+                          routingGeneration:
+                            type: integer
+                            minimum: 0
+                          sourceId:
+                            type:
+                              - string
+                              - "null"
+                          purpose:
+                            type: string
+                            enum:
+                              - live
+                              - capture
+                          requestedCadenceMs:
+                            type: integer
+                            minimum: 1
+                          samplingSessionId:
+                            type: string
+                          openedAtMs:
+                            type: integer
+                          heartbeatAtMs:
+                            type: integer
+                          expiresAtMs:
+                            type: integer
+                        additionalProperties: false
+                      source:
+                        type: object
+                        required:
+                          - wireVersion
+                          - sourceId
+                          - kind
+                          - hostInstanceId
+                          - runtimeKind
+                          - build
+                          - metricSchemaVersion
+                          - capabilities
+                          - clock
+                          - connection
+                        properties:
+                          wireVersion:
+                            type: integer
+                            const: 1
+                          sourceId:
+                            type: string
+                          kind:
+                            type: string
+                            enum:
+                              - renderer
+                              - host
+                          hostInstanceId:
+                            type: string
+                          runtimeKind:
+                            type: string
+                            enum:
+                              - browser
+                              - tauri-rust
+                              - node-headless
+                          build:
+                            type: object
+                            additionalProperties: true
+                          metricSchemaVersion:
+                            type: integer
+                            minimum: 1
+                          capabilities:
+                            type: array
+                            items:
+                              type: string
+                            uniqueItems: true
+                          clock:
+                            type: object
+                            additionalProperties: true
+                          connection:
+                            type: object
+                            additionalProperties: true
+                        additionalProperties: false
+                    additionalProperties: false
+                  - type: object
+                    required:
+                      - accepted
+                      - code
+                      - detail
+                    properties:
+                      accepted:
+                        const: false
+                      code:
+                        type: string
+                        enum:
+                          - cadence-too-fast
+                          - device-purpose-limit
+                          - host-lease-limit
+                          - rate-limited
+                          - target-mismatch
+                          - routing-generation-mismatch
+                          - unsupported
+                          - permission-denied
+                      detail:
+                        type: string
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_read_observations:
+    post:
+      operationId: internalRpcPerfReadObservations
+      tags:
+        - headless-rpc
+      summary: perf_read_observations (performance.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - leaseId
+              properties:
+                leaseId:
+                  type: string
+                  minLength: 1
+                afterSequence:
+                  type: integer
+                  minimum: 0
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    - wireVersion
+                    - sourceId
+                    - targetId
+                    - routingGeneration
+                    - hostInstanceId
+                    - samplingSessionId
+                    - sequence
+                    - requestedIntervalMs
+                    - actualIntervalMs
+                    - monotonicElapsedMs
+                    - wallStartMs
+                    - wallEndMs
+                    - collectionDurationMs
+                    - missedTicks
+                    - flags
+                    - tsMs
+                    - intervalMs
+                    - processes
+                    - runtime
+                    - topSpans
+                    - systemMemory
+                    - managed
+                  properties:
+                    wireVersion:
+                      type: integer
+                      const: 1
+                    sourceId:
+                      type: string
+                    targetId:
+                      type: string
+                    routingGeneration:
+                      type: integer
+                      minimum: 0
+                    hostInstanceId:
+                      type: string
+                    samplingSessionId:
+                      type: string
+                    leaseId:
+                      type: string
+                    sequence:
+                      type: integer
+                      minimum: 1
+                    requestedIntervalMs:
+                      type: integer
+                      minimum: 1
+                    actualIntervalMs:
+                      type: integer
+                      minimum: 0
+                    monotonicElapsedMs:
+                      type: integer
+                      minimum: 0
+                    wallStartMs:
+                      type: integer
+                    wallEndMs:
+                      type: integer
+                    collectionDurationMs:
+                      type: integer
+                      minimum: 0
+                    missedTicks:
+                      type: integer
+                      minimum: 0
+                    flags:
+                      type: object
+                      additionalProperties:
+                        type: boolean
+                    tsMs:
+                      type: integer
+                    intervalMs:
+                      type: integer
+                      minimum: 0
+                    processes:
+                      type: array
+                      items:
+                        type: object
+                        additionalProperties: true
+                    runtime:
+                      type: object
+                      additionalProperties: true
+                    topSpans:
+                      type: array
+                      items:
+                        type: object
+                        additionalProperties: true
+                    systemMemory:
+                      type:
+                        - object
+                        - "null"
+                      additionalProperties: true
+                    managed:
+                      type: array
+                      items:
+                        type: object
+                        additionalProperties: true
+                    observations:
+                      type: object
+                      additionalProperties:
+                        type:
+                          - number
+                          - "null"
+                  additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_renew_lease:
+    post:
+      operationId: internalRpcPerfRenewLease
+      tags:
+        - headless-rpc
+      summary: perf_renew_lease (performance.capture)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - leaseId
+              properties:
+                leaseId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_system_details:
+    post:
+      operationId: internalRpcPerfSystemDetails
+      tags:
+        - headless-rpc
+      summary: perf_system_details (performance.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
+                  compatibility remains owned by that domain.
+                x-cognia-schema-owner: performance
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_trace_close:
+    post:
+      operationId: internalRpcPerfTraceClose
+      tags:
+        - headless-rpc
+      summary: perf_trace_close (performance.traces)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - handleId
+              properties:
+                handleId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_trace_open:
+    post:
+      operationId: internalRpcPerfTraceOpen
+      tags:
+        - headless-rpc
+      summary: perf_trace_open (performance.traces)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - traceId
+              properties:
+                traceId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - handleId
+                  - traceId
+                  - sizeBytes
+                  - sha256
+                  - chunkBytes
+                  - expiresAtMs
+                properties:
+                  handleId:
+                    type: string
+                  traceId:
+                    type: string
+                  sizeBytes:
+                    type: integer
+                    minimum: 0
+                    maximum: 268435456
+                  sha256:
+                    type: string
+                    pattern: ^[a-f0-9]{64}$
+                  chunkBytes:
+                    type: integer
+                    minimum: 1
+                    maximum: 1048576
+                  expiresAtMs:
+                    type: integer
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/perf_trace_read_chunk:
+    post:
+      operationId: internalRpcPerfTraceReadChunk
+      tags:
+        - headless-rpc
+      summary: perf_trace_read_chunk (performance.traces)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - handleId
+                - offset
+              properties:
+                handleId:
+                  type: string
+                  minLength: 1
+                offset:
+                  type: integer
+                  minimum: 0
+                length:
+                  type: integer
+                  minimum: 1
+                  maximum: 1048576
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - offset
+                  - nextOffset
+                  - dataBase64
+                  - chunkSha256
+                  - eof
+                  - finalSha256
+                properties:
+                  offset:
+                    type: integer
+                    minimum: 0
+                  nextOffset:
+                    type: integer
+                    minimum: 0
+                  dataBase64:
+                    type: string
+                  chunkSha256:
+                    type: string
+                    pattern: ^[a-f0-9]{64}$
+                  eof:
+                    type: boolean
+                  finalSha256:
+                    type:
+                      - string
+                      - "null"
+                    pattern: ^[a-f0-9]{64}$
+                additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger.
           content:
@@ -54805,6 +58140,18 @@ components:
           - connectors_lark_ws_close
           - connectors_lark_ws_open
           - connectors_list_adapters
+          - connectors_matrix_crypto_close
+          - connectors_matrix_crypto_decrypt_event
+          - connectors_matrix_crypto_encrypt_event
+          - connectors_matrix_crypto_get_missing_sessions
+          - connectors_matrix_crypto_init
+          - connectors_matrix_crypto_mark_request_sent
+          - connectors_matrix_crypto_outgoing_requests
+          - connectors_matrix_crypto_receive_sync_changes
+          - connectors_matrix_crypto_share_room_key
+          - connectors_matrix_crypto_update_tracked_users
+          - connectors_matrix_encrypted_media_fetch
+          - connectors_matrix_encrypted_media_upload
           - connectors_media_upload
           - connectors_onebot_send
           - connectors_register
@@ -54918,6 +58265,7 @@ components:
           - git_sync
           - git_tags
           - git_unstage
+          - git_workspace_list
           - git_worktree_add
           - git_worktree_commit
           - git_worktree_list
@@ -54981,6 +58329,17 @@ components:
           - ocr_list_available_backends
           - ocr_list_native_backends
           - ocr_model_status
+          - perf_close_lease
+          - perf_hotspots
+          - perf_lease_snapshot
+          - perf_list_traces
+          - perf_open_lease
+          - perf_read_observations
+          - perf_renew_lease
+          - perf_system_details
+          - perf_trace_close
+          - perf_trace_open
+          - perf_trace_read_chunk
           - plugin_activate_vscode
           - plugin_api_batch_invoke
           - plugin_api_invoke
@@ -55275,10 +58634,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 465
-  generatedRequestSchemaCount: 465
-  runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 465
+  internalCommandCount: 489
+  generatedRequestSchemaCount: 489
+  runtimeInferredRequestSchemaCount: 64
+  contractRequestSchemaCount: 425
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 465
+  generatedResponseSchemaCount: 489
   loopbackOnly: true

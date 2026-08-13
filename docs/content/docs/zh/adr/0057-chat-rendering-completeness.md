@@ -45,3 +45,7 @@ MCP工具的效果，按规格来说，是`content: [{type:'text'|'image'|'resou
 - **有界快照。** 持久化的子代理快照继承存储的上限（~100 toolCalls / ~50 日志）;有更多新手的游戏只保留最新的。
 - **流水线耦合。** `adapter.ts`现在是决定通用工具中哪些内容能留给渲染器的唯一地方——未来的丰富渲染工作键是从`mcpContent`中提取，而不是重新解析字符串。
 - **同一变化中相关的弥合间隙**（非ADR-worthy，记录以供参考）：未知部件回退卡、非图像文件预览、字级差值（`fast-diff`）、子代理流式文本被限制为详细模式、progress-UX统一到诚实工具数量、共享`BackgroundedRunControls`、OCR `ocr-result`聊天部分，以及将产物底座挂载到移动聊天壳上。
+
+## 当前状态修订（2026-08-13）
+
+Structured MCP content 与 durable terminal/subagent snapshot 已实现，并有 renderer 测试覆盖。两个已命名 defect 已关闭；原 `Proposed` 状态只作为历史保留，不应被理解为需要新增另一套 renderer fallback pipeline。

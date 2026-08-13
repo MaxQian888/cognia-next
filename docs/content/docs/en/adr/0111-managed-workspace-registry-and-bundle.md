@@ -9,6 +9,10 @@ description: Unify worktree ownership, base-ref selection, cross-root atomic app
 
 Proposed (2026-08-07). Amends ADR-0086 and ADR-0108.
 
+## Current rollout amendment (2026-08-13)
+
+Registry storage/state transitions, bundles, typed base specs, sensitive grants, scheduler isolation, and AgentTeam Task Workspace leases are implemented. The legacy AgentTeam allocator/reconciler remains only for the documented one-release kill-switch and Git reconciliation path; it must not be deleted until consumer telemetry confirms zero fallback use. Rollout order remains ADR-0111 migration, ADR-0086 GA, then ADR-0113 canary.
+
 ## Context
 
 Cognia already owns Task Workspace snapshots and patches, the Git worktree seam, Workspace Trust, per-`Project` multi-root, and per-agent Git isolation. Compared with Codex Worktrees, Claude Code Worktrees, VS Code Worktrees, and native `git-worktree`, the missing capabilities are not new patch primitives — they are unified ownership, versioned execution context, cross-root composition, sensitive-resource authorization, and product-level discoverability. Evidence is in `docs/research/managed-workspace-registry-gap-analysis-2026-08-07.md`.

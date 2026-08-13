@@ -9,6 +9,10 @@ description: "cognia-next 在原有 frontend / python / hybrid 之外新增一�
 **Date:** 2026-05-14
 **Branch:** `feat/wasm-plugins`
 
+## 当前状态修订（2026-08-13）
+
+`WasmHostServices` 现已提供 AI/workflow bridge、clipboard 与 notification 服务。v0.1 WIT/ABI 继续冻结，不做原地回填。可选 Sigstore 信任仍不在已接受范围内；包签名继续沿用现有 Ed25519 信任路径。
+
 ---
 
 ## 背景

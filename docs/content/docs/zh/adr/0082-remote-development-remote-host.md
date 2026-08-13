@@ -7,6 +7,10 @@ description: 桌面外向传输路由、远程主机注册表,以及会话级"�
 
 **状态**: 已接受 (2026-07-17)
 
+## 当前能力修订（2026-08-13）
+
+当前能力矩阵已经包含 code-server relay、Cloudflared transport 与 remote external-Agent execution，超过原始缺口描述。后续 remote LSP 只能在测试过的能力矩阵证明缺失时扩展现有 remote-host adapter；不授权第二套 remote-development transport。
+
 ## 背景
 
 `cognia-server serve` 已经能在远程机器上立起一台完整的无头 Cognia:它绑
@@ -124,3 +128,9 @@ generation、request id、签发/过期时间）。传输层现在只把带上�
 响应都绑定真实 pending request、且具备 session 级工具授权前，
 `claude.controller-tool-proxy` 不会被广告。原子 Skill 写入和主机托管 Bridge
 生命周期也会保持未广告，直到 owner、过期、健康检查和迁移要求全部完成。
+
+## 2026-08 Source Control 安全修订
+
+远程 Git 不再通过转发 renderer 路径来“免费远程化”。当前账户的项目根目录会注册为不透明工作区；设备客户端仅使用 `workspaceId` 加经过校验的相对路径寻址。只有主机解析绝对路径，并重新授权规范化后的 worktree 与 Git 目录，阻止嵌套仓库或向上发现造成越界。响应会清除主机路径，身份读写仅允许 repository-local。
+
+`source-control.git` 在 `host_feature_manifest` 中逐一广告所有现有 Git 操作。交互式变更必须使用 `host_admin_lease_issue` 签发的设备绑定、精确命令 lease，TTL 为 120 秒；客户端不会自动续期，也不会重试已过期或送达不确定的变更。Source Control 在 Tauri 与已配对客户端显示，在独立 Web 隐藏；远程界面仅在可见时每五秒轮询。

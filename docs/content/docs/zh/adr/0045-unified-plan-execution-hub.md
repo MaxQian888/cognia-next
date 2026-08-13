@@ -183,3 +183,7 @@ approval_gate     → waitForDecision(scope, id, signal)  (reuses approval-bus)
 - **P3 — 聊天→编排**：`teammate_dispatch`接线`dispatchTeammate`;ExitPlanMode捕获;显式`CreatePlan`/`UpdatePlan`工具 defs + 渲染器调度。
 - **P4 — 进球/团队投射**：`projections.ts`双向;通过计划流程路由目标子目标和团队任务。
 - **P5 — 规划者 + 重新规划 + UI**： `decomposeIntoPlan`;三种精炼触发器;批准卡、追踪面板、精炼控制;通知。
+
+## 当前状态修订（2026-08-13）
+
+Plan persistence、approval、projection、execution 以及 plan/goal/team integration 已经实现。提案中若干路径后来发生迁移；canonical owner 是当前 plan repository、projections、goal orchestration 与 AgentTeam execution modules。不得根据历史路径清单再建一套 plan engine。

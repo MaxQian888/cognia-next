@@ -9,6 +9,10 @@ description: Wave 1-4 enhancements over the existing terminal dock. (1) The agen
 **Authors**: Max Qian + Claude Opus 4.7
 **Affects**: `lib/terminal/`, `lib/plugin/bridge/sidecar-tools-bridge.ts`, `lib/plugin/security/permission-guard.ts`, `lib/claude/plugin-tool-ipc.ts`, `lib/claude/build-options.ts`, `lib/workflow/nodes/`, `types/workflow/visual.ts`, `components/terminal/`, `components/mobile/mobile-terminal-screen.tsx`, `components/settings/terminal/`, `components/workflow/editor/inspector/`, `sidecar/builtin-tools/`, `src-tauri/src/terminal/`, `src-tauri/src/companion_api/ws_terminal.rs`, `src-tauri/resources/terminal/`, `plugins/github-delivery/plugin.json`
 
+## Current state amendment (2026-08-13)
+
+Remote SSH sessions now probe supported interactive shells, inject a validated nonce-bound OSC 633 integration command through the existing PTY writer, and surface explicit degraded capability reasons when probing or injection fails. Events continue through the one canonical `Osc633Parser`; no parallel terminal transport or protocol was introduced. `cargo test -p cognia-terminal` covers the supported-shell and nonce-validation paths.
+
 ## Context
 
 The Phase 1 terminal subsystem (~80 uncommitted files on `master` before this work) shipped a full xterm.js dock, Rust `portable-pty` backend, OSC 633 prompt-marker parser, mobile WebSocket transport, settings UI, chat handoff, sidecar MCP tool, plugin VSCode shim, and an agent-trust consent gate. A cross-cutting audit found 23 concrete gaps. The user scoped a single-wave delivery covering 4 themes: agent dock unification, mobile/WAN resilience, plugin + workflow surfacing, and shell-feature parity.

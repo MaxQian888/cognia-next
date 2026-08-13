@@ -1,0 +1,228 @@
+---
+title: ADR gap audit — 2026-08-12
+description: Evidence-backed audit of ADR catalogue integrity, numbering anomalies, status drift, and current implementation alignment.
+---
+
+# ADR gap audit — 2026-08-12
+
+## Scope and method
+
+This audit covers every file under `docs/content/docs/{en,zh}/adr/`, both ADR sidebars, current Git worktree state, and targeted implementation checks for records with missing or visibly stale status metadata. A feature was treated as implemented only when its code, tests, and runtime registration or mounted product surface were all present.
+
+This is a snapshot of the current working tree. It includes the in-progress ADR-0114 files and sidebar entries that were already present when the audit began.
+
+## Confirmed catalogue findings
+
+| Check | Result | Disposition |
+| --- | --- | --- |
+| Locale parity | 112 English files and 112 matching Chinese files | No missing translation counterpart |
+| Sidebar parity | 112 entries in each sidebar; no stale or omitted slug | Keep automated/file-based checks in future reviews |
+| Duplicate numeric IDs | `0013`, `0025`, and `0026` each have two slugs | Preserve historical slugs; use the full number-plus-slug when linking |
+| Unused numeric IDs | `0029`, `0080`, `0099`, `0103`, `0105` | Do not backfill without evidence of an actual historical decision |
+| Missing status fields | ADR-0034, ADR-0035, ADR-0036 | Repaired after implementation verification |
+| Authority wording | Overview said an ADR overrides contradictory docs | Corrected: implementation and tests define current behavior; drift is explicit |
+
+## Status repairs verified against the implementation
+
+### ADR-0034 — Workflow editor completeness and plugin parity
+
+Confirmed through the mounted `RightSidebar`, lazy-loaded `SettingsTab` and `RunsTab`, the node inspector registry, workflow runtime, plugin workflow-template registry, and co-located tests. The record now states `Accepted (2026-05-23)` with a 2026-08-12 implementation reconfirmation.
+
+### ADR-0035 — Rust performance dashboard
+
+Confirmed through `app/performance/page.tsx`, `components/performance/`, `lib/perf/backend/`, `src-tauri/src/perf/`, `PerfState` management, and the registered `perf_*` Tauri commands. The record now states `Accepted (2026-05-26)` with a 2026-08-12 implementation reconfirmation.
+
+### ADR-0036 — WeChat / WeCom connectors
+
+Confirmed through `lib/connectors/adapter-registry.ts`, the `wecom` and `wechat-personal` adapter implementations, shared platform capabilities, runtime contract tests, and adapter-specific tests. The record now states `Accepted (2026-05-26)` with a 2026-08-12 implementation reconfirmation.
+
+## Stale-status review queue
+
+Eleven records still contain a `Proposed` label. That does not mean all eleven are unimplemented; it means their decision state has not been safely normalized by this audit.
+
+| ADR | Current label | Confirmed observation | Next review |
+| --- | --- | --- | --- |
+| 0007 | Proposed | Theme and background appliers are mounted in `app/layout.tsx`; broad implementation exists | Verify every decision item and remaining exclusions before promotion |
+| 0016 | Proposed | Plugin completion contains shipped addenda but also explicit deferred/demoted surfaces | Split accepted core from deferred scope or add a rollout matrix |
+| 0022 | Proposed | Durable AgentTeam implementation has evolved substantially beyond the original plan | Reconcile with ADR-0066, ADR-0071, ADR-0113, and current durable-v2 code |
+| 0028 | Proposed, partially shipped | The ADR already distinguishes live account pinning from unverified sandbox scope | Preserve partial label until sandbox decisions are re-audited |
+| 0030 | Proposed | Character-pack registry, local store, projections, signatures, and tests exist | Verify every amended decision before promotion |
+| 0031 | Proposed | The record itself says multiple waves shipped while retaining contradictory deferred text | Rewrite rollout notes without erasing the original decision history |
+| 0045 | Proposed | Plan types, persistence, projections, and UI exist, but several originally named paths changed | Map each decision to the current plan/goal/team execution architecture |
+| 0056 | Proposed | Mobile settings surfaces exist; full parity is a product-wide claim | Audit every settings bucket and paired/standalone gate |
+| 0057 | Proposed | Structured MCP content and terminal subagent snapshots have implementation tests | Verify persistence and all renderer fallbacks before promotion |
+| 0068 | Proposed | Some package extraction occurred, while this ADR is explicitly a multi-track program | Add a track-by-track rollout table rather than promoting the whole program |
+| 0111 | Proposed | Registry, bundle, storage tables, typed base specs, and UI exist; legacy AgentTeam allocator remains | Reconcile shipped registry work with remaining migration and removal decisions |
+
+## Gaps that were not “fixed” by assumption
+
+- No ADR was created for unused numbers. A sequence hole is not architectural evidence.
+- Historical duplicate numbers were not renamed. Renaming would break inbound links and obscure repository history.
+- Older `Proposed` records were not bulk-promoted based on file existence alone. Presence does not prove complete wiring, compatibility, or rollout.
+- ADR-0114 was not rewritten during this audit. It is existing working-tree work and was checked only for catalogue inclusion and implementation references.
+
+## Follow-up order
+
+1. Reconcile ADR-0031 because its own shipped/deferred notes conflict.
+2. Reconcile ADR-0111 against the remaining legacy workspace allocator and actual rollout gates.
+3. Reconcile ADR-0022 against durable-v2 and multi-host dispatch before changing its status.
+4. Review ADR-0007, ADR-0030, and ADR-0057 as smaller implementation-backed promotion candidates.
+5. Add a repository check that enforces locale/sidebar parity, unique slugs, and the presence of an explicit status while allowing documented historical numeric collisions.
+
+## Per-record implementation review
+
+The matrix below is the second-pass, record-by-record review requested after the catalogue audit. The verdicts mean:
+
+- **Closed** — the current accepted/core scope has code, tests, and a reachable runtime or product surface; no missing function was confirmed.
+- **Limited** — the core works, but a current platform or intentionally excluded capability remains.
+- **Partial** — at least one described or deferred function is still absent, unwired, or only represented by a stub.
+- **Rollout** — the implementation exists but remains experimental, default-off, dark-launched, or short of its stated GA gate.
+- **Drift** — the implementation has moved past the ADR's status or follow-up text; the gap is documentation reconciliation rather than a confirmed missing user function.
+- **Superseded / removed** — a later architecture owns the behavior or the product intentionally removed it.
+
+An item marked Limited is not automatically a defect. It is included so product scope is explicit. Evidence paths name the current owner, not necessarily the historical path printed in the ADR.
+
+### ADR-0001 through ADR-0028
+
+| ADR | Verdict | Current gap or confirmation |
+| --- | --- | --- |
+| 0001 backup schema v3 | Limited | Core backup, encryption, integrity, streaming, history, and domain transfer are wired. Silent scheduled file writes remain desktop-only; browsers use reminders by platform design. |
+| 0002 scheduler resolution | Partial | `Run now`, remote data sources, team dispatch resolution, and session A2UI are present. `TaskForm` still has no per-teammate override or explicit per-task A2UI editor. |
+| 0003 employee twin | Closed | Importers, `applyTwinContext`, retry/dead-letter handling, cron reconciliation, and runtime injection are present under `lib/twin/` and `lib/claude/build-options.ts`. |
+| 0004 native vector backend | Partial | Native admin parity and Agent vector tools have shipped. Lazy `json_extract` metadata-index materialization remains unimplemented and intentionally benchmark-gated. |
+| 0005 remote control | Superseded | The old subsystem is explicitly superseded; Companion, External Bridge, remote-host transport, and scheduler/webhook owners now carry the live behavior. |
+| 0006 plugin system | Closed | Core lifecycle, UI exits, registries, permissions, diagnostics, and desktop runtime are live. Remaining runtime-family gaps are tracked against ADR-0016 instead of this foundation ADR. |
+| 0007 theme/background | Drift | Scope appliers and theme/background surfaces are mounted. The Proposed label is stale; slideshow, per-conversation themes, Monaco CSS, and `tokenColors` are explicit non-goals rather than broken core behavior. |
+| 0008 external bridge | Partial | Rust/host MCP control and inbound write tools are present. No packaged `packages/claude-code-plugin`, passive Claude/Cursor/Cline log producer, or web crawler was found; dedicated user-repository enrollment is also not evidenced as a complete bridge surface. |
+| 0009 platform connectors | Closed | Shared bus, five original adapters, attachment handling, A2UI, digest execution, OAuth exchange, Lark media, and a registered OneBot probe are present. |
+| 0010 Claude subscription OAuth | Limited | OAuth and usage tracking work. External CLI credential-file injection and real Anthropic billing remain intentionally excluded. |
+| 0011 visual workflows | Closed | Editor, runtime, triggers, persistence, approvals, plugin points, callable workflows, and cross-device execution are now covered by this ADR and later workflow ADRs. |
+| 0012 transport abstraction | Drift | The original migration seam evolved into current local, Companion, WebRTC, and remote-host transports. Historical deferred call sites and stub wording are stale. |
+| 0013 command manifest | Closed | Companion command classification, route parity, idempotency, and generated/mobile mirrors are present and tested. |
+| 0013 WASM plugins | Partial | Component runtime, limits, signing, CLI, and capabilities work. AI generation, clipboard/toast/workflow event host bindings and optional Sigstore trust remain incomplete or below the ADR's intended native behavior. |
+| 0014 Capacitor shell | Closed | The shell, secure pairing, platform façades, navigation, and mobile build integration are present; later mobile ADRs own parity work. |
+| 0015 mobile v2 | Closed | WAN transport, sync, interaction, camera/network façades, drafts, and mobile product surfaces are present. |
+| 0016 plugin completion | Partial | The desktop command gap and Python path are closed, but native media parity is not: TS calls five `plugin_media_*` operations while Rust currently registers only `plugin_media_get_video_frame`. Demoted hook families also remain intentionally unavailable. |
+| 0017 workflow plugin points | Closed | Trigger queueing, plugin node/template registries, workflow hooks, and editor/runtime consumption are present. |
+| 0018 GitHub delivery | Removed | The ADR itself records removal on 2026-07-28; Marketplace Integration owns the supported integration path. |
+| 0019 `/goal` | Limited | Goal persistence, subgoals, judge override, workflow linkage, scheduler execution, and manual resume work. Foreground interactive goals are not automatically re-armed after app restart. |
+| 0020 computer use | Partial | Chat/MCP routing, picker commands, Docker target binding, consent, and audit are live. macOS/Linux accessibility-tree and chord parity, cloud/Lume providers, and the final composer target picker remain deferred. |
+| 0021 WebRTC WAN | Closed | Authenticated v2 signaling, encrypted envelopes, recovery, replay/idempotency, fragmentation, capacity control, and TURN handling are present. |
+| 0022 AgentTeam hardening | Drift | Manual retry, pause/resume, delegation, consensus, persistence, review, and remote dispatch now exist through later ADRs. The Proposed/non-goal text is stale; a durable external queue remains intentionally out of scope. |
+| 0023 Rust cloud vector backends | Limited | Desktop cloud vector routing works. Web/SSR cloud vector access and eight advanced native-only operations remain unavailable; some cloud filters retain backend-specific limits. |
+| 0024 OCR | Partial | OCR routing, PDF/composer flows, cache CRUD, and providers are present. `purgeOcrCacheOlderThan` has no scheduled owner, and Windows Media OCR is still advertised through a placeholder while the native binding reports unavailable. |
+| 0025 A2UI ⇄ IM | Closed | Capability projection, callback bindings, platform callbacks, safety defaults, and durable connector dispatch are present. |
+| 0025 unified subscription | Limited | Multi-account vault, switching, encrypted transfer, discovery, sync, and limits tracking are present. Full OpenCode Zen OAuth still depends on an upstream supported flow. |
+| 0026 built-in skills/Lark | Partial | Calendar, Doc, Sheets, Base, Task, and Wiki families plus the authenticated CLI bridge are present. Mail, Drive, Slides, VC, Minutes, Whiteboard, Approval, Attendance, Contact, Event, and OKR are not in the in-app built-in family, and Cognia does not drive CLI login/setup UI. |
+| 0026 plugin extension expansion | Partial | Workbench slots, tool renderers, registries, settings surfaces, and contribution bridges are live. Install-from-URL, sandboxed Webview panels, and lifting `workspace-backend-registry` out of `lib/github/` remain absent. |
+| 0027 mobile offline/discovery | Drift | PNG manifests, mobile Inbox, full backup/import/reminders, Twin long-press/redaction/camera paths, and workflow delete/pause RPC mirrors are now present. The remaining item is a real Tauri service-worker smoke across desktop platforms; the ADR's open list is mostly stale. |
+| 0028 per-session isolation | Partial | Account pinning, T1 OS confinement, sandbox runner, E2B/container backends, policy, telemetry, and session routing exist. WarmQuery prewarming and future macOS XPC migration remain open; some higher-tier isolation is rollout-dependent. |
+
+### ADR-0030 through ADR-0059
+
+| ADR | Verdict | Current gap or confirmation |
+| --- | --- | --- |
+| 0030 character-pack overlay | Drift | Pack storage, projection, signatures, dependency dimensions, and voice resolution are wired into chat/pet TTS. `tauriPath` was retired in favor of portable `webDataUrl`, so the old asset-hook follow-up is obsolete. |
+| 0031 integrated terminal phase 2 | Partial | Local/WAN terminal, replay, reconnect, and transport selection work. Remote delivery of OSC 633 shell-integration scripts remains disabled. |
+| 0032 AgentTeam plugin integration | Closed | Team/teammate overlays, capability resolution, templates, dependency diagnostics, and preset editing are wired. |
+| 0033 integrated terminal phase 3 | Partial | Dock, workflows, permalink linkage, flow control, and AI autocomplete integration are present. Mobile OSC 633, server-side workflow consent, and a binary Tauri event body replacing JSON byte arrays remain open. |
+| 0034 workflow editor completeness | Closed | Reconfirmed against the mounted sidebar, inspector registry, runtime, plugin registries, variables, and tests. |
+| 0035 Rust performance dashboard | Closed | Reconfirmed against the route, renderer transport, sampler state, commands, dashboard, and tests. |
+| 0036 WeChat/WeCom | Closed | Reconfirmed against both adapters, registry wiring, capability map, and contract tests; protocol-specific unsupported operations are explicit constraints. |
+| 0037 public share links | Limited | Zero-knowledge sharing is live. Public A2UI renders as download/import rather than the full interactive catalog. |
+| 0038 source control panel | Partial | Init/clone/worktrees/blame/graph/stash/review are present. Multi-repo/submodules, reflog recovery, GPG signing, and line/sub-hunk staging remain absent. |
+| 0039 terminal autocomplete | Partial | Completion, script types, history, ghost text, and provider integration work. Mobile autocomplete, inline error explain/fix, public pixel measurement, and more shells remain deferred. |
+| 0040 hooks completion | Limited | Hooks fire across built-in and external agents. External tools that execute without a permission request can be observed but cannot be blocked at that protocol boundary. |
+| 0041 Agent command auto-mode | Closed | Static and model policy, compound-command handling, sidecar fast path, consent, and audit are wired. |
+| 0042 notification center | Closed | Unified persistence, preferences, dedup, DND, critical routing, toast/OS/webhook delivery, and mounted UI are present. |
+| 0043 provider execution | Closed | Local and aggregator providers, AI SDK multi-step execution, timeouts, embeddings, and routing are wired. |
+| 0044 unified LSP configuration | Limited | Shared configuration reaches Agent and editors. Pure built-in defaults do not eagerly start in editors by design; only configured/overridden servers do. |
+| 0045 unified plan hub | Drift | Plan persistence, approval, projection, execution, and plan/goal/team integration exist, but the Proposed ADR names several superseded paths. No specific missing user function was confirmed; decision-to-owner reconciliation is still required. |
+| 0046 LSP maturity | Limited | Provisioning, health/restart, diagnostics revisioning, and Skill-editor UI are present. Provisioning is npm-focused and complete editor coverage remains narrower than the long-term design. |
+| 0047 project instruction files | Limited | Nested `CLAUDE.md`/`AGENTS.md`, imports, extra local paths, and project agents work. Remote-URL extras and per-file-read nearby-instruction injection are not supported. |
+| 0048 Codex support | Limited | Credential reuse, chat, headers, and usage scheduler are present; a native app-server path has since shipped. Provider-specific credit/balance views beyond windowed limits remain absent. |
+| 0049 external-agent process hardening | Limited | Resolver, lifecycle cleanup, and Windows executable handling are live. Node sidecar spawn unification and project-local `node_modules/.bin` augmentation remain excluded. |
+| 0050 CLI TUI operation experience | Limited | Editing, permissions, keybind validation, limits, long-task progress, and later rendering follow-ups are present. Width-aware edit history/undo and overlay back-stack remain intentionally deferred. |
+| 0051 external-agent adapter plugin type | Closed | Dynamic adapter registration reaches preset discovery, session launch, renderer protocol, and hardened native spawn. |
+| 0052 CLI fixed-region layout | Closed | Fullscreen layout, mouse modes, measured chrome, virtualization, grapheme-safe input, and authoritative input ownership are present. |
+| 0053 CLI rendering/tool invocation | Partial | Structured blocks, caches, diff/progress cells, batching, and safety rendering are present. Unified ripgrep-backed search and richer interactive scrollback cells remain deferred. |
+| 0054 local multi-account isolation | Limited | Physical Dexie account isolation and switching work. At-rest Dexie encryption and cloud identity/login are explicitly outside this local ADR. |
+| 0055 Agent browser loop | Limited | Local shared browser tools and public-origin Playwright handoff work. Cross-origin iframe, trusted-event, response-body, and closed-shadow limits remain, and the live Tauri snapshot→act smoke is not recorded. |
+| 0056 mobile settings parity | Drift | The `/me/*` route set now covers the proposed bucket-1/2/3 sections broadly, including Agent, MCP, plugins, skills, teams, workflows, hooks, network, and external agents. Field-level parity still lacks a current generated matrix; bucket 4 remains desktop-only by decision. |
+| 0057 chat rendering completeness | Drift | Structured MCP content and durable subagent snapshots are implemented and tested. The Proposed status is stale; no remaining gap from the two named defects was found. |
+| 0058 desktop pet | Closed | Window ownership, hotkeys, events, voice, skins, state, settings, and runtime initialization are present. |
+| 0059 headless brain | Rollout | Headless bootstrap, protocol, standalone/companion web targets, runtime manifests, and durability layers exist. Cloud operation remains bounded by deployment configuration and the durability/authority rollout described by later ADRs. |
+
+### ADR-0060 through ADR-0089
+
+| ADR | Verdict | Current gap or confirmation |
+| --- | --- | --- |
+| 0060 personal knowledge capture | Partial | Capture, enrichment, radar, wiki health, scheduler, and pet integration exist. Always-on-top capture window/hotkey, precise Windows source process, image clipboard capture, and hybrid BM25+dense wiki search remain follow-ups. |
+| 0061 cross-device workflow | Limited | Durable waitpoints, remote mobile steps, leases, cancel, and cloud placement work. Voice payload relay, an OS background mobile runner, symmetric DataChannel fallback, and general session/artifact handoff remain deferred. |
+| 0062 external session import | Limited | Claude Code, Codex, OpenCode, watch re-import, plugin importers, and subagent reconstruction work. Cursor, Cline, and Gemini CLI lack first-party adapters. |
+| 0063 optical compaction | Closed | Strategy selection, frame encoding, verification, budget gate, storage bounds, and restore path are present. |
+| 0064 external CLI subagent dispatch | Drift | The old five-runtime union limit is closed: `TeammateRuntime` now covers the executable preset catalog except non-executable custom/preview entries, and auto-compose consumes external presets. |
+| 0065 workspace confinement | Partial | Default confinement, credential blocks, permission unification, and monotonic sandbox clamp are wired. Per-teammate sandbox fields exist, but no AgentTeam settings UI was found for editing them. |
+| 0066 AgentTeam task board | Closed | CQRS projection, move guards, retry, pause/resume, mobile steering, plugin feed, and durable result reseeding are present. |
+| 0067 Rust crate decomposition | Partial | W1 and Tiers A/B landed. App-shell Tier C and `sccache` remain deferred. |
+| 0068 frontend package extraction | Partial | Several `@cognia/*` leaves and build/initializer improvements landed, but the ADR is a multi-track program and does not yet have evidence that every extraction/decomposition track is complete. |
+| 0069 memory external APIs | Limited | Plugin, Companion, and MCP surfaces share policy and consolidation. Independent memory embeddings and live cross-device evidence/job/audit sync remain absent; inbound IM writes stay excluded by policy. |
+| 0070 risk ceremony | Drift | AgentTeam, Goal, and Workflow risk gates plus settings UI are now present. The ADR status still says phases 2–3 are planned. |
+| 0071 blocking lead review | Closed | Opt-in lead review, revision loop, terminal status ownership, receipts, and board behavior are wired. |
+| 0072 browser action recording | Limited | Recording, replay, exports, secret redaction, storage, and UI are present. The live WebView record→replay smoke remains unperformed and cross-origin/trusted-event limits inherit from ADR-0055. |
+| 0073 Chromium cookie import | Limited | macOS Chromium import and security boundaries are implemented. Windows, Linux, Firefox, and real Keychain/WKWebView smoke remain outside current coverage. |
+| 0074 native OpenTelemetry | Closed | Native export, credential ownership, cross-runtime correlation, feature gating, and privacy defaults are present. |
+| 0075 voice/TTS | Partial | Streaming read-aloud, provider cleanup, structured failures, retry, and pet voice work. Real amplitude-driven pet lips and richer voice-segment producers remain deferred; voice cloning is intentionally excluded. |
+| 0076 local-provider management | Closed | Native HTTP transport, scan/list/pull/delete/stop, progress, and Ollama embeddings are mounted with boot-order coverage. |
+| 0077 TUI external-agent hosting | Limited | Codex/Claude hosting and unified TUI rendering/approval work on supported systems. Windows is intentionally unavailable until a strict stdio-preserving sandbox exists. |
+| 0078 CLI ↔ App bridge | Partial | Local discovery, auth, product separation, and bridge routes work. Native startup still lacks an explicit compile-time mobile exclusion around `cli_bridge::init`. |
+| 0079 scheduler extension contract | Closed | Driver injection, exhaustive trigger/kind mapping, adapter registration, history aggregation, and OS capability validation are present. |
+| 0081 workflow callable/chained triggers | Closed | Published workflow tools, completion triggers, cycle rejection, payload propagation, and callable execution are wired. |
+| 0082 remote development host | Partial | Remote terminal/files/Git and explicit SSH profiles are present. Remote external agents, code-server/LSP, automated provisioning, and implicit tunnel fallback remain deferred. |
+| 0083 Context Workbench | Limited | Shared hosts, panels, plugin slots, context/reveal APIs, and rollback switches are present. Sandboxed Webview panels remain outside the design. |
+| 0084 Cognia Sites | Limited | Desktop authoring/deployment lifecycle and Cloudflare provider ownership are implemented in the accepted scope. Mobile read-only projection is not present and plain web intentionally does not own local Sites metadata. |
+| 0085 cloud shared browser | Rollout | Workspace runtime, remote Chromium engine, gateway, leases, quotas, and security rules exist but are experimental, image/health/config dependent, and default-off. |
+| 0086 task workspaces | Rollout | Reversible task workspace/patch machinery is accepted behind `developer.taskWorkspace`; GA still depends on the stated runtime matrix and ADR-0111 migration. |
+| 0087 Python plugin contributions | Partial | Nine supported contribution families dispatch through a real interpreter. Re-entrant chat-middleware continuation/retry/fan-out is not implemented, and experimental families remain default-off. |
+| 0088 Pro IDE | Limited | Persistent code-server, proxy, health, file-open, and extension trust separation work. Cross-ecosystem extension sharing, automatic pinned-Code upgrades, and multi-user-machine exposure remain unsupported. |
+| 0089 topic connector runtime | Closed | Topic identity, queue/steer policy, durable inbound jobs, CardKit progress, callback authorization, and connector state are present. |
+
+### ADR-0090 through ADR-0114
+
+| ADR | Verdict | Current gap or confirmation |
+| --- | --- | --- |
+| 0090 unified Agent execution | Closed | Agent Host/Gateway contracts, compatibility evidence, capability fail-closed behavior, routing, credential affinity, and migration are wired. |
+| 0091 Lark unified identity | Closed | Account isolation, binding/approval, dual entry, callback authorization, and operator configuration are present. |
+| 0092 official website workspace | Closed | Separate website/docs topology, aliases, data pipelines, and build ownership are present. |
+| 0093 selection toolbar sizing | Closed | Renderer measurement, native placement, reveal ordering, six actions, and platform handling are wired. |
+| 0094 conversation anchors/jump | Closed | Timeline, anchors, private permalinks, hydration, and message-location integration are present. |
+| 0095 desktop selection perception | Closed | Opt-in selection events and current platform backends are registered with workflow/event consumers. |
+| 0096 loading motion/accessibility | Closed | Shared loading primitives, reduced-motion policy, and the repository audit gate are present. |
+| 0097 cross-device settings | Closed | Generated contract, scoped mirrors, browser WebRTC reach, host-scoped cursors, and parity checks are present. |
+| 0098 persistent Workbench rail | Closed | Persistent/collapsed behavior, host-specific escape hatches, settings, and mounted rails are present. |
+| 0100 unified templates | Partial | Envelope, catalog, lifecycle, preflight, and domain adapters are live. Trust verifies self-contained signatures but has no publisher key pinning/registry, so publisher identity is still channel-derived. |
+| 0101 evaluation lab | Closed | Evidence capture, uncertainty, cost accounting, review provenance, recommendations, and reversible apply are present. |
+| 0102 observability/crash diagnostics | Rollout | Unified correlation, crash recovery, receipts, retention, and remote processing seams exist. Remote processing remains feature-gated and deployment/security-operation dependent. |
+| 0104 provider diagnostics | Closed | Quick/precise probes, fixed PII-gated samples, capability/latency evidence, and the control-plane UI are present. |
+| 0106 end-to-end skill recorder | Closed | Scoped capture, preflight, append-only bundle, review, generated disabled skill, isolated trial, and explicit enable are wired. |
+| 0107 coding-agent migration | Limited | Preview/apply routes through domain validators and supports current Claude/Codex/OpenCode artifacts. Source-private concepts without a safe Cognia representation remain reported but unapplied. |
+| 0108 Codex-inspired workflows | Closed | Task workspace, setup, review, terminal/browser/CDP, restore, and shared execution-root workflows are integrated without a duplicate engine. |
+| 0109 plugin catalog governance | Limited | Canonical catalog, generated mirrors, lifecycle ownership, and parity evidence are present. Stronger renderer isolation remains a separate security project. |
+| 0110 MCP governance | Closed | Registry, trust states, projection, credentials, versioning, scoped inbound clients, sync, and runtime gateway are present. |
+| 0111 managed workspace registry | Partial | Registry/bundle/storage/base-spec/sensitive-resource work is present, but the legacy AgentTeam `workspace/allocator.ts` and `reconciler.ts` still exist and the one-cycle kill switch remains. Scheduled/AgentTeam migration and removal decisions are therefore not fully closed. |
+| 0112 decision/provenance ledger | Closed | Derived projection, source adapters, conflict review, replay, and audit-gap behavior are present. |
+| 0113 AgentTeam multi-host | Rollout | Durable remote child dispatch, admission, recovery, worker-local credentials, and compatibility are implemented for dark launch. Remote dispatch is disabled by default and P0 explicitly excludes multi-user authority, auto-clone, multi-root children, PostgreSQL authority, and deployment operations. |
+| 0114 chat presentation | Closed | Presentation resolver, density/provenance behavior, renderer integration, compatibility rules, and tests are present in the audited working tree. |
+
+## Highest-value functional gap queue
+
+The record-by-record review produces this implementation order; it excludes pure status/documentation cleanup:
+
+1. Finish native plugin media parity (ADR-0016) so the four TS operations that lack Rust commands cannot fail at runtime.
+2. Make OCR truthful and self-maintaining (ADR-0024): scheduled TTL purge plus a real Windows binding or removal of the selectable placeholder.
+3. Complete External Bridge producers (ADR-0008): packaged Claude Code distribution, passive IDE ingestion, crawler, and explicit user-repository enrollment.
+4. Close non-Windows Computer Use parity and remaining target UX (ADR-0020).
+5. Finish managed-workspace migration and retire the legacy AgentTeam allocator (ADR-0111), then advance ADR-0086/0113 rollout gates.
+6. Decide whether the in-app Lark tier should expand beyond its six families (ADR-0026); if yes, add the missing family contracts instead of relying on separately installed Codex skills.
+7. Address the terminal remote-integration/binary-transport debt (ADR-0031/0033) and remote development phases (ADR-0082).
+8. Add the missing real-shell smoke evidence for Agent Browser, recorder, cookie import, mobile service workers, cloud browser, and other native-only seams.

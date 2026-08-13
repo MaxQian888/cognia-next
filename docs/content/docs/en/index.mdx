@@ -55,8 +55,9 @@ Two standalone services live alongside the monorepo:
 </Cards>
 
 <Callout type="info" title="ADRs">
-  Architecture Decision Records live under [`docs/content/docs/en/adr/`](./adr/0001-backup-schema-v3) — one
-  ADR per major decision. They are immutable historical records; if a doc page contradicts an ADR, the ADR wins.
+  Architecture Decision Records live in the [ADR catalogue](./adr). They preserve decision rationale; current
+  behavior is determined by the implementation and tests. When an ADR and the implementation diverge, the docs
+  describe the implementation and call out the drift instead of silently treating the ADR as runtime truth.
 </Callout>
 
 ## Pick your runtime mode

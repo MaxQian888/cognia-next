@@ -9,6 +9,10 @@ description: "Make the cognia-agent TUI render markdown more naturally and strea
 **Authors**: Max Qian + Claude Opus 4.8
 **Builds on**: the [Agent CLI TUI](../subsystems/cognia-agent-tui) subsystem, ADR-0050 (operation-experience hardening), and the sidecar built-in tools.
 
+## Current state amendment (2026-08-13)
+
+Interactive transcript cells are shipped. The remaining search cleanup is compatibility work: legacy `content_search` and `file_search` names should delegate to the canonical ripgrep/glob adapters after behavior-equivalence coverage, with the old names retained during the compatibility window.
+
 ## Context
 
 The TUI's markdown renderer, tool-call cards, and the sidecar's built-in tools were all functional but had rough edges surfaced by a research pass (and by studying OpenCode / Crush / glamour):

@@ -93,8 +93,20 @@ Tailwind v4 输出的 CSS 带哈希；可长缓存。
 ## 桌面构建（Tauri）
 
 ```bash
-pnpm tauri build
+pnpm tauri:build:bundled
 ```
+
+内置模式是默认发布模式：所有由应用启动的 JavaScript 进程统一使用随 Cognia
+打包且经过校验的 Node 26。需要更小的安装包时，使用
+`pnpm tauri:build:system-node`。轻量模式仍会打包 sidecar 代码与
+`node_modules`，只排除 Node 可执行文件；首次启动会检测 Node.js 26 或更高版本，
+缺失或版本过旧时应用仍可打开，并提供官方安装页面的直接入口。对应的开发命令是
+`pnpm tauri:dev:bundled` 与 `pnpm tauri:dev:system-node`。
+
+<Callout type="warn" title="请使用 profile 命令">
+  不要直接执行 `tauri build --features system-node-runtime`。package 命令还会移除
+  包内 Node 资源及其准备步骤；Cargo feature 只负责选择运行时行为。
+</Callout>
 
 它会：
 
@@ -170,7 +182,10 @@ Tauri 跨编译需要可观的搭建（Docker 镜像、sysroot）。日常做法
 ]
 ```
 
-Sidecar 的整个 `node_modules/` 都被打进去，因为 sidecar 作为独立 Node 进程运行，需要这些依赖。生产用户**不**需要本地 Node —— 包内的 Node 二进制（或宿主系统的）会运行 sidecar。
+两种模式都会打包 Sidecar 的整个 `node_modules/`，因为 sidecar 作为独立 Node
+进程运行，需要这些依赖。内置模式不会回退到系统 Node，轻量模式也不会回退到包内
+runtime；Agent、MCP helper、webclone、OAuth helper 与 JavaScript 插件会在同一
+进程内统一使用一个经过校验的 runtime。
 
 <Callout type="warn" title="tauri-build 在编译期校验这些路径">
   `bundle.resources` 里每个普通文件路径在任何编译 Rust crate 的地方都必须存在 —— 包括 headless 的 `Dockerfile.cognia-server` 构建。新增资源但不同步扩 Dockerfile 的 COPY 集会弄坏容器镜像；`images.yml` 的 PR paths 已覆盖编译输入，让它在 CI 就失败而不是拖到打 tag。

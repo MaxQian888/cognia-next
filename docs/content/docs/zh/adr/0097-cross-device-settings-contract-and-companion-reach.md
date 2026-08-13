@@ -181,13 +181,31 @@ D12 用主机签发的 **device id** 作为游标键，并在该键变化时清�
 凭证册的迁移也会改归同一批旧键。同步的某一拍可能跑在它前面，因此两条路径对「哪个水位留下」
 的判断必须一致 —— 已经落在新键下的那条胜出 —— 否则后跑的一方会把先跑的一方的水位回退。
 
+### D15 — 多 Host 协同已在生产路径可达（2026-08-13）
+
+Web 现有的 Runtime Target 菜单与 Mobile 的已配对服务器 Sheet 现在直接调用凭证册。两端都可通过
+`/pair?mode=add` 添加 Host、按稳定 `hostId` 切换、显示当前标记并完整移除。Web 的离线、不兼容、
+缺少授权统一进入 `/pair?mode=recover`；缺少授权时会显示准确能力，并明确要求在 Host → 设置 →
+Companion → 已配对设备中处理，不会暗示浏览器可以自行授予 Host 权限。
+
+Mobile 将 Companion 工作绑定到 `local_acct_a`，并以稳定 `hostId` 作为 runtime context、Runtime
+Snapshot、出站队列和目标数据库的作用域。带日志的收养迁移会从 `__local__` 复制并校验凭证册记录与
+秘密、保留当前 Host 指针、把旧数据迁入该 Host 的数据库并归属旧 Mobile 队列行；只有校验完成后才
+删除源数据。其他 Host 的数据库保持为空，直到第一次权威同步。
+
+切换会先等待出站 runner 静默，再停止旧 Host 订阅，然后切换凭证册/registry 指针、数据库和
+runtime context，重载 transport、协商 manifest、执行权威同步、重绑 Host 服务并发布 snapshot。
+失败会恢复全部状态；若回滚不完整，则清空 runtime context 与 transport 缓存，禁止向不明确的 Host
+发送工作。
+
+移除以远端完成为前提。客户端使用被移除 Host 的显式凭证和 TLS pin 调用
+`DELETE /api/devices/{deviceId}`。只有成功或明确的 `device_revoked` 响应才允许本地清理；离线、超时、
+普通认证失败与 `last_owner` 都保留配对、密钥、数据库、镜像、游标和全部队列状态以便重试。活动 Host
+存在替代项时必须先显式选择并验证备用 Host；Web 无替代 Host 时回到 standalone，Mobile 唯一 Host
+则保持活动完成撤销后进入未配对流程。
+
 ## 还没完成
 
-- ~~**手机上的多凭证册。**~~ **存储层已完成（2026-08-02）** —— 见 D13，切换路径见 D14。
-  还有一项刻意留待后续，且能从凭证册自身的 API 看出来：**目前还没有任何 UI 调用 `list()` /
-  `setActive()`。** 凭证册能持有多台主机，但现有调用方一律经由 `CompanionConfig` 适配器，
-  而它只回答当前活跃主机。主机列表与切换器随 Companion 设置的 master/detail 改造一并落地；
-  在那之前，凭证册的多主机能力可达但未在产品中被使用。
 - **工作流程布局（ADR-0061 P5正统）。** 没有任何东西能选择执行*哪里*。接收到的进程会触发cron或webhook——`trigger-bridge`调用`runWorkflow()`——没有桌面实时探测、执行者选择，也没有切换。D11使云主机的功能可见;桌面关闭时，它不会让任何程序运行。这需要分布式调度语义（谁算离线，时间长短，双方都认为应该跑什么`run-lease`），并且是刻意规划的。
 
 - **同伴设置master/detail。** 该部分仍然是一卷可折叠分组，而不是像Gateway或外观那样的导航+面板分割。故意推迟：它是导航形式，而非破损的机制。

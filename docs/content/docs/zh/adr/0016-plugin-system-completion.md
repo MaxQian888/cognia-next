@@ -7,6 +7,10 @@ description: "弥补了ADR 0006 留下的桌面运行时空白。审计接口 82
 
 **状态：** 提议 **日期：** 2026-05-09 **超复后续：** ADR 0006 §“Tauri后端间隙”
 
+## 当前状态修订（2026-08-13）
+
+Plugin Media TypeScript 接口现已具备 concatenate、effect、transition 与 export 的已注册原生处理器。实现复用 `cognia-media` 现有 ffmpeg 参数校验、timeout、临时路径与错误模型，没有新增第二套 JavaScript media API。已降级的 hook family 继续延期。
+
 ---
 
 ## 背景

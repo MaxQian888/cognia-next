@@ -11,6 +11,10 @@ description: Cross-shell text extraction from images and PDFs. Plumbs 20 OCR pro
 > (PP-OCRv6 via `oar-ocr` + ONNX Runtime), and `local-http` (generic
 > adapter for self-hosted servers like Umi-OCR / PaddleOCR-Server).
 
+## Current state amendment (2026-08-13)
+
+OCR cache expiry is owned by the existing central storage-retention sweep with the catalogued `ocrResults` executor. Provider controls derive from runtime capability status; unsupported placeholders cannot be enabled and remain visible only to explain the platform limitation. A Windows native backend is still a separate platform deliverable.
+
 ## Context
 
 cognia-next ships in three shells — browser (static export), Tauri 2.9

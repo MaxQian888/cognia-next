@@ -320,3 +320,7 @@ and string escaping while owning key order. A checked-in pack signed by
 the real `cognia pack sign` binary is verified in Jest by Node's own
 Ed25519, so the suite proves interop on a real artifact rather than only
 on vectors somebody remembered to write down.
+
+## Current-state amendment (2026-08-13)
+
+Character-pack storage, registry projection, signatures, dependency dimensions, and voice resolution are wired into chat and pet TTS. Portable `webDataUrl` assets supersede the historical `tauriPath` proposal, so the old asset-hook follow-up is closed rather than a reason to add a second asset path.
