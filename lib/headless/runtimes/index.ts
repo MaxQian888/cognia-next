@@ -16,7 +16,8 @@
  *   A2UI store (T-A4).
  * - `scheduler`, `workflow-runtime`, `agent-team-runtime`,
  *   `automation-policy`, `audit-retention`, `storage-retention`,
- *   `provider-core-runtime`, `routing-runtime`, `ocr-runtime`, `background-task`,
+ *   `provider-core-runtime`, `routing-runtime`, `ocr-runtime`,
+ *   `template-trust-reconciliation`, `background-task`,
  *   `provider-cost-mirror` — the boot-initializer batch (T-A7..A9; see
  *   ./initializers.ts for what is deliberately excluded and why).
  * - `connector-runtime` — the shared connector bootstrap with the Tauri
@@ -75,5 +76,6 @@ import "./managed-ide-broker"
 import "./memory-job-worker"
 import "./twin-job-worker"
 import "./integration-runtime"
+import "./performance-runtime"
 
 export {}

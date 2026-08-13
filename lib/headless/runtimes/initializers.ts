@@ -178,6 +178,15 @@ registerHeadlessRuntime({
   },
 })
 
+registerHeadlessRuntime({
+  name: "template-trust-reconciliation",
+  hosts: ["brain"],
+  start: async () => {
+    const { getTemplateRuntime } = await import("@/lib/templates/runtime")
+    await getTemplateRuntime().service.hydrateCatalog()
+  },
+})
+
 // ── A9: provider-core runtime adapters ──────────────────────────────────────
 
 registerHeadlessRuntime({
