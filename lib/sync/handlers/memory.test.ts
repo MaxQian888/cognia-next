@@ -8,7 +8,7 @@ import type { Memory } from "@/types/memory/memory"
 import { getDb } from "@/lib/db/schema"
 import { createMemorySyncRowV1, type EncryptedMemorySyncRowV1 } from "../memory-content-protocol"
 
-import { syncMemories } from "./memory"
+import { ensurePairedMemoryDek, syncMemories } from "./memory"
 
 function makeTransport(
   rows: EncryptedMemorySyncRowV1[],
@@ -108,5 +108,65 @@ describe("syncMemories", () => {
     )
     expect(out).toMatchObject({ ok: false, failure: { reason: "schema" } })
     expect(await getDb().memories.count()).toBe(0)
+  })
+})
+
+describe("ensurePairedMemoryDek", () => {
+  it("imports a missing DEK from the authenticated companion RPC", async () => {
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ])
+    let imported = false
+    const importPaired = jest.fn(async () => {
+      imported = true
+    })
+    const store = {
+      load: jest.fn(async () =>
+        imported ? { profileId: "memory-shared", keyId: "dek-1", key } : null
+      ),
+      importPaired,
+    }
+    const raw = Uint8Array.from({ length: 32 }, (_, index) => index)
+    const rawKey = btoa(String.fromCharCode(...raw))
+    const transport = {
+      call: jest.fn(async () => ({
+        protocolVersion: 1,
+        profileId: "memory-shared",
+        keyId: "dek-1",
+        rawKey,
+      })) as unknown as Transport["call"],
+      subscribe: jest.fn(() => () => {}) as unknown as Transport["subscribe"],
+    }
+
+    await expect(ensurePairedMemoryDek(transport, "memory-shared", "dek-1", store)).resolves.toBe(
+      key
+    )
+    expect(transport.call).toHaveBeenCalledWith("retrieval_profile_dek_export", {
+      profileId: "memory-shared",
+      contentProtocolVersion: 1,
+    })
+    expect(importPaired).toHaveBeenCalledWith("memory-shared", "dek-1", expect.any(Uint8Array), {
+      authenticated: true,
+      protocolVersion: 1,
+    })
+  })
+
+  it("rejects a mismatched pairing response", async () => {
+    const store = { load: jest.fn(async () => null), importPaired: jest.fn() }
+    const transport = {
+      call: jest.fn(async () => ({
+        protocolVersion: 1,
+        profileId: "other",
+        keyId: "dek-1",
+        rawKey: btoa("x".repeat(32)),
+      })) as unknown as Transport["call"],
+      subscribe: jest.fn(() => () => {}) as unknown as Transport["subscribe"],
+    }
+
+    await expect(
+      ensurePairedMemoryDek(transport, "memory-shared", "dek-1", store)
+    ).rejects.toMatchObject({ code: "upgrade_required" })
+    expect(store.importPaired).not.toHaveBeenCalled()
   })
 })

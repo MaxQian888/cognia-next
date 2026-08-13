@@ -106,6 +106,7 @@ import type {
   ImportMergeStrategy,
 } from "@/lib/data/types"
 import { adaptPermissionMode } from "@/lib/ai/agent/external/permission-modes"
+import { createProfileDekStore } from "@/lib/rag/profile-dek-store"
 import type {
   AcpPermissionMode,
   ExternalAgentProtocol,
@@ -373,6 +374,8 @@ export async function dispatchCommand(
       return memoryUpdateRpc(payload)
     case "memory_forget":
       return memoryForgetRpc(payload)
+    case "retrieval_profile_dek_export":
+      return retrievalProfileDekExport(payload)
     // External agents (ADR-0056, Wave 4). The desktop's external-agent config
     // lives in the `cognia-external-agents` Zustand/localStorage store (NOT a
     // Dexie table, so no sync mirror) — these arms project + mutate it for the
@@ -1287,6 +1290,37 @@ function decodeBase64(value: string): Uint8Array {
   const bytes = new Uint8Array(binary.length)
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
   return bytes
+}
+
+function encodeBase64(value: Uint8Array): string {
+  let binary = ""
+  for (const byte of value) binary += String.fromCharCode(byte)
+  return btoa(binary)
+}
+
+async function retrievalProfileDekExport(payload: Record<string, unknown>) {
+  const profileId = payload.profileId
+  const protocolVersion = payload.contentProtocolVersion
+  if (typeof profileId !== "string" || !profileId.trim()) {
+    throw new Error("retrieval_profile_dek_export.profileId is required")
+  }
+  if (protocolVersion !== 1) {
+    throw new Error("upgrade_required: retrieval content protocol v1 is required")
+  }
+  const exported = await createProfileDekStore().exportForPairing(profileId, {
+    authenticated: true,
+    protocolVersion,
+  })
+  try {
+    return {
+      protocolVersion: 1,
+      profileId: exported.profileId,
+      keyId: exported.keyId,
+      rawKey: encodeBase64(exported.rawKey),
+    }
+  } finally {
+    exported.rawKey.fill(0)
+  }
 }
 
 async function extractImageText(base64: string, mimeType: string): Promise<string> {
