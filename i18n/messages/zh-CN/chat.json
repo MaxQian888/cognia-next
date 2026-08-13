@@ -149,22 +149,6 @@
     "searchPlaceholder": "搜索角色…",
     "title": "选择一个角色"
   },
-  "compactBoundary": {
-    "auto": "自动",
-    "detail": "{from} → {to} tokens",
-    "effectiveness": "已回收 {pct}%",
-    "label": "上下文已压缩",
-    "manual": "手动",
-    "phase": "已在第 {turn} 轮重置上下文",
-    "viewFrames": "查看图像帧"
-  },
-  "compaction": {
-    "notification": "上下文已压缩",
-    "notificationDetail": "{from} → {to} tokens",
-    "undo": "撤销压缩",
-    "undoFailed": "无法恢复对话",
-    "undoSuccess": "对话已恢复"
-  },
   "checkpoint": {
     "action": "恢复到此文件检查点",
     "affectedFiles": "受影响的文件",
@@ -181,6 +165,22 @@
       "unknown": "预览未返回状态"
     },
     "title": "恢复文件检查点"
+  },
+  "compactBoundary": {
+    "auto": "自动",
+    "detail": "{from} → {to} tokens",
+    "effectiveness": "已回收 {pct}%",
+    "label": "上下文已压缩",
+    "manual": "手动",
+    "phase": "已在第 {turn} 轮重置上下文",
+    "viewFrames": "查看图像帧"
+  },
+  "compaction": {
+    "notification": "上下文已压缩",
+    "notificationDetail": "{from} → {to} tokens",
+    "undo": "撤销压缩",
+    "undoFailed": "无法恢复对话",
+    "undoSuccess": "对话已恢复"
   },
   "composer": {
     "ariaAttachImage": "添加文件",
@@ -381,7 +381,6 @@
         "global": "全局记忆",
         "workspace": "工作区记忆"
       },
-      "storedInMemory": "已存入{scope}",
       "storeError": {
         "disabled": "长期记忆已关闭。",
         "empty": "请输入要记住的内容。",
@@ -390,6 +389,7 @@
         "temporary": "临时模式下无法使用记忆。",
         "unavailable": "记忆存储当前不可用。"
       },
+      "storedInMemory": "已存入{scope}",
       "targetLabel": {
         "file:project": "项目记忆文件",
         "file:user": "用户记忆文件",
@@ -522,6 +522,12 @@
     "skills": {
       "enabled": "已启用技能「{name}」。"
     },
+    "smartSnapshot": {
+      "captureFailed": "智能快照失败",
+      "captureTooltip": "智能快照",
+      "captured": "已附加智能快照：{appName}",
+      "switchPrompt": "请切换到目标应用，Cognia 稍后会截取它。"
+    },
     "stopTooltip": "停止",
     "toolbar": {
       "breakdownAgents": "子智能体",
@@ -600,6 +606,7 @@
         },
         "inputLevel": "麦克风输入音量",
         "mute": "麦克风静音",
+        "noMicrophone": "未找到麦克风。",
         "phases": {
           "connecting": "正在连接…",
           "error": "连接错误",
@@ -610,7 +617,6 @@
           "speaking": "你正在说话",
           "thinking": "正在思考…"
         },
-        "noMicrophone": "未找到麦克风。",
         "reconnectProgress": "正在进行第 {attempt}/{maxAttempts} 次重连",
         "retry": "重新尝试",
         "selectMicrophone": "切换麦克风",
@@ -629,12 +635,6 @@
     "webLabel": "Web",
     "workflowRefs": {
       "removeAria": "移除对 {label} 的引用"
-    },
-    "smartSnapshot": {
-      "captureFailed": "智能快照失败",
-      "captureTooltip": "智能快照",
-      "captured": "已附加智能快照：{appName}",
-      "switchPrompt": "请切换到目标应用，Cognia 稍后会截取它。"
     }
   },
   "concurrent": {
@@ -753,13 +753,13 @@
     "accountSwitcher": {
       "active": "当前",
       "aria": "切换本会话使用的账号",
-      "noOverride": "继承",
-      "toast": "下一条消息将使用账号 {label}",
       "effective": "当前生效账号",
       "error": "无法切换账号。",
       "inheritedToast": "正在使用继承账号 {label}",
-      "toastInherited": "正在使用继承的账号。",
+      "noOverride": "继承",
       "switchFailed": "无法切换账号：{error}",
+      "toast": "下一条消息将使用账号 {label}",
+      "toastInherited": "正在使用继承的账号。",
       "unavailable": "账号切换当前不可用。",
       "unavailableWithId": "账号 {id} 当前不可用。",
       "useInherited": "使用继承账号"
@@ -789,68 +789,6 @@
     "cwdReset": "重置",
     "debugMode": "调试模式",
     "description": "为本会话覆盖默认值，留空则继承全局设置。",
-    "flowDisplay": {
-      "aria": "Agent 流程展示模式",
-      "detailed": "详细",
-      "simplified": "简化",
-      "standard": "标准"
-    },
-    "forkAria": "派生会话",
-    "forkSuccess": "已派生新会话，已切换到该分支。",
-    "forkTooltip": "派生会话 — 从当前会话的历史新建一条分支",
-    "forkUnsupported": "此 agent 不支持派生会话。",
-    "groups": {
-      "default": "默认",
-      "favorites": "收藏",
-      "other": "其他"
-    },
-    "hideArtifacts": "折叠产物面板",
-    "hideConversations": "折叠会话列表",
-    "insights": "会话洞察",
-    "memoryInherit": "继承应用设置",
-    "memoryLearn": "从此对话学习",
-    "memoryOff": "关闭",
-    "memoryOn": "开启",
-    "memoryUse": "在此对话使用记忆",
-    "noApiKey": "未配置 API Key",
-    "openBrowser": "打开浏览器面板",
-    "permissionModeAppDefault": "使用应用默认",
-    "permissionModeLabel": "权限模式",
-    "pickDirAria": "选择目录",
-    "pickDirTitle": "为本会话选择工作目录",
-    "presetConflict": {
-      "apply": "应用",
-      "cancel": "取消",
-      "fillEmptyBody": "保留你已经填写的内容，只在会话当前为空时套用预设。最安全的默认。",
-      "fillEmptyTitle": "仅填充空字段",
-      "mergeBody": "对这些标量字段而言等同于“仅填充空字段”。（适用于通过分区编辑器应用、且数组字段会被合并的场景。）",
-      "mergeTitle": "合并",
-      "overwriteAllBody": "无论会话是否已填写，都用预设的字段值覆盖。",
-      "overwriteAllTitle": "全部覆盖",
-      "summary": "该预设会覆盖以下{count, plural, =1 {字段} other {字段}}：{fields}。",
-      "title": "应用预设「{name}」？"
-    },
-    "presetHelp": "从预设中应用系统提示、模型、权限模式与工作目录。",
-    "presetLabel": "应用预设",
-    "presetNoneOption": "（无）",
-    "presetNonePlaceholder": "（无）",
-    "presetPill": {
-      "ariaLabel": "当前预设——点击切换",
-      "defaultBadge": "默认",
-      "empty": "没有匹配的预设。",
-      "manageAll": "管理所有预设…",
-      "none": "未使用预设",
-      "searchAriaLabel": "搜索预设",
-      "searchPlaceholder": "搜索预设…"
-    },
-    "providerUndoAria": "提供商撤销",
-    "providerUndoConfirm": "继续执行提供商撤销",
-    "providerUndoFailure": "提供商撤销失败：{error}",
-    "providerUndoProgress": "正在撤销…",
-    "providerUndoSuccess": "提供商撤销已完成",
-    "providerUndoTooltip": "运行提供商声明的 /undo 命令",
-    "providerUndoWarningDescription": "提供商可能会还原对话状态和文件更改。这是提供商原生撤销，并非恢复压缩前上下文。系统会针对当前外部智能体配置记住此确认。",
-    "providerUndoWarningTitle": "提供商撤销可能会更改文件",
     "execution": {
       "addEnv": "添加变量",
       "effort": "执行思考强度",
@@ -888,6 +826,71 @@
       "summaryPlan": "规划",
       "summaryUtility": "辅助"
     },
+    "flowDisplay": {
+      "aria": "Agent 流程展示模式",
+      "detailed": "详细",
+      "simplified": "简化",
+      "standard": "标准"
+    },
+    "forkAria": "派生会话",
+    "forkSuccess": "已派生新会话，已切换到该分支。",
+    "forkTooltip": "派生会话 — 从当前会话的历史新建一条分支",
+    "forkUnsupported": "此 agent 不支持派生会话。",
+    "groups": {
+      "default": "默认",
+      "favorites": "收藏",
+      "other": "其他"
+    },
+    "hideArtifacts": "折叠产物面板",
+    "hideConversations": "折叠会话列表",
+    "insights": "会话洞察",
+    "memoryInherit": "继承应用设置",
+    "memoryLearn": "从此对话学习",
+    "memoryOff": "关闭",
+    "memoryOn": "开启",
+    "memoryUse": "在此对话使用记忆",
+    "noApiKey": "未配置 API Key",
+    "openBrowser": "打开浏览器面板",
+    "openInCodexApp": "在 Codex App 中打开",
+    "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
+    "openedInCodexApp": "已在 Codex App 中打开。",
+    "permissionModeAppDefault": "使用应用默认",
+    "permissionModeLabel": "权限模式",
+    "pickDirAria": "选择目录",
+    "pickDirTitle": "为本会话选择工作目录",
+    "presetConflict": {
+      "apply": "应用",
+      "cancel": "取消",
+      "fillEmptyBody": "保留你已经填写的内容，只在会话当前为空时套用预设。最安全的默认。",
+      "fillEmptyTitle": "仅填充空字段",
+      "mergeBody": "对这些标量字段而言等同于“仅填充空字段”。（适用于通过分区编辑器应用、且数组字段会被合并的场景。）",
+      "mergeTitle": "合并",
+      "overwriteAllBody": "无论会话是否已填写，都用预设的字段值覆盖。",
+      "overwriteAllTitle": "全部覆盖",
+      "summary": "该预设会覆盖以下{count, plural, =1 {字段} other {字段}}：{fields}。",
+      "title": "应用预设「{name}」？"
+    },
+    "presetHelp": "从预设中应用系统提示、模型、权限模式与工作目录。",
+    "presetLabel": "应用预设",
+    "presetNoneOption": "（无）",
+    "presetNonePlaceholder": "（无）",
+    "presetPill": {
+      "ariaLabel": "当前预设——点击切换",
+      "defaultBadge": "默认",
+      "empty": "没有匹配的预设。",
+      "manageAll": "管理所有预设…",
+      "none": "未使用预设",
+      "searchAriaLabel": "搜索预设",
+      "searchPlaceholder": "搜索预设…"
+    },
+    "providerUndoAria": "提供商撤销",
+    "providerUndoConfirm": "继续执行提供商撤销",
+    "providerUndoFailure": "提供商撤销失败：{error}",
+    "providerUndoProgress": "正在撤销…",
+    "providerUndoSuccess": "提供商撤销已完成",
+    "providerUndoTooltip": "运行提供商声明的 /undo 命令",
+    "providerUndoWarningDescription": "提供商可能会还原对话状态和文件更改。这是提供商原生撤销，并非恢复压缩前上下文。系统会针对当前外部智能体配置记住此确认。",
+    "providerUndoWarningTitle": "提供商撤销可能会更改文件",
     "save": "保存",
     "sessionCommunication": "会话通信",
     "sheet": {
@@ -922,10 +925,7 @@
     "unreadArtifacts": "有新产物 · 展开面板",
     "untitledSession": "（未命名）",
     "workingDirLabel": "工作目录",
-    "workingDirPlaceholder": "/path/to/project",
-    "openInCodexApp": "在 Codex App 中打开",
-    "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
-    "openedInCodexApp": "已在 Codex App 中打开。"
+    "workingDirPlaceholder": "/path/to/project"
   },
   "history": {
     "loadError": "无法加载此对话。",
@@ -948,13 +948,13 @@
     "dismiss": "忽略",
     "environmentSetupFailed": "项目环境初始化失败。请重试，或仅为当前交互回合明确绕过初始化。",
     "environmentUnavailable": "所选项目环境不可用。",
+    "managedWorktreeUnavailable": "托管 Worktree 不可用。此任务未在本地目录中运行。",
     "noSession": "当前没有打开的会话，请先新建一个再发送。",
     "openSettings": "打开设置",
     "pendingPromptPiiBlocked": "自动提示词可能包含隐私或凭据类数据，已阻止发送。请新建普通对话，并只提供你明确希望发送的内容。",
     "retry": "重试",
     "sidecarExited": "AI 进程意外停止，本轮已中断。点击重试可继续。",
     "title": "发送失败",
-    "managedWorktreeUnavailable": "托管 Worktree 不可用。此任务未在本地目录中运行。",
     "unflushedEditorBuffers": "本回合开始前有 {count} 个打开的文件未能保存，agent 可能读到过期内容：{files}"
   },
   "jump": {
@@ -1163,7 +1163,9 @@
       "timeout": "请求耗时过长——请重试，或调高超时时间。",
       "unauthorized": "身份验证失败——请在设置中检查 API 密钥或令牌。"
     },
+    "moreLabel": "更多消息操作",
     "pluginMenu": "插件操作",
+    "quoteLabel": "引用到输入框",
     "readAloud": "朗读",
     "reasoning": {
       "completed": "思考了几秒",
@@ -1185,12 +1187,45 @@
     "truncateFromLabel": "从这里删除",
     "truncateFromTooltip": "删除这条消息以及其后的全部内容",
     "unknownPart": "未知内容（{type}）",
+    "unknownPartDiagnostic": {
+      "circular": "[循环引用]",
+      "redacted": "[已隐藏]",
+      "truncated": "… [已截断]",
+      "unavailable": "[诊断数据不可用]"
+    },
     "usageCacheHit": "缓存命中：{n}",
     "usageCacheWrite": "缓存写入：{n}",
     "usageCost": "费用：${cost}",
     "usageInput": "输入：{n}",
     "usageOutput": "输出：{n}",
     "usageReasoning": "推理：{n}"
+  },
+  "messageDisplay": {
+    "assistant": "助手",
+    "details": "消息详情",
+    "durationValue": "{value} 毫秒",
+    "metadata": {
+      "cost": "费用",
+      "duration": "耗时",
+      "finishState": "结束状态",
+      "identity": "身份",
+      "model": "模型",
+      "provider": "提供商",
+      "timestamp": "时间",
+      "usage": "Token"
+    },
+    "status": {
+      "complete": "已完成",
+      "error": "失败",
+      "streaming": "正在回复"
+    },
+    "story": {
+      "assistantAnswer": "这是一个信息丰富但保持克制的长回答阅读界面。",
+      "rendererOwnership": "助手内容仍由现有的富消息部件渲染器负责。",
+      "userQuestion": "可以解释一下这个实现吗？"
+    },
+    "usageValue": "↑{input} ↓{output}",
+    "you": "你"
   },
   "ocrResult": {
     "askAbout": "追问此内容",
@@ -1453,8 +1488,6 @@
     "attachedCreateError": "无法创建附加会话。",
     "attachedCreated": "已创建附加会话。",
     "attachedPromptLabel": "初始提示词",
-    "attachedTab": "附加会话",
-    "attachedTitleLabel": "任务标题",
     "attachedStatus": {
       "closed": "已关闭",
       "completed": "已完成",
@@ -1462,6 +1495,8 @@
       "running": "运行中",
       "staged": "待运行"
     },
+    "attachedTab": "附加会话",
+    "attachedTitleLabel": "任务标题",
     "closeAttached": "关闭",
     "contextFull": "完整父会话上下文",
     "contextLabel": "上下文分叉",
@@ -1552,8 +1587,8 @@
     "citationsLabel": "{count, plural, other {# 个网页来源}}",
     "degradedNotice": "数字分身检索不可用 — 本次回复未使用其资料。",
     "originLabel": {
-      "anthropic": "网络",
       "agentKnowledgeBase": "Agent 知识库",
+      "anthropic": "网络",
       "footnote": "脚注",
       "memory": "记忆",
       "twinRag": "数字分身",
@@ -1626,13 +1661,6 @@
     "today": "今天",
     "yesterday": "昨天"
   },
-  "transcript": {
-    "collapseTurn": "收起轮次",
-    "expandTurn": "展开完整轮次",
-    "loadOlder": "加载更早轮次",
-    "loading": "正在加载聊天记录…",
-    "retry": "重试加载聊天记录"
-  },
   "toolApproval": {
     "actionsTitle": "审批操作",
     "allowAlways": "始终允许",
@@ -1645,6 +1673,13 @@
     "interruptedNotice": "该请求已被中断——工具调用已被拒绝。重新发送消息可重试。",
     "titleFallback": "允许执行 {tool}？",
     "toolLabel": "工具"
+  },
+  "transcript": {
+    "collapseTurn": "收起轮次",
+    "expandTurn": "展开完整轮次",
+    "loadOlder": "加载更早轮次",
+    "loading": "正在加载聊天记录…",
+    "retry": "重试加载聊天记录"
   },
   "truncateFrom": {
     "cancel": "保留",

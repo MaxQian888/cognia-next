@@ -114,6 +114,30 @@
         "workspace": "Workspace"
       }
     },
+    "metadata": {
+      "agent": {
+        "description": "Show the character or team responsible for the conversation.",
+        "heading": "Agent",
+        "label": "Show agent"
+      },
+      "description": "Choose the context shown beneath each conversation title. The selected order is preserved.",
+      "heading": "Row details",
+      "model": {
+        "description": "Show the effective model after session, agent, and app defaults are resolved.",
+        "heading": "Model",
+        "label": "Show model"
+      },
+      "provider": {
+        "description": "Show the effective model provider.",
+        "heading": "Provider",
+        "label": "Show provider"
+      },
+      "workspace": {
+        "description": "Show the workspace that owns the conversation.",
+        "heading": "Workspace",
+        "label": "Show workspace"
+      }
+    },
     "preview": {
       "description": "Show a second line with the latest message under each conversation.",
       "heading": "Message preview",
@@ -125,6 +149,11 @@
       "heading": "Sidebar width"
     },
     "title": "Conversation sidebar",
+    "titleMotion": {
+      "description": "Reveal overflowing titles with a paused back-and-forth scroll on hover. Reduced-motion preferences always stay static.",
+      "heading": "Long-title motion",
+      "label": "Scroll long titles on hover"
+    },
     "unread": {
       "description": "Show a count badge on conversations with unread messages.",
       "heading": "Unread badges",

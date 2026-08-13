@@ -134,7 +134,10 @@
     "useSvg": "Built-in vector mascot"
   },
   "bubbles": {
-    "achievementUnlocked": ["We earned a badge!", "Achievement get!"],
+    "achievementUnlocked": [
+      "We earned a badge!",
+      "Achievement get!"
+    ],
     "birthday": {
       "0": "It's my hatch day! 🎂",
       "1": "Happy birthday to me! Thanks for another year!"
@@ -143,54 +146,149 @@
       "0": "Squeaky clean!",
       "1": "So fresh!"
     },
-    "error": ["Uh oh…", "That hurt.", "Let's retry."],
-    "evolved": ["I evolved!", "New me!"],
-    "fed": ["Yum!", "Tasty!", "Nom nom."],
-    "goalComplete": ["Goal smashed!", "We did it!", "Victory!"],
-    "greeting": ["Hi there!", "Welcome back!", "Hey!"],
-    "hatched": ["Hello world!", "I'm here!"],
+    "error": [
+      "Uh oh…",
+      "That hurt.",
+      "Let's retry."
+    ],
+    "evolved": [
+      "I evolved!",
+      "New me!"
+    ],
+    "fed": [
+      "Yum!",
+      "Tasty!",
+      "Nom nom."
+    ],
+    "goalComplete": [
+      "Goal smashed!",
+      "We did it!",
+      "Victory!"
+    ],
+    "greeting": [
+      "Hi there!",
+      "Welcome back!",
+      "Hey!"
+    ],
+    "hatched": [
+      "Hello world!",
+      "I'm here!"
+    ],
     "idle": {
-      "content": ["…", "Just vibing.", "All good."],
-      "grumpy": ["Hmph.", "Not now."],
-      "happy": ["Best day!", "So happy!", "☀"],
-      "lonely": ["Miss you…", "Hello?"],
-      "tired": ["So sleepy…", "Yawn…"]
+      "content": [
+        "…",
+        "Just vibing.",
+        "All good."
+      ],
+      "grumpy": [
+        "Hmph.",
+        "Not now."
+      ],
+      "happy": [
+        "Best day!",
+        "So happy!",
+        "☀"
+      ],
+      "lonely": [
+        "Miss you…",
+        "Hello?"
+      ],
+      "tired": [
+        "So sleepy…",
+        "Yawn…"
+      ]
     },
-    "inboundMessage": ["You've got mail!", "Ping!"],
-    "levelUp": ["Level up!", "Getting stronger!"],
-    "petted": ["Purr…", "That's nice.", "♥"],
-    "played": ["So fun!", "Again!", "Wheee!"],
-    "review": ["Take a look?", "Ready for review."],
+    "inboundMessage": [
+      "You've got mail!",
+      "Ping!"
+    ],
+    "levelUp": [
+      "Level up!",
+      "Getting stronger!"
+    ],
+    "petted": [
+      "Purr…",
+      "That's nice.",
+      "♥"
+    ],
+    "played": [
+      "So fun!",
+      "Again!",
+      "Wheee!"
+    ],
+    "review": [
+      "Take a look?",
+      "Ready for review."
+    ],
     "scheduledRunDue": [
       "Reminder! Your scheduled task is due.",
       "Hey, it's time for your scheduled task!"
     ],
-    "scheduledRunStarting": ["On it — running your task…", "Task time! Working on it…"],
+    "scheduledRunStarting": [
+      "On it — running your task…",
+      "Task time! Working on it…"
+    ],
     "slept": {
       "0": "Zzz…",
       "1": "So cozy…"
     },
     "snarky": {
-      "error": ["Who wrote this? …Oh.", "Not my bug."],
-      "fed": ["Finally.", "Acceptable."],
-      "petted": ["I'll allow it.", "Hmph. Nice."],
-      "played": ["I let you win.", "Again. Obviously."],
-      "success": ["I did most of that.", "As expected."]
+      "error": [
+        "Who wrote this? …Oh.",
+        "Not my bug."
+      ],
+      "fed": [
+        "Finally.",
+        "Acceptable."
+      ],
+      "petted": [
+        "I'll allow it.",
+        "Hmph. Nice."
+      ],
+      "played": [
+        "I let you win.",
+        "Again. Obviously."
+      ],
+      "success": [
+        "I did most of that.",
+        "As expected."
+      ]
     },
     "streakDay": {
       "0": "Day {days} together! Coins are flowing!",
       "1": "{days}-day streak — we're on fire!"
     },
-    "success": ["Nailed it!", "Done and done.", "Yay!"],
-    "talked": ["I'm listening!", "Tell me more?", "Hehe, okay!"],
-    "thinking": ["Hmm, working on it…", "Let me think…", "Crunching…"],
+    "success": [
+      "Nailed it!",
+      "Done and done.",
+      "Yay!"
+    ],
+    "talked": [
+      "I'm listening!",
+      "Tell me more?",
+      "Hehe, okay!"
+    ],
+    "thinking": [
+      "Hmm, working on it…",
+      "Let me think…",
+      "Crunching…"
+    ],
     "treated": {
       "0": "Yummy! Thank you!",
       "1": "Best treat ever! ♥"
     },
-    "twinBusy": ["Quietly going through your notes…", "Learning a bit more about you…"],
-    "twinMilestone": ["I just learned something new about you!", "Fresh insight unlocked!"],
-    "waiting": ["Your call!", "Waiting on you…"]
+    "twinBusy": [
+      "Quietly going through your notes…",
+      "Learning a bit more about you…"
+    ],
+    "twinMilestone": [
+      "I just learned something new about you!",
+      "Fresh insight unlocked!"
+    ],
+    "waiting": [
+      "Your call!",
+      "Waiting on you…"
+    ]
   },
   "care": {
     "unwell": {
@@ -218,8 +316,8 @@
     "openFullChat": "Open full chat",
     "openPanel": "Chat",
     "petFallbackName": "Pet",
-    "sending": "{name} is thinking…",
     "scrollToBottom": "Scroll to the latest pet message",
+    "sending": "{name} is thinking…",
     "you": "You"
   },
   "condition": {
@@ -330,10 +428,10 @@
       "spriteManagedBelow": "Create, import, and switch v2 sprite pets in the Appearance section below.",
       "title": "Look"
     },
+    "openSettings": "Open full pet settings",
     "preview": {
       "unavailable": "Hatch your pet to see the live preview."
     },
-    "openSettings": "Open full pet settings",
     "sound": {
       "description": "Sound effects and quiet hours.",
       "title": "Sound"

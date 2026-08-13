@@ -1,0 +1,13 @@
+{
+  "apply": "应用",
+  "download": "下载",
+  "editorDescription": "编辑结构化配置，验证后应用更改。",
+  "editorLabel": "结构化配置编辑器",
+  "format": "格式",
+  "import": "导入",
+  "invalid": "配置无效：{message}",
+  "json": "JSON",
+  "reset": "重置",
+  "validate": "验证",
+  "yaml": "YAML"
+}

@@ -227,7 +227,6 @@
       "pick": "选择导出文件"
     },
     "heading": "导入测试集",
-    "progress": "已导入 {done} / {total}",
     "hf": {
       "fetch": "拉取并导入",
       "limit": "导入行数",
@@ -250,6 +249,7 @@
     "nothingToImport": "没有可导入的内容 —— 请检查列映射。",
     "preview": "已解析 {count} 条用例",
     "previewSample": "预览 {count} 行样本；实际将导入 {total} 条",
+    "progress": "已导入 {done} / {total}",
     "skipped": "跳过 {count} 行",
     "stage": "暂存 {count} 条用例",
     "tabs": {
@@ -583,8 +583,8 @@
     "targetKind": "目标类型",
     "targetLabel": "标签",
     "targetRef": "模型 / 团队 / 工作流 ID",
-    "twinModel": "孪生模型",
-    "targets": "被测目标"
+    "targets": "被测目标",
+    "twinModel": "孪生模型"
   },
   "runDetail": {
     "agentOutput": "模型回答",

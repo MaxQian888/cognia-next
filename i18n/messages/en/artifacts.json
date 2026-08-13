@@ -70,6 +70,10 @@
   "noVersions": "No version history",
   "openFullDesigner": "Open Full Designer",
   "openWithDefault": "Open with Default App",
+  "pluginRenderer": {
+    "failed": "The plugin renderer failed.",
+    "loading": "Loading plugin renderer…"
+  },
   "preview": "Preview",
   "previewInDesigner": "Preview in Designer",
   "previousVersion": "Previous version",
@@ -179,12 +183,6 @@
     "reviewEmpty": "Select a changed file to review its diff",
     "scopeLabel": "Workspace scope",
     "taskResources": {
-      "agent": "Agent",
-      "allCaptureClasses": "Source and generated",
-      "allOrigins": "All sources",
-      "allStatuses": "All changes",
-      "allTime": "All time",
-      "any": "Filesystem change",
       "adoptionGenerationOnly": "{lines} generated lines · adoption unavailable for the legacy fallback",
       "adoptionPending": "{lines} proposed lines · awaiting review",
       "adoptionRate": "{rate}% adopted · {accepted} of {proposed} changed lines",
@@ -193,6 +191,12 @@
       "adoptionTitle": "AI code adoption",
       "adoptionTruncated": "Partial tracking coverage",
       "adoptionUnavailable": "Adoption coverage unavailable",
+      "agent": "Agent",
+      "allCaptureClasses": "Source and generated",
+      "allOrigins": "All sources",
+      "allStatuses": "All changes",
+      "allTime": "All time",
+      "any": "Filesystem change",
       "applyAll": "Apply all",
       "applyFile": "Apply file",
       "applySelectedHunks": "Apply {count} hunks",
@@ -264,9 +268,5 @@
       "description": "Workspace editing requires the desktop app or a paired companion filesystem.",
       "title": "Workspace is unavailable"
     }
-  },
-  "pluginRenderer": {
-    "failed": "The plugin renderer failed.",
-    "loading": "Loading plugin renderer…"
   }
 }

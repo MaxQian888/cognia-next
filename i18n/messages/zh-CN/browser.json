@@ -1,15 +1,4 @@
 {
-  "adjust": {
-    "accept": "接受反馈",
-    "accepted": "调整反馈已可发送，实时预览已还原。",
-    "color": "颜色（例如 #2563eb）",
-    "font": "字体（例如 16px Inter）",
-    "label": "浏览器调整",
-    "preview": "预览",
-    "revert": "还原",
-    "spacing": "间距（例如 8px 12px）",
-    "text": "替换文本"
-  },
   "actions": {
     "back": "后退",
     "cancelSelect": "取消选择",
@@ -20,6 +9,17 @@
     "reload": "刷新",
     "screenshot": "截图发送到对话",
     "selectElement": "选择元素"
+  },
+  "adjust": {
+    "accept": "接受反馈",
+    "accepted": "调整反馈已可发送，实时预览已还原。",
+    "color": "颜色（例如 #2563eb）",
+    "font": "字体（例如 16px Inter）",
+    "label": "浏览器调整",
+    "preview": "预览",
+    "revert": "还原",
+    "spacing": "间距（例如 8px 12px）",
+    "text": "替换文本"
   },
   "agent": {
     "driving": "智能体操作中",
@@ -116,8 +116,8 @@
     "title": "预览网页"
   },
   "errors": {
-    "navigate": "无法导航到该地址",
-    "httpsProxyUnsupported": "此浏览器预览不支持 HTTPS 代理。"
+    "httpsProxyUnsupported": "此浏览器预览不支持 HTTPS 代理。",
+    "navigate": "无法导航到该地址"
   },
   "find": {
     "close": "关闭查找",

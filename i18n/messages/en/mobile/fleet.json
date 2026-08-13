@@ -1,6 +1,11 @@
 {
   "connectFirst": "Connect to your desktop to watch its agent fleet.",
   "empty": "No active agents.",
+  "hostCapacity": "{used}/{total} slots",
+  "hostEmpty": "No active sessions on this host.",
+  "hostOffline": "Offline",
+  "hostOnline": "Online",
+  "localHost": "Local host",
   "permission": {
     "allow": "Allow",
     "allowed": "Allowed",
@@ -19,6 +24,8 @@
     "countdown": "{seconds}s left",
     "expired": "The answer window closed — answer in the terminal.",
     "failed": "Could not send the answer.",
+    "reject": "Reject",
+    "rejected": "Rejected.",
     "submit": "Submit"
   },
   "reply": {
@@ -34,7 +41,9 @@
     },
     "focus": "Focus terminal",
     "focusFailed": "Couldn't focus the terminal.",
+    "openTeam": "Open AgentTeam run",
     "status": {
+      "detached": "Monitoring detached",
       "ended": "Session ended",
       "idle": "Idle",
       "planPending": "Plan awaiting approval on desktop",
@@ -46,5 +55,7 @@
   },
   "summary": "{total, plural, one {# agent} other {# agents}}",
   "title": "Agent Fleet",
-  "waiting": "{count} waiting"
+  "waiting": "{count} waiting",
+  "workspaceMissing": "Repository binding missing",
+  "workspaceReady": "Workspace ready"
 }

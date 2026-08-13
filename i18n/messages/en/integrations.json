@@ -1,34 +1,33 @@
 {
   "accounts": {
     "add": "Add account",
+    "advanced": "Advanced",
     "approvedOrigin": "Approved self-hosted HTTPS origin (optional)",
     "authStrategy": "Authentication method",
-    "credentialHandle": "Credential handle",
-    "discoverInstallations": "Discover installations",
-    "integration": "Integration",
-    "installation": "Installation",
-    "label": "Account label",
-    "providerId": "Auth provider ID",
-    "remoteAccountId": "Remote account ID",
-    "selectAuthStrategy": "Select an authentication method",
-    "selectIntegration": "Select an integration",
-    "selectInstallation": "Select an installation",
-    "title": "Accounts",
-    "advanced": "Advanced",
     "checkHealth": "Check account health",
-    "configured": "Configured",
     "configFields": {
       "accountLabel": "Account label",
       "appId": "App ID",
       "privateKey": "Private key",
       "token": "Personal access token"
     },
+    "configured": "Configured",
+    "credentialHandle": "Credential handle",
     "dedicatedAppConfirmation": "I confirm this is a dedicated integration app.",
+    "discoverInstallations": "Discover installations",
+    "installation": "Installation",
+    "integration": "Integration",
+    "label": "Account label",
     "lastSync": "Last sync",
     "missingPermissions": "Missing permissions",
     "notConfigured": "Not configured",
+    "providerId": "Auth provider ID",
     "rateLimitReset": "Rate limit resets",
     "recommended": "Recommended",
+    "remoteAccountId": "Remote account ID",
+    "selectAuthStrategy": "Select an authentication method",
+    "selectInstallation": "Select an installation",
+    "selectIntegration": "Select an integration",
     "statusMessages": {
       "installationRevoked": "The GitHub App installation was revoked.",
       "installationSuspended": "The GitHub App installation is suspended.",
@@ -36,6 +35,7 @@
       "remoteReconciliationUnavailable": "Remote account reconciliation is unavailable.",
       "webhookVerified": "The webhook configuration was verified."
     },
+    "title": "Accounts",
     "validateAndAdd": "Validate and add",
     "webhookUrl": "Webhook URL",
     "webhookVerification": "Webhook verification"
@@ -54,6 +54,14 @@
   "disable": "Disable",
   "emptyPlugins": "Install an Integration-capable Marketplace plugin to begin.",
   "enable": "Enable",
+  "errors": {
+    "accountSetup": "Couldn't set up the integration account.",
+    "confirmDedicatedApp": "Confirm that this is a dedicated integration app.",
+    "installationDiscovery": "Couldn't discover GitHub App installations.",
+    "projectionRequired": "Select an inbox projection.",
+    "resourceDiscovery": "Couldn't discover resources.",
+    "subscriptionSetup": "Couldn't create the subscription."
+  },
   "health": {
     "degraded": "Degraded",
     "healthy": "Healthy",
@@ -81,16 +89,9 @@
     "account": "Account",
     "add": "Add subscription",
     "allResources": "All resources",
-    "eventTypes": "Event types, comma-separated",
-    "ingressSecret": "Webhook secret (required when ingress is enabled)",
-    "resourceId": "Resource ID (optional)",
-    "resourceKind": "Resource kind (optional)",
-    "selectAccount": "Select an account",
-    "title": "Subscriptions",
     "deliverToInbox": "Deliver events to Inbox",
     "disabledByProvider": "Disabled by the provider",
     "discover": "Discover",
-    "events": "Events",
     "eventLabels": {
       "checkRunCompleted": "Check run completed",
       "githubAppAuthorizationRevoked": "GitHub App authorization revoked",
@@ -114,7 +115,10 @@
       "repositoriesAdded": "Repositories added to installation",
       "repositoriesRemoved": "Repositories removed from installation"
     },
+    "eventTypes": "Event types, comma-separated",
+    "events": "Events",
     "failedDeliveries": "Failed deliveries",
+    "ingressSecret": "Webhook secret (required when ingress is enabled)",
     "loadMore": "Load more",
     "noFailedDeliveries": "No failed deliveries.",
     "projection": "Inbox projection",
@@ -125,17 +129,13 @@
     },
     "repository": "Repository",
     "requeue": "Requeue",
+    "resourceId": "Resource ID (optional)",
+    "resourceKind": "Resource kind (optional)",
     "searchResources": "Search resources",
-    "selectProjection": "Select a projection"
+    "selectAccount": "Select an account",
+    "selectProjection": "Select a projection",
+    "title": "Subscriptions"
   },
   "title": "Integrations",
-  "errors": {
-    "accountSetup": "Couldn't set up the integration account.",
-    "confirmDedicatedApp": "Confirm that this is a dedicated integration app.",
-    "installationDiscovery": "Couldn't discover GitHub App installations.",
-    "projectionRequired": "Select an inbox projection.",
-    "resourceDiscovery": "Couldn't discover resources.",
-    "subscriptionSetup": "Couldn't create the subscription."
-  },
   "unsupportedWeb": "Integration management requires the desktop app."
 }

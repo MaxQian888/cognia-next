@@ -1,4 +1,63 @@
 {
+  "aiShell": {
+    "actions": {
+      "cancel": "Cancel",
+      "newPlan": "New plan",
+      "runAll": "Run all",
+      "stepByStep": "Step by step",
+      "stop": "Stop execution"
+    },
+    "advisory": {
+      "applyFix": "Apply fix",
+      "fix": "Suggested fix:",
+      "noFix": "No automatic fix available.",
+      "retryHint": "Re-run the original step after applying the fix.",
+      "title": "Error Diagnosis"
+    },
+    "context": {
+      "branch": "Branch",
+      "cwd": "CWD",
+      "shell": "Shell"
+    },
+    "error": {
+      "advisory": "Diagnosis",
+      "generating": "Error generating plan.",
+      "noModel": "No model configured. Set one in settings.",
+      "piiBlocked": "Context contains secrets — redact before retrying."
+    },
+    "history": {
+      "clear": "Clear history",
+      "empty": "No messages yet.",
+      "title": "AI Shell history"
+    },
+    "inputPlaceholder": "Describe what you want to do…",
+    "plan": {
+      "cancelled": "Plan cancelled.",
+      "completed": "All steps completed.",
+      "empty": "No steps generated.",
+      "error": "Failed to generate plan.",
+      "executing": "Executing…",
+      "generating": "Generating plan…",
+      "ready": "Plan ready — review and run.",
+      "title": "Execution Plan"
+    },
+    "send": "Send",
+    "step": {
+      "cancelled": "Cancelled",
+      "confirm": "This step may be destructive. Run it?",
+      "edit": "Edit command",
+      "failed": "Failed (exit {code})",
+      "failedNoCode": "Failed",
+      "pending": "Pending",
+      "retry": "Retry step",
+      "running": "Running…",
+      "skip": "Skip step",
+      "skipped": "Skipped",
+      "succeeded": "Done"
+    },
+    "title": "AI Shell",
+    "toggle": "Toggle AI Shell (Ctrl+Shift+I)"
+  },
   "commandMenu": {
     "copyCommand": "Copy command",
     "copyCommandAndOutput": "Copy command and output",
@@ -120,6 +179,45 @@
     "title": "Quick fixes",
     "trigger": "Show quick fixes"
   },
+  "recording": {
+    "discard": "Discard recording",
+    "elapsed": "{time}",
+    "export": {
+      "cast": "Export as .cast",
+      "done": "Export complete",
+      "error": "Export failed: {message}",
+      "exporting": "Exporting…",
+      "gif": "Export as GIF",
+      "title": "Export"
+    },
+    "frames": "{count} frames",
+    "list": {
+      "delete": "Delete recording",
+      "deleteConfirm": "Delete this recording? This cannot be undone.",
+      "empty": "No recordings yet.",
+      "title": "Recordings"
+    },
+    "pause": "Pause recording",
+    "player": {
+      "duration": "{time}",
+      "pause": "Pause",
+      "play": "Play",
+      "restart": "Restart",
+      "seek": "Seek",
+      "speed": "Speed: {speed}×"
+    },
+    "resume": "Resume recording",
+    "save": "Save recording",
+    "start": "Start recording",
+    "status": {
+      "idle": "Ready to record",
+      "paused": "Paused",
+      "recording": "Recording…",
+      "stopped": "Recording complete"
+    },
+    "stop": "Stop recording",
+    "title": "Recording"
+  },
   "search": {
     "caseSensitive": "Match case",
     "close": "Close find",
@@ -158,13 +256,6 @@
   },
   "stickyScroll": {
     "label": "Sticky command header"
-  },
-  "template": {
-    "cancel": "Cancel",
-    "inputPlaceholder": "Enter value",
-    "run": "Run",
-    "selectPlaceholder": "Choose an option",
-    "title": "Fill template variables"
   },
   "tab": {
     "appearance": {
@@ -222,102 +313,11 @@
       "running": "Running"
     }
   },
-  "aiShell": {
-    "title": "AI Shell",
-    "toggle": "Toggle AI Shell (Ctrl+Shift+I)",
-    "inputPlaceholder": "Describe what you want to do…",
-    "send": "Send",
-    "context": {
-      "branch": "Branch",
-      "cwd": "CWD",
-      "shell": "Shell"
-    },
-    "plan": {
-      "title": "Execution Plan",
-      "empty": "No steps generated.",
-      "generating": "Generating plan…",
-      "ready": "Plan ready — review and run.",
-      "executing": "Executing…",
-      "completed": "All steps completed.",
-      "cancelled": "Plan cancelled.",
-      "error": "Failed to generate plan."
-    },
-    "step": {
-      "pending": "Pending",
-      "running": "Running…",
-      "succeeded": "Done",
-      "failed": "Failed (exit {code})",
-      "failedNoCode": "Failed",
-      "skipped": "Skipped",
-      "cancelled": "Cancelled",
-      "confirm": "This step may be destructive. Run it?",
-      "edit": "Edit command",
-      "skip": "Skip step",
-      "retry": "Retry step"
-    },
-    "actions": {
-      "runAll": "Run all",
-      "stepByStep": "Step by step",
-      "cancel": "Cancel",
-      "stop": "Stop execution",
-      "newPlan": "New plan"
-    },
-    "error": {
-      "noModel": "No model configured. Set one in settings.",
-      "piiBlocked": "Context contains secrets — redact before retrying.",
-      "generating": "Error generating plan.",
-      "advisory": "Diagnosis"
-    },
-    "advisory": {
-      "title": "Error Diagnosis",
-      "fix": "Suggested fix:",
-      "noFix": "No automatic fix available.",
-      "applyFix": "Apply fix",
-      "retryHint": "Re-run the original step after applying the fix."
-    },
-    "history": {
-      "title": "AI Shell history",
-      "clear": "Clear history",
-      "empty": "No messages yet."
-    }
-  },
-  "recording": {
-    "title": "Recording",
-    "start": "Start recording",
-    "stop": "Stop recording",
-    "pause": "Pause recording",
-    "resume": "Resume recording",
-    "discard": "Discard recording",
-    "save": "Save recording",
-    "status": {
-      "idle": "Ready to record",
-      "recording": "Recording…",
-      "paused": "Paused",
-      "stopped": "Recording complete"
-    },
-    "elapsed": "{time}",
-    "frames": "{count} frames",
-    "player": {
-      "play": "Play",
-      "pause": "Pause",
-      "speed": "Speed: {speed}×",
-      "seek": "Seek",
-      "duration": "{time}",
-      "restart": "Restart"
-    },
-    "export": {
-      "title": "Export",
-      "gif": "Export as GIF",
-      "cast": "Export as .cast",
-      "exporting": "Exporting…",
-      "done": "Export complete",
-      "error": "Export failed: {message}"
-    },
-    "list": {
-      "title": "Recordings",
-      "empty": "No recordings yet.",
-      "delete": "Delete recording",
-      "deleteConfirm": "Delete this recording? This cannot be undone."
-    }
+  "template": {
+    "cancel": "Cancel",
+    "inputPlaceholder": "Enter value",
+    "run": "Run",
+    "selectPlaceholder": "Choose an option",
+    "title": "Fill template variables"
   }
 }

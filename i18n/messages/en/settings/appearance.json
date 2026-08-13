@@ -398,6 +398,9 @@
       "sectionLabel": "Font families",
       "serifLabel": "Serif font"
     },
+    "messageDisplay": {
+      "sectionLabel": "Chat message presentation"
+    },
     "motion": {
       "sectionLabel": "Motion speed",
       "speed": {
@@ -418,6 +421,83 @@
   "library": {
     "importTitle": "Import from VSCode",
     "packsTitle": "Theme packs"
+  },
+  "messageDisplay": {
+    "actions": {
+      "all": "All actions",
+      "core": "Core actions",
+      "hover": "On hover",
+      "label": "Actions"
+    },
+    "advanced": "Advanced message display",
+    "agentFlow": {
+      "detailed": "Detailed",
+      "label": "Agent flow",
+      "simplified": "Simplified",
+      "standard": "Standard"
+    },
+    "layout": {
+      "bubbles": "Bubbles",
+      "cards": "Cards",
+      "hybrid": "Hybrid",
+      "label": "Layout"
+    },
+    "metadata": {
+      "cost": "Cost",
+      "duration": "Duration",
+      "finishState": "Finish state",
+      "identity": "Identity",
+      "label": "Metadata placement",
+      "model": "Model",
+      "provider": "Provider",
+      "timestamp": "Timestamp",
+      "usage": "Usage"
+    },
+    "motion": {
+      "expressive": "Expressive",
+      "label": "Message motion",
+      "off": "Off",
+      "restrained": "Restrained"
+    },
+    "placement": {
+      "details": "Details",
+      "header": "Header",
+      "hidden": "Hidden"
+    },
+    "preset": {
+      "balanced": "Balanced",
+      "focused": "Focused",
+      "hint": {
+        "balanced": "Keeps useful context visible and technical detail progressive.",
+        "focused": "Prioritizes reading with compact technical detail.",
+        "inspector": "Expands runtime metadata, tools, and diagnostics."
+      },
+      "inherit": "Inherit global setting",
+      "inspector": "Inspector",
+      "label": "Presentation preset"
+    },
+    "reasoning": {
+      "label": "Reasoning"
+    },
+    "resetOverrides": "Reset advanced overrides",
+    "richControls": {
+      "always": "Always",
+      "hidden": "Hidden",
+      "hover": "On hover",
+      "label": "Rich-content controls"
+    },
+    "sources": {
+      "label": "Sources"
+    },
+    "tools": {
+      "label": "Tools"
+    },
+    "visibility": {
+      "auto": "Automatic",
+      "collapsed": "Collapsed",
+      "expanded": "Expanded",
+      "hidden": "Hidden"
+    }
   },
   "nav": {
     "groups": {

@@ -1550,9 +1550,15 @@
     },
     "runtimeTarget": {
       "active": "Active",
+      "addHost": "Add Host",
+      "fallbackInvalid": "Choose one of the saved fallback Hosts.",
+      "fallbackPrompt": "Enter the fallback Host id ({choices}).",
       "heading": "Runtime target",
       "legacyMixed": "Legacy mixed (read-only)",
       "loadFailed": "Runtime targets could not be loaded.",
+      "removeConfirm": "Remove {name}? The Host must confirm revocation before local data is deleted.",
+      "removeFailed": "The Host could not be removed.",
+      "removeHost": "Remove {name}",
       "switchFailed": "Runtime target could not be switched.",
       "thisBrowser": "This browser"
     },
@@ -2928,12 +2934,12 @@
         "deploymentRefPlaceholder": "deployment id (e.g. dep-vendor-a)",
         "description": "How this teammate's runtime, deployment and credentials are bound. References only — endpoints and keys live in provider profiles.",
         "flagOffHint": "Inert until the unified execution resolver flag (agentExecutionResolverV2) is enabled — dispatch ignores this binding while it is off.",
-        "hostAuto": "Auto",
-        "hostLocal": "Local",
-        "hostPinned": "{host}",
+        "hostAuto": "Any ready worker",
+        "hostLocal": "Run with coordinator",
+        "hostPinned": "{host} (online)",
         "hostPinnedOffline": "{host} (offline)",
-        "hostTarget": "Host target",
-        "hostWaitingWarning": "Pinned host is offline; the child will remain queued.",
+        "hostTarget": "Execution host",
+        "hostWaitingWarning": "This pinned worker is offline; the task will remain queued without migrating.",
         "modeInherit": "Inherit team default",
         "modePinned": "Pinned",
         "modePool": "Candidate pool",
@@ -2944,6 +2950,7 @@
         "modelRolePrimary": "Primary",
         "previewNative": "Native delegation",
         "previewOrchestrated": "Orchestrated ({reasons})",
+        "remotePrerequisitesHint": "Remote targets require resolver v2, remote dispatch, Task Workspace, and a placement-ready worker profile.",
         "runtimeAiSdk": "AI SDK",
         "runtimeAuto": "Auto",
         "runtimeClaudeSdk": "Claude Agent SDK",
@@ -2961,6 +2968,14 @@
         "twin": "Digital twin",
         "twinHint": "This teammate acts with the selected digital employee's knowledge and style.",
         "twinNone": "None"
+      },
+      "sandboxSection": {
+        "description": "Set this teammate's sandbox limits. Every override is clamped to the team ceiling.",
+        "enabled": "Run this teammate in the OS sandbox",
+        "enabledHint": "Inherits the team setting until this teammate is explicitly changed.",
+        "inheritedCeiling": "Team ceiling — CPU: {cpu}s, memory: {memory} MB, network: {network}, writable roots: {roots}",
+        "inheritedNone": "The team has no additional sandbox ceiling; the native safety floor still applies.",
+        "title": "Sandbox"
       },
       "save": "Save",
       "title": "Configure {name}"
@@ -5648,7 +5663,9 @@
         "timeout": "The request took too long — retry, or raise the timeout.",
         "unauthorized": "Authentication failed — check your API key or token in Settings."
       },
+      "moreLabel": "More message actions",
       "pluginMenu": "Plugin actions",
+      "quoteLabel": "Quote in composer",
       "readAloud": "Read aloud",
       "reasoning": {
         "completed": "Thought for a few seconds",
@@ -5670,12 +5687,45 @@
       "truncateFromLabel": "Delete from here",
       "truncateFromTooltip": "Delete this message and everything after it",
       "unknownPart": "Unknown content ({type})",
+      "unknownPartDiagnostic": {
+        "circular": "[circular]",
+        "redacted": "[redacted]",
+        "truncated": "… [truncated]",
+        "unavailable": "[unavailable diagnostic data]"
+      },
       "usageCacheHit": "Cache hit: {n}",
       "usageCacheWrite": "Cache write: {n}",
       "usageCost": "Cost: ${cost}",
       "usageInput": "Input: {n}",
       "usageOutput": "Output: {n}",
       "usageReasoning": "Reasoning: {n}"
+    },
+    "messageDisplay": {
+      "assistant": "Assistant",
+      "details": "Message details",
+      "durationValue": "{value} ms",
+      "metadata": {
+        "cost": "Cost",
+        "duration": "Duration",
+        "finishState": "Finish state",
+        "identity": "Identity",
+        "model": "Model",
+        "provider": "Provider",
+        "timestamp": "Time",
+        "usage": "Tokens"
+      },
+      "status": {
+        "complete": "Complete",
+        "error": "Failed",
+        "streaming": "Responding"
+      },
+      "story": {
+        "assistantAnswer": "A stable reading surface for a long answer with progressive technical detail.",
+        "rendererOwnership": "Assistant content remains owned by the existing rich-part renderers.",
+        "userQuestion": "Can you explain this implementation?"
+      },
+      "usageValue": "↑{input} ↓{output}",
+      "you": "You"
     },
     "ocrResult": {
       "askAbout": "Ask about this",
@@ -6263,6 +6313,16 @@
     "identityMerge": {
       "cancel": "Cancel",
       "description": "Select which identity to keep as primary. The secondary identity's id will be recorded in the primary's merge history.",
+      "errors": {
+        "alias_conflict": "These identities contain a conflicting platform alias.",
+        "cycle": "This merge would create a cycle.",
+        "primary_absorbed": "The primary identity was already merged into another contact.",
+        "primary_missing": "The primary identity is no longer available.",
+        "same_identity": "An identity cannot be merged into itself.",
+        "secondary_absorbed": "The selected identity was already merged into another contact.",
+        "secondary_missing": "The selected identity is no longer available.",
+        "unexpected": "Identity merge failed. Please refresh and try again."
+      },
       "merge": "Merge",
       "primary": "Primary:",
       "primaryBadge": "Primary",
@@ -6869,6 +6929,13 @@
         }
       },
       "groupOther": "Other",
+      "metadata": {
+        "agent": "Agent",
+        "label": "Row details",
+        "model": "Model",
+        "provider": "Provider",
+        "workspace": "Workspace"
+      },
       "newChat": "New chat",
       "newConversation": "New conversation",
       "newFolder": "New folder",
@@ -6885,6 +6952,7 @@
       "showPreview": "Show message previews",
       "showUnreadBadges": "Show unread badges",
       "teamFallback": "Team",
+      "titleMotion": "Scroll long titles on hover",
       "ungroupedAgent": "No agent",
       "ungroupedWorkspace": "No workspace",
       "viewActive": "Show active conversations",
@@ -10205,8 +10273,17 @@
       }
     },
     "contactProfile": {
+      "candidatesTitle": "Available identities",
       "empty": "No contact details for this conversation. Group chats and never-seen contacts don't have a directory entry yet.",
+      "errors": {
+        "alias_conflict": "The saved identity contains conflicting aliases.",
+        "identity_conflict": "Another contact now owns this platform identity.",
+        "primary_missing": "This contact no longer exists.",
+        "snapshot_missing": "This identity is no longer merged with the contact.",
+        "unexpected": "The identity change failed. Please refresh and try again."
+      },
       "lastSeen": "Last seen",
+      "merge": "Merge",
       "mergedTitle": "Merged identities",
       "platform": "Platform",
       "remoteId": "User ID",
@@ -10332,6 +10409,11 @@
         "advancedJsonHelp": "These fields populate the per-conversation `trigger` partial that overrides the adapter trigger policy.",
         "allowComputerUse": "Allow Computer Use tools",
         "allowComputerUseWarning": "When on, replies in this channel may fire screenshot, mouse, and keyboard actions on the host. Off by default for IM channels.",
+        "allowGoalDriving": "Allow self-driving /goal on this conversation",
+        "allowGoalDrivingPlatform": "Runs only where the connector runtime runs — the desktop app (all channels) or `cli serve` (webhook channels). The mobile app can't drive IM goals.",
+        "allowGoalDrivingWarning": "When off, /goal refuses to start on this IM conversation so a self-driving loop cannot auto-reply without operator review. Off by default.",
+        "allowScheduleTools": "Allow this conversation's agent to manage schedules",
+        "allowScheduleToolsWarning": "Exposes create, list, and cancel schedule tools only to this conversation. The agent can mutate only tasks it created. Off by default.",
         "allowedSkills": {
           "add": "Add",
           "all": "Allow all",
@@ -10342,11 +10424,6 @@
           "remove": "Remove {id}",
           "whitelist": "Whitelist"
         },
-        "allowGoalDriving": "Allow self-driving /goal on this conversation",
-        "allowGoalDrivingPlatform": "Runs only where the connector runtime runs — the desktop app (all channels) or `cli serve` (webhook channels). The mobile app can't drive IM goals.",
-        "allowGoalDrivingWarning": "When off, /goal refuses to start on this IM conversation so a self-driving loop cannot auto-reply without operator review. Off by default.",
-        "allowScheduleTools": "Allow this conversation's agent to manage schedules",
-        "allowScheduleToolsWarning": "Exposes create, list, and cancel schedule tools only to this conversation. The agent can mutate only tasks it created. Off by default.",
         "appendActivity": "Progress lines (no-edit adapters)",
         "appendActivityHint": "On adapters that can't edit a message in place, post one compact progress line per step during a turn instead of staying silent. On by default; turn off for noisy channels.",
         "applyToAdapter": "Apply to all on this adapter",
@@ -10362,15 +10439,15 @@
         "liveActivity": "Live activity card",
         "liveActivityHint": "Show a live progress card in chat while the assistant is working (tool count, elapsed time, current action, file edits). On by default; turn off for noisy channels.",
         "mode": "Mode",
-        "modelManagedByTarget": "Provider and model are managed by the selected Agent Team or Workflow.",
-        "modelOverride": "Model override",
-        "modelOverridePlaceholder": "claude-opus-4-7",
         "modeOptions": {
           "auto": "Auto-reply",
           "draft": "Draft only",
           "manual": "Manual review",
           "unset": "Use adapter default"
         },
+        "modelManagedByTarget": "Provider and model are managed by the selected Agent Team or Workflow.",
+        "modelOverride": "Model override",
+        "modelOverridePlaceholder": "claude-opus-4-7",
         "muted": "Muted (drops outbound)",
         "mutedHint": "Defer every outbound delivery on this conversation (re-checked every minute) while the bot keeps replying in its other conversations. Same semantics as the adapter-level mute, scoped to one chat.",
         "pinned": "Pinned",
@@ -12861,15 +12938,30 @@
         "title": "Find a desktop on this network"
       },
       "switch": {
+        "active": "Active",
+        "addHost": "Add Host",
+        "biometricFailed": "Biometric check failed ({reason}); the Host was not removed.",
+        "cancel": "Cancel",
+        "confirmRemove": "Remove Host",
         "daysAgo": "{n}d",
         "empty": "No previously paired desktops yet.",
+        "fallbackLabel": "Switch to this Host first",
         "forget": "Forget {name}",
         "forgot": "Removed {name} from this device.",
         "hoursAgo": "{n}h",
         "justNow": "just now",
         "lastSeen": "last seen",
+        "loadFailed": "Paired Hosts could not be loaded.",
         "minutesAgo": "{n}m",
         "never": "never",
+        "remove": "Remove {name}",
+        "removeDescription": "Cognia first revokes this device on the selected Host. If the Host is offline or refuses, every local record is kept so you can retry.",
+        "removeFailed": "The Host could not be removed.",
+        "removeReason": "Confirm removing this paired Host",
+        "removeTitle": "Remove {name}?",
+        "removed": "Removed {name} from this device.",
+        "switchFailed": "The Host could not be switched.",
+        "switchedTo": "Switched to {name}.",
         "switchingTo": "Switching to {name}…",
         "title": "Paired desktops"
       },
@@ -13367,6 +13459,7 @@
       },
       "skillsRow": "Skills",
       "slashCommandsRow": "Slash commands",
+      "sourceControlRow": "Source control",
       "speechRow": "Speech & voice",
       "storage": {
         "backupsDescription": "{count} files · {total}",
@@ -13486,11 +13579,13 @@
       "readAloud": "Read aloud",
       "regenerate": "Regenerate reply",
       "share": "Share…",
+      "shareCard": "Share as card",
       "shareDialogTitle": "Share via",
       "shareFailed": "Share failed: {message}",
       "shareUnsupported": "Sharing isn't supported on this device.",
       "stopReading": "Stop reading",
-      "title": "Message"
+      "title": "Message",
+      "truncate": "Delete from here"
     },
     "network": {
       "backAria": "Back to Me",
@@ -13627,6 +13722,7 @@
       "staleWarning": "{count} messages waiting > 30 min."
     },
     "pair": {
+      "accountContextMissing": "An active local account is required before pairing a Host.",
       "baseUrlLabel": "Server URL",
       "biometricFailed": "Biometric check failed ({reason}); did not sign out.",
       "checkingTitle": "Re-checking link",
@@ -13738,6 +13834,25 @@
         }
       },
       "persistenceError": "The device was registered, but its credential couldn't be saved securely. Pair again.",
+      "recovery": {
+        "incompatible": {
+          "description": "This Host's protocol or feature manifest is incompatible. Switch Hosts or pair again with an updated Host.",
+          "title": "Host compatibility problem"
+        },
+        "offline": {
+          "description": "Retry diagnostics below, switch to another saved Host, or pair this device again.",
+          "title": "Host is offline"
+        },
+        "repair": "Re-pair this Host",
+        "requiresGrant": {
+          "description": "This device is missing the exact Host capability: {grant}.",
+          "instructions": "On the Host, open Settings → Companion → Paired Devices and update this device. A Web client cannot grant itself Host authority.",
+          "title": "Host permission required",
+          "unknownGrant": "unknown capability"
+        },
+        "switchFailed": "The saved Host could not be activated: {reason}",
+        "switchTo": "Switch to {name}"
+      },
       "scanCta": "Scan QR",
       "scanError": {
         "failed": "Scan failed: {message}",
@@ -13753,6 +13868,9 @@
         "cta": "Sign out / re-pair"
       },
       "signOutDescription": "You'll need to scan the QR again to reconnect.",
+      "signOutFallbackInvalid": "Choose one of the saved fallback Hosts.",
+      "signOutFallbackPrompt": "Enter the fallback Host id ({choices}).",
+      "signOutFallbackRequired": "A fallback Host is required before removing the active Host.",
       "signOutReason": "Confirm sign out",
       "signOutTitle": "Sign out",
       "step": {
@@ -15092,7 +15210,15 @@
       }
     },
     "runtime": {
-      "defaultNormalized": "The default provider was normalized to {provider}."
+      "defaultNormalized": "Default OCR provider {provider} is unavailable ({reason}); switched to Auto.",
+      "reasons": {
+        "backend-not-bound": "This build does not include this native backend.",
+        "configuration-required": "Complete this provider's configuration before enabling it.",
+        "missing-credentials": "Add the required credentials before using this provider.",
+        "model-corrupt": "The model files failed integrity verification. Download them again.",
+        "model-missing": "Download the required model files before using this provider.",
+        "unsupported-shell": "This provider is not supported in the current app shell."
+      }
     },
     "sidebar": {
       "categoryAll": "All",
@@ -15207,9 +15333,84 @@
     "title": "Cognia"
   },
   "performance": {
+    "captures": {
+      "active": {
+        "elapsed": "Elapsed {seconds}s",
+        "gaps": "{count} gaps",
+        "title": "Active capture"
+      },
+      "comparison": {
+        "absolute": "Absolute delta",
+        "compare": "Compare selected captures",
+        "mad": "MAD",
+        "median": "Median",
+        "na": "N/A",
+        "p95": "Type-7 p95",
+        "percent": "Percent delta"
+      },
+      "controls": {
+        "cadence": "Capture cadence",
+        "delete": "Delete capture {id}",
+        "duration": "Capture duration",
+        "export": "Export capture {id}",
+        "import": "Import .cognia-perf",
+        "rawExport": "Export raw capture {id}",
+        "selectCompare": "Select capture {id} for comparison",
+        "source": "Capture source",
+        "start": "Start capture",
+        "stop": "Stop capture"
+      },
+      "errors": {
+        "compareSelection": "Select exactly two captures to compare.",
+        "locked": "Unlock the active account to access encrypted captures."
+      },
+      "library": {
+        "bytes": "{value} bytes",
+        "empty": "No captures are stored for this target.",
+        "frames": "{count} frames",
+        "retention": "Unpinned captures retain for {days} days and at most {count} per target. Account quota: {quota} GiB.",
+        "title": "Capture library"
+      },
+      "milliseconds": "{value} ms",
+      "minutes": "{value} min",
+      "raw": {
+        "attachment": "Attachment {ordinal} · {type} · {bytes} bytes",
+        "attachments": "Explicit attachment selection",
+        "cancel": "Cancel",
+        "confirm": "I understand, export raw evidence",
+        "description": "Raw evidence can contain process, span, trace, error, and environment details. This confirmation is cryptographically bound to this capture and the attachment selection below.",
+        "noAttachments": "No attachments selected; trace bytes remain excluded.",
+        "title": "Confirm raw performance export"
+      },
+      "shell": {
+        "label": "Active performance capture",
+        "return": "Open",
+        "stop": "Stop performance capture",
+        "summary": "{target} · {seconds}s · {gaps} gaps"
+      },
+      "source": {
+        "host": "Selected host",
+        "renderer": "Local Renderer"
+      },
+      "state": {
+        "idle": "Idle",
+        "recording": "Recording"
+      },
+      "toast": {
+        "exported": "Capture exported with default redaction.",
+        "imported": "Capture imported and verified.",
+        "rawExported": "Raw capture exported after confirmation.",
+        "started": "Capture started.",
+        "stopped": "Capture stopped."
+      }
+    },
     "desktopOnly": {
       "description": "Runtime and process metrics are sampled from the native Rust backend, which only runs in the desktop app.",
       "title": "Performance panel is desktop-only"
+    },
+    "diagnose": {
+      "logs": "Open Logs",
+      "observability": "Open Observability"
     },
     "hotspots": {
       "columns": {
@@ -15225,6 +15426,20 @@
       },
       "empty": "No hotspots recorded yet.",
       "hint": "Run an instrumented operation (send a message, run an OCR, run a terminal or git command) to populate the table."
+    },
+    "hud": {
+      "clear": "clear",
+      "clearLabel": "Clear HUD entries",
+      "columns": {
+        "count": "n",
+        "name": "name",
+        "p50": "p50",
+        "p95": "p95"
+      },
+      "disable": "Disable HUD",
+      "fps": "{value} fps",
+      "title": "Perf HUD",
+      "waiting": "waiting for entries…"
     },
     "managed": {
       "actions": {
@@ -15283,7 +15498,8 @@
       "high": "Critical",
       "low": "Normal",
       "moderate": "Moderate",
-      "title": "Memory pressure"
+      "title": "Memory pressure",
+      "utilization": "Used / total memory"
     },
     "metrics": {
       "cpu": "App CPU",
@@ -15309,6 +15525,7 @@
       },
       "empty": "No processes sampled yet.",
       "noMatch": "No processes match your search.",
+      "orphaned": "Orphaned",
       "roles": {
         "child": "Child",
         "main": "Main",
@@ -15321,6 +15538,10 @@
         "totalDisk": "Disk I/O",
         "totalMemory": "Total memory"
       }
+    },
+    "resources": {
+      "host": "Host",
+      "renderer": "Renderer"
     },
     "runtime": {
       "aliveTasks": "Alive tasks",
@@ -15344,11 +15565,32 @@
       "traces": {
         "description": "dial9 writes binary async traces to disk for offline analysis.",
         "empty": "No trace files yet.",
+        "identity": "Trace {index}",
         "open": "Open folder",
         "title": "Flight-recorder traces"
       },
       "workerN": "Worker {n}",
       "workers": "Worker threads"
+    },
+    "sourceHealth": {
+      "error": "Latest error",
+      "gaps": "Visible gaps",
+      "kind": {
+        "host": "Selected host",
+        "renderer": "Local Renderer"
+      },
+      "latestGap": "Latest gap: {reason}, {start}–{end}",
+      "none": "None",
+      "notAvailable": "N/A",
+      "overhead": "Collection overhead",
+      "state": {
+        "connecting": "Connecting",
+        "error": "Error",
+        "live": "Live",
+        "stale": "Stale",
+        "unsupported": "Unsupported"
+      },
+      "title": "Sources and capabilities"
     },
     "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
     "system": {
@@ -15378,10 +15620,13 @@
       "loading": "Reading system details…"
     },
     "tabs": {
+      "captures": "Captures",
+      "diagnose": "Diagnose",
       "hotspots": "Hotspots",
       "managed": "Managed",
       "overview": "Performance",
       "processes": "Processes",
+      "resources": "Resources",
       "runtime": "Async runtime",
       "system": "System"
     },
@@ -22339,6 +22584,9 @@
           "sectionLabel": "Font families",
           "serifLabel": "Serif font"
         },
+        "messageDisplay": {
+          "sectionLabel": "Chat message presentation"
+        },
         "motion": {
           "sectionLabel": "Motion speed",
           "speed": {
@@ -22359,6 +22607,83 @@
       "library": {
         "importTitle": "Import from VSCode",
         "packsTitle": "Theme packs"
+      },
+      "messageDisplay": {
+        "actions": {
+          "all": "All actions",
+          "core": "Core actions",
+          "hover": "On hover",
+          "label": "Actions"
+        },
+        "advanced": "Advanced message display",
+        "agentFlow": {
+          "detailed": "Detailed",
+          "label": "Agent flow",
+          "simplified": "Simplified",
+          "standard": "Standard"
+        },
+        "layout": {
+          "bubbles": "Bubbles",
+          "cards": "Cards",
+          "hybrid": "Hybrid",
+          "label": "Layout"
+        },
+        "metadata": {
+          "cost": "Cost",
+          "duration": "Duration",
+          "finishState": "Finish state",
+          "identity": "Identity",
+          "label": "Metadata placement",
+          "model": "Model",
+          "provider": "Provider",
+          "timestamp": "Timestamp",
+          "usage": "Usage"
+        },
+        "motion": {
+          "expressive": "Expressive",
+          "label": "Message motion",
+          "off": "Off",
+          "restrained": "Restrained"
+        },
+        "placement": {
+          "details": "Details",
+          "header": "Header",
+          "hidden": "Hidden"
+        },
+        "preset": {
+          "balanced": "Balanced",
+          "focused": "Focused",
+          "hint": {
+            "balanced": "Keeps useful context visible and technical detail progressive.",
+            "focused": "Prioritizes reading with compact technical detail.",
+            "inspector": "Expands runtime metadata, tools, and diagnostics."
+          },
+          "inherit": "Inherit global setting",
+          "inspector": "Inspector",
+          "label": "Presentation preset"
+        },
+        "reasoning": {
+          "label": "Reasoning"
+        },
+        "resetOverrides": "Reset advanced overrides",
+        "richControls": {
+          "always": "Always",
+          "hidden": "Hidden",
+          "hover": "On hover",
+          "label": "Rich-content controls"
+        },
+        "sources": {
+          "label": "Sources"
+        },
+        "tools": {
+          "label": "Tools"
+        },
+        "visibility": {
+          "auto": "Automatic",
+          "collapsed": "Collapsed",
+          "expanded": "Expanded",
+          "hidden": "Hidden"
+        }
       },
       "nav": {
         "groups": {
@@ -23727,14 +24052,14 @@
         "modelManagedByTarget": "Provider and model are managed by the selected Agent Team or Workflow.",
         "notConfigured": "{id} (not configured)",
         "precedenceNote": "Per-conversation overrides (/model, /team, inbox switchers) always beat these bot-level defaults.",
+        "reasoningDefault": "Default",
+        "reasoningHelp": "Thinking depth for this bot's replies. Dropped automatically on models without reasoning.",
+        "reasoningLabel": "Default reasoning",
         "reasoning_high": "High",
         "reasoning_low": "Low",
         "reasoning_max": "Max",
         "reasoning_medium": "Medium",
         "reasoning_xhigh": "Extra high",
-        "reasoningDefault": "Default",
-        "reasoningHelp": "Thinking depth for this bot's replies. Dropped automatically on models without reasoning.",
-        "reasoningLabel": "Default reasoning",
         "save": "Save",
         "targetDirect": "Direct Agent",
         "targetLabel": "Execution target",
@@ -24716,6 +25041,8 @@
         "save": "Save",
         "sectionAdvanced": "Advanced",
         "sectionAdvancedDesc": "Quiet hours and mute.",
+        "sectionDelivery": "Delivery and transport",
+        "sectionDeliveryDesc": "Choose the inbound transport used by the runtime and webhook server.",
         "sectionIdentity": "Identity",
         "sectionIdentityDesc": "App credentials for the QQ open platform.",
         "testButtonLabel": "Test credentials",
@@ -24726,7 +25053,12 @@
         "testSucceededLabel": "Credentials valid",
         "testSucceededToast": "Connected to gateway {gatewayUrl}.",
         "titleEdit": "Edit QQ Official Bot",
-        "titleNew": "Add QQ Official Bot"
+        "titleNew": "Add QQ Official Bot",
+        "transportGateway": "Gateway WebSocket",
+        "transportGatewayHelp": "Connect outbound to QQ's gateway and receive events over WebSocket.",
+        "transportLabel": "Inbound transport",
+        "transportWebhook": "HTTPS webhook",
+        "transportWebhookHelp": "Receive events at this adapter's registered callback URL."
       },
       "quickCommands": {
         "actionTypeLabel": "Action type",
@@ -25087,8 +25419,8 @@
         "botIdLabel": "Bot ID",
         "botIdPlaceholder": "e.g. wb1234567890abcdef",
         "create": "Create",
-        "credentialsRequired": "Bot ID and Secret are required.",
         "credentialUnchangedPlaceholder": "Leave blank to keep current",
+        "credentialsRequired": "Bot ID and Secret are required.",
         "displayNameLabel": "Display name",
         "displayNamePlaceholder": "My WeCom Bot",
         "displayNameRequired": "Display name is required.",
@@ -25109,8 +25441,8 @@
         "sectionQuickCommands": "Quick commands",
         "sectionQuickCommandsDesc": "Buttons pushed on enter_chat as a template_card menu — each maps a trigger key to a prompt or slash command.",
         "testButtonLabel": "Test credentials",
-        "testCredentialsAria": "Test WeCom credentials",
         "testCredentialScopeHelp": "Testing mints a short-lived access token from WeCom to verify the corp credentials.",
+        "testCredentialsAria": "Test WeCom credentials",
         "testFailedLabel": "Credential test failed",
         "testFailedToast": "WeCom credential test failed: {error}",
         "testSucceededLabel": "Credentials valid",
@@ -25239,6 +25571,30 @@
             "workspace": "Workspace"
           }
         },
+        "metadata": {
+          "agent": {
+            "description": "Show the character or team responsible for the conversation.",
+            "heading": "Agent",
+            "label": "Show agent"
+          },
+          "description": "Choose the context shown beneath each conversation title. The selected order is preserved.",
+          "heading": "Row details",
+          "model": {
+            "description": "Show the effective model after session, agent, and app defaults are resolved.",
+            "heading": "Model",
+            "label": "Show model"
+          },
+          "provider": {
+            "description": "Show the effective model provider.",
+            "heading": "Provider",
+            "label": "Show provider"
+          },
+          "workspace": {
+            "description": "Show the workspace that owns the conversation.",
+            "heading": "Workspace",
+            "label": "Show workspace"
+          }
+        },
         "preview": {
           "description": "Show a second line with the latest message under each conversation.",
           "heading": "Message preview",
@@ -25250,6 +25606,11 @@
           "heading": "Sidebar width"
         },
         "title": "Conversation sidebar",
+        "titleMotion": {
+          "description": "Reveal overflowing titles with a paused back-and-forth scroll on hover. Reduced-motion preferences always stay static.",
+          "heading": "Long-title motion",
+          "label": "Scroll long titles on hover"
+        },
         "unread": {
           "description": "Show a count badge on conversations with unread messages.",
           "heading": "Unread badges",
@@ -26490,22 +26851,29 @@
       "summaryAria": "{count} integrations active",
       "title": "Agent fleet monitor",
       "workers": {
-        "bindingHint": "Repository paths stay on each worker. Bind one locally with cognia-agent worker bind; this screen never accepts absolute paths.",
+        "bindingHint": "Remote AgentTeam placement reuses these authenticated Fleet hosts and Task Workspace bindings.",
         "capacity": "{used}/{total} slots",
-        "copied": "Worker enrollment command copied.",
-        "copy": "Copy command",
-        "copyFailed": "Could not copy the command.",
-        "description": "Enroll least-privilege Agent RPC workers and inspect their readiness.",
+        "commandAria": "Worker enrollment command",
+        "copied": "Enrollment command copied.",
+        "copy": "Copy enrollment command",
+        "copyFailed": "Could not copy the enrollment command.",
+        "description": "Enroll least-privilege CLI workers and inspect their placement readiness.",
         "empty": "No execution workers enrolled.",
         "enroll": "Enroll worker",
         "error": "Worker action failed: {detail}",
-        "expires": "One-time enrollment expires at {time}.",
-        "notConnected": "Connect this browser to a Companion host first.",
+        "expires": "Enrollment expires at {time}.",
+        "notConnected": "Connect Companion before enrolling a worker.",
         "offline": "Offline",
         "online": "Online",
+        "placementReason": "Placement unavailable: {reason}",
         "qrAria": "Worker enrollment QR code",
-        "revoke": "Revoke worker",
-        "revoked": "Worker capability revoked.",
+        "revoke": "Revoke",
+        "revoked": "Worker access revoked.",
+        "status": {
+          "incompatible": "Incompatible",
+          "offline": "Offline",
+          "online": "Online"
+        },
         "title": "Execution workers"
       }
     },
@@ -26867,7 +27235,7 @@
         "discard": "Discard & switch",
         "title": "Discard unsaved changes?"
       },
-      "description": "Run runtime-supported handlers at lifecycle events. Claude supports command, HTTP, MCP tool, prompt, and agent handlers; other runtimes expose only probed capabilities.",
+      "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
       "eventListLabel": "Events",
       "group": {
         "addHandler": "Add handler",
@@ -26897,8 +27265,8 @@
         "removeAria": "Remove handler",
         "serverLabel": "MCP server",
         "serverRequired": "MCP server is required.",
-        "timeoutLabel": "Timeout (seconds)",
-        "timeoutPlaceholder": "30",
+        "timeoutLabel": "Timeout (ms)",
+        "timeoutPlaceholder": "5000",
         "toolLabel": "Tool",
         "toolRequired": "MCP tool is required.",
         "typeCommand": "Command",
@@ -28349,7 +28717,7 @@
         "title": "Auto-lock"
       },
       "contextInspector": {
-        "auditGap": "Some governance evidence is unavailable for this decision.",
+        "auditGap": "Governance history is incomplete because some projections failed.",
         "conflicts": "Conflicts",
         "decisionListLabel": "Recent governance decisions",
         "description": "Inspect why an action was chosen, which evidence and policy supported it, and whether facts remain in conflict.",
@@ -30968,6 +31336,8 @@
       "destinationPlaceholder": "/path/to/repository",
       "failed": "Failed to clone repository",
       "open": "Clone Repository",
+      "remoteDescription": "Enter a remote URL and a relative destination inside the authorized host workspace.",
+      "remoteDestinationPlaceholder": "repositories/project",
       "submit": "Clone",
       "title": "Clone Repository",
       "urlLabel": "Repository URL",
@@ -31099,6 +31469,10 @@
       "moveUp": "Move up",
       "rewordPlaceholder": "New commit message",
       "title": "Interactive rebase"
+    },
+    "remote": {
+      "noWorkspace": "No authorized Git workspace",
+      "noWorkspaceDescription": "Open a project on the paired desktop to authorize its roots for this account, then refresh this page."
     },
     "remotes": {
       "add": "Add Remote",
@@ -31272,6 +31646,7 @@
       "pathPlaceholder": "Choose an empty directory",
       "prune": "Prune stale",
       "pruned": "Stale worktree records pruned",
+      "relativePathPlaceholder": "worktrees/feature-name",
       "remove": "Remove Worktree",
       "removeDescription": "Remove the linked worktree at {path}?",
       "removeTitle": "Remove worktree?",

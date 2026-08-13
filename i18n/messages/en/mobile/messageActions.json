@@ -24,9 +24,11 @@
   "readAloud": "Read aloud",
   "regenerate": "Regenerate reply",
   "share": "Share…",
+  "shareCard": "Share as card",
   "shareDialogTitle": "Share via",
   "shareFailed": "Share failed: {message}",
   "shareUnsupported": "Sharing isn't supported on this device.",
   "stopReading": "Stop reading",
-  "title": "Message"
+  "title": "Message",
+  "truncate": "Delete from here"
 }

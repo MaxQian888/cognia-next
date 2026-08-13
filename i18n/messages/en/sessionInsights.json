@@ -103,12 +103,12 @@
     "ready": "Opened the Skill review.",
     "title": "Extract this workflow as a Skill"
   },
-  "title": "Session insights",
   "tests": {
     "counts": "{passed} passed, {failed} failed",
     "snapshot": "Test snapshot {index}",
     "title": "Test results"
   },
+  "title": "Session insights",
   "units": {
     "tokPerSec": "{value} tok/s"
   }

@@ -454,6 +454,10 @@
     "successOnly": "Success Only"
   },
   "notifyOnStart": "Notify on start",
+  "occurrenceList": {
+    "moreTimes": "+{count} more",
+    "rowAria": "{name}, {count, plural, one {# upcoming time} other {# upcoming times}}"
+  },
   "onBootDelaySeconds": "Boot Delay (seconds)",
   "onEventId": "Event ID",
   "onEventSource": "Event Source",
@@ -897,10 +901,6 @@
   "timeoutMs": "Timeout (ms)",
   "timezone": "Timezone",
   "timing": "Timing",
-  "occurrenceList": {
-    "moreTimes": "+{count} more",
-    "rowAria": "{name}, {count, plural, one {# upcoming time} other {# upcoming times}}"
-  },
   "title": "Task Scheduler",
   "tools": {
     "createFailed": "Failed to create scheduled task",

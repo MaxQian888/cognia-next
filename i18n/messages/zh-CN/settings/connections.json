@@ -38,7 +38,15 @@
       "fieldPublicUrl": "公开 URL",
       "fieldTransport": "传输",
       "fieldType": "类型",
-      "noSelection": "在左侧选择一个适配器，查看其配置、健康状态、会话和审计日志。"
+      "noSelection": "在左侧选择一个适配器，查看其配置、健康状态、会话和审计日志。",
+      "sections": {
+        "behavior": "行为",
+        "connection": "连接",
+        "delivery": "投递",
+        "permissions": "权限",
+        "platform": "平台",
+        "responder": "响应者"
+      }
     },
     "detailTabs": {
       "audit": "审计",
@@ -82,6 +90,15 @@
       "lastOk": "最近成功",
       "nextRetry": "下次重试",
       "noData": "暂无数据",
+      "observedState": {
+        "building": "构建中",
+        "degraded": "降级",
+        "failed": "失败",
+        "retry_wait": "等待重试",
+        "running": "运行中",
+        "starting": "启动中",
+        "stopped": "已停止"
+      },
       "pendingOutbound": "待发出站",
       "rateBucketAvailable": "{available}/{capacity} 令牌",
       "rateBucketLabel": "限流桶",
@@ -98,15 +115,6 @@
       "retryEta": "重试时间",
       "retryInSeconds": "{seconds} 秒后",
       "runtimeTitle": "出站运行时",
-      "observedState": {
-        "building": "构建中",
-        "degraded": "降级",
-        "failed": "失败",
-        "retry_wait": "等待重试",
-        "running": "运行中",
-        "starting": "启动中",
-        "stopped": "已停止"
-      },
       "state": {
         "degraded": "降级",
         "down": "离线",
@@ -188,12 +196,16 @@
     }
   },
   "aiBindingDefaults": {
+    "cancel": "取消",
     "characterDefault": "默认",
     "characterHelp": "此机器人默认使用的人设；会话可用 /character 单独绑定。",
     "characterLabel": "默认人设",
+    "characterTeamHelp": "仅将人设和系统提示词注入团队队长的本次入口上下文，不改变成员、模型或工具。",
+    "characterWorkflowHelp": "Character ID 会通过现有工作流触发载荷传递，节点可按需读取。",
     "modelDefault": "默认",
     "modelHelp": "此机器人使用的提供商 + 模型。优先于人设自带的模型；会话内 /model 仍然最高。",
     "modelLabel": "默认提供商 · 模型",
+    "modelManagedByTarget": "Provider 和 Model 由所选 Agent Team 或 Workflow 管理。",
     "notConfigured": "{id}（未配置）",
     "precedenceNote": "会话级覆盖（/model、/team、收件箱切换器）始终优先于这些机器人级默认值。",
     "reasoningDefault": "默认",
@@ -204,9 +216,18 @@
     "reasoning_max": "最高",
     "reasoning_medium": "中",
     "reasoning_xhigh": "特高",
+    "save": "保存",
+    "targetDirect": "Direct Agent",
+    "targetLabel": "执行目标",
+    "targetTeam": "Agent Team",
+    "targetWorkflow": "Workflow",
     "teamHelp": "入站消息将派发给该 Agent 团队；会话可用 /team 单独绑定，或用 /team off 关闭。",
     "teamLabel": "默认 Agent 团队",
-    "title": "AI 绑定默认值"
+    "title": "AI 绑定默认值",
+    "workflowHelp": "只有存在 active production deployment 的工作流才能接收 IM 流量。",
+    "workflowLabel": "默认 Workflow",
+    "workflowNone": "无",
+    "workflowProduction": "生产部署"
   },
   "audit": {
     "collapseAria": "收起审计条目",
@@ -229,6 +250,7 @@
         "edit_fallback": "活动编辑回退"
       },
       "adapter": {
+        "config_changed": "适配器配置已变更",
         "credentials_rotated": "凭证已轮换",
         "error": "适配器错误",
         "heartbeat": "心跳",
@@ -321,7 +343,8 @@
         "replayed": "已重放"
       },
       "override": {
-        "computer_use_changed": "电脑操作开关变更"
+        "computer_use_changed": "电脑操作开关变更",
+        "config_changed": "会话覆盖配置已变更"
       },
       "plugin": {
         "inbound_blocked": "插件拦截入站",
@@ -381,6 +404,32 @@
       "all": "全部"
     },
     "timeRangeLabel": "时间范围"
+  },
+  "behaviorEditor": {
+    "activationTtl": "激活有效期（小时）",
+    "activationTtlPlaceholder": "例如 24",
+    "activation_always": "始终激活",
+    "activation_direct_only": "仅私聊",
+    "activation_mention_activates": "提及后激活会话",
+    "activation_mention_each": "每条消息都需提及",
+    "activeRun": "已有运行时",
+    "cancel": "取消",
+    "dispatchQueue": "消息排队",
+    "dispatchSteer": "引导当前运行",
+    "effectiveSource": "有效来源：{source}",
+    "groupActivation": "群聊激活",
+    "inherit": "继承",
+    "modeAuto": "自动回复",
+    "modeDraft": "仅生成草稿",
+    "modeManual": "人工审核",
+    "responseMode": "响应模式",
+    "save": "保存",
+    "source_adapter-default": "Adapter 默认值",
+    "source_conversation-override": "会话覆盖",
+    "source_dispatch-rule": "调度规则",
+    "source_system-default": "系统默认值",
+    "source_target-managed": "由执行目标管理",
+    "title": "会话行为"
   },
   "cannedResponses": {
     "addButton": "添加快捷回复",
@@ -636,6 +685,11 @@
     "totalLabel": "总数",
     "unreadLabel": "未读"
   },
+  "inboxAssets": {
+    "cannedResponses": "快捷回复",
+    "description": "管理收件箱中使用的可复用标签与回复。",
+    "labels": "标签"
+  },
   "labels": {
     "addButton": "添加标签",
     "builtinBadge": "内置",
@@ -888,16 +942,21 @@
       "title": "会话白/黑名单"
     },
     "whoami": {
+      "avatarPublishHint": "请在飞书开发者后台发布此头像，以保持机器人身份一致。",
       "dingtalkNoProbe": "钉钉适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。",
+      "downloadAvatar": "下载头像",
       "lastProbeAt": "上次探测：{time}",
       "missingScopesHint": "请在飞书开发者后台 → 权限管理中开启这些权限并重新发布应用，然后重新探测。群管理需要 im:chat:create、im:chat:update、im:chat.members:write_only 和 contact:user.id:readonly。",
       "missingScopesTitle": "检测到缺失的权限 scope",
       "onebotNoProbe": "OneBot 身份会在客户端连接后自动读取 — 下方的 QQ UIN 是你配置的值；机器人连接后这里会显示其真实身份。",
       "onebotUinMismatch": "已连接机器人的 UIN（{actual}）与配置的 UIN（{configured}）不一致，请将适配器的 Bot UIN 改为一致。",
+      "openDeveloperConsole": "打开开发者后台",
       "openId": "Open ID",
       "probeButton": "探测身份",
       "probeFailed": "探测失败",
       "qqOfficialNoProbe": "QQ 官方适配器没有主动探测身份的接口 — 下方的 AppID 是配置时录入的。",
+      "recommendedAvatarHint": "建议为此飞书应用使用生成的头像。",
+      "recommendedAvatarTitle": "推荐头像",
       "reprobeButton": "重新探测",
       "requiresDesktop": "机器人身份探测需要桌面端运行时。",
       "tenant": "租户",
@@ -906,12 +965,7 @@
       "unsupportedNoProbe": "该适配器没有主动探测身份的接口。",
       "wechatOaNoProbe": "微信公众号适配器没有主动探测身份的接口 — 下方的 AppID 是配置时录入的。",
       "wechatPersonalNoProbe": "个人微信适配器没有主动探测身份的接口。",
-      "wecomNoProbe": "企业微信适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。",
-      "avatarPublishHint": "请在飞书开发者后台发布此头像，以保持机器人身份一致。",
-      "downloadAvatar": "下载头像",
-      "openDeveloperConsole": "打开开发者后台",
-      "recommendedAvatarHint": "建议为此飞书应用使用生成的头像。",
-      "recommendedAvatarTitle": "推荐头像"
+      "wecomNoProbe": "企业微信适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。"
     }
   },
   "matrix": {
@@ -1086,6 +1140,7 @@
     "disabledBadge": "已禁用",
     "noAdapters": "尚未配置任何适配器。",
     "noRecentActivity": "暂无最近活动。",
+    "openInbox": "打开收件箱",
     "recentActivityHeading": "最近活动",
     "runningSummary": "已启用 {total} 个适配器，其中 {running} 个运行中",
     "serverHeading": "入站服务器（Webhook / 反向 WS）",
@@ -1103,6 +1158,25 @@
     "statusRunning": "运行中 — {addr}",
     "statusStopped": "已停止",
     "statusUnknown": "未知"
+  },
+  "permissionsEditor": {
+    "builtInSkills": "内置 Skills 上限",
+    "cancel": "取消",
+    "confirmImpact": "保存此权限上限？它可能阻止该适配器全部会话中的 Skill 和主机能力。",
+    "conversationGrantRequired": "Adapter 只能限制此能力上限；每个会话仍需显式授权。",
+    "hitl": "写入类 Skill 需要 HITL",
+    "hitlHelp": "会话设置可覆盖此默认值；破坏性 Skill 始终需要审批。",
+    "host": {
+      "computer_use": "Computer Use",
+      "goal_driving": "Goal Driving",
+      "ocr": "OCR",
+      "schedule_tools": "Schedule Tools"
+    },
+    "hostCapabilities": "主机能力",
+    "save": "保存",
+    "skillHelp": "使用逗号分隔 Skill ID 或通配符。留空表示 Adapter 不追加限制；会话显式空白名单仍会阻止全部 Skill。",
+    "skillPlaceholder": "lark.calendar.*, lark.task.list",
+    "title": "权限"
   },
   "qqOfficial": {
     "adapterCreated": "已添加 QQ 官方机器人",
@@ -1123,6 +1197,8 @@
     "save": "保存",
     "sectionAdvanced": "高级",
     "sectionAdvancedDesc": "免打扰时段与静音。",
+    "sectionDelivery": "交付与传输",
+    "sectionDeliveryDesc": "选择运行时和 Webhook 服务器统一使用的入站传输方式。",
     "sectionIdentity": "身份",
     "sectionIdentityDesc": "QQ 开放平台的应用凭据。",
     "testButtonLabel": "测试凭据",
@@ -1133,7 +1209,12 @@
     "testSucceededLabel": "凭据有效",
     "testSucceededToast": "已连接到网关 {gatewayUrl}。",
     "titleEdit": "编辑 QQ 官方机器人",
-    "titleNew": "添加 QQ 官方机器人"
+    "titleNew": "添加 QQ 官方机器人",
+    "transportGateway": "网关 WebSocket",
+    "transportGatewayHelp": "主动连接 QQ 网关，并通过 WebSocket 接收事件。",
+    "transportLabel": "入站传输方式",
+    "transportWebhook": "HTTPS Webhook",
+    "transportWebhookHelp": "通过此适配器注册的回调地址接收事件。"
   },
   "quickCommands": {
     "actionTypeLabel": "动作类型",
@@ -1283,6 +1364,7 @@
   },
   "tabs": {
     "adapters": "适配器",
+    "assets": "收件箱资产",
     "audit": "审计",
     "canned": "快捷回复",
     "capability": "能力矩阵",
@@ -1290,6 +1372,7 @@
     "inbox": "收件箱",
     "labels": "标签",
     "outbound": "出站",
+    "overrides": "覆盖配置",
     "overview": "概览",
     "tunnel": "隧道"
   },
@@ -1497,6 +1580,7 @@
     "displayNameLabel": "显示名称",
     "displayNamePlaceholder": "我的企业微信机器人",
     "displayNameRequired": "显示名称为必填项。",
+    "preflightFailed": "无法验证新凭据：{error}",
     "proactiveNote": "提示：企业微信仅在用户至少给机器人发过一次消息后，才会向该会话投递主动推送（定时 / 工作流）。",
     "quickCommands": {
       "help": "企业微信智能机器人没有持久菜单。在 enter_chat 时推送一张 template_card 模拟——下面每行变成一个按钮。触发键稳定即可（用户看不到，仅用于回链按钮）。"

@@ -1,4 +1,9 @@
 {
+  "capabilities": {
+    "degraded": "Limited APIs",
+    "proven": "APIs verified",
+    "unproven": "Awaiting probe"
+  },
   "claude": {
     "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
     "label": "Claude Code hooks"
@@ -16,6 +21,7 @@
     "clearEnded": "Clear ended",
     "count": "{count, plural, one {# session} other {# sessions}}",
     "delete": "Remove from history",
+    "detachedAgo": "detached {ago} ago",
     "empty": "No sessions recorded yet.",
     "endedAgo": "ended {ago} ago",
     "filterAll": "All",
@@ -24,8 +30,7 @@
     "ranFor": "ran {duration}",
     "showLess": "Show fewer",
     "showMore": "Show all {count}",
-    "title": "Recent sessions",
-    "detachedAgo": "detached {ago} ago"
+    "title": "Recent sessions"
   },
   "island": {
     "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
@@ -60,7 +65,13 @@
   },
   "opencode": {
     "desc": "Install a plugin into ~/.config/opencode/plugin. Observe sessions and approve/deny permissions from the island.",
-    "label": "OpenCode plugin"
+    "label": "OpenCode plugin",
+    "outbox": {
+      "corrupt": "The durable command queue is corrupt; controls are disabled.",
+      "repair": "Repair queue",
+      "repaired": "OpenCode command queue repaired.",
+      "unavailable": "The durable command queue is unavailable; controls are disabled."
+    }
   },
   "saved": "Fleet settings updated.",
   "status": {
@@ -73,5 +84,31 @@
     "unavailable": "Claude Code not found"
   },
   "summaryAria": "{count} integrations active",
-  "title": "Agent fleet monitor"
+  "title": "Agent fleet monitor",
+  "workers": {
+    "bindingHint": "Remote AgentTeam placement reuses these authenticated Fleet hosts and Task Workspace bindings.",
+    "capacity": "{used}/{total} slots",
+    "commandAria": "Worker enrollment command",
+    "copied": "Enrollment command copied.",
+    "copy": "Copy enrollment command",
+    "copyFailed": "Could not copy the enrollment command.",
+    "description": "Enroll least-privilege CLI workers and inspect their placement readiness.",
+    "empty": "No execution workers enrolled.",
+    "enroll": "Enroll worker",
+    "error": "Worker action failed: {detail}",
+    "expires": "Enrollment expires at {time}.",
+    "notConnected": "Connect Companion before enrolling a worker.",
+    "offline": "Offline",
+    "online": "Online",
+    "placementReason": "Placement unavailable: {reason}",
+    "qrAria": "Worker enrollment QR code",
+    "revoke": "Revoke",
+    "revoked": "Worker access revoked.",
+    "status": {
+      "incompatible": "Incompatible",
+      "offline": "Offline",
+      "online": "Online"
+    },
+    "title": "Execution workers"
+  }
 }

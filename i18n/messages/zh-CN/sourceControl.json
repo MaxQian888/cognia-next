@@ -58,6 +58,8 @@
     "destinationPlaceholder": "/仓库/保存路径",
     "failed": "克隆仓库失败",
     "open": "克隆仓库",
+    "remoteDescription": "输入远程仓库 URL，并填写已授权主机工作区内的相对目标目录。",
+    "remoteDestinationPlaceholder": "repositories/project",
     "submit": "克隆",
     "title": "克隆仓库",
     "urlLabel": "仓库 URL",
@@ -189,6 +191,10 @@
     "moveUp": "上移",
     "rewordPlaceholder": "新的提交信息",
     "title": "交互式变基"
+  },
+  "remote": {
+    "noWorkspace": "没有已授权的 Git 工作区",
+    "noWorkspaceDescription": "请先在已配对桌面端打开项目，为当前账号授权项目根目录，然后刷新此页面。"
   },
   "remotes": {
     "add": "添加远程",
@@ -362,6 +368,7 @@
     "pathPlaceholder": "选择一个空目录",
     "prune": "清理失效项",
     "pruned": "已清理失效的工作树记录",
+    "relativePathPlaceholder": "worktrees/feature-name",
     "remove": "移除工作树",
     "removeDescription": "确定移除位于 {path} 的关联工作树吗？",
     "removeTitle": "移除工作树？",

@@ -1,0 +1,13 @@
+{
+  "apply": "Apply",
+  "download": "Download",
+  "editorDescription": "Edit the structured configuration, validate it, then apply the changes.",
+  "editorLabel": "Structured configuration editor",
+  "format": "Format",
+  "import": "Import",
+  "invalid": "The configuration is invalid: {message}",
+  "json": "JSON",
+  "reset": "Reset",
+  "validate": "Validate",
+  "yaml": "YAML"
+}

@@ -15,6 +15,10 @@
       "desc": "工作目录变更时触发。",
       "label": "工作目录变更"
     },
+    "DirectoryAdded": {
+      "desc": "向会话工作区添加目录时触发。",
+      "label": "目录已添加"
+    },
     "Elicitation": {
       "desc": "智能体向你征询结构化输入时触发。",
       "label": "信息征询"
@@ -30,6 +34,10 @@
     "InstructionsLoaded": {
       "desc": "加载 CLAUDE.md / 指令时触发。",
       "label": "指令加载"
+    },
+    "MessageDisplay": {
+      "desc": "运行时向用户显示消息时触发。",
+      "label": "消息显示"
     },
     "Notification": {
       "desc": "运行时通知（空闲、等待输入）时触发。",
@@ -75,6 +83,10 @@
       "desc": "会话开始时触发；适合注入常驻上下文。",
       "label": "会话开始"
     },
+    "Setup": {
+      "desc": "设置仓库或工作树环境时触发。",
+      "label": "环境设置"
+    },
     "Stop": {
       "desc": "助手完成本轮回复时触发。",
       "label": "停止"
@@ -82,6 +94,10 @@
     "StopFailure": {
       "desc": "本轮因错误结束时触发。",
       "label": "停止（失败）"
+    },
+    "SubagentStart": {
+      "desc": "原生子代理开始运行时触发。",
+      "label": "子代理启动"
     },
     "SubagentStop": {
       "desc": "子代理结束运行时触发。",

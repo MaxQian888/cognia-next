@@ -157,14 +157,14 @@
     "secretSaveError": "保存密钥失败：{error}",
     "secretSaved": "签名密钥已保存。",
     "secretSet": "已配置签名密钥。",
+    "secretUnavailable": "签名密钥不可用",
     "setSecret": "保存密钥",
     "signingSecret": "签名密钥",
     "signingSecretHelp": "在桌面端存放在 OS 钥匙串。投递会带上 Standard Webhooks 三件套请求头（webhook-id / webhook-timestamp / webhook-signature）。",
     "subscriptionAll": "全部事件",
     "subscriptionSummary": "{count, plural, =0 {全部事件} other {# 种事件类型}}",
     "subscriptionsHelp": "仅向该端点投递所选事件类型。不勾选则接收全部事件。",
-    "subscriptionsLabel": "事件订阅",
-    "secretUnavailable": "签名密钥不可用"
+    "subscriptionsLabel": "事件订阅"
   },
   "overview": {
     "endpointUrlLabel": "端点 URL",

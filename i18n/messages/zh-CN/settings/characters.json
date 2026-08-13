@@ -111,44 +111,8 @@
     "descriptionPlaceholder": "（可选）一句话说明",
     "disallowedTools": "禁用的工具（用逗号分隔）",
     "disallowedToolsPlaceholder": "Bash",
-    "mcpServers": "MCP 服务器",
-    "mcpServersEmptyHint": "（使用所有已启用的 MCP 服务器）",
-    "mcpServersHint": "全部不选表示「使用所有已启用的服务器」。",
-    "model": "模型",
-    "modelIdPlaceholder": "或粘贴模型 id",
-    "knowledgeBases": "知识库",
-    "knowledgeBasesEmptyHint": "此 Agent 尚未绑定可复用知识库。",
-    "knowledgeBasesHint": "可绑定一个或多个可复用知识库；检索会独立查询所有已选知识库。",
-    "memoryPolicy": {
-      "description": "选择此 Agent 可执行的长期记忆操作，以及允许访问的作用域。",
-      "globalCeiling": "应用级记忆与隐私设置始终是权限上限。此策略只能收紧权限，不能启用全局或当前会话已禁用的访问。",
-      "operations": {
-        "autoLearn": "自动学习",
-        "create": "创建记忆",
-        "forget": "遗忘记忆",
-        "recall": "召回记忆",
-        "update": "更新记忆"
-      },
-      "readableScopes": "可读作用域",
-      "scopes": {
-        "agent": "Agent",
-        "character": "角色",
-        "global": "全局",
-        "workspace": "工作区"
-      },
-      "title": "记忆策略",
-      "writableScopes": "可写作用域"
-    },
-    "routing": {
-      "description": "分别为规划、执行和轻量 utility 任务选择模型。现有路由器继续支持模型别名与 Auto。",
-      "execute": "执行模型",
-      "plan": "规划模型",
-      "planPlaceholder": "使用应用默认规划模型",
-      "title": "语义模型路由",
-      "utility": "Utility 模型",
-      "utilityPlaceholder": "使用应用默认 utility 模型"
-    },
     "execution": {
+      "addEnv": "添加变量",
       "effort": "推理强度",
       "effortValues": {
         "high": "高",
@@ -157,7 +121,6 @@
         "medium": "中",
         "xhigh": "超高"
       },
-      "addEnv": "添加变量",
       "envDescription": "普通值随 Agent 保存；敏感值写入设备 keyring，保存或导出的仅是不透明引用。",
       "envKind": "类型",
       "envName": "名称",
@@ -179,6 +142,34 @@
       "maxTurnsPlaceholder": "使用应用默认值",
       "removeEnv": "移除环境变量 {name}"
     },
+    "knowledgeBases": "知识库",
+    "knowledgeBasesEmptyHint": "此 Agent 尚未绑定可复用知识库。",
+    "knowledgeBasesHint": "可绑定一个或多个可复用知识库；检索会独立查询所有已选知识库。",
+    "mcpServers": "MCP 服务器",
+    "mcpServersEmptyHint": "（使用所有已启用的 MCP 服务器）",
+    "mcpServersHint": "全部不选表示「使用所有已启用的服务器」。",
+    "memoryPolicy": {
+      "description": "选择此 Agent 可执行的长期记忆操作，以及允许访问的作用域。",
+      "globalCeiling": "应用级记忆与隐私设置始终是权限上限。此策略只能收紧权限，不能启用全局或当前会话已禁用的访问。",
+      "operations": {
+        "autoLearn": "自动学习",
+        "create": "创建记忆",
+        "forget": "遗忘记忆",
+        "recall": "召回记忆",
+        "update": "更新记忆"
+      },
+      "readableScopes": "可读作用域",
+      "scopes": {
+        "agent": "Agent",
+        "character": "角色",
+        "global": "全局",
+        "workspace": "工作区"
+      },
+      "title": "记忆策略",
+      "writableScopes": "可写作用域"
+    },
+    "model": "模型",
+    "modelIdPlaceholder": "或粘贴模型 id",
     "name": "名称",
     "namePlaceholder": "Coding Assistant",
     "permissionMode": "权限模式",
@@ -202,6 +193,15 @@
       "mobile": "移动端",
       "tauri": "桌面端",
       "title": "可用平台"
+    },
+    "routing": {
+      "description": "分别为规划、执行和轻量 utility 任务选择模型。现有路由器继续支持模型别名与 Auto。",
+      "execute": "执行模型",
+      "plan": "规划模型",
+      "planPlaceholder": "使用应用默认规划模型",
+      "title": "语义模型路由",
+      "utility": "Utility 模型",
+      "utilityPlaceholder": "使用应用默认 utility 模型"
     },
     "sandbox": {
       "enable": {
@@ -294,10 +294,10 @@
     "created": "已创建知识库「{name}」。",
     "delete": "删除",
     "deleteAria": "删除知识库 {name}",
-    "deleted": "已删除知识库「{name}」。",
     "deleteReferenced": "此知识库仍被 {count} 个 Agent 或工作流引用。删除后会解除这些引用，但保留 Agent 与工作流。",
     "deleteTitle": "删除知识库？",
     "deleteUnreferenced": "这会删除知识库、导入来源和派生索引。",
+    "deleted": "已删除知识库「{name}」。",
     "description": "可复用知识库可绑定到多个 Agent，并与 Project 和 Twin 知识独立检索。",
     "detachAndDelete": "解绑并删除",
     "empty": "尚未创建可复用知识库。",

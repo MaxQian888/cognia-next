@@ -1,7 +1,82 @@
 {
+  "captures": {
+    "active": {
+      "elapsed": "Elapsed {seconds}s",
+      "gaps": "{count} gaps",
+      "title": "Active capture"
+    },
+    "comparison": {
+      "absolute": "Absolute delta",
+      "compare": "Compare selected captures",
+      "mad": "MAD",
+      "median": "Median",
+      "na": "N/A",
+      "p95": "Type-7 p95",
+      "percent": "Percent delta"
+    },
+    "controls": {
+      "cadence": "Capture cadence",
+      "delete": "Delete capture {id}",
+      "duration": "Capture duration",
+      "export": "Export capture {id}",
+      "import": "Import .cognia-perf",
+      "rawExport": "Export raw capture {id}",
+      "selectCompare": "Select capture {id} for comparison",
+      "source": "Capture source",
+      "start": "Start capture",
+      "stop": "Stop capture"
+    },
+    "errors": {
+      "compareSelection": "Select exactly two captures to compare.",
+      "locked": "Unlock the active account to access encrypted captures."
+    },
+    "library": {
+      "bytes": "{value} bytes",
+      "empty": "No captures are stored for this target.",
+      "frames": "{count} frames",
+      "retention": "Unpinned captures retain for {days} days and at most {count} per target. Account quota: {quota} GiB.",
+      "title": "Capture library"
+    },
+    "milliseconds": "{value} ms",
+    "minutes": "{value} min",
+    "raw": {
+      "attachment": "Attachment {ordinal} · {type} · {bytes} bytes",
+      "attachments": "Explicit attachment selection",
+      "cancel": "Cancel",
+      "confirm": "I understand, export raw evidence",
+      "description": "Raw evidence can contain process, span, trace, error, and environment details. This confirmation is cryptographically bound to this capture and the attachment selection below.",
+      "noAttachments": "No attachments selected; trace bytes remain excluded.",
+      "title": "Confirm raw performance export"
+    },
+    "shell": {
+      "label": "Active performance capture",
+      "return": "Open",
+      "stop": "Stop performance capture",
+      "summary": "{target} · {seconds}s · {gaps} gaps"
+    },
+    "source": {
+      "host": "Selected host",
+      "renderer": "Local Renderer"
+    },
+    "state": {
+      "idle": "Idle",
+      "recording": "Recording"
+    },
+    "toast": {
+      "exported": "Capture exported with default redaction.",
+      "imported": "Capture imported and verified.",
+      "rawExported": "Raw capture exported after confirmation.",
+      "started": "Capture started.",
+      "stopped": "Capture stopped."
+    }
+  },
   "desktopOnly": {
     "description": "Runtime and process metrics are sampled from the native Rust backend, which only runs in the desktop app.",
     "title": "Performance panel is desktop-only"
+  },
+  "diagnose": {
+    "logs": "Open Logs",
+    "observability": "Open Observability"
   },
   "hotspots": {
     "columns": {
@@ -17,6 +92,20 @@
     },
     "empty": "No hotspots recorded yet.",
     "hint": "Run an instrumented operation (send a message, run an OCR, run a terminal or git command) to populate the table."
+  },
+  "hud": {
+    "clear": "clear",
+    "clearLabel": "Clear HUD entries",
+    "columns": {
+      "count": "n",
+      "name": "name",
+      "p50": "p50",
+      "p95": "p95"
+    },
+    "disable": "Disable HUD",
+    "fps": "{value} fps",
+    "title": "Perf HUD",
+    "waiting": "waiting for entries…"
   },
   "managed": {
     "actions": {
@@ -75,7 +164,8 @@
     "high": "Critical",
     "low": "Normal",
     "moderate": "Moderate",
-    "title": "Memory pressure"
+    "title": "Memory pressure",
+    "utilization": "Used / total memory"
   },
   "metrics": {
     "cpu": "App CPU",
@@ -101,6 +191,7 @@
     },
     "empty": "No processes sampled yet.",
     "noMatch": "No processes match your search.",
+    "orphaned": "Orphaned",
     "roles": {
       "child": "Child",
       "main": "Main",
@@ -113,6 +204,10 @@
       "totalDisk": "Disk I/O",
       "totalMemory": "Total memory"
     }
+  },
+  "resources": {
+    "host": "Host",
+    "renderer": "Renderer"
   },
   "runtime": {
     "aliveTasks": "Alive tasks",
@@ -136,11 +231,32 @@
     "traces": {
       "description": "dial9 writes binary async traces to disk for offline analysis.",
       "empty": "No trace files yet.",
+      "identity": "Trace {index}",
       "open": "Open folder",
       "title": "Flight-recorder traces"
     },
     "workerN": "Worker {n}",
     "workers": "Worker threads"
+  },
+  "sourceHealth": {
+    "error": "Latest error",
+    "gaps": "Visible gaps",
+    "kind": {
+      "host": "Selected host",
+      "renderer": "Local Renderer"
+    },
+    "latestGap": "Latest gap: {reason}, {start}–{end}",
+    "none": "None",
+    "notAvailable": "N/A",
+    "overhead": "Collection overhead",
+    "state": {
+      "connecting": "Connecting",
+      "error": "Error",
+      "live": "Live",
+      "stale": "Stale",
+      "unsupported": "Unsupported"
+    },
+    "title": "Sources and capabilities"
   },
   "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
   "system": {
@@ -170,10 +286,13 @@
     "loading": "Reading system details…"
   },
   "tabs": {
+    "captures": "Captures",
+    "diagnose": "Diagnose",
     "hotspots": "Hotspots",
     "managed": "Managed",
     "overview": "Performance",
     "processes": "Processes",
+    "resources": "Resources",
     "runtime": "Async runtime",
     "system": "System"
   },

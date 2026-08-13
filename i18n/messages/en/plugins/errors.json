@@ -1,5 +1,6 @@
 {
   "activation": "Couldn't activate {pluginName}",
+  "adapter": "Plugin adapter failed for {pluginName}",
   "config": "Couldn't apply settings for {pluginName}",
   "disable": "Couldn't disable {pluginName}",
   "enable": "Couldn't enable {pluginName}",

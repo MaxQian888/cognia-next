@@ -1,5 +1,6 @@
 {
   "activation": "{pluginName} 激活失败",
+  "adapter": "{pluginName} 的插件适配器运行失败",
   "config": "{pluginName} 设置应用失败",
   "disable": "{pluginName} 禁用失败",
   "enable": "{pluginName} 启用失败",

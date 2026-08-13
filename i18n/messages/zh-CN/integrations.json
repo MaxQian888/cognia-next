@@ -1,34 +1,33 @@
 {
   "accounts": {
     "add": "添加账号",
+    "advanced": "高级",
     "approvedOrigin": "已授权的 self-hosted HTTPS origin（可选）",
     "authStrategy": "认证方式",
-    "credentialHandle": "凭据句柄",
-    "discoverInstallations": "发现安装实例",
-    "integration": "Integration",
-    "installation": "安装实例",
-    "label": "账号名称",
-    "providerId": "认证提供方 ID",
-    "remoteAccountId": "远端账号 ID",
-    "selectAuthStrategy": "选择认证方式",
-    "selectIntegration": "选择 Integration",
-    "selectInstallation": "选择安装实例",
-    "title": "账号",
-    "advanced": "高级",
     "checkHealth": "检查账号健康状态",
-    "configured": "已配置",
     "configFields": {
       "accountLabel": "账号名称",
       "appId": "App ID",
       "privateKey": "私钥",
       "token": "个人访问令牌"
     },
+    "configured": "已配置",
+    "credentialHandle": "凭据句柄",
     "dedicatedAppConfirmation": "我确认这是专用的集成应用。",
+    "discoverInstallations": "发现安装实例",
+    "installation": "安装实例",
+    "integration": "Integration",
+    "label": "账号名称",
     "lastSync": "最近同步",
     "missingPermissions": "缺少权限",
     "notConfigured": "未配置",
+    "providerId": "认证提供方 ID",
     "rateLimitReset": "速率限制重置时间",
     "recommended": "推荐",
+    "remoteAccountId": "远端账号 ID",
+    "selectAuthStrategy": "选择认证方式",
+    "selectInstallation": "选择安装实例",
+    "selectIntegration": "选择 Integration",
     "statusMessages": {
       "installationRevoked": "GitHub App 安装实例已被撤销。",
       "installationSuspended": "GitHub App 安装实例已暂停。",
@@ -36,6 +35,7 @@
       "remoteReconciliationUnavailable": "暂时无法与远端账号核对状态。",
       "webhookVerified": "Webhook 配置已验证。"
     },
+    "title": "账号",
     "validateAndAdd": "验证并添加",
     "webhookUrl": "Webhook 地址",
     "webhookVerification": "Webhook 验证"
@@ -54,6 +54,14 @@
   "disable": "停用",
   "emptyPlugins": "请先安装支持 Integration 的 Marketplace 插件。",
   "enable": "启用",
+  "errors": {
+    "accountSetup": "无法配置集成账号。",
+    "confirmDedicatedApp": "请确认这是专用的集成应用。",
+    "installationDiscovery": "无法发现 GitHub App 安装实例。",
+    "projectionRequired": "请选择收件箱投影。",
+    "resourceDiscovery": "无法发现资源。",
+    "subscriptionSetup": "无法创建订阅。"
+  },
   "health": {
     "degraded": "异常",
     "healthy": "健康",
@@ -81,16 +89,9 @@
     "account": "账号",
     "add": "添加订阅",
     "allResources": "全部资源",
-    "eventTypes": "事件类型（逗号分隔）",
-    "ingressSecret": "Webhook 密钥（启用 ingress 时必填）",
-    "resourceId": "资源 ID（可选）",
-    "resourceKind": "资源类型（可选）",
-    "selectAccount": "选择账号",
-    "title": "订阅",
     "deliverToInbox": "将事件投递到收件箱",
     "disabledByProvider": "已被提供方停用",
     "discover": "发现",
-    "events": "事件",
     "eventLabels": {
       "checkRunCompleted": "检查运行已完成",
       "githubAppAuthorizationRevoked": "GitHub App 授权已撤销",
@@ -114,7 +115,10 @@
       "repositoriesAdded": "仓库已加入安装实例",
       "repositoriesRemoved": "仓库已从安装实例移除"
     },
+    "eventTypes": "事件类型（逗号分隔）",
+    "events": "事件",
     "failedDeliveries": "失败投递",
+    "ingressSecret": "Webhook 密钥（启用 ingress 时必填）",
     "loadMore": "加载更多",
     "noFailedDeliveries": "没有失败投递。",
     "projection": "收件箱投影",
@@ -125,17 +129,13 @@
     },
     "repository": "仓库",
     "requeue": "重新入队",
+    "resourceId": "资源 ID（可选）",
+    "resourceKind": "资源类型（可选）",
     "searchResources": "搜索资源",
-    "selectProjection": "选择投影"
+    "selectAccount": "选择账号",
+    "selectProjection": "选择投影",
+    "title": "订阅"
   },
   "title": "Integrations",
-  "errors": {
-    "accountSetup": "无法配置集成账号。",
-    "confirmDedicatedApp": "请确认这是专用的集成应用。",
-    "installationDiscovery": "无法发现 GitHub App 安装实例。",
-    "projectionRequired": "请选择收件箱投影。",
-    "resourceDiscovery": "无法发现资源。",
-    "subscriptionSetup": "无法创建订阅。"
-  },
   "unsupportedWeb": "集成管理需要桌面应用。"
 }

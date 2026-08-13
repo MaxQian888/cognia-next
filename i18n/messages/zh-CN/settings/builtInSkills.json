@@ -7,18 +7,18 @@
   },
   "description": "经过代码审查的第一方 MCP 工具，助手可在桌面对话或 IM 渠道中调用。",
   "lark": {
-    "emptyHint": "尚未注册飞书技能。",
-    "intro": {
-      "body": "这些技能将 lark-cli 子命令包装为强类型 MCP 工具，助手直接调用，执行运行在桌面 sidecar 中。",
-      "gates": "只读技能无需确认。在 IM 渠道中，写操作默认弹出 A2UI 确认卡。删除类操作需在会话设置中显式开启。",
-      "title": "飞书生产力技能 (lark-cli)"
-    },
     "diagnostics": {
       "affectedTools": "受影响工具：{tools}",
       "missing": "缺少 {count} 项必需能力。",
       "missingCapabilities": "缺少能力：{capabilities}",
       "unknown": "未知",
       "versions": "检测到 lark-cli {detected}；认证版本 {certified}。"
+    },
+    "emptyHint": "尚未注册飞书技能。",
+    "intro": {
+      "body": "这些技能将 lark-cli 子命令包装为强类型 MCP 工具，助手直接调用，执行运行在桌面 sidecar 中。",
+      "gates": "只读技能无需确认。在 IM 渠道中，写操作默认弹出 A2UI 确认卡。删除类操作需在会话设置中显式开启。",
+      "title": "飞书生产力技能 (lark-cli)"
     }
   },
   "mutation": {

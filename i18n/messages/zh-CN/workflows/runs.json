@@ -25,6 +25,15 @@
       "description": "该运行可能已被删除，或链接不正确。",
       "title": "未找到运行记录"
     },
+    "provenance": {
+      "caller": "调用方 {value}",
+      "draft": "草稿/本地调试",
+      "entrypoint": "入口 {value}",
+      "revision": "部署修订 {value}",
+      "trace": "追踪 {value}",
+      "trigger": "触发源 {value}",
+      "version": "版本 {value}"
+    },
     "rerun": "重跑",
     "rerunFromStep": "从此步重跑",
     "rerunFromStepHint": "在时间线中选择一个步骤以从该步重跑",
@@ -35,15 +44,6 @@
       "originalVersion": "运行原发布版本"
     },
     "running": "运行中…",
-    "provenance": {
-      "caller": "调用方 {value}",
-      "draft": "草稿/本地调试",
-      "entrypoint": "入口 {value}",
-      "revision": "部署修订 {value}",
-      "trace": "追踪 {value}",
-      "trigger": "触发源 {value}",
-      "version": "版本 {value}"
-    },
     "sparkline": {
       "title": "时长趋势"
     },

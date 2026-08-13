@@ -1,4 +1,31 @@
 {
+  "actions": {
+    "collapse": "Collapse workbench",
+    "expand": "Expand workbench",
+    "focus": "Focus mode",
+    "historyBack": "Go back",
+    "historyForward": "Go forward",
+    "layoutMenu": "Layout options",
+    "narrow": "Narrow mode",
+    "pin": "Pin panel",
+    "pinHint": "Pinned panels stay put — automatic reveals become badges instead",
+    "resetLayout": "Reset layout",
+    "resize": "Resize workbench",
+    "retry": "Retry panel",
+    "switchPanel": "Switch panel",
+    "unpin": "Unpin panel",
+    "wide": "Wide mode"
+  },
+  "activities": {
+    "ai": "AI",
+    "comments": "Comments",
+    "inspect": "Inspect",
+    "preview-run": "Preview / run",
+    "review": "Review",
+    "templates": "Templates",
+    "workspace": "Workspace"
+  },
+  "activityRailLabel": "Context Workbench activities",
   "agentStatusPanel": {
     "active": "{count, plural, one {# active} other {# active}}",
     "emptyDescription": "Add teammates to the team to see their status here.",
@@ -19,33 +46,6 @@
     },
     "title": "Agent Status"
   },
-  "actions": {
-    "collapse": "Collapse workbench",
-    "expand": "Expand workbench",
-    "focus": "Focus mode",
-    "layoutMenu": "Layout options",
-    "narrow": "Narrow mode",
-    "pin": "Pin panel",
-    "pinHint": "Pinned panels stay put — automatic reveals become badges instead",
-    "resetLayout": "Reset layout",
-    "resize": "Resize workbench",
-    "retry": "Retry panel",
-    "historyBack": "Go back",
-    "historyForward": "Go forward",
-    "switchPanel": "Switch panel",
-    "unpin": "Unpin panel",
-    "wide": "Wide mode"
-  },
-  "activities": {
-    "ai": "AI",
-    "comments": "Comments",
-    "inspect": "Inspect",
-    "preview-run": "Preview / run",
-    "review": "Review",
-    "templates": "Templates",
-    "workspace": "Workspace"
-  },
-  "activityRailLabel": "Context Workbench activities",
   "aiActions": "AI actions",
   "aiLoading": "Preparing the resource conversation…",
   "artifactSelectionComment": {
@@ -116,28 +116,6 @@
     "showItem": "Show"
   },
   "exportResourceSession": "Export this resource conversation",
-  "metadata": {
-    "artifactTitle": "Artifact properties",
-    "artifactType": "Type",
-    "canvasTitle": "Document properties",
-    "createdAt": "Created",
-    "documentType": "Type",
-    "goToSource": "Go to source message",
-    "language": "Language",
-    "messageCount": "Messages",
-    "model": "Model",
-    "notRun": "Not run",
-    "provider": "Provider",
-    "revision": "Revision",
-    "runtimeStatus": "Runtime",
-    "saveState": "Save state",
-    "sessionId": "Conversation ID",
-    "sessionTitle": "Conversation",
-    "unknown": "Unknown",
-    "updatedAt": "Updated",
-    "version": "Version",
-    "workingDir": "Working directory"
-  },
   "logsPanel": {
     "count": "{count, plural, one {# entry} other {# entries}}",
     "emptyDescription": "No log entries match the current filter.",
@@ -166,95 +144,27 @@
     "sortLabel": "Sort memories",
     "title": "Memory"
   },
-  "runContext": {
-    "title": "Run Context",
-    "tabs": {
-      "workingSet": "Working Set",
-      "review": "Review"
-    },
-    "workingSet": {
-      "title": "Working Set",
-      "description": "Bounded facts and handles shared by you and the agent.",
-      "emptyTitle": "Working set is empty",
-      "emptyDescription": "Add a fact, decision, question, resource, or subtask handle.",
-      "summaryLabel": "Working set summary",
-      "summaryPlaceholder": "Add a concise, durable item",
-      "kindLabel": "Entry kind",
-      "add": "Add",
-      "resolve": "Resolve",
-      "remove": "Remove",
-      "active": "Active",
-      "resolved": "Resolved",
-      "revisionConflict": "The working set changed. Review the latest revision and try again.",
-      "kinds": {
-        "fact": "Fact",
-        "decision": "Decision",
-        "open-question": "Open question",
-        "resource": "Resource",
-        "subtask": "Subtask"
-      },
-      "projectionTitle": "Live projections",
-      "projectionDescription": "Live runs and task handles are shown without copying them into the working set.",
-      "projection": {
-        "artifact": "Artifact: {title}",
-        "backgroundTask": "Subtask {id}: {status}",
-        "run": "{kind}: {status}",
-        "taskWorkspace": "Task: {id}"
-      },
-      "runKinds": {
-        "agent-turn": "Agent turn",
-        "goal": "Goal",
-        "plan": "Plan",
-        "scheduled": "Scheduled run",
-        "team": "Agent Team",
-        "workflow": "Workflow"
-      },
-      "runStatuses": {
-        "cancelled": "Cancelled",
-        "completed": "Completed",
-        "failed": "Failed",
-        "paused": "Paused",
-        "queued": "Queued",
-        "recovery_required": "Recovery required",
-        "running": "Running",
-        "waiting": "Waiting"
-      },
-      "backgroundTaskStatuses": {
-        "done": "Done",
-        "error": "Error",
-        "interrupted": "Interrupted",
-        "running": "Running"
-      }
-    },
-    "review": {
-      "title": "Run Review",
-      "description": "Generate and approve bounded learning from terminal runs.",
-      "emptyTitle": "No run review yet",
-      "emptyDescription": "Reviews are generated only when you request one for a terminal run.",
-      "generate": "Generate review",
-      "approve": "Approve and apply",
-      "reject": "Reject",
-      "dismiss": "Dismiss",
-      "retry": "Retry apply",
-      "status": {
-        "pending_review": "Pending review",
-        "resolved": "Resolved"
-      },
-      "proposalStatus": {
-        "pending": "Pending",
-        "approved_pending_apply": "Applying",
-        "applied": "Applied",
-        "rejected": "Rejected",
-        "apply_failed": "Apply failed"
-      },
-      "target": {
-        "team-config": "Team configuration",
-        "project-environment": "Project environment",
-        "memory-candidate": "Memory candidate",
-        "skill-draft": "Disabled skill draft",
-        "observation": "Observation"
-      }
-    }
+  "metadata": {
+    "artifactTitle": "Artifact properties",
+    "artifactType": "Type",
+    "canvasTitle": "Document properties",
+    "createdAt": "Created",
+    "documentType": "Type",
+    "goToSource": "Go to source message",
+    "language": "Language",
+    "messageCount": "Messages",
+    "model": "Model",
+    "notRun": "Not run",
+    "provider": "Provider",
+    "revision": "Revision",
+    "runtimeStatus": "Runtime",
+    "saveState": "Save state",
+    "sessionId": "Conversation ID",
+    "sessionTitle": "Conversation",
+    "unknown": "Unknown",
+    "updatedAt": "Updated",
+    "version": "Version",
+    "workingDir": "Working directory"
   },
   "mobileDescription": "AI, comments, inspection, review, and preview tools for the current resource.",
   "mobileTitle": "Context Workbench",
@@ -276,6 +186,96 @@
     "title": "Switch panel"
   },
   "resourceChat": "AI conversation",
+  "runContext": {
+    "review": {
+      "approve": "Approve and apply",
+      "description": "Generate and approve bounded learning from terminal runs.",
+      "dismiss": "Dismiss",
+      "emptyDescription": "Reviews are generated only when you request one for a terminal run.",
+      "emptyTitle": "No run review yet",
+      "generate": "Generate review",
+      "proposalStatus": {
+        "applied": "Applied",
+        "apply_failed": "Apply failed",
+        "approved_pending_apply": "Applying",
+        "pending": "Pending",
+        "rejected": "Rejected"
+      },
+      "reject": "Reject",
+      "retry": "Retry apply",
+      "status": {
+        "pending_review": "Pending review",
+        "resolved": "Resolved"
+      },
+      "target": {
+        "memory-candidate": "Memory candidate",
+        "observation": "Observation",
+        "project-environment": "Project environment",
+        "skill-draft": "Disabled skill draft",
+        "team-config": "Team configuration"
+      },
+      "title": "Run Review"
+    },
+    "tabs": {
+      "review": "Review",
+      "workingSet": "Working Set"
+    },
+    "title": "Run Context",
+    "workingSet": {
+      "active": "Active",
+      "add": "Add",
+      "backgroundTaskStatuses": {
+        "done": "Done",
+        "error": "Error",
+        "interrupted": "Interrupted",
+        "running": "Running"
+      },
+      "description": "Bounded facts and handles shared by you and the agent.",
+      "emptyDescription": "Add a fact, decision, question, resource, or subtask handle.",
+      "emptyTitle": "Working set is empty",
+      "kindLabel": "Entry kind",
+      "kinds": {
+        "decision": "Decision",
+        "fact": "Fact",
+        "open-question": "Open question",
+        "resource": "Resource",
+        "subtask": "Subtask"
+      },
+      "projection": {
+        "artifact": "Artifact: {title}",
+        "backgroundTask": "Subtask {id}: {status}",
+        "run": "{kind}: {status}",
+        "taskWorkspace": "Task: {id}"
+      },
+      "projectionDescription": "Live runs and task handles are shown without copying them into the working set.",
+      "projectionTitle": "Live projections",
+      "remove": "Remove",
+      "resolve": "Resolve",
+      "resolved": "Resolved",
+      "revisionConflict": "The working set changed. Review the latest revision and try again.",
+      "runKinds": {
+        "agent-turn": "Agent turn",
+        "goal": "Goal",
+        "plan": "Plan",
+        "scheduled": "Scheduled run",
+        "team": "Agent Team",
+        "workflow": "Workflow"
+      },
+      "runStatuses": {
+        "cancelled": "Cancelled",
+        "completed": "Completed",
+        "failed": "Failed",
+        "paused": "Paused",
+        "queued": "Queued",
+        "recovery_required": "Recovery required",
+        "running": "Running",
+        "waiting": "Waiting"
+      },
+      "summaryLabel": "Working set summary",
+      "summaryPlaceholder": "Add a concise, durable item",
+      "title": "Working Set"
+    }
+  },
   "sessionSidechat": "Side chat",
   "sessionSources": {
     "description": "Files, web pages, retrieved context, and tools used in this conversation.",
@@ -288,6 +288,7 @@
       "web": "Web"
     },
     "labels": {
+      "agentKnowledge": "Agent knowledge",
       "anthropic": "Web",
       "document": "Document",
       "file": "File",
@@ -305,6 +306,10 @@
     "searchPlaceholder": "Search files, web pages, and tools…",
     "title": "Conversation sources"
   },
+  "sidechatPlaceholder": {
+    "description": "Open a conversation first, then use Side chat to investigate something without adding noise to the main thread.",
+    "title": "No conversation is open"
+  },
   "sourceControlPanel": {
     "changeCount": "{count, plural, one {# change} other {# changes}}",
     "clean": "Working tree clean",
@@ -319,10 +324,6 @@
     "staged": "{count, plural, one {# staged} other {# staged}}",
     "title": "Source Control",
     "unstaged": "{count, plural, one {# change} other {# changes}}"
-  },
-  "sidechatPlaceholder": {
-    "description": "Open a conversation first, then use Side chat to investigate something without adding noise to the main thread.",
-    "title": "No conversation is open"
   },
   "unavailable": {
     "comments": {

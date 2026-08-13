@@ -1,4 +1,63 @@
 {
+  "aiShell": {
+    "actions": {
+      "cancel": "取消",
+      "newPlan": "新计划",
+      "runAll": "全部执行",
+      "stepByStep": "逐步执行",
+      "stop": "停止执行"
+    },
+    "advisory": {
+      "applyFix": "应用修复",
+      "fix": "建议修复：",
+      "noFix": "无法自动修复。",
+      "retryHint": "应用修复后重新运行原始步骤。",
+      "title": "错误诊断"
+    },
+    "context": {
+      "branch": "分支",
+      "cwd": "工作目录",
+      "shell": "Shell"
+    },
+    "error": {
+      "advisory": "诊断",
+      "generating": "生成计划时出错。",
+      "noModel": "未配置模型，请在设置中选择。",
+      "piiBlocked": "上下文中包含敏感信息 — 请脱敏后重试。"
+    },
+    "history": {
+      "clear": "清除历史",
+      "empty": "暂无消息。",
+      "title": "AI Shell 历史"
+    },
+    "inputPlaceholder": "描述你想做什么…",
+    "plan": {
+      "cancelled": "计划已取消。",
+      "completed": "所有步骤已完成。",
+      "empty": "未生成任何步骤。",
+      "error": "生成计划失败。",
+      "executing": "执行中…",
+      "generating": "正在生成计划…",
+      "ready": "计划就绪 — 审阅后执行。",
+      "title": "执行计划"
+    },
+    "send": "发送",
+    "step": {
+      "cancelled": "已取消",
+      "confirm": "此步骤可能具有破坏性，是否执行？",
+      "edit": "编辑命令",
+      "failed": "失败（退出码 {code}）",
+      "failedNoCode": "失败",
+      "pending": "待执行",
+      "retry": "重试步骤",
+      "running": "运行中…",
+      "skip": "跳过步骤",
+      "skipped": "已跳过",
+      "succeeded": "完成"
+    },
+    "title": "AI Shell",
+    "toggle": "切换 AI Shell（Ctrl+Shift+I）"
+  },
   "commandMenu": {
     "copyCommand": "复制命令",
     "copyCommandAndOutput": "复制命令与输出",
@@ -120,6 +179,45 @@
     "title": "快速修复",
     "trigger": "显示快速修复"
   },
+  "recording": {
+    "discard": "丢弃录制",
+    "elapsed": "{time}",
+    "export": {
+      "cast": "导出为 .cast",
+      "done": "导出完成",
+      "error": "导出失败：{message}",
+      "exporting": "导出中…",
+      "gif": "导出为 GIF",
+      "title": "导出"
+    },
+    "frames": "{count} 帧",
+    "list": {
+      "delete": "删除录制",
+      "deleteConfirm": "确定删除此录制？此操作不可撤销。",
+      "empty": "暂无录制。",
+      "title": "录制列表"
+    },
+    "pause": "暂停录制",
+    "player": {
+      "duration": "{time}",
+      "pause": "暂停",
+      "play": "播放",
+      "restart": "重新开始",
+      "seek": "跳转",
+      "speed": "速度：{speed}×"
+    },
+    "resume": "继续录制",
+    "save": "保存录制",
+    "start": "开始录制",
+    "status": {
+      "idle": "准备就绪",
+      "paused": "已暂停",
+      "recording": "录制中…",
+      "stopped": "录制完成"
+    },
+    "stop": "停止录制",
+    "title": "录制"
+  },
   "search": {
     "caseSensitive": "区分大小写",
     "close": "关闭查找",
@@ -158,13 +256,6 @@
   },
   "stickyScroll": {
     "label": "固定的命令标题"
-  },
-  "template": {
-    "cancel": "取消",
-    "inputPlaceholder": "请输入值",
-    "run": "运行",
-    "selectPlaceholder": "请选择",
-    "title": "填写模板变量"
   },
   "tab": {
     "appearance": {
@@ -222,102 +313,11 @@
       "running": "运行中"
     }
   },
-  "aiShell": {
-    "title": "AI Shell",
-    "toggle": "切换 AI Shell（Ctrl+Shift+I）",
-    "inputPlaceholder": "描述你想做什么…",
-    "send": "发送",
-    "context": {
-      "branch": "分支",
-      "cwd": "工作目录",
-      "shell": "Shell"
-    },
-    "plan": {
-      "title": "执行计划",
-      "empty": "未生成任何步骤。",
-      "generating": "正在生成计划…",
-      "ready": "计划就绪 — 审阅后执行。",
-      "executing": "执行中…",
-      "completed": "所有步骤已完成。",
-      "cancelled": "计划已取消。",
-      "error": "生成计划失败。"
-    },
-    "step": {
-      "pending": "待执行",
-      "running": "运行中…",
-      "succeeded": "完成",
-      "failed": "失败（退出码 {code}）",
-      "failedNoCode": "失败",
-      "skipped": "已跳过",
-      "cancelled": "已取消",
-      "confirm": "此步骤可能具有破坏性，是否执行？",
-      "edit": "编辑命令",
-      "skip": "跳过步骤",
-      "retry": "重试步骤"
-    },
-    "actions": {
-      "runAll": "全部执行",
-      "stepByStep": "逐步执行",
-      "cancel": "取消",
-      "stop": "停止执行",
-      "newPlan": "新计划"
-    },
-    "error": {
-      "noModel": "未配置模型，请在设置中选择。",
-      "piiBlocked": "上下文中包含敏感信息 — 请脱敏后重试。",
-      "generating": "生成计划时出错。",
-      "advisory": "诊断"
-    },
-    "advisory": {
-      "title": "错误诊断",
-      "fix": "建议修复：",
-      "noFix": "无法自动修复。",
-      "applyFix": "应用修复",
-      "retryHint": "应用修复后重新运行原始步骤。"
-    },
-    "history": {
-      "title": "AI Shell 历史",
-      "clear": "清除历史",
-      "empty": "暂无消息。"
-    }
-  },
-  "recording": {
-    "title": "录制",
-    "start": "开始录制",
-    "stop": "停止录制",
-    "pause": "暂停录制",
-    "resume": "继续录制",
-    "discard": "丢弃录制",
-    "save": "保存录制",
-    "status": {
-      "idle": "准备就绪",
-      "recording": "录制中…",
-      "paused": "已暂停",
-      "stopped": "录制完成"
-    },
-    "elapsed": "{time}",
-    "frames": "{count} 帧",
-    "player": {
-      "play": "播放",
-      "pause": "暂停",
-      "speed": "速度：{speed}×",
-      "seek": "跳转",
-      "duration": "{time}",
-      "restart": "重新开始"
-    },
-    "export": {
-      "title": "导出",
-      "gif": "导出为 GIF",
-      "cast": "导出为 .cast",
-      "exporting": "导出中…",
-      "done": "导出完成",
-      "error": "导出失败：{message}"
-    },
-    "list": {
-      "title": "录制列表",
-      "empty": "暂无录制。",
-      "delete": "删除录制",
-      "deleteConfirm": "确定删除此录制？此操作不可撤销。"
-    }
+  "template": {
+    "cancel": "取消",
+    "inputPlaceholder": "请输入值",
+    "run": "运行",
+    "selectPlaceholder": "请选择",
+    "title": "填写模板变量"
   }
 }

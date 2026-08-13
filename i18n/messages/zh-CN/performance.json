@@ -1,7 +1,82 @@
 {
+  "captures": {
+    "active": {
+      "elapsed": "已录制 {seconds} 秒",
+      "gaps": "{count} 个缺口",
+      "title": "活动 Capture"
+    },
+    "comparison": {
+      "absolute": "绝对差值",
+      "compare": "比较选中的 Capture",
+      "mad": "MAD",
+      "median": "中位数",
+      "na": "不适用",
+      "p95": "Type-7 p95",
+      "percent": "百分比差值"
+    },
+    "controls": {
+      "cadence": "Capture 采样间隔",
+      "delete": "删除 Capture {id}",
+      "duration": "Capture 时长",
+      "export": "导出 Capture {id}",
+      "import": "导入 .cognia-perf",
+      "rawExport": "原始导出 Capture {id}",
+      "selectCompare": "选择 Capture {id} 用于比较",
+      "source": "Capture 来源",
+      "start": "开始 Capture",
+      "stop": "停止 Capture"
+    },
+    "errors": {
+      "compareSelection": "请选择两个 Capture 进行比较。",
+      "locked": "请解锁当前账户以访问加密 Capture。"
+    },
+    "library": {
+      "bytes": "{value} 字节",
+      "empty": "当前目标尚未保存 Capture。",
+      "frames": "{count} 帧",
+      "retention": "未固定的 Capture 保留 {days} 天且每个目标最多 {count} 个；账户配额为 {quota} GiB。",
+      "title": "Capture 资料库"
+    },
+    "milliseconds": "{value} 毫秒",
+    "minutes": "{value} 分钟",
+    "raw": {
+      "attachment": "附件 {ordinal} · {type} · {bytes} 字节",
+      "attachments": "明确选择附件",
+      "cancel": "取消",
+      "confirm": "我已了解，导出原始证据",
+      "description": "原始证据可能包含进程、span、trace、错误和环境详情。本次确认会以密码学方式绑定当前 Capture 与下方附件选择。",
+      "noAttachments": "未选择附件；trace 字节仍会排除。",
+      "title": "确认原始性能导出"
+    },
+    "shell": {
+      "label": "正在进行的性能捕获",
+      "return": "打开",
+      "stop": "停止性能捕获",
+      "summary": "{target} · {seconds} 秒 · {gaps} 个缺口"
+    },
+    "source": {
+      "host": "选中主机",
+      "renderer": "本地 Renderer"
+    },
+    "state": {
+      "idle": "空闲",
+      "recording": "录制中"
+    },
+    "toast": {
+      "exported": "已按默认脱敏策略导出 Capture。",
+      "imported": "Capture 已校验并导入。",
+      "rawExported": "已确认并导出原始 Capture。",
+      "started": "Capture 已开始。",
+      "stopped": "Capture 已停止。"
+    }
+  },
   "desktopOnly": {
     "description": "运行时与进程指标来自原生 Rust 后端，仅在桌面应用中运行。",
     "title": "性能面板仅在桌面端可用"
+  },
+  "diagnose": {
+    "logs": "打开日志",
+    "observability": "打开可观测性"
   },
   "hotspots": {
     "columns": {
@@ -17,6 +92,20 @@
     },
     "empty": "尚未记录到热点。",
     "hint": "执行一次已埋点的操作（发送消息、运行 OCR、执行终端或 git 命令）即可填充该表。"
+  },
+  "hud": {
+    "clear": "清空",
+    "clearLabel": "清空 HUD 条目",
+    "columns": {
+      "count": "数量",
+      "name": "名称",
+      "p50": "p50",
+      "p95": "p95"
+    },
+    "disable": "关闭 HUD",
+    "fps": "{value} fps",
+    "title": "性能 HUD",
+    "waiting": "正在等待条目…"
   },
   "managed": {
     "actions": {
@@ -75,7 +164,8 @@
     "high": "严重",
     "low": "正常",
     "moderate": "中等",
-    "title": "内存压力"
+    "title": "内存压力",
+    "utilization": "已用 / 总内存"
   },
   "metrics": {
     "cpu": "应用 CPU",
@@ -101,6 +191,7 @@
     },
     "empty": "尚未采样到进程。",
     "noMatch": "没有匹配的进程。",
+    "orphaned": "孤立进程",
     "roles": {
       "child": "子进程",
       "main": "主进程",
@@ -113,6 +204,10 @@
       "totalDisk": "磁盘 I/O",
       "totalMemory": "总内存"
     }
+  },
+  "resources": {
+    "host": "主机",
+    "renderer": "Renderer"
   },
   "runtime": {
     "aliveTasks": "存活任务",
@@ -136,11 +231,32 @@
     "traces": {
       "description": "dial9 将二进制异步 trace 写入磁盘以供离线分析。",
       "empty": "暂无 trace 文件。",
+      "identity": "Trace {index}",
       "open": "打开文件夹",
       "title": "飞行记录 trace"
     },
     "workerN": "工作线程 {n}",
     "workers": "工作线程"
+  },
+  "sourceHealth": {
+    "error": "最近错误",
+    "gaps": "可见缺口",
+    "kind": {
+      "host": "选中主机",
+      "renderer": "本地 Renderer"
+    },
+    "latestGap": "最近缺口：{reason}，{start}–{end}",
+    "none": "无",
+    "notAvailable": "不适用",
+    "overhead": "采集开销",
+    "state": {
+      "connecting": "连接中",
+      "error": "错误",
+      "live": "实时",
+      "stale": "已过期",
+      "unsupported": "不支持"
+    },
+    "title": "来源与能力"
   },
   "subtitle": "实时查看 Rust 后端的进程树、异步运行时与操作热点。",
   "system": {
@@ -170,10 +286,13 @@
     "loading": "正在读取系统信息…"
   },
   "tabs": {
+    "captures": "Capture",
+    "diagnose": "诊断",
     "hotspots": "热点",
     "managed": "托管进程",
     "overview": "性能",
     "processes": "进程",
+    "resources": "资源",
     "runtime": "异步运行时",
     "system": "系统"
   },

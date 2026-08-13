@@ -151,8 +151,8 @@
       "plugin": "Plugins",
       "rag": "Retrieval",
       "runtime": "Runtime",
-      "workflow": "Workflows",
-      "wiki": "Wiki"
+      "wiki": "Wiki",
+      "workflow": "Workflows"
     },
     "plannedBadge": "Planned",
     "plannedReason": "Deferred past Phase 1: user-repository access needs per-repository consent, which does not exist yet. The scope stays in the API so handlers keep compiling, but it cannot be granted.",

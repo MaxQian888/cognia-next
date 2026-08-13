@@ -57,6 +57,7 @@
     "edgeRate": "Rate",
     "elevenSimilarity": "Similarity boost",
     "elevenStability": "Stability",
+    "elevenVoiceIdPlaceholder": "ElevenLabs voice ID",
     "label": {
       "cartesia": "Cartesia API key",
       "deepgram": "Deepgram API key",
@@ -64,17 +65,24 @@
       "google": "Google AI Studio API key",
       "hume": "Hume AI API key",
       "lmnt": "LMNT API key",
+      "local-openai-compatible": "Local OpenAI-compatible",
       "mistral": "Mistral API key",
       "openai": "OpenAI API key",
-      "xiaomi": "Xiaomi MiMo API key",
-      "local-openai-compatible": "Local OpenAI-compatible"
+      "xiaomi": "Xiaomi MiMo API key"
     },
+    "localEndpoint": "Local endpoint",
+    "localEndpointHint": "Use the base URL of an OpenAI-compatible speech server.",
+    "localEndpointPlaceholder": "http://127.0.0.1:8000/v1",
+    "localModelPlaceholder": "Local model name",
+    "localOpenaiIntro": "Connect to a local OpenAI-compatible text-to-speech server.",
+    "localVoicePlaceholder": "Voice name",
     "mistralVoiceIdHint": "Enter a Voice Library ID created in the Mistral console.",
     "mistralVoiceIdPlaceholder": "voice_…",
     "model": "Model",
     "realtimeDesktopOnly": "OpenAI Realtime streams over a WebSocket and only works in the desktop app.",
     "realtimeIntro": "Low-latency streaming voices that start speaking on the first audio chunk. Uses your OpenAI API key.",
     "speed": "Speed",
+    "timeoutSeconds": "Timeout (seconds)",
     "voice": "Voice",
     "voiceAuto": "Auto-select for language",
     "voiceAutoPlaceholder": "Auto-select for language",
@@ -91,15 +99,7 @@
     "xiaomiIntro": "Xiaomi MiMo TTS with style tags and dialect support. V2.5 adds VoiceDesign and VoiceClone.",
     "xiaomiStyle": "Style",
     "xiaomiStyleHint": "Style tags: 开心, 悲伤, 生气, 东北话, 四川话, 粤语, 台湾腔, 变快, 变慢, 唱歌, 孙悟空, 林黛玉",
-    "xiaomiStylePlaceholder": "No style",
-    "elevenVoiceIdPlaceholder": "ElevenLabs voice ID",
-    "localEndpoint": "Local endpoint",
-    "localEndpointHint": "Use the base URL of an OpenAI-compatible speech server.",
-    "localEndpointPlaceholder": "http://127.0.0.1:8000/v1",
-    "localModelPlaceholder": "Local model name",
-    "localOpenaiIntro": "Connect to a local OpenAI-compatible text-to-speech server.",
-    "localVoicePlaceholder": "Voice name",
-    "timeoutSeconds": "Timeout (seconds)"
+    "xiaomiStylePlaceholder": "No style"
   },
   "stt": {
     "description": "The composer's voice-input button uses your browser's Web Speech API. Pick the language you usually speak and the microphone you want to use.",
@@ -125,6 +125,7 @@
     "fallback": "Fall back to system voice",
     "fallbackHint": "If a cloud provider fails, finish reading with the free browser voice instead of stopping.",
     "loading": "Loading…",
+    "mobileSystemPlayback": "Mobile uses system audio playback.",
     "pitch": "Pitch",
     "pronunciationDict": "Pronunciation dictionary",
     "pronunciationDictHint": "Map words to their pronunciation. Matched case-insensitively as whole words.",
@@ -149,7 +150,6 @@
     "testVoice": "Test voice",
     "title": "Text-to-speech",
     "volume": "Volume",
-    "mobileSystemPlayback": "Mobile uses system audio playback.",
     "webCloudWarning": "Web playback sends text to the configured cloud provider."
   }
 }

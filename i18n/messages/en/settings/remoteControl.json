@@ -157,14 +157,14 @@
     "secretSaveError": "Failed to save secret: {error}",
     "secretSaved": "Signing secret saved.",
     "secretSet": "A signing secret is configured.",
+    "secretUnavailable": "Signing secret unavailable",
     "setSecret": "Save secret",
     "signingSecret": "Signing secret",
     "signingSecretHelp": "Stored in the OS keyring on desktop. Deliveries then carry the Standard Webhooks header trio (webhook-id / webhook-timestamp / webhook-signature).",
     "subscriptionAll": "All events",
     "subscriptionSummary": "{count, plural, =0 {All events} one {# event type} other {# event types}}",
     "subscriptionsHelp": "Deliver only the selected event types to this endpoint. Select none to receive every event.",
-    "subscriptionsLabel": "Event subscriptions",
-    "secretUnavailable": "Signing secret unavailable"
+    "subscriptionsLabel": "Event subscriptions"
   },
   "overview": {
     "endpointUrlLabel": "Endpoint URL",

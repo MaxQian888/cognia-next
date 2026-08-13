@@ -222,6 +222,9 @@
     "save": "Save",
     "sdk": {
       "cancel": "Cancel",
+      "close": "Close",
+      "continueInChat": "Continue in Chat",
+      "continued": "SDK session opened in Chat.",
       "count": "{count, plural, one {# native session} other {# native sessions}}",
       "delete": "Delete SDK session",
       "deleteConfirm": "Delete permanently",
@@ -229,8 +232,14 @@
       "deleteTitle": "Delete native SDK session?",
       "deleted": "SDK session deleted.",
       "description": "Sessions stored by the Claude Agent SDK, including transcripts that are not yet linked to a Cognia chat.",
+      "details": "Inspect SDK session",
+      "detailsDescription": "Inspect the compacted native transcript and its subagent transcripts without changing the SDK source session.",
+      "detailsPartial": "The SDK returned a partial page of this transcript.",
+      "detailsPartialError": "Some session details could not be loaded. Available transcript data is shown below.",
       "disabled": "Enable Claude Agent SDK parity in Sidecar diagnostics to manage native sessions.",
+      "editTag": "Edit SDK session tag",
       "empty": "No native SDK sessions were found.",
+      "emptyTranscript": "No transcript messages were returned.",
       "errors": {
         "continueFailed": "The SDK session could not be continued in Chat.",
         "deleteFailed": "The SDK session could not be deleted.",
@@ -240,15 +249,6 @@
         "renameFailed": "The SDK session could not be renamed.",
         "tagFailed": "The SDK session tag could not be saved."
       },
-      "close": "Close",
-      "continueInChat": "Continue in Chat",
-      "continued": "SDK session opened in Chat.",
-      "details": "Inspect SDK session",
-      "detailsDescription": "Inspect the compacted native transcript and its subagent transcripts without changing the SDK source session.",
-      "detailsPartial": "The SDK returned a partial page of this transcript.",
-      "detailsPartialError": "Some session details could not be loaded. Available transcript data is shown below.",
-      "editTag": "Edit SDK session tag",
-      "emptyTranscript": "No transcript messages were returned.",
       "fork": "Fork SDK session",
       "forked": "SDK session forked.",
       "importStore": "Import into SessionStore",
@@ -273,9 +273,6 @@
     "untitled": "(untitled)"
   },
   "sidecar": {
-    "capabilityActionSucceeded": "Live session capabilities refreshed.",
-    "capabilityControlsDescription": "Apply SDK capability changes to the active Chat session without restarting it.",
-    "capabilityControlsTitle": "Live session controls",
     "capabilities": {
       "commandsLabel": "Agent commands ({count})",
       "description": "What the live SDK session reports it supports. cognia's own model picker and slash menu are unaffected.",
@@ -283,6 +280,9 @@
       "modelsLabel": "Account models ({count})",
       "title": "Live session capabilities"
     },
+    "capabilityActionSucceeded": "Live session capabilities refreshed.",
+    "capabilityControlsDescription": "Apply SDK capability changes to the active Chat session without restarting it.",
+    "capabilityControlsTitle": "Live session controls",
     "checking": "Checking…",
     "countHooks": "Hooks",
     "countHooksHint": "Open hooks",
@@ -310,21 +310,21 @@
         "description": "Keep isolated warm SDK processes ready for the next compatible request.",
         "label": "Prewarm pool"
       },
+      "resolver": {
+        "description": "Use the unified execution resolver to select the correct agent runtime.",
+        "label": "Unified execution resolver"
+      },
       "sessionStore": {
         "description": "Mirror native SDK session records into the encrypted, tenant-isolated host store.",
         "label": "Session store"
       },
-      "title": "Claude Agent SDK advanced features",
-      "resolver": {
-        "description": "Use the unified execution resolver to select the correct agent runtime.",
-        "label": "Unified execution resolver"
-      }
+      "title": "Claude Agent SDK advanced features"
     },
-    "restartBtn": "Restart sidecar",
-    "restartedToast": "Sidecar restart requested.",
     "reinitializeBtn": "Reinitialize session",
     "reloadPluginsBtn": "Reload plugins",
     "reloadSkillsBtn": "Reload skills",
+    "restartBtn": "Restart sidecar",
+    "restartedToast": "Sidecar restart requested.",
     "running": "Running",
     "sdkSessionLabel": "Most recent SDK session id",
     "sdkVersionLabel": "SDK version",

@@ -92,9 +92,15 @@
   },
   "runtimeTarget": {
     "active": "Active",
+    "addHost": "Add Host",
+    "fallbackInvalid": "Choose one of the saved fallback Hosts.",
+    "fallbackPrompt": "Enter the fallback Host id ({choices}).",
     "heading": "Runtime target",
     "legacyMixed": "Legacy mixed (read-only)",
     "loadFailed": "Runtime targets could not be loaded.",
+    "removeConfirm": "Remove {name}? The Host must confirm revocation before local data is deleted.",
+    "removeFailed": "The Host could not be removed.",
+    "removeHost": "Remove {name}",
     "switchFailed": "Runtime target could not be switched.",
     "thisBrowser": "This browser"
   },

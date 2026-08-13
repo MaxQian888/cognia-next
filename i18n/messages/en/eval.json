@@ -227,7 +227,6 @@
       "pick": "Choose an export file"
     },
     "heading": "Import test set",
-    "progress": "Imported {done} of {total}",
     "hf": {
       "fetch": "Fetch & import",
       "limit": "Rows to import",
@@ -250,6 +249,7 @@
     "nothingToImport": "Nothing to import — check the column mapping.",
     "preview": "{count, plural, =1 {# case} other {# cases}} parsed",
     "previewSample": "Previewing {count} sample row(s); {total} will be imported",
+    "progress": "Imported {done} of {total}",
     "skipped": "{count} row(s) skipped",
     "stage": "Stage {count} case(s)",
     "tabs": {
@@ -583,8 +583,8 @@
     "targetKind": "Target kind",
     "targetLabel": "Label",
     "targetRef": "Model / team / workflow id",
-    "twinModel": "Twin model",
-    "targets": "Targets"
+    "targets": "Targets",
+    "twinModel": "Twin model"
   },
   "runDetail": {
     "agentOutput": "Agent answer",

@@ -134,6 +134,7 @@
   },
   "jobs": {
     "attempt": "第 {n} 次尝试",
+    "cancel": "取消",
     "cancelReason": "已从孪生工作台取消",
     "deadLetter": "死信",
     "draftsProduced": "已生成 {count} 个草稿",
@@ -146,10 +147,9 @@
     "queueDistill": "排队蒸馏",
     "queueIngest": "为待处理源排队摄取",
     "queuedAt": "入队于 {when}",
-    "retry": "重试",
-    "retryBusy": "重试中…",
     "resume": "恢复",
-    "cancel": "取消"
+    "retry": "重试",
+    "retryBusy": "重试中…"
   },
   "kind": {
     "character": "角色",
@@ -204,13 +204,6 @@
     "countEntities": "{count, plural, =0 {0 个实体} =1 {1 个实体} other {# 个实体}}",
     "countPlaybooks": "{count, plural, =0 {0 个工作流} =1 {1 个工作流} other {# 个工作流}}",
     "countStyleSamples": "{count, plural, =0 {0 个风格样本} =1 {1 个风格样本} other {# 个风格样本}}",
-    "empty": {
-      "decisions": "暂无决策——可由蒸馏自动提取，也可手动添加。",
-      "entities": "暂无实体——可由蒸馏自动生成，也可点击「新增实体」手动添加。",
-      "noMatch": "没有匹配项。",
-      "playbooks": "暂无工作流——可由蒸馏自动生成，也可手动添加。",
-      "styleSamples": "暂无风格样本——可由蒸馏自动生成，也可手动添加。"
-    },
     "decision": {
       "add": "新增决策",
       "choiceLabel": "选择",
@@ -225,6 +218,13 @@
       "rationaleLabel": "理由",
       "rationalePlaceholder": "为什么做出这一选择",
       "required": "上下文和选择不能为空。"
+    },
+    "empty": {
+      "decisions": "暂无决策——可由蒸馏自动提取，也可手动添加。",
+      "entities": "暂无实体——可由蒸馏自动生成，也可点击「新增实体」手动添加。",
+      "noMatch": "没有匹配项。",
+      "playbooks": "暂无工作流——可由蒸馏自动生成，也可手动添加。",
+      "styleSamples": "暂无风格样本——可由蒸馏自动生成，也可手动添加。"
     },
     "entity": {
       "add": "新增实体",

@@ -89,6 +89,7 @@
   },
   "cannedResponses": {
     "empty": "No canned responses match.",
+    "manage": "Manage canned responses",
     "searchPlaceholder": "Search canned responses…",
     "triggerAria": "Insert a canned response"
   },
@@ -113,8 +114,17 @@
     }
   },
   "contactProfile": {
+    "candidatesTitle": "Available identities",
     "empty": "No contact details for this conversation. Group chats and never-seen contacts don't have a directory entry yet.",
+    "errors": {
+      "alias_conflict": "The saved identity contains conflicting aliases.",
+      "identity_conflict": "Another contact now owns this platform identity.",
+      "primary_missing": "This contact no longer exists.",
+      "snapshot_missing": "This identity is no longer merged with the contact.",
+      "unexpected": "The identity change failed. Please refresh and try again."
+    },
     "lastSeen": "Last seen",
+    "merge": "Merge",
     "mergedTitle": "Merged identities",
     "platform": "Platform",
     "remoteId": "User ID",
@@ -276,6 +286,7 @@
         "manual": "Manual review",
         "unset": "Use adapter default"
       },
+      "modelManagedByTarget": "Provider and model are managed by the selected Agent Team or Workflow.",
       "modelOverride": "Model override",
       "modelOverridePlaceholder": "claude-opus-4-7",
       "muted": "Muted (drops outbound)",
@@ -283,6 +294,27 @@
       "pinned": "Pinned",
       "proactivePush": "Proactive IM notifications",
       "proactivePushHint": "Allow the assistant to proactively push task-complete / error / input-required events back to this conversation. Off by default.",
+      "promoteConfirm": "Promote these explicit conversation values to adapter defaults?\n\n{changes}",
+      "promotePermissionConfirm": "This promotion changes the adapter Built-in Skill ceiling or HITL default and can affect other conversations. Continue?",
+      "promoteToAdapter": "Promote to Adapter default",
+      "promoteToAdapterTitle": "Promote supported explicit values without rewriting conversation overrides",
+      "promotionFields": {
+        "activationPolicy": "Activation policy",
+        "activationTtl": "Activation TTL",
+        "builtInSkillCeiling": "Built-in Skill ceiling",
+        "character": "Character",
+        "dispatchMode": "Active-run dispatch mode",
+        "mode": "Response mode",
+        "model": "Model",
+        "muted": "Muted",
+        "provider": "Provider",
+        "quietHours": "Quiet hours",
+        "requireHitlForWrites": "Write-skill HITL",
+        "team": "Agent Team",
+        "workflow": "Workflow"
+      },
+      "providerModelDefault": "Use Adapter default",
+      "providerModelOverride": "Provider and model",
       "providerOverride": "Provider override",
       "providerOverridePlaceholder": "anthropic",
       "quietHours": {
@@ -296,6 +328,7 @@
       "quietHoursOverride": "Quiet hours (this conversation)",
       "quietHoursTo": "To",
       "quietHoursTz": "Time zone",
+      "referenceMissing": "{id} (missing)",
       "requireHitlForWrites": {
         "help": "When off, write-tier skills run without the A2UI confirm card. Destructive skills always require HITL regardless. Defaults on.",
         "label": "Require HITL for write skills"
@@ -304,12 +337,22 @@
       "slaResponseMinutesHint": "When set, this conversation shows a countdown badge and turns Overdue if no reply is sent within this many minutes (quiet hours excluded). Leave empty for no SLA.",
       "slaResponseMinutesPlaceholder": "e.g. 30",
       "suppressGroups": "Suppress in group chats",
+      "target": {
+        "direct": "Direct Agent",
+        "inherit": "Inherit",
+        "label": "Execution target",
+        "none": "None",
+        "specificCharacter": "Specific Character",
+        "team": "Agent Team",
+        "workflow": "Workflow"
+      },
       "teamBinding": "Agent Team (id)",
       "teamBindingHelp": "When set, inbound messages dispatch to this Agent Team instead of a single character; progress streams back to the conversation.",
       "teamBindingPlaceholder": "(none — replies use the character)",
       "workflowBinding": "Visual Workflow (name or id)",
       "workflowBindingHelp": "When set (and no team is bound — a team wins), inbound messages run this Visual Workflow instead of a single character; the message text is the trigger payload and progress streams back to the conversation.",
-      "workflowBindingPlaceholder": "(none — replies use the character)"
+      "workflowBindingPlaceholder": "(none — replies use the character)",
+      "workflowProduction": "Production"
     },
     "gearAria": "Open per-conversation override settings",
     "noOverrideYet": "No override yet — defaults are inherited from the adapter.",
@@ -347,6 +390,7 @@
     "cancel": "Cancel",
     "markdownPlaceholder": "Draft markdown…",
     "reject": "Reject",
+    "segmentFallback": "Unsupported draft segment",
     "textPlaceholder": "Draft text…"
   },
   "extensionPoints": {
@@ -371,6 +415,7 @@
   "labels": {
     "addAria": "Add or remove labels",
     "empty": "No labels yet — create them in Settings.",
+    "manage": "Manage labels",
     "pickerTitle": "Labels",
     "removeAria": "Remove label {name}"
   },

@@ -1,8 +1,8 @@
 {
   "blockedRunSummary": "运行前需先修复 {count} 个错误。",
   "blockedRunTitle": "无法运行——请先修复错误",
-  "containerBoundary": "该连线跨越了循环容器边界（{source} → {target}）。",
   "connectorEgressPolicy": "Connector 触发路径上的外部汇点 {kind} 必须在发布前明确选择阻断或脱敏。",
+  "containerBoundary": "该连线跨越了循环容器边界（{source} → {target}）。",
   "credentialMissing": "引用了未配置的凭据（{ref}）。",
   "danglingSource": "该连线的起点节点已不存在（{ref}）。",
   "danglingTarget": "该连线指向的节点已不存在（{ref}）。",

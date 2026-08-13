@@ -25,6 +25,15 @@
       "description": "This run may have been deleted, or the URL is incorrect.",
       "title": "Run not found"
     },
+    "provenance": {
+      "caller": "caller {value}",
+      "draft": "draft/local debug",
+      "entrypoint": "entrypoint {value}",
+      "revision": "deployment revision {value}",
+      "trace": "trace {value}",
+      "trigger": "trigger {value}",
+      "version": "version {value}"
+    },
     "rerun": "Re-run",
     "rerunFromStep": "Re-run from step",
     "rerunFromStepHint": "Select a step in the timeline to re-run from it",
@@ -35,15 +44,6 @@
       "originalVersion": "Run original version"
     },
     "running": "Running…",
-    "provenance": {
-      "caller": "caller {value}",
-      "draft": "draft/local debug",
-      "entrypoint": "entrypoint {value}",
-      "revision": "deployment revision {value}",
-      "trace": "trace {value}",
-      "trigger": "trigger {value}",
-      "version": "version {value}"
-    },
     "sparkline": {
       "title": "Duration trend"
     },

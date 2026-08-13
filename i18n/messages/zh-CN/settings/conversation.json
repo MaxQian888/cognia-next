@@ -114,6 +114,30 @@
         "workspace": "工作区"
       }
     },
+    "metadata": {
+      "agent": {
+        "description": "显示负责该会话的角色或团队。",
+        "heading": "Agent",
+        "label": "显示 Agent"
+      },
+      "description": "选择在会话标题下方显示的上下文，选中顺序会被保留。",
+      "heading": "行详情",
+      "model": {
+        "description": "显示按会话、Agent 和应用默认值解析后的实际模型。",
+        "heading": "模型",
+        "label": "显示模型"
+      },
+      "provider": {
+        "description": "显示实际使用的模型提供商。",
+        "heading": "提供商",
+        "label": "显示提供商"
+      },
+      "workspace": {
+        "description": "显示该会话所属的工作区。",
+        "heading": "工作区",
+        "label": "显示工作区"
+      }
+    },
     "preview": {
       "description": "在每个会话下方显示一行最新消息预览。",
       "heading": "消息预览",
@@ -125,6 +149,11 @@
       "heading": "侧边栏宽度"
     },
     "title": "会话侧边栏",
+    "titleMotion": {
+      "description": "悬停时以两端停顿的往返滚动展示溢出标题；开启减少动态效果后始终保持静态。",
+      "heading": "长标题动效",
+      "label": "悬停时滚动长标题"
+    },
     "unread": {
       "description": "在有未读消息的会话上显示计数徽标。",
       "heading": "未读徽标",

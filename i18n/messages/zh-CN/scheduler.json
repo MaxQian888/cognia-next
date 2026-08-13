@@ -454,6 +454,10 @@
     "successOnly": "仅成功时"
   },
   "notifyOnStart": "开始时通知",
+  "occurrenceList": {
+    "moreTimes": "另有 {count} 次",
+    "rowAria": "{name}，未来 {count} 次执行"
+  },
   "onBootDelaySeconds": "开机延迟（秒）",
   "onEventId": "事件 ID",
   "onEventSource": "事件来源",
@@ -897,10 +901,6 @@
   "timeoutMs": "超时（毫秒）",
   "timezone": "时区",
   "timing": "时间",
-  "occurrenceList": {
-    "moreTimes": "另有 {count} 次",
-    "rowAria": "{name}，未来 {count} 次执行"
-  },
   "title": "定时任务",
   "tools": {
     "createFailed": "定时任务创建失败",

@@ -88,6 +88,13 @@
       }
     },
     "groupOther": "Other",
+    "metadata": {
+      "agent": "Agent",
+      "label": "Row details",
+      "model": "Model",
+      "provider": "Provider",
+      "workspace": "Workspace"
+    },
     "newChat": "New chat",
     "newConversation": "New conversation",
     "newFolder": "New folder",
@@ -104,6 +111,7 @@
     "showPreview": "Show message previews",
     "showUnreadBadges": "Show unread badges",
     "teamFallback": "Team",
+    "titleMotion": "Scroll long titles on hover",
     "ungroupedAgent": "No agent",
     "ungroupedWorkspace": "No workspace",
     "viewActive": "Show active conversations",
@@ -203,6 +211,7 @@
       "moreEmpty": "Nothing in the More menu — every item is pinned or hidden.",
       "moveToMore": "Move to More",
       "pin": "Pin to rail",
+      "pinItem": "Pin item",
       "pinned": "Pinned",
       "pinnedEmpty": "No pinned items — everything is in the More menu.",
       "restoreDefaults": "Restore defaults",
@@ -210,8 +219,7 @@
       "side": "Rail position",
       "sideLeft": "Left",
       "sideRight": "Right",
-      "title": "Customize sidebar",
-      "pinItem": "Pin item"
+      "title": "Customize sidebar"
     },
     "directMessages": "Direct Messages",
     "discover": "Discover",
@@ -593,8 +601,11 @@
     "deselect": "Deselect",
     "dragHandle": "Drag to reorder or move to a folder",
     "moveToFolder": "Move to folder",
+    "openInCodexApp": "Open in Codex app",
+    "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
     "openInTerminal": "Open in terminal",
     "openInTerminalFailed": "Could not export this session for the terminal",
+    "openedInCodexApp": "Opened in the Codex app.",
     "openedInTerminal": "Run in your terminal: {command}",
     "pin": "Pin",
     "pinned": "Pinned",
@@ -603,10 +614,7 @@
     "select": "Select",
     "unarchive": "Unarchive",
     "unpin": "Unpin",
-    "untitled": "(untitled)",
-    "openInCodexApp": "Open in Codex app",
-    "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
-    "openedInCodexApp": "Opened in the Codex app."
+    "untitled": "(untitled)"
   },
   "shell": {
     "desktopOnlyBodyMiddle": " rather than ",
@@ -653,9 +661,9 @@
     "syncNever": "Not synced",
     "syncNow": "Sync now",
     "terminal": "{count, plural, =0 {Terminal} one {# terminal} other {# terminals}}",
+    "terminalAiShellToggle": "Toggle AI Shell panel",
     "terminalRunning": "Terminal panel — a session is running",
     "terminalToggle": "Toggle terminal panel",
-    "terminalAiShellToggle": "Toggle AI Shell panel",
     "usage": "Usage & limits",
     "usageOpen": "Open usage & limits"
   },

@@ -235,6 +235,7 @@
     "manageButton": "Manage language packs"
   },
   "modelStatus": {
+    "cancelDownload": "Cancel download",
     "description": "Pure-Rust OCR engines ship without weights to keep the installer slim. Models are downloaded to your user data directory on first use.",
     "download": "Download models",
     "downloadAll": "Download all model files",
@@ -244,13 +245,12 @@
     "downloadingDetail": "{bytesDone} / {bytesTotal} bytes — file {index} of {count}",
     "emptyNoModelFiles": "No managed model files for this backend.",
     "installed": "Models ready",
+    "legacyDetected": "Legacy model files detected",
     "missing": "{count} model file(s) missing",
     "modelDir": "Stored in: {path}",
     "redownload": "Re-download",
     "shellUnavailable": "Local model management is only available in the desktop app.",
-    "title": "Local models",
-    "cancelDownload": "Cancel download",
-    "legacyDetected": "Legacy model files detected"
+    "title": "Local models"
   },
   "overlay": {
     "ariaLabel": "Selectable extracted text over the source image",
@@ -448,6 +448,17 @@
       "label": "Windows.Media.Ocr"
     }
   },
+  "runtime": {
+    "defaultNormalized": "Default OCR provider {provider} is unavailable ({reason}); switched to Auto.",
+    "reasons": {
+      "backend-not-bound": "This build does not include this native backend.",
+      "configuration-required": "Complete this provider's configuration before enabling it.",
+      "missing-credentials": "Add the required credentials before using this provider.",
+      "model-corrupt": "The model files failed integrity verification. Download them again.",
+      "model-missing": "Download the required model files before using this provider.",
+      "unsupported-shell": "This provider is not supported in the current app shell."
+    }
+  },
   "sidebar": {
     "categoryAll": "All",
     "clearCache": "Clear OCR cache",
@@ -550,8 +561,5 @@
         "label": "Web screenshots / UI text"
       }
     }
-  },
-  "runtime": {
-    "defaultNormalized": "The default provider was normalized to {provider}."
   }
 }

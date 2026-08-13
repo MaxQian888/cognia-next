@@ -2,11 +2,13 @@
   "agents": {
     "claude-code": "Claude Code",
     "codex": "Codex",
+    "cognia": "Cognia",
     "opencode": "OpenCode"
   },
   "island": {
     "empty": "No active agents",
     "legend": {
+      "detached": "{count} detached",
       "done": "{count} done",
       "idle": "{count} idle",
       "needsYou": "{count} waiting",
@@ -28,6 +30,8 @@
   },
   "question": {
     "expired": "Answered in terminal",
+    "reject": "Reject",
+    "rejected": "Rejected",
     "submit": "Submit",
     "submitted": "Sent"
   },
@@ -61,6 +65,7 @@
       "turn": "Turn failed"
     },
     "focusTerminal": "Focus terminal",
+    "host": "Execution host: {host}",
     "interrupt": {
       "error": {
         "interrupt_identity_mismatch": "That process is no longer the agent — nothing was sent.",
@@ -79,6 +84,7 @@
     "openTranscript": "Reveal transcript",
     "questionMore": "{count, plural, one {+# more question} other {+# more questions}}",
     "status": {
+      "detached": "Monitoring detached",
       "ended": "Session ended",
       "idle": "Idle",
       "planPending": "Plan awaiting approval in the terminal",

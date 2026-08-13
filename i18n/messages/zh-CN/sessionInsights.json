@@ -103,12 +103,12 @@
     "ready": "已打开 Skill 审阅。",
     "title": "将此流程提炼为 Skill"
   },
-  "title": "会话洞察",
   "tests": {
     "counts": "{passed} 通过，{failed} 失败",
     "snapshot": "测试快照 {index}",
     "title": "测试结果"
   },
+  "title": "会话洞察",
   "units": {
     "tokPerSec": "{value} tok/s"
   }

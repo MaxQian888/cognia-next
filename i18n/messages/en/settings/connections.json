@@ -38,7 +38,15 @@
       "fieldPublicUrl": "Public URL",
       "fieldTransport": "Transport",
       "fieldType": "Type",
-      "noSelection": "Select an adapter on the left to see its configuration, health, conversations, and audit log."
+      "noSelection": "Select an adapter on the left to see its configuration, health, conversations, and audit log.",
+      "sections": {
+        "behavior": "Behavior",
+        "connection": "Connection",
+        "delivery": "Delivery",
+        "permissions": "Permissions",
+        "platform": "Platform",
+        "responder": "Responder"
+      }
     },
     "detailTabs": {
       "audit": "Audit",
@@ -82,6 +90,15 @@
       "lastOk": "Last OK",
       "nextRetry": "Next retry",
       "noData": "No data yet",
+      "observedState": {
+        "building": "Building",
+        "degraded": "Degraded",
+        "failed": "Failed",
+        "retry_wait": "Retry wait",
+        "running": "Running",
+        "starting": "Starting",
+        "stopped": "Stopped"
+      },
       "pendingOutbound": "Pending outbound",
       "rateBucketAvailable": "{available}/{capacity} tokens",
       "rateBucketLabel": "Rate limit",
@@ -98,15 +115,6 @@
       "retryEta": "Retry ETA",
       "retryInSeconds": "in {seconds}s",
       "runtimeTitle": "Outbound runtime",
-      "observedState": {
-        "building": "Building",
-        "degraded": "Degraded",
-        "failed": "Failed",
-        "retry_wait": "Retry wait",
-        "running": "Running",
-        "starting": "Starting",
-        "stopped": "Stopped"
-      },
       "state": {
         "degraded": "Degraded",
         "down": "Down",
@@ -188,12 +196,16 @@
     }
   },
   "aiBindingDefaults": {
+    "cancel": "Cancel",
     "characterDefault": "Default",
     "characterHelp": "Persona this bot answers as unless a conversation binds its own (/character).",
     "characterLabel": "Default persona",
+    "characterTeamHelp": "Only the persona and system prompt are injected into the team lead entry context. Team members, models, and tools stay unchanged.",
+    "characterWorkflowHelp": "The character id is passed in the existing workflow trigger payload for nodes to consume when needed.",
     "modelDefault": "Default",
     "modelHelp": "Provider + model this bot uses. Beats the persona's own model; /model in a chat still wins.",
     "modelLabel": "Default provider · model",
+    "modelManagedByTarget": "Provider and model are managed by the selected Agent Team or Workflow.",
     "notConfigured": "{id} (not configured)",
     "precedenceNote": "Per-conversation overrides (/model, /team, inbox switchers) always beat these bot-level defaults.",
     "reasoningDefault": "Default",
@@ -204,9 +216,18 @@
     "reasoning_max": "Max",
     "reasoning_medium": "Medium",
     "reasoning_xhigh": "Extra high",
+    "save": "Save",
+    "targetDirect": "Direct Agent",
+    "targetLabel": "Execution target",
+    "targetTeam": "Agent Team",
+    "targetWorkflow": "Workflow",
     "teamHelp": "Inbound messages dispatch to this Agent Team unless a conversation binds its own (/team) or turns teams off (/team off).",
     "teamLabel": "Default Agent Team",
-    "title": "AI binding defaults"
+    "title": "AI binding defaults",
+    "workflowHelp": "Only workflows with an active production deployment can receive IM traffic.",
+    "workflowLabel": "Default Workflow",
+    "workflowNone": "None",
+    "workflowProduction": "Production"
   },
   "audit": {
     "collapseAria": "Collapse audit entry",
@@ -229,6 +250,7 @@
         "edit_fallback": "Activity edit fallback"
       },
       "adapter": {
+        "config_changed": "Adapter configuration changed",
         "credentials_rotated": "Credentials rotated",
         "error": "Adapter error",
         "heartbeat": "Heartbeat",
@@ -321,7 +343,8 @@
         "replayed": "Replayed"
       },
       "override": {
-        "computer_use_changed": "Computer Use toggled"
+        "computer_use_changed": "Computer Use toggled",
+        "config_changed": "Conversation override changed"
       },
       "plugin": {
         "inbound_blocked": "Plugin blocked inbound",
@@ -381,6 +404,32 @@
       "all": "All"
     },
     "timeRangeLabel": "Time range"
+  },
+  "behaviorEditor": {
+    "activationTtl": "Activation TTL (hours)",
+    "activationTtlPlaceholder": "e.g. 24",
+    "activation_always": "Always active",
+    "activation_direct_only": "Direct messages only",
+    "activation_mention_activates": "Mention activates the conversation",
+    "activation_mention_each": "Require a mention for every message",
+    "activeRun": "When a run is active",
+    "cancel": "Cancel",
+    "dispatchQueue": "Queue the message",
+    "dispatchSteer": "Steer the active run",
+    "effectiveSource": "Effective source: {source}",
+    "groupActivation": "Group activation",
+    "inherit": "Inherit",
+    "modeAuto": "Auto-reply",
+    "modeDraft": "Draft only",
+    "modeManual": "Manual review",
+    "responseMode": "Response mode",
+    "save": "Save",
+    "source_adapter-default": "Adapter default",
+    "source_conversation-override": "Conversation override",
+    "source_dispatch-rule": "Dispatch rule",
+    "source_system-default": "System default",
+    "source_target-managed": "Managed by target",
+    "title": "Conversation behavior"
   },
   "cannedResponses": {
     "addButton": "Add canned response",
@@ -636,6 +685,11 @@
     "totalLabel": "Total",
     "unreadLabel": "Unread"
   },
+  "inboxAssets": {
+    "cannedResponses": "Canned responses",
+    "description": "Manage the reusable labels and replies used from the Inbox.",
+    "labels": "Labels"
+  },
   "labels": {
     "addButton": "Add label",
     "builtinBadge": "Built-in",
@@ -888,16 +942,21 @@
       "title": "Chat allow/blocklist"
     },
     "whoami": {
+      "avatarPublishHint": "Publish this avatar in the Lark developer console for consistent bot identity.",
       "dingtalkNoProbe": "DingTalk adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured.",
+      "downloadAvatar": "Download avatar",
       "lastProbeAt": "Last probed at {time}",
       "missingScopesHint": "Enable these permissions in the Lark developer console → Permissions, re-publish the app, then re-probe. Chat management needs im:chat:create, im:chat:update, im:chat.members:write_only and contact:user.id:readonly.",
       "missingScopesTitle": "Missing permission scopes detected",
       "onebotNoProbe": "OneBot identity is read from the connected client automatically — the QQ UIN below is what you configured; the bot's real identity appears here once it connects.",
       "onebotUinMismatch": "Connected bot UIN ({actual}) differs from the configured UIN ({configured}). Update the adapter's Bot UIN to match.",
+      "openDeveloperConsole": "Open developer console",
       "openId": "Open ID",
       "probeButton": "Probe identity",
       "probeFailed": "Probe failed",
       "qqOfficialNoProbe": "QQ Official adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
+      "recommendedAvatarHint": "Use the generated avatar for this Lark app.",
+      "recommendedAvatarTitle": "Recommended avatar",
       "reprobeButton": "Re-probe",
       "requiresDesktop": "Bot identity probe requires the desktop runtime.",
       "tenant": "Tenant",
@@ -906,12 +965,7 @@
       "unsupportedNoProbe": "This adapter doesn't expose an active identity probe.",
       "wechatOaNoProbe": "WeChat Official Account adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
       "wechatPersonalNoProbe": "Personal WeChat adapters don't expose an active identity probe.",
-      "wecomNoProbe": "WeCom adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured.",
-      "avatarPublishHint": "Publish this avatar in the Lark developer console for consistent bot identity.",
-      "downloadAvatar": "Download avatar",
-      "openDeveloperConsole": "Open developer console",
-      "recommendedAvatarHint": "Use the generated avatar for this Lark app.",
-      "recommendedAvatarTitle": "Recommended avatar"
+      "wecomNoProbe": "WeCom adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured."
     }
   },
   "matrix": {
@@ -1086,6 +1140,7 @@
     "disabledBadge": "disabled",
     "noAdapters": "No adapters configured yet.",
     "noRecentActivity": "No recent activity.",
+    "openInbox": "Open Inbox",
     "recentActivityHeading": "Recent Activity",
     "runningSummary": "{running} of {total} enabled adapters running",
     "serverHeading": "Inbound Server (webhooks)",
@@ -1103,6 +1158,25 @@
     "statusRunning": "Running — {addr}",
     "statusStopped": "Stopped",
     "statusUnknown": "Unknown"
+  },
+  "permissionsEditor": {
+    "builtInSkills": "Built-in Skills ceiling",
+    "cancel": "Cancel",
+    "confirmImpact": "Save this permission ceiling? It can block skills and host capabilities across every conversation on this adapter.",
+    "conversationGrantRequired": "The adapter can only cap this capability; each conversation must grant it explicitly.",
+    "hitl": "Require HITL for write skills",
+    "hitlHelp": "Conversation settings may override this default. Destructive skills always require approval.",
+    "host": {
+      "computer_use": "Computer Use",
+      "goal_driving": "Goal Driving",
+      "ocr": "OCR",
+      "schedule_tools": "Schedule Tools"
+    },
+    "hostCapabilities": "Host Capabilities",
+    "save": "Save",
+    "skillHelp": "Comma-separated skill ids or wildcards. Leave blank to impose no additional adapter restriction; an explicit empty conversation allowlist still blocks all skills.",
+    "skillPlaceholder": "lark.calendar.*, lark.task.list",
+    "title": "Permissions"
   },
   "qqOfficial": {
     "adapterCreated": "QQ Official Bot added",
@@ -1123,6 +1197,8 @@
     "save": "Save",
     "sectionAdvanced": "Advanced",
     "sectionAdvancedDesc": "Quiet hours and mute.",
+    "sectionDelivery": "Delivery and transport",
+    "sectionDeliveryDesc": "Choose the inbound transport used by the runtime and webhook server.",
     "sectionIdentity": "Identity",
     "sectionIdentityDesc": "App credentials for the QQ open platform.",
     "testButtonLabel": "Test credentials",
@@ -1133,7 +1209,12 @@
     "testSucceededLabel": "Credentials valid",
     "testSucceededToast": "Connected to gateway {gatewayUrl}.",
     "titleEdit": "Edit QQ Official Bot",
-    "titleNew": "Add QQ Official Bot"
+    "titleNew": "Add QQ Official Bot",
+    "transportGateway": "Gateway WebSocket",
+    "transportGatewayHelp": "Connect outbound to QQ's gateway and receive events over WebSocket.",
+    "transportLabel": "Inbound transport",
+    "transportWebhook": "HTTPS webhook",
+    "transportWebhookHelp": "Receive events at this adapter's registered callback URL."
   },
   "quickCommands": {
     "actionTypeLabel": "Action type",
@@ -1283,6 +1364,7 @@
   },
   "tabs": {
     "adapters": "Adapters",
+    "assets": "Inbox assets",
     "audit": "Audit",
     "canned": "Canned",
     "capability": "Capabilities",
@@ -1290,6 +1372,7 @@
     "inbox": "Inbox",
     "labels": "Labels",
     "outbound": "Outbound",
+    "overrides": "Overrides",
     "overview": "Overview",
     "tunnel": "Tunnel"
   },
@@ -1497,6 +1580,7 @@
     "displayNameLabel": "Display name",
     "displayNamePlaceholder": "My WeCom Bot",
     "displayNameRequired": "Display name is required.",
+    "preflightFailed": "Could not verify the new credentials: {error}",
     "proactiveNote": "Note: WeCom only delivers proactive pushes (scheduled / workflow) to a chat after the user has messaged the bot at least once.",
     "quickCommands": {
       "help": "WeCom 智能机器人 has no persistent menu surface. We approximate one by pushing a template_card on enter_chat — each row below becomes a button. Pick a stable trigger key (you'll never see it as a user; it's only how the click is wired)."

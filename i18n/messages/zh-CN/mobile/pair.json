@@ -1,4 +1,5 @@
 {
+  "accountContextMissing": "配对 Host 前需要一个活动的本地账户。",
   "baseUrlLabel": "服务器地址",
   "biometricFailed": "生物识别失败（{reason}），未退出登录。",
   "checkingTitle": "正在重新检查链路",
@@ -109,6 +110,26 @@
       "title": "需要本地网络权限"
     }
   },
+  "persistenceError": "设备已注册，但无法安全保存其凭据。请重新配对。",
+  "recovery": {
+    "incompatible": {
+      "description": "此 Host 的协议或功能清单不兼容。请切换 Host，或与更新后的 Host 重新配对。",
+      "title": "Host 兼容性问题"
+    },
+    "offline": {
+      "description": "请重试下方诊断、切换到其他已保存 Host，或重新配对此设备。",
+      "title": "Host 离线"
+    },
+    "repair": "重新配对此 Host",
+    "requiresGrant": {
+      "description": "此设备缺少准确的 Host 能力：{grant}。",
+      "instructions": "请在 Host 上打开“设置 → Companion → 已配对设备”并更新此设备。Web 客户端不能自行授予 Host 权限。",
+      "title": "需要 Host 权限",
+      "unknownGrant": "未知能力"
+    },
+    "switchFailed": "无法激活已保存的 Host：{reason}",
+    "switchTo": "切换到 {name}"
+  },
   "scanCta": "扫码配对",
   "scanError": {
     "failed": "扫码失败：{message}",
@@ -124,6 +145,9 @@
     "cta": "退出 / 重新配对"
   },
   "signOutDescription": "退出后需重新扫码配对才能再次连接。",
+  "signOutFallbackInvalid": "请选择一个已保存的备用 Host。",
+  "signOutFallbackPrompt": "请输入备用 Host ID（{choices}）。",
+  "signOutFallbackRequired": "移除活动 Host 前必须选择备用 Host。",
   "signOutReason": "确认退出当前配对",
   "signOutTitle": "退出登录",
   "step": {
@@ -152,6 +176,5 @@
     "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
     "storageNoticeTitle": "凭据保存在此浏览器中",
     "title": "连接到服务器"
-  },
-  "persistenceError": "设备已注册，但无法安全保存其凭据。请重新配对。"
+  }
 }

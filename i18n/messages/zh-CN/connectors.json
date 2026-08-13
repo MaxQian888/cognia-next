@@ -46,6 +46,16 @@
   "identityMerge": {
     "cancel": "取消",
     "description": "选择保留哪一个作为主身份。次身份的 ID 会被记录在主身份的合并历史中。",
+    "errors": {
+      "alias_conflict": "这些身份包含冲突的平台别名。",
+      "cycle": "此次合并会形成循环。",
+      "primary_absorbed": "主身份已被合并到其他联系人。",
+      "primary_missing": "主身份已不存在。",
+      "same_identity": "不能将身份合并到自身。",
+      "secondary_absorbed": "所选身份已被合并到其他联系人。",
+      "secondary_missing": "所选身份已不存在。",
+      "unexpected": "身份合并失败，请刷新后重试。"
+    },
     "merge": "合并",
     "primary": "主身份：",
     "primaryBadge": "主",

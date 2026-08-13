@@ -398,6 +398,9 @@
       "sectionLabel": "字体",
       "serifLabel": "衬线字体"
     },
+    "messageDisplay": {
+      "sectionLabel": "聊天消息展示"
+    },
     "motion": {
       "sectionLabel": "动效速度",
       "speed": {
@@ -418,6 +421,83 @@
   "library": {
     "importTitle": "从 VSCode 导入",
     "packsTitle": "主题包"
+  },
+  "messageDisplay": {
+    "actions": {
+      "all": "全部操作",
+      "core": "核心操作",
+      "hover": "悬停时",
+      "label": "操作"
+    },
+    "advanced": "高级消息显示",
+    "agentFlow": {
+      "detailed": "详细",
+      "label": "Agent 流程",
+      "simplified": "精简",
+      "standard": "标准"
+    },
+    "layout": {
+      "bubbles": "气泡",
+      "cards": "卡片",
+      "hybrid": "混合",
+      "label": "布局"
+    },
+    "metadata": {
+      "cost": "费用",
+      "duration": "耗时",
+      "finishState": "结束状态",
+      "identity": "身份",
+      "label": "元数据位置",
+      "model": "模型",
+      "provider": "提供商",
+      "timestamp": "时间",
+      "usage": "用量"
+    },
+    "motion": {
+      "expressive": "丰富",
+      "label": "消息动效",
+      "off": "关闭",
+      "restrained": "克制"
+    },
+    "placement": {
+      "details": "详情",
+      "header": "头部",
+      "hidden": "隐藏"
+    },
+    "preset": {
+      "balanced": "均衡",
+      "focused": "专注",
+      "hint": {
+        "balanced": "保留有用上下文，并渐进展示技术细节。",
+        "focused": "优先阅读体验，压缩技术细节。",
+        "inspector": "展开运行元数据、工具和诊断信息。"
+      },
+      "inherit": "继承全局设置",
+      "inspector": "检查器",
+      "label": "展示预设"
+    },
+    "reasoning": {
+      "label": "推理"
+    },
+    "resetOverrides": "重置高级覆盖",
+    "richControls": {
+      "always": "始终",
+      "hidden": "隐藏",
+      "hover": "悬停时",
+      "label": "富内容控件"
+    },
+    "sources": {
+      "label": "来源"
+    },
+    "tools": {
+      "label": "工具"
+    },
+    "visibility": {
+      "auto": "自动",
+      "collapsed": "折叠",
+      "expanded": "展开",
+      "hidden": "隐藏"
+    }
   },
   "nav": {
     "groups": {

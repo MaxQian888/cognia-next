@@ -27,18 +27,18 @@
     "addBypass": "添加",
     "bypass": "绕过列表",
     "bypassHint": "命中以下主机或域名后缀的请求直接走直连。以「.」开头表示匹配域名后缀，例如「.internal」。",
+    "clearPassword": "清除已保存密码",
     "host": "主机",
     "optionalPlaceholder": "可选",
     "password": "密码",
+    "passwordConfiguredPlaceholder": "密码已配置",
+    "passwordKeyringError": "无法在安全存储中更新代理密码。",
     "port": "端口",
     "protocol": "协议",
     "proxyWebsocketsHint": "通过 HTTP CONNECT 隧道或 SOCKS5 转发 Discord Gateway、Slack Socket Mode 等 WSS 长连接。",
     "proxyWebsocketsLabel": "WebSocket 走代理",
     "removeBypass": "从绕过列表中移除 {entry}",
-    "username": "用户名",
-    "clearPassword": "清除已保存密码",
-    "passwordConfiguredPlaceholder": "密码已配置",
-    "passwordKeyringError": "无法在安全存储中更新代理密码。"
+    "username": "用户名"
   },
   "ipInfo": {
     "disabled": "IP 查询已关闭。开启后将从 ipinfo.io 获取当前公网 IP 及归属地。",

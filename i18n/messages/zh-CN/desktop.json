@@ -88,6 +88,13 @@
       }
     },
     "groupOther": "其它",
+    "metadata": {
+      "agent": "Agent",
+      "label": "行详情",
+      "model": "模型",
+      "provider": "提供商",
+      "workspace": "工作区"
+    },
     "newChat": "新建聊天",
     "newConversation": "新建会话",
     "newFolder": "新建文件夹",
@@ -104,6 +111,7 @@
     "showPreview": "显示消息预览",
     "showUnreadBadges": "显示未读角标",
     "teamFallback": "团队",
+    "titleMotion": "悬停时滚动长标题",
     "ungroupedAgent": "未绑定角色",
     "ungroupedWorkspace": "未归属工作区",
     "viewActive": "显示活跃会话",
@@ -203,6 +211,7 @@
       "moreEmpty": "「更多」菜单为空——所有项均已固定或隐藏。",
       "moveToMore": "移至更多",
       "pin": "固定到导航栏",
+      "pinItem": "固定项目",
       "pinned": "已固定",
       "pinnedEmpty": "暂无固定项——所有项都在「更多」菜单中。",
       "restoreDefaults": "恢复默认",
@@ -210,8 +219,7 @@
       "side": "导航栏位置",
       "sideLeft": "左侧",
       "sideRight": "右侧",
-      "title": "自定义侧边栏",
-      "pinItem": "固定项目"
+      "title": "自定义侧边栏"
     },
     "directMessages": "私信",
     "discover": "发现",
@@ -593,8 +601,11 @@
     "deselect": "取消选择",
     "dragHandle": "拖拽以重新排序或移动到文件夹",
     "moveToFolder": "移动到文件夹",
+    "openInCodexApp": "在 Codex App 中打开",
+    "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
     "openInTerminal": "在终端打开",
     "openInTerminalFailed": "无法导出此会话到终端",
+    "openedInCodexApp": "已在 Codex App 中打开。",
     "openedInTerminal": "在终端运行：{command}",
     "pin": "置顶",
     "pinned": "已置顶",
@@ -603,10 +614,7 @@
     "select": "选择",
     "unarchive": "取消归档",
     "unpin": "取消置顶",
-    "untitled": "（无标题）",
-    "openInCodexApp": "在 Codex App 中打开",
-    "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
-    "openedInCodexApp": "已在 Codex App 中打开。"
+    "untitled": "（无标题）"
   },
   "shell": {
     "desktopOnlyBodyMiddle": " 启动应用，而不是 ",
@@ -653,9 +661,9 @@
     "syncNever": "未同步",
     "syncNow": "立即同步",
     "terminal": "{count, plural, =0 {终端} other {# 个终端}}",
+    "terminalAiShellToggle": "切换 AI Shell 面板",
     "terminalRunning": "终端面板 — 有会话正在运行",
     "terminalToggle": "切换终端面板",
-    "terminalAiShellToggle": "切换 AI Shell 面板",
     "usage": "用量与额度",
     "usageOpen": "打开用量与额度"
   },

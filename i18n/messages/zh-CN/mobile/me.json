@@ -210,6 +210,7 @@
   },
   "skillsRow": "技能",
   "slashCommandsRow": "斜杠命令",
+  "sourceControlRow": "源代码管理",
   "speechRow": "语音",
   "storage": {
     "backupsDescription": "{count} 个文件 · {total}",

@@ -149,22 +149,6 @@
     "searchPlaceholder": "Search characters…",
     "title": "Pick a character"
   },
-  "compactBoundary": {
-    "auto": "automatic",
-    "detail": "{from} → {to} tokens",
-    "effectiveness": "reclaimed {pct}%",
-    "label": "Context compacted",
-    "manual": "manual",
-    "phase": "context reset at turn {turn}",
-    "viewFrames": "View frames"
-  },
-  "compaction": {
-    "notification": "Context compacted",
-    "notificationDetail": "{from} → {to} tokens",
-    "undo": "Undo compaction",
-    "undoFailed": "Couldn't restore the conversation",
-    "undoSuccess": "Conversation restored"
-  },
   "checkpoint": {
     "action": "Restore files to this checkpoint",
     "affectedFiles": "Affected files",
@@ -181,6 +165,22 @@
       "unknown": "Preview returned no status"
     },
     "title": "Restore file checkpoint"
+  },
+  "compactBoundary": {
+    "auto": "automatic",
+    "detail": "{from} → {to} tokens",
+    "effectiveness": "reclaimed {pct}%",
+    "label": "Context compacted",
+    "manual": "manual",
+    "phase": "context reset at turn {turn}",
+    "viewFrames": "View frames"
+  },
+  "compaction": {
+    "notification": "Context compacted",
+    "notificationDetail": "{from} → {to} tokens",
+    "undo": "Undo compaction",
+    "undoFailed": "Couldn't restore the conversation",
+    "undoSuccess": "Conversation restored"
   },
   "composer": {
     "ariaAttachImage": "Attach files",
@@ -381,7 +381,6 @@
         "global": "global memory",
         "workspace": "workspace memory"
       },
-      "storedInMemory": "Stored in {scope}",
       "storeError": {
         "disabled": "Long-term memory is disabled.",
         "empty": "Type a fact to remember.",
@@ -390,6 +389,7 @@
         "temporary": "Memory is unavailable in temporary mode.",
         "unavailable": "The memory store is unavailable."
       },
+      "storedInMemory": "Stored in {scope}",
       "targetLabel": {
         "file:project": "Project memory file",
         "file:user": "User memory file",
@@ -522,6 +522,12 @@
     "skills": {
       "enabled": "Enabled skill \"{name}\"."
     },
+    "smartSnapshot": {
+      "captureFailed": "Smart snapshot failed",
+      "captureTooltip": "Smart snapshot",
+      "captured": "Smart snapshot attached: {appName}",
+      "switchPrompt": "Switch to the target app now; Cognia will capture it in a moment."
+    },
     "stopTooltip": "Stop",
     "toolbar": {
       "breakdownAgents": "Subagents",
@@ -600,6 +606,7 @@
         },
         "inputLevel": "Microphone input level",
         "mute": "Mute microphone",
+        "noMicrophone": "No microphone found.",
         "phases": {
           "connecting": "Connecting…",
           "error": "Connection error",
@@ -610,7 +617,6 @@
           "speaking": "You’re speaking",
           "thinking": "Thinking…"
         },
-        "noMicrophone": "No microphone found.",
         "reconnectProgress": "Reconnect attempt {attempt} of {maxAttempts}",
         "retry": "Try again",
         "selectMicrophone": "Switch microphone",
@@ -629,12 +635,6 @@
     "webLabel": "Web",
     "workflowRefs": {
       "removeAria": "Remove reference to {label}"
-    },
-    "smartSnapshot": {
-      "captureFailed": "Smart snapshot failed",
-      "captureTooltip": "Smart snapshot",
-      "captured": "Smart snapshot attached: {appName}",
-      "switchPrompt": "Switch to the target app now; Cognia will capture it in a moment."
     }
   },
   "concurrent": {
@@ -753,13 +753,13 @@
     "accountSwitcher": {
       "active": "active",
       "aria": "Switch account for this session",
-      "noOverride": "Inherit",
-      "toast": "Next message will use account {label}",
       "effective": "Effective account",
       "error": "Couldn't switch accounts.",
       "inheritedToast": "Using inherited account {label}",
-      "toastInherited": "Using the inherited account.",
+      "noOverride": "Inherit",
       "switchFailed": "Couldn't switch accounts: {error}",
+      "toast": "Next message will use account {label}",
+      "toastInherited": "Using the inherited account.",
       "unavailable": "Account switching is unavailable.",
       "unavailableWithId": "Account {id} is unavailable.",
       "useInherited": "Use inherited account"
@@ -789,68 +789,6 @@
     "cwdReset": "Reset",
     "debugMode": "Debug mode",
     "description": "Override defaults for this chat. Empty = use global.",
-    "flowDisplay": {
-      "aria": "Agent flow display mode",
-      "detailed": "Detailed",
-      "simplified": "Simplified",
-      "standard": "Standard"
-    },
-    "forkAria": "Fork session",
-    "forkSuccess": "Session forked. The new branch is now active.",
-    "forkTooltip": "Fork conversation — branches a new session from this one's history",
-    "forkUnsupported": "This agent doesn't support session forking.",
-    "groups": {
-      "default": "Default",
-      "favorites": "Favorites",
-      "other": "Other"
-    },
-    "hideArtifacts": "Hide artifacts panel",
-    "hideConversations": "Hide conversation list",
-    "insights": "Session insights",
-    "memoryInherit": "Inherit app setting",
-    "memoryLearn": "Learn from this chat",
-    "memoryOff": "Off",
-    "memoryOn": "On",
-    "memoryUse": "Use memories in this chat",
-    "noApiKey": "No API key",
-    "openBrowser": "Open browser panel",
-    "permissionModeAppDefault": "Use app default",
-    "permissionModeLabel": "Permission mode",
-    "pickDirAria": "Pick directory",
-    "pickDirTitle": "Working directory for this session",
-    "presetConflict": {
-      "apply": "Apply",
-      "cancel": "Cancel",
-      "fillEmptyBody": "Keep your existing values; only apply preset fields where the session is currently empty. Safest default.",
-      "fillEmptyTitle": "Only fill empty fields",
-      "mergeBody": "Same as \"fill empty\" for these scalar fields. (Useful when applying through the section editor where array fields are unioned.)",
-      "mergeTitle": "Merge",
-      "overwriteAllBody": "Every preset field replaces the session value, even when the session already has one set.",
-      "overwriteAllTitle": "Overwrite everything",
-      "summary": "This preset would overwrite the following session {count, plural, =1 {field} other {fields}}: {fields}.",
-      "title": "Apply preset \"{name}\"?"
-    },
-    "presetHelp": "Picks system prompt + model + permission mode + working dir from the preset.",
-    "presetLabel": "Apply a preset",
-    "presetNoneOption": "(none)",
-    "presetNonePlaceholder": "(none)",
-    "presetPill": {
-      "ariaLabel": "Active preset — click to switch",
-      "defaultBadge": "Default",
-      "empty": "No presets match.",
-      "manageAll": "Manage all presets…",
-      "none": "No preset",
-      "searchAriaLabel": "Search presets",
-      "searchPlaceholder": "Search presets…"
-    },
-    "providerUndoAria": "Provider Undo",
-    "providerUndoConfirm": "Continue with Provider Undo",
-    "providerUndoFailure": "Provider undo failed: {error}",
-    "providerUndoProgress": "Undoing…",
-    "providerUndoSuccess": "Provider undo completed",
-    "providerUndoTooltip": "Run the provider's advertised /undo command",
-    "providerUndoWarningDescription": "The provider may revert conversation state and file changes. This is provider-native undo, not a compaction restore. This warning is remembered for this external-agent configuration.",
-    "providerUndoWarningTitle": "Provider Undo may change files",
     "execution": {
       "addEnv": "Add variable",
       "effort": "Execution effort",
@@ -888,6 +826,71 @@
       "summaryPlan": "Plan",
       "summaryUtility": "Utility"
     },
+    "flowDisplay": {
+      "aria": "Agent flow display mode",
+      "detailed": "Detailed",
+      "simplified": "Simplified",
+      "standard": "Standard"
+    },
+    "forkAria": "Fork session",
+    "forkSuccess": "Session forked. The new branch is now active.",
+    "forkTooltip": "Fork conversation — branches a new session from this one's history",
+    "forkUnsupported": "This agent doesn't support session forking.",
+    "groups": {
+      "default": "Default",
+      "favorites": "Favorites",
+      "other": "Other"
+    },
+    "hideArtifacts": "Hide artifacts panel",
+    "hideConversations": "Hide conversation list",
+    "insights": "Session insights",
+    "memoryInherit": "Inherit app setting",
+    "memoryLearn": "Learn from this chat",
+    "memoryOff": "Off",
+    "memoryOn": "On",
+    "memoryUse": "Use memories in this chat",
+    "noApiKey": "No API key",
+    "openBrowser": "Open browser panel",
+    "openInCodexApp": "Open in Codex app",
+    "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
+    "openedInCodexApp": "Opened in the Codex app.",
+    "permissionModeAppDefault": "Use app default",
+    "permissionModeLabel": "Permission mode",
+    "pickDirAria": "Pick directory",
+    "pickDirTitle": "Working directory for this session",
+    "presetConflict": {
+      "apply": "Apply",
+      "cancel": "Cancel",
+      "fillEmptyBody": "Keep your existing values; only apply preset fields where the session is currently empty. Safest default.",
+      "fillEmptyTitle": "Only fill empty fields",
+      "mergeBody": "Same as \"fill empty\" for these scalar fields. (Useful when applying through the section editor where array fields are unioned.)",
+      "mergeTitle": "Merge",
+      "overwriteAllBody": "Every preset field replaces the session value, even when the session already has one set.",
+      "overwriteAllTitle": "Overwrite everything",
+      "summary": "This preset would overwrite the following session {count, plural, =1 {field} other {fields}}: {fields}.",
+      "title": "Apply preset \"{name}\"?"
+    },
+    "presetHelp": "Picks system prompt + model + permission mode + working dir from the preset.",
+    "presetLabel": "Apply a preset",
+    "presetNoneOption": "(none)",
+    "presetNonePlaceholder": "(none)",
+    "presetPill": {
+      "ariaLabel": "Active preset — click to switch",
+      "defaultBadge": "Default",
+      "empty": "No presets match.",
+      "manageAll": "Manage all presets…",
+      "none": "No preset",
+      "searchAriaLabel": "Search presets",
+      "searchPlaceholder": "Search presets…"
+    },
+    "providerUndoAria": "Provider Undo",
+    "providerUndoConfirm": "Continue with Provider Undo",
+    "providerUndoFailure": "Provider undo failed: {error}",
+    "providerUndoProgress": "Undoing…",
+    "providerUndoSuccess": "Provider undo completed",
+    "providerUndoTooltip": "Run the provider's advertised /undo command",
+    "providerUndoWarningDescription": "The provider may revert conversation state and file changes. This is provider-native undo, not a compaction restore. This warning is remembered for this external-agent configuration.",
+    "providerUndoWarningTitle": "Provider Undo may change files",
     "save": "Save",
     "sessionCommunication": "Session communication",
     "sheet": {
@@ -922,10 +925,7 @@
     "unreadArtifacts": "New artifacts — open panel",
     "untitledSession": "(untitled)",
     "workingDirLabel": "Working directory",
-    "workingDirPlaceholder": "/path/to/project",
-    "openInCodexApp": "Open in Codex app",
-    "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
-    "openedInCodexApp": "Opened in the Codex app."
+    "workingDirPlaceholder": "/path/to/project"
   },
   "history": {
     "loadError": "Couldn't load this conversation.",
@@ -948,13 +948,13 @@
     "dismiss": "Dismiss",
     "environmentSetupFailed": "Project environment setup failed. Retry, or explicitly bypass setup for this interactive turn.",
     "environmentUnavailable": "The selected project environment is unavailable.",
+    "managedWorktreeUnavailable": "The managed worktree is unavailable. This task was not run locally.",
     "noSession": "No conversation is open. Start a new one to send this.",
     "openSettings": "Open settings",
     "pendingPromptPiiBlocked": "The automated prompt was blocked because it may contain private or credential-like data. Start a normal chat and share only the details you intend to send.",
     "retry": "Retry",
     "sidecarExited": "The assistant stopped unexpectedly and the turn was interrupted. Retry to continue.",
     "title": "Failed to send",
-    "managedWorktreeUnavailable": "The managed worktree is unavailable. This task was not run locally.",
     "unflushedEditorBuffers": "{count, plural, one {# open file could not be saved} other {# open files could not be saved}} before this turn, so the agent may read an out-of-date copy: {files}"
   },
   "jump": {
@@ -1163,7 +1163,9 @@
       "timeout": "The request took too long — retry, or raise the timeout.",
       "unauthorized": "Authentication failed — check your API key or token in Settings."
     },
+    "moreLabel": "More message actions",
     "pluginMenu": "Plugin actions",
+    "quoteLabel": "Quote in composer",
     "readAloud": "Read aloud",
     "reasoning": {
       "completed": "Thought for a few seconds",
@@ -1185,12 +1187,45 @@
     "truncateFromLabel": "Delete from here",
     "truncateFromTooltip": "Delete this message and everything after it",
     "unknownPart": "Unknown content ({type})",
+    "unknownPartDiagnostic": {
+      "circular": "[circular]",
+      "redacted": "[redacted]",
+      "truncated": "… [truncated]",
+      "unavailable": "[unavailable diagnostic data]"
+    },
     "usageCacheHit": "Cache hit: {n}",
     "usageCacheWrite": "Cache write: {n}",
     "usageCost": "Cost: ${cost}",
     "usageInput": "Input: {n}",
     "usageOutput": "Output: {n}",
     "usageReasoning": "Reasoning: {n}"
+  },
+  "messageDisplay": {
+    "assistant": "Assistant",
+    "details": "Message details",
+    "durationValue": "{value} ms",
+    "metadata": {
+      "cost": "Cost",
+      "duration": "Duration",
+      "finishState": "Finish state",
+      "identity": "Identity",
+      "model": "Model",
+      "provider": "Provider",
+      "timestamp": "Time",
+      "usage": "Tokens"
+    },
+    "status": {
+      "complete": "Complete",
+      "error": "Failed",
+      "streaming": "Responding"
+    },
+    "story": {
+      "assistantAnswer": "A stable reading surface for a long answer with progressive technical detail.",
+      "rendererOwnership": "Assistant content remains owned by the existing rich-part renderers.",
+      "userQuestion": "Can you explain this implementation?"
+    },
+    "usageValue": "↑{input} ↓{output}",
+    "you": "You"
   },
   "ocrResult": {
     "askAbout": "Ask about this",
@@ -1453,8 +1488,6 @@
     "attachedCreateError": "Couldn't create the attached session.",
     "attachedCreated": "Attached session created.",
     "attachedPromptLabel": "Initial prompt",
-    "attachedTab": "Attached sessions",
-    "attachedTitleLabel": "Task title",
     "attachedStatus": {
       "closed": "Closed",
       "completed": "Completed",
@@ -1462,6 +1495,8 @@
       "running": "Running",
       "staged": "Ready"
     },
+    "attachedTab": "Attached sessions",
+    "attachedTitleLabel": "Task title",
     "closeAttached": "Close",
     "contextFull": "Full parent context",
     "contextLabel": "Context fork",
@@ -1552,8 +1587,8 @@
     "citationsLabel": "{count, plural, =1 {1 web source} other {# web sources}}",
     "degradedNotice": "Twin retrieval unavailable — this reply skipped the twin's documents.",
     "originLabel": {
-      "anthropic": "Web",
       "agentKnowledgeBase": "Agent KB",
+      "anthropic": "Web",
       "footnote": "Note",
       "memory": "Memory",
       "twinRag": "Twin",
@@ -1626,13 +1661,6 @@
     "today": "Today",
     "yesterday": "Yesterday"
   },
-  "transcript": {
-    "collapseTurn": "Collapse turn",
-    "expandTurn": "Expand full turn",
-    "loadOlder": "Load older turns",
-    "loading": "Loading transcript…",
-    "retry": "Retry transcript"
-  },
   "toolApproval": {
     "actionsTitle": "Approval actions",
     "allowAlways": "Allow always",
@@ -1645,6 +1673,13 @@
     "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
     "titleFallback": "Allow {tool}?",
     "toolLabel": "Tool"
+  },
+  "transcript": {
+    "collapseTurn": "Collapse turn",
+    "expandTurn": "Expand full turn",
+    "loadOlder": "Load older turns",
+    "loading": "Loading transcript…",
+    "retry": "Retry transcript"
   },
   "truncateFrom": {
     "cancel": "Keep them",

@@ -70,6 +70,10 @@
   "noVersions": "暂无版本历史",
   "openFullDesigner": "打开完整设计器",
   "openWithDefault": "用默认应用打开",
+  "pluginRenderer": {
+    "failed": "插件渲染器运行失败。",
+    "loading": "正在加载插件渲染器…"
+  },
   "preview": "预览",
   "previewInDesigner": "在设计器中预览",
   "previousVersion": "旧版本",
@@ -179,12 +183,6 @@
     "reviewEmpty": "请选择一个改动文件以审阅差异",
     "scopeLabel": "工作区范围",
     "taskResources": {
-      "agent": "Agent",
-      "allCaptureClasses": "源码和生成产物",
-      "allOrigins": "全部来源",
-      "allStatuses": "全部改动",
-      "allTime": "全部时间",
-      "any": "文件系统变化",
       "adoptionGenerationOnly": "生成了 {lines} 行 · 旧回退链路无法判断采用情况",
       "adoptionPending": "建议变更 {lines} 行 · 等待审阅",
       "adoptionRate": "采用率 {rate}% · 已采用 {accepted}/{proposed} 行变更",
@@ -193,6 +191,12 @@
       "adoptionTitle": "AI 代码采用率",
       "adoptionTruncated": "跟踪覆盖不完整",
       "adoptionUnavailable": "无法获得采用率覆盖数据",
+      "agent": "Agent",
+      "allCaptureClasses": "源码和生成产物",
+      "allOrigins": "全部来源",
+      "allStatuses": "全部改动",
+      "allTime": "全部时间",
+      "any": "文件系统变化",
       "applyAll": "全部应用",
       "applyFile": "应用文件",
       "applySelectedHunks": "应用 {count} 个区块",
@@ -264,9 +268,5 @@
       "description": "工作区编辑需要桌面应用或已配对的 Companion 文件系统。",
       "title": "工作区不可用"
     }
-  },
-  "pluginRenderer": {
-    "failed": "插件渲染器运行失败。",
-    "loading": "正在加载插件渲染器…"
   }
 }

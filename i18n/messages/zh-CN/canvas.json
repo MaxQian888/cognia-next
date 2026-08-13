@@ -125,7 +125,6 @@
   "errorDescription": "渲染编辑器时出现异常。可以重试，或复制错误详情上报。",
   "errorTitle": "画布出错了",
   "errors": "错误",
-  "input": "输入",
   "executing": "执行中…",
   "executingCode": "正在执行代码…",
   "executionFailed": "执行失败",
@@ -161,6 +160,7 @@
     "placeholder": "输入命令…",
     "title": "画布命令面板"
   },
+  "input": "输入",
   "join": {
     "documentLabel": "文档",
     "error": "无法加入",
@@ -200,7 +200,6 @@
   "online": "在线",
   "original": "原文",
   "output": "输出",
-  "rawErrorOutput": "原始错误输出",
   "panels": {
     "accept": "接受",
     "collabHint": "实时协作默认关闭。在「设置 → 画布 → 协作」中启用并填入 CRDT 信令服务器 URL。",
@@ -236,6 +235,7 @@
     "unsupported": "{language} 文档暂不支持实时预览。"
   },
   "previewAction": "预览",
+  "rawErrorOutput": "原始错误输出",
   "readyToRun": "准备运行",
   "reconnect": "重新连接",
   "reconnecting": "重新连接中…",

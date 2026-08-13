@@ -1,8 +1,8 @@
 {
   "blockedRunSummary": "{count} error(s) must be fixed before this workflow can run.",
   "blockedRunTitle": "Can't run — fix errors first",
-  "containerBoundary": "This connection crosses a loop container boundary ({source} → {target}).",
   "connectorEgressPolicy": "Connector-triggered external sink {kind} must explicitly choose Block or Redact before publishing.",
+  "containerBoundary": "This connection crosses a loop container boundary ({source} → {target}).",
   "credentialMissing": "References a credential that isn't configured ({ref}).",
   "danglingSource": "This connection starts from a node that no longer exists ({ref}).",
   "danglingTarget": "This connection points to a node that no longer exists ({ref}).",

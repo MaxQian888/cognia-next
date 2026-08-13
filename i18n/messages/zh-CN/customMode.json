@@ -75,7 +75,6 @@
   "mcpTools": "MCP 工具",
   "modeGenerationFailed": "根据描述生成模式失败",
   "modePreview": "模式预览",
-  "noToolsSelected": "未选择工具",
   "modelOverride": "模型覆盖",
   "modelOverridePlaceholder": "留空表示使用默认模型",
   "modelSettings": "模型",
@@ -83,6 +82,7 @@
   "namePlaceholder": "我的自定义助手",
   "no": "否",
   "noMcpServers": "尚未连接任何 MCP 服务器",
+  "noToolsSelected": "未选择工具",
   "outputFormat": "输出格式",
   "outputLabel": "输出：",
   "outputSettings": "输出",
@@ -100,7 +100,7 @@
   "templates": "快速开始模板",
   "tools": "工具",
   "toolsLabel": "工具：",
-  "unnamedMode": "未命名模式",
   "toolsUnavailable": "部分工具需要先完成配置",
+  "unnamedMode": "未命名模式",
   "yes": "是"
 }

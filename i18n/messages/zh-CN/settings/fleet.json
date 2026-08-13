@@ -1,4 +1,9 @@
 {
+  "capabilities": {
+    "degraded": "API 能力受限",
+    "proven": "API 已验证",
+    "unproven": "等待能力探测"
+  },
   "claude": {
     "desc": "将转发 hooks 安装到 ~/.claude/settings.json，让每个 Claude Code 会话上报到这里。失败即放行：Cognia 关闭时立即退出。",
     "label": "Claude Code hooks"
@@ -16,6 +21,7 @@
     "clearEnded": "清除已结束",
     "count": "{count} 个会话",
     "delete": "从历史中移除",
+    "detachedAgo": "{ago} 前已脱离",
     "empty": "尚无会话记录。",
     "endedAgo": "{ago}前结束",
     "filterAll": "全部",
@@ -24,8 +30,7 @@
     "ranFor": "运行 {duration}",
     "showLess": "收起",
     "showMore": "显示全部 {count} 条",
-    "title": "最近会话",
-    "detachedAgo": "{ago} 前已脱离"
+    "title": "最近会话"
   },
   "island": {
     "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",
@@ -60,7 +65,13 @@
   },
   "opencode": {
     "desc": "在 ~/.config/opencode/plugin 安装插件。可在灵动岛上观察会话并批准/拒绝权限。",
-    "label": "OpenCode 插件"
+    "label": "OpenCode 插件",
+    "outbox": {
+      "corrupt": "持久化命令队列已损坏，控制功能已停用。",
+      "repair": "修复队列",
+      "repaired": "OpenCode 命令队列已修复。",
+      "unavailable": "持久化命令队列不可用，控制功能已停用。"
+    }
   },
   "saved": "舰队设置已更新。",
   "status": {
@@ -73,5 +84,31 @@
     "unavailable": "未找到 Claude Code"
   },
   "summaryAria": "{count} 项集成已启用",
-  "title": "Agent 舰队监控"
+  "title": "Agent 舰队监控",
+  "workers": {
+    "bindingHint": "远程 AgentTeam 调度复用这些已认证的舰队主机与 Task Workspace 绑定。",
+    "capacity": "{used}/{total} 个槽位",
+    "commandAria": "Worker 注册命令",
+    "copied": "注册命令已复制。",
+    "copy": "复制注册命令",
+    "copyFailed": "无法复制注册命令。",
+    "description": "注册最小权限 CLI worker，并检查其调度就绪状态。",
+    "empty": "尚未注册执行 worker。",
+    "enroll": "注册 worker",
+    "error": "Worker 操作失败：{detail}",
+    "expires": "注册凭据将在 {time} 过期。",
+    "notConnected": "注册 worker 前请先连接 Companion。",
+    "offline": "离线",
+    "online": "在线",
+    "placementReason": "无法调度：{reason}",
+    "qrAria": "Worker 注册二维码",
+    "revoke": "撤销",
+    "revoked": "Worker 访问权限已撤销。",
+    "status": {
+      "incompatible": "不兼容",
+      "offline": "离线",
+      "online": "在线"
+    },
+    "title": "执行 Worker"
+  }
 }

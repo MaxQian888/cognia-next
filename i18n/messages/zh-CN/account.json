@@ -92,9 +92,15 @@
   },
   "runtimeTarget": {
     "active": "当前",
+    "addHost": "添加 Host",
+    "fallbackInvalid": "请选择一个已保存的备用 Host。",
+    "fallbackPrompt": "请输入备用 Host ID（{choices}）。",
     "heading": "运行目标",
     "legacyMixed": "旧版混合数据（只读）",
     "loadFailed": "无法加载运行目标。",
+    "removeConfirm": "要移除 {name} 吗？只有 Host 确认撤销后才会删除本地数据。",
+    "removeFailed": "无法移除该 Host。",
+    "removeHost": "移除 {name}",
     "switchFailed": "无法切换运行目标。",
     "thisBrowser": "此浏览器"
   },

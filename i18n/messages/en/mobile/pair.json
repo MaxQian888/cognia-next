@@ -1,4 +1,5 @@
 {
+  "accountContextMissing": "An active local account is required before pairing a Host.",
   "baseUrlLabel": "Server URL",
   "biometricFailed": "Biometric check failed ({reason}); did not sign out.",
   "checkingTitle": "Re-checking link",
@@ -109,6 +110,26 @@
       "title": "Local network access required"
     }
   },
+  "persistenceError": "The device was registered, but its credential couldn't be saved securely. Pair again.",
+  "recovery": {
+    "incompatible": {
+      "description": "This Host's protocol or feature manifest is incompatible. Switch Hosts or pair again with an updated Host.",
+      "title": "Host compatibility problem"
+    },
+    "offline": {
+      "description": "Retry diagnostics below, switch to another saved Host, or pair this device again.",
+      "title": "Host is offline"
+    },
+    "repair": "Re-pair this Host",
+    "requiresGrant": {
+      "description": "This device is missing the exact Host capability: {grant}.",
+      "instructions": "On the Host, open Settings → Companion → Paired Devices and update this device. A Web client cannot grant itself Host authority.",
+      "title": "Host permission required",
+      "unknownGrant": "unknown capability"
+    },
+    "switchFailed": "The saved Host could not be activated: {reason}",
+    "switchTo": "Switch to {name}"
+  },
   "scanCta": "Scan QR",
   "scanError": {
     "failed": "Scan failed: {message}",
@@ -124,6 +145,9 @@
     "cta": "Sign out / re-pair"
   },
   "signOutDescription": "You'll need to scan the QR again to reconnect.",
+  "signOutFallbackInvalid": "Choose one of the saved fallback Hosts.",
+  "signOutFallbackPrompt": "Enter the fallback Host id ({choices}).",
+  "signOutFallbackRequired": "A fallback Host is required before removing the active Host.",
   "signOutReason": "Confirm sign out",
   "signOutTitle": "Sign out",
   "step": {
@@ -152,6 +176,5 @@
     "storageNotice": "The device credential is kept in this browser's localStorage: anyone with access to this browser profile — or a script injected into this origin — could use it. Pair from a trusted device and sign out when you're done.",
     "storageNoticeTitle": "Credential stays in this browser",
     "title": "Connect to your server"
-  },
-  "persistenceError": "The device was registered, but its credential couldn't be saved securely. Pair again."
+  }
 }

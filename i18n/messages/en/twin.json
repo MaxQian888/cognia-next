@@ -134,6 +134,7 @@
   },
   "jobs": {
     "attempt": "attempt {n}",
+    "cancel": "Cancel",
     "cancelReason": "Cancelled from Twin workbench",
     "deadLetter": "dead-letter",
     "draftsProduced": "{count, plural, =0 {No drafts produced} =1 {1 draft produced} other {# drafts produced}}",
@@ -146,10 +147,9 @@
     "queueDistill": "Queue distill",
     "queueIngest": "Queue ingest for pending sources",
     "queuedAt": "queued {when}",
-    "retry": "Retry",
-    "retryBusy": "Retrying…",
     "resume": "Resume",
-    "cancel": "Cancel"
+    "retry": "Retry",
+    "retryBusy": "Retrying…"
   },
   "kind": {
     "character": "Character",
@@ -204,13 +204,6 @@
     "countEntities": "{count, plural, =0 {0 entities} =1 {1 entity} other {# entities}}",
     "countPlaybooks": "{count, plural, =0 {0 playbooks} =1 {1 playbook} other {# playbooks}}",
     "countStyleSamples": "{count, plural, =0 {0 style samples} =1 {1 style sample} other {# style samples}}",
-    "empty": {
-      "decisions": "No decisions yet — distill will extract some, or add one manually.",
-      "entities": "No entities yet — distill will produce some, or click Add entity manually.",
-      "noMatch": "No matches for your search.",
-      "playbooks": "No playbooks yet — distill will produce some, or add one manually.",
-      "styleSamples": "No style samples yet — distill will produce some, or add one manually."
-    },
     "decision": {
       "add": "Add decision",
       "choiceLabel": "Choice",
@@ -225,6 +218,13 @@
       "rationaleLabel": "Rationale",
       "rationalePlaceholder": "Why this choice was made",
       "required": "Context and choice are required."
+    },
+    "empty": {
+      "decisions": "No decisions yet — distill will extract some, or add one manually.",
+      "entities": "No entities yet — distill will produce some, or click Add entity manually.",
+      "noMatch": "No matches for your search.",
+      "playbooks": "No playbooks yet — distill will produce some, or add one manually.",
+      "styleSamples": "No style samples yet — distill will produce some, or add one manually."
     },
     "entity": {
       "add": "Add entity",

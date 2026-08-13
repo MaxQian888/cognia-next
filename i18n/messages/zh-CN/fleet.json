@@ -2,11 +2,13 @@
   "agents": {
     "claude-code": "Claude Code",
     "codex": "Codex",
+    "cognia": "Cognia",
     "opencode": "OpenCode"
   },
   "island": {
     "empty": "暂无活动 Agent",
     "legend": {
+      "detached": "{count} 个已断开监控",
       "done": "{count} 个已结束",
       "idle": "{count} 个空闲",
       "needsYou": "{count} 个待处理",
@@ -28,6 +30,8 @@
   },
   "question": {
     "expired": "已在终端中处理",
+    "reject": "拒绝",
+    "rejected": "已拒绝",
     "submit": "提交",
     "submitted": "已发送"
   },
@@ -61,6 +65,7 @@
       "turn": "本轮失败"
     },
     "focusTerminal": "聚焦终端",
+    "host": "执行主机：{host}",
     "interrupt": {
       "error": {
         "interrupt_identity_mismatch": "该进程已不是这个 Agent，未发送任何信号。",
@@ -79,6 +84,7 @@
     "openTranscript": "在文件管理器中显示会话记录",
     "questionMore": "还有 {count} 个问题",
     "status": {
+      "detached": "监控已断开",
       "ended": "会话已结束",
       "idle": "空闲",
       "planPending": "计划等待在终端中确认",

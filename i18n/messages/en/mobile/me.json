@@ -210,6 +210,7 @@
   },
   "skillsRow": "Skills",
   "slashCommandsRow": "Slash commands",
+  "sourceControlRow": "Source control",
   "speechRow": "Speech & voice",
   "storage": {
     "backupsDescription": "{count} files · {total}",

@@ -58,6 +58,8 @@
     "destinationPlaceholder": "/path/to/repository",
     "failed": "Failed to clone repository",
     "open": "Clone Repository",
+    "remoteDescription": "Enter a remote URL and a relative destination inside the authorized host workspace.",
+    "remoteDestinationPlaceholder": "repositories/project",
     "submit": "Clone",
     "title": "Clone Repository",
     "urlLabel": "Repository URL",
@@ -189,6 +191,10 @@
     "moveUp": "Move up",
     "rewordPlaceholder": "New commit message",
     "title": "Interactive rebase"
+  },
+  "remote": {
+    "noWorkspace": "No authorized Git workspace",
+    "noWorkspaceDescription": "Open a project on the paired desktop to authorize its roots for this account, then refresh this page."
   },
   "remotes": {
     "add": "Add Remote",
@@ -362,6 +368,7 @@
     "pathPlaceholder": "Choose an empty directory",
     "prune": "Prune stale",
     "pruned": "Stale worktree records pruned",
+    "relativePathPlaceholder": "worktrees/feature-name",
     "remove": "Remove Worktree",
     "removeDescription": "Remove the linked worktree at {path}?",
     "removeTitle": "Remove worktree?",

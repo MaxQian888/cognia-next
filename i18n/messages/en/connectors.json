@@ -46,6 +46,16 @@
   "identityMerge": {
     "cancel": "Cancel",
     "description": "Select which identity to keep as primary. The secondary identity's id will be recorded in the primary's merge history.",
+    "errors": {
+      "alias_conflict": "These identities contain a conflicting platform alias.",
+      "cycle": "This merge would create a cycle.",
+      "primary_absorbed": "The primary identity was already merged into another contact.",
+      "primary_missing": "The primary identity is no longer available.",
+      "same_identity": "An identity cannot be merged into itself.",
+      "secondary_absorbed": "The selected identity was already merged into another contact.",
+      "secondary_missing": "The selected identity is no longer available.",
+      "unexpected": "Identity merge failed. Please refresh and try again."
+    },
     "merge": "Merge",
     "primary": "Primary:",
     "primaryBadge": "Primary",

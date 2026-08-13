@@ -89,6 +89,7 @@
   },
   "cannedResponses": {
     "empty": "没有匹配的快捷回复。",
+    "manage": "管理快捷回复",
     "searchPlaceholder": "搜索快捷回复……",
     "triggerAria": "插入快捷回复"
   },
@@ -113,8 +114,17 @@
     }
   },
   "contactProfile": {
+    "candidatesTitle": "可合并的身份",
     "empty": "该会话暂无联系人信息。群聊和尚未出现过的联系人还没有目录记录。",
+    "errors": {
+      "alias_conflict": "保存的身份包含冲突别名。",
+      "identity_conflict": "另一个联系人已占用该平台身份。",
+      "primary_missing": "该联系人已不存在。",
+      "snapshot_missing": "该身份已不再与联系人合并。",
+      "unexpected": "身份变更失败，请刷新后重试。"
+    },
     "lastSeen": "最近出现",
+    "merge": "合并",
     "mergedTitle": "已合并的身份",
     "platform": "平台",
     "remoteId": "用户 ID",
@@ -276,6 +286,7 @@
         "manual": "人工审核",
         "unset": "继承适配器默认"
       },
+      "modelManagedByTarget": "Provider 和 Model 由所选 Agent Team 或 Workflow 管理。",
       "modelOverride": "Model 覆盖",
       "modelOverridePlaceholder": "claude-opus-4-7",
       "muted": "静音 (不发出站消息)",
@@ -283,6 +294,27 @@
       "pinned": "置顶",
       "proactivePush": "主动 IM 通知",
       "proactivePushHint": "允许助手将任务完成 / 出错 / 需输入等事件主动推送回此会话。默认关闭。",
+      "promoteConfirm": "将这些会话显式值提升为 Adapter 默认值？\n\n{changes}",
+      "promotePermissionConfirm": "本次提升会改变 Adapter 的内置 Skill 上限或 HITL 默认值，并可能影响其他会话。是否继续？",
+      "promoteToAdapter": "提升为 Adapter 默认",
+      "promoteToAdapterTitle": "仅提升支持的显式值，不改写已有会话覆盖",
+      "promotionFields": {
+        "activationPolicy": "激活策略",
+        "activationTtl": "激活有效期",
+        "builtInSkillCeiling": "内置 Skill 上限",
+        "character": "Character",
+        "dispatchMode": "运行中调度模式",
+        "mode": "响应模式",
+        "model": "Model",
+        "muted": "静音",
+        "provider": "Provider",
+        "quietHours": "免打扰时段",
+        "requireHitlForWrites": "写入类 Skill 二次确认",
+        "team": "Agent Team",
+        "workflow": "Workflow"
+      },
+      "providerModelDefault": "使用 Adapter 默认值",
+      "providerModelOverride": "Provider 和 Model",
       "providerOverride": "Provider 覆盖",
       "providerOverridePlaceholder": "anthropic",
       "quietHours": {
@@ -296,6 +328,7 @@
       "quietHoursOverride": "勿扰时段 (本会话)",
       "quietHoursTo": "到",
       "quietHoursTz": "时区",
+      "referenceMissing": "{id}（已缺失）",
       "requireHitlForWrites": {
         "help": "关闭后写入类 skill 无需 A2UI 确认卡片即可执行。破坏性 skill 始终需要 HITL。默认开启。",
         "label": "写入类 Skill 需要二次确认"
@@ -304,12 +337,22 @@
       "slaResponseMinutesHint": "设置后，该会话会显示倒计时徽章；若在该分钟数内未回复则标记为「已超时」（不计入静默时段）。留空表示不设时限。",
       "slaResponseMinutesPlaceholder": "例如 30",
       "suppressGroups": "在群聊中抑制",
+      "target": {
+        "direct": "Direct Agent",
+        "inherit": "继承",
+        "label": "执行目标",
+        "none": "无",
+        "specificCharacter": "指定 Character",
+        "team": "Agent Team",
+        "workflow": "Workflow"
+      },
       "teamBinding": "Agent 团队 (id)",
       "teamBindingHelp": "设置后，入站消息将派发给该 Agent 团队而非单个角色；进度会回流到会话中。",
       "teamBindingPlaceholder": "（无 —— 由角色回复）",
       "workflowBinding": "可视化工作流（名称或 id）",
       "workflowBindingHelp": "设置后（且未绑定团队 —— 团队优先），入站消息将运行该可视化工作流而非单个角色；消息文本作为触发载荷，进度会回流到会话中。",
-      "workflowBindingPlaceholder": "（无 —— 由角色回复）"
+      "workflowBindingPlaceholder": "（无 —— 由角色回复）",
+      "workflowProduction": "Production"
     },
     "gearAria": "打开该会话的覆盖设置",
     "noOverrideYet": "尚未配置覆盖 — 当前继承适配器默认。",
@@ -347,6 +390,7 @@
     "cancel": "取消",
     "markdownPlaceholder": "草稿 Markdown…",
     "reject": "拒绝",
+    "segmentFallback": "不支持的草稿片段",
     "textPlaceholder": "草稿文本…"
   },
   "extensionPoints": {
@@ -371,6 +415,7 @@
   "labels": {
     "addAria": "添加或移除标签",
     "empty": "暂无标签——请在设置中创建。",
+    "manage": "管理标签",
     "pickerTitle": "标签",
     "removeAria": "移除标签 {name}"
   },

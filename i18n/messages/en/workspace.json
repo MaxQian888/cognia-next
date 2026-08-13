@@ -63,8 +63,6 @@
   "switcher": {
     "active": "Active workspace: {name}",
     "allHeading": "All",
-    "pin": "Pin {name}",
-    "pinnedHeading": "Pinned",
     "clearSearch": "Clear search",
     "empty": "No workspaces yet",
     "folderCount": "{count, plural, one {# folder} other {# folders}}",
@@ -74,9 +72,11 @@
     "noMatches": "No matching workspaces",
     "none": "No active workspace",
     "openFolder": "Open folder…",
+    "pin": "Pin {name}",
+    "pinnedHeading": "Pinned",
     "recentHeading": "Recent",
-    "unpin": "Unpin {name}",
     "searchPlaceholder": "Search workspaces…",
+    "unpin": "Unpin {name}",
     "untrustedHint": "Untrusted workspace"
   }
 }

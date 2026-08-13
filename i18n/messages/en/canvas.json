@@ -125,7 +125,6 @@
   "errorDescription": "Something went wrong while rendering the editor. You can retry, or copy the error details to report it.",
   "errorTitle": "Canvas crashed",
   "errors": "Errors",
-  "input": "Input",
   "executing": "Executing…",
   "executingCode": "Executing code…",
   "executionFailed": "Execution failed",
@@ -161,6 +160,7 @@
     "placeholder": "Type a command…",
     "title": "Canvas command palette"
   },
+  "input": "Input",
   "join": {
     "documentLabel": "Document",
     "error": "Couldn't join",
@@ -200,7 +200,6 @@
   "online": "Online",
   "original": "Original",
   "output": "Output",
-  "rawErrorOutput": "Raw error output",
   "panels": {
     "accept": "Accept",
     "collabHint": "Real-time collaboration is disabled by default. Enable it in Settings → Canvas → Collaboration and provide a CRDT signalling URL.",
@@ -236,6 +235,7 @@
     "unsupported": "No live preview for {language} documents."
   },
   "previewAction": "Preview",
+  "rawErrorOutput": "Raw error output",
   "readyToRun": "Ready to run",
   "reconnect": "Reconnect",
   "reconnecting": "Reconnecting…",

@@ -151,8 +151,8 @@
       "plugin": "插件",
       "rag": "检索",
       "runtime": "运行时",
-      "workflow": "工作流",
-      "wiki": "Wiki"
+      "wiki": "Wiki",
+      "workflow": "工作流"
     },
     "plannedBadge": "规划中",
     "plannedReason": "已推迟到 Phase 1 之后：访问用户仓库需要逐仓库授权，该机制尚未实现。此范围保留在 API 中以便处理器继续编译，但无法被授予。",

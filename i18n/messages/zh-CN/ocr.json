@@ -235,6 +235,7 @@
     "manageButton": "管理语言包"
   },
   "modelStatus": {
+    "cancelDownload": "取消下载",
     "description": "纯 Rust 的 OCR 引擎不随安装包附带模型权重以保持安装体积；首次使用时会下载到用户数据目录。",
     "download": "下载模型",
     "downloadAll": "下载全部模型文件",
@@ -244,13 +245,12 @@
     "downloadingDetail": "{bytesDone} / {bytesTotal} 字节 — 第 {index} / {count} 个文件",
     "emptyNoModelFiles": "该后端没有需要管理的模型文件。",
     "installed": "模型就绪",
+    "legacyDetected": "检测到旧版模型文件",
     "missing": "缺少 {count} 个模型文件",
     "modelDir": "存储位置：{path}",
     "redownload": "重新下载",
     "shellUnavailable": "本地模型管理仅在桌面端可用。",
-    "title": "本地模型",
-    "cancelDownload": "取消下载",
-    "legacyDetected": "检测到旧版模型文件"
+    "title": "本地模型"
   },
   "overlay": {
     "ariaLabel": "覆盖在原图上的可选中文字",
@@ -448,6 +448,17 @@
       "label": "Windows.Media.Ocr"
     }
   },
+  "runtime": {
+    "defaultNormalized": "默认 OCR provider {provider} 当前不可用（{reason}），已切换为自动选择。",
+    "reasons": {
+      "backend-not-bound": "当前构建未包含这个原生后端。",
+      "configuration-required": "请先完成该 provider 的配置，再启用它。",
+      "missing-credentials": "请先添加必需凭据，再使用该 provider。",
+      "model-corrupt": "模型文件完整性校验失败，请重新下载。",
+      "model-missing": "请先下载必需的模型文件，再使用该 provider。",
+      "unsupported-shell": "当前应用环境不支持该 provider。"
+    }
+  },
   "sidebar": {
     "categoryAll": "全部",
     "clearCache": "清空 OCR 缓存",
@@ -550,8 +561,5 @@
         "label": "网页截图 / UI 文字"
       }
     }
-  },
-  "runtime": {
-    "defaultNormalized": "默认提供方已调整为 {provider}。"
   }
 }

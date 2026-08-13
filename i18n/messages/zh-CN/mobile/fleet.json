@@ -1,6 +1,11 @@
 {
   "connectFirst": "连接到你的桌面以查看其智能体队列。",
   "empty": "暂无活动 Agent。",
+  "hostCapacity": "{used}/{total} 个槽位",
+  "hostEmpty": "此主机暂无活动会话。",
+  "hostOffline": "离线",
+  "hostOnline": "在线",
+  "localHost": "本地主机",
   "permission": {
     "allow": "允许",
     "allowed": "已允许",
@@ -19,6 +24,8 @@
     "countdown": "剩余 {seconds} 秒",
     "expired": "回答窗口已关闭，请在终端里回答。",
     "failed": "回答发送失败。",
+    "reject": "拒绝",
+    "rejected": "已拒绝。",
     "submit": "提交"
   },
   "reply": {
@@ -34,7 +41,9 @@
     },
     "focus": "聚焦终端",
     "focusFailed": "无法聚焦终端。",
+    "openTeam": "打开 AgentTeam 运行",
     "status": {
+      "detached": "监控已断开",
       "ended": "会话已结束",
       "idle": "空闲",
       "planPending": "计划等待在桌面确认",
@@ -46,5 +55,7 @@
   },
   "summary": "{total} 个 Agent",
   "title": "智能体队列",
-  "waiting": "{count} 个待处理"
+  "waiting": "{count} 个待处理",
+  "workspaceMissing": "缺少仓库绑定",
+  "workspaceReady": "工作区就绪"
 }

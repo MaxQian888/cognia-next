@@ -1,15 +1,4 @@
 {
-  "adjust": {
-    "accept": "Accept feedback",
-    "accepted": "Adjustment feedback is ready to send. The live preview was reverted.",
-    "color": "Color (for example, #2563eb)",
-    "font": "Font (for example, 16px Inter)",
-    "label": "Browser Adjust",
-    "preview": "Preview",
-    "revert": "Revert",
-    "spacing": "Spacing (for example, 8px 12px)",
-    "text": "Replacement text"
-  },
   "actions": {
     "back": "Back",
     "cancelSelect": "Cancel selection",
@@ -20,6 +9,17 @@
     "reload": "Reload",
     "screenshot": "Send screenshot to chat",
     "selectElement": "Select element"
+  },
+  "adjust": {
+    "accept": "Accept feedback",
+    "accepted": "Adjustment feedback is ready to send. The live preview was reverted.",
+    "color": "Color (for example, #2563eb)",
+    "font": "Font (for example, 16px Inter)",
+    "label": "Browser Adjust",
+    "preview": "Preview",
+    "revert": "Revert",
+    "spacing": "Spacing (for example, 8px 12px)",
+    "text": "Replacement text"
   },
   "agent": {
     "driving": "Agent driving",
@@ -116,8 +116,8 @@
     "title": "Preview a web page"
   },
   "errors": {
-    "navigate": "Could not navigate to that URL",
-    "httpsProxyUnsupported": "HTTPS proxying is not supported in this browser preview."
+    "httpsProxyUnsupported": "HTTPS proxying is not supported in this browser preview.",
+    "navigate": "Could not navigate to that URL"
   },
   "find": {
     "close": "Close find",
