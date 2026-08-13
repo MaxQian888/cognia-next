@@ -14,6 +14,8 @@ const MAX_DURATION_MS = 8_000
 export interface HoverScrollTextProps {
   text: string
   className?: string
+  /** `off` keeps the title static and exposes the complete value as a tooltip. */
+  motion?: "hover" | "off"
 }
 
 interface ScrollMotion {
@@ -29,6 +31,7 @@ type ScrollStyle = CSSProperties & {
   "--hover-scroll-content-width": string
   "--hover-scroll-duration": string
   "--hover-scroll-delay": string
+  "--hover-scroll-cycle-duration": string
 }
 
 function prefersReducedMotion(): boolean {
@@ -48,14 +51,18 @@ function readDurationScale(): number {
   return Number.isFinite(scale) && scale > 0 ? scale : 1
 }
 
-export function HoverScrollText({ text, className }: HoverScrollTextProps) {
+export function HoverScrollText({
+  text,
+  className,
+  motion: motionMode = "hover",
+}: HoverScrollTextProps) {
   const contentRef = useRef<HTMLSpanElement>(null)
   const [motion, setMotion] = useState<ScrollMotion | null>(null)
   const [showStaticTitle, setShowStaticTitle] = useState(false)
   const activeMotion = motion?.text === text ? motion : null
 
   const handleMouseEnter = (event: MouseEvent<HTMLSpanElement>) => {
-    if (prefersReducedMotion()) {
+    if (motionMode === "off" || prefersReducedMotion()) {
       setShowStaticTitle(true)
       return
     }
@@ -87,6 +94,7 @@ export function HoverScrollText({ text, className }: HoverScrollTextProps) {
         "--hover-scroll-content-width": `${activeMotion.contentWidth}px`,
         "--hover-scroll-duration": `${activeMotion.duration}ms`,
         "--hover-scroll-delay": `${activeMotion.delay}ms`,
+        "--hover-scroll-cycle-duration": `${activeMotion.duration * 2 + activeMotion.delay * 2}ms`,
       }
     : undefined
 
@@ -94,6 +102,7 @@ export function HoverScrollText({ text, className }: HoverScrollTextProps) {
     <span
       className={cn("block min-w-0 overflow-hidden", className)}
       data-slot="hover-scroll-text"
+      data-motion={motionMode}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={() => {
         setMotion(null)

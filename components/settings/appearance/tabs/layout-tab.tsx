@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_RADIUS, type RadiusSettings } from "@/types/appearance"
 import { DensityCard } from "../components/density-card"
-import { AgentFlowCard } from "../components/agent-flow-card"
+import { MessageDisplayCard } from "../components/message-display-card"
 import { UsageDisplayCard } from "../components/usage-display-card"
 import { SettingSliderRow } from "../components/setting-slider-row"
 
@@ -45,8 +45,8 @@ export function LayoutTab() {
       </section>
 
       <section className="space-y-2 border-t pt-4">
-        <Label className="text-sm">{tLayout("agentFlow.sectionLabel")}</Label>
-        <AgentFlowCard />
+        <Label className="text-sm">{tLayout("messageDisplay.sectionLabel")}</Label>
+        <MessageDisplayCard />
       </section>
 
       <section className="space-y-2 border-t pt-4">

@@ -11,21 +11,23 @@
  * mirror fan-out).
  */
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   GitBranchIcon,
+  ImageIcon,
   Loader2Icon,
   PencilIcon,
   QuoteIcon,
   RefreshCcwIcon,
   LinkIcon,
   Share2Icon,
+  ScissorsIcon,
   SquareIcon,
   Trash2Icon,
   Volume2Icon,
 } from "lucide-react"
-import { motion, useReducedMotion } from "motion/react"
+import { motion } from "motion/react"
 import { toast } from "sonner"
 import type { UIMessage } from "ai"
 
@@ -68,6 +70,12 @@ import type { UsageInfo } from "@/lib/claude/adapter"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { CharacterVoiceSource } from "@/lib/plugin/character-pack/character-voice"
+import { resolveMessageActionCommands } from "@/lib/chat/message-action-commands"
+import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
+import type { MessageMotion } from "@/types/appearance"
+import { QuoteCardDialog } from "@/components/share/quote-card-dialog"
+import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
+import { runMetadataOf } from "@/lib/chat/message-run-metadata"
 
 export interface MessageActionSheetProps {
   message: UIMessage | null
@@ -95,6 +103,7 @@ export interface MessageActionSheetProps {
    * The row itself renders for assistant messages when TTS is enabled.
    */
   character?: CharacterVoiceSource | null
+  messageMotion?: MessageMotion
 }
 
 export function MessageActionSheet({
@@ -104,10 +113,14 @@ export function MessageActionSheet({
   onDelete,
   onEditResend,
   character,
+  messageMotion = "restrained",
 }: MessageActionSheetProps) {
   const t = useTranslations("mobile.messageActions")
   const tCommon = useTranslations("common")
   const open = message !== null
+  const [cardOpen, setCardOpen] = useState(false)
+  const [truncateOpen, setTruncateOpen] = useState(false)
+  const [nowFallback] = useState(() => new Date())
   // Android hardware / browser back closes the sheet instead of navigating.
   useBackDismiss(open, () => onOpenChange(false))
   // `busy` is always reset in the action handlers' try/finally below;
@@ -148,6 +161,33 @@ export function MessageActionSheet({
   // opened on a message belonging to a session that is not the active one.
   const branchSessionStreaming = useChatStore((s) =>
     branchSessionId ? s.sessions[branchSessionId]?.status === "streaming" : false
+  )
+  const commands = useMemo(
+    () =>
+      resolveMessageActionCommands({
+        role: message?.role ?? "system",
+        hasContent: Boolean(text),
+        hasSession: Boolean(branchSessionId),
+        canEdit: Boolean(onEditResend),
+        canRegenerate: Boolean(onRegenerate),
+        canReadAloud: ttsEnabled,
+        canDelete: Boolean(onDelete),
+        streaming: branchSessionStreaming,
+      }),
+    [
+      branchSessionId,
+      branchSessionStreaming,
+      message?.role,
+      onDelete,
+      onEditResend,
+      onRegenerate,
+      text,
+      ttsEnabled,
+    ]
+  )
+  const commandById = useMemo(
+    () => new Map(commands.map((command) => [command.id, command])),
+    [commands]
   )
 
   const onBranch = () => {
@@ -340,7 +380,7 @@ export function MessageActionSheet({
             </div>
           </div>
         ) : (
-        <StaggeredRows>
+        <StaggeredRows disabled={messageMotion === "off"}>
           <Row
             icon={<AnimatedActionIcon icon={AnimatedCopyIcon} size={16} />}
             label={t("copy")}
@@ -362,6 +402,15 @@ export function MessageActionSheet({
             disabled={busy || !text}
             testid="message-action-share"
           />
+          {commandById.has("shareCard") && (
+            <Row
+              icon={<ImageIcon className="size-4" />}
+              label={t("shareCard")}
+              onClick={() => setCardOpen(true)}
+              disabled={busy || !text}
+              testid="message-action-share-card"
+            />
+          )}
           <Row
             icon={<LinkIcon className="size-4" />}
             label={t("copyLink")}
@@ -383,7 +432,7 @@ export function MessageActionSheet({
             disabled={busy || !message}
             testid="message-action-bookmark"
           />
-          {message?.role === "assistant" && ttsEnabled && (
+          {commandById.has("readAloud") && (
             <Row
               icon={
                 readAloudLoading ? (
@@ -400,13 +449,22 @@ export function MessageActionSheet({
               testid="message-action-read-aloud"
             />
           )}
-          {branchSessionId && (
+          {commandById.has("branch") && branchSessionId && (
             <Row
               icon={<GitBranchIcon className="size-4" />}
               label={t("branch")}
               onClick={onBranch}
-              disabled={busy || branchSessionStreaming}
+              disabled={busy || commandById.get("branch")?.disabled}
               testid="message-action-branch"
+            />
+          )}
+          {commandById.get("truncate")?.destructive && branchSessionId && message && (
+            <Row
+              icon={<ScissorsIcon className="size-4 text-destructive" />}
+              label={t("truncate")}
+              onClick={() => setTruncateOpen(true)}
+              disabled={busy || commandById.get("truncate")?.disabled}
+              testid="message-action-truncate"
             />
           )}
           {message?.role === "assistant" && (
@@ -420,7 +478,7 @@ export function MessageActionSheet({
               <BranchNavigator message={message} />
             </div>
           )}
-          {onEditResend && (
+          {commandById.has("edit") && onEditResend && (
             <Row
               icon={<PencilIcon className="size-4" />}
               label={t("edit")}
@@ -429,16 +487,16 @@ export function MessageActionSheet({
               testid="message-action-edit"
             />
           )}
-          {onRegenerate && (
+          {commandById.has("regenerate") && onRegenerate && (
             <Row
               icon={<RefreshCcwIcon className="size-4" />}
               label={t("regenerate")}
               onClick={onRegenerateRow}
-              disabled={busy}
+              disabled={busy || commandById.get("regenerate")?.disabled}
               testid="message-action-regenerate"
             />
           )}
-          {onDelete && (
+          {commandById.get("delete")?.destructive && onDelete && (
             <Row
               icon={<Trash2Icon className="size-4 text-destructive" />}
               label={t("delete")}
@@ -486,16 +544,44 @@ export function MessageActionSheet({
           }}
         />
       )}
+      {cardOpen && message && (
+        <QuoteCardDialog
+          open
+          onOpenChange={setCardOpen}
+          role={message.role}
+          text={text}
+          model={runMetadataOf(message)?.modelId}
+          timestamp={
+            typeof (message.metadata as { createdAt?: unknown } | undefined)?.createdAt === "number"
+              ? new Date((message.metadata as { createdAt: number }).createdAt)
+              : nowFallback
+          }
+        />
+      )}
+      {truncateOpen && message && branchSessionId && (
+        <TruncateFromDialog
+          sessionId={branchSessionId}
+          messageId={message.id}
+          open
+          onOpenChange={setTruncateOpen}
+        />
+      )}
     </>
   )
 }
 
-function StaggeredRows({ children }: { children: React.ReactNode }) {
-  const reduce = useReducedMotion()
+function StaggeredRows({
+  children,
+  disabled = false,
+}: {
+  children: React.ReactNode
+  disabled?: boolean
+}) {
+  const { reduce } = useFlowMotion()
   return (
     <motion.div
       className="flex flex-col gap-1 p-4 pb-8"
-      initial={reduce ? false : "initial"}
+      initial={reduce || disabled ? false : "initial"}
       animate="animate"
       variants={STAGGER_CONTAINER}
     >

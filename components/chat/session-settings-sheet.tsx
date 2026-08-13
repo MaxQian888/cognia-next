@@ -70,7 +70,7 @@ import { PlanModeTasksSheet } from "@/components/agent/workspace/plan-mode-tasks
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { TwinHeaderBadge } from "@/components/chat/twin-header-badge"
 import { SkillsBadge } from "@/components/chat/skills-badge"
-import { AgentFlowDisplayToggle } from "@/components/chat/agent-flow-display-toggle"
+import { MessageDisplayControls } from "@/components/settings/appearance/components/message-display-controls"
 import { SessionInsightsSheet } from "@/components/chat/session-insights/session-insights-sheet"
 import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-trigger"
 import { ClearConversationTrigger } from "@/components/chat/dialogs/clear-conversation-trigger"
@@ -107,6 +107,7 @@ import type {
   ChatSession,
   SystemPromptPreset,
 } from "@cognia/agent-config-types"
+import type { MessageDisplayPreferences } from "@/types/appearance"
 
 /**
  * Every permission mode, straight from the shared metadata rather than a local
@@ -206,6 +207,7 @@ export function SessionSettingsSheet({
     s.activeProjectId ? (s.projects.find((p) => p.id === s.activeProjectId) ?? null) : null
   )
   const defaultWorkingDir = useSettingsStore((s) => s.settings?.defaultWorkingDir)
+  const globalMessageDisplay = useSettingsStore((s) => s.settings?.messageDisplay)
   const fallbackCwd = resolveEffectiveCwd({
     activeProject,
     characterWorkingDir: character?.workingDir,
@@ -227,6 +229,9 @@ export function SessionSettingsSheet({
   const [executionEffortDirty, setExecutionEffortDirty] = useState(false)
   const [presetId, setPresetId] = useState<string>("")
   const [pendingApply, setPendingApply] = useState<PendingPresetApply | null>(null)
+  const [messageDisplayPreference, setMessageDisplayPreference] = useState<
+    MessageDisplayPreferences | undefined
+  >(session.messageDisplayOverride)
 
   // Hydrate the form ONLY on the false→true transition of `open`. A naive
   // `[open, session, presets]` deps list re-fires whenever the parent
@@ -252,6 +257,7 @@ export function SessionSettingsSheet({
     })
     setEnvSecretValues({})
     setExecutionEffortDirty(false)
+    setMessageDisplayPreference(session.messageDisplayOverride)
     let resolvedId: string | null = null
     if (session.activePresetId) {
       const byId = presets.find((p) => p.id === session.activePresetId)
@@ -414,6 +420,7 @@ export function SessionSettingsSheet({
         effort,
         thinkingLevel: executionEffortDirty ? effort : session.thinkingLevel,
         executionPolicy,
+        messageDisplayOverride: messageDisplayPreference,
       })
     } catch (err) {
       loggers.chat.error("session settings save failed", err, { sessionId: session.id })
@@ -1049,8 +1056,13 @@ export function SessionSettingsSheet({
 
           {/* 显示 */}
           <Section label={t("sheet.sections.display")}>
-            <div className="flex flex-wrap items-center gap-2">
-              <AgentFlowDisplayToggle />
+            <div className="space-y-3">
+              <MessageDisplayControls
+                allowInherit
+                value={messageDisplayPreference}
+                inheritedValue={globalMessageDisplay}
+                onChange={setMessageDisplayPreference}
+              />
               {planLabel && (
                 <Badge
                   variant="secondary"

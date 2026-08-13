@@ -38,6 +38,11 @@ test("groups the sidebar behavior controls under one card", () => {
   expect(screen.getByLabelText("groupBy.label")).toBeInTheDocument()
   expect(screen.getByLabelText("unread.label")).toBeInTheDocument()
   expect(screen.getByLabelText("contentSearch.label")).toBeInTheDocument()
+  expect(screen.getByLabelText("metadata.agent.label")).toBeInTheDocument()
+  expect(screen.getByLabelText("metadata.model.label")).toBeInTheDocument()
+  expect(screen.getByLabelText("metadata.provider.label")).toBeInTheDocument()
+  expect(screen.getByLabelText("metadata.workspace.label")).toBeInTheDocument()
+  expect(screen.getByLabelText("titleMotion.label")).toBeInTheDocument()
 })
 
 test("defaults: workspace grouping + unread on, preview + compact + content-search off", () => {
@@ -47,6 +52,11 @@ test("defaults: workspace grouping + unread on, preview + compact + content-sear
   expect(screen.getByLabelText("preview.label")).not.toBeChecked()
   expect(screen.getByLabelText("density.label")).not.toBeChecked()
   expect(screen.getByLabelText("contentSearch.label")).not.toBeChecked()
+  expect(screen.getByLabelText("metadata.agent.label")).toBeChecked()
+  expect(screen.getByLabelText("metadata.model.label")).toBeChecked()
+  expect(screen.getByLabelText("metadata.provider.label")).not.toBeChecked()
+  expect(screen.getByLabelText("metadata.workspace.label")).not.toBeChecked()
+  expect(screen.getByLabelText("titleMotion.label")).toBeChecked()
 })
 
 test("folds the retired groupByDate=false into the no-grouping option", () => {
@@ -97,6 +107,29 @@ test("each behavior toggle saves its matching field", async () => {
   // Defaults are on → clicking turns them off.
   await user.click(screen.getByLabelText("unread.label"))
   expect(save).toHaveBeenCalledWith({ conversationSidebar: { showUnreadBadges: false } })
+})
+
+test("conversation details can be added and removed without losing their order", async () => {
+  settingsValue = { metadata: ["agent", "model"] }
+  const user = userEvent.setup()
+  render(<ConversationSidebarCard />)
+
+  await user.click(screen.getByLabelText("metadata.provider.label"))
+  expect(save).toHaveBeenLastCalledWith({
+    conversationSidebar: { metadata: ["agent", "model", "provider"] },
+  })
+
+  await user.click(screen.getByLabelText("metadata.agent.label"))
+  expect(save).toHaveBeenLastCalledWith({
+    conversationSidebar: { metadata: ["model"] },
+  })
+})
+
+test("long-title motion can be disabled", async () => {
+  const user = userEvent.setup()
+  render(<ConversationSidebarCard />)
+  await user.click(screen.getByLabelText("titleMotion.label"))
+  expect(save).toHaveBeenCalledWith({ conversationSidebar: { titleMotion: "off" } })
 })
 
 test("reset width button restores the default width", async () => {

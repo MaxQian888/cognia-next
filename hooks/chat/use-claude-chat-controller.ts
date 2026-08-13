@@ -39,6 +39,10 @@ import {
 import { expireSessionPeerMessages } from "@/lib/db/session-peer-messages"
 import { markAttachedSessionRunning } from "@/lib/chat/attached-session"
 import {
+  attachRunMetadataToLastAssistant,
+  buildCompletedRunMetadata,
+} from "@/lib/chat/message-run-metadata"
+import {
   maybeDrainBackgroundResults,
   registerBackgroundReplaySend,
 } from "./background-result-runtime"
@@ -1140,6 +1144,7 @@ export function useClaudeChat() {
           // without flickering the chat list. Parts start empty and grow as
           // ExternalAgentEvents arrive via the onEvent callback below.
           const assistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          const externalStartedAt = behaviorTurnStartedAt.get(sessionId)
           let assistantParts: UIMessage["parts"] = [] as unknown as UIMessage["parts"]
           const baseList = store.getState().sessions[sessionId]?.messages ?? []
 
@@ -1152,7 +1157,13 @@ export function useClaudeChat() {
               id: assistantId,
               role: "assistant",
               parts: assistantParts,
-              ...(delegatedMeta ? { metadata: delegatedMeta } : {}),
+              metadata: {
+                ...(delegatedMeta ?? {}),
+                run: {
+                  providerId: "external",
+                  startedAt: externalStartedAt,
+                },
+              },
             }
             store.getState().replaceSessionMessages(sessionId, [...baseList, assistantMsg])
           }
@@ -1218,12 +1229,22 @@ export function useClaudeChat() {
             id: assistantId,
             role: "assistant",
             parts: assistantParts,
-            ...(delegatedMeta ? { metadata: delegatedMeta } : {}),
+            metadata: {
+              ...(delegatedMeta ?? {}),
+              run: { providerId: "external", startedAt: externalStartedAt },
+            },
           }
-          const finalMessages = store.getState().sessions[sessionId]?.messages ?? [
-            ...baseList,
-            finalAssistant,
-          ]
+          const completedAt = Date.now()
+          const finalMessages = attachRunMetadataToLastAssistant(
+            store.getState().sessions[sessionId]?.messages ?? [...baseList, finalAssistant],
+            buildCompletedRunMetadata({
+              providerId: "external",
+              startedAt: externalStartedAt,
+              completedAt,
+              reportedDurationMs: result.duration,
+            })
+          )
+          store.getState().replaceSessionMessages(sessionId, finalMessages)
           chatTurnPerformance.beginFinalPersistence(sessionId)
           await persistMessages(sessionId, finalMessages)
           chatTurnPerformance.endFinalPersistence(sessionId)

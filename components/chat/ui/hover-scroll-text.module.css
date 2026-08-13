@@ -1,10 +1,16 @@
-@keyframes hover-scroll-to-end {
-  from {
+@keyframes hover-scroll-round-trip {
+  0%,
+  12% {
     transform: translate3d(0, 0, 0);
   }
 
-  to {
+  50%,
+  62% {
     transform: translate3d(var(--hover-scroll-distance), 0, 0);
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -13,10 +19,9 @@
   max-width: none;
   overflow: visible;
   text-overflow: clip;
-  animation-name: hover-scroll-to-end;
-  animation-duration: var(--hover-scroll-duration);
+  animation-name: hover-scroll-round-trip;
+  animation-duration: var(--hover-scroll-cycle-duration);
   animation-timing-function: linear;
-  animation-delay: var(--hover-scroll-delay);
-  animation-fill-mode: forwards;
+  animation-iteration-count: infinite;
   will-change: transform;
 }

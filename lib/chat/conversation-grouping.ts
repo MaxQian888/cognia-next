@@ -1,4 +1,8 @@
-import type { ConversationGroupBy, ConversationSidebarSettings } from "@cognia/agent-config-types"
+import type {
+  ConversationGroupBy,
+  ConversationSidebarMetadata,
+  ConversationSidebarSettings,
+} from "@cognia/agent-config-types"
 
 /**
  * What the conversation list groups by when settings say nothing.
@@ -16,6 +20,20 @@ export const CONVERSATION_GROUP_BY_OPTIONS: readonly ConversationGroupBy[] = [
   "date",
   "agent",
   "none",
+] as const
+
+/** Default row context: enough to identify the executor without crowding the rail. */
+export const DEFAULT_CONVERSATION_SIDEBAR_METADATA: readonly ConversationSidebarMetadata[] = [
+  "agent",
+  "model",
+] as const
+
+/** Canonical field order used by the settings surfaces. */
+export const CONVERSATION_SIDEBAR_METADATA_OPTIONS: readonly ConversationSidebarMetadata[] = [
+  "agent",
+  "model",
+  "provider",
+  "workspace",
 ] as const
 
 function isGroupBy(value: unknown): value is ConversationGroupBy {
@@ -39,4 +57,28 @@ export function resolveConversationGroupBy(
   if (isGroupBy(settings?.groupBy)) return settings.groupBy
   if (settings?.groupByDate === false) return "none"
   return DEFAULT_CONVERSATION_GROUP_BY
+}
+
+/**
+ * Normalize a persisted row-detail list. Invalid and duplicate values are
+ * dropped while the user's order is preserved.
+ */
+export function resolveConversationSidebarMetadata(
+  settings: ConversationSidebarSettings | null | undefined
+): ConversationSidebarMetadata[] {
+  if (!Array.isArray(settings?.metadata)) return [...DEFAULT_CONVERSATION_SIDEBAR_METADATA]
+  const valid = new Set(CONVERSATION_SIDEBAR_METADATA_OPTIONS)
+  return settings.metadata.filter(
+    (field, index, fields) => valid.has(field) && fields.indexOf(field) === index
+  )
+}
+
+/** Toggle one row-detail field without disturbing the order of its siblings. */
+export function toggleConversationSidebarMetadata(
+  current: readonly ConversationSidebarMetadata[],
+  field: ConversationSidebarMetadata,
+  enabled: boolean
+): ConversationSidebarMetadata[] {
+  if (enabled) return current.includes(field) ? [...current] : [...current, field]
+  return current.filter((item) => item !== field)
 }

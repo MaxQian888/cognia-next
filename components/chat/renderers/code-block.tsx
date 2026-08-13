@@ -265,7 +265,10 @@ export const CodeBlock = memo(function CodeBlock({
           {/* Hover-revealed on fine pointers; always visible on touch, where
               there is no hover to reveal it (copy/download/fullscreen would
               otherwise be unreachable on mobile). */}
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
+          <div
+            data-message-rich-control
+            className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity"
+          >
             <TooltipIconButton
               variant="ghost"
               size="icon"

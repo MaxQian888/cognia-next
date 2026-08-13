@@ -462,7 +462,10 @@ function buildComponents(
             isStreaming={isStreaming}
           />
           {showArtifactButton && (
-            <div className="absolute right-1 top-1 opacity-0 group-hover/code:opacity-100 transition-opacity">
+            <div
+              data-message-rich-control
+              className="absolute right-1 top-1 opacity-0 group-hover/code:opacity-100 transition-opacity"
+            >
               <ArtifactCreateButton
                 content={codeContent}
                 language={language}

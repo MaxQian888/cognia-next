@@ -241,6 +241,7 @@ function buildChildRow(
     characterId: parent.characterId,
     teamId: parent.teamId,
     disabledSkillIds: parent.disabledSkillIds,
+    messageDisplayOverride: parent.messageDisplayOverride,
     model: parent.model,
     providerOverride: parent.providerOverride,
     accountId: parent.accountId,

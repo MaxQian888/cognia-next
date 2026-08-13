@@ -27,6 +27,14 @@ jest.mock("@/components/chat/branch-dialog", () => ({
     <div data-testid="branch-dialog" data-session={sessionId} data-message={messageId} />
   ),
 }))
+jest.mock("@/components/share/quote-card-dialog", () => ({
+  QuoteCardDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="quote-card-dialog" /> : null,
+}))
+jest.mock("@/components/chat/truncate-from-dialog", () => ({
+  TruncateFromDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="truncate-from-dialog" /> : null,
+}))
 
 // Importing the composer for the append-event constant would drag in the whole
 // composer module (stores, Dexie, etc.); stub it to just the string (mirrors
@@ -110,6 +118,7 @@ const messages = {
       copyFailed: "Copy failed: {message}",
       quote: "Quote",
       share: "Share…",
+      shareCard: "Share as card",
       shareDialogTitle: "Share via",
       shareUnsupported: "Sharing isn't supported on this device.",
       shareFailed: "Share failed: {message}",
@@ -130,6 +139,7 @@ const messages = {
       branchVariants: "Reply variants",
       readAloud: "Read aloud",
       stopReading: "Stop reading",
+      truncate: "Delete from here",
     },
   },
   common: { cancel: "Cancel" },
@@ -232,6 +242,8 @@ describe("MessageActionSheet", () => {
     renderSheet(makeMessage("hello"), jest.fn())
     expect(screen.getByTestId("message-action-copy")).toBeInTheDocument()
     expect(screen.getByTestId("message-action-share")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("message-action-share-card"))
+    expect(screen.getByTestId("quote-card-dialog")).toBeInTheDocument()
   })
 
   it("shows a per-message usage footer for assistant messages with usage metadata", () => {
@@ -271,6 +283,8 @@ describe("MessageActionSheet", () => {
     const dialog = screen.getByTestId("branch-dialog")
     expect(dialog).toHaveAttribute("data-session", "s9")
     expect(dialog).toHaveAttribute("data-message", "m1")
+    fireEvent.click(screen.getByTestId("message-action-truncate"))
+    expect(screen.getByTestId("truncate-from-dialog")).toBeInTheDocument()
   })
 
   it("blocks the Branch row while the TARGET session is mid-turn", () => {
@@ -419,7 +433,8 @@ describe("MessageActionSheet", () => {
   })
 
   it("opens the edit pane prefilled with the message text", () => {
-    renderSheet(makeMessage("original text"), jest.fn(), { onEditResend: jest.fn() })
+    const message = { ...makeMessage("original text"), role: "user" as const }
+    renderSheet(message, jest.fn(), { onEditResend: jest.fn() })
     fireEvent.click(screen.getByTestId("message-action-edit"))
     const input = screen.getByTestId("message-action-edit-input") as HTMLTextAreaElement
     expect(input.value).toBe("original text")
@@ -430,7 +445,7 @@ describe("MessageActionSheet", () => {
   it("resends the trimmed edited text and closes the sheet", async () => {
     const onEditResend = jest.fn().mockResolvedValue(undefined)
     const onOpenChange = jest.fn()
-    const message = makeMessage("original text")
+    const message = { ...makeMessage("original text"), role: "user" as const }
     renderSheet(message, onOpenChange, { onEditResend })
 
     fireEvent.click(screen.getByTestId("message-action-edit"))
@@ -446,7 +461,9 @@ describe("MessageActionSheet", () => {
   })
 
   it("disables resend when the edited text is blank", () => {
-    renderSheet(makeMessage("original"), jest.fn(), { onEditResend: jest.fn() })
+    renderSheet({ ...makeMessage("original"), role: "user" }, jest.fn(), {
+      onEditResend: jest.fn(),
+    })
     fireEvent.click(screen.getByTestId("message-action-edit"))
     fireEvent.change(screen.getByTestId("message-action-edit-input"), {
       target: { value: "   " },
@@ -456,7 +473,7 @@ describe("MessageActionSheet", () => {
 
   it("cancel returns to the action list without resending", () => {
     const onEditResend = jest.fn()
-    renderSheet(makeMessage("original"), jest.fn(), { onEditResend })
+    renderSheet({ ...makeMessage("original"), role: "user" }, jest.fn(), { onEditResend })
     fireEvent.click(screen.getByTestId("message-action-edit"))
     fireEvent.click(screen.getByTestId("message-action-edit-cancel"))
     expect(screen.getByTestId("message-action-copy")).toBeInTheDocument()
@@ -525,7 +542,7 @@ describe("MessageActionSheet", () => {
   it("toasts and stays open when the resend fails", async () => {
     const onEditResend = jest.fn().mockRejectedValue(new Error("offline"))
     const onOpenChange = jest.fn()
-    renderSheet(makeMessage("original"), onOpenChange, { onEditResend })
+    renderSheet({ ...makeMessage("original"), role: "user" }, onOpenChange, { onEditResend })
 
     fireEvent.click(screen.getByTestId("message-action-edit"))
     fireEvent.click(screen.getByTestId("message-action-edit-send"))

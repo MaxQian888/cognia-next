@@ -82,6 +82,7 @@ describe("<CompanionTranscriptMessages />", () => {
         onCopy={onCopy}
         onRegenerate={onRegenerate}
         onEditResend={onEditResend}
+        messageDisplayOverride={{ preset: "focused" }}
       />
     )
 
@@ -94,6 +95,7 @@ describe("<CompanionTranscriptMessages />", () => {
       onCopy,
       onRegenerate,
       onEditResend,
+      messageDisplay: { preset: "focused" },
     })
   })
 })

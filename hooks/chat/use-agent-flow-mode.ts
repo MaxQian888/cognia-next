@@ -19,6 +19,7 @@ import { useCallback } from "react"
 
 import { useSettingsStore } from "@/stores/settings"
 import { type AgentFlowMode, DEFAULT_AGENT_FLOW, isAgentFlowMode } from "@/types/appearance"
+import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
 
 /** Pure resolver — exported for unit tests. */
 export function resolveAgentFlowMode(value: unknown): AgentFlowMode {
@@ -31,15 +32,21 @@ export interface UseAgentFlowMode {
 }
 
 export function useAgentFlowMode(): UseAgentFlowMode {
+  const preferences = useSettingsStore((s) => s.settings?.messageDisplay)
   const stored = useSettingsStore((s) => s.settings?.agentFlowMode?.mode)
   const save = useSettingsStore((s) => s.save)
-  const mode = resolveAgentFlowMode(stored)
+  const mode = resolveMessageDisplayOptions(preferences, undefined, stored).agentFlowMode
 
   const setMode = useCallback(
     (next: AgentFlowMode) => {
-      void save({ agentFlowMode: { mode: next } })
+      void save({
+        messageDisplay: {
+          preset: preferences?.preset ?? "balanced",
+          overrides: { ...(preferences?.overrides ?? {}), agentFlowMode: next },
+        },
+      })
     },
-    [save]
+    [preferences, save]
   )
 
   return { mode, setMode }

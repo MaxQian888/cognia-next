@@ -21,16 +21,41 @@ function partType(part: unknown): string {
   return typeof t === "string" && t.length > 0 ? t : "unknown"
 }
 
-function safeJson(part: unknown): string {
+const MAX_DIAGNOSTIC_CHARS = 16_384
+const SENSITIVE_KEY = /(?:authorization|cookie|password|secret|token|api[-_]?key)/i
+
+export interface DiagnosticFallbackLabels {
+  redacted: string
+  circular: string
+  truncated: string
+  unavailable: string
+}
+
+export function safeDiagnosticJson(part: unknown, labels: DiagnosticFallbackLabels): string {
+  const seen = new WeakSet<object>()
   try {
-    return JSON.stringify(part, null, 2)
+    const output = JSON.stringify(
+      part,
+      (key, value) => {
+        if (SENSITIVE_KEY.test(key)) return labels.redacted
+        if (typeof value === "object" && value !== null) {
+          if (seen.has(value)) return labels.circular
+          seen.add(value)
+        }
+        return value
+      },
+      2
+    )
+    if (output.length <= MAX_DIAGNOSTIC_CHARS) return output
+    return `${output.slice(0, MAX_DIAGNOSTIC_CHARS)}\n${labels.truncated}`
   } catch {
-    return String(part)
+    return labels.unavailable
   }
 }
 
 export const UnknownPartCard = memo(function UnknownPartCard({ part }: UnknownPartCardProps) {
   const t = useTranslations("chat.message")
+  const diagnosticT = useTranslations("chat.message.unknownPartDiagnostic")
   const type = partType(part)
   return (
     <div
@@ -45,7 +70,16 @@ export const UnknownPartCard = memo(function UnknownPartCard({ part }: UnknownPa
           <span className="truncate">{t("unknownPart", { type })}</span>
         </CollapsibleTrigger>
         <CollapsibleContent className="px-2 pb-2">
-          <CodeBlock code={safeJson(part)} language="json" showLineNumbers={false} />
+          <CodeBlock
+            code={safeDiagnosticJson(part, {
+              redacted: diagnosticT("redacted"),
+              circular: diagnosticT("circular"),
+              truncated: diagnosticT("truncated"),
+              unavailable: diagnosticT("unavailable"),
+            })}
+            language="json"
+            showLineNumbers={false}
+          />
         </CollapsibleContent>
       </Collapsible>
     </div>

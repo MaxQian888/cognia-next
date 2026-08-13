@@ -2,15 +2,29 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import type { UIMessage } from "ai"
 
 import { TranscriptTimelineSurface } from "./transcript-timeline-surface"
+import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
 
 jest.mock("./message-renderer", () => ({
-  MessageRenderer: ({ message, onEditResend }: { message: UIMessage; onEditResend?: unknown }) => (
-    <div data-testid={`message-${message.id}`} data-editable={Boolean(onEditResend)}>
+  MessageRenderer: ({
+    message,
+    onEditResend,
+    messageDisplay,
+  }: {
+    message: UIMessage
+    onEditResend?: unknown
+    messageDisplay?: { preset?: string }
+  }) => (
+    <div
+      data-testid={`message-${message.id}`}
+      data-editable={Boolean(onEditResend)}
+      data-preset={messageDisplay?.preset}
+    >
       {message.parts.map((part) => (part.type === "text" ? part.text : part.type))}
     </div>
   ),
 }))
 
+const virtualizerMeasureMock = jest.fn()
 jest.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: (options: { count: number }) => ({
     getVirtualItems: () =>
@@ -21,6 +35,7 @@ jest.mock("@tanstack/react-virtual", () => ({
       })),
     getTotalSize: () => options.count * 240,
     measureElement: jest.fn(),
+    measure: virtualizerMeasureMock,
   }),
 }))
 
@@ -95,10 +110,15 @@ describe("<TranscriptTimelineSurface />", () => {
         ]}
         liveStatus="streaming"
         labels={labels}
+        renderAdapters={{
+          messageDisplay: resolveMessageDisplayOptions({ preset: "inspector" }),
+        }}
       />
     )
 
     expect(screen.getByTestId("message-live")).toHaveTextContent("stream")
+    expect(screen.getByTestId("message-live")).toHaveAttribute("data-preset", "inspector")
+    expect(virtualizerMeasureMock).toHaveBeenCalled()
   })
 
   it("does not expose mutation controls for summary rows outside the writable window", () => {

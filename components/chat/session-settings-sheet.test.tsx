@@ -87,6 +87,23 @@ jest.mock("@/components/agent/workspace/plan-mode-tasks-sheet", () => ({
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: () => <div data-testid="plugin-slot" />,
 }))
+jest.mock("@/components/settings/appearance/components/message-display-controls", () => ({
+  MessageDisplayControls: ({
+    value,
+    onChange,
+  }: {
+    value?: { preset: string }
+    onChange: (value: { preset: string } | undefined) => void
+  }) => (
+    <button
+      type="button"
+      data-testid="session-message-display"
+      onClick={() => onChange(value ? undefined : { preset: "inspector" })}
+    >
+      {value?.preset ?? "inherit"}
+    </button>
+  ),
+}))
 
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -288,6 +305,30 @@ describe("SessionSettingsSheet", () => {
         envBindings: [{ name: "MODE", kind: "plain", value: "safe" }],
       },
     })
+  })
+
+  it("persists a session message-display override and can reset it to inherit", async () => {
+    const updateSession = jest.fn(async (_id: string, _patch: unknown) => undefined)
+    render(
+      <DataAdapterProvider adapter={makeAdapter({ updateSession })}>
+        <SessionSettingsSheet
+          session={mkSession({
+            id: "ses_display",
+            messageDisplayOverride: { preset: "focused" },
+          })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+
+    fireEvent.click(screen.getByTestId("session-message-display"))
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    })
+
+    await waitFor(() => expect(updateSession).toHaveBeenCalledTimes(1))
+    expect(updateSession.mock.calls[0][1]).toMatchObject({ messageDisplayOverride: undefined })
   })
 
   it("preserves an untouched composite thinking level while saving execution overrides", async () => {

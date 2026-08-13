@@ -13,6 +13,8 @@ import { useCharacters } from "@/lib/data-hooks/context"
 import { transport } from "@/lib/tauri/transport-instance"
 import { TranscriptTimelineSurface } from "./transcript-timeline-surface"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
+import { useMessageDisplay } from "@/hooks/chat/use-message-display"
+import type { MessageDisplayPreferences } from "@/types/appearance"
 
 type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
 
@@ -32,6 +34,7 @@ export interface CompanionTranscriptMessagesProps {
   sessionId: string
   messages: UIMessage[]
   status: ChatStatus
+  messageDisplayOverride?: MessageDisplayPreferences
   directCharacter?: Character | null
   projectRoot?: string | null
   onCopy: () => void
@@ -53,6 +56,7 @@ export function CompanionTranscriptMessages({
   sessionId,
   messages,
   status,
+  messageDisplayOverride,
   directCharacter,
   projectRoot,
   onCopy,
@@ -63,6 +67,7 @@ export function CompanionTranscriptMessages({
   const t = useTranslations("chat.transcript")
   const transcript = useTranscriptController(sessionId, companionTranscriptSource)
   const characterById = useStableCharacterById(useCharacters())
+  const messageDisplay = useMessageDisplay(messageDisplayOverride)
   const liveMessages = useMemo(() => selectActiveTurnMessages(messages, status), [messages, status])
   const mutableMessageIds = useMemo(
     () => new Set(messages.map((message) => message.id)),
@@ -104,6 +109,7 @@ export function CompanionTranscriptMessages({
           onRewindFiles,
           projectRoot,
           mutableMessageIds,
+          messageDisplay,
         }}
       />
     </SessionMediaProvider>

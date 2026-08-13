@@ -55,6 +55,10 @@ import {
 } from "@cognia/agent-trace/chat-tool-spans"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { bumpUnread } from "@/lib/db/session-state"
+import {
+  attachRunMetadataToLastAssistant,
+  buildCompletedRunMetadata,
+} from "@/lib/chat/message-run-metadata"
 import { type AgentExecutionHandle } from "@/lib/ai/agent/execution/agent-execution-handle"
 import {
   dispatchTokenUsage as dispatchPluginTokenUsage,
@@ -78,6 +82,7 @@ import {
 import type { UIMessage } from "ai"
 import {
   chatToolCallsById,
+  behaviorTurnStartedAt,
   finishBehaviorTurn,
   rememberChatToolCall,
   rememberToolCallsFromSdkEvent,
@@ -747,6 +752,20 @@ export async function handleEvent(
           )
           if (withAgentKnowledge !== nextMessages) nextMessages = withAgentKnowledge
         }
+        const completedAt = Date.now()
+        const startedAt = behaviorTurnStartedAt.get(sessionId)
+        const result = sdkResult as { duration_ms?: number; subtype?: string } | undefined
+        nextMessages = attachRunMetadataToLastAssistant(
+          nextMessages,
+          buildCompletedRunMetadata({
+            providerId: last?.options.provider,
+            modelId: last?.options.model,
+            startedAt,
+            completedAt,
+            reportedDurationMs: result?.duration_ms,
+            finishReason: result?.subtype,
+          })
+        )
       }
 
       if (nextMessages !== current) {

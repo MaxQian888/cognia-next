@@ -1,37 +1,40 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
-import { UnknownPartCard } from "./unknown-part-card"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
-}))
-jest.mock("@/components/ui/collapsible")
+import { render, screen } from "@testing-library/react"
+
+import { safeDiagnosticJson, UnknownPartCard } from "./unknown-part-card"
+
+jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("@/components/chat/renderers/code-block", () => ({
-  CodeBlock: ({ code }: { code: string }) => <pre data-testid="code-block">{code}</pre>,
+  CodeBlock: ({ code }: { code: string }) => <pre>{code}</pre>,
+}))
+jest.mock("@/components/ui/collapsible", () => ({
+  Collapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
+  CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
 describe("UnknownPartCard", () => {
-  it("names the unknown part type and dumps its JSON", () => {
-    render(<UnknownPartCard part={{ type: "mystery", payload: { a: 1 } }} />)
-    const card = screen.getByTestId("unknown-part-card")
-    expect(card.dataset.partType).toBe("mystery")
-    expect(screen.getByText(/unknownPart.*mystery/)).toBeInTheDocument()
-    expect(screen.getByTestId("code-block").textContent).toContain('"payload"')
+  it("keeps an unknown part reachable", () => {
+    render(<UnknownPartCard part={{ type: "data-future", value: 1 }} />)
+    expect(screen.getByTestId("unknown-part-card")).toHaveAttribute("data-part-type", "data-future")
   })
 
-  it("falls back to 'unknown' when the part has no type", () => {
-    render(<UnknownPartCard part={{ foo: "bar" }} />)
-    expect(screen.getByTestId("unknown-part-card").dataset.partType).toBe("unknown")
-  })
-
-  it("survives a non-serializable part without throwing", () => {
-    const circular: Record<string, unknown> = { type: "loopy" }
-    circular.self = circular
-    render(<UnknownPartCard part={circular} />)
-    expect(screen.getByTestId("unknown-part-card").dataset.partType).toBe("loopy")
-    expect(screen.getByTestId("code-block")).toBeInTheDocument()
+  it("redacts secrets and caps diagnostic output", () => {
+    const output = safeDiagnosticJson(
+      { apiKey: "private", payload: "x".repeat(20_000) },
+      {
+        redacted: "[redacted]",
+        circular: "[circular]",
+        truncated: "[truncated]",
+        unavailable: "[unavailable]",
+      }
+    )
+    expect(output).toContain("[redacted]")
+    expect(output).not.toContain("private")
+    expect(output).toContain("[truncated]")
+    expect(output.length).toBeLessThan(16_500)
   })
 })

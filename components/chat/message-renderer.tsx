@@ -9,6 +9,7 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
 import { Tool, ToolHeader, ToolContent } from "@/components/ai-elements/tool"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { MessageShell } from "@/components/chat/message-shell"
 import {
   chatMarkdownUrlTransform,
   chatStreamdownRehypePlugins,
@@ -57,7 +58,7 @@ import {
   type ToolActivityGroupEntry,
 } from "@/components/chat/message-parts/tool-activity-group"
 import { MotionReveal } from "@/components/chat/motion/motion-reveal"
-import { useAgentFlowMode } from "@/hooks/chat/use-agent-flow-mode"
+import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 import {
   groupAgentParts,
   isToolOnlyFlow,
@@ -67,6 +68,7 @@ import {
 import { parseTodoInput } from "@/lib/chat/todos"
 import { resolveToolDisplayTitle } from "@/lib/chat/tool-summary"
 import type { AgentFlowMode } from "@/types/appearance"
+import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
 import { BranchPointMarker } from "@/components/chat/branch-children-chip"
 import { TriggerBadge } from "@/components/chat/trigger-badge"
@@ -79,8 +81,13 @@ import type {
   CanvasInlinePart as CanvasInlinePartType,
   SourcesPart as SourcesPartType,
 } from "@/lib/claude/parts-extensions"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
@@ -93,6 +100,8 @@ import {
   PencilIcon,
   RefreshCcwIcon,
   Share2Icon,
+  MoreHorizontalIcon,
+  QuoteIcon,
 } from "lucide-react"
 import { BookmarkIcon as AnimatedBookmarkIcon } from "@/components/ui/bookmark"
 import { CheckIcon as AnimatedCheckIcon } from "@/components/ui/check"
@@ -106,13 +115,14 @@ import React, { memo, useCallback, useMemo, useState, type KeyboardEvent } from 
 import { useTranslations } from "next-intl"
 import { buildMessagePermalink } from "@/lib/chat/message-permalink"
 import { cn } from "@/lib/utils"
-import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import { avatarColor } from "@/lib/ui/avatar"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ReadAloudButton } from "./read-aloud-button"
 import { TodoList } from "./todo-list"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { buildMessageShareContent, writeMessageToClipboard } from "@/lib/chat/message-share"
+import { resolveMessageActionCommands } from "@/lib/chat/message-action-commands"
 import { loggers } from "@cognia/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { MessagePluginMenu } from "@/components/chat/message-plugin-menu"
@@ -162,6 +172,8 @@ interface Props {
   ) => Promise<RewindFilesResult>
   /** Root used to resolve project-relative links in assistant Markdown. */
   projectRoot?: string | null
+  /** Resolved once by the owning transcript when available. */
+  messageDisplay?: ResolvedMessageDisplayOptions
 }
 
 function usePluginPartRegistryRevision(): number {
@@ -198,6 +210,7 @@ function MessageRendererInner({
   onEditResend,
   onRewindFiles,
   projectRoot,
+  messageDisplay,
 }: Props) {
   useAgentFileAutoFollow({ parts: message.parts, isStreaming, projectRoot })
   // Re-render when a plugin registers / unregisters a message-part renderer.
@@ -206,7 +219,9 @@ function MessageRendererInner({
   usePluginToolRendererRevision()
   const t = useTranslations("chat.message")
   // Agent invocation-flow display mode (simplified / standard / detailed).
-  const { mode: agentFlowMode } = useAgentFlowMode()
+  const fallbackMessageDisplay = useMessageDisplay()
+  const display = messageDisplay ?? fallbackMessageDisplay
+  const agentFlowMode: AgentFlowMode = display.agentFlowMode
   // Read-aloud is gated on the global TTS toggle; the selector keeps this
   // re-render rare (settings change), not on every playback progress tick.
   const ttsEnabled = useSettingsStore((s) => s.settings?.ttsEnabled ?? false)
@@ -260,9 +275,18 @@ function MessageRendererInner({
   // Segment the parts into tool-activity groups + standalone parts. Memoized on
   // `message.parts` so it doesn't re-run on every token or on unrelated local
   // state (editing/draft/shared/branchOpen) before the memoized children skip.
+  const presentationParts = useMemo(
+    () =>
+      message.parts.map((part) =>
+        shouldHideMessagePart(part, display)
+          ? ({ type: "step-start" } as UIMessage["parts"][number])
+          : part
+      ),
+    [display, message.parts]
+  )
   const segments = useMemo(
-    () => groupAgentParts(message.parts, agentFlowMode),
-    [message.parts, agentFlowMode]
+    () => groupAgentParts(presentationParts, agentFlowMode),
+    [presentationParts, agentFlowMode]
   )
 
   // Image file parts belong to one visual attachment group even when a text or
@@ -292,6 +316,40 @@ function MessageRendererInner({
   // Plain text of the message, for the "share as card" action + gate.
   const messageText = useMemo(() => extractText(message), [message])
   const messageShareContent = useMemo(() => buildMessageShareContent(message), [message])
+  const messageActionCommands = useMemo(
+    () =>
+      resolveMessageActionCommands({
+        role: message.role,
+        hasContent: messageShareContent.hasContent,
+        hasSession: Boolean(branchSessionId),
+        canEdit: Boolean(onEditResend),
+        canRegenerate: Boolean(isLastAssistant && onRegenerate),
+        canReadAloud: ttsEnabled,
+        canBringBack: Boolean(handBackTargetId),
+        streaming: isStreaming,
+      }),
+    [
+      branchSessionId,
+      handBackTargetId,
+      isLastAssistant,
+      isStreaming,
+      message.role,
+      messageShareContent.hasContent,
+      onEditResend,
+      onRegenerate,
+      ttsEnabled,
+    ]
+  )
+  const hasActionCommand = useCallback(
+    (id: (typeof messageActionCommands)[number]["id"]) =>
+      messageActionCommands.some((command) => command.id === id),
+    [messageActionCommands]
+  )
+  const actionCommand = useCallback(
+    (id: (typeof messageActionCommands)[number]["id"]) =>
+      messageActionCommands.find((command) => command.id === id),
+    [messageActionCommands]
+  )
 
   // A turn that is nothing but tool calls has no prose to copy, quote, read
   // aloud or card, so it renders no action bar. The bar is `opacity-0` until
@@ -402,6 +460,33 @@ function MessageRendererInner({
     }
   }, [messageShareContent])
 
+  const handleBringBack = useCallback(() => {
+    if (!handBackTargetId) return
+    const text = extractText(message).trim()
+    if (!text) return
+    dispatchComposerAppend({
+      text: `${text
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n")}\n\n`,
+      sessionId: handBackTargetId,
+    })
+    toast.success(t("bringBackDone"))
+  }, [handBackTargetId, message, t])
+
+  const handleQuote = useCallback(() => {
+    if (!branchSessionId) return
+    const text = extractText(message).trim()
+    if (!text) return
+    dispatchComposerAppend({
+      text: `${text
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n")}\n\n`,
+      sessionId: branchSessionId,
+    })
+  }, [branchSessionId, message])
+
   const usage = (message as { metadata?: { usage?: UsageInfo } }).metadata?.usage
 
   return (
@@ -410,361 +495,495 @@ function MessageRendererInner({
         from={message.role}
         className={cn(
           "py-2 sm:py-3",
-          message.role === "user" ? "max-w-[min(82%,42rem)]" : "max-w-full"
+          display.layout === "cards"
+            ? "max-w-full"
+            : display.layout === "bubbles"
+              ? "max-w-[min(88%,46rem)]"
+              : message.role === "user"
+                ? "max-w-[min(82%,42rem)]"
+                : "max-w-full"
         )}
       >
-        {speaker &&
-          message.role === "assistant" &&
-          (() => {
-            const speakerColor = avatarColor(speaker)
-            return (
-              <div className="mb-1 flex items-center gap-2 self-start text-xs">
-                <Avatar className="size-5">
-                  <AvatarFallback
-                    className="text-[10px] text-white"
-                    style={{ backgroundColor: speakerColor }}
-                    aria-hidden
-                  >
-                    {avatarGlyph(speaker)}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="font-medium" style={{ color: speakerColor }}>
-                  {speaker.name}
-                </span>
-              </div>
-            )
-          })()}
+        <MessageShell
+          message={message}
+          display={display}
+          speakerName={speaker?.name}
+          speakerColor={speaker ? avatarColor(speaker) : undefined}
+          isStreaming={isStreaming}
+        >
+          <PluginExtensionSlot point="chat.message.before" className="mb-1 empty:hidden" />
 
-        <PluginExtensionSlot point="chat.message.before" className="mb-1 empty:hidden" />
-
-        {editing ? (
-          <div
-            className={cn(
-              "flex w-full max-w-full flex-col gap-2",
-              message.role === "user" && "items-end"
-            )}
-          >
-            <Textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={onKey}
-              autoFocus
-              rows={Math.min(10, draft.split("\n").length + 1)}
-              className="min-h-[60px] resize-none"
-            />
-            <div className="flex justify-end gap-2 text-xs">
-              <Button variant="ghost" size="sm" onClick={cancelEdit}>
-                {t("editingCancel")}
-              </Button>
-              <Button size="sm" onClick={submitEdit}>
-                {t("editingSubmit")}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          // `MessageContent` is `w-fit` so a user bubble hugs its text. For the
-          // assistant that makes the column width follow the widest mounted
-          // child — collapsing a tool card unmounts its body and the whole
-          // column snaps narrow. Pin the assistant side to the full row so
-          // expand/collapse never moves the width.
-          // Every image in this turn — markdown `![]()`, attachment gallery,
-          // tool-result screenshots — registers with one collection so the
-          // lightbox pages across the whole message instead of dead-ending on
-          // whichever image was clicked.
-          <MessageImageCollectionProvider>
-            <MessageContent
+          {editing ? (
+            <div
               className={cn(
-                "leading-relaxed",
-                "group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:bg-muted/70 group-[.is-user]:px-4 group-[.is-user]:py-2.5",
-                "group-[.is-assistant]:w-full"
+                "flex w-full max-w-full flex-col gap-2",
+                message.role === "user" && "items-end"
               )}
             >
-              {(() => {
-                const inboundA2UI = (
-                  message as {
-                    metadata?: {
-                      inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
+              <Textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onKey}
+                autoFocus
+                rows={Math.min(10, draft.split("\n").length + 1)}
+                className="min-h-[60px] resize-none"
+              />
+              <div className="flex justify-end gap-2 text-xs">
+                <Button variant="ghost" size="sm" onClick={cancelEdit}>
+                  {t("editingCancel")}
+                </Button>
+                <Button size="sm" onClick={submitEdit}>
+                  {t("editingSubmit")}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            // `MessageContent` is `w-fit` so a user bubble hugs its text. For the
+            // assistant that makes the column width follow the widest mounted
+            // child — collapsing a tool card unmounts its body and the whole
+            // column snaps narrow. Pin the assistant side to the full row so
+            // expand/collapse never moves the width.
+            // Every image in this turn — markdown `![]()`, attachment gallery,
+            // tool-result screenshots — registers with one collection so the
+            // lightbox pages across the whole message instead of dead-ending on
+            // whichever image was clicked.
+            <MessageImageCollectionProvider>
+              <MessageContent
+                className={cn(
+                  "leading-relaxed",
+                  display.layout !== "cards" &&
+                    "group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:bg-muted/70 group-[.is-user]:px-4 group-[.is-user]:py-2.5",
+                  "group-[.is-assistant]:w-full"
+                )}
+              >
+                {(() => {
+                  const inboundA2UI = (
+                    message as {
+                      metadata?: {
+                        inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
+                      }
                     }
-                  }
-                ).metadata?.inboundA2UI
-                if (!inboundA2UI) return null
-                return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
-              })()}
-              {/* Segment the parts so runs of ≥2 consecutive tool calls collapse */}
-              {/* into one activity group. Subagent parts are transparent here and */}
-              {/* render once below as a dispatch tree. */}
-              {segments.map((segment, si) => {
-                if (segment.kind === "group") {
-                  const entries: ToolActivityGroupEntry[] = segment.entries.map((e) => ({
-                    part: e.part as ToolUIPart,
-                    key: `${message.id}-${e.index}`,
-                  }))
-                  return (
-                    <MotionReveal key={`${message.id}-group-${si}`} index={si}>
-                      {/* Key the group on the display mode: the tool cards it wraps
+                  ).metadata?.inboundA2UI
+                  if (!inboundA2UI) return null
+                  return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
+                })()}
+                {/* Segment the parts so runs of ≥2 consecutive tool calls collapse */}
+                {/* into one activity group. Subagent parts are transparent here and */}
+                {/* render once below as a dispatch tree. */}
+                {segments.map((segment, si) => {
+                  if (segment.kind === "group") {
+                    const entries: ToolActivityGroupEntry[] = segment.entries.map((e) => ({
+                      part: e.part as ToolUIPart,
+                      key: `${message.id}-${e.index}`,
+                    }))
+                    return (
+                      <MotionReveal
+                        key={`${message.id}-group-${si}`}
+                        index={si}
+                        disabled={display.motion === "off"}
+                        intensity={display.motion === "expressive" ? "expressive" : "restrained"}
+                      >
+                        {/* Key the group on the display mode: the tool cards it wraps
                         own their open state in uncontrolled Collapsibles
                         (`defaultOpen`, read once at mount), so a live
                         standard⇄detailed switch only takes effect if the group
                         remounts and re-applies the per-mode default. */}
-                      <ToolActivityGroup
-                        key={agentFlowMode}
-                        entries={entries}
-                        mode={agentFlowMode}
-                        renderChild={(part, key, opts) =>
-                          renderToolPart(
-                            part,
-                            key,
-                            agentFlowMode,
-                            opts,
-                            message.id,
-                            branchSessionId ?? undefined
-                          )
-                        }
-                      />
-                    </MotionReveal>
-                  )
-                }
+                        <ToolActivityGroup
+                          key={`${agentFlowMode}-${display.tools}`}
+                          entries={entries}
+                          mode={agentFlowMode}
+                          renderChild={(part, key, opts) =>
+                            renderToolPart(
+                              part,
+                              key,
+                              agentFlowMode,
+                              opts,
+                              message.id,
+                              branchSessionId ?? undefined,
+                              display.tools
+                            )
+                          }
+                        />
+                      </MotionReveal>
+                    )
+                  }
 
-                const { part, index } = segment.entry
-                const partKey = `${message.id}-${index}`
-                const partType = (part as { type?: string }).type
-                if (messageImageGallery.partIndexes.has(index)) {
-                  if (index !== messageImageGallery.firstPartIndex) return null
-                  return (
-                    <MessageImageGallery
-                      key={`${message.id}-image-gallery`}
-                      items={messageImageGallery.items}
+                  const { part, index } = segment.entry
+                  const partKey = `${message.id}-${index}`
+                  const partType = (part as { type?: string }).type
+                  if (messageImageGallery.partIndexes.has(index)) {
+                    if (index !== messageImageGallery.firstPartIndex) return null
+                    return (
+                      <MessageImageGallery
+                        key={`${message.id}-image-gallery`}
+                        items={messageImageGallery.items}
+                      />
+                    )
+                  }
+                  // Tool cards and reasoning read the display mode only through their
+                  // Collapsible's uncontrolled `defaultOpen`, snapshotted at mount —
+                  // a live standard⇄detailed switch changes the prop but never
+                  // re-opens or re-collapses an already-mounted card. Fold the mode
+                  // into just those parts' key so switching the display mode remounts
+                  // them and re-applies the per-mode default. Prose keeps a
+                  // mode-agnostic key (no reflow), and the outer MotionReveal key
+                  // stays stable so the entrance animation isn't replayed on a toggle.
+                  const disclosureKey = isToolPartType(partType)
+                    ? `${agentFlowMode}-${display.tools}`
+                    : partType === "reasoning"
+                      ? `${agentFlowMode}-${display.reasoning}`
+                      : partType === "sources"
+                        ? display.sources
+                        : null
+                  const nodeKey = disclosureKey ? `${partKey}-${disclosureKey}` : partKey
+                  const node = (
+                    <MessagePart
+                      key={nodeKey}
+                      part={part}
+                      partKey={partKey}
+                      isStreaming={isStreaming}
+                      mentionPattern={message.role === "user" ? mentionPattern : null}
+                      characterById={characterById}
+                      messageId={message.id}
+                      sessionId={branchSessionId ?? undefined}
+                      mode={agentFlowMode}
+                      display={display}
+                      t={t}
+                      projectRoot={projectRoot}
                     />
                   )
-                }
-                // Tool cards and reasoning read the display mode only through their
-                // Collapsible's uncontrolled `defaultOpen`, snapshotted at mount —
-                // a live standard⇄detailed switch changes the prop but never
-                // re-opens or re-collapses an already-mounted card. Fold the mode
-                // into just those parts' key so switching the display mode remounts
-                // them and re-applies the per-mode default. Prose keeps a
-                // mode-agnostic key (no reflow), and the outer MotionReveal key
-                // stays stable so the entrance animation isn't replayed on a toggle.
-                const modeSensitive = isToolPartType(partType) || partType === "reasoning"
-                const nodeKey = modeSensitive ? `${partKey}-${agentFlowMode}` : partKey
-                const node = (
-                  <MessagePart
-                    key={nodeKey}
-                    part={part}
-                    partKey={partKey}
-                    isStreaming={isStreaming}
-                    mentionPattern={message.role === "user" ? mentionPattern : null}
-                    characterById={characterById}
-                    messageId={message.id}
-                    sessionId={branchSessionId ?? undefined}
-                    mode={agentFlowMode}
-                    t={t}
-                    projectRoot={projectRoot}
-                  />
-                )
-                // Give tool cards/rows and dispatch banners a one-shot entrance;
-                // leave text/markdown untouched to avoid wrapping prose in extra
-                // block boxes.
-                return isToolPartType(partType) || partType === "agent-team-dispatch" ? (
-                  <MotionReveal key={partKey} index={si}>
-                    {node}
-                  </MotionReveal>
-                ) : (
-                  node
-                )
-              })}
-              <SubagentTree parts={message.parts} mode={agentFlowMode} />
-            </MessageContent>
-          </MessageImageCollectionProvider>
-        )}
+                  // Give tool cards/rows and dispatch banners a one-shot entrance;
+                  // leave text/markdown untouched to avoid wrapping prose in extra
+                  // block boxes.
+                  return isToolPartType(partType) || partType === "agent-team-dispatch" ? (
+                    <MotionReveal
+                      key={partKey}
+                      index={si}
+                      disabled={display.motion === "off"}
+                      intensity={display.motion === "expressive" ? "expressive" : "restrained"}
+                    >
+                      {node}
+                    </MotionReveal>
+                  ) : (
+                    node
+                  )
+                })}
+                <SubagentTree parts={message.parts} mode={agentFlowMode} />
+              </MessageContent>
+            </MessageImageCollectionProvider>
+          )}
 
-        {/* Delivery state of a mid-run follow-up. Self-hides for every message
+          {/* Delivery state of a mid-run follow-up. Self-hides for every message
             that is not a pending steer. */}
-        <SteerStatusBadge message={message} sessionId={branchSessionId} />
-        <SessionPeerOriginBadge metadata={message.metadata} />
+          <SteerStatusBadge message={message} sessionId={branchSessionId} />
+          <SessionPeerOriginBadge metadata={message.metadata} />
 
-        <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
+          <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
 
-        {/* Trigger audit badge — surfaces workflows fired by this message via */}
-        {/* `lib/chat/trigger-audit-ring`. Only renders when ≥1 trigger fired. */}
-        {(() => {
-          const sessionId =
-            typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId ===
-            "string"
-              ? ((message as { metadata?: { sessionId?: string } }).metadata!.sessionId as string)
-              : null
-          if (!sessionId) return null
-          return <TriggerBadge sessionId={sessionId} messageId={message.id} />
-        })()}
-
-        {/* Memory transparency chips — "learned N" + "recalled N" for completed */}
-        {/* assistant turns. Mounted only when not streaming so the liveQuery */}
-        {/* inside the chips never runs in the token-delta hot path. */}
-        {message.role === "assistant" && !isStreaming && (
-          <div className="mt-1 flex flex-wrap items-center gap-1 empty:hidden">
-            <MemoryLearnedChip messageId={message.id} />
-            {(() => {
-              const sourcesPart = (message.parts as unknown[]).find(isSourcesPart)
-              return sourcesPart ? <MemoryRecalledChip part={sourcesPart} /> : null
-            })()}
-          </div>
-        )}
-
-        {/* ADR-0026 §5 §A — revived hover-action slot. Distinct from the */}
-        {/* footer below: this slot is visible above the message body on hover, */}
-        {/* the footer holds host copy/regenerate controls. */}
-        <PluginExtensionSlot
-          point="chat.message.actions"
-          className={cn(
-            "mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
-            message.role === "user" ? "ml-auto" : ""
-          )}
-        />
-
-        {/* Plugin context-menu items targeting the `chat:message` zone
-            (ctx.contextMenu.register) — hover ellipsis dropdown. Renders
-            nothing when no plugin contributed items. */}
-        <div
-          className={cn(
-            "opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
-            message.role === "user" ? "ml-auto" : ""
-          )}
-        >
-          <MessagePluginMenu
-            messageId={message.id}
-            sessionId={
+          {/* Trigger audit badge — surfaces workflows fired by this message via */}
+          {/* `lib/chat/trigger-audit-ring`. Only renders when ≥1 trigger fired. */}
+          {(() => {
+            const sessionId =
               typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId ===
               "string"
                 ? ((message as { metadata?: { sessionId?: string } }).metadata!.sessionId as string)
-                : undefined
-            }
-          />
-        </div>
+                : null
+            if (!sessionId) return null
+            return <TriggerBadge sessionId={sessionId} messageId={message.id} />
+          })()}
 
-        {!editing && !isToolOnlyTurn && (
-          <MessageActions
+          {/* Memory transparency chips — "learned N" + "recalled N" for completed */}
+          {/* assistant turns. Mounted only when not streaming so the liveQuery */}
+          {/* inside the chips never runs in the token-delta hot path. */}
+          {message.role === "assistant" && !isStreaming && (
+            <div className="mt-1 flex flex-wrap items-center gap-1 empty:hidden">
+              <MemoryLearnedChip messageId={message.id} />
+              {(() => {
+                const sourcesPart = (message.parts as unknown[]).find(isSourcesPart)
+                return sourcesPart ? <MemoryRecalledChip part={sourcesPart} /> : null
+              })()}
+            </div>
+          )}
+          {/* ADR-0026 §5 §A — revived hover-action slot. Distinct from the */}
+          {/* footer below: this slot is visible above the message body on hover, */}
+          {/* the footer holds host copy/regenerate controls. */}
+          <PluginExtensionSlot
+            point="chat.message.actions"
             className={cn(
-              "text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100",
+              "mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
+              message.role === "user" ? "ml-auto" : ""
+            )}
+          />
+
+          {/* Plugin context-menu items targeting the `chat:message` zone
+            (ctx.contextMenu.register) — hover ellipsis dropdown. Renders
+            nothing when no plugin contributed items. */}
+          <div
+            className={cn(
+              "opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
               message.role === "user" ? "ml-auto" : ""
             )}
           >
-            {usage && message.role === "assistant" && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="font-mono">
-                    ↑{usage.inputTokens ?? 0} ↓{usage.outputTokens ?? 0}
-                    {usage.totalCostUsd !== undefined && ` · $${usage.totalCostUsd.toFixed(4)}`}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <UsageBreakdown usage={usage} />
-                </TooltipContent>
-              </Tooltip>
-            )}
+            <MessagePluginMenu
+              messageId={message.id}
+              sessionId={
+                typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId ===
+                "string"
+                  ? ((message as { metadata?: { sessionId?: string } }).metadata!
+                      .sessionId as string)
+                  : undefined
+              }
+            />
+          </div>
 
-            <MessageAction
-              tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
-              label={t("copyLabel")}
-              onClick={handleCopy}
+          {!editing && !isToolOnlyTurn && display.actions !== "all" && (
+            <MessageActions
+              className={cn(
+                "text-xs text-muted-foreground transition-opacity",
+                display.actions === "hover" && "opacity-0 group-hover:opacity-100",
+                message.role === "user" ? "ml-auto" : ""
+              )}
             >
-              <CopyFeedbackIcon copied={copied || richCopied} size={14} />
-            </MessageAction>
+              <MessageAction
+                tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
+                label={t("copyLabel")}
+                onClick={handleCopy}
+              >
+                <CopyFeedbackIcon copied={copied || richCopied} size={14} />
+              </MessageAction>
 
-            <MessageAction
-              tooltip={shared ? t("shareDone") : t("shareTooltip")}
-              label={t("shareLabel")}
-              onClick={handleShare}
+              {hasActionCommand("edit") && onEditResend && (
+                <MessageAction
+                  tooltip={t("editTooltip")}
+                  label={t("editLabel")}
+                  onClick={startEdit}
+                >
+                  <PencilIcon className="size-3.5" />
+                </MessageAction>
+              )}
+
+              {hasActionCommand("regenerate") && onRegenerate && (
+                <MessageAction
+                  tooltip={t("regenerateTooltip")}
+                  label={t("regenerateLabel")}
+                  onClick={() => void onRegenerate()}
+                  disabled={actionCommand("regenerate")?.disabled}
+                >
+                  <RefreshCcwIcon className="size-3.5" />
+                </MessageAction>
+              )}
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label={t("moreLabel")}
+                  >
+                    <MoreHorizontalIcon className="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align={message.role === "user" ? "end" : "start"}>
+                  <DropdownMenuItem onSelect={() => void handleShare()}>
+                    <Share2Icon className="size-4" />
+                    {t("shareLabel")}
+                  </DropdownMenuItem>
+                  {hasActionCommand("quote") && branchSessionId && (
+                    <DropdownMenuItem onSelect={handleQuote}>
+                      <QuoteIcon className="size-4" />
+                      {t("quoteLabel")}
+                    </DropdownMenuItem>
+                  )}
+                  {hasActionCommand("copyLink") && branchSessionId && (
+                    <DropdownMenuItem onSelect={() => void handleCopyLink()}>
+                      <LinkIcon className="size-4" />
+                      {t("copyLinkLabel")}
+                    </DropdownMenuItem>
+                  )}
+                  {hasActionCommand("shareCard") && (
+                    <DropdownMenuItem onSelect={() => setCardOpen(true)}>
+                      <ImageIcon className="size-4" />
+                      {t("shareCardLabel")}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onSelect={() => toggleBookmark(message.id)}>
+                    <AnimatedBookmarkIcon className="size-4" />
+                    {isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
+                  </DropdownMenuItem>
+                  {hasActionCommand("branch") && branchSessionId && (
+                    <DropdownMenuItem
+                      disabled={actionCommand("branch")?.disabled}
+                      onSelect={() => setBranchOpen(true)}
+                    >
+                      <GitBranchIcon className="size-4" />
+                      {t("branchLabel")}
+                    </DropdownMenuItem>
+                  )}
+                  {hasActionCommand("truncate") && branchSessionId && (
+                    <DropdownMenuItem
+                      disabled={actionCommand("truncate")?.disabled}
+                      onSelect={() => setTruncateOpen(true)}
+                    >
+                      <ScissorsIcon className="size-4" />
+                      {t("truncateFromLabel")}
+                    </DropdownMenuItem>
+                  )}
+                  {hasActionCommand("bringBack") && handBackTargetId && (
+                    <DropdownMenuItem onSelect={handleBringBack}>
+                      <CornerUpLeftIcon className="size-4" />
+                      {t("bringBackLabel")}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <BranchNavigator message={message} className="mx-1" />
+              {branchSessionId && (
+                <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
+              )}
+            </MessageActions>
+          )}
+
+          {!editing && !isToolOnlyTurn && display.actions === "all" && (
+            <MessageActions
+              className={cn(
+                "text-xs text-muted-foreground",
+                message.role === "user" ? "ml-auto" : ""
+              )}
             >
-              <Share2Icon className="size-3.5" />
-            </MessageAction>
+              {usage && message.role === "assistant" && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="font-mono">
+                      ↑{usage.inputTokens ?? 0} ↓{usage.outputTokens ?? 0}
+                      {usage.totalCostUsd !== undefined && ` · $${usage.totalCostUsd.toFixed(4)}`}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <UsageBreakdown usage={usage} />
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
-            {branchSessionId && (
               <MessageAction
-                // Deliberately worded as a *link to this message*, never as
-                // "share": the neighbouring share action publishes content,
-                // this one only navigates, and confusing the two is either a
-                // privacy accident or a dead link.
-                tooltip={linkCopied ? t("copyLinkDone") : t("copyLinkTooltip")}
-                label={t("copyLinkLabel")}
-                onClick={handleCopyLink}
+                tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
+                label={t("copyLabel")}
+                onClick={handleCopy}
               >
-                {linkCopied ? (
-                  <AnimatedActionIcon icon={AnimatedCheckIcon} size={14} animateOnChange />
-                ) : (
-                  <LinkIcon className="size-3.5" />
-                )}
+                <CopyFeedbackIcon copied={copied || richCopied} size={14} />
               </MessageAction>
-            )}
 
-            {messageShareContent.hasContent && (
               <MessageAction
-                tooltip={t("shareCardTooltip")}
-                label={t("shareCardLabel")}
-                onClick={() => setCardOpen(true)}
+                tooltip={shared ? t("shareDone") : t("shareTooltip")}
+                label={t("shareLabel")}
+                onClick={handleShare}
               >
-                <ImageIcon className="size-3.5" />
+                <Share2Icon className="size-3.5" />
               </MessageAction>
-            )}
 
-            <MessageAction
-              tooltip={isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
-              label={t("bookmarkLabel")}
-              onClick={() => toggleBookmark(message.id)}
-              className={cn(isBookmarked && "text-yellow-500")}
-            >
-              <AnimatedActionIcon
-                icon={AnimatedBookmarkIcon}
-                size={14}
-                animateOnChange={isBookmarked}
-                className={isBookmarked ? "fill-current" : undefined}
-              />
-            </MessageAction>
+              {hasActionCommand("quote") && branchSessionId && (
+                <MessageAction
+                  tooltip={t("quoteLabel")}
+                  label={t("quoteLabel")}
+                  onClick={handleQuote}
+                >
+                  <QuoteIcon className="size-3.5" />
+                </MessageAction>
+              )}
 
-            {message.role === "user" && onEditResend && (
-              <MessageAction tooltip={t("editTooltip")} label={t("editLabel")} onClick={startEdit}>
-                <PencilIcon className="size-3.5" />
-              </MessageAction>
-            )}
+              {branchSessionId && (
+                <MessageAction
+                  // Deliberately worded as a *link to this message*, never as
+                  // "share": the neighbouring share action publishes content,
+                  // this one only navigates, and confusing the two is either a
+                  // privacy accident or a dead link.
+                  tooltip={linkCopied ? t("copyLinkDone") : t("copyLinkTooltip")}
+                  label={t("copyLinkLabel")}
+                  onClick={handleCopyLink}
+                >
+                  {linkCopied ? (
+                    <AnimatedActionIcon icon={AnimatedCheckIcon} size={14} animateOnChange />
+                  ) : (
+                    <LinkIcon className="size-3.5" />
+                  )}
+                </MessageAction>
+              )}
 
-            {message.role === "user" && branchSessionId && onRewindFiles && (
-              <CheckpointAction
-                checkpointId={message.id}
-                enabled={checkpointEnabled}
-                rewindFiles={(checkpointId, dryRun) =>
-                  onRewindFiles(branchSessionId, checkpointId, dryRun)
-                }
-              />
-            )}
+              {messageShareContent.hasContent && (
+                <MessageAction
+                  tooltip={t("shareCardTooltip")}
+                  label={t("shareCardLabel")}
+                  onClick={() => setCardOpen(true)}
+                >
+                  <ImageIcon className="size-3.5" />
+                </MessageAction>
+              )}
 
-            {branchSessionId && (
               <MessageAction
-                tooltip={isStreaming ? t("branchStreamingTooltip") : t("branchTooltip")}
-                label={t("branchLabel")}
-                onClick={() => setBranchOpen(true)}
-                // A branch snapshots the visible thread, so taking one mid-turn
-                // would copy a half-written reply and seed the child with an
-                // unfinished exchange. Matches the regenerate action below.
-                disabled={isStreaming}
+                tooltip={isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
+                label={t("bookmarkLabel")}
+                onClick={() => toggleBookmark(message.id)}
+                className={cn(isBookmarked && "text-yellow-500")}
               >
-                <GitBranchIcon className="size-3.5" />
+                <AnimatedActionIcon
+                  icon={AnimatedBookmarkIcon}
+                  size={14}
+                  animateOnChange={isBookmarked}
+                  className={isBookmarked ? "fill-current" : undefined}
+                />
               </MessageAction>
-            )}
 
-            {/* The only remaining destructive path. Editing a user message used
+              {message.role === "user" && onEditResend && (
+                <MessageAction
+                  tooltip={t("editTooltip")}
+                  label={t("editLabel")}
+                  onClick={startEdit}
+                >
+                  <PencilIcon className="size-3.5" />
+                </MessageAction>
+              )}
+
+              {message.role === "user" && branchSessionId && onRewindFiles && (
+                <CheckpointAction
+                  checkpointId={message.id}
+                  enabled={checkpointEnabled}
+                  rewindFiles={(checkpointId, dryRun) =>
+                    onRewindFiles(branchSessionId, checkpointId, dryRun)
+                  }
+                />
+              )}
+
+              {branchSessionId && (
+                <MessageAction
+                  tooltip={isStreaming ? t("branchStreamingTooltip") : t("branchTooltip")}
+                  label={t("branchLabel")}
+                  onClick={() => setBranchOpen(true)}
+                  // A branch snapshots the visible thread, so taking one mid-turn
+                  // would copy a half-written reply and seed the child with an
+                  // unfinished exchange. Matches the regenerate action below.
+                  disabled={actionCommand("branch")?.disabled}
+                >
+                  <GitBranchIcon className="size-3.5" />
+                </MessageAction>
+              )}
+
+              {/* The only remaining destructive path. Editing a user message used
                 to delete its whole tail as a side effect; now that it branches
                 instead, removing messages has to be asked for explicitly. */}
-            {branchSessionId && (
-              <MessageAction
-                tooltip={t("truncateFromTooltip")}
-                label={t("truncateFromLabel")}
-                onClick={() => setTruncateOpen(true)}
-                disabled={isStreaming}
-              >
-                <ScissorsIcon className="size-3.5" />
-              </MessageAction>
-            )}
+              {actionCommand("truncate")?.destructive && branchSessionId && (
+                <MessageAction
+                  tooltip={t("truncateFromTooltip")}
+                  label={t("truncateFromLabel")}
+                  onClick={() => setTruncateOpen(true)}
+                  disabled={actionCommand("truncate")?.disabled}
+                >
+                  <ScissorsIcon className="size-3.5" />
+                </MessageAction>
+              )}
 
-            {/* Hand a conclusion back up.
+              {/* Hand a conclusion back up.
                 Two shapes of the same gesture, so they share one action and one
                 mechanism: a sidechat hands back to the MAIN conversation, a
                 branch hands back to the conversation it was cut from. Lineage
@@ -772,65 +991,55 @@ function MessageRendererInner({
                 the parent to look, but nothing brought a finding with you.
                 Deliberately not auto-sent — a conclusion reached elsewhere is
                 usually worth rewording before it costs a turn up there. */}
-            {handBackTargetId && (
-              <MessageAction
-                tooltip={t("bringBackTooltip")}
-                label={t("bringBackLabel")}
-                onClick={() => {
-                  const text = extractText(message).trim()
-                  if (!text) return
-                  dispatchComposerAppend({
-                    text: `${text
-                      .split("\n")
-                      .map((line) => `> ${line}`)
-                      .join("\n")}\n\n`,
-                    sessionId: handBackTargetId,
-                  })
-                  toast.success(t("bringBackDone"))
-                }}
-              >
-                <CornerUpLeftIcon className="size-3.5" />
-              </MessageAction>
-            )}
+              {handBackTargetId && (
+                <MessageAction
+                  tooltip={t("bringBackTooltip")}
+                  label={t("bringBackLabel")}
+                  onClick={handleBringBack}
+                >
+                  <CornerUpLeftIcon className="size-3.5" />
+                </MessageAction>
+              )}
 
-            {message.role === "assistant" && ttsEnabled && (
-              <ReadAloudButton
-                messageId={message.id}
-                text={extractText(message)}
-                character={speaker ?? directCharacter ?? null}
-              />
-            )}
+              {message.role === "assistant" && ttsEnabled && (
+                <ReadAloudButton
+                  messageId={message.id}
+                  text={extractText(message)}
+                  character={speaker ?? directCharacter ?? null}
+                />
+              )}
 
-            {/* Both roles: assistant siblings come from regenerating, user
+              {/* Both roles: assistant siblings come from regenerating, user
                 siblings from editing (which keeps the original rather than
                 deleting its tail). The navigator no-ops when the message has
                 no branch group, so no role gate is needed. */}
-            <BranchNavigator message={message} className="mx-1" />
+              <BranchNavigator message={message} className="mx-1" />
 
-            {/* Self-hides unless a cross-session branch was cut here. Shows the
+              {/* Self-hides unless a cross-session branch was cut here. Shows the
                 fork where the decision was made, rather than only in the
                 header — scrolling a long thread reveals where it diverged. */}
-            {branchSessionId && (
-              <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
-            )}
+              {branchSessionId && (
+                <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
+              )}
 
-            {message.role === "assistant" && isLastAssistant && onRegenerate && (
-              <MessageAction
-                tooltip={t("regenerateTooltip")}
-                label={t("regenerateLabel")}
-                onClick={() => void onRegenerate()}
-                disabled={isStreaming}
-              >
-                <RefreshCcwIcon className="size-3.5" />
-              </MessageAction>
-            )}
+              {message.role === "assistant" && isLastAssistant && onRegenerate && (
+                <MessageAction
+                  tooltip={t("regenerateTooltip")}
+                  label={t("regenerateLabel")}
+                  onClick={() => void onRegenerate()}
+                  disabled={actionCommand("regenerate")?.disabled}
+                >
+                  <RefreshCcwIcon className="size-3.5" />
+                </MessageAction>
+              )}
 
-            <PluginExtensionSlot
-              point="chat.message.footer"
-              className="flex items-center gap-1 empty:hidden"
-            />
-          </MessageActions>
-        )}
+              <PluginExtensionSlot
+                point="chat.message.footer"
+                className="flex items-center gap-1 empty:hidden"
+              />
+            </MessageActions>
+          )}
+        </MessageShell>
 
         {branchSessionId && (
           <BranchDialog
@@ -886,7 +1095,8 @@ export const MessageRenderer = memo(
     prev.onCopy === next.onCopy &&
     prev.onRegenerate === next.onRegenerate &&
     prev.onEditResend === next.onEditResend &&
-    prev.projectRoot === next.projectRoot
+    prev.projectRoot === next.projectRoot &&
+    prev.messageDisplay === next.messageDisplay
 )
 
 MessageRenderer.displayName = "MessageRenderer"
@@ -932,6 +1142,28 @@ function extractText(message: UIMessage): string {
     .join("\n\n")
 }
 
+function shouldHideMessagePart(
+  part: UIMessage["parts"][number],
+  display: ResolvedMessageDisplayOptions
+): boolean {
+  const typed = part as {
+    type?: string
+    state?: string
+    twinDegraded?: boolean
+    memoryDegraded?: boolean
+  }
+  if (typed.type === "reasoning") return display.reasoning === "hidden"
+  if (typed.type === "sources") {
+    return display.sources === "hidden" && !typed.twinDegraded && !typed.memoryDegraded
+  }
+  if (isToolPartType(typed.type) && display.tools === "hidden") {
+    // Only successful, settled tools may disappear. Running, failed and
+    // approval-sensitive states remain reachable regardless of preference.
+    return typed.state === "output-available"
+  }
+  return false
+}
+
 /**
  * Memoized boundary around a single message part. Parts inside a finalized
  * message keep stable references (the adapter only replaces the changed
@@ -952,6 +1184,7 @@ const MessagePart = memo(function MessagePart({
   messageId,
   sessionId,
   mode,
+  display,
   t,
   projectRoot,
 }: {
@@ -963,6 +1196,7 @@ const MessagePart = memo(function MessagePart({
   messageId: string | undefined
   sessionId: string | undefined
   mode: AgentFlowMode
+  display: ResolvedMessageDisplayOptions
   t: ReturnType<typeof useTranslations>
   projectRoot?: string | null
 }) {
@@ -975,6 +1209,7 @@ const MessagePart = memo(function MessagePart({
     messageId,
     sessionId,
     mode,
+    display,
     t,
     projectRoot
   )
@@ -1001,7 +1236,8 @@ function renderToolPart(
   mode: AgentFlowMode,
   opts: ToolActivityChildOptions,
   messageId: string | undefined,
-  sessionId: string | undefined
+  sessionId: string | undefined,
+  visibility: ResolvedMessageDisplayOptions["tools"]
 ): React.ReactNode {
   const toolPresentation = tp as ToolUIPart & {
     title?: string
@@ -1028,6 +1264,8 @@ function renderToolPart(
       }}
     />
   )
+  const preferenceOpen =
+    visibility === "expanded" ? true : visibility === "collapsed" ? false : undefined
 
   // Simplified mode: every tool collapses to a one-line, expandable row.
   if (mode === "simplified") {
@@ -1038,7 +1276,7 @@ function renderToolPart(
           sessionId={sessionId}
           expanded={opts.expanded}
           onToggle={opts.onToggle}
-          defaultOpen={opts.forceOpen}
+          defaultOpen={opts.forceOpen ?? preferenceOpen}
         />
         {slot}
       </React.Fragment>
@@ -1049,6 +1287,7 @@ function renderToolPart(
   // trace / the live output); a settled success stays collapsed.
   const defaultOpen =
     opts.forceOpen ??
+    preferenceOpen ??
     (mode === "detailed" || tp.state === "output-error" || tp.state === "input-available")
 
   // Bash keeps its own card so the terminal view owns the whole block; every
@@ -1099,6 +1338,7 @@ function renderPart(
   messageId: string | undefined,
   sessionId: string | undefined,
   mode: AgentFlowMode,
+  display: ResolvedMessageDisplayOptions,
   t: ReturnType<typeof useTranslations>,
   projectRoot?: string | null
 ) {
@@ -1114,7 +1354,13 @@ function renderPart(
   }
 
   if (type === "sources") {
-    return <SourcesPart key={key} part={part as unknown as SourcesPartType} />
+    return (
+      <SourcesPart
+        key={key}
+        part={part as unknown as SourcesPartType}
+        defaultOpen={display.sources === "expanded"}
+      />
+    )
   }
 
   if (type === "canvas") {
@@ -1177,6 +1423,7 @@ function renderPart(
           text={text}
           isStreaming={isStreaming}
           projectRoot={projectRoot}
+          richControls={display.richControls}
         />
       )
     }
@@ -1210,7 +1457,15 @@ function renderPart(
     // Detailed mode keeps the reasoning expanded; simplified keeps it collapsed;
     // standard defers to the component's stream-aware auto open/close.
     const reasoningDefaultOpen =
-      mode === "detailed" ? true : mode === "simplified" ? false : undefined
+      display.reasoning === "expanded"
+        ? true
+        : display.reasoning === "collapsed"
+          ? false
+          : mode === "detailed"
+            ? true
+            : mode === "simplified"
+              ? false
+              : undefined
     return (
       <Reasoning
         key={key}
@@ -1359,7 +1614,7 @@ function renderPart(
     const tp = part as ToolUIPart
     // Delegate to the shared tool renderer (mode-aware: simplified row vs.
     // standard/detailed card), which also appends the per-call plugin slot.
-    return renderToolPart(tp, key, mode, {}, messageId, sessionId)
+    return renderToolPart(tp, key, mode, {}, messageId, sessionId, display.tools)
   }
 
   // AI SDK structural/control parts carry no visible content — render nothing

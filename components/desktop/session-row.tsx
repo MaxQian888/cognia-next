@@ -28,10 +28,16 @@ import {
 import { cn } from "@/lib/utils"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
-import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
+import type {
+  ChatSession,
+  ConversationSidebarMetadata,
+  SessionFolder,
+} from "@cognia/agent-config-types"
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
+  BotIcon,
+  BoxesIcon,
   CheckIcon,
   FolderIcon,
   FolderInputIcon,
@@ -42,6 +48,7 @@ import {
   ListChecksIcon,
   Loader2Icon,
   MessageSquareIcon,
+  CpuIcon,
   MoreHorizontalIcon,
   PencilIcon,
   PinIcon,
@@ -49,6 +56,7 @@ import {
   TerminalIcon,
   Trash2Icon,
   UsersIcon,
+  WaypointsIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
@@ -63,6 +71,20 @@ import {
 } from "react"
 
 const log = loggers.ui
+
+export type SessionRowMetadataKind = ConversationSidebarMetadata
+
+export interface SessionRowMetadataItem {
+  kind: SessionRowMetadataKind
+  value: string
+}
+
+const METADATA_ICON = {
+  agent: BotIcon,
+  model: CpuIcon,
+  provider: WaypointsIcon,
+  workspace: BoxesIcon,
+} satisfies Record<SessionRowMetadataKind, typeof BotIcon>
 
 export interface SessionRowProps {
   session: ChatSession
@@ -110,6 +132,10 @@ export interface SessionRowProps {
   density?: "comfortable" | "compact"
   /** Render a second line with the denormalized last-message preview. */
   showPreview?: boolean
+  /** Ordered context fields rendered between the title and message preview. */
+  metadata?: SessionRowMetadataItem[]
+  /** Motion policy for overflowing titles. */
+  titleMotion?: "hover" | "off"
   /** @dnd-kit node ref from the Sortable wrapper (applied to the `<li>`). */
   dragRef?: (el: HTMLElement | null) => void
   /** @dnd-kit drag listeners — applied to the hover grip handle. */
@@ -156,6 +182,8 @@ function SessionRowImpl({
   focused = false,
   density = "comfortable",
   showPreview = false,
+  metadata = [],
+  titleMotion = "hover",
   dragRef,
   dragListeners,
   dragAttributes,
@@ -397,7 +425,31 @@ function SessionRowImpl({
             <PinIcon className="size-3 shrink-0 text-muted-foreground" aria-label={t("pinned")} />
           ) : null}
           <span className="flex min-w-0 flex-1 flex-col">
-            <HoverScrollText text={displayTitle} />
+            <HoverScrollText text={displayTitle} motion={titleMotion} />
+            {metadata.length > 0 ? (
+              <span
+                className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[10px] leading-4 text-muted-foreground"
+                data-testid="session-row-metadata"
+                title={metadata.map((item) => item.value).join(" · ")}
+              >
+                {metadata.map((item, index) => {
+                  const MetadataIcon = METADATA_ICON[item.kind]
+                  return (
+                    <span
+                      key={`${item.kind}:${item.value}`}
+                      className={cn(
+                        "flex min-w-0 shrink-0 items-center gap-1",
+                        index > 0 && "before:mr-0.5 before:content-['·']"
+                      )}
+                      data-metadata-kind={item.kind}
+                    >
+                      <MetadataIcon className="size-2.5 shrink-0" aria-hidden />
+                      <span>{item.value}</span>
+                    </span>
+                  )
+                })}
+              </span>
+            ) : null}
             {showPreview && session.lastMessagePreview ? (
               <span className="truncate text-xs text-muted-foreground">
                 {session.lastMessagePreview}

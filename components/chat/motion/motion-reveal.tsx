@@ -18,11 +18,26 @@
  */
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import type { CSSProperties, ReactNode } from "react"
+import { createContext, useContext, type CSSProperties, type ReactNode } from "react"
 
 import { useSettingsStore } from "@/stores/settings"
 import { speedToDurationScale } from "@/lib/appearance/motion-applier"
 import { MOBILE_DURATION, MOBILE_EASE, MOBILE_SPRING } from "@/lib/ui/motion"
+import type { MessageMotion } from "@/types/appearance"
+
+const MessageMotionContext = createContext<MessageMotion | undefined>(undefined)
+
+export function MessageMotionProvider({
+  motion: messageMotion,
+  children,
+}: {
+  motion: MessageMotion
+  children: ReactNode
+}) {
+  return (
+    <MessageMotionContext.Provider value={messageMotion}>{children}</MessageMotionContext.Provider>
+  )
+}
 
 export interface FlowMotion {
   /** True when all motion should be suppressed (user opt-in or OS hint). */
@@ -41,8 +56,9 @@ export interface FlowMotion {
 export function useFlowMotion(): FlowMotion {
   const osReduce = useReducedMotion()
   const motionPref = useSettingsStore((s) => s.settings?.motion)
+  const messageMotion = useContext(MessageMotionContext)
   return {
-    reduce: osReduce === true || (motionPref?.reduce ?? false),
+    reduce: messageMotion === "off" || osReduce === true || (motionPref?.reduce ?? false),
     durationScale: speedToDurationScale(motionPref?.speed),
   }
 }
@@ -54,9 +70,17 @@ export interface MotionRevealProps {
   className?: string
   /** Force-disable the animation regardless of preference. */
   disabled?: boolean
+  /** Restrained is the message default; expressive keeps the spring accent. */
+  intensity?: "restrained" | "expressive"
 }
 
-export function MotionReveal({ children, index = 0, className, disabled }: MotionRevealProps) {
+export function MotionReveal({
+  children,
+  index = 0,
+  className,
+  disabled,
+  intensity = "restrained",
+}: MotionRevealProps) {
   const { reduce, durationScale } = useFlowMotion()
 
   if (disabled || reduce) {
@@ -70,19 +94,27 @@ export function MotionReveal({ children, index = 0, className, disabled }: Motio
   // default this is damping 30 against stiffness 320 — just under critical, so
   // the intended hint of bounce survives unchanged.
   const delay = Math.min(Math.max(index, 0), 6) * 0.03
+  const transition =
+    intensity === "expressive"
+      ? {
+          delay,
+          type: "spring" as const,
+          stiffness: 320,
+          damping: 30 / durationScale,
+          opacity: { duration: 0.18 * durationScale, ease: "easeOut" as const, delay },
+        }
+      : {
+          delay: Math.min(delay, 0.06),
+          duration: 0.16 * durationScale,
+          ease: "easeOut" as const,
+        }
 
   return (
     <motion.div
       className={className}
-      initial={{ opacity: 0, y: 6 }}
+      initial={{ opacity: 0, y: intensity === "expressive" ? 6 : 3 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{
-        delay,
-        type: "spring",
-        stiffness: 320,
-        damping: 30 / durationScale,
-        opacity: { duration: 0.18 * durationScale, ease: "easeOut", delay },
-      }}
+      transition={transition}
     >
       {children}
     </motion.div>

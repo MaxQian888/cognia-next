@@ -5,7 +5,11 @@ import { PanelLeftIcon } from "lucide-react"
 
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore, SIDEBAR_WIDTH_DEFAULT } from "@/stores/ui"
-import type { ConversationGroupBy, ConversationSidebarSettings } from "@cognia/agent-config-types"
+import type {
+  ConversationGroupBy,
+  ConversationSidebarMetadata,
+  ConversationSidebarSettings,
+} from "@cognia/agent-config-types"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
@@ -18,7 +22,10 @@ import {
 import { Switch } from "@/components/ui/switch"
 import {
   CONVERSATION_GROUP_BY_OPTIONS,
+  CONVERSATION_SIDEBAR_METADATA_OPTIONS,
   resolveConversationGroupBy,
+  resolveConversationSidebarMetadata,
+  toggleConversationSidebarMetadata,
 } from "@/lib/chat/conversation-grouping"
 import { SettingsCard } from "../common/settings-section"
 
@@ -42,6 +49,8 @@ export function ConversationSidebarCard() {
   const groupBy = resolveConversationGroupBy(settings)
   const showUnreadBadges = settings?.showUnreadBadges !== false
   const contentSearch = settings?.searchScope === "titleAndContent"
+  const metadata = resolveConversationSidebarMetadata(settings)
+  const titleMotion = settings?.titleMotion ?? "hover"
 
   const rows: Array<{
     id: string
@@ -84,6 +93,18 @@ export function ConversationSidebarCard() {
       onCheckedChange: (v) => saveSidebar({ searchScope: v ? "titleAndContent" : "title" }),
     },
   ]
+
+  const metadataRows = CONVERSATION_SIDEBAR_METADATA_OPTIONS.map((field) => ({
+    id: `sidebar-metadata-${field}`,
+    field,
+    heading: t(`metadata.${field}.heading`),
+    description: t(`metadata.${field}.description`),
+    label: t(`metadata.${field}.label`),
+    checked: metadata.includes(field),
+  }))
+
+  const setMetadata = (field: ConversationSidebarMetadata, enabled: boolean) =>
+    saveSidebar({ metadata: toggleConversationSidebarMetadata(metadata, field, enabled) })
 
   return (
     <SettingsCard
@@ -128,6 +149,40 @@ export function ConversationSidebarCard() {
             />
           </div>
         ))}
+
+        <div className="space-y-4 border-t pt-5">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">{t("metadata.heading")}</p>
+            <p className="text-sm text-muted-foreground">{t("metadata.description")}</p>
+          </div>
+          {metadataRows.map((row) => (
+            <div key={row.id} className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor={row.id}>{row.heading}</Label>
+                <p className="text-sm text-muted-foreground">{row.description}</p>
+              </div>
+              <Switch
+                id={row.id}
+                aria-label={row.label}
+                checked={row.checked}
+                onCheckedChange={(enabled) => setMetadata(row.field, enabled)}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="sidebar-title-motion">{t("titleMotion.heading")}</Label>
+            <p className="text-sm text-muted-foreground">{t("titleMotion.description")}</p>
+          </div>
+          <Switch
+            id="sidebar-title-motion"
+            aria-label={t("titleMotion.label")}
+            checked={titleMotion === "hover"}
+            onCheckedChange={(enabled) => saveSidebar({ titleMotion: enabled ? "hover" : "off" })}
+          />
+        </div>
 
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5">

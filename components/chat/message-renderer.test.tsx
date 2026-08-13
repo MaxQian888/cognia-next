@@ -243,7 +243,31 @@ let mockFlowMode = "standard"
 jest.mock("@/hooks/chat/use-agent-flow-mode", () => ({
   useAgentFlowMode: () => ({ mode: mockFlowMode, setMode: jest.fn() }),
 }))
+jest.mock("@/hooks/chat/use-message-display", () => ({
+  useMessageDisplay: () => ({
+    preset: "balanced",
+    layout: "hybrid",
+    metadata: {
+      identity: "header",
+      timestamp: "header",
+      model: "header",
+      provider: "details",
+      duration: "details",
+      usage: "details",
+      cost: "details",
+      finishState: "details",
+    },
+    actions: "all",
+    agentFlowMode: mockFlowMode,
+    reasoning: "auto",
+    tools: "auto",
+    sources: "collapsed",
+    richControls: "hover",
+    motion: "off",
+  }),
+}))
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
+  MessageMotionProvider: ({ children }: { children: ReactForMocks.ReactNode }) => children,
   MotionReveal: ({ children }: { children: ReactForMocks.ReactNode }) => children,
   MotionCollapse: ({ children }: { children: ReactForMocks.ReactNode }) => children,
   MotionStatusSwap: ({ children }: { children: ReactForMocks.ReactNode }) => children,
@@ -295,6 +319,7 @@ import type { UIMessage } from "ai"
 import { MessageRenderer } from "./message-renderer"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useChatStore } from "@/stores/chat"
+import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -305,6 +330,21 @@ function assistantMsg(id = "m1", text = "Hello"): UIMessage {
 function userMsg(id = "u1", text = "Hi"): UIMessage {
   return { id, role: "user", parts: [{ type: "text", text }] }
 }
+
+describe("message display actions", () => {
+  it("keeps Copy and More stable while moving secondary actions into overflow", () => {
+    render(
+      <MessageRenderer
+        message={assistantMsg()}
+        messageDisplay={resolveMessageDisplayOptions({ preset: "balanced" })}
+      />
+    )
+
+    expect(screen.getByLabelText("copyTooltip")).toBeInTheDocument()
+    expect(screen.getByLabelText("moreLabel")).toBeInTheDocument()
+    expect(screen.queryByLabelText("shareTooltip")).not.toBeInTheDocument()
+  })
+})
 
 beforeEach(() => {
   useChatStore.getState().clear()
@@ -463,7 +503,11 @@ describe("commentary parts", () => {
 
     render(<MessageRenderer message={msg} isStreaming />)
 
-    expect(screen.getByRole("status")).toHaveTextContent("Checking the affected files")
+    expect(
+      screen.getAllByRole("status").find((node) =>
+        node.textContent?.includes("Checking the affected files")
+      )
+    ).toBeDefined()
     expect(document.querySelector("[data-test='reasoning']")).toBeNull()
   })
 })

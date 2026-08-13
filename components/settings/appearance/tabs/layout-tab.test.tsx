@@ -19,8 +19,8 @@ jest.mock("@/stores/settings", () => ({
 jest.mock("../components/density-card", () => ({
   DensityCard: () => <div data-testid="density-card" />,
 }))
-jest.mock("../components/agent-flow-card", () => ({
-  AgentFlowCard: () => <div data-testid="agent-flow-card" />,
+jest.mock("../components/message-display-card", () => ({
+  MessageDisplayCard: () => <div data-testid="message-display-card" />,
 }))
 jest.mock("../components/usage-display-card", () => ({
   UsageDisplayCard: () => <div data-testid="usage-display-card" />,
@@ -34,10 +34,10 @@ beforeEach(() => {
 })
 
 describe("LayoutTab", () => {
-  it("renders density, radius, agent-flow, and usage-display sections", () => {
+  it("renders density, radius, message-display, and usage-display sections", () => {
     render(<LayoutTab />)
     expect(screen.getByTestId("density-card")).toBeInTheDocument()
-    expect(screen.getByTestId("agent-flow-card")).toBeInTheDocument()
+    expect(screen.getByTestId("message-display-card")).toBeInTheDocument()
     expect(screen.getByTestId("usage-display-card")).toBeInTheDocument()
     expect(screen.getByText("radius.sectionLabel")).toBeInTheDocument()
   })

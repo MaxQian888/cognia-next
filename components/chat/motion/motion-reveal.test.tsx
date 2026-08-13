@@ -6,6 +6,7 @@ import { render, renderHook } from "@testing-library/react"
 
 import {
   MotionCollapse,
+  MessageMotionProvider,
   MotionPopover,
   MotionReveal,
   MotionSelectionIndicator,
@@ -27,6 +28,15 @@ describe("useFlowMotion", () => {
     const { result } = renderHook(() => useFlowMotion())
     expect(result.current.reduce).toBe(false)
     expect(result.current.durationScale).toBe(1)
+  })
+
+  it("lets a message-level off preference disable nested motion", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: false, speed: 1 } } as never })
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <MessageMotionProvider motion="off">{children}</MessageMotionProvider>
+    )
+    const { result } = renderHook(() => useFlowMotion(), { wrapper })
+    expect(result.current).toEqual({ reduce: true, durationScale: 1 })
   })
 })
 

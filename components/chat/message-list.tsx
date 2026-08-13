@@ -39,6 +39,8 @@ import { useCharacters } from "@/lib/data-hooks/context"
 import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { useChatAutoPlayTTS } from "@/hooks/media/use-chat-auto-play-tts"
 import { useCompactionToast } from "@/hooks/chat/use-compaction-toast"
+import { useMessageDisplay } from "@/hooks/chat/use-message-display"
+import type { MessageDisplayPreferences } from "@/types/appearance"
 import type { Character } from "@cognia/agent-config-types"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
@@ -91,6 +93,8 @@ interface Props {
   ) => Promise<RewindFilesResult>
   /** Root used to resolve project-relative links inside rendered messages. */
   projectRoot?: string | null
+  /** Per-session presentation preference; omitted sessions inherit global settings. */
+  messageDisplayOverride?: MessageDisplayPreferences
 }
 
 export function MessageList({
@@ -103,6 +107,7 @@ export function MessageList({
   onEditResend,
   onRewindFiles,
   projectRoot,
+  messageDisplayOverride,
 }: Props) {
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
@@ -137,6 +142,7 @@ export function MessageList({
   const showLongPressHint = isMobile && messages.length > 0 && messages.length <= 2
   const [actionMessage, setActionMessage] = useState<UIMessage | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
+  const messageDisplay = useMessageDisplay(messageDisplayOverride)
   const scrollParentRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
 
@@ -302,6 +308,14 @@ export function MessageList({
     })
     return () => cancelAnimationFrame(raf)
   }, [sessionId, rowVirtualizer])
+
+  // Layout and disclosure changes can alter every row's geometry at once.
+  // Drop cached measurements without moving a reader who is inspecting older
+  // content; the existing resize-follow logic only re-pins when already at the
+  // bottom.
+  useEffect(() => {
+    rowVirtualizer.measure()
+  }, [messageDisplay, rowVirtualizer])
 
   const virtualItems = rowVirtualizer.getVirtualItems()
   const totalSize = rowVirtualizer.getTotalSize()
@@ -555,6 +569,7 @@ export function MessageList({
           onEditResend={onEditResend}
           onRewindFiles={onRewindFiles}
           projectRoot={projectRoot}
+          messageDisplay={messageDisplay}
         />
       </LongPress>
     ) : (
@@ -568,6 +583,7 @@ export function MessageList({
         onEditResend={onEditResend}
         onRewindFiles={onRewindFiles}
         projectRoot={projectRoot}
+        messageDisplay={messageDisplay}
       />
     )
 
@@ -778,6 +794,7 @@ export function MessageList({
         {isMobile ? (
           <MessageActionSheet
             message={actionMessage}
+            messageMotion={messageDisplay.motion}
             // Same speaker resolution as message-renderer: team sender first,
             // then the session's 1:1 character — drives the Read-aloud voice.
             character={(() => {

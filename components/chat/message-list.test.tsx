@@ -44,6 +44,8 @@ jest.mock("./thinking-indicator", () => ({
 const useVirtualizerCalls: Array<{ count: number; estimateSize: (i: number) => number }> = []
 const measureSpy = jest.fn()
 const scrollToIndexSpy = jest.fn()
+const messageRendererProps: Array<Record<string, unknown>> = []
+const messageActionSheetProps: Array<Record<string, unknown>> = []
 // One identity for the lifetime of the suite, mutated in place. The real
 // `useVirtualizer` hands back a stable instance; a fresh object per render would
 // re-run every effect that lists the virtualizer as a dependency, and the
@@ -107,18 +109,20 @@ jest.mock("@/hooks/shortcuts/use-app-shortcut", () => ({
 
 jest.mock("./message-renderer", () => {
   return {
-    MessageRenderer: ({
-      message,
-      projectRoot,
-    }: {
+    MessageRenderer: (props: {
       message: { id: string; parts: { text?: string }[] }
       projectRoot?: string
-    }) =>
-      ReactForMocks.createElement(
+      messageDisplay?: unknown
+    }) => {
+      messageRendererProps.push(props)
+      return ReactForMocks.createElement(
         "div",
-        { "data-test": `msg-${message.id}`, "data-project-root": projectRoot },
-        message.parts.map((p, i) => ReactForMocks.createElement("span", { key: i }, p.text ?? ""))
-      ),
+        { "data-test": `msg-${props.message.id}`, "data-project-root": props.projectRoot },
+        props.message.parts.map((p, i) =>
+          ReactForMocks.createElement("span", { key: i }, p.text ?? "")
+        )
+      )
+    },
   }
 })
 
@@ -151,49 +155,46 @@ jest.mock("@/components/interactions/long-press", () => ({
 }))
 
 jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
-  MessageActionSheet: ({
-    message,
-    onRegenerate,
-    onDelete,
-    onEditResend,
-    onOpenChange,
-  }: {
+  MessageActionSheet: (props: {
     message: unknown
     onRegenerate?: () => void
     onDelete?: (m: unknown) => void
     onEditResend?: (m: unknown, newText: string) => void
     onOpenChange?: (next: boolean) => void
-  }) =>
-    ReactForMocks.createElement(
+    messageMotion?: string
+  }) => {
+    messageActionSheetProps.push(props)
+    return ReactForMocks.createElement(
       "div",
       {
         "data-test": "action-sheet",
-        "data-message": message ? "open" : "closed",
-        "data-can-regenerate": String(Boolean(onRegenerate)),
-        "data-can-edit": String(Boolean(onEditResend)),
+        "data-message": props.message ? "open" : "closed",
+        "data-can-regenerate": String(Boolean(props.onRegenerate)),
+        "data-can-edit": String(Boolean(props.onEditResend)),
       },
       [
-        message && onDelete
+        props.message && props.onDelete
           ? ReactForMocks.createElement("button", {
               key: "delete",
               "data-test": "sheet-delete",
-              onClick: () => onDelete(message),
+              onClick: () => props.onDelete?.(props.message),
             })
           : null,
         ReactForMocks.createElement("button", {
           key: "dismiss",
           "data-test": "sheet-dismiss",
-          onClick: () => onOpenChange?.(false),
+          onClick: () => props.onOpenChange?.(false),
         }),
-        message && onEditResend
+        props.message && props.onEditResend
           ? ReactForMocks.createElement("button", {
               key: "edit",
               "data-test": "sheet-edit",
-              onClick: () => onEditResend(message, "edited text"),
+              onClick: () => props.onEditResend?.(props.message, "edited text"),
             })
           : null,
       ]
-    ),
+    )
+  },
 }))
 
 const dbDeleteMock = jest.fn(async (_id: string) => undefined)
@@ -264,6 +265,8 @@ beforeEach(() => {
   useChatStore.getState().setActiveSession("ses_1")
   useVirtualizerCalls.length = 0
   measureSpy.mockClear()
+  messageRendererProps.length = 0
+  messageActionSheetProps.length = 0
 })
 
 describe("MessageList", () => {
@@ -301,6 +304,28 @@ describe("MessageList", () => {
       "data-project-root",
       "/repo"
     )
+  })
+
+  it("resolves a session presentation override for rows and mobile actions", () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList
+          messages={[userMsg("m1", "hello")]}
+          status="idle"
+          messageDisplayOverride={{ preset: "inspector", overrides: { motion: "off" } }}
+        />
+      </Wrapper>
+    )
+
+    expect(messageRendererProps.at(-1)?.messageDisplay).toMatchObject({
+      preset: "inspector",
+      motion: "off",
+    })
+    expect(messageActionSheetProps.at(-1)?.messageMotion).toBe("off")
+    expect(measureSpy).toHaveBeenCalled()
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
   })
 
   it("routes a hook-notice system message to HookNoticeMarker, not MessageRenderer", () => {

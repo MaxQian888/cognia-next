@@ -256,6 +256,19 @@ describe("ChatPane", () => {
     )
   })
 
+  it("passes the session message-display override to the active transcript", () => {
+    const activeSession = {
+      ...mockSession,
+      messageDisplayOverride: { preset: "focused" as const },
+    }
+    render(<ChatPane {...makeProps()} activeSession={activeSession} />)
+
+    expect(MessageList).toHaveBeenCalledWith(
+      expect.objectContaining({ messageDisplayOverride: { preset: "focused" } }),
+      undefined
+    )
+  })
+
   it("routes browser companion sessions through the bounded transcript surface", () => {
     hasWebCompanionTargetMock.mockReturnValue(true)
     historyModeMock = "timeline"

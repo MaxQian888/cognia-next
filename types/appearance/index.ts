@@ -140,6 +140,8 @@ export interface AppearanceSettingsSlice {
   motion?: MotionSettings
   /** Agent invocation-flow display mode (simplified / standard / detailed). */
   agentFlowMode?: AgentFlowSettings
+  /** Unified chat-message presentation preferences. */
+  messageDisplay?: MessageDisplayPreferences
   /** Usage / consumption statistics display mode (simplified / standard / detailed). */
   usageDisplayMode?: UsageDisplaySettings
   typographyExt?: TypographyExtSettings
@@ -360,6 +362,42 @@ export function isAgentFlowMode(value: unknown): value is AgentFlowMode {
   return value === "simplified" || value === "standard" || value === "detailed"
 }
 
+export type MessageDisplayPreset = "focused" | "balanced" | "inspector"
+export type MessageDisplayLayout = "hybrid" | "bubbles" | "cards"
+export type MessageMetadataPlacement = "hidden" | "header" | "details"
+export type MessageActionVisibility = "hover" | "core" | "all"
+export type MessagePartVisibility = "hidden" | "collapsed" | "auto" | "expanded"
+export type MessageRichControls = "hidden" | "hover" | "always"
+export type MessageMotion = "off" | "restrained" | "expressive"
+
+export interface MessageDisplayMetadataOptions {
+  identity: MessageMetadataPlacement
+  timestamp: MessageMetadataPlacement
+  model: MessageMetadataPlacement
+  provider: MessageMetadataPlacement
+  duration: MessageMetadataPlacement
+  usage: MessageMetadataPlacement
+  cost: MessageMetadataPlacement
+  finishState: MessageMetadataPlacement
+}
+
+export interface MessageDisplayOverrides {
+  layout?: MessageDisplayLayout
+  metadata?: Partial<MessageDisplayMetadataOptions>
+  actions?: MessageActionVisibility
+  agentFlowMode?: AgentFlowMode
+  reasoning?: MessagePartVisibility
+  tools?: MessagePartVisibility
+  sources?: MessagePartVisibility
+  richControls?: MessageRichControls
+  motion?: MessageMotion
+}
+
+export interface MessageDisplayPreferences {
+  preset: MessageDisplayPreset
+  overrides?: MessageDisplayOverrides
+}
+
 // ----------------------------------------------------------------------------
 // Usage / consumption statistics display mode
 //
@@ -405,6 +443,7 @@ export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   radius: DEFAULT_RADIUS,
   motion: DEFAULT_MOTION,
   agentFlowMode: DEFAULT_AGENT_FLOW,
+  messageDisplay: { preset: "balanced" },
   usageDisplayMode: DEFAULT_USAGE_DISPLAY,
   typographyExt: DEFAULT_TYPOGRAPHY_EXT,
   a11y: DEFAULT_A11Y,

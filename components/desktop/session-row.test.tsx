@@ -124,6 +124,30 @@ test("shows the message preview line only when showPreview is on", () => {
   expect(screen.queryByText("last thing said")).toBeNull()
 })
 
+test("renders the configured conversation details in their supplied order", () => {
+  setup({
+    metadata: [
+      { kind: "agent", value: "Alice" },
+      { kind: "model", value: "Claude Sonnet 4.6" },
+      { kind: "provider", value: "Anthropic" },
+    ],
+  })
+
+  const details = screen.getByTestId("session-row-metadata")
+  expect(details).toHaveTextContent("Alice")
+  expect(details).toHaveTextContent("Claude Sonnet 4.6")
+  expect(details).toHaveTextContent("Anthropic")
+  expect(
+    Array.from(details.querySelectorAll("[data-metadata-kind]")).map((node) => node.textContent)
+  ).toEqual(["Alice", "Claude Sonnet 4.6", "Anthropic"])
+})
+
+test("can keep long titles static when title motion is disabled", () => {
+  setup({ titleMotion: "off" })
+  const title = screen.getByText("Hello")
+  expect(title.closest('[data-slot="hover-scroll-text"]')).toHaveAttribute("data-motion", "off")
+})
+
 test("renders a drag grip handle when drag wiring is supplied", () => {
   setup({ dragListeners: {}, dragAttributes: {} })
   expect(screen.getByLabelText("dragHandle")).toBeInTheDocument()

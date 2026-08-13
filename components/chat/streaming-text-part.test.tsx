@@ -105,13 +105,14 @@ describe("StreamingTextPart", () => {
     const { getByTestId } = render(<StreamingTextPart text="hello" isStreaming={true} />)
     const caret = getByTestId("streaming-caret")
     expect(caret).toBeInTheDocument()
-    expect(caret).toHaveClass("animate-pulse")
+    expect(caret).toHaveClass("w-0")
+    expect(caret.firstElementChild).toHaveClass("animate-pulse")
   })
 
   it("renders a static caret under reduced motion", () => {
     flowMotion.reduce = true
     const { getByTestId } = render(<StreamingTextPart text="hello" isStreaming={true} />)
-    expect(getByTestId("streaming-caret")).not.toHaveClass("animate-pulse")
+    expect(getByTestId("streaming-caret").firstElementChild).not.toHaveClass("animate-pulse")
   })
 
   it("supplies incremental parsing and off-screen block containment to Streamdown", () => {

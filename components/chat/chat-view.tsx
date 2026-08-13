@@ -634,6 +634,7 @@ export function ChatPane({
             <div className="relative flex min-h-0 flex-1 flex-col" data-computer-use-pip-host>
               <ChatMessages
                 sessionId={boundId}
+                messageDisplayOverride={activeSession?.messageDisplayOverride}
                 directCharacter={activeCharacter ?? null}
                 projectRoot={projectRoot}
                 onCopy={handleCopySuccess}
@@ -692,6 +693,7 @@ export function ChatPane({
  */
 function ChatMessages({
   sessionId,
+  messageDisplayOverride,
   directCharacter,
   projectRoot,
   onCopy,
@@ -701,6 +703,7 @@ function ChatMessages({
   useCompanionTranscript,
 }: {
   sessionId: string | null
+  messageDisplayOverride?: import("@/types/appearance").MessageDisplayPreferences
   directCharacter?: Character | null
   projectRoot?: string | null
   onCopy: () => void
@@ -721,6 +724,7 @@ function ChatMessages({
         sessionId={sessionId}
         messages={messages}
         status={status}
+        messageDisplayOverride={messageDisplayOverride}
         directCharacter={directCharacter}
         projectRoot={projectRoot}
         onCopy={onCopy}
@@ -734,6 +738,7 @@ function ChatMessages({
     <MessageList
       messages={messages}
       status={status}
+      messageDisplayOverride={messageDisplayOverride}
       paneSessionId={sessionId}
       directCharacter={directCharacter}
       projectRoot={projectRoot}

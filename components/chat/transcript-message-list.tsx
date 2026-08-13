@@ -7,21 +7,20 @@ import type { UIMessage } from "ai"
 import { PerfBoundary } from "@/lib/perf"
 import { estimateMessageHeight } from "@/lib/chat/row-height-estimate"
 import { MessageRenderer } from "./message-renderer"
+import { useMessageDisplay } from "@/hooks/chat/use-message-display"
+import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 
 const VIRTUALIZE_THRESHOLD = 40
 const BOTTOM_SLOP_PX = 80
 
 export type TranscriptRenderStatus =
-  | "loading"
-  | "idle"
-  | "streaming"
-  | "awaiting_approval"
-  | "error"
+  "loading" | "idle" | "streaming" | "awaiting_approval" | "error"
 
 export interface TranscriptMessageListProps {
   messages: UIMessage[]
   status: TranscriptRenderStatus
   sessionId: string
+  messageDisplay?: ResolvedMessageDisplayOptions
 }
 
 /**
@@ -35,7 +34,10 @@ export function TranscriptMessageList({
   messages,
   status,
   sessionId,
+  messageDisplay: providedMessageDisplay,
 }: TranscriptMessageListProps) {
+  const fallbackMessageDisplay = useMessageDisplay()
+  const messageDisplay = providedMessageDisplay ?? fallbackMessageDisplay
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const pinnedToBottomRef = useRef(true)
@@ -70,6 +72,10 @@ export function TranscriptMessageList({
   }, [rowVirtualizer, sessionId])
 
   useEffect(() => {
+    rowVirtualizer.measure()
+  }, [messageDisplay, rowVirtualizer])
+
+  useEffect(() => {
     if (status !== "streaming" || !pinnedToBottomRef.current) return
     const frame = requestAnimationFrame(() => {
       const element = scrollRef.current
@@ -95,6 +101,7 @@ export function TranscriptMessageList({
       message={message}
       isStreaming={index === streamingRowIndex}
       isLastAssistant={message.id === lastAssistantId}
+      messageDisplay={messageDisplay}
     />
   )
 

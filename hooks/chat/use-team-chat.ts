@@ -52,6 +52,10 @@ import { listMessages, persistMessages } from "@/lib/db/messages"
 import { getSession, touchSession, updateSession } from "@/lib/db/sessions"
 import { listCharactersByIds } from "@/lib/db/characters"
 import { recordResultUsage } from "@/lib/db/session-usage"
+import {
+  attachRunMetadataToLastAssistant,
+  buildCompletedRunMetadata,
+} from "@/lib/chat/message-run-metadata"
 import { bumpUnread } from "@/lib/db/session-state"
 import { getTeam } from "@/lib/db/teams"
 import type {
@@ -1178,7 +1182,9 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
   // Stash extras on the resolver so the event handler can apply them.
   const ctx: SubResolverCtx = {
     senderId: character.id,
+    providerId: opts.provider,
     model: opts.model,
+    startedAt: Date.now(),
     extraMetadata: messageMetadata,
     postProcessText,
     // Recalled-memory transparency: direct chat folds this into the assistant
@@ -1228,6 +1234,7 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
             : undefined,
         }
         ctx.model = next.modelId
+        ctx.providerId = next.providerId
       } finally {
         resolvers.delete(sub)
       }
@@ -1248,8 +1255,11 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
 
 interface SubResolverCtx {
   senderId: string
+  /** Provider actually used by the final routing attempt. */
+  providerId?: string
   /** Model id resolved for this member's turn — stamped on sessionUsage. */
   model?: string
+  startedAt: number
   extraMetadata?: Record<string, unknown>
   postProcessText?: (text: string) => string
   /** Recalled long-term memories for this member's turn (SourcesPart merge). */
@@ -1465,6 +1475,19 @@ async function handleTeamEvent(
             tagged = tagged.filter((message) => !duplicateIds.has(message.id))
           }
           tagged = mergeMemorySourcesIntoLastAssistant(tagged, ctx?.memoryContext)
+          const completedAt = Date.now()
+          const result = sdkResult as unknown as { duration_ms?: number; subtype?: string }
+          tagged = attachRunMetadataToLastAssistant(
+            tagged,
+            buildCompletedRunMetadata({
+              providerId: ctx?.providerId,
+              modelId: ctx?.model,
+              startedAt: ctx?.startedAt,
+              completedAt,
+              reportedDurationMs: result.duration_ms,
+              finishReason: result.subtype,
+            })
+          )
           await persistMessages(teamSessionId, tagged)
           if (isOpen) {
             useChatStore.getState().replaceSessionMessages(teamSessionId, tagged)

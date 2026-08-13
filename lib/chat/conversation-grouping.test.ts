@@ -1,7 +1,11 @@
 import {
+  CONVERSATION_SIDEBAR_METADATA_OPTIONS,
   CONVERSATION_GROUP_BY_OPTIONS,
+  DEFAULT_CONVERSATION_SIDEBAR_METADATA,
   DEFAULT_CONVERSATION_GROUP_BY,
   resolveConversationGroupBy,
+  resolveConversationSidebarMetadata,
+  toggleConversationSidebarMetadata,
 } from "./conversation-grouping"
 
 describe("resolveConversationGroupBy", () => {
@@ -37,5 +41,35 @@ describe("resolveConversationGroupBy", () => {
     expect(
       resolveConversationGroupBy({ groupBy: "bogus" } as unknown as { groupBy: undefined })
     ).toBe("workspace")
+  })
+})
+
+describe("conversation sidebar metadata", () => {
+  it("defaults to agent and model", () => {
+    expect(resolveConversationSidebarMetadata(undefined)).toEqual(["agent", "model"])
+    expect(DEFAULT_CONVERSATION_SIDEBAR_METADATA).toEqual(["agent", "model"])
+  })
+
+  it("preserves user order while dropping corrupt and duplicate entries", () => {
+    expect(
+      resolveConversationSidebarMetadata({
+        metadata: ["provider", "agent", "provider", "bogus"],
+      } as never)
+    ).toEqual(["provider", "agent"])
+    expect(CONVERSATION_SIDEBAR_METADATA_OPTIONS).toEqual([
+      "agent",
+      "model",
+      "provider",
+      "workspace",
+    ])
+  })
+
+  it("adds and removes one field without reordering siblings", () => {
+    expect(toggleConversationSidebarMetadata(["agent", "model"], "provider", true)).toEqual([
+      "agent",
+      "model",
+      "provider",
+    ])
+    expect(toggleConversationSidebarMetadata(["agent", "model"], "agent", false)).toEqual(["model"])
   })
 })

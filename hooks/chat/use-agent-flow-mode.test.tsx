@@ -48,6 +48,11 @@ describe("useAgentFlowMode", () => {
     await act(async () => {
       result.current.setMode("simplified")
     })
-    expect(saveMock).toHaveBeenCalledWith({ agentFlowMode: { mode: "simplified" } })
+    expect(saveMock).toHaveBeenCalledWith({
+      messageDisplay: {
+        preset: "balanced",
+        overrides: { agentFlowMode: "simplified" },
+      },
+    })
   })
 })

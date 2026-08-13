@@ -251,6 +251,7 @@ function MarkdownTable({
     <div
       className="not-typeset flex items-center justify-end gap-1"
       data-testid="markdown-table-actions"
+      data-message-rich-control
     >
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

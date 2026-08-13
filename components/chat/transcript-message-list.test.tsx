@@ -4,18 +4,22 @@ import type { UIMessage } from "ai"
 import { TranscriptMessageList } from "./transcript-message-list"
 
 const renderedMessageIds: string[] = []
+const renderedMessageDisplays: unknown[] = []
 
 jest.mock("./message-renderer", () => ({
   MessageRenderer: ({
     message,
     isStreaming,
     isLastAssistant,
+    messageDisplay,
   }: {
     message: UIMessage
     isStreaming?: boolean
     isLastAssistant?: boolean
+    messageDisplay?: unknown
   }) => {
     renderedMessageIds.push(message.id)
+    renderedMessageDisplays.push(messageDisplay)
     return (
       <div
         data-testid={`canonical-message-${message.id}`}
@@ -54,6 +58,7 @@ function message(id: string, role: UIMessage["role"], text: string): UIMessage {
 describe("<TranscriptMessageList />", () => {
   beforeEach(() => {
     renderedMessageIds.length = 0
+    renderedMessageDisplays.length = 0
     visibleIndexes = null
     virtualizerOptions = null
   })
@@ -74,6 +79,18 @@ describe("<TranscriptMessageList />", () => {
           } as UIMessage,
         ]}
         status="streaming"
+        messageDisplay={{
+          preset: "inspector",
+          layout: "hybrid",
+          metadata: {} as never,
+          actions: "all",
+          agentFlowMode: "detailed",
+          reasoning: "expanded",
+          tools: "expanded",
+          sources: "expanded",
+          richControls: "always",
+          motion: "restrained",
+        }}
       />
     )
 
@@ -84,6 +101,10 @@ describe("<TranscriptMessageList />", () => {
       "true"
     )
     expect(renderedMessageIds).toEqual(["u1", "a1"])
+    expect(renderedMessageDisplays).toEqual([
+      expect.objectContaining({ preset: "inspector" }),
+      expect.objectContaining({ preset: "inspector" }),
+    ])
   })
 
   it("mounts only the virtualizer window for a large transcript", () => {

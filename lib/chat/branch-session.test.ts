@@ -41,6 +41,7 @@ async function seedSource(overrides: Partial<ChatSession> = {}): Promise<ChatSes
     kind: "direct",
     model: "claude-x",
     systemPrompt: "be nice",
+    messageDisplayOverride: { preset: "inspector" },
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -259,6 +260,7 @@ describe("branchSessionAtMessage — direct", () => {
     expect(child.branchKind).toBe("direct")
     expect(child.model).toBe("claude-x")
     expect(child.systemPrompt).toBe("be nice")
+    expect(child.messageDisplayOverride).toEqual({ preset: "inspector" })
     expect(child.title).toBe("Original (branch)")
 
     const msgs = await listMessages(child.id)

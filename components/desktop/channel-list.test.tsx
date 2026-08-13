@@ -223,8 +223,8 @@ test("DM guild renders only direct sessions, grouped into date buckets", () => {
   // The rail's DM/Team split is the `"team"` grouping mode; the default
   // (`"workspace"`) deliberately stops filtering by guild.
   conversationSidebar = { groupBy: "team" }
-  // queries: characters, sessionStates (none), team (none)
-  callQueue.push(characters, [], undefined)
+  // queries: characters, sessionStates (none), teams (none)
+  callQueue.push(characters, [], [])
   render(
     <ChannelList
       sessions={[dmSession, teamSession]}
@@ -378,6 +378,42 @@ test("constrains long session titles to the history rail width", () => {
   )
   expect(container.querySelector('[data-slot="scroll-area"]')?.className).toContain(
     "[&_[data-slot=scroll-area-scrollbar]]:hidden"
+  )
+})
+
+test("shows configured agent, model, and provider details using session precedence", () => {
+  conversationSidebar = {
+    groupBy: "team",
+    metadata: ["agent", "model", "provider"],
+    titleMotion: "off",
+  }
+  callQueue.push(characters, [], undefined)
+
+  render(
+    <ChannelList
+      sessions={[
+        {
+          ...dmSession,
+          model: "claude-sonnet-4-6",
+          providerOverride: "anthropic",
+        },
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  const details = screen.getByTestId("session-row-metadata")
+  expect(details).toHaveTextContent("Alice")
+  expect(details).toHaveTextContent("Claude Sonnet 4.6")
+  expect(details).toHaveTextContent("Anthropic")
+  expect(screen.getByText("Hi Alice").closest('[data-slot="hover-scroll-text"]')).toHaveAttribute(
+    "data-motion",
+    "off"
   )
 })
 
@@ -632,6 +668,16 @@ test.each([
     initial: { searchScope: "titleAndContent" },
     expected: { searchScope: "title" },
   },
+  {
+    label: "metadata.provider",
+    initial: { metadata: ["agent", "model"] },
+    expected: { metadata: ["agent", "model", "provider"] },
+  },
+  {
+    label: "titleMotion",
+    initial: { titleMotion: "hover" },
+    expected: { titleMotion: "off" },
+  },
 ])("display option $label persists its preference without dropping siblings", async (testCase) => {
   conversationSidebar = testCase.initial
   callQueue.push(characters, [], undefined)
@@ -769,7 +815,7 @@ test("a failed display-option save does not block the next queued change", async
 test("Team guild renders only that team's sessions", () => {
   conversationSidebar = { groupBy: "team" }
   selectedGuild = { kind: "team", teamId: "t-1" }
-  callQueue.push(characters, [], team)
+  callQueue.push(characters, [], [team])
   render(
     <ChannelList
       sessions={[dmSession, teamSession]}
@@ -781,7 +827,7 @@ test("Team guild renders only that team's sessions", () => {
       onRename={jest.fn()}
     />
   )
-  expect(screen.getByText("Squad")).toBeInTheDocument()
+  expect(screen.getAllByText("Squad")).toHaveLength(2)
   expect(screen.getByText("Squad meeting")).toBeInTheDocument()
   expect(screen.queryByText("Hi Alice")).toBeNull()
 })
@@ -832,6 +878,45 @@ describe("workspace grouping (the default axis)", () => {
       "data-[state=open]:animate-collapsible-down",
       "motion-reduce:animate-none"
     )
+  })
+
+  it("shows agent metadata for team conversations outside the selected guild", () => {
+    const otherTeam = { ...team, id: "t-2", name: "Platform" }
+    callQueue.push(characters, [], [team, otherTeam])
+
+    render(
+      <ChannelList
+        sessions={[
+          baseSession("squad", {
+            kind: "team",
+            teamId: team.id,
+            projectId: "w1",
+            title: "Squad planning",
+          }),
+          baseSession("platform", {
+            kind: "team",
+            teamId: otherTeam.id,
+            projectId: "w1",
+            title: "Platform planning",
+          }),
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+
+    expect(
+      within(screen.getByText("Squad planning").closest("li")!).getByTestId("session-row-metadata")
+    ).toHaveTextContent("Squad")
+    expect(
+      within(screen.getByText("Platform planning").closest("li")!).getByTestId(
+        "session-row-metadata"
+      )
+    ).toHaveTextContent("Platform")
   })
 
   it("toggling a workspace header records an explicit collapse choice", async () => {
@@ -937,7 +1022,7 @@ test("Empty DM state CTA calls onNewDirect", async () => {
 
 test("Empty team state CTA routes to onNewTeamConversation with teamId", async () => {
   selectedGuild = { kind: "team", teamId: "t-1" }
-  callQueue.push(characters, [], team)
+  callQueue.push(characters, [], [team])
   const onNew = jest.fn()
   const user = userEvent.setup()
   render(

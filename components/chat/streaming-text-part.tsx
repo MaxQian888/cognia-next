@@ -27,6 +27,7 @@ import { parseProjectFileReference } from "@/lib/files/project-file-reference"
 import { cn } from "@/lib/utils"
 import { MarkdownRenderer } from "./markdown-renderer"
 import { chatMarkdownUrlTransform, chatStreamdownRehypePlugins } from "./markdown/rendering-policy"
+import type { MessageRichControls } from "@/types/appearance"
 import {
   createIncrementalMarkdownBlockParser,
   type MarkdownBlockParser,
@@ -36,6 +37,7 @@ interface Props {
   text: string
   isStreaming: boolean
   projectRoot?: string | null
+  richControls?: MessageRichControls
 }
 
 interface FinalizedProps {
@@ -209,7 +211,7 @@ export function createStreamingComponents(
   }
 }
 
-function StreamingTextPartInner({ text, isStreaming, projectRoot }: Props) {
+function StreamingTextPartInner({ text, isStreaming, projectRoot, richControls = "hover" }: Props) {
   const [parser] = useState<MarkdownBlockParser>(() =>
     createIncrementalMarkdownBlockParser(parseMarkdownIntoBlocks)
   )
@@ -227,7 +229,8 @@ function StreamingTextPartInner({ text, isStreaming, projectRoot }: Props) {
         BlockComponent={ContainedStreamdownBlock}
         className="typeset typeset-chat"
         components={components}
-        controls={{ table: false }}
+        controls={richControls === "hidden" ? false : { table: false }}
+        data-rich-controls={richControls}
         isAnimating={isStreaming}
         mode="streaming"
         parseMarkdownIntoBlocksFn={parser}
@@ -239,11 +242,15 @@ function StreamingTextPartInner({ text, isStreaming, projectRoot }: Props) {
       <span
         aria-hidden
         data-testid="streaming-caret"
-        className={cn(
-          "ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 rounded-full bg-foreground/60 align-middle",
-          !reduce && "animate-pulse"
-        )}
-      />
+        className="relative inline-block h-4 w-0 align-middle"
+      >
+        <span
+          className={cn(
+            "absolute bottom-0 left-0.5 h-4 w-[2px] rounded-full bg-foreground/60",
+            !reduce && "animate-pulse"
+          )}
+        />
+      </span>
     </>
   )
 }
@@ -253,6 +260,7 @@ export const StreamingTextPart = memo(
   (prev, next) =>
     prev.text === next.text &&
     prev.isStreaming === next.isStreaming &&
-    prev.projectRoot === next.projectRoot
+    prev.projectRoot === next.projectRoot &&
+    prev.richControls === next.richControls
 )
 StreamingTextPart.displayName = "StreamingTextPart"

@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef } from "react"
+import { useEffect, useRef } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import type { UIMessage } from "ai"
 import type {
@@ -16,6 +16,7 @@ import { PerfBoundary } from "@/lib/perf"
 import type { TranscriptRenderStatus } from "./transcript-message-list"
 import { MessageRenderer } from "./message-renderer"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
+import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 
 export interface TranscriptTimelineLabels {
   expand: string
@@ -55,6 +56,7 @@ export interface TranscriptTimelineSurfaceProps {
     projectRoot?: string | null
     /** Mutations are exposed only for rows present in the caller's writable window. */
     mutableMessageIds?: ReadonlySet<string>
+    messageDisplay?: ResolvedMessageDisplayOptions
   }
 }
 
@@ -120,6 +122,7 @@ function renderMessages(
       }
       onRewindFiles={adapters?.onRewindFiles}
       projectRoot={adapters?.projectRoot}
+      messageDisplay={adapters?.messageDisplay}
     />
   ))
 }
@@ -144,6 +147,9 @@ export function TranscriptTimelineSurface(props: TranscriptTimelineSurfaceProps)
     overscan: 4,
     measureElement: (element) => Math.round(element?.getBoundingClientRect().height ?? 0),
   })
+  useEffect(() => {
+    if (typeof virtualizer.measure === "function") virtualizer.measure()
+  }, [props.renderAdapters?.messageDisplay, virtualizer])
   const newestCompletedItemKey = [...props.items]
     .reverse()
     .find((item) => item.kind === "completed-turn")?.itemKey

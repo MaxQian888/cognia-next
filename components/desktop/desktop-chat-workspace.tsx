@@ -53,15 +53,18 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@cognia/logging"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
+import { usePlatform } from "@/hooks/use-platform"
 import {
   resolveOperationAvailability,
   type OperationAvailabilityState,
 } from "@/lib/runtime/operation-availability"
+import { resolveRuntimeRecovery } from "@/lib/runtime/recovery-resolver"
 
 const log = loggers.shell
 
 export function DesktopChatWorkspace() {
   const router = useRouter()
+  const platform = usePlatform()
   const runtimeT = useTranslations("desktop.chatRuntime")
   const runtimeSnapshot = useRuntimeSnapshot()
   const chatAvailability = resolveOperationAvailability({
@@ -71,6 +74,7 @@ export function DesktopChatWorkspace() {
     readOnlyFallback: true,
   })
   const composerDisabled = chatAvailability.state !== "available"
+  const runtimeRecovery = resolveRuntimeRecovery(chatAvailability, platform)
   // Grouping by workspace is the one mode that needs conversations from every
   // workspace; every other mode keeps the sidebar workspace-isolated.
   const sidebarGroupBy = resolveConversationGroupBy(
@@ -596,12 +600,18 @@ export function DesktopChatWorkspace() {
                           )}
                         </p>
                       </div>
-                      {runtimeRecoveryRoute(chatAvailability.state) ? (
+                      {runtimeRecovery.kind !== "none" ? (
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => router.push(runtimeRecoveryRoute(chatAvailability.state)!)}
+                          onClick={() => {
+                            if (runtimeRecovery.kind === "route") {
+                              router.push(runtimeRecovery.href)
+                            } else if (runtimeRecovery.kind === "local-settings") {
+                              openSettings(runtimeRecovery.section)
+                            }
+                          }}
                         >
                           {runtimeT(
                             chatAvailability.state === "requires-pairing"
@@ -669,12 +679,4 @@ export function DesktopChatWorkspace() {
 
 function runtimeAvailabilityMessageKey(state: OperationAvailabilityState): string {
   return state.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
-}
-
-function runtimeRecoveryRoute(state: OperationAvailabilityState): string | null {
-  if (state === "requires-pairing") return "/pair"
-  if (state === "requires-grant" || state === "incompatible" || state === "offline") {
-    return "/settings?section=remote-hosts"
-  }
-  return null
 }

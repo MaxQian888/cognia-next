@@ -41,6 +41,23 @@ describe("HoverScrollText", () => {
     expect(text.style.getPropertyValue("--hover-scroll-content-width")).toBe("244px")
     expect(text.style.getPropertyValue("--hover-scroll-duration")).toBe("3000ms")
     expect(text.style.getPropertyValue("--hover-scroll-delay")).toBe("400ms")
+    expect(text.style.getPropertyValue("--hover-scroll-cycle-duration")).toBe("6800ms")
+  })
+
+  it("keeps overflowing text static when motion is disabled", () => {
+    render(<HoverScrollText text="A complete conversation title" motion="off" />)
+
+    const text = screen.getByText("A complete conversation title")
+    const viewport = text.parentElement!
+    Object.defineProperty(viewport, "clientWidth", { configurable: true, value: 100 })
+    Object.defineProperty(text, "scrollWidth", { configurable: true, value: 244 })
+
+    fireEvent.mouseEnter(viewport)
+
+    expect(text).not.toHaveAttribute("data-scrolling")
+    expect(text).toHaveClass("truncate")
+    expect(viewport).toHaveAttribute("data-motion", "off")
+    expect(viewport).toHaveAttribute("title", "A complete conversation title")
   })
 
   it("keeps reduced-motion titles truncated and exposes a static hover fallback", () => {

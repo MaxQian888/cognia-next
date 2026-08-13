@@ -222,7 +222,10 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
         role="figure"
         aria-label={t("diagramLabel")}
       >
-        <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity z-10 bg-background/80 rounded-lg p-0.5">
+        <div
+          data-message-rich-control
+          className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity z-10 bg-background/80 rounded-lg p-0.5"
+        >
           <TooltipIconButton
             variant="ghost"
             size="icon"

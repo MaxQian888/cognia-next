@@ -5,7 +5,7 @@ import { SessionRow } from "./session-row"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 
 // The channel-list session row: icon + title (double-click to rename inline),
-// optional pin/branch indicators + unread badge, and a hover actions menu.
+// optional metadata, pin/branch indicators + unread badge, and a hover actions menu.
 const makeSession = (over: Partial<ChatSession> = {}): ChatSession =>
   ({
     id: "ses_1",
@@ -58,6 +58,16 @@ export const Pinned: Story = {
 
 export const Unread: Story = { args: { unread: 7 } }
 
+export const RichMetadata: Story = {
+  args: {
+    metadata: [
+      { kind: "agent", value: "Research Agent" },
+      { kind: "model", value: "Claude Sonnet 4.5" },
+      { kind: "provider", value: "Anthropic" },
+    ],
+  },
+}
+
 export const TeamSession: Story = {
   args: { session: makeSession({ kind: "team", title: "Release squad", teamId: "t1" }) },
 }
@@ -71,6 +81,10 @@ export const LongTitle: Story = {
     }),
     unread: 12,
     showPreview: true,
+    metadata: [
+      { kind: "agent", value: "Release Coordinator" },
+      { kind: "model", value: "GPT-5.4" },
+    ],
   },
 }
 

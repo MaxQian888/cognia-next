@@ -46,7 +46,7 @@ import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
-import { getTeam } from "@/lib/db/teams"
+import { listTeams } from "@/lib/db/teams"
 import { loggers } from "@cognia/logging"
 import { avatarColor } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
@@ -85,16 +85,22 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 import type {
   ConversationGroupBy,
+  ConversationSidebarMetadata,
   ConversationSidebarSettings,
   ConversationSidebarDensity,
   ConversationSearchScope,
+  ConversationSidebarTitleMotion,
 } from "@cognia/agent-config-types"
 import { conversationSectionKey, UNGROUPED_ID } from "@/lib/chat/conversation-list-model"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
 import {
   CONVERSATION_GROUP_BY_OPTIONS,
+  CONVERSATION_SIDEBAR_METADATA_OPTIONS,
   resolveConversationGroupBy,
+  resolveConversationSidebarMetadata,
+  toggleConversationSidebarMetadata,
 } from "@/lib/chat/conversation-grouping"
+import { getModelDisplayName, getProviderDisplayName } from "@/lib/ai/icons"
 import type { Character, ChatSession, SessionFolder, Team } from "@cognia/agent-config-types"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import {
@@ -129,7 +135,7 @@ import {
   type ReactNode,
 } from "react"
 import { ChannelListBulkActions } from "./channel-list-bulk-actions"
-import { SessionRow } from "./session-row"
+import { SessionRow, type SessionRowMetadataItem } from "./session-row"
 
 const log = loggers.ui
 
@@ -140,6 +146,7 @@ const log = loggers.ui
  * note below). Hoisting the fallback keeps the reference constant.
  */
 const EMPTY_FOLDERS: SessionFolder[] = []
+const EMPTY_SESSION_METADATA: SessionRowMetadataItem[] = []
 
 /** Maps a date bucket to its `desktop.channelList` label key. */
 const BUCKET_LABEL_KEY: Record<DateBucket, string> = {
@@ -374,12 +381,19 @@ function ChannelListBody({
   // Behavior preferences (Settings → Conversation). Absent settings fall back
   // to today's defaults so the sidebar renders identically before load.
   const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
+  const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
+  const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const saveSettings = useSettingsStore((s) => s.save)
   const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
   const showPreview = sidebarSettings?.showPreview ?? false
   const groupBy = resolveConversationGroupBy(sidebarSettings)
   const showUnreadBadges = sidebarSettings?.showUnreadBadges ?? true
   const searchScope: ConversationSearchScope = sidebarSettings?.searchScope ?? "title"
+  const metadataFields = useMemo(
+    () => resolveConversationSidebarMetadata(sidebarSettings),
+    [sidebarSettings]
+  )
+  const titleMotion: ConversationSidebarTitleMotion = sidebarSettings?.titleMotion ?? "hover"
   const sidebarSettingsRef = useRef(sidebarSettings)
   const sidebarSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const pendingSidebarSavesRef = useRef(0)
@@ -438,11 +452,9 @@ function ChannelListBody({
     return map
   }, [sessionStates, showUnreadBadges])
 
-  const team = useClientLiveQuery<Team | undefined>(
-    () => (chatGuild.kind === "team" ? getTeam(chatGuild.teamId) : Promise.resolve(undefined)),
-    [chatGuild],
-    undefined
-  )
+  const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
+  const teamById = useMemo(() => new Map(teams.map((item) => [item.id, item])), [teams])
+  const team = chatGuild.kind === "team" ? teamById.get(chatGuild.teamId) : undefined
 
   // Filter the session list by selected guild — but only under `groupBy: "team"`.
   //
@@ -530,6 +542,10 @@ function ChannelListBody({
     () => projects.map((p) => ({ id: p.id, name: p.name })),
     [projects]
   )
+  const workspaceById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.name])),
+    [projects]
+  )
   const agentGroups = useMemo(
     () => (characters ?? []).map((c) => ({ id: c.id, name: c.name })),
     [characters]
@@ -557,11 +573,54 @@ function ChannelListBody({
   // their character color. Replaces the old per-character group accent.
   const accentFor = useCallback(
     (s: ChatSession): string | undefined => {
-      if (s.kind === "team") return team ? avatarColor(team) : undefined
+      if (s.kind === "team") {
+        const sessionTeam = s.teamId ? teamById.get(s.teamId) : undefined
+        return sessionTeam ? avatarColor(sessionTeam) : undefined
+      }
       const character = s.characterId ? characterById.get(s.characterId) : null
       return character ? avatarColor(character) : undefined
     },
-    [team, characterById]
+    [teamById, characterById]
+  )
+
+  const metadataBySessionId = useMemo(() => {
+    const result = new Map<string, SessionRowMetadataItem[]>()
+    for (const session of filtered) {
+      const character = session.characterId ? characterById.get(session.characterId) : undefined
+      const values: Record<ConversationSidebarMetadata, string | undefined> = {
+        agent:
+          session.kind === "team"
+            ? session.teamId
+              ? teamById.get(session.teamId)?.name
+              : undefined
+            : character?.name,
+        model: getModelDisplayName(
+          session.model ?? character?.model ?? defaultModel ?? "claude-sonnet-4-5"
+        ),
+        provider: getProviderDisplayName(
+          session.providerOverride ?? character?.providerId ?? defaultProvider ?? "anthropic"
+        ),
+        workspace: session.projectId ? workspaceById.get(session.projectId) : undefined,
+      }
+      const metadata = metadataFields.flatMap((kind) => {
+        const value = values[kind]
+        return value ? [{ kind, value }] : []
+      })
+      result.set(session.id, metadata)
+    }
+    return result
+  }, [
+    characterById,
+    defaultModel,
+    defaultProvider,
+    filtered,
+    metadataFields,
+    teamById,
+    workspaceById,
+  ])
+  const metadataFor = useCallback(
+    (session: ChatSession) => metadataBySessionId.get(session.id) ?? EMPTY_SESSION_METADATA,
+    [metadataBySessionId]
   )
 
   const selection = useRangeSelection(orderedIds)
@@ -758,6 +817,8 @@ function ChannelListBody({
           groupBy={groupBy}
           showUnreadBadges={showUnreadBadges}
           searchScope={searchScope}
+          metadataFields={metadataFields}
+          titleMotion={titleMotion}
           onUpdateDisplay={saveSidebarSettings}
           onToggleView={() => setView(view === "active" ? "archived" : "active")}
           onNewFolder={
@@ -821,6 +882,8 @@ function ChannelListBody({
                 focusedId={focusedId}
                 density={density}
                 showPreview={showPreview}
+                metadataFor={metadataFor}
+                titleMotion={titleMotion}
                 unreadById={unreadById}
                 isSelected={isSelected}
                 onToggleSelection={handleToggleSelection}
@@ -958,6 +1021,8 @@ function Header({
   groupBy,
   showUnreadBadges,
   searchScope,
+  metadataFields,
+  titleMotion,
   onUpdateDisplay,
   onToggleView,
   onNewFolder,
@@ -972,6 +1037,8 @@ function Header({
   groupBy: ConversationGroupBy
   showUnreadBadges: boolean
   searchScope: ConversationSearchScope
+  metadataFields: ConversationSidebarMetadata[]
+  titleMotion: ConversationSidebarTitleMotion
   onUpdateDisplay: (patch: Partial<ConversationSidebarSettings>) => void
   onToggleView: () => void
   onNewFolder?: () => void
@@ -1038,6 +1105,35 @@ function Header({
               onCheckedChange={(checked) => onUpdateDisplay({ showPreview: Boolean(checked) })}
             >
               {t("showPreview")}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              {t("metadata.label")}
+            </DropdownMenuLabel>
+            {CONVERSATION_SIDEBAR_METADATA_OPTIONS.map((field) => (
+              <DropdownMenuCheckboxItem
+                key={field}
+                checked={metadataFields.includes(field)}
+                onCheckedChange={(checked) =>
+                  onUpdateDisplay({
+                    metadata: toggleConversationSidebarMetadata(
+                      metadataFields,
+                      field,
+                      Boolean(checked)
+                    ),
+                  })
+                }
+              >
+                {t(`metadata.${field}`)}
+              </DropdownMenuCheckboxItem>
+            ))}
+            <DropdownMenuCheckboxItem
+              checked={titleMotion === "hover"}
+              onCheckedChange={(checked) =>
+                onUpdateDisplay({ titleMotion: checked ? "hover" : "off" })
+              }
+            >
+              {t("titleMotion")}
             </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
@@ -1110,6 +1206,8 @@ function ConversationSections({
   focusedId,
   density,
   showPreview,
+  metadataFor,
+  titleMotion,
   unreadById,
   isSelected,
   onToggleSelection,
@@ -1134,6 +1232,8 @@ function ConversationSections({
   focusedId: string | null
   density: ConversationSidebarDensity
   showPreview: boolean
+  metadataFor: (session: ChatSession) => SessionRowMetadataItem[]
+  titleMotion: ConversationSidebarTitleMotion
   unreadById: Map<string, number>
   isSelected: (id: string) => boolean
   onToggleSelection: (id: string) => void
@@ -1161,6 +1261,8 @@ function ConversationSections({
     focused: s.id === focusedId,
     density,
     showPreview,
+    metadata: metadataFor(s),
+    titleMotion,
     accentColor: accentFor(s),
     unread: unreadById.get(s.id),
     folders,
