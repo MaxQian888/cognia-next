@@ -223,6 +223,11 @@
       "category": "knowledge"
     },
     {
+      "id": "performance",
+      "title": "Performance",
+      "category": "system"
+    },
+    {
       "id": "plugin",
       "title": "Plugin",
       "category": "extensions"
@@ -6001,6 +6006,453 @@
       "outputTyped": true
     },
     {
+      "name": "connectors_matrix_crypto_close",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_crypto_close (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "adapter_id"
+        ],
+        "properties": {
+          "adapter_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `adapterId`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_crypto_decrypt_event",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_crypto_decrypt_event (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "req"
+        ],
+        "properties": {
+          "req": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "connectors"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_crypto_encrypt_event",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_crypto_encrypt_event (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "req"
+        ],
+        "properties": {
+          "req": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "connectors"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_crypto_get_missing_sessions",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_crypto_get_missing_sessions (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "req"
+        ],
+        "properties": {
+          "req": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "connectors"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_crypto_init",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_crypto_init (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "req"
+        ],
+        "properties": {
+          "req": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_crypto_mark_request_sent",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_crypto_mark_request_sent (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "req"
+        ],
+        "properties": {
+          "req": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_crypto_outgoing_requests",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_crypto_outgoing_requests (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "adapter_id"
+        ],
+        "properties": {
+          "adapter_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `adapterId`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "connectors"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_crypto_receive_sync_changes",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_crypto_receive_sync_changes (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "req"
+        ],
+        "properties": {
+          "req": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_crypto_share_room_key",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_crypto_share_room_key (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "req"
+        ],
+        "properties": {
+          "req": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "connectors"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_crypto_update_tracked_users",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_crypto_update_tracked_users (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "req"
+        ],
+        "properties": {
+          "req": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_encrypted_media_fetch",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_encrypted_media_fetch (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "req"
+        ],
+        "properties": {
+          "req": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "connectors"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_matrix_encrypted_media_upload",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_matrix_encrypted_media_upload (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "req"
+        ],
+        "properties": {
+          "req": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "connectors"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "connectors_media_upload",
       "category": "connectors",
       "resource": "connectors",
@@ -8170,7 +8622,7 @@
       "idempotency": "structural",
       "summary": "git_blame (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8179,16 +8631,15 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "path": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "rev": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -8224,7 +8675,7 @@
       "idempotency": "structural",
       "summary": "git_branches (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8232,7 +8683,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8268,7 +8720,7 @@
       "idempotency": "required",
       "summary": "git_checkout_branch (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8277,10 +8729,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8303,7 +8757,7 @@
       "idempotency": "required",
       "summary": "git_cherry_pick (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8312,10 +8766,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "sha": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8338,7 +8794,7 @@
       "idempotency": "required",
       "summary": "git_clone (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8347,17 +8803,32 @@
         ],
         "properties": {
           "remoteUrl": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "destination": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "string"
+        "type": "object",
+        "required": [
+          "workspaceId",
+          "relativePath"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "relativePath": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -8373,7 +8844,7 @@
       "idempotency": "required",
       "summary": "git_commit (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8384,16 +8855,20 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "amend": {
-            "type": "boolean"
+            "type": "boolean",
+            "example": false
           },
           "signoff": {
-            "type": "boolean"
+            "type": "boolean",
+            "example": false
           }
         },
         "additionalProperties": false
@@ -8419,7 +8894,7 @@
       "idempotency": "structural",
       "summary": "git_commit_files (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8428,10 +8903,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "sha": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8467,7 +8944,7 @@
       "idempotency": "structural",
       "summary": "git_conflicts (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8475,7 +8952,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8511,7 +8989,7 @@
       "idempotency": "required",
       "summary": "git_create_branch (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8521,19 +8999,19 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "checkout": {
-            "type": "boolean"
+            "type": "boolean",
+            "example": false
           },
           "from": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -8556,7 +9034,7 @@
       "idempotency": "required",
       "summary": "git_create_tag (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8565,22 +9043,18 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "message": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "target": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -8603,7 +9077,7 @@
       "idempotency": "required",
       "summary": "git_delete_branch (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8613,13 +9087,16 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "force": {
-            "type": "boolean"
+            "type": "boolean",
+            "example": false
           }
         },
         "additionalProperties": false
@@ -8642,7 +9119,7 @@
       "idempotency": "required",
       "summary": "git_delete_tag (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8651,10 +9128,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8677,7 +9156,7 @@
       "idempotency": "structural",
       "summary": "git_diff_commit (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8687,13 +9166,16 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "sha": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "path": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8719,7 +9201,7 @@
       "idempotency": "structural",
       "summary": "git_diff_file (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8729,13 +9211,16 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "path": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "staged": {
-            "type": "boolean"
+            "type": "boolean",
+            "example": false
           }
         },
         "additionalProperties": false
@@ -8761,7 +9246,7 @@
       "idempotency": "structural",
       "summary": "git_diff_refs_file (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8772,16 +9257,20 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "base": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "target": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "path": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8807,7 +9296,7 @@
       "idempotency": "structural",
       "summary": "git_diff_refs_files (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8817,13 +9306,16 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "base": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "target": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8849,7 +9341,7 @@
       "idempotency": "structural",
       "summary": "git_diff_staged_all (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8857,7 +9349,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8880,7 +9373,7 @@
       "idempotency": "structural",
       "summary": "git_diff_stat (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8888,7 +9381,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -8914,7 +9408,7 @@
       "idempotency": "required",
       "summary": "git_discard (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8923,19 +9417,18 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "paths": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "example": []
           },
           "hunkPatch": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -8958,7 +9451,7 @@
       "idempotency": "required",
       "summary": "git_discard_all (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -8967,10 +9460,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "includeUntracked": {
-            "type": "boolean"
+            "type": "boolean",
+            "example": false
           }
         },
         "additionalProperties": false
@@ -8993,7 +9488,7 @@
       "idempotency": "required",
       "summary": "git_fetch (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9001,13 +9496,11 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "remote": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "prune": {
             "type": "boolean"
@@ -9033,7 +9526,7 @@
       "idempotency": "structural",
       "summary": "git_file_history (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9043,13 +9536,18 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "path": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "maxCount": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0
           }
         },
         "additionalProperties": false
@@ -9085,7 +9583,7 @@
       "idempotency": "structural",
       "summary": "git_identity (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9093,7 +9591,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9119,7 +9618,7 @@
       "idempotency": "required",
       "summary": "git_ignore_add (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9128,10 +9627,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "pattern": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9154,7 +9655,7 @@
       "idempotency": "required",
       "summary": "git_init (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9162,7 +9663,8 @@
         ],
         "properties": {
           "path": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9185,7 +9687,7 @@
       "idempotency": "required",
       "summary": "git_interactive_rebase (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9195,10 +9697,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "base": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "entries": {
             "type": "array",
@@ -9206,7 +9710,8 @@
               "type": "object",
               "additionalProperties": {},
               "example": {}
-            }
+            },
+            "example": []
           }
         },
         "additionalProperties": false
@@ -9229,7 +9734,7 @@
       "idempotency": "structural",
       "summary": "git_is_repo (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9237,7 +9742,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9260,7 +9766,7 @@
       "idempotency": "structural",
       "summary": "git_log (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9270,13 +9776,20 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "maxCount": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0
           },
           "skip": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0
           }
         },
         "additionalProperties": false
@@ -9312,7 +9825,7 @@
       "idempotency": "required",
       "summary": "git_merge (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9321,10 +9834,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "branch": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9347,7 +9862,7 @@
       "idempotency": "required",
       "summary": "git_merge_abort (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9355,7 +9870,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9378,7 +9894,7 @@
       "idempotency": "required",
       "summary": "git_pull (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9386,19 +9902,14 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "remote": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "branch": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "rebase": {
             "type": "boolean"
@@ -9424,7 +9935,7 @@
       "idempotency": "required",
       "summary": "git_push (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9432,19 +9943,14 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "remote": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "branch": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "setUpstream": {
             "type": "boolean"
@@ -9473,7 +9979,7 @@
       "idempotency": "required",
       "summary": "git_push_tag (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9483,13 +9989,16 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "remote": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9512,7 +10021,7 @@
       "idempotency": "required",
       "summary": "git_rebase (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9521,10 +10030,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "onto": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9547,7 +10058,7 @@
       "idempotency": "structural",
       "summary": "git_rebase_commits (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9556,10 +10067,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "base": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9595,7 +10108,7 @@
       "idempotency": "structural",
       "summary": "git_refs (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9603,7 +10116,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9639,7 +10153,7 @@
       "idempotency": "required",
       "summary": "git_remote_add (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9649,13 +10163,16 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "url": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9678,7 +10195,7 @@
       "idempotency": "required",
       "summary": "git_remote_remove (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9687,10 +10204,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9713,7 +10232,7 @@
       "idempotency": "structural",
       "summary": "git_remotes (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9721,7 +10240,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9757,7 +10277,7 @@
       "idempotency": "required",
       "summary": "git_rename_branch (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9766,16 +10286,15 @@
         ],
         "properties": {
           "repoPath": {
+            "type": "string",
+            "example": ""
+          },
+          "old": {
             "type": "string"
           },
           "newName": {
-            "type": "string"
-          },
-          "old": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9798,7 +10317,7 @@
       "idempotency": "structural",
       "summary": "git_repo_state (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9806,7 +10325,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9832,7 +10352,7 @@
       "idempotency": "required",
       "summary": "git_reset (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9842,13 +10362,16 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "mode": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "target": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -9871,7 +10394,7 @@
       "idempotency": "required",
       "summary": "git_resolve_conflict (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9880,26 +10403,20 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "path": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "mergedContent": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "side": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "enum": [
-              "ours",
-              "theirs"
-            ]
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
           }
         },
         "additionalProperties": false
@@ -9922,7 +10439,7 @@
       "idempotency": "required",
       "summary": "git_restore (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9932,22 +10449,22 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "paths": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "example": []
           },
           "staged": {
-            "type": "boolean"
+            "type": "boolean",
+            "example": false
           },
           "source": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -9970,7 +10487,7 @@
       "idempotency": "required",
       "summary": "git_revert (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -9979,10 +10496,12 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "sha": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -10005,7 +10524,7 @@
       "idempotency": "required",
       "summary": "git_sequencer_abort (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10013,7 +10532,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -10036,7 +10556,7 @@
       "idempotency": "required",
       "summary": "git_sequencer_continue (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10044,7 +10564,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -10067,24 +10588,26 @@
       "idempotency": "required",
       "summary": "git_set_identity (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
           "repoPath",
           "name",
-          "email",
-          "global"
+          "email"
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "email": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "global": {
             "type": "boolean"
@@ -10110,7 +10633,7 @@
       "idempotency": "required",
       "summary": "git_stage (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10119,19 +10642,18 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "paths": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "example": []
           },
           "hunkPatch": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -10154,7 +10676,7 @@
       "idempotency": "required",
       "summary": "git_stash_apply (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10163,10 +10685,14 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "index": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0
           }
         },
         "additionalProperties": false
@@ -10189,7 +10715,7 @@
       "idempotency": "required",
       "summary": "git_stash_drop (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10198,10 +10724,14 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "index": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0
           }
         },
         "additionalProperties": false
@@ -10224,7 +10754,7 @@
       "idempotency": "structural",
       "summary": "git_stash_list (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10232,7 +10762,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -10268,7 +10799,7 @@
       "idempotency": "required",
       "summary": "git_stash_pop (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10277,10 +10808,14 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "index": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0
           }
         },
         "additionalProperties": false
@@ -10303,7 +10838,7 @@
       "idempotency": "required",
       "summary": "git_stash_push (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10311,13 +10846,11 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "message": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "includeUntracked": {
             "type": "boolean"
@@ -10346,7 +10879,7 @@
       "idempotency": "structural",
       "summary": "git_status (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10354,7 +10887,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -10380,7 +10914,7 @@
       "idempotency": "required",
       "summary": "git_sync (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10388,7 +10922,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -10420,7 +10955,7 @@
       "idempotency": "structural",
       "summary": "git_tags (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10428,7 +10963,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -10464,7 +11000,7 @@
       "idempotency": "required",
       "summary": "git_unstage (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10473,19 +11009,18 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "paths": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "example": []
           },
           "hunkPatch": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -10493,6 +11028,43 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "git_workspace_list",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "git_workspace_list (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "git"
       },
       "outputTyped": true
     },
@@ -10508,7 +11080,7 @@
       "idempotency": "required",
       "summary": "git_worktree_add (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10518,19 +11090,19 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "path": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "branch": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "baseRef": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -10553,7 +11125,7 @@
       "idempotency": "required",
       "summary": "git_worktree_commit (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10562,10 +11134,12 @@
         ],
         "properties": {
           "worktreePath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -10591,7 +11165,7 @@
       "idempotency": "structural",
       "summary": "git_worktree_list (workspace.read)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10599,7 +11173,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -10635,7 +11210,7 @@
       "idempotency": "required",
       "summary": "git_worktree_prune (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10643,7 +11218,8 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           }
         },
         "additionalProperties": false
@@ -10666,7 +11242,7 @@
       "idempotency": "required",
       "summary": "git_worktree_remove (git.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "runtime-inferred",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -10676,19 +11252,19 @@
         ],
         "properties": {
           "repoPath": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "path": {
-            "type": "string"
+            "type": "string",
+            "example": ""
           },
           "force": {
-            "type": "boolean"
+            "type": "boolean",
+            "example": false
           },
           "deleteBranch": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -13451,6 +14027,1276 @@
         "additionalProperties": true,
         "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
         "x-cognia-schema-owner": "ocr"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_close_lease",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "performance.capture",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "perf_close_lease (performance.capture)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "leaseId"
+        ],
+        "properties": {
+          "leaseId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_hotspots",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "read",
+      "capability": "performance.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "perf_hotspots (performance.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "performance"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_lease_snapshot",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "read",
+      "capability": "performance.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "perf_lease_snapshot (performance.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "leaseId"
+        ],
+        "properties": {
+          "leaseId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "wireVersion",
+          "frames",
+          "oldestSequence",
+          "latestSequence",
+          "sources",
+          "leases",
+          "gaps",
+          "samples",
+          "running",
+          "intervalMs"
+        ],
+        "properties": {
+          "wireVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "frames": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "wireVersion",
+                "sourceId",
+                "targetId",
+                "routingGeneration",
+                "hostInstanceId",
+                "samplingSessionId",
+                "sequence",
+                "requestedIntervalMs",
+                "actualIntervalMs",
+                "monotonicElapsedMs",
+                "wallStartMs",
+                "wallEndMs",
+                "collectionDurationMs",
+                "missedTicks",
+                "flags",
+                "tsMs",
+                "intervalMs",
+                "processes",
+                "runtime",
+                "topSpans",
+                "systemMemory",
+                "managed"
+              ],
+              "properties": {
+                "wireVersion": {
+                  "type": "integer",
+                  "const": 1
+                },
+                "sourceId": {
+                  "type": "string"
+                },
+                "targetId": {
+                  "type": "string"
+                },
+                "routingGeneration": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "hostInstanceId": {
+                  "type": "string"
+                },
+                "samplingSessionId": {
+                  "type": "string"
+                },
+                "leaseId": {
+                  "type": "string"
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "requestedIntervalMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "actualIntervalMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "monotonicElapsedMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "wallStartMs": {
+                  "type": "integer"
+                },
+                "wallEndMs": {
+                  "type": "integer"
+                },
+                "collectionDurationMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "missedTicks": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "flags": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  }
+                },
+                "tsMs": {
+                  "type": "integer"
+                },
+                "intervalMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "processes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "runtime": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "topSpans": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "systemMemory": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                },
+                "managed": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "observations": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "oldestSequence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "latestSequence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "wireVersion",
+                "sourceId",
+                "kind",
+                "hostInstanceId",
+                "runtimeKind",
+                "build",
+                "metricSchemaVersion",
+                "capabilities",
+                "clock",
+                "connection"
+              ],
+              "properties": {
+                "wireVersion": {
+                  "type": "integer",
+                  "const": 1
+                },
+                "sourceId": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "renderer",
+                    "host"
+                  ]
+                },
+                "hostInstanceId": {
+                  "type": "string"
+                },
+                "runtimeKind": {
+                  "type": "string",
+                  "enum": [
+                    "browser",
+                    "tauri-rust",
+                    "node-headless"
+                  ]
+                },
+                "build": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "metricSchemaVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "uniqueItems": true
+                },
+                "clock": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "connection": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "leases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "wireVersion",
+                "leaseId",
+                "clientId",
+                "deviceId",
+                "targetId",
+                "routingGeneration",
+                "sourceId",
+                "purpose",
+                "requestedCadenceMs",
+                "samplingSessionId",
+                "openedAtMs",
+                "heartbeatAtMs",
+                "expiresAtMs"
+              ],
+              "properties": {
+                "wireVersion": {
+                  "type": "integer",
+                  "const": 1
+                },
+                "leaseId": {
+                  "type": "string"
+                },
+                "clientId": {
+                  "type": "string"
+                },
+                "deviceId": {
+                  "type": "string"
+                },
+                "targetId": {
+                  "type": "string"
+                },
+                "routingGeneration": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sourceId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "purpose": {
+                  "type": "string",
+                  "enum": [
+                    "live",
+                    "capture"
+                  ]
+                },
+                "requestedCadenceMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "samplingSessionId": {
+                  "type": "string"
+                },
+                "openedAtMs": {
+                  "type": "integer"
+                },
+                "heartbeatAtMs": {
+                  "type": "integer"
+                },
+                "expiresAtMs": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "wireVersion",
+                "sourceId",
+                "targetId",
+                "routingGeneration",
+                "hostInstanceId",
+                "samplingSessionId",
+                "sequence",
+                "requestedIntervalMs",
+                "actualIntervalMs",
+                "monotonicElapsedMs",
+                "wallStartMs",
+                "wallEndMs",
+                "collectionDurationMs",
+                "missedTicks",
+                "flags",
+                "tsMs",
+                "intervalMs",
+                "processes",
+                "runtime",
+                "topSpans",
+                "systemMemory",
+                "managed"
+              ],
+              "properties": {
+                "wireVersion": {
+                  "type": "integer",
+                  "const": 1
+                },
+                "sourceId": {
+                  "type": "string"
+                },
+                "targetId": {
+                  "type": "string"
+                },
+                "routingGeneration": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "hostInstanceId": {
+                  "type": "string"
+                },
+                "samplingSessionId": {
+                  "type": "string"
+                },
+                "leaseId": {
+                  "type": "string"
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "requestedIntervalMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "actualIntervalMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "monotonicElapsedMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "wallStartMs": {
+                  "type": "integer"
+                },
+                "wallEndMs": {
+                  "type": "integer"
+                },
+                "collectionDurationMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "missedTicks": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "flags": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  }
+                },
+                "tsMs": {
+                  "type": "integer"
+                },
+                "intervalMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "processes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "runtime": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "topSpans": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "systemMemory": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                },
+                "managed": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "observations": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "intervalMs": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_list_traces",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "read",
+      "capability": "performance.traces",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "perf_list_traces (performance.traces)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "performance"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_open_lease",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "performance.capture",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "perf_open_lease (performance.capture)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "object",
+            "required": [
+              "clientId",
+              "deviceId",
+              "targetId",
+              "routingGeneration",
+              "purpose",
+              "requestedCadenceMs"
+            ],
+            "properties": {
+              "clientId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Overwritten by the authenticated RPC device identity."
+              },
+              "targetId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "routingGeneration": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "purpose": {
+                "type": "string",
+                "enum": [
+                  "live",
+                  "capture"
+                ]
+              },
+              "requestedCadenceMs": {
+                "type": "integer",
+                "minimum": 500,
+                "maximum": 10000
+              },
+              "sourceId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "accepted",
+              "lease",
+              "source"
+            ],
+            "properties": {
+              "accepted": {
+                "const": true
+              },
+              "lease": {
+                "type": "object",
+                "required": [
+                  "wireVersion",
+                  "leaseId",
+                  "clientId",
+                  "deviceId",
+                  "targetId",
+                  "routingGeneration",
+                  "sourceId",
+                  "purpose",
+                  "requestedCadenceMs",
+                  "samplingSessionId",
+                  "openedAtMs",
+                  "heartbeatAtMs",
+                  "expiresAtMs"
+                ],
+                "properties": {
+                  "wireVersion": {
+                    "type": "integer",
+                    "const": 1
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "clientId": {
+                    "type": "string"
+                  },
+                  "deviceId": {
+                    "type": "string"
+                  },
+                  "targetId": {
+                    "type": "string"
+                  },
+                  "routingGeneration": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sourceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "enum": [
+                      "live",
+                      "capture"
+                    ]
+                  },
+                  "requestedCadenceMs": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "samplingSessionId": {
+                    "type": "string"
+                  },
+                  "openedAtMs": {
+                    "type": "integer"
+                  },
+                  "heartbeatAtMs": {
+                    "type": "integer"
+                  },
+                  "expiresAtMs": {
+                    "type": "integer"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "source": {
+                "type": "object",
+                "required": [
+                  "wireVersion",
+                  "sourceId",
+                  "kind",
+                  "hostInstanceId",
+                  "runtimeKind",
+                  "build",
+                  "metricSchemaVersion",
+                  "capabilities",
+                  "clock",
+                  "connection"
+                ],
+                "properties": {
+                  "wireVersion": {
+                    "type": "integer",
+                    "const": 1
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "renderer",
+                      "host"
+                    ]
+                  },
+                  "hostInstanceId": {
+                    "type": "string"
+                  },
+                  "runtimeKind": {
+                    "type": "string",
+                    "enum": [
+                      "browser",
+                      "tauri-rust",
+                      "node-headless"
+                    ]
+                  },
+                  "build": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "metricSchemaVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  },
+                  "clock": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "connection": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "accepted",
+              "code",
+              "detail"
+            ],
+            "properties": {
+              "accepted": {
+                "const": false
+              },
+              "code": {
+                "type": "string",
+                "enum": [
+                  "cadence-too-fast",
+                  "device-purpose-limit",
+                  "host-lease-limit",
+                  "rate-limited",
+                  "target-mismatch",
+                  "routing-generation-mismatch",
+                  "unsupported",
+                  "permission-denied"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_read_observations",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "read",
+      "capability": "performance.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "perf_read_observations (performance.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "leaseId"
+        ],
+        "properties": {
+          "leaseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "afterSequence": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "wireVersion",
+            "sourceId",
+            "targetId",
+            "routingGeneration",
+            "hostInstanceId",
+            "samplingSessionId",
+            "sequence",
+            "requestedIntervalMs",
+            "actualIntervalMs",
+            "monotonicElapsedMs",
+            "wallStartMs",
+            "wallEndMs",
+            "collectionDurationMs",
+            "missedTicks",
+            "flags",
+            "tsMs",
+            "intervalMs",
+            "processes",
+            "runtime",
+            "topSpans",
+            "systemMemory",
+            "managed"
+          ],
+          "properties": {
+            "wireVersion": {
+              "type": "integer",
+              "const": 1
+            },
+            "sourceId": {
+              "type": "string"
+            },
+            "targetId": {
+              "type": "string"
+            },
+            "routingGeneration": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "hostInstanceId": {
+              "type": "string"
+            },
+            "samplingSessionId": {
+              "type": "string"
+            },
+            "leaseId": {
+              "type": "string"
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "requestedIntervalMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "actualIntervalMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "monotonicElapsedMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "wallStartMs": {
+              "type": "integer"
+            },
+            "wallEndMs": {
+              "type": "integer"
+            },
+            "collectionDurationMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "missedTicks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "flags": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            },
+            "tsMs": {
+              "type": "integer"
+            },
+            "intervalMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "processes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "runtime": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "topSpans": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "systemMemory": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true
+            },
+            "managed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "observations": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_renew_lease",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "performance.capture",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "perf_renew_lease (performance.capture)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "leaseId"
+        ],
+        "properties": {
+          "leaseId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_system_details",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "read",
+      "capability": "performance.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "perf_system_details (performance.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "performance"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_trace_close",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "performance.traces",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "perf_trace_close (performance.traces)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "handleId"
+        ],
+        "properties": {
+          "handleId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_trace_open",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "performance.traces",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "perf_trace_open (performance.traces)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "traceId"
+        ],
+        "properties": {
+          "traceId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "handleId",
+          "traceId",
+          "sizeBytes",
+          "sha256",
+          "chunkBytes",
+          "expiresAtMs"
+        ],
+        "properties": {
+          "handleId": {
+            "type": "string"
+          },
+          "traceId": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 268435456
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "chunkBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1048576
+          },
+          "expiresAtMs": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "perf_trace_read_chunk",
+      "category": "system",
+      "resource": "performance",
+      "target": "execution",
+      "operation": "read",
+      "capability": "performance.traces",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "perf_trace_read_chunk (performance.traces)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "handleId",
+          "offset"
+        ],
+        "properties": {
+          "handleId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "length": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1048576
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "offset",
+          "nextOffset",
+          "dataBase64",
+          "chunkSha256",
+          "eof",
+          "finalSha256"
+        ],
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextOffset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dataBase64": {
+            "type": "string"
+          },
+          "chunkSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "eof": {
+            "type": "boolean"
+          },
+          "finalSha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -23391,5 +25237,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "905f109efefada0bc04a5c07e5c1fa3d79882bec53edc58d412721454f3f0600"
+  "catalogHash": "ae0ad5199c9c07b1498be6053d81e8ad73e87b8628e8fe78ea55f4fdf6260c86"
 }

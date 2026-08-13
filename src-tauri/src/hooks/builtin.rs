@@ -7,10 +7,10 @@
 // `~/.claude/settings.json` (id → bool); absent ids fall back to
 // `default_enabled`.
 //
-// The scripts live in the bundled `hooks/builtin/` resource dir and run as
-// spawned `node` command hooks. If `node` is absent or the script path does not
-// resolve, the command handler soft-allows (only an explicit exit 2 blocks), so
-// a packaging gap degrades gracefully instead of locking a turn.
+// The scripts live in the bundled `hooks/builtin/` resource dir and run with
+// the process-wide Node runtime selected during desktop setup. If the runtime
+// or script path does not resolve, the command handler soft-allows (only an
+// explicit exit 2 blocks), so a packaging gap does not lock a turn.
 
 use std::path::{Path, PathBuf};
 
@@ -72,8 +72,17 @@ fn is_enabled(def: &BuiltinHookDef, overrides: &Map<String, Value>) -> bool {
     }
 }
 
-fn quote(p: &str) -> String {
-    format!("\"{}\"", p.replace('"', "\\\""))
+#[cfg(not(windows))]
+fn quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(windows)]
+fn quote(value: &str) -> String {
+    // Hook commands run through cmd.exe on Windows. Quotes protect whitespace
+    // and metacharacters; doubling percent signs prevents environment-variable
+    // expansion in paths supplied by the installation layout.
+    format!("\"{}\"", value.replace('%', "%%").replace('"', "\"\""))
 }
 
 /// Build the built-in hook groups keyed by event name (a `settings.json`
@@ -89,7 +98,11 @@ pub fn build_builtin_hooks(
             continue;
         }
         let script_path = base_dir.join(def.script);
-        let command = format!("{} {}", node_bin, quote(&script_path.to_string_lossy()));
+        let command = format!(
+            "{} {}",
+            quote(node_bin),
+            quote(&script_path.to_string_lossy())
+        );
         let mut group = Map::new();
         if let Some(m) = def.matcher {
             group.insert("matcher".to_string(), json!(m));
@@ -175,7 +188,14 @@ fn builtin_base_dir() -> PathBuf {
 pub fn apply_builtin_hooks(settings: &mut ClaudeSettings) {
     let overrides = overrides_from(settings);
     let base = builtin_base_dir();
-    let builtin = build_builtin_hooks(&base, "node", &overrides);
+    let node = match cognia_core::node_runtime::node_executable() {
+        Ok(node) => node,
+        Err(error) => {
+            log::warn!("built-in hooks disabled because Node.js is unavailable: {error}");
+            return;
+        }
+    };
+    let builtin = build_builtin_hooks(&base, &node.to_string_lossy(), &overrides);
     if builtin.is_empty() {
         return;
     }
@@ -203,7 +223,37 @@ mod tests {
         assert_eq!(ups.len(), 1); // only the default-on prompt loader
         let cmd = ups[0]["hooks"][0]["command"].as_str().unwrap();
         assert!(cmd.contains("auto-context-loader.mjs"));
-        assert!(cmd.starts_with("node "));
+        assert!(cmd.starts_with(&format!("{} ", quote("node"))));
+    }
+
+    #[test]
+    fn node_executable_and_script_paths_are_shell_quoted() {
+        let cfg = build_builtin_hooks(
+            Path::new("/Applications/Cognia App/hooks"),
+            "/Applications/Cognia App/Node/bin/node",
+            &Map::new(),
+        );
+        let command = cfg["SessionStart"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+
+        assert_eq!(
+            command,
+            format!(
+                "{} {}",
+                quote("/Applications/Cognia App/Node/bin/node"),
+                quote("/Applications/Cognia App/hooks/auto-context-loader.mjs")
+            )
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn posix_hook_arguments_do_not_expand_shell_syntax() {
+        assert_eq!(
+            quote("$HOME/$(touch nope)/`id`/it's"),
+            "'$HOME/$(touch nope)/`id`/it'\"'\"'s'"
+        );
     }
 
     #[test]

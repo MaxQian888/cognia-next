@@ -77,6 +77,7 @@ pub fn init_structured_tracing() -> bool {
 // only re-exports it for generate_handler! command registration.
 pub use cognia_media as media;
 mod mcp_oauth;
+mod node_runtime;
 // ADR-0067 follow-up — extracted to `crates/cognia-mcp-server`; re-aliased so
 // `mcp_server::…` (generate_handler! + .manage()) resolves unchanged.
 pub use cognia_mcp_server as mcp_server;
@@ -428,18 +429,6 @@ pub fn run() {
         // first request and can legitimately take longer than the 8s grace;
         // measuring from process boot exposed the still-unpainted black webview.
         .on_page_load(|webview, payload| {
-            // A navigation tears down every `perf://sample` listener in the
-            // document, but the renderer never gets to send the balancing
-            // `perf_stop_sampling` — so a reload (or a renderer crash) would
-            // otherwise leave the 1 Hz process-tree walk running for the rest
-            // of the session. Drop the leases and let the panel re-take one.
-            if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
-            {
-                if let Some(perf) = webview.app_handle().try_state::<perf::PerfState>() {
-                    perf.sampler.halt();
-                }
-            }
-
             #[cfg(all(feature = "agent-debug", desktop))]
             if matches!(
                 payload.event(),
@@ -502,9 +491,9 @@ pub fn run() {
         .manage(perf::PerfState::new())
         // CLI bridge — loopback-only HTTP listener that `cognia-cli` talks
         // to for `install`/`uninstall`/`reload`. Spawned at app boot in the
-        // setup hook below; this `.manage(...)` just registers the state
-        // wrapper so the handle survives for the app's lifetime.
-        .manage(cli_bridge::CliBridgeServerState::new())
+            // setup hook below; this `.manage(...)` just registers the state
+            // wrapper so the handle survives for the app's lifetime.
+            .manage(cli_bridge::CliBridgeServerState::new())
         .setup(|app| {
             // Phase B follow-up — install the keyring-backed push credential
             // store and reinstate any FCM/APNs dispatchers the user uploaded
@@ -750,6 +739,10 @@ pub fn run() {
             capture::get_foreground_app,
             media::commands::video_get_info,
             media::commands::plugin_media_get_video_frame,
+            media::commands::plugin_media_concatenate_videos,
+            media::commands::plugin_media_apply_video_effect,
+            media::commands::plugin_media_add_transition,
+            media::commands::plugin_media_export_video,
             media::commands::video_analyze,
             media::commands::video_cleanup_analysis,
             media::commands::video_trim,
@@ -1126,6 +1119,7 @@ pub fn run() {
             companion_api::commands::companion_push_clear_fcm,
             companion_api::commands::companion_push_clear_apns,
             companion_api::commands::companion_push_status,
+            companion_api::commands::companion_push_notification,
             companion_api::commands::companion_test_local_reachability,
             proxy_config::commands::proxy_apply,
             proxy_config::commands::proxy_get_active,
@@ -1155,8 +1149,11 @@ pub fn run() {
             connectors::commands::connectors_attachment_fetch,
             connectors::commands::connectors_attachment_read,
             connectors::commands::connectors_media_upload,
+            connectors::commands::connectors_matrix_encrypted_media_upload,
+            connectors::commands::connectors_matrix_encrypted_media_fetch,
             connectors::commands::connectors_discord_upload,
             connectors::commands::connectors_matrix_crypto_init,
+            connectors::commands::connectors_matrix_crypto_close,
             connectors::commands::connectors_matrix_crypto_outgoing_requests,
             connectors::commands::connectors_matrix_crypto_mark_request_sent,
             connectors::commands::connectors_matrix_crypto_receive_sync_changes,
@@ -1551,6 +1548,11 @@ pub fn run() {
             parse::parse_document_native,
             // Performance panel — process/runtime/span sampling + hotspots.
             perf::commands::perf_snapshot,
+            perf::commands::perf_open_lease,
+            perf::commands::perf_renew_lease,
+            perf::commands::perf_close_lease,
+            perf::commands::perf_lease_snapshot,
+            perf::commands::perf_read_observations,
             perf::commands::perf_start_sampling,
             perf::commands::perf_set_interval,
             perf::commands::perf_stop_sampling,
@@ -1558,6 +1560,9 @@ pub fn run() {
             perf::commands::perf_reset_hotspots,
             perf::commands::perf_system_details,
             perf::commands::perf_list_traces,
+            perf::commands::perf_trace_open,
+            perf::commands::perf_trace_read_chunk,
+            perf::commands::perf_trace_close,
             perf::commands::perf_open_trace_dir,
         ])
         .setup(|app| {
@@ -1568,6 +1573,11 @@ pub fn run() {
             // number is the residual synchronous startup cost — log it so the
             // before/after can be compared from the app logs.
             let setup_start = std::time::Instant::now();
+
+            // Resolve one Node.js executable for every app-owned JavaScript
+            // child. A missing system runtime is retained as an actionable
+            // error so the lightweight shell can still open and guide repair.
+            node_runtime::initialize(app.handle());
 
             // ADR-0020 W1 — automation subsystem. We construct the
             // worker thread with an `AppHandle` so it can emit
@@ -2040,6 +2050,7 @@ pub fn run() {
             // ephemeral loopback port, writes the endpoint discovery file
             // so `cognia plugin install` etc. can find us. Best-effort —
             // failure is logged and the rest of the app keeps booting.
+            #[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
             {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -2162,6 +2173,10 @@ mod tests {
         for command in [
             "media::commands::video_get_info,",
             "media::commands::plugin_media_get_video_frame,",
+            "media::commands::plugin_media_concatenate_videos,",
+            "media::commands::plugin_media_apply_video_effect,",
+            "media::commands::plugin_media_add_transition,",
+            "media::commands::plugin_media_export_video,",
             "media::commands::video_analyze,",
             "media::commands::video_cleanup_analysis,",
             "media::commands::video_trim,",
@@ -2172,6 +2187,25 @@ mod tests {
             );
         }
         assert!(production_source.contains(".manage(media::MediaSourceRegistry::default())"));
+    }
+
+    #[test]
+    fn matrix_e2ee_commands_are_registered_with_the_tauri_invoke_handler() {
+        let source = include_str!("lib.rs");
+        let production_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production lib.rs source");
+        for command in [
+            "connectors::commands::connectors_matrix_crypto_close,",
+            "connectors::commands::connectors_matrix_encrypted_media_upload,",
+            "connectors::commands::connectors_matrix_encrypted_media_fetch,",
+        ] {
+            assert!(
+                production_source.contains(command),
+                "{command} must remain in tauri::generate_handler!"
+            );
+        }
     }
 
     /// The app declares an ACL manifest (build.rs → AppManifest), which turns on
