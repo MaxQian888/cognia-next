@@ -752,6 +752,17 @@ interface LocalVideoClipEntry {
   sourcePath: string
   sourceToken?: string
   clip: VideoClip
+  effects: Array<{ id: string; params: Record<string, unknown> }>
+}
+
+interface NativeVideoClipInput {
+  sourceToken: string
+  startTime: number
+  endTime: number
+  volume: number
+  playbackSpeed: number
+  effects: Array<{ id: string; params: Record<string, unknown> }>
+  transitionOut?: VideoTransition
 }
 
 type MediaAIError = Error & {
@@ -807,7 +818,7 @@ function buildVideoClip(sourcePath: string, info: NativeVideoInfo): VideoClip {
 }
 
 function persistClip(clip: VideoClip, sourcePath: string, sourceToken?: string): VideoClip {
-  localVideoClipRegistry.set(clip.id, { clip, sourcePath, sourceToken })
+  localVideoClipRegistry.set(clip.id, { clip, sourcePath, sourceToken, effects: [] })
   return clip
 }
 
@@ -819,6 +830,24 @@ function updatePersistedClip(clipId: string, updater: (clip: VideoClip) => Video
     clip: updated,
   })
   return updated
+}
+
+function toNativeVideoClip(entry: LocalVideoClipEntry): NativeVideoClipInput {
+  if (!entry.sourceToken) {
+    throw new Error(`Video clip is not backed by an authorized local source: ${entry.clip.id}`)
+  }
+  return {
+    sourceToken: entry.sourceToken,
+    startTime: entry.clip.startTime,
+    endTime: entry.clip.endTime,
+    volume: entry.clip.volume ?? 1,
+    playbackSpeed: entry.clip.playbackSpeed ?? 1,
+    effects: entry.effects.map((effect) => ({
+      id: effect.id,
+      params: { ...effect.params },
+    })),
+    transitionOut: entry.clip.transitions?.out,
+  }
 }
 
 function requireClip(clipId: string): LocalVideoClipEntry {
@@ -1406,12 +1435,15 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         if (clipIds.length === 0) {
           throw new Error("No clips provided for concatenation")
         }
-        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
-        const merged = await invoke<VideoClip>("plugin_media_concatenate_videos", {
-          pluginId,
-          clipIds,
+        const result = await invoke<{ outputPath: string }>("plugin_media_concatenate_videos", {
+          clips: clipIds.map((clipId) => toNativeVideoClip(requireClip(clipId))),
         })
-        return persistClip(merged, merged.sourceUrl)
+        const info = await getNativeVideoInfo(result.outputPath)
+        return persistClip(
+          buildVideoClip(result.outputPath, info),
+          result.outputPath,
+          info.sourceToken
+        )
       },
 
       applyEffect: async (
@@ -1419,15 +1451,17 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         effectId: string,
         params?: Record<string, unknown>
       ): Promise<void> => {
-        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
+        const entry = requireClip(clipId)
+        if (!entry.sourceToken) {
+          throw new Error(`Video clip is not backed by an authorized local source: ${clipId}`)
+        }
+        const effect = { id: effectId, params: params ?? {} }
         await invoke<void>("plugin_media_apply_video_effect", {
-          pluginId,
-          clipId,
-          effectId,
-          params: params ?? {},
-          _params: params ?? {},
+          sourceToken: entry.sourceToken,
+          effect,
         })
 
+        entry.effects.push(effect)
         updatePersistedClip(clipId, (clip) => {
           const nextFilters = clip.filters ? [...clip.filters] : []
           if (!nextFilters.includes(effectId)) {
@@ -1445,11 +1479,11 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         toClipId: string,
         transition: VideoTransition
       ): Promise<void> => {
-        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
+        const fromEntry = requireClip(fromClipId)
+        const toEntry = requireClip(toClipId)
         await invoke<void>("plugin_media_add_transition", {
-          pluginId,
-          fromClipId,
-          toClipId,
+          fromClip: toNativeVideoClip(fromEntry),
+          toClip: toNativeVideoClip(toEntry),
           transition,
         })
 
@@ -1468,10 +1502,8 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         }
 
         const bytes = await withTimelineProgress(options.onProgress, async () =>
-          // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
-          invoke<number[] | Uint8Array>("plugin_media_export_video", {
-            pluginId,
-            clipIds,
+          invoke<ArrayBuffer | number[] | Uint8Array>("plugin_media_export_video", {
+            clips: clipIds.map((clipId) => toNativeVideoClip(requireClip(clipId))),
             options: {
               format: options.format,
               resolution: options.resolution,

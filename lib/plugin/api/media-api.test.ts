@@ -516,16 +516,7 @@ describe("Media Registry", () => {
           }
         }
         if (command === "plugin_media_concatenate_videos") {
-          return {
-            id: "merged",
-            sourceUrl: "/tmp/merged.mp4",
-            startTime: 0,
-            endTime: 12,
-            duration: 12,
-            position: 0,
-            track: 0,
-            filters: [],
-          }
+          return { outputPath: "/tmp/merged.mp4" }
         }
         if (command === "plugin_media_export_video") {
           return new Uint8Array([1, 2, 3, 4])
@@ -629,30 +620,71 @@ describe("Media Registry", () => {
       })
     })
 
-    it("should concatenate clips without throwing NOT_SUPPORTED", async () => {
+    it("should concatenate authorized clips through the native renderer", async () => {
       const api = createMediaAPI(testPluginId, {} as never)
-      const clip = await api.video.concatenate(["clip-1", "clip-2"])
-      expect(clip.id).toBe("merged")
+      const first = await api.video.loadClip("/tmp/first.mp4")
+      const second = await api.video.loadClip("/tmp/second.mp4")
+      const clip = await api.video.concatenate([first.id, second.id])
+      expect(clip.sourceUrl).toBe("/tmp/merged.mp4")
       expect(invoke).toHaveBeenCalledWith(
         "plugin_media_concatenate_videos",
-        expect.objectContaining({ clipIds: ["clip-1", "clip-2"] })
+        expect.objectContaining({
+          clips: [
+            expect.objectContaining({ sourceToken: "authorized-source-token" }),
+            expect.objectContaining({ sourceToken: "authorized-source-token" }),
+          ],
+        })
       )
     })
 
-    it("should apply effect and transition without throwing", async () => {
+    it("should validate effects and transitions natively and include them in export", async () => {
       const api = createMediaAPI(testPluginId, {} as never)
       const loaded = await api.video.loadClip("/tmp/source.mp4")
+      const target = await api.video.loadClip("/tmp/target.mp4")
       await expect(
         api.video.applyEffect(loaded.id, "brightness-contrast", { brightness: 12 })
       ).resolves.toBeUndefined()
       await expect(
-        api.video.addTransition(loaded.id, "clip-2", { type: "fade", duration: 1 })
+        api.video.addTransition(loaded.id, target.id, { type: "fade", duration: 1 })
       ).resolves.toBeUndefined()
+
+      await api.video.export([loaded.id, target.id], {
+        format: "mp4",
+        resolution: "1080p",
+        fps: 30,
+        quality: "high",
+      })
+
+      expect(invoke).toHaveBeenCalledWith("plugin_media_apply_video_effect", {
+        sourceToken: "authorized-source-token",
+        effect: {
+          id: "brightness-contrast",
+          params: { brightness: 12 },
+        },
+      })
+      expect(invoke).toHaveBeenCalledWith("plugin_media_add_transition", {
+        fromClip: expect.objectContaining({ sourceToken: "authorized-source-token" }),
+        toClip: expect.objectContaining({ sourceToken: "authorized-source-token" }),
+        transition: { type: "fade", duration: 1 },
+      })
+      expect(invoke).toHaveBeenCalledWith(
+        "plugin_media_export_video",
+        expect.objectContaining({
+          clips: [
+            expect.objectContaining({
+              effects: [{ id: "brightness-contrast", params: { brightness: 12 } }],
+              transitionOut: { type: "fade", duration: 1 },
+            }),
+            expect.objectContaining({ effects: [] }),
+          ],
+        })
+      )
     })
 
     it("should export video to blob", async () => {
       const api = createMediaAPI(testPluginId, {} as never)
-      const blob = await api.video.export(["clip-1"], {
+      const loaded = await api.video.loadClip("/tmp/source.mp4")
+      const blob = await api.video.export([loaded.id], {
         format: "mp4",
         resolution: "1080p",
         fps: 30,

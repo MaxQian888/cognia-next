@@ -14,6 +14,8 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::process::Command;
 
+mod editing;
+
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 const FRAME_TIMEOUT: Duration = Duration::from_secs(120);
 const ANALYSIS_TIMEOUT: Duration = Duration::from_secs(600);
@@ -163,6 +165,37 @@ pub struct VideoTrimOptions {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoTrimResult {
+    pub output_path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizedVideoClipInput {
+    pub source_token: String,
+    pub start_time: f64,
+    pub end_time: f64,
+    pub volume: f64,
+    pub playback_speed: f64,
+    #[serde(default)]
+    pub effects: Vec<editing::VideoEffectSpec>,
+    pub transition_out: Option<editing::VideoTransitionSpec>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoExportCommandOptions {
+    pub format: String,
+    pub resolution: String,
+    pub fps: u32,
+    pub quality: String,
+    pub codec: Option<String>,
+    pub audio_bitrate: Option<u32>,
+    pub video_bitrate: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoEditResult {
     pub output_path: String,
 }
 
@@ -682,6 +715,66 @@ fn media_temp_root() -> PathBuf {
     std::env::temp_dir().join("cognia-video")
 }
 
+async fn resolve_render_clips(
+    registry: &MediaSourceRegistry,
+    clips: &[AuthorizedVideoClipInput],
+) -> Result<(Vec<editing::VideoRenderClip>, Vec<NativeVideoInfo>), VideoError> {
+    let mut resolved = Vec::with_capacity(clips.len());
+    let mut metadata = Vec::with_capacity(clips.len());
+    for clip in clips {
+        let path = registry.resolve(&clip.source_token)?;
+        let info = probe_video(&path).await?;
+        let duration = info.duration_ms as f64 / 1000.0;
+        if !clip.end_time.is_finite() || clip.end_time > duration + 0.001 {
+            return Err(VideoError::InvalidInput {
+                message: format!(
+                    "clip endTime must not exceed the authorized source duration ({duration:.3})"
+                ),
+            });
+        }
+        resolved.push(editing::VideoRenderClip {
+            path,
+            start_time: clip.start_time,
+            end_time: clip.end_time,
+            volume: clip.volume,
+            playback_speed: clip.playback_speed,
+            has_audio: info.has_audio,
+            effects: clip.effects.clone(),
+            transition_out: clip.transition_out.clone(),
+        });
+        metadata.push(info);
+    }
+    Ok((resolved, metadata))
+}
+
+fn export_dimensions(resolution: &str) -> Result<(u32, u32), VideoError> {
+    match resolution {
+        "480p" => Ok((854, 480)),
+        "720p" => Ok((1280, 720)),
+        "1080p" => Ok((1920, 1080)),
+        "4k" => Ok((3840, 2160)),
+        _ => Err(VideoError::InvalidInput {
+            message: "export resolution must be 480p, 720p, 1080p, or 4k".to_string(),
+        }),
+    }
+}
+
+fn normalize_export_options(
+    options: VideoExportCommandOptions,
+) -> Result<editing::VideoExportOptions, VideoError> {
+    let (width, height) = export_dimensions(&options.resolution)?;
+    Ok(editing::VideoExportOptions {
+        format: options.format,
+        width,
+        height,
+        fps: options.fps,
+        quality: options.quality,
+        codec: options.codec,
+        audio_bitrate: options.audio_bitrate,
+        video_bitrate: options.video_bitrate,
+    })
+}
+
 async fn analyze_video(
     input_path: &Path,
     metadata: NativeVideoInfo,
@@ -926,10 +1019,12 @@ fn pack_frame_response(frame: NativeVideoFrame) -> Vec<u8> {
 pub mod commands {
     use super::{
         analyze_video, cleanup_analysis_directory, extract_frame, normalize_analysis_options,
-        pack_frame_response, probe_video, resolve_media_file, trim_video, MediaSourceRegistry,
-        NativeVideoInfo, VideoAnalysisManifest, VideoAnalysisOptions, VideoError, VideoTrimOptions,
-        VideoTrimResult,
+        normalize_export_options, pack_frame_response, probe_video, resolve_media_file,
+        resolve_render_clips, trim_video, AuthorizedVideoClipInput, MediaSourceRegistry,
+        NativeVideoInfo, TemporaryPathGuard, VideoAnalysisManifest, VideoAnalysisOptions,
+        VideoEditResult, VideoError, VideoExportCommandOptions, VideoTrimOptions, VideoTrimResult,
     };
+    use crate::editing::{self, VideoEffectSpec, VideoTransitionSpec};
     use tauri::ipc::Response;
     use tauri::State;
 
@@ -954,6 +1049,117 @@ pub mod commands {
         let metadata = probe_video(&path).await?;
         let frame = extract_frame(&path, &metadata, time).await?;
         Ok(Response::new(pack_frame_response(frame)))
+    }
+
+    #[tauri::command]
+    pub async fn plugin_media_concatenate_videos(
+        state: State<'_, MediaSourceRegistry>,
+        clips: Vec<AuthorizedVideoClipInput>,
+    ) -> Result<VideoEditResult, VideoError> {
+        let (resolved, metadata) = resolve_render_clips(&state, &clips).await?;
+        let first = metadata.first().ok_or_else(|| VideoError::InvalidInput {
+            message: "at least one clip is required for concatenation".to_string(),
+        })?;
+        let width = first.width.max(16).min(7680) & !1;
+        let height = first.height.max(16).min(4320) & !1;
+        let fps = if first.fps.is_finite() && first.fps > 0.0 {
+            first.fps.round().clamp(1.0, 120.0) as u32
+        } else {
+            30
+        };
+        let options = editing::VideoExportOptions {
+            format: "mp4".to_string(),
+            width,
+            height,
+            fps,
+            quality: "high".to_string(),
+            codec: None,
+            audio_bitrate: None,
+            video_bitrate: None,
+        };
+        let output_path = super::media_temp_root()
+            .join("edits")
+            .join(format!("{}.mp4", uuid::Uuid::new_v4()));
+        let mut cleanup_guard = TemporaryPathGuard::file(output_path.clone());
+        editing::render_timeline(&resolved, &options, &output_path).await?;
+        cleanup_guard.retain();
+        Ok(VideoEditResult {
+            output_path: output_path.to_string_lossy().into_owned(),
+        })
+    }
+
+    #[tauri::command]
+    pub async fn plugin_media_apply_video_effect(
+        state: State<'_, MediaSourceRegistry>,
+        source_token: String,
+        effect: VideoEffectSpec,
+    ) -> Result<(), VideoError> {
+        state.resolve(&source_token)?;
+        editing::validate_effect(&effect)
+    }
+
+    #[tauri::command]
+    pub async fn plugin_media_add_transition(
+        state: State<'_, MediaSourceRegistry>,
+        from_clip: AuthorizedVideoClipInput,
+        to_clip: AuthorizedVideoClipInput,
+        transition: VideoTransitionSpec,
+    ) -> Result<(), VideoError> {
+        let (resolved, _) = resolve_render_clips(&state, &[from_clip, to_clip]).await?;
+        let from_duration =
+            (resolved[0].end_time - resolved[0].start_time) / resolved[0].playback_speed;
+        let to_duration =
+            (resolved[1].end_time - resolved[1].start_time) / resolved[1].playback_speed;
+        editing::validate_transition(&transition, from_duration, to_duration)
+    }
+
+    #[tauri::command]
+    pub async fn plugin_media_export_video(
+        state: State<'_, MediaSourceRegistry>,
+        clips: Vec<AuthorizedVideoClipInput>,
+        options: VideoExportCommandOptions,
+    ) -> Result<Response, VideoError> {
+        let (resolved, _) = resolve_render_clips(&state, &clips).await?;
+        let options = normalize_export_options(options)?;
+        let output_path = super::media_temp_root().join("exports").join(format!(
+            "{}.{}",
+            uuid::Uuid::new_v4(),
+            options.format
+        ));
+        let mut cleanup_guard = TemporaryPathGuard::file(output_path.clone());
+        editing::render_timeline(&resolved, &options, &output_path).await?;
+        let output_size = tokio::fs::metadata(&output_path)
+            .await
+            .map_err(|error| VideoError::Io {
+                message: format!("{}: {error}", output_path.display()),
+            })?
+            .len();
+        if output_size > editing::MAX_EXPORT_BYTES {
+            tokio::fs::remove_file(&output_path)
+                .await
+                .map_err(|error| VideoError::Io {
+                    message: format!("{}: {error}", output_path.display()),
+                })?;
+            cleanup_guard.retain();
+            return Err(VideoError::InvalidInput {
+                message: format!(
+                    "rendered export is {output_size} bytes; the IPC export limit is {} bytes",
+                    editing::MAX_EXPORT_BYTES
+                ),
+            });
+        }
+        let bytes = tokio::fs::read(&output_path)
+            .await
+            .map_err(|error| VideoError::Io {
+                message: format!("{}: {error}", output_path.display()),
+            })?;
+        tokio::fs::remove_file(&output_path)
+            .await
+            .map_err(|error| VideoError::Io {
+                message: format!("{}: {error}", output_path.display()),
+            })?;
+        cleanup_guard.retain();
+        Ok(Response::new(bytes))
     }
 
     #[tauri::command]
