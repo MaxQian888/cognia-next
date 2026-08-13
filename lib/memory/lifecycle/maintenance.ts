@@ -193,7 +193,7 @@ export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParam
     onIdle(() => {
       void (async () => {
         try {
-          const { claimMemoryJob, completeMemoryJob, failMemoryJob } =
+          const { claimMemoryJob, finishMemoryJob, failMemoryJob } =
             await import("@/lib/db/memory-governance")
           const claimed = await claimMemoryJob(job.id, "renderer-memory-maintenance")
           if (!claimed) return
@@ -222,7 +222,7 @@ export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParam
             },
             deps
           )
-          await completeMemoryJob(job.id)
+          await finishMemoryJob(job.id, "succeeded", "maintenance_completed")
         } catch {
           const { failMemoryJob } = await import("@/lib/db/memory-governance")
           await failMemoryJob(job.id, "maintenance_failed").catch(() => undefined)

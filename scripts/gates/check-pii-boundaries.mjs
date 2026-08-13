@@ -51,6 +51,16 @@ export function isAiBoundary(moduleName) {
   )
 }
 
+export function isAuditedProductionFile(file) {
+  return (
+    /\.(?:[cm]?[jt]s|tsx)$/.test(file) &&
+    !/\.d\.[cm]?ts$/.test(file) &&
+    !/\.(?:test|spec|stories)\.[cm]?[jt]sx?$/.test(file) &&
+    !file.includes("/__tests__/") &&
+    !file.includes("/__mocks__/")
+  )
+}
+
 export function auditFile(file, source, allowlist) {
   const imports = extractImports(source)
   const boundaries = imports.filter(isAiBoundary)
@@ -70,9 +80,7 @@ function productionFiles(root) {
   return (
     output
       .split("\n")
-      .filter((file) => /\.(?:[cm]?[jt]s|tsx)$/.test(file))
-      .filter((file) => !/\.(?:test|spec|stories)\.[cm]?[jt]sx?$/.test(file))
-      .filter((file) => !file.includes("/__tests__/") && !file.includes("/__mocks__/"))
+      .filter(isAuditedProductionFile)
       // `git ls-files` reads the index, which still lists a file deleted in the
       // working tree but not yet staged. There is nothing left to audit there.
       .filter((file) => existsSync(resolve(root, file)))

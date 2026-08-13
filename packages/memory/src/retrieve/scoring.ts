@@ -13,7 +13,7 @@
  * only ranks.
  */
 
-import type { MemoryProvenance, MemoryType } from "../types/memory"
+import type { Memory, MemoryProvenance, MemoryType } from "../types/memory"
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const DEFAULT_RECENCY_DECAY = 0.995
@@ -78,6 +78,8 @@ export interface ScorableMemory {
    * contributes nothing (identical to the prior three-factor score).
    */
   veracity?: number
+  /** Combined confidence/review/feedback/staleness/contamination trust in [0,1]. */
+  governance?: number
 }
 
 export interface MemoryScoreParts {
@@ -85,6 +87,7 @@ export interface MemoryScoreParts {
   importance: number
   relevance: number
   veracity: number
+  governance: number
 }
 
 export interface ScoredMemory<T> {
@@ -145,6 +148,7 @@ export function scoreMemories<T extends ScorableMemory>(
   const wImportance = opts.weights?.importance ?? 1
   const wRelevance = opts.weights?.relevance ?? 1
   const wVeracity = opts.weights?.veracity ?? 1
+  const wGovernance = opts.weights?.governance ?? 1
 
   const recencyRaw = memories.map((m) => rawRecency(m.lastAccessedAt, now, decay, m.halfLifeDays))
   const importanceRaw = memories.map((m) => Math.min(10, Math.max(1, m.importance)) / 10)
@@ -160,6 +164,9 @@ export function scoreMemories<T extends ScorableMemory>(
   const hasVeracity = memories.some((m) => typeof m.veracity === "number")
   const veracityRaw = memories.map((m) => (typeof m.veracity === "number" ? m.veracity : 0.5))
   const veracity = hasVeracity ? minMaxNormalize(veracityRaw) : memories.map(() => 0)
+  const hasGovernance = memories.some((m) => typeof m.governance === "number")
+  const governanceRaw = memories.map((m) => (typeof m.governance === "number" ? m.governance : 0.5))
+  const governance = hasGovernance ? minMaxNormalize(governanceRaw) : memories.map(() => 0)
 
   return memories
     .map((memory, i) => {
@@ -168,13 +175,52 @@ export function scoreMemories<T extends ScorableMemory>(
         importance: importance[i],
         relevance: relevance[i],
         veracity: veracity[i],
+        governance: governance[i],
       }
       const score =
         wRecency * parts.recency +
         wImportance * parts.importance +
         wRelevance * parts.relevance +
-        wVeracity * parts.veracity
+        wVeracity * parts.veracity +
+        wGovernance * parts.governance
       return { memory, score, parts }
     })
     .sort((a, b) => b.score - a.score)
+}
+
+/** Governance signals are ranking-only; hard exclusions stay in the retriever. */
+export function governanceScoreFor(memory: Memory): number {
+  const confidence = memory.confidence ?? 0.5
+  const review =
+    memory.reviewStatus === "verified"
+      ? 1
+      : memory.reviewStatus === "unreviewed" || memory.reviewStatus === undefined
+        ? 0.6
+        : 0
+  const contamination =
+    memory.contaminationState === "clean"
+      ? 1
+      : memory.contaminationState === "external-context"
+        ? 0.4
+        : 0.7
+  const staleness =
+    memory.staleness === "fresh"
+      ? 1
+      : memory.staleness === "stale"
+        ? 0.3
+        : memory.staleness === "expired"
+          ? 0
+          : 0.7
+  const trust =
+    memory.trustState === "trusted"
+      ? 1
+      : memory.trustState === "untrusted"
+        ? 0.5
+        : memory.trustState === "quarantined"
+          ? 0
+          : 0.7
+  const positive = Math.max(0, memory.retrievalFeedback?.positive ?? 0)
+  const negative = Math.max(0, memory.retrievalFeedback?.negative ?? 0)
+  const feedback = (positive + 1) / (positive + negative + 2)
+  return (confidence + review + contamination + staleness + trust + feedback) / 6
 }

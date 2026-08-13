@@ -1,6 +1,11 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { auditFile, extractImports, isAiBoundary } from "./check-pii-boundaries.mjs"
+import {
+  auditFile,
+  extractImports,
+  isAiBoundary,
+  isAuditedProductionFile,
+} from "./check-pii-boundaries.mjs"
 
 test("extractImports ignores type-only imports and finds dynamic boundaries", () => {
   const imports = extractImports(
@@ -14,6 +19,12 @@ test("isAiBoundary recognizes SDK and cloud embedding seams", () => {
   assert.equal(isAiBoundary("@ai-sdk/anthropic"), true)
   assert.equal(isAiBoundary("@cognia/provider-embedding/embedding"), true)
   assert.equal(isAiBoundary("@cognia/redact"), false)
+})
+
+test("production scan excludes generated declarations but keeps executable TypeScript", () => {
+  assert.equal(isAuditedProductionFile("plugins/generated/provider.d.ts"), false)
+  assert.equal(isAuditedProductionFile("lib/runtime.ts"), true)
+  assert.equal(isAuditedProductionFile("lib/runtime.test.ts"), false)
 })
 
 test("unreviewed boundary fails while a redactor import passes", () => {

@@ -18,11 +18,13 @@
 
 import type { MemoryConfig } from "@/types/memory/memory"
 import type { ApplyMemoryContextDeps } from "./apply-memory-context"
-import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { createProviderEmbeddingAdapter } from "@cognia/memory/runtime/provider-embedding-adapter"
+import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { listActiveForReader, listActiveProcedural, touchMemories } from "@/lib/db/memories"
 import { createBedrockSidecarEmbeddingModel } from "@/lib/claude/feature-call"
 import type { EmbeddingConfig } from "@cognia/provider-embedding/embedding"
+import { isLocalEmbeddingProvider } from "@cognia/rag"
+import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 
 /** Single global collection for memory vectors. */
 export const MEMORY_VECTOR_COLLECTION = "cognia_memory"
@@ -79,7 +81,7 @@ async function resolveMemoryBackendOutcome(
   if (typeof store.searchByEmbedding !== "function") {
     return { mode: { kind: "bm25", reason: "store_unsupported", provider } }
   }
-  if (!config.allowCloudEmbedding && provider !== "transformersjs") {
+  if (!config.allowCloudEmbedding && !isLocalEmbeddingProvider(embedding.provider)) {
     return { mode: { kind: "bm25", reason: "cloud_blocked", provider } }
   }
   return { backend: { store, embedding }, mode: { kind: "hybrid", provider } }
@@ -153,7 +155,19 @@ export async function tryBuildMemoryDeps(
           },
         })
       }
-      deps.embed = createProviderEmbeddingAdapter(embedConfig)
+      const embeddingTransport = createProviderEmbeddingAdapter(embedConfig)
+      deps.embed = async (text) =>
+        (
+          await generateSafeEmbedding(text, {
+            profileId: "memory",
+            purpose: "query",
+            embedding: embedConfig as EmbeddingConfig & {
+              provider: PrebuiltTwinDeps["embedding"]["provider"]
+            },
+            vectorBackend: prebuiltTwinDeps?.vectorBackend ?? "native",
+            transport: embeddingTransport,
+          })
+        ).embedding
       deps.vectorSearch = async (vector, topK) => {
         const hits = await backend.store.searchByEmbedding!(MEMORY_VECTOR_COLLECTION, vector, {
           limit: topK,

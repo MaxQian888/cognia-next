@@ -12,12 +12,6 @@
     "protection": "User-directed provider request; derived-data review remains in the PII auditor."
   },
   {
-    "file": "hooks/chat/use-team-chat.ts",
-    "boundaries": ["@cognia/provider-embedding/embedding"],
-    "reason": "Team-chat retrieval delegates to the shared embedding boundary.",
-    "protection": "Callers provide already-reviewed chat query text."
-  },
-  {
     "file": "lib/agent-team/runtime-streamers.ts",
     "boundaries": ["ai"],
     "reason": "Low-level team streaming adapter receives prepared prompts.",
@@ -109,12 +103,6 @@
     ],
     "reason": "Twin distillation consumes redacted ingest data.",
     "protection": "Twin ingest applies @cognia/redact before distillation."
-  },
-  {
-    "file": "lib/workflow/nodes/built-ins.ts",
-    "boundaries": ["@cognia/provider-embedding/embedding"],
-    "reason": "Workflow node delegates to the shared embedding boundary.",
-    "protection": "Workflow inputs are explicit node inputs; derived-data flows require auditor review."
   },
   {
     "file": "packages/provider-core/src/core/client.ts",

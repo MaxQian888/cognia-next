@@ -118,7 +118,7 @@ describe("retrieveKnowledgeBaseChunks", () => {
     })
   })
 
-  it("uses original text for a fully local embedding backend", async () => {
+  it("uses provider locality rather than vector locality for the PII boundary", async () => {
     const deps = makeDeps([])
     loadMock.mockResolvedValue([])
 
@@ -129,7 +129,7 @@ describe("retrieveKnowledgeBaseChunks", () => {
       deps,
     })
 
-    expect(embedMock).toHaveBeenCalledWith("Email alice@example.com", deps.embedding)
+    expect(embedMock).toHaveBeenCalledWith("Email <EMAIL_001>", deps.embedding)
   })
 
   it("reports dimension incompatibility without throwing", async () => {

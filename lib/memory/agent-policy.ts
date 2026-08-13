@@ -4,11 +4,7 @@ import {
   type MemoryExternalContextSource,
   type MemorySessionPolicy,
 } from "@/lib/memory/control-plane/policy"
-import {
-  resolveMemoryConfig,
-  type MemoryConfig,
-  type MemoryScope,
-} from "@/types/memory/memory"
+import { resolveMemoryConfig, type MemoryConfig, type MemoryScope } from "@/types/memory/memory"
 
 const ALL_SCOPES: readonly MemoryScope[] = ["global", "workspace", "character", "agent"]
 
@@ -47,10 +43,9 @@ export function resolveAgentMemoryPolicy(input: {
   const globallyWritable = config.enabled && !config.temporary
   const recallRequested = input.session?.memoryUse ?? operations.recall
   const learnRequested = input.session?.memoryLearn ?? input.agentPolicy?.autoLearn ?? true
-  const canRecall = config.enabled && !config.temporary && config.useMemory && recallRequested
+  const canRecall = turn.canRecall && recallRequested
   const canAutoLearn =
     turn.canLearn &&
-    config.learnFromChats &&
     config.autoExtract &&
     learnRequested &&
     operations.create &&

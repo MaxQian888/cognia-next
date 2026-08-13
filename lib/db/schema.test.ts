@@ -13,6 +13,8 @@ import {
   LEGACY_COGNIA_DB_NAME,
   __resetDbForTesting,
   activateAccountDatabase,
+  backfillMemoryGovernanceV161,
+  backfillMemoryJobV161,
   backfillMemoryGovernanceV118,
   backfillRootsForRow,
   clearAccountDatabaseSelection,
@@ -399,6 +401,14 @@ describe("getDb", () => {
     expect(db.memoryEvidence).toBeDefined()
     expect(db.memoryJobs).toBeDefined()
     expect(db.memoryAuditEvents).toBeDefined()
+    expect(db.retrievalProfiles).toBeDefined()
+    expect(db.retrievalGenerations).toBeDefined()
+    expect(db.retrievalActivePointers).toBeDefined()
+    expect(db.retrievalJobs).toBeDefined()
+    expect(db.retrievalTraces).toBeDefined()
+    expect(db.retrievalEncryptedContent).toBeDefined()
+    expect(db.retrievalTombstones).toBeDefined()
+    expect(db.retrievalMigrationJournal).toBeDefined()
     expect(db.petSpritePacks).toBeDefined()
     expect(db.connectorConversationStates).toBeDefined()
     expect(db.connectorInboundJobs).toBeDefined()
@@ -409,6 +419,34 @@ describe("getDb", () => {
     await db.open()
     expect(db.verno).toBeGreaterThanOrEqual(122)
     expect(db.memories.schema.indexes.map((index) => index.name)).toContain("sourceMessageId")
+  })
+
+  it("v161 preserves unknown memory governance and expands legacy job outcomes", () => {
+    const memory = backfillMemoryGovernanceV161({
+      type: "procedural",
+      evidenceState: "legacy",
+      sensitivity: "normal",
+      reviewStatus: "unreviewed",
+    } as never)
+    expect(memory).toMatchObject({
+      confidence: null,
+      expiresAt: null,
+      staleness: "unknown",
+      sensitivity: "unknown",
+      reviewStatus: "pending_instruction",
+    })
+    expect(
+      backfillMemoryJobV161({
+        status: "completed",
+        retryCount: 0,
+        startedAt: 10,
+      } as never)
+    ).toMatchObject({
+      status: "succeeded",
+      attempt: 1,
+      maxAttempts: 4,
+      resultCode: "legacy_completed",
+    })
   })
 
   it("v123 opens the certification projection table", async () => {

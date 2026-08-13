@@ -29,7 +29,7 @@ jest.mock("@/lib/db/memory-governance", () => ({
   createMemoryEvidence: (...args: unknown[]) => mockCreateEvidence(...args),
   enqueueMemoryJob: (...args: unknown[]) => mockEnqueueJob(...args),
   claimMemoryJob: (...args: unknown[]) => mockClaimJob(...args),
-  completeMemoryJob: (...args: unknown[]) => mockCompleteJob(...args),
+  finishMemoryJob: (...args: unknown[]) => mockCompleteJob(...args),
   failMemoryJob: (...args: unknown[]) => mockFailJob(...args),
 }))
 jest.mock("@/lib/db/memories", () => ({ updateMemory: jest.fn() }))
@@ -117,19 +117,18 @@ describe("runTurnMemory", () => {
       expect.objectContaining({ kind: "turn-extraction", evidenceIds: ["e-user", "e-assistant"] }),
       { reuseCompleted: true }
     )
-    expect(mockCompleteJob).toHaveBeenCalledWith("job-1")
+    expect(mockCompleteJob).toHaveBeenCalledWith("job-1", "no_output", "nothing_durable")
   })
 
-  it("learns agent-scoped memory into the shared Twin namespace", async () => {
+  it("does not narrow automatic memory below workspace without extractor rationale", async () => {
     setMemory({ scopeDefault: "agent" })
     mockResolveCharacter.mockResolvedValue({ id: "c1", twinId: "alice" })
     await runTurnMemory("s1", INPUT)
     expect(mockRunExtraction.mock.calls[0][0]).toMatchObject({
-      scope: "agent",
-      agentId: "twin:alice",
+      scope: "global",
     })
     expect(mockEnqueueJob).toHaveBeenCalledWith(
-      expect.objectContaining({ scope: "agent", agentId: "twin:alice" }),
+      expect.objectContaining({ scope: "global", agentId: undefined }),
       { reuseCompleted: true }
     )
     expect(mockSchedule).toHaveBeenCalledWith(expect.objectContaining({ agentId: "twin:alice" }))
@@ -295,12 +294,12 @@ describe("runTurnMemory", () => {
 })
 
 describe("resolveAutomaticMemoryScope", () => {
-  it("uses only scopes that have both an identity and Agent write permission", () => {
-    expect(resolveAutomaticMemoryScope("agent", { projectId: "p1" })).toBe("global")
-    expect(resolveAutomaticMemoryScope("agent", { characterId: "c1" })).toBe("agent")
+  it("defaults automatic writes to workspace and never infers a narrower scope", () => {
+    expect(resolveAutomaticMemoryScope("agent", { projectId: "p1" })).toBe("workspace")
+    expect(resolveAutomaticMemoryScope("agent", { characterId: "c1" })).toBe("global")
     expect(resolveAutomaticMemoryScope("agent", {})).toBe("global")
     expect(resolveAutomaticMemoryScope("workspace", { projectId: "p1" })).toBe("workspace")
     expect(resolveAutomaticMemoryScope("global", {}, ["agent"])).toBeNull()
-    expect(resolveAutomaticMemoryScope("global", { characterId: "c1" }, ["agent"])).toBe("agent")
+    expect(resolveAutomaticMemoryScope("global", { characterId: "c1" }, ["agent"])).toBeNull()
   })
 })

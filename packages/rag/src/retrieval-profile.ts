@@ -12,6 +12,7 @@ export type RetrievalVectorBackend =
   | "indexeddb"
   | "sqlite"
   | "lancedb"
+  | "milvus"
   | "chroma"
   | "pinecone"
   | "weaviate"

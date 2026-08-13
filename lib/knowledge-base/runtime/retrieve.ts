@@ -1,10 +1,9 @@
-import { generateEmbedding } from "@cognia/provider-embedding/embedding"
+import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import {
   EmbeddingDimensionMismatchError,
   ensureCollectionDimensionCompatible,
 } from "@cognia/vector/dimension-guard"
-import { redactText } from "@cognia/redact"
 import type { IVectorStore } from "@cognia/vector/store"
 import { getKnowledgeBaseChunksByVectorDocIds } from "@/lib/db/knowledge-bases"
 import type { VectorBackend } from "@/types/twin"
@@ -53,10 +52,12 @@ export async function retrieveKnowledgeBaseChunks(
     const queryEmbedding =
       input.precomputedQueryEmbedding ??
       (
-        await generateEmbedding(
-          input.deps.vectorBackend === "native" ? query : redactText(query).redacted,
-          input.deps.embedding
-        )
+        await generateSafeEmbedding(query, {
+          profileId: `kb:${input.knowledgeBaseId}`,
+          purpose: "query",
+          embedding: input.deps.embedding,
+          vectorBackend: input.deps.vectorBackend,
+        })
       ).embedding
     const collection = knowledgeBaseVectorCollectionName(input.knowledgeBaseId)
     await ensureCollectionDimensionCompatible(input.deps.store, collection, queryEmbedding.length, {

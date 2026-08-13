@@ -34,7 +34,7 @@ import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import type { ApplyMemoryContextDeps } from "@/lib/memory/runtime/apply-memory-context"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { tryBuildTwinDeps, type TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
-import { generateEmbedding } from "@cognia/provider-embedding/embedding"
+import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import {
   buildSupervisorRoster,
   parseDispatches,
@@ -405,7 +405,12 @@ export function useTeamChat() {
         turnTwinDeps = await tryBuildTwinDeps()
         if (turnTwinDeps) {
           try {
-            const result = await generateEmbedding(userText, turnTwinDeps.embedding)
+            const result = await generateSafeEmbedding(userText, {
+              profileId: "team-chat-shared",
+              purpose: "query",
+              embedding: turnTwinDeps.embedding,
+              vectorBackend: turnTwinDeps.vectorBackend ?? "native",
+            })
             turnEmbedding = result.embedding
           } catch {
             turnEmbedding = undefined // resolver falls back to per-member embed

@@ -23,7 +23,7 @@ import { updateMemory } from "@/lib/db/memories"
 import {
   appendMemoryAuditEvent,
   claimMemoryJob,
-  completeMemoryJob,
+  finishMemoryJob,
   createMemoryEvidence,
   enqueueMemoryJob,
   failMemoryJob,
@@ -57,18 +57,15 @@ export interface TurnMemoryInput {
 }
 
 export function resolveAutomaticMemoryScope(
-  configured: ReturnType<typeof resolveMemoryConfig>["scopeDefault"],
+  _configured: ReturnType<typeof resolveMemoryConfig>["scopeDefault"],
   session: { projectId?: string; characterId?: string },
   writableScopes: readonly MemoryScope[] = ["global", "workspace", "character", "agent"]
 ): MemoryScope | null {
-  const available = new Set<MemoryScope>(["global"])
-  if (session.projectId) available.add("workspace")
-  if (session.characterId) {
-    available.add("character")
-    available.add("agent")
-  }
-  if (available.has(configured) && writableScopes.includes(configured)) return configured
-  for (const scope of writableScopes) if (available.has(scope)) return scope
+  // Automatic learning starts at the workspace boundary. Character/agent and
+  // branch/path narrowing require an explicit applicability rationale from the
+  // extractor and are therefore not inferred here.
+  if (session.projectId && writableScopes.includes("workspace")) return "workspace"
+  if (writableScopes.includes("global")) return "global"
   return null
 }
 
@@ -138,6 +135,7 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
         sessionId,
         contaminationState,
         reviewed: false,
+        sourceRole: "user",
       }),
       createMemoryEvidence({
         kind: "message",
@@ -145,6 +143,7 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
         sessionId,
         contaminationState,
         reviewed: false,
+        sourceRole: "assistant",
       }),
     ])
     const job = await enqueueMemoryJob(
@@ -192,7 +191,12 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
         if (!memoryId) continue
         await updateMemory(memoryId, {
           evidenceState: "supported",
-          reviewStatus: operation.op === "CONFLICT" ? "conflict" : "unreviewed",
+          reviewStatus:
+            operation.op === "CONFLICT"
+              ? "conflict"
+              : operation.op === "ADD" && operation.memory.type === "procedural"
+                ? "pending_instruction"
+                : "unreviewed",
           contaminationState,
           sensitivity: "normal",
         })
@@ -216,7 +220,12 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
           reason: "automatic_learning",
         })
       }
-      await completeMemoryJob(job.id)
+      const producedOutput = result.applied.some((operation) => operation.op !== "NOOP")
+      await finishMemoryJob(
+        job.id,
+        producedOutput ? "succeeded" : "no_output",
+        producedOutput ? "memories_applied" : "nothing_durable"
+      )
       claimedJobId = undefined
     }
 

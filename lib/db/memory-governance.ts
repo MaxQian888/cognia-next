@@ -91,7 +91,7 @@ export async function listMemoryJobs(): Promise<MemoryJob[]> {
 }
 
 export type MemoryJobDraft = Omit<MemoryJob, "id" | "status" | "queuedAt" | "retryCount"> &
-  Partial<Pick<MemoryJob, "id" | "status" | "queuedAt" | "retryCount">>
+  Partial<Pick<MemoryJob, "id" | "status" | "queuedAt" | "retryCount" | "attempt" | "maxAttempts">>
 
 export async function enqueueMemoryJob(
   draft: MemoryJobDraft,
@@ -104,7 +104,7 @@ export async function enqueueMemoryJob(
     if (active) return active
     if (options.reuseCompleted) {
       const completed = sameKey
-        .filter((job) => job.status === "completed")
+        .filter((job) => job.status === "succeeded" || job.status === "no_output")
         .sort((a, b) => b.queuedAt - a.queuedAt)[0]
       if (completed) return completed
     }
@@ -115,6 +115,8 @@ export async function enqueueMemoryJob(
       status: draft.status ?? "queued",
       queuedAt: draft.queuedAt ?? Date.now(),
       retryCount: draft.retryCount ?? 0,
+      attempt: draft.attempt ?? 0,
+      maxAttempts: draft.maxAttempts ?? 4,
     }
     await db.memoryJobs.add(row)
     return row
@@ -137,12 +139,15 @@ export async function claimMemoryJob(
     const claimable =
       job &&
       ((job.status === "queued" && (job.nextAttemptAt ?? 0) <= now) ||
+        (job.status === "retry_wait" && (job.nextAttemptAt ?? Number.POSITIVE_INFINITY) <= now) ||
         (job.status === "running" && job.leaseExpiresAt !== undefined && job.leaseExpiresAt <= now))
     if (!job || !claimable) return undefined
     const claimed: MemoryJob = {
       ...job,
       status: "running",
-      startedAt: now,
+      startedAt: job.startedAt ?? now,
+      heartbeatAt: now,
+      attempt: (job.attempt ?? 0) + 1,
       leaseOwner: workerId,
       leaseExpiresAt: now + leaseTtlMs,
       nextAttemptAt: undefined,
@@ -163,7 +168,7 @@ export async function claimNextMemoryJob(
     // `[status+queuedAt]` keeps the scan ordered by claim priority. `first()`
     // stops as soon as it reaches an eligible row, rather than materializing
     // every queued/running job and sorting both arrays in renderer memory.
-    const [queued, expiredLease] = await Promise.all([
+    const [queued, retryWait, expiredLease] = await Promise.all([
       db.memoryJobs
         .where("[status+queuedAt]")
         .between(["queued", 0], ["queued", Number.MAX_SAFE_INTEGER])
@@ -171,22 +176,26 @@ export async function claimNextMemoryJob(
         .first(),
       db.memoryJobs
         .where("[status+queuedAt]")
+        .between(["retry_wait", 0], ["retry_wait", Number.MAX_SAFE_INTEGER])
+        .filter((job) => (job.nextAttemptAt ?? Number.POSITIVE_INFINITY) <= now)
+        .first(),
+      db.memoryJobs
+        .where("[status+queuedAt]")
         .between(["running", 0], ["running", Number.MAX_SAFE_INTEGER])
         .filter((job) => job.leaseExpiresAt !== undefined && job.leaseExpiresAt <= now)
         .first(),
     ])
-    const next =
-      queued && expiredLease
-        ? queued.queuedAt <= expiredLease.queuedAt
-          ? queued
-          : expiredLease
-        : (queued ?? expiredLease)
+    const next = [queued, retryWait, expiredLease]
+      .filter((job): job is MemoryJob => job !== undefined)
+      .sort((left, right) => left.queuedAt - right.queuedAt)[0]
     if (!next) return undefined
 
     const claimed: MemoryJob = {
       ...next,
       status: "running",
-      startedAt: now,
+      startedAt: next.startedAt ?? now,
+      heartbeatAt: now,
+      attempt: (next.attempt ?? 0) + 1,
       leaseOwner: workerId,
       leaseExpiresAt: now + leaseTtlMs,
       nextAttemptAt: undefined,
@@ -197,13 +206,73 @@ export async function claimNextMemoryJob(
   })
 }
 
-export async function completeMemoryJob(id: string, now: number = Date.now()): Promise<void> {
+export async function finishMemoryJob(
+  id: string,
+  status: "succeeded" | "no_output" | "skipped" | "failed" | "cancelled",
+  resultCode: string,
+  now: number = Date.now()
+): Promise<void> {
   await getDb().memoryJobs.update(id, {
-    status: "completed",
+    status,
     completedAt: now,
     leaseOwner: undefined,
     leaseExpiresAt: undefined,
+    heartbeatAt: undefined,
     errorCode: undefined,
+    resultCode,
+  })
+}
+
+/** Compatibility wrapper for existing callers; success is now explicit. */
+export async function completeMemoryJob(id: string, now: number = Date.now()): Promise<void> {
+  return finishMemoryJob(id, "succeeded", "completed", now)
+}
+
+export async function heartbeatMemoryJob(
+  id: string,
+  workerId: string,
+  now: number = Date.now(),
+  leaseTtlMs = 10 * 60 * 1000
+): Promise<MemoryJob | undefined> {
+  const db = getDb()
+  return db.transaction("rw", db.memoryJobs, async () => {
+    const job = await db.memoryJobs.get(id)
+    if (
+      !job ||
+      job.status !== "running" ||
+      job.leaseOwner !== workerId ||
+      (job.leaseExpiresAt ?? 0) < now
+    ) {
+      return undefined
+    }
+    const heartbeat = { ...job, heartbeatAt: now, leaseExpiresAt: now + leaseTtlMs }
+    await db.memoryJobs.put(heartbeat)
+    return heartbeat
+  })
+}
+
+export async function cancelMemoryJob(
+  id: string,
+  now: number = Date.now()
+): Promise<MemoryJob | undefined> {
+  const db = getDb()
+  return db.transaction("rw", db.memoryJobs, async () => {
+    const job = await db.memoryJobs.get(id)
+    if (!job || ["succeeded", "no_output", "skipped", "failed", "cancelled"].includes(job.status)) {
+      return job
+    }
+    const cancelled: MemoryJob = {
+      ...job,
+      status: "cancelled",
+      cancellationRequestedAt: now,
+      completedAt: now,
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
+      heartbeatAt: undefined,
+      resultCode: "cancelled_by_user",
+    }
+    await db.memoryJobs.put(cancelled)
+    return cancelled
   })
 }
 
@@ -221,14 +290,16 @@ export async function failMemoryJob(
   if (retryCount <= maxRetries) {
     const baseDelayMs = options.baseDelayMs ?? 1_000
     await db.memoryJobs.update(id, {
-      status: "queued",
+      status: "retry_wait",
       retryCount,
       nextAttemptAt: now + baseDelayMs * 2 ** (retryCount - 1),
       errorCode,
       leaseOwner: undefined,
       leaseExpiresAt: undefined,
+      heartbeatAt: undefined,
+      resultCode: "retry_scheduled",
     })
-    return "queued"
+    return "retry_wait"
   }
 
   await db.memoryJobs.update(id, {
@@ -238,6 +309,8 @@ export async function failMemoryJob(
     errorCode,
     leaseOwner: undefined,
     leaseExpiresAt: undefined,
+    heartbeatAt: undefined,
+    resultCode: "retry_exhausted",
   })
   return "failed"
 }

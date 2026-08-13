@@ -9,6 +9,7 @@ import {
 import { getSkill as getPluginSkill } from "@/lib/plugin/registries/skill-registry"
 import { invokeMcpTool } from "@/lib/mcp/invoke"
 import { guardWorkflowEgress } from "@/lib/workflow/runtime/egress-guard"
+import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import { nonRetryable, sha256Hex } from "../shared/executor-support"
 
 // ── action.skill.invoke ───────────────────────────────────────────────────
@@ -144,13 +145,11 @@ registerNodeExecutor({
 
     const [
       { tryBuildTwinDeps },
-      { generateEmbedding },
       { vectorCollectionName },
       { getTwinChunksByVectorDocIds },
       { getTwinSource },
     ] = await Promise.all([
       import("@/lib/twin/runtime/build-deps"),
-      import("@cognia/provider-embedding/embedding"),
       import("@/lib/twin/ingest/persist"),
       import("@/lib/db/twin-chunks"),
       import("@/lib/db/twin-sources"),
@@ -169,7 +168,12 @@ registerNodeExecutor({
 
     let queryEmbedding: number[]
     try {
-      const embedded = await generateEmbedding(query, deps.embedding)
+      const embedded = await generateSafeEmbedding(query, {
+        profileId: `workflow-twin:${twinId}`,
+        purpose: "query",
+        embedding: deps.embedding,
+        vectorBackend: deps.vectorBackend ?? "native",
+      })
       queryEmbedding = embedded.embedding
     } catch (err) {
       return {

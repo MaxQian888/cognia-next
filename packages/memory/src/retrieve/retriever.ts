@@ -22,7 +22,12 @@ import {
 import { BM25Index, normalizeScores, reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { tokenizeMultilingual } from "@cognia/rag/cjk-tokenizer"
 import { buildExpandedKeywordQuery } from "./query-expansion"
-import { recencyHalfLifeDaysForType, scoreMemories, veracityFor } from "./scoring"
+import {
+  governanceScoreFor,
+  recencyHalfLifeDaysForType,
+  scoreMemories,
+  veracityFor,
+} from "./scoring"
 
 /**
  * Terms too common to signal topical relevance. The BM25 leg returns *any* doc
@@ -205,6 +210,8 @@ export interface RetrieveMemoriesInput {
    * factor. Defaults to `DEFAULT_MEMORY_CONFIG.decayHalfLifeDays` when omitted.
    */
   recencyHalfLifeDays?: number
+  /** Stable clock for expiry and score tests. */
+  now?: number
 }
 
 export interface RetrievedMemory {
@@ -263,6 +270,17 @@ export function __resetMemoryBm25Cache(): void {
   memoryBm25Cache.clear()
 }
 
+export function isMemoryEligibleForRetrieval(memory: Memory, now: number = Date.now()): boolean {
+  if (memory.status !== "active") return false
+  if (memory.expiresAt !== null && memory.expiresAt !== undefined && memory.expiresAt <= now) {
+    return false
+  }
+  if (memory.staleness === "expired" || memory.trustState === "quarantined") return false
+  if (memory.reviewStatus === "conflict") return false
+  if (memory.type === "procedural" && memory.reviewStatus !== "verified") return false
+  return true
+}
+
 export async function retrieveMemories(
   input: RetrieveMemoriesInput,
   deps: MemoryRetrieverDeps
@@ -271,7 +289,9 @@ export async function retrieveMemories(
   if (!query) return []
 
   const reader = input.reader ?? input.characterId
-  let candidates = await deps.loadCandidates(reader)
+  let candidates = (await deps.loadCandidates(reader)).filter((memory) =>
+    isMemoryEligibleForRetrieval(memory, input.now)
+  )
   if (input.types) {
     const allow = new Set(input.types)
     candidates = candidates.filter((m) => allow.has(m.type))
@@ -356,9 +376,10 @@ export async function retrieveMemories(
       relevance: relevanceById.get(m.id) ?? 0,
       halfLifeDays: recencyHalfLifeDaysForType(m.type, baseHalfLife),
       veracity: veracityFor(m),
+      governance: governanceScoreFor(m),
     }))
 
-  const ranked = scoreMemories(scorable, {}).slice(0, input.topK)
+  const ranked = scoreMemories(scorable, { now: input.now }).slice(0, input.topK)
 
   const result: RetrievedMemory[] = ranked.map((r) => ({
     memory: byId.get(r.memory.id)!,

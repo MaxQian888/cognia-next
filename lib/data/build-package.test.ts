@@ -676,7 +676,7 @@ describe("buildBackupPackage — learned memory", () => {
       id: "mjob_1",
       dedupeKey: "turn:s1:m1",
       kind: "turn-extraction",
-      status: "completed",
+      status: "succeeded",
       scope: "workspace",
       projectId: "project_1",
       provenance: "user",

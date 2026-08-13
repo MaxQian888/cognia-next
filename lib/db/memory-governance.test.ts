@@ -3,10 +3,13 @@ import {
   appendMemoryAuditEvent,
   claimMemoryJob,
   claimNextMemoryJob,
+  cancelMemoryJob,
   completeMemoryJob,
   createMemoryEvidence,
   enqueueMemoryJob,
   failMemoryJob,
+  finishMemoryJob,
+  heartbeatMemoryJob,
   findEarliestInstrumentedAuditAt,
   getMemoryJob,
   listMemoryAuditEvents,
@@ -110,7 +113,7 @@ describe("durable memory jobs", () => {
     await enqueueMemoryJob(draft)
     await claimNextMemoryJob("worker", 1_000, 50)
     expect(await failMemoryJob("j1", "provider_unavailable", 1_100, { maxRetries: 1 })).toBe(
-      "queued"
+      "retry_wait"
     )
     expect(await claimNextMemoryJob("worker", 1_100)).toBeUndefined()
     expect(await claimNextMemoryJob("worker", 2_100)).toBeDefined()
@@ -123,14 +126,35 @@ describe("durable memory jobs", () => {
     await enqueueMemoryJob(draft)
     await claimNextMemoryJob("worker", 1_000)
     await completeMemoryJob("j1", 1_100)
-    expect(await getMemoryJob("j1")).toMatchObject({ status: "completed", completedAt: 1_100 })
+    expect(await getMemoryJob("j1")).toMatchObject({ status: "succeeded", completedAt: 1_100 })
     expect((await enqueueMemoryJob({ ...draft, id: "j2" })).id).toBe("j2")
   })
 
-  it("reuses only completed work and replaces a failed dedupe-key job", async () => {
+  it("reuses only successful work and replaces a failed dedupe-key job", async () => {
     await enqueueMemoryJob({ ...draft, status: "failed" })
     const retry = await enqueueMemoryJob({ ...draft, id: "j2" }, { reuseCompleted: true })
     expect(retry.id).toBe("j2")
+  })
+
+  it("renews the active lease and records no-output and cancellation outcomes", async () => {
+    await enqueueMemoryJob(draft)
+    await claimNextMemoryJob("worker", 1_000, 100)
+    expect(await heartbeatMemoryJob("j1", "other", 1_050, 100)).toBeUndefined()
+    expect(await heartbeatMemoryJob("j1", "worker", 1_050, 100)).toMatchObject({
+      heartbeatAt: 1_050,
+      leaseExpiresAt: 1_150,
+    })
+    await finishMemoryJob("j1", "no_output", "nothing_durable", 1_100)
+    expect(await getMemoryJob("j1")).toMatchObject({
+      status: "no_output",
+      resultCode: "nothing_durable",
+    })
+
+    await enqueueMemoryJob({ ...draft, id: "j2", dedupeKey: "k2" })
+    expect(await cancelMemoryJob("j2", 1_200)).toMatchObject({
+      status: "cancelled",
+      resultCode: "cancelled_by_user",
+    })
   })
 })
 
@@ -191,6 +215,6 @@ describe("insight readers", () => {
     const jobs = await listMemoryJobs()
     expect(jobs.map((j) => j.id)).toEqual(["j-new", "j-old"])
     // Completed jobs are retained, which is what makes "last run" reportable.
-    expect(jobs[1]).toMatchObject({ status: "completed", completedAt: 150 })
+    expect(jobs[1]).toMatchObject({ status: "succeeded", completedAt: 150 })
   })
 })

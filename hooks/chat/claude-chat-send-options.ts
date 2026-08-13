@@ -18,7 +18,7 @@ import { allRootPaths } from "@/lib/workspace/roots"
 import { resolveWorkspaceTrustForSend } from "@/lib/workspace/trust-gate"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
-import { generateEmbedding } from "@cognia/provider-embedding/embedding"
+import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import type { ChatSession, SendOptions } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
@@ -104,7 +104,14 @@ export async function buildSendOptions(
   let turnEmbedding: number[] | undefined
   if (twinHandshake && userMessage?.trim()) {
     try {
-      turnEmbedding = (await generateEmbedding(userMessage, twinHandshake.embedding)).embedding
+      turnEmbedding = (
+        await generateSafeEmbedding(userMessage, {
+          profileId: "chat-shared",
+          purpose: "query",
+          embedding: twinHandshake.embedding,
+          vectorBackend: twinHandshake.vectorBackend ?? "native",
+        })
+      ).embedding
     } catch {
       turnEmbedding = undefined
     }

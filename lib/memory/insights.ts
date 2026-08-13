@@ -150,13 +150,16 @@ export function summarizeMemoryJobs(jobs: MemoryJob[]): MemoryJobKindSummary[] {
     }
     for (const job of own) {
       if (job.status === "running") summary.running++
-      else if (job.status === "queued") {
+      else if (job.status === "queued" || job.status === "retry_wait") {
         if (job.retryCount > 0) summary.retrying++
         else summary.queued++
       } else if (job.status === "failed") {
         summary.failed++
         summary.lastErrorCode ??= job.errorCode
-      } else if (job.status === "completed" && job.completedAt !== undefined) {
+      } else if (
+        (job.status === "succeeded" || job.status === "no_output") &&
+        job.completedAt !== undefined
+      ) {
         if (summary.lastCompletedAt === undefined || job.completedAt > summary.lastCompletedAt) {
           summary.lastCompletedAt = job.completedAt
         }
