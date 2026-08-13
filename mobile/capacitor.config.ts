@@ -75,12 +75,19 @@ const config: CapacitorConfig = {
     LocalNotifications: {
       smallIcon: "ic_stat_icon",
       iconColor: "#3b82f6",
+      // iOS otherwise defaults to badge-only while the app is foregrounded,
+      // making workflow/local reminder notifications appear to do nothing.
+      presentationOptions: ["badge", "sound", "banner", "list"],
       // No custom `sound`: a `beep.wav` was referenced but never bundled (no
       // res/raw asset), so Android logged a missing-resource error and fell
       // back to the default anyway. Use the system default sound explicitly.
     },
     PushNotifications: {
-      presentationOptions: ["badge", "sound", "alert"],
+      // Keep foreground push fully native on both platforms. `alert` is
+      // deprecated on iOS; `banner` + `list` map to the modern presentation
+      // options there and to one alert notification on Android. The unified
+      // bridge records the same delivery without adding a duplicate toast.
+      presentationOptions: ["badge", "sound", "banner", "list"],
     },
     // CapacitorHttp (M2.9) — enabled so HTTPS calls to the desktop server's
     // self-signed cert can go through a native pinned trust path. Server-trust

@@ -7,8 +7,10 @@ import {
   DEFAULT_CHANNEL_ID,
   ensureChannel,
   ensurePermission,
+  emitNotificationPermissionGranted,
   listPending,
   onAction,
+  subscribeNotificationPermissionGranted,
   requestPermission,
   schedule,
 } from "./local-notifications"
@@ -101,6 +103,31 @@ describe("requestPermission", () => {
     })
     const out = await requestPermission(async () => p)
     expect(out).toEqual({ kind: "ok", value: "denied" })
+  })
+})
+
+describe("notification permission signal", () => {
+  it("notifies active subscribers and stops after unsubscribe", () => {
+    const target = new EventTarget()
+    const handler = jest.fn()
+    const unsubscribe = subscribeNotificationPermissionGranted(handler, target)
+
+    expect(emitNotificationPermissionGranted(target)).toBe(true)
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    unsubscribe()
+    emitNotificationPermissionGranted(target)
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses the window event target when none is injected", () => {
+    const handler = jest.fn()
+    const unsubscribe = subscribeNotificationPermissionGranted(handler)
+
+    expect(emitNotificationPermissionGranted()).toBe(true)
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    unsubscribe()
   })
 })
 

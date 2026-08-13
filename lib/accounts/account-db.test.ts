@@ -30,6 +30,27 @@ async function freshRegistry(testName: string) {
 }
 
 describe("LocalAccountRegistry", () => {
+  it("v2 opens account-wide performance quota and encrypted budget stores", async () => {
+    const { db } = await freshRegistry("performance-account-stores")
+    await db.performanceQuotaReservations.put({
+      id: "reservation-a",
+      accountId: "acct_one",
+      targetDatabase: "cognia-account-acct_one-target-a",
+      captureId: "capture-a",
+      status: "reserved",
+      reservedBytes: 1024,
+      committedBytes: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect(await db.performanceQuotaReservations.get("reservation-a")).toMatchObject({
+      captureId: "capture-a",
+      reservedBytes: 1024,
+    })
+    expect(db.performanceBudgetProfiles).toBeDefined()
+    db.close()
+  })
+
   it("creates the first account, activates it, and derives its physical Dexie name", async () => {
     const { db, registry } = await freshRegistry("first-account")
 

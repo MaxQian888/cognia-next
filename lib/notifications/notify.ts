@@ -27,7 +27,7 @@ export interface NotifyDeps {
   /** In-app toast fan-out (sonner). */
   toast?: (rec: NotificationRecord) => void
   /** OS notification fan-out (Tauri). */
-  osNotify?: (opts: { title: string; body?: string }) => void | Promise<void>
+  osNotify?: (opts: { title: string; body?: string; href?: string }) => void | Promise<void>
   /** Mobile push fan-out. */
   push?: (rec: NotificationRecord) => void | Promise<void>
   /**
@@ -128,7 +128,9 @@ export async function notify(input: NotificationInput, deps: NotifyDeps): Promis
       const permitted = deps.isOsPermitted ? await deps.isOsPermitted() : true
       if (permitted) {
         if (
-          await runSafely("os", () => deps.osNotify!({ title: record.title, body: record.body }))
+          await runSafely("os", () =>
+            deps.osNotify!({ title: record.title, body: record.body, href: record.href })
+          )
         ) {
           delivered.push("os")
         }

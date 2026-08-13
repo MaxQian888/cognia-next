@@ -1668,6 +1668,174 @@
     "connectors_list_adapters": {
       "type": "object"
     },
+    "connectors_matrix_crypto_close": {
+      "type": "object",
+      "required": [
+        "adapter_id"
+      ],
+      "properties": {
+        "adapter_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `adapterId`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_crypto_decrypt_event": {
+      "type": "object",
+      "required": [
+        "req"
+      ],
+      "properties": {
+        "req": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_crypto_encrypt_event": {
+      "type": "object",
+      "required": [
+        "req"
+      ],
+      "properties": {
+        "req": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_crypto_get_missing_sessions": {
+      "type": "object",
+      "required": [
+        "req"
+      ],
+      "properties": {
+        "req": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_crypto_init": {
+      "type": "object",
+      "required": [
+        "req"
+      ],
+      "properties": {
+        "req": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_crypto_mark_request_sent": {
+      "type": "object",
+      "required": [
+        "req"
+      ],
+      "properties": {
+        "req": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_crypto_outgoing_requests": {
+      "type": "object",
+      "required": [
+        "adapter_id"
+      ],
+      "properties": {
+        "adapter_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `adapterId`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_crypto_receive_sync_changes": {
+      "type": "object",
+      "required": [
+        "req"
+      ],
+      "properties": {
+        "req": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_crypto_share_room_key": {
+      "type": "object",
+      "required": [
+        "req"
+      ],
+      "properties": {
+        "req": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_crypto_update_tracked_users": {
+      "type": "object",
+      "required": [
+        "req"
+      ],
+      "properties": {
+        "req": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_encrypted_media_fetch": {
+      "type": "object",
+      "required": [
+        "req"
+      ],
+      "properties": {
+        "req": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_matrix_encrypted_media_upload": {
+      "type": "object",
+      "required": [
+        "req"
+      ],
+      "properties": {
+        "req": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
     "connectors_media_upload": {
       "type": "object",
       "required": [
@@ -2541,19 +2709,23 @@
     "git_blame": {
       "type": "object",
       "required": [
-        "repoPath",
-        "path"
+        "path",
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "path": {
           "type": "string"
         },
         "rev": {
           "type": "string",
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -2561,10 +2733,14 @@
     "git_branches": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -2573,15 +2749,24 @@
     "git_checkout_branch": {
       "type": "object",
       "required": [
-        "repoPath",
-        "name"
+        "name",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "name": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2589,15 +2774,24 @@
     "git_cherry_pick": {
       "type": "object",
       "required": [
-        "repoPath",
-        "sha"
+        "sha",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "sha": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2606,14 +2800,25 @@
       "type": "object",
       "required": [
         "remoteUrl",
-        "destination"
+        "workspaceId",
+        "destinationRelativePath",
+        "adminLease"
       ],
       "properties": {
         "remoteUrl": {
           "type": "string"
         },
-        "destination": {
-          "type": "string"
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destinationRelativePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2621,15 +2826,13 @@
     "git_commit": {
       "type": "object",
       "required": [
-        "repoPath",
         "message",
         "amend",
-        "signoff"
+        "signoff",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "message": {
           "type": "string"
         },
@@ -2638,6 +2841,17 @@
         },
         "signoff": {
           "type": "boolean"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2645,14 +2859,18 @@
     "git_commit_files": {
       "type": "object",
       "required": [
-        "repoPath",
-        "sha"
+        "sha",
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "sha": {
           "type": "string"
         },
-        "sha": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -2661,10 +2879,14 @@
     "git_conflicts": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -2673,14 +2895,12 @@
     "git_create_branch": {
       "type": "object",
       "required": [
-        "repoPath",
         "name",
-        "checkout"
+        "checkout",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "name": {
           "type": "string"
         },
@@ -2690,6 +2910,17 @@
         "from": {
           "type": "string",
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2697,13 +2928,11 @@
     "git_create_tag": {
       "type": "object",
       "required": [
-        "repoPath",
-        "name"
+        "name",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "name": {
           "type": "string"
         },
@@ -2714,6 +2943,17 @@
         "target": {
           "type": "string",
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2721,19 +2961,28 @@
     "git_delete_branch": {
       "type": "object",
       "required": [
-        "repoPath",
         "name",
-        "force"
+        "force",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "name": {
           "type": "string"
         },
         "force": {
           "type": "boolean"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2741,15 +2990,24 @@
     "git_delete_tag": {
       "type": "object",
       "required": [
-        "repoPath",
-        "name"
+        "name",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "name": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2757,18 +3015,22 @@
     "git_diff_commit": {
       "type": "object",
       "required": [
-        "repoPath",
         "sha",
-        "path"
+        "path",
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "sha": {
           "type": "string"
         },
         "path": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -2777,19 +3039,23 @@
     "git_diff_file": {
       "type": "object",
       "required": [
-        "repoPath",
         "path",
-        "staged"
+        "staged",
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "path": {
           "type": "string"
         },
         "staged": {
           "type": "boolean"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -2797,15 +3063,12 @@
     "git_diff_refs_file": {
       "type": "object",
       "required": [
-        "repoPath",
         "base",
         "target",
-        "path"
+        "path",
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "base": {
           "type": "string"
         },
@@ -2813,6 +3076,13 @@
           "type": "string"
         },
         "path": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -2821,18 +3091,22 @@
     "git_diff_refs_files": {
       "type": "object",
       "required": [
-        "repoPath",
         "base",
-        "target"
+        "target",
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "base": {
           "type": "string"
         },
         "target": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -2841,10 +3115,14 @@
     "git_diff_staged_all": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -2853,10 +3131,14 @@
     "git_diff_stat": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -2865,13 +3147,11 @@
     "git_discard": {
       "type": "object",
       "required": [
-        "repoPath",
-        "paths"
+        "paths",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "paths": {
           "type": "array",
           "items": {
@@ -2881,6 +3161,17 @@
         "hunkPatch": {
           "type": "string",
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2888,15 +3179,24 @@
     "git_discard_all": {
       "type": "object",
       "required": [
-        "repoPath",
-        "includeUntracked"
+        "includeUntracked",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "includeUntracked": {
           "type": "boolean"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2904,18 +3204,27 @@
     "git_fetch": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "remote": {
           "type": "string",
           "nullable": true
         },
         "prune": {
           "type": "boolean"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2923,19 +3232,23 @@
     "git_file_history": {
       "type": "object",
       "required": [
-        "repoPath",
         "path",
-        "maxCount"
+        "maxCount",
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "path": {
           "type": "string"
         },
         "maxCount": {
           "type": "integer"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -2943,10 +3256,14 @@
     "git_identity": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -2955,15 +3272,24 @@
     "git_ignore_add": {
       "type": "object",
       "required": [
-        "repoPath",
-        "pattern"
+        "pattern",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "pattern": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2971,11 +3297,20 @@
     "git_init": {
       "type": "object",
       "required": [
-        "path"
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "path": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -2983,14 +3318,12 @@
     "git_interactive_rebase": {
       "type": "object",
       "required": [
-        "repoPath",
         "base",
-        "entries"
+        "entries",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "base": {
           "type": "string"
         },
@@ -3000,6 +3333,17 @@
             "type": "object",
             "additionalProperties": true
           }
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3007,10 +3351,14 @@
     "git_is_repo": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -3019,19 +3367,23 @@
     "git_log": {
       "type": "object",
       "required": [
-        "repoPath",
         "maxCount",
-        "skip"
+        "skip",
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "maxCount": {
           "type": "integer"
         },
         "skip": {
           "type": "integer"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -3039,15 +3391,24 @@
     "git_merge": {
       "type": "object",
       "required": [
-        "repoPath",
-        "branch"
+        "branch",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "branch": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3055,11 +3416,20 @@
     "git_merge_abort": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3067,12 +3437,10 @@
     "git_pull": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "remote": {
           "type": "string",
           "nullable": true
@@ -3083,6 +3451,17 @@
         },
         "rebase": {
           "type": "boolean"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3090,12 +3469,10 @@
     "git_push": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "remote": {
           "type": "string",
           "nullable": true
@@ -3109,6 +3486,17 @@
         },
         "forceWithLease": {
           "type": "boolean"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3116,19 +3504,28 @@
     "git_push_tag": {
       "type": "object",
       "required": [
-        "repoPath",
         "remote",
-        "name"
+        "name",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "remote": {
           "type": "string"
         },
         "name": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3136,15 +3533,24 @@
     "git_rebase": {
       "type": "object",
       "required": [
-        "repoPath",
-        "onto"
+        "onto",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "onto": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3152,14 +3558,18 @@
     "git_rebase_commits": {
       "type": "object",
       "required": [
-        "repoPath",
-        "base"
+        "base",
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "base": {
           "type": "string"
         },
-        "base": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -3168,10 +3578,14 @@
     "git_refs": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -3180,19 +3594,28 @@
     "git_remote_add": {
       "type": "object",
       "required": [
-        "repoPath",
         "name",
-        "url"
+        "url",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "name": {
           "type": "string"
         },
         "url": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3200,15 +3623,24 @@
     "git_remote_remove": {
       "type": "object",
       "required": [
-        "repoPath",
-        "name"
+        "name",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "name": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3216,10 +3648,14 @@
     "git_remotes": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -3228,19 +3664,28 @@
     "git_rename_branch": {
       "type": "object",
       "required": [
-        "repoPath",
-        "newName"
+        "newName",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "newName": {
           "type": "string"
         },
         "old": {
           "type": "string",
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3248,10 +3693,14 @@
     "git_repo_state": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -3260,19 +3709,28 @@
     "git_reset": {
       "type": "object",
       "required": [
-        "repoPath",
         "mode",
-        "target"
+        "target",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "mode": {
           "type": "string"
         },
         "target": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3280,13 +3738,11 @@
     "git_resolve_conflict": {
       "type": "object",
       "required": [
-        "repoPath",
-        "path"
+        "path",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "path": {
           "type": "string"
         },
@@ -3301,6 +3757,17 @@
             "theirs"
           ],
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3308,14 +3775,12 @@
     "git_restore": {
       "type": "object",
       "required": [
-        "repoPath",
         "paths",
-        "staged"
+        "staged",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "paths": {
           "type": "array",
           "items": {
@@ -3328,6 +3793,17 @@
         "source": {
           "type": "string",
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3335,15 +3811,24 @@
     "git_revert": {
       "type": "object",
       "required": [
-        "repoPath",
-        "sha"
+        "sha",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "sha": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3351,11 +3836,20 @@
     "git_sequencer_abort": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3363,11 +3857,20 @@
     "git_sequencer_continue": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3375,15 +3878,13 @@
     "git_set_identity": {
       "type": "object",
       "required": [
-        "repoPath",
         "name",
         "email",
-        "global"
+        "global",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "name": {
           "type": "string"
         },
@@ -3391,7 +3892,19 @@
           "type": "string"
         },
         "global": {
-          "type": "boolean"
+          "type": "boolean",
+          "const": false
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3399,13 +3912,11 @@
     "git_stage": {
       "type": "object",
       "required": [
-        "repoPath",
-        "paths"
+        "paths",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "paths": {
           "type": "array",
           "items": {
@@ -3415,6 +3926,17 @@
         "hunkPatch": {
           "type": "string",
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3422,15 +3944,24 @@
     "git_stash_apply": {
       "type": "object",
       "required": [
-        "repoPath",
-        "index"
+        "index",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "index": {
           "type": "integer"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3438,15 +3969,24 @@
     "git_stash_drop": {
       "type": "object",
       "required": [
-        "repoPath",
-        "index"
+        "index",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "index": {
           "type": "integer"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3454,10 +3994,14 @@
     "git_stash_list": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -3466,15 +4010,24 @@
     "git_stash_pop": {
       "type": "object",
       "required": [
-        "repoPath",
-        "index"
+        "index",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "index": {
           "type": "integer"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3482,12 +4035,10 @@
     "git_stash_push": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "message": {
           "type": "string",
           "nullable": true
@@ -3497,6 +4048,17 @@
         },
         "keepIndex": {
           "type": "boolean"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3504,10 +4066,14 @@
     "git_status": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -3516,11 +4082,20 @@
     "git_sync": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3528,10 +4103,14 @@
     "git_tags": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -3540,13 +4119,11 @@
     "git_unstage": {
       "type": "object",
       "required": [
-        "repoPath",
-        "paths"
+        "paths",
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
         "paths": {
           "type": "array",
           "items": {
@@ -3556,30 +4133,56 @@
         "hunkPatch": {
           "type": "string",
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
+      "additionalProperties": false
+    },
+    "git_workspace_list": {
+      "type": "object",
+      "properties": {},
       "additionalProperties": false
     },
     "git_worktree_add": {
       "type": "object",
       "required": [
-        "repoPath",
-        "path",
-        "branch"
+        "branch",
+        "workspaceId",
+        "destinationRelativePath",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string"
-        },
         "branch": {
           "type": "string"
         },
         "baseRef": {
           "type": "string",
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "destinationRelativePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3587,15 +4190,26 @@
     "git_worktree_commit": {
       "type": "object",
       "required": [
-        "worktreePath",
-        "message"
+        "message",
+        "workspaceId",
+        "worktreeRelativePath",
+        "adminLease"
       ],
       "properties": {
-        "worktreePath": {
-          "type": "string"
-        },
         "message": {
           "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "worktreeRelativePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3603,10 +4217,14 @@
     "git_worktree_list": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
         }
       },
@@ -3615,11 +4233,20 @@
     "git_worktree_prune": {
       "type": "object",
       "required": [
-        "repoPath"
+        "workspaceId",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
           "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3627,23 +4254,33 @@
     "git_worktree_remove": {
       "type": "object",
       "required": [
-        "repoPath",
-        "path",
-        "force"
+        "force",
+        "workspaceId",
+        "worktreeRelativePath",
+        "adminLease"
       ],
       "properties": {
-        "repoPath": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string"
-        },
         "force": {
           "type": "boolean"
         },
         "deleteBranch": {
           "type": "string",
           "nullable": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "worktreeRelativePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -4787,6 +5424,181 @@
             "string",
             "null"
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "perf_close_lease": {
+      "type": "object",
+      "required": [
+        "leaseId"
+      ],
+      "properties": {
+        "leaseId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "perf_hotspots": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "perf_lease_snapshot": {
+      "type": "object",
+      "required": [
+        "leaseId"
+      ],
+      "properties": {
+        "leaseId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "perf_list_traces": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "perf_open_lease": {
+      "type": "object",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "required": [
+            "clientId",
+            "deviceId",
+            "targetId",
+            "routingGeneration",
+            "purpose",
+            "requestedCadenceMs"
+          ],
+          "properties": {
+            "clientId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "deviceId": {
+              "type": "string",
+              "description": "Overwritten by the authenticated RPC device identity."
+            },
+            "targetId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "routingGeneration": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "purpose": {
+              "type": "string",
+              "enum": [
+                "live",
+                "capture"
+              ]
+            },
+            "requestedCadenceMs": {
+              "type": "integer",
+              "minimum": 500,
+              "maximum": 10000
+            },
+            "sourceId": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "perf_read_observations": {
+      "type": "object",
+      "required": [
+        "leaseId"
+      ],
+      "properties": {
+        "leaseId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "afterSequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "perf_renew_lease": {
+      "type": "object",
+      "required": [
+        "leaseId"
+      ],
+      "properties": {
+        "leaseId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "perf_system_details": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "perf_trace_close": {
+      "type": "object",
+      "required": [
+        "handleId"
+      ],
+      "properties": {
+        "handleId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "perf_trace_open": {
+      "type": "object",
+      "required": [
+        "traceId"
+      ],
+      "properties": {
+        "traceId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "perf_trace_read_chunk": {
+      "type": "object",
+      "required": [
+        "handleId",
+        "offset"
+      ],
+      "properties": {
+        "handleId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
         }
       },
       "additionalProperties": false

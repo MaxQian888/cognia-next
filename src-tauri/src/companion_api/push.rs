@@ -250,18 +250,24 @@ impl PushTokenRegistry {
         self.inner.read().tokens.len()
     }
 
-    /// Iterate every registered device and call `dispatch_to_device` on the
-    /// supplied dispatcher. Used by the event-bus trigger wiring in Phase B4
-    /// to deliver a single payload to all offline phones.
+    /// Iterate registered devices for one provider and call
+    /// `dispatch_to_device` on the supplied dispatcher. Used by the event-bus
+    /// trigger wiring in Phase B4 to deliver a single payload to compatible
+    /// offline phones without submitting APNs tokens to FCM or vice versa.
     #[allow(dead_code)]
     pub async fn broadcast_to_offline(
         &self,
+        provider: PushProvider,
         payload: &PushPayload,
         dispatcher: &dyn PushDispatcher,
     ) -> usize {
         let device_ids: Vec<String> = {
             let g = self.inner.read();
-            g.tokens.keys().cloned().collect()
+            g.tokens
+                .values()
+                .filter(|record| record.provider == provider)
+                .map(|record| record.device_id.clone())
+                .collect()
         };
         let mut sent = 0;
         for id in device_ids {
@@ -529,12 +535,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn broadcast_to_offline_sends_to_every_registered_device() {
+    async fn broadcast_to_offline_sends_only_to_matching_provider() {
         let r = PushTokenRegistry::new();
         r.register(make_record("dev-1"));
         r.register(PushTokenRecord {
             device_id: "dev-2".to_string(),
-            provider: PushProvider::Fcm,
+            provider: PushProvider::Apns,
             token: "tok-2".to_string(),
             app_version: None,
             device_locale: None,
@@ -546,6 +552,7 @@ mod tests {
         };
         let count = r
             .broadcast_to_offline(
+                PushProvider::Fcm,
                 &PushPayload {
                     title: Some("t".into()),
                     body: None,
@@ -554,7 +561,7 @@ mod tests {
                 &dispatcher,
             )
             .await;
-        assert_eq!(count, 2);
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]
@@ -577,6 +584,7 @@ mod tests {
         };
         let count = r
             .broadcast_to_offline(
+                PushProvider::Fcm,
                 &PushPayload {
                     title: None,
                     body: None,

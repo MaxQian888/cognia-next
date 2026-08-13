@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use webrtc::ice_transport::ice_server::RTCIceServer;
+use webrtc::peer_connection::RTCIceServer;
 
 use std::time::{Duration, Instant};
 
@@ -659,7 +659,8 @@ pub mod commands {
     use std::sync::Arc;
 
     use super::{
-        DeviceRegistration, DeviceTierEntry, SignalingConfigPatch, SignalingHub, SignalingStatus,
+        DeviceRegistration, DeviceTierEntry, RTCIceServer, SignalingConfigPatch, SignalingHub,
+        SignalingStatus,
     };
 
     /// Replace the currently-tracked set of paired devices. Idempotent —
@@ -686,7 +687,7 @@ pub mod commands {
         hub: tauri::State<'_, Arc<SignalingHub>>,
         patch: SignalingConfigPatch,
     ) -> Result<(), String> {
-        let mut servers: Vec<webrtc::ice_transport::ice_server::RTCIceServer> =
+        let mut servers: Vec<RTCIceServer> =
             patch.ice_servers.into_iter().map(Into::into).collect();
         servers.extend(patch.turn_servers.into_iter().map(Into::into));
         hub.configure(patch.enabled, patch.signaling_url, servers);

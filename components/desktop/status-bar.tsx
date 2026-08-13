@@ -14,6 +14,7 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { StatusBarZone } from "@/components/desktop/status-bar-zone"
 import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
 import { useBarLayout } from "@/components/shell/use-bar-layout"
+import { PerfCaptureShellStatus } from "@/components/performance/perf-capture-shell-status"
 
 /**
  * VSCode-style status bar mounted at the bottom of the desktop shell.
@@ -79,6 +80,7 @@ export function StatusBar() {
           wrapper rather than on a fallback span, so the spacing survives a
           plugin contributing to the slot. */}
             <div className="flex min-w-0 flex-1 items-center justify-center gap-1">
+              <PerfCaptureShellStatus className="flex min-w-0 items-center gap-1" />
               <PluginExtensionSlot
                 point="statusbar.center"
                 className="flex h-6 items-center gap-1 empty:hidden"

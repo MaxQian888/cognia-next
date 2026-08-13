@@ -28,7 +28,9 @@ import {
   hydrateCompanionConfig,
   issueCompanionSocketTicket,
   loadCompanionConfig,
+  reloadCompanionConfigForActiveTarget,
   saveCompanionConfig,
+  suspendCompanionTransport,
   type CompanionConfig,
   type TransportTier,
 } from "./transport-companion"
@@ -380,6 +382,38 @@ describe("config helpers", () => {
     }
     expect(await hydrateCompanionConfig()).toEqual(hydrated)
     expect(loadCompanionConfig()).toEqual(hydrated)
+  })
+
+  it("reloads an explicit active target without racing the ordered Host rebind", async () => {
+    const changed = jest.fn()
+    window.addEventListener("cognia:companion-config-changed", changed)
+    __setCompanionStorageForTests({
+      load: async () => ({ ...MOCK_CONFIG, targetId: "host-b", accountId: "acct_transport" }),
+      save: async () => undefined,
+      clear: async () => undefined,
+    })
+    try {
+      await expect(reloadCompanionConfigForActiveTarget({ notify: false })).resolves.toEqual(
+        expect.objectContaining({ targetId: "host-b" })
+      )
+      expect(loadCompanionConfig()).toEqual(expect.objectContaining({ targetId: "host-b" }))
+      expect(changed).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener("cognia:companion-config-changed", changed)
+    }
+  })
+
+  it("fails closed by clearing the dispatch cache and notifying runtime bindings", async () => {
+    const changed = jest.fn()
+    window.addEventListener("cognia:companion-config-changed", changed)
+    __setCompanionConfigCacheForTests(MOCK_CONFIG)
+    try {
+      await suspendCompanionTransport()
+      expect(loadCompanionConfig()).toBeNull()
+      expect(changed).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener("cognia:companion-config-changed", changed)
+    }
   })
 })
 

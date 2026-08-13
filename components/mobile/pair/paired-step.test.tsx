@@ -7,6 +7,22 @@ import userEvent from "@testing-library/user-event"
 
 import { PairedStep } from "./paired-step"
 
+const removeHost = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => "mobile" }))
+jest.mock("@/lib/accounts/active-account-id", () => ({ DEFAULT_LOCAL_ACCOUNT_ID: "local_acct_a" }))
+jest.mock("@/lib/runtime/runtime-target-context", () => ({
+  getActiveRuntimeTargetContext: () => ({ accountId: "local_acct_a", targetId: "host-a" }),
+}))
+jest.mock("@/lib/companion/credential-book", () => ({
+  companionCredentialBook: () => ({
+    getActive: async () => ({ hostId: "host-a", accountNamespace: "local_acct_a" }),
+    list: async () => [{ hostId: "host-a", accountNamespace: "local_acct_a" }],
+  }),
+}))
+jest.mock("@/lib/companion/host-removal", () => ({
+  removeCompanionHost: (...args: unknown[]) => removeHost(...args),
+}))
+
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn().mockReturnValue(false),
   transport: {
@@ -151,12 +167,16 @@ describe("<PairedStep />", () => {
     expect(screen.getByTestId("smoke-call-result")).toHaveTextContent('"status": "ok"')
   })
 
-  it("clears the saved config and notifies onAfterSignOut", async () => {
+  it("remotely revokes the active Host and notifies onAfterSignOut", async () => {
     const onAfterSignOut = jest.fn()
     const user = userEvent.setup()
     render(<PairedStep {...baseProps} onAfterSignOut={onAfterSignOut} />)
     await user.click(screen.getByTestId("pair-signout"))
     await waitFor(() => expect(onAfterSignOut).toHaveBeenCalled())
-    expect(window.localStorage.getItem("cognia.companion.config.v1")).toBeNull()
+    expect(removeHost).toHaveBeenCalledWith({
+      accountId: "local_acct_a",
+      hostId: "host-a",
+      platform: "mobile",
+    })
   })
 })

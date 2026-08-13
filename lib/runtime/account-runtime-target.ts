@@ -14,7 +14,10 @@ import {
   setActiveRuntimeTargetContext,
   type RuntimeTargetScope,
 } from "./runtime-target-context"
-import { stopRuntimeTargetSubscriptions } from "./runtime-target-lifecycle"
+import {
+  runRuntimeTargetTransitionPhase,
+  stopRuntimeTargetSubscriptions,
+} from "./runtime-target-lifecycle"
 import {
   RuntimeTargetRegistry,
   runtimeTargetDatabaseName,
@@ -51,6 +54,11 @@ interface SwitchDependencies {
   activateDatabase(accountId: string, targetId: string): void
   setContext(accountId: string, targetId: string): void
   assertCredentialAvailable(target: RuntimeTargetRecord): Promise<void>
+  finalizeCaptures?(context: {
+    accountId: string
+    fromTargetId: string | null
+    toTargetId: string
+  }): Promise<void>
   stopSubscriptions(): Promise<void>
   reloadTransport(): Promise<unknown>
 }
@@ -59,6 +67,11 @@ interface DetachDependencies {
   registry: AccountRuntimeTargetRegistry
   activateDatabase(accountId: string, targetId: string): void
   setContext(accountId: string, targetId: string): void
+  finalizeCaptures?(context: {
+    accountId: string
+    fromTargetId: string | null
+    toTargetId: string
+  }): Promise<void>
   stopSubscriptions(): Promise<void>
   deleteDatabase(name: string): Promise<void>
 }
@@ -203,7 +216,16 @@ export async function switchAccountRuntimeTarget(
         throw new Error("Companion target credentials are unavailable.")
       }
     },
-    stopSubscriptions: stopRuntimeTargetSubscriptions,
+    finalizeCaptures: (context) =>
+      runRuntimeTargetTransitionPhase("finalize-captures", context),
+    stopSubscriptions: async () => {
+      const scope = getActiveRuntimeTargetContext()
+      await runRuntimeTargetTransitionPhase("release-subscriptions", {
+        accountId: scope?.accountId ?? accountId,
+        fromTargetId: scope?.targetId ?? null,
+        toTargetId,
+      })
+    },
     reloadTransport: async () => {
       const { reloadCompanionConfigForActiveTarget } =
         await import("@/lib/tauri/transport-companion")
@@ -224,8 +246,14 @@ export async function switchAccountRuntimeTarget(
   if (previous?.id === target.id) return target
   await dependencies.assertCredentialAvailable(target)
 
-  const activated = await dependencies.registry.activateTarget(accountId, target.id)
+  const transition = {
+    accountId,
+    fromTargetId: previous?.id ?? null,
+    toTargetId: target.id,
+  }
+  await dependencies.finalizeCaptures?.(transition)
   await dependencies.stopSubscriptions()
+  const activated = await dependencies.registry.activateTarget(accountId, target.id)
   dependencies.activateDatabase(accountId, activated.id)
   dependencies.setContext(accountId, activated.id)
   try {
@@ -252,6 +280,8 @@ export async function detachActiveCompanionRuntimeTarget(
     registry: runtimeTargetRegistry,
     activateDatabase: activateAccountDatabase,
     setContext: setActiveRuntimeTargetContext,
+    finalizeCaptures: (context) =>
+      runRuntimeTargetTransitionPhase("finalize-captures", context),
     stopSubscriptions: stopRuntimeTargetSubscriptions,
     deleteDatabase: (name) => Dexie.delete(name),
   }
@@ -265,8 +295,13 @@ export async function detachActiveCompanionRuntimeTarget(
   }
 
   const standalone = await dependencies.registry.ensureStandaloneTarget(scope.accountId)
-  const activated = await dependencies.registry.activateTarget(scope.accountId, standalone.id)
+  await dependencies.finalizeCaptures?.({
+    accountId: scope.accountId,
+    fromTargetId: active.id,
+    toTargetId: standalone.id,
+  })
   await dependencies.stopSubscriptions()
+  const activated = await dependencies.registry.activateTarget(scope.accountId, standalone.id)
   dependencies.activateDatabase(scope.accountId, activated.id)
   dependencies.setContext(scope.accountId, activated.id)
   await dependencies.registry.deleteTarget(scope.accountId, active.id)

@@ -473,6 +473,18 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connectors_attachment_fetch",
     "connectors_attachment_read",
     "connectors_media_upload",
+    "connectors_matrix_crypto_init",
+    "connectors_matrix_crypto_close",
+    "connectors_matrix_crypto_outgoing_requests",
+    "connectors_matrix_crypto_mark_request_sent",
+    "connectors_matrix_crypto_receive_sync_changes",
+    "connectors_matrix_crypto_decrypt_event",
+    "connectors_matrix_crypto_encrypt_event",
+    "connectors_matrix_crypto_share_room_key",
+    "connectors_matrix_crypto_update_tracked_users",
+    "connectors_matrix_crypto_get_missing_sessions",
+    "connectors_matrix_encrypted_media_upload",
+    "connectors_matrix_encrypted_media_fetch",
     "connectors_lark_upload_file",
     "connectors_lark_upload_image",
     // Mobile outbound-queue RPCs — round-trip through desktop_writes_bridge.
@@ -537,6 +549,20 @@ const KNOWN_COMMANDS: &[&str] = &[
     // successful connect and caches the result for failover. NOT a
     // CONTROL_COMMAND — every paired device may ask how to reach its own host.
     "companion_endpoints",
+    // Capability-driven selected-host performance diagnostics. Legacy
+    // start/set/stop/reset commands remain local-only and are intentionally
+    // absent from this public command list.
+    "perf_close_lease",
+    "perf_hotspots",
+    "perf_lease_snapshot",
+    "perf_list_traces",
+    "perf_open_lease",
+    "perf_read_observations",
+    "perf_renew_lease",
+    "perf_trace_close",
+    "perf_trace_open",
+    "perf_trace_read_chunk",
+    "perf_system_details",
     // ── Source control (ADR-0038) ───────────────────────────────────────────
     // Native git porcelain over a repo path. Reads are ungated; writes /
     // network ops require the remote-control capability (see CONTROL_COMMANDS).
@@ -546,6 +572,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // keys those wrappers send (`repoPath`, `hunkPatch`, …), which Tauri
     // converts to snake_case on the desktop path and we read verbatim here.
     "git_is_repo",
+    "git_workspace_list",
     "git_repo_state",
     "git_status",
     "git_diff_stat",
@@ -1007,8 +1034,15 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // idempotency TTL would hand back a stale tunnel URL right after the user
     // started one.
     "companion_endpoints",
+    "perf_hotspots",
+    "perf_lease_snapshot",
+    "perf_list_traces",
+    "perf_read_observations",
+    "perf_trace_read_chunk",
+    "perf_system_details",
     // Source-control reads — same (repoPath, …) returns the same snapshot.
     "git_is_repo",
+    "git_workspace_list",
     "git_repo_state",
     "git_status",
     "git_diff_stat",
@@ -1463,6 +1497,17 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "device_capabilities_report",
     "workflow_approval_respond",
     "workflow_step_result",
+    "perf_close_lease",
+    "perf_hotspots",
+    "perf_lease_snapshot",
+    "perf_list_traces",
+    "perf_open_lease",
+    "perf_read_observations",
+    "perf_renew_lease",
+    "perf_trace_close",
+    "perf_trace_open",
+    "perf_trace_read_chunk",
+    "perf_system_details",
 ];
 
 /// Inject (and overwrite) `callerDeviceId` into `args` for the commands in
@@ -1561,6 +1606,18 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "connectors_attachment_fetch",
     "connectors_attachment_read",
     "connectors_media_upload",
+    "connectors_matrix_crypto_init",
+    "connectors_matrix_crypto_close",
+    "connectors_matrix_crypto_outgoing_requests",
+    "connectors_matrix_crypto_mark_request_sent",
+    "connectors_matrix_crypto_receive_sync_changes",
+    "connectors_matrix_crypto_decrypt_event",
+    "connectors_matrix_crypto_encrypt_event",
+    "connectors_matrix_crypto_share_room_key",
+    "connectors_matrix_crypto_update_tracked_users",
+    "connectors_matrix_crypto_get_missing_sessions",
+    "connectors_matrix_encrypted_media_upload",
+    "connectors_matrix_encrypted_media_fetch",
     "connectors_lark_upload_file",
     "connectors_lark_upload_image",
     // The brain may persist non-connector secrets (backup auto-key, WebDAV,

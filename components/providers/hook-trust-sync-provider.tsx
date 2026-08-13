@@ -15,17 +15,29 @@ import { useEffect } from "react"
 import { syncTrustedWorkspacesToRust } from "@/lib/claude/hook-trust-sync"
 import { syncAllowedRootsToRust } from "@/lib/files/allowed-roots-sync"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useAccountStore } from "@/stores/account/account-store"
 
 export function HookTrustSyncProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     void syncTrustedWorkspacesToRust()
     void syncAllowedRootsToRust()
-    // Re-push workspace roots whenever the project list changes (the registry is
-    // additive, so re-syncing only ever widens the shadow-check's view).
-    const unsub = useProjectStore.subscribe((state, prev) => {
+    // The remote Git registry is a replaceable current-account snapshot, so
+    // project and account changes both revoke the previous authorization set.
+    const unsubProjects = useProjectStore.subscribe((state, prev) => {
       if (state.projects !== prev.projects) void syncAllowedRootsToRust()
     })
-    return unsub
+    const unsubAccount = useAccountStore.subscribe((state, prev) => {
+      if (
+        state.unlockedAccountId !== prev.unlockedAccountId ||
+        state.accountRevision !== prev.accountRevision
+      ) {
+        void syncAllowedRootsToRust()
+      }
+    })
+    return () => {
+      unsubProjects()
+      unsubAccount()
+    }
   }, [])
   return <>{children}</>
 }

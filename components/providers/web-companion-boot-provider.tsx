@@ -25,6 +25,11 @@ import type { CompanionPlaneHealth } from "@/lib/tauri/transport-companion"
 import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import { transport } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
+import {
+  notifyWebHostBindingsFailed,
+  notifyWebHostBindingsReady,
+  registerWebHostBindingOwner,
+} from "@/lib/companion/web-host-binding-lifecycle"
 
 const log = loggers.shell
 
@@ -58,9 +63,13 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
   }, [pathname])
 
   useEffect(() => {
+    const unregisterOwner = registerWebHostBindingOwner()
     const onConfigChanged = () => setConfigRevision((revision) => revision + 1)
     window.addEventListener("cognia:companion-config-changed", onConfigChanged)
-    return () => window.removeEventListener("cognia:companion-config-changed", onConfigChanged)
+    return () => {
+      window.removeEventListener("cognia:companion-config-changed", onConfigChanged)
+      unregisterOwner()
+    }
   }, [])
 
   useEffect(() => {
@@ -111,6 +120,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
       if (cancelled) return
 
       if (!config) {
+        notifyWebHostBindingsFailed(new Error("The selected Web Host credential is unavailable."))
         updateRuntimeSnapshot({
           vaultState: getActiveBrowserVault() ? "unlocked" : "unavailable",
           connectionState: "offline",
@@ -151,6 +161,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
           connectionState: "offline",
           host: { compatible: false, operations: [], grants: [] },
         })
+        notifyWebHostBindingsFailed(new Error("The selected Web Host transport is unavailable."))
         return
       }
 
@@ -161,6 +172,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
       let recoveryTimer: ReturnType<typeof setTimeout> | null = null
       let recoveryInFlight: Promise<void> | null = null
       let backgroundSyncInstalled = false
+      let bindingsReady = false
 
       cleanup.push(() => {
         if (recoveryTimer !== null) clearTimeout(recoveryTimer)
@@ -179,6 +191,9 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
             connectionState: "offline",
             host: { compatible: false, operations: [], grants: [] },
           })
+          notifyWebHostBindingsFailed(
+            new Error("The selected Web Host manifest is incompatible with event replay.")
+          )
           return false
         }
         updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
@@ -269,6 +284,10 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
           completedRecovery = true
           recoveryAttempt = 0
           await installBackgroundSync()
+          if (!bindingsReady) {
+            bindingsReady = true
+            notifyWebHostBindingsReady()
+          }
         })()
           .catch((error) => {
             if (cancelled) return

@@ -18,12 +18,11 @@ use p256::{
         signature::{Signer, Verifier},
         Signature, SigningKey, VerifyingKey,
     },
-    elliptic_curve::sec1::ToEncodedPoint,
+    elliptic_curve::{sec1::ToSec1Point, Generate},
     PublicKey,
 };
-use rand::rngs::SysRng;
 use serde_json::Value;
-use sha2_v10::{Digest, Sha256};
+use sha2::{Digest, Sha256};
 
 pub use cognia_signaling_core::proto::{
     EnvelopeKind, PeerRole, RoomDescriptorV2, SignalingEnvelopeV2, SubscribeProofV2,
@@ -87,7 +86,7 @@ pub struct V2Identity {
 impl V2Identity {
     pub fn generate() -> Self {
         Self {
-            signing_key: SigningKey::random(&mut SysRng),
+            signing_key: SigningKey::generate(),
         }
     }
 
@@ -104,7 +103,7 @@ impl V2Identity {
         URL_SAFE_NO_PAD.encode(
             self.signing_key
                 .verifying_key()
-                .to_encoded_point(false)
+                .to_sec1_point(false)
                 .as_bytes(),
         )
     }
@@ -117,13 +116,13 @@ pub struct V2EphemeralKey {
 
 impl V2EphemeralKey {
     pub fn generate() -> Self {
-        let secret = EphemeralSecret::random(&mut SysRng);
+        let secret = EphemeralSecret::generate();
         let public_key = PublicKey::from(&secret);
         Self { secret, public_key }
     }
 
     pub fn public_key_base64(&self) -> String {
-        URL_SAFE_NO_PAD.encode(self.public_key.to_encoded_point(false).as_bytes())
+        URL_SAFE_NO_PAD.encode(self.public_key.to_sec1_point(false).as_bytes())
     }
 
     pub fn derive_direction_key(

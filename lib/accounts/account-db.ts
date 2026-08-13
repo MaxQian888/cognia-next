@@ -15,9 +15,35 @@ import {
 export const ACCOUNT_REGISTRY_DB_NAME = "cognia-account-registry"
 export const ACCOUNT_DB_PREFIX = "cognia-account-"
 
+export interface PerformanceQuotaReservationRow {
+  id: string
+  accountId: string
+  targetDatabase: string
+  captureId: string
+  status: "reserved" | "committed"
+  reservedBytes: number
+  committedBytes: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface EncryptedPerformanceBudgetProfileRow {
+  id: string
+  accountId: string
+  version: number
+  metricIdHash: string
+  byteCount: number
+  iv: Uint8Array
+  ciphertext: Uint8Array
+  createdAt: number
+  updatedAt: number
+}
+
 export class CogniaAccountRegistryDB extends Dexie {
   accounts!: Table<LocalAccountRecord, string>
   state!: Table<AccountRegistryState, typeof ACCOUNT_REGISTRY_STATE_ID>
+  performanceQuotaReservations!: Table<PerformanceQuotaReservationRow, string>
+  performanceBudgetProfiles!: Table<EncryptedPerformanceBudgetProfileRow, string>
 
   constructor(name = ACCOUNT_REGISTRY_DB_NAME) {
     super(name)
@@ -25,6 +51,11 @@ export class CogniaAccountRegistryDB extends Dexie {
     this.version(1).stores({
       accounts: "&id, displayName, createdAt, updatedAt",
       state: "&id, activeAccountId, updatedAt",
+    })
+    this.version(2).stores({
+      performanceQuotaReservations:
+        "&id, accountId, targetDatabase, captureId, status, [accountId+status], updatedAt",
+      performanceBudgetProfiles: "&id, accountId, [accountId+metricIdHash], updatedAt",
     })
   }
 }

@@ -22,15 +22,15 @@ use cognia_terminal::protocol::{
     FrameKind, TerminalErrorCode, TerminalFrame, HEADER_LEN, MAX_FRAME_PAYLOAD,
 };
 use serde::Deserialize;
-use tokio::sync::mpsc;
 use uuid::Uuid;
-use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::data_channel::RTCDataChannel;
+use webrtc::data_channel::{DataChannel, DataChannelEvent};
 
 use super::SharedState;
 
 const MAX_WS_FRAME_BYTES: usize = HEADER_LEN + MAX_FRAME_PAYLOAD;
-const TERMINAL_DATACHANNEL_QUEUE_CAPACITY: usize = 128;
+const TERMINAL_DC_QUEUE_CAPACITY: usize = 128;
+const TERMINAL_DC_SEND_TIMEOUT: Duration = Duration::from_secs(15);
+const TERMINAL_DC_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Deserialize)]
 pub struct TerminalSocketQuery {
@@ -102,6 +102,67 @@ fn device_allowed_for_terminal(
         && store
             .has_capability(tenant_id, device_id, "terminal.open")
             .unwrap_or(false)
+}
+
+fn spawn_terminal_dc_writer(
+    channel: std::sync::Arc<dyn DataChannel>,
+    timeout: Duration,
+) -> (
+    tokio::sync::mpsc::Sender<Vec<u8>>,
+    tokio::sync::mpsc::Receiver<()>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (outbound_tx, mut outbound_rx) =
+        tokio::sync::mpsc::channel::<Vec<u8>>(TERMINAL_DC_QUEUE_CAPACITY);
+    let (writer_done_tx, writer_done_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let writer_pump = tokio::spawn(async move {
+        while let Some(bytes) = outbound_rx.recv().await {
+            let send = channel.send(bytes::BytesMut::from(bytes.as_slice()));
+            match tokio::time::timeout(timeout, send).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    log::warn!("terminal data channel send failed: {error}");
+                    break;
+                }
+                Err(_) => {
+                    log::warn!("terminal data channel send timed out");
+                    break;
+                }
+            }
+        }
+        close_terminal_data_channel(channel.as_ref()).await;
+        let _ = writer_done_tx.try_send(());
+    });
+    (outbound_tx, writer_done_rx, writer_pump)
+}
+
+fn spawn_terminal_dc_event_pump(
+    channel: std::sync::Arc<dyn DataChannel>,
+    capacity: usize,
+) -> (
+    tokio::sync::mpsc::Receiver<DataChannelEvent>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (event_tx, event_rx) = tokio::sync::mpsc::channel(capacity);
+    let event_pump = tokio::spawn(async move {
+        while let Some(event) = channel.poll().await {
+            if event_tx.try_send(event).is_err() {
+                log::warn!("terminal data channel event queue overflowed; closing attachment");
+                close_terminal_data_channel(channel.as_ref()).await;
+                break;
+            }
+        }
+    });
+    (event_rx, event_pump)
+}
+
+async fn close_terminal_data_channel(channel: &dyn DataChannel) {
+    if tokio::time::timeout(TERMINAL_DC_CLOSE_TIMEOUT, channel.close())
+        .await
+        .is_err()
+    {
+        log::warn!("terminal data channel close timed out");
+    }
 }
 
 async fn proxy_terminal_socket(mut socket: WebSocket, device_id: String, state: SharedState) {
@@ -214,73 +275,62 @@ async fn terminal_remote_client_authorized(device_id: &str) -> bool {
     device_allowed_for_terminal(&store, &tenant_id, device_id)
 }
 
-enum TerminalDataChannelEvent {
-    Binary(Vec<u8>),
-    Text,
-    Closed,
-}
-
 /// Authenticated WAN adapter for the durable terminal host. Signaling binds
 /// the peer to `device_id`; the independent terminal grant remains mandatory
 /// and is rechecked while the attachment is live for immediate revocation.
 pub(crate) async fn proxy_terminal_datachannel(
-    channel: std::sync::Arc<RTCDataChannel>,
+    channel: std::sync::Arc<dyn DataChannel>,
     device_id: String,
     state: SharedState,
 ) {
     if !terminal_remote_client_authorized(&device_id).await {
         let _ = send_datachannel_protocol_error(
-            &channel,
+            channel.as_ref(),
             TerminalErrorCode::PermissionDenied,
             "remote terminal permission is required",
         )
         .await;
-        let _ = channel.close().await;
+        close_terminal_data_channel(channel.as_ref()).await;
         return;
     }
 
     let identity =
         ClientIdentity::remote(format!("companion:{device_id}"), device_id.clone(), true);
     let app = state.app_handle.as_ref();
-    let host_stream = match crate::terminal_host_bridge::connect_terminal_host_client(app, identity)
-        .await
-    {
-        Ok(stream) => stream,
-        Err(message) => {
-            let _ =
-                send_datachannel_protocol_error(&channel, TerminalErrorCode::HostOffline, &message)
-                    .await;
-            let _ = channel.close().await;
-            return;
-        }
-    };
-    let (mut host_reader, mut host_writer) = tokio::io::split(host_stream);
-    let (event_tx, mut event_rx) = mpsc::channel(TERMINAL_DATACHANNEL_QUEUE_CAPACITY);
-
-    let message_tx = event_tx.clone();
-    let overflow_channel = std::sync::Arc::clone(&channel);
-    channel.on_message(Box::new(move |message: DataChannelMessage| {
-        let message_tx = message_tx.clone();
-        let overflow_channel = std::sync::Arc::clone(&overflow_channel);
-        Box::pin(async move {
-            let event = if message.is_string {
-                TerminalDataChannelEvent::Text
-            } else {
-                TerminalDataChannelEvent::Binary(message.data.to_vec())
-            };
-            if message_tx.try_send(event).is_err() {
-                log::warn!("terminal data channel input queue overflow; closing attachment");
-                let _ = overflow_channel.close().await;
+    let host_stream =
+        match crate::terminal_host_bridge::connect_terminal_host_client(app, identity).await {
+            Ok(stream) => stream,
+            Err(message) => {
+                let _ = send_datachannel_protocol_error(
+                    channel.as_ref(),
+                    TerminalErrorCode::HostOffline,
+                    &message,
+                )
+                .await;
+                close_terminal_data_channel(channel.as_ref()).await;
+                return;
             }
-        })
-    }));
-    channel.on_close(Box::new(move || {
-        let event_tx = event_tx.clone();
-        Box::pin(async move {
-            let _ = event_tx.try_send(TerminalDataChannelEvent::Closed);
-        })
-    }));
-
+        };
+    let (mut host_reader, mut host_writer) = tokio::io::split(host_stream);
+    let (mut event_rx, event_pump) = spawn_terminal_dc_event_pump(
+        std::sync::Arc::clone(&channel),
+        TERMINAL_DC_QUEUE_CAPACITY,
+    );
+    let (outbound_tx, mut writer_done_rx, writer_pump) = spawn_terminal_dc_writer(
+        std::sync::Arc::clone(&channel),
+        TERMINAL_DC_SEND_TIMEOUT,
+    );
+    let (host_inbound_tx, mut host_inbound_rx) =
+        tokio::sync::mpsc::channel::<TerminalFrame>(TERMINAL_DC_QUEUE_CAPACITY);
+    let (host_writer_done_tx, mut host_writer_done_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let host_writer_pump = tokio::spawn(async move {
+        while let Some(frame) = host_inbound_rx.recv().await {
+            if write_frame(&mut host_writer, &frame).await.is_err() {
+                break;
+            }
+        }
+        let _ = host_writer_done_tx.try_send(());
+    });
     let mut authorization_check = tokio::time::interval(Duration::from_secs(1));
     authorization_check.tick().await;
     loop {
@@ -288,7 +338,7 @@ pub(crate) async fn proxy_terminal_datachannel(
             _ = authorization_check.tick() => {
                 if !terminal_remote_client_authorized(&device_id).await {
                     let _ = send_datachannel_protocol_error(
-                        &channel,
+                        channel.as_ref(),
                         TerminalErrorCode::PermissionDenied,
                         "remote terminal permission was revoked",
                     ).await;
@@ -299,13 +349,16 @@ pub(crate) async fn proxy_terminal_datachannel(
                 match host_frame {
                     Ok(Some(frame)) => match frame.encode() {
                         Ok(bytes) => {
-                            if channel.send(&bytes::Bytes::from(bytes)).await.is_err() {
+                            if outbound_tx.try_send(bytes).is_err() {
+                                log::warn!(
+                                    "terminal data channel outbound queue overflowed; closing attachment"
+                                );
                                 break;
                             }
                         }
                         Err(error) => {
                             let _ = send_datachannel_protocol_error(
-                                &channel,
+                                channel.as_ref(),
                                 TerminalErrorCode::InvalidRequest,
                                 &error.to_string(),
                             ).await;
@@ -315,7 +368,7 @@ pub(crate) async fn proxy_terminal_datachannel(
                     Ok(None) => break,
                     Err(error) => {
                         let _ = send_datachannel_protocol_error(
-                            &channel,
+                            channel.as_ref(),
                             TerminalErrorCode::HostOffline,
                             &error,
                         ).await;
@@ -323,42 +376,71 @@ pub(crate) async fn proxy_terminal_datachannel(
                     }
                 }
             }
+            writer_done = writer_done_rx.recv() => {
+                if writer_done.is_some() {
+                    break;
+                }
+            }
+            host_writer_done = host_writer_done_rx.recv() => {
+                if host_writer_done.is_some() {
+                    break;
+                }
+            }
             incoming = event_rx.recv() => {
                 match incoming {
-                    Some(TerminalDataChannelEvent::Binary(bytes)) => {
+                    Some(DataChannelEvent::OnMessage(message)) if !message.is_string => {
+                        let bytes = message.data.to_vec();
                         let frame = match TerminalFrame::decode(&bytes) {
                             Ok(frame) => frame,
                             Err(error) => {
                                 let _ = send_datachannel_protocol_error(
-                                    &channel,
+                                    channel.as_ref(),
                                     TerminalErrorCode::InvalidRequest,
                                     &error.to_string(),
                                 ).await;
                                 break;
                             }
                         };
-                        if write_frame(&mut host_writer, &frame).await.is_err() {
+                        if host_inbound_tx.try_send(frame).is_err() {
+                            log::warn!(
+                                "terminal host inbound queue overflowed; closing attachment"
+                            );
                             break;
                         }
                     }
-                    Some(TerminalDataChannelEvent::Text) => {
+                    Some(DataChannelEvent::OnMessage(_)) => {
                         let _ = send_datachannel_protocol_error(
-                            &channel,
+                            channel.as_ref(),
                             TerminalErrorCode::InvalidRequest,
                             "terminal data channel accepts binary protocol frames only",
                         ).await;
                         break;
                     }
-                    Some(TerminalDataChannelEvent::Closed) | None => break,
+                    Some(DataChannelEvent::OnClose) | None => break,
+                    Some(DataChannelEvent::OnError) => {
+                        log::warn!("terminal data channel reported an error");
+                        break;
+                    }
+                    Some(
+                        DataChannelEvent::OnOpen
+                        | DataChannelEvent::OnClosing
+                        | DataChannelEvent::OnBufferedAmountLow
+                        | DataChannelEvent::OnBufferedAmountHigh,
+                    ) => {}
                 }
             }
         }
     }
-    let _ = channel.close().await;
+    drop(outbound_tx);
+    drop(host_inbound_tx);
+    close_terminal_data_channel(channel.as_ref()).await;
+    event_pump.abort();
+    writer_pump.abort();
+    host_writer_pump.abort();
 }
 
 async fn send_datachannel_protocol_error(
-    channel: &RTCDataChannel,
+    channel: &dyn DataChannel,
     code: TerminalErrorCode,
     message: &str,
 ) -> Result<(), String> {
@@ -366,11 +448,13 @@ async fn send_datachannel_protocol_error(
         .map_err(|error| error.to_string())?;
     let frame = TerminalFrame::command(FrameKind::Error, Uuid::nil(), 0, payload);
     let bytes = frame.encode().map_err(|error| error.to_string())?;
-    channel
-        .send(&bytes::Bytes::from(bytes))
-        .await
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+    tokio::time::timeout(
+        TERMINAL_DC_SEND_TIMEOUT,
+        channel.try_send(bytes::BytesMut::from(bytes.as_slice())),
+    )
+    .await
+    .map_err(|_| "terminal data channel error send timed out".to_string())?
+    .map_err(|error| error.to_string())
 }
 
 async fn send_protocol_error(
@@ -391,11 +475,158 @@ async fn send_protocol_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use webrtc::data_channel::{RTCDataChannelId, RTCDataChannelState};
+
+    struct BlockedDataChannel {
+        closed: AtomicBool,
+        immediate_sends: std::sync::Mutex<Vec<Vec<u8>>>,
+        events: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<DataChannelEvent>>>,
+    }
+
+    impl Default for BlockedDataChannel {
+        fn default() -> Self {
+            Self {
+                closed: AtomicBool::new(false),
+                immediate_sends: std::sync::Mutex::new(Vec::new()),
+                events: tokio::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    impl BlockedDataChannel {
+        fn with_events(
+            events: tokio::sync::mpsc::UnboundedReceiver<DataChannelEvent>,
+        ) -> Self {
+            Self {
+                events: tokio::sync::Mutex::new(Some(events)),
+                ..Self::default()
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DataChannel for BlockedDataChannel {
+        async fn label(&self) -> webrtc::error::Result<String> {
+            Ok("cognia.terminal".into())
+        }
+        async fn ordered(&self) -> webrtc::error::Result<bool> {
+            Ok(true)
+        }
+        async fn max_packet_life_time(&self) -> webrtc::error::Result<Option<u16>> {
+            Ok(None)
+        }
+        async fn max_retransmits(&self) -> webrtc::error::Result<Option<u16>> {
+            Ok(None)
+        }
+        async fn protocol(&self) -> webrtc::error::Result<String> {
+            Ok(String::new())
+        }
+        async fn negotiated(&self) -> webrtc::error::Result<bool> {
+            Ok(false)
+        }
+        fn id(&self) -> RTCDataChannelId {
+            0
+        }
+        async fn ready_state(&self) -> webrtc::error::Result<RTCDataChannelState> {
+            Ok(RTCDataChannelState::Open)
+        }
+        async fn buffered_amount_high_threshold(&self) -> webrtc::error::Result<u32> {
+            Ok(u32::MAX)
+        }
+        async fn set_buffered_amount_high_threshold(
+            &self,
+            _threshold: u32,
+        ) -> webrtc::error::Result<()> {
+            Ok(())
+        }
+        async fn buffered_amount_low_threshold(&self) -> webrtc::error::Result<u32> {
+            Ok(0)
+        }
+        async fn set_buffered_amount_low_threshold(
+            &self,
+            _threshold: u32,
+        ) -> webrtc::error::Result<()> {
+            Ok(())
+        }
+        async fn send(&self, _data: bytes::BytesMut) -> webrtc::error::Result<()> {
+            std::future::pending().await
+        }
+        async fn send_text(&self, _text: &str) -> webrtc::error::Result<()> {
+            Ok(())
+        }
+        async fn try_send(&self, data: bytes::BytesMut) -> webrtc::error::Result<()> {
+            self.immediate_sends.lock().unwrap().push(data.to_vec());
+            Ok(())
+        }
+        async fn poll(&self) -> Option<DataChannelEvent> {
+            let mut events = self.events.lock().await;
+            match events.as_mut() {
+                Some(events) => events.recv().await,
+                None => std::future::pending().await,
+            }
+        }
+        async fn close(&self) -> webrtc::error::Result<()> {
+            self.closed.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
 
     #[test]
     fn canonical_terminal_query_requires_a_ticket() {
         let query: TerminalSocketQuery = serde_urlencoded::from_str("ticket=single-use").unwrap();
         assert_eq!(query.ticket, "single-use");
         assert!(serde_urlencoded::from_str::<TerminalSocketQuery>("").is_err());
+    }
+
+    #[tokio::test]
+    async fn blocked_terminal_send_times_out_and_closes_attachment() {
+        let channel = std::sync::Arc::new(BlockedDataChannel::default());
+        let (tx, mut done_rx, writer) = spawn_terminal_dc_writer(
+            channel.clone(),
+            Duration::from_millis(20),
+        );
+        tx.send(vec![1, 2, 3]).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), done_rx.recv())
+            .await
+            .expect("writer must terminate after its send deadline")
+            .expect("writer completion signal");
+        writer.await.unwrap();
+        assert!(channel.closed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn protocol_errors_use_the_nonblocking_send_path() {
+        let channel = BlockedDataChannel::default();
+
+        send_datachannel_protocol_error(
+            &channel,
+            TerminalErrorCode::PermissionDenied,
+            "revoked",
+        )
+        .await
+        .unwrap();
+
+        let sends = channel.immediate_sends.lock().unwrap();
+        assert_eq!(sends.len(), 1);
+        let frame = TerminalFrame::decode(&sends[0]).unwrap();
+        assert_eq!(frame.kind, FrameKind::Error);
+    }
+
+    #[tokio::test]
+    async fn event_queue_overflow_closes_the_attachment() {
+        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+        event_tx.send(DataChannelEvent::OnOpen).unwrap();
+        event_tx.send(DataChannelEvent::OnBufferedAmountHigh).unwrap();
+        drop(event_tx);
+        let channel = std::sync::Arc::new(BlockedDataChannel::with_events(event_rx));
+        let (_events, pump) = spawn_terminal_dc_event_pump(channel.clone(), 1);
+
+        tokio::time::timeout(Duration::from_secs(1), pump)
+            .await
+            .expect("event pump must fail closed on overflow")
+            .expect("event pump join");
+        assert!(channel.closed.load(Ordering::SeqCst));
     }
 }

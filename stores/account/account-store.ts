@@ -47,6 +47,7 @@ import {
   clearProjectEditorAccountStorage,
   purgeProjectEditorAccountStorage,
 } from "@/stores/editor/project-editor-session-store"
+import { bumpPerformanceSecurityGeneration } from "@/lib/perf/security-generation"
 
 export interface CreateLocalAccountInput {
   id?: string
@@ -519,6 +520,9 @@ export function createAccountStore(
 
       lock: async () => {
         const unlockedAccountId = get().unlockedAccountId
+        if (unlockedAccountId) {
+          bumpPerformanceSecurityGeneration(unlockedAccountId, "account-locked")
+        }
         try {
           if (unlockedAccountId) {
             await dependencies.clearSubscriptionRuntime(unlockedAccountId)

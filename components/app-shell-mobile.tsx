@@ -94,6 +94,7 @@ import { loggers } from "@cognia/logging"
 import type { Character, SendContent, Team } from "@cognia/agent-config-types"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { impact, notify } from "@/lib/capacitor/haptics"
+import { PerfCaptureShellStatus } from "@/components/performance/perf-capture-shell-status"
 
 const log = loggers.shell
 
@@ -543,6 +544,8 @@ export function AppShellMobile() {
           </DropdownMenu>
         </div>
       </header>
+
+      <PerfCaptureShellStatus className="flex min-h-8 shrink-0 items-center gap-2 border-b border-border bg-destructive/5 px-3 text-xs" />
 
       {/* Conversation export / share-link dialog (reuses the desktop flow;
           its download now writes to the device Files app on Capacitor). */}

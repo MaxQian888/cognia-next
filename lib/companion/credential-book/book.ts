@@ -141,6 +141,22 @@ export function createCredentialBook(opts: CredentialBookOptions): CompanionCred
     })
   }
 
+  async function clearActive(accountNamespace: string, expectedHostId?: string): Promise<void> {
+    return serialize(async () => {
+      const book = await opts.records.read()
+      const activeKey = book.active[accountNamespace]
+      if (!activeKey) return
+      if (
+        expectedHostId &&
+        activeKey !== hostRecordKey({ accountNamespace, hostId: expectedHostId })
+      ) {
+        throw new Error(`Companion host ${expectedHostId} is not active for ${accountNamespace}.`)
+      }
+      delete book.active[accountNamespace]
+      await opts.records.write(book)
+    })
+  }
+
   async function loadCredential(key: CompanionHostKey): Promise<CompanionHostCredential | null> {
     return opts.credentials.load(key)
   }
@@ -202,6 +218,7 @@ export function createCredentialBook(opts: CredentialBookOptions): CompanionCred
     remove,
     getActive,
     setActive,
+    clearActive,
     loadCredential,
     saveCredential,
     updateConnection,

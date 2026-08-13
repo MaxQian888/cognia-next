@@ -1,9 +1,8 @@
 //! WebRTC peer wrapper. ADR-0021.
 //!
-//! Builds one `webrtc::peer_connection::RTCPeerConnection` per active
-//! mobile peer in a rendezvous room and bridges its lifecycle hooks
-//! (`on_data_channel`, `on_ice_candidate`, `on_peer_connection_state_change`)
-//! into tokio mpsc channels that the signaling client task consumes.
+//! Builds one `webrtc::peer_connection::PeerConnection` per active mobile peer
+//! in a rendezvous room and bridges its event-handler callbacks plus polled
+//! data-channel events into tokio mpsc channels consumed by the signaling task.
 //!
 //! Role split (matches `lib/tauri/transport-rtc.ts`):
 //! - **mobile** is the offerer — it calls `pc.createDataChannel("cognia.v2", ...)`
@@ -15,18 +14,15 @@
 
 use std::{future::Future, sync::Arc, time::Duration};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use tokio::sync::{mpsc, Mutex, Notify, RwLock};
-use webrtc::api::APIBuilder;
-use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::data_channel::data_channel_state::RTCDataChannelState;
-use webrtc::data_channel::RTCDataChannel;
-use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
-use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::data_channel::{DataChannel, DataChannelEvent, RTCDataChannelState};
+use webrtc::error::Error as WebrtcError;
+use webrtc::peer_connection::{
+    PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
+    RTCIceCandidateInit, RTCIceServer, RTCPeerConnectionIceEvent, RTCPeerConnectionState,
+    RTCSessionDescription,
+};
 
 /// DataChannel label both peers agree on. Mirrored in
 /// `lib/signaling/types.ts:DATACHANNEL_LABEL`.
@@ -43,8 +39,8 @@ const SEND_BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(15);
 /// callback world out to plain mpsc channels for the signaling client to
 /// consume.
 pub struct PeerSession {
-    pc: Arc<RTCPeerConnection>,
-    dc: Arc<RwLock<Option<Arc<RTCDataChannel>>>>,
+    pc: Arc<dyn PeerConnection>,
+    dc: Arc<RwLock<Option<Arc<dyn DataChannel>>>>,
     /// Latched once the data channel opens — wakes `wait_for_open()`.
     open_tx: tokio::sync::watch::Sender<bool>,
     open_rx: tokio::sync::watch::Receiver<bool>,
@@ -64,9 +60,172 @@ pub struct PeerCallbacks {
     /// envelopes from the mobile peer).
     pub inbound_data: mpsc::Sender<Vec<u8>>,
     /// Handler for the isolated canonical binary terminal channel.
-    pub terminal_channel: Arc<dyn Fn(Arc<RTCDataChannel>) + Send + Sync>,
+    pub terminal_channel: Arc<dyn Fn(Arc<dyn DataChannel>) + Send + Sync>,
     /// `RTCPeerConnectionState` transitions for failure detection.
     pub state_change: mpsc::Sender<RTCPeerConnectionState>,
+}
+
+#[derive(Clone)]
+struct CogniaPeerHandler {
+    callbacks: Arc<PeerCallbacks>,
+    dc: Arc<RwLock<Option<Arc<dyn DataChannel>>>>,
+    open_tx: tokio::sync::watch::Sender<bool>,
+    send_capacity: Arc<Notify>,
+}
+
+#[async_trait::async_trait]
+impl PeerConnectionEventHandler for CogniaPeerHandler {
+    async fn on_ice_candidate(&self, event: RTCPeerConnectionIceEvent) {
+        match event.candidate.to_json() {
+            Ok(candidate) => {
+                if self.callbacks.outbound_ice.try_send(candidate).is_err() {
+                    log::warn!("signaling::peer: ICE queue overflow or receiver closed");
+                }
+            }
+            Err(error) => log::warn!("signaling::peer: ice candidate to_json failed: {error}"),
+        }
+    }
+
+    async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
+        if self.callbacks.state_change.try_send(state).is_err() {
+            log::warn!("signaling::peer: state queue overflow or receiver closed");
+        }
+    }
+
+    async fn on_data_channel(&self, channel: Arc<dyn DataChannel>) {
+        let callbacks = Arc::clone(&self.callbacks);
+        let dc = Arc::clone(&self.dc);
+        let open_tx = self.open_tx.clone();
+        let send_capacity = Arc::clone(&self.send_capacity);
+        tokio::spawn(async move {
+            handle_inbound_channel(channel, callbacks, dc, open_tx, send_capacity).await;
+        });
+    }
+}
+
+async fn channel_contract(
+    channel: &Arc<dyn DataChannel>,
+) -> Result<(String, bool, Option<u16>, Option<u16>), WebrtcError> {
+    Ok((
+        channel.label().await?,
+        channel.ordered().await?,
+        channel.max_packet_life_time().await?,
+        channel.max_retransmits().await?,
+    ))
+}
+
+async fn handle_inbound_channel(
+    channel: Arc<dyn DataChannel>,
+    callbacks: Arc<PeerCallbacks>,
+    dc: Arc<RwLock<Option<Arc<dyn DataChannel>>>>,
+    open_tx: tokio::sync::watch::Sender<bool>,
+    send_capacity: Arc<Notify>,
+) {
+    let (label, ordered, max_packet_lifetime, max_retransmits) =
+        match channel_contract(&channel).await {
+            Ok(contract) => contract,
+            Err(error) => {
+                log::warn!("signaling::peer: read data-channel contract failed: {error}");
+                let _ = channel.close().await;
+                return;
+            }
+        };
+
+    if label == TERMINAL_DATACHANNEL_LABEL {
+        if !is_reliable_ordered_channel(ordered, max_packet_lifetime, max_retransmits) {
+            log::warn!("signaling::peer: rejecting unreliable terminal data channel");
+            let _ = channel.close().await;
+            return;
+        }
+        (callbacks.terminal_channel)(channel);
+        return;
+    }
+    if label != DATACHANNEL_LABEL {
+        log::warn!("signaling::peer: rejecting data channel with unexpected label {label:?}");
+        let _ = channel.close().await;
+        return;
+    }
+
+    let decision = {
+        let mut slot = dc.write().await;
+        let decision = classify_inbound_channel(
+            &label,
+            ordered,
+            max_packet_lifetime,
+            max_retransmits,
+            slot.is_some(),
+        );
+        if decision == InboundChannelDecision::AcceptMain {
+            *slot = Some(Arc::clone(&channel));
+        }
+        decision
+    };
+    match decision {
+        InboundChannelDecision::AcceptMain => {}
+        InboundChannelDecision::RejectUnreliable => {
+            log::warn!("signaling::peer: rejecting unreliable main data channel");
+            let _ = channel.close().await;
+            return;
+        }
+        InboundChannelDecision::RejectDuplicate => {
+            log::warn!("signaling::peer: rejecting duplicate main data channel");
+            let _ = channel.close().await;
+            return;
+        }
+    }
+
+    if let Err(error) = channel
+        .set_buffered_amount_low_threshold(SEND_BUFFER_LOW_WATER as u32)
+        .await
+    {
+        log::warn!("signaling::peer: set low-water threshold failed: {error}");
+        let _ = channel.close().await;
+    } else {
+        while let Some(event) = channel.poll().await {
+            match event {
+                DataChannelEvent::OnOpen => {
+                    let _ = open_tx.send(true);
+                }
+                DataChannelEvent::OnMessage(message) => {
+                    if callbacks
+                        .inbound_data
+                        .try_send(message.data.to_vec())
+                        .is_err()
+                    {
+                        log::warn!(
+                            "signaling::peer: inbound frame queue overflow; closing peer channel"
+                        );
+                        let _ = channel.close().await;
+                        break;
+                    }
+                }
+                DataChannelEvent::OnBufferedAmountLow => send_capacity.notify_waiters(),
+                DataChannelEvent::OnClosing | DataChannelEvent::OnClose => {
+                    let _ = open_tx.send(false);
+                    send_capacity.notify_waiters();
+                    if matches!(event, DataChannelEvent::OnClose) {
+                        break;
+                    }
+                }
+                DataChannelEvent::OnError => {
+                    log::warn!("signaling::peer: data channel reported an error");
+                    let _ = channel.close().await;
+                    break;
+                }
+                DataChannelEvent::OnBufferedAmountHigh => {}
+            }
+        }
+    }
+
+    let mut slot = dc.write().await;
+    if slot
+        .as_ref()
+        .is_some_and(|current| Arc::ptr_eq(current, &channel))
+    {
+        *slot = None;
+    }
+    let _ = open_tx.send(false);
+    send_capacity.notify_waiters();
 }
 
 impl PeerSession {
@@ -76,7 +235,7 @@ impl PeerSession {
     pub async fn new(
         ice_servers: Vec<RTCIceServer>,
         callbacks: PeerCallbacks,
-    ) -> Result<Self, webrtc::Error> {
+    ) -> Result<Self, WebrtcError> {
         // The WebRTC DTLS handshake builds a rustls config, which in rustls
         // 0.23 requires an explicit crypto provider when both `ring` and
         // `aws-lc-rs` are in the dep graph. Install one idempotently here so
@@ -84,180 +243,28 @@ impl PeerSession {
         // headless entry points).
         crate::companion_api::ensure_crypto_provider();
 
-        let api = APIBuilder::new().build();
-        let config = RTCConfiguration {
-            ice_servers,
-            ..Default::default()
-        };
-        let pc = Arc::new(api.new_peer_connection(config).await?);
-        let dc: Arc<RwLock<Option<Arc<RTCDataChannel>>>> = Arc::new(RwLock::new(None));
+        let config = RTCConfigurationBuilder::default()
+            .with_ice_servers(ice_servers)
+            .build();
+        let dc: Arc<RwLock<Option<Arc<dyn DataChannel>>>> = Arc::new(RwLock::new(None));
         let (open_tx, open_rx) = tokio::sync::watch::channel(false);
         let send_capacity = Arc::new(Notify::new());
-
-        // ── on_ice_candidate ───────────────────────────────────────────
-        let ice_tx = callbacks.outbound_ice.clone();
-        pc.on_ice_candidate(Box::new(move |candidate: Option<RTCIceCandidate>| {
-            let ice_tx = ice_tx.clone();
-            Box::pin(async move {
-                if let Some(c) = candidate {
-                    match c.to_json() {
-                        Ok(init) => {
-                            if ice_tx.try_send(init).is_err() {
-                                log::warn!(
-                                    "signaling::peer: ICE queue overflow or receiver closed"
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            log::warn!("signaling::peer: ice candidate to_json failed: {e}");
-                        }
-                    }
-                }
-            })
-        }));
-
-        // ── on_peer_connection_state_change ────────────────────────────
-        let state_tx = callbacks.state_change.clone();
-        pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
-            let state_tx = state_tx.clone();
-            Box::pin(async move {
-                if state_tx.try_send(s).is_err() {
-                    log::warn!("signaling::peer: state queue overflow or receiver closed");
-                }
-            })
-        }));
-
-        // ── on_data_channel ────────────────────────────────────────────
-        let dc_slot = Arc::clone(&dc);
-        let inbound_tx = callbacks.inbound_data.clone();
-        let terminal_channel = Arc::clone(&callbacks.terminal_channel);
-        let open_tx_dc = open_tx.clone();
-        let send_capacity_dc = Arc::clone(&send_capacity);
-        pc.on_data_channel(Box::new(move |channel: Arc<RTCDataChannel>| {
-            let dc_slot = Arc::clone(&dc_slot);
-            let inbound_tx = inbound_tx.clone();
-            let terminal_channel = Arc::clone(&terminal_channel);
-            let open_tx_dc = open_tx_dc.clone();
-            let send_capacity_dc = Arc::clone(&send_capacity_dc);
-            Box::pin(async move {
-                if channel.label() == TERMINAL_DATACHANNEL_LABEL {
-                    if !is_reliable_ordered_channel(
-                        channel.ordered(),
-                        channel.max_packet_lifetime(),
-                        channel.max_retransmits(),
-                    ) {
-                        log::warn!(
-                            "signaling::peer: rejecting unreliable terminal data channel"
-                        );
-                        let _ = channel.close().await;
-                        return;
-                    }
-                    terminal_channel(channel);
-                    return;
-                }
-                if channel.label() != DATACHANNEL_LABEL {
-                    log::warn!(
-                        "signaling::peer: ignoring data channel with unexpected label \"{}\"",
-                        channel.label()
-                    );
-                    return;
-                }
-
-                // The RPC/event channel is a single ordered, fully reliable
-                // stream. A second channel with the same label is not a
-                // replacement protocol: accepting it would let its callbacks
-                // overwrite the live channel and reorder framed messages.
-                let decision = {
-                    let mut slot = dc_slot.write().await;
-                    let decision = classify_inbound_channel(
-                        channel.label(),
-                        channel.ordered(),
-                        channel.max_packet_lifetime(),
-                        channel.max_retransmits(),
-                        slot.is_some(),
-                    );
-                    if decision == InboundChannelDecision::AcceptMain {
-                        *slot = Some(Arc::clone(&channel));
-                    }
-                    decision
-                };
-                match decision {
-                    InboundChannelDecision::AcceptMain => {}
-                    InboundChannelDecision::RejectUnreliable => {
-                        log::warn!("signaling::peer: rejecting unreliable main data channel");
-                        let _ = channel.close().await;
-                        return;
-                    }
-                    InboundChannelDecision::RejectDuplicate => {
-                        log::warn!("signaling::peer: rejecting duplicate main data channel");
-                        let _ = channel.close().await;
-                        return;
-                    }
-                }
-
-                channel
-                    .set_buffered_amount_low_threshold(SEND_BUFFER_LOW_WATER)
-                    .await;
-                let capacity_signal = Arc::clone(&send_capacity_dc);
-                channel
-                    .on_buffered_amount_low(Box::new(move || {
-                        let capacity_signal = Arc::clone(&capacity_signal);
-                        Box::pin(async move {
-                            capacity_signal.notify_waiters();
-                        })
-                    }))
-                    .await;
-
-                // on_open → signal the caller via the watch channel.
-                let open_signal = open_tx_dc.clone();
-                channel.on_open(Box::new(move || {
-                    let open_signal = open_signal.clone();
-                    Box::pin(async move {
-                        let _ = open_signal.send(true);
-                    })
-                }));
-
-                // on_message → forward bytes to the dispatcher.
-                let forward = inbound_tx.clone();
-                let overflow_channel = Arc::clone(&channel);
-                channel.on_message(Box::new(move |msg: DataChannelMessage| {
-                    let forward = forward.clone();
-                    let overflow_channel = Arc::clone(&overflow_channel);
-                    Box::pin(async move {
-                        let bytes = msg.data.to_vec();
-                        if forward.try_send(bytes).is_err() {
-                            log::warn!(
-                                "signaling::peer: inbound frame queue overflow; closing peer channel"
-                            );
-                            let _ = overflow_channel.close().await;
-                        }
-                    })
-                }));
-
-                // on_close → drop the cached handle and signal closure.
-                let dc_slot_close = Arc::clone(&dc_slot);
-                let open_signal_close = open_tx_dc.clone();
-                let capacity_signal_close = Arc::clone(&send_capacity_dc);
-                let closing_channel = Arc::clone(&channel);
-                channel.on_close(Box::new(move || {
-                    let dc_slot_close = Arc::clone(&dc_slot_close);
-                    let open_signal_close = open_signal_close.clone();
-                    let capacity_signal_close = Arc::clone(&capacity_signal_close);
-                    let closing_channel = Arc::clone(&closing_channel);
-                    Box::pin(async move {
-                        let mut slot = dc_slot_close.write().await;
-                        if slot
-                            .as_ref()
-                            .is_some_and(|current| Arc::ptr_eq(current, &closing_channel))
-                        {
-                            *slot = None;
-                        }
-                        let _ = open_signal_close.send(false);
-                        capacity_signal_close.notify_waiters();
-                    })
-                }));
-            })
-        }));
+        let callbacks = Arc::new(callbacks);
+        let handler = Arc::new(CogniaPeerHandler {
+            callbacks,
+            dc: Arc::clone(&dc),
+            open_tx: open_tx.clone(),
+            send_capacity: Arc::clone(&send_capacity),
+        });
+        let pc: Arc<dyn PeerConnection> = Arc::new(
+            PeerConnectionBuilder::new()
+                .with_configuration(config)
+                .with_handler(handler)
+                .with_udp_addrs(vec!["0.0.0.0:0", "[::]:0"])
+                .with_data_channel_send_buffer_limit(SEND_BUFFER_HIGH_WATER)
+                .build()
+                .await?,
+        );
 
         Ok(Self {
             pc,
@@ -272,7 +279,7 @@ impl PeerSession {
     /// Process an incoming SDP offer and return the SDP of our answer.
     /// Caller is responsible for relaying the answer back to the mobile
     /// peer through the signaling channel.
-    pub async fn accept_offer(&self, sdp: String) -> Result<String, webrtc::Error> {
+    pub async fn accept_offer(&self, sdp: String) -> Result<String, WebrtcError> {
         let offer = RTCSessionDescription::offer(sdp)?;
         self.pc.set_remote_description(offer).await?;
         let answer = self.pc.create_answer(None).await?;
@@ -281,10 +288,7 @@ impl PeerSession {
     }
 
     /// Add an inbound ICE candidate received via signaling.
-    pub async fn add_remote_ice(
-        &self,
-        candidate: RTCIceCandidateInit,
-    ) -> Result<(), webrtc::Error> {
+    pub async fn add_remote_ice(&self, candidate: RTCIceCandidateInit) -> Result<(), WebrtcError> {
         self.pc.add_ice_candidate(candidate).await
     }
 
@@ -363,7 +367,7 @@ impl PeerSession {
 
     async fn send_frame(
         &self,
-        channel: &Arc<RTCDataChannel>,
+        channel: &Arc<dyn DataChannel>,
         frame: OutboundFrame,
     ) -> Result<(), PeerSendError> {
         // Lock one physical frame at a time. Logical messages may interleave
@@ -371,7 +375,12 @@ impl PeerSession {
         // prevents concurrent senders from all refilling a just-drained SCTP
         // buffer before any of them can observe the new buffered amount.
         let _send_guard = self.send_lock.lock().await;
-        if channel.ready_state() != RTCDataChannelState::Open {
+        if channel
+            .ready_state()
+            .await
+            .map_err(|error| PeerSendError::Webrtc(error.to_string()))?
+            != RTCDataChannelState::Open
+        {
             return Err(PeerSendError::ChannelClosed);
         }
         if let Err(error) = wait_for_send_capacity(
@@ -379,7 +388,7 @@ impl PeerSession {
                 let channel = Arc::clone(channel);
                 move || {
                     let channel = Arc::clone(&channel);
-                    async move { channel.buffered_amount().await }
+                    async move { channel.outstanding_bytes().await.unwrap_or(usize::MAX) }
                 }
             },
             self.open_rx.clone(),
@@ -393,15 +402,31 @@ impl PeerSession {
             }
             return Err(error);
         }
-        if channel.ready_state() != RTCDataChannelState::Open {
+        if channel
+            .ready_state()
+            .await
+            .map_err(|error| PeerSendError::Webrtc(error.to_string()))?
+            != RTCDataChannelState::Open
+        {
             return Err(PeerSendError::ChannelClosed);
         }
-        match frame {
-            OutboundFrame::Text(text) => channel.send_text(text).await,
-            OutboundFrame::Binary(bytes) => channel.send(&bytes).await,
+        let result = match frame {
+            OutboundFrame::Text(text) => {
+                tokio::time::timeout(SEND_BACKPRESSURE_TIMEOUT, channel.send_text(&text)).await
+            }
+            OutboundFrame::Binary(bytes) => {
+                let bytes = BytesMut::from(bytes.as_ref());
+                tokio::time::timeout(SEND_BACKPRESSURE_TIMEOUT, channel.send(bytes)).await
+            }
+        };
+        match result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(PeerSendError::Webrtc(error.to_string())),
+            Err(_) => {
+                let _ = channel.close().await;
+                Err(PeerSendError::BackpressureTimeout)
+            }
         }
-        .map(|_| ())
-        .map_err(|error| PeerSendError::Webrtc(error.to_string()))
     }
 
     /// Wait until the data channel transitions to the `open` state. Returns
@@ -538,7 +563,40 @@ pub enum PeerSendError {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use webrtc::peer_connection::offer_answer_options::RTCOfferOptions;
+
+    #[derive(Clone)]
+    struct NoopPeerHandler;
+
+    #[async_trait::async_trait]
+    impl PeerConnectionEventHandler for NoopPeerHandler {}
+
+    #[derive(Clone)]
+    struct ForwardIceHandler {
+        remote: Arc<dyn PeerConnection>,
+    }
+
+    #[async_trait::async_trait]
+    impl PeerConnectionEventHandler for ForwardIceHandler {
+        async fn on_ice_candidate(&self, event: RTCPeerConnectionIceEvent) {
+            if let Ok(candidate) = event.candidate.to_json() {
+                let _ = self.remote.add_ice_candidate(candidate).await;
+            }
+        }
+    }
+
+    async fn build_test_peer(
+        handler: Arc<dyn PeerConnectionEventHandler>,
+    ) -> Arc<dyn PeerConnection> {
+        crate::companion_api::ensure_crypto_provider();
+        Arc::new(
+            PeerConnectionBuilder::new()
+                .with_handler(handler)
+                .with_udp_addrs(vec!["127.0.0.1:0"])
+                .build()
+                .await
+                .expect("test peer"),
+        )
+    }
 
     fn callbacks() -> (
         PeerCallbacks,
@@ -691,11 +749,7 @@ mod tests {
         let (cb, _ice, _data, _state) = callbacks();
         let desktop = PeerSession::new(vec![], cb).await.expect("desktop");
 
-        let mobile_api = APIBuilder::new().build();
-        let mobile = mobile_api
-            .new_peer_connection(RTCConfiguration::default())
-            .await
-            .expect("mobile pc");
+        let mobile = build_test_peer(Arc::new(NoopPeerHandler)).await;
         let _dc = mobile
             .create_data_channel(DATACHANNEL_LABEL, None)
             .await
@@ -714,13 +768,8 @@ mod tests {
 
         // ICE restart: the mobile re-offers with `ice_restart` on the SAME PC;
         // the desktop renegotiates on the SAME PeerSession (no rebuild).
-        let offer2 = mobile
-            .create_offer(Some(RTCOfferOptions {
-                ice_restart: true,
-                ..Default::default()
-            }))
-            .await
-            .expect("offer2 restart");
+        mobile.restart_ice().await.expect("restart ice");
+        let offer2 = mobile.create_offer(None).await.expect("offer2 restart");
         mobile
             .set_local_description(offer2.clone())
             .await
@@ -745,31 +794,13 @@ mod tests {
         let (cb, _desktop_ice_rx, desktop_data_rx, _desktop_state_rx) = callbacks();
         let desktop = PeerSession::new(vec![], cb).await.expect("desktop");
 
-        // Build the mobile (offerer) side manually using the same crate.
-        let mobile_api = APIBuilder::new().build();
-        let mobile = Arc::new(
-            mobile_api
-                .new_peer_connection(RTCConfiguration::default())
-                .await
-                .expect("mobile pc"),
-        );
-
-        // Wire the two ends' ICE candidates directly into each other.
+        // Build the mobile (offerer) side manually using the same crate and
+        // wire the two ends' ICE candidates directly into each other.
         let desktop_pc = Arc::clone(&desktop.pc);
-        let mobile_clone = Arc::clone(&mobile);
-        mobile.on_ice_candidate(Box::new(move |c: Option<RTCIceCandidate>| {
-            let desktop_pc = Arc::clone(&desktop_pc);
-            Box::pin(async move {
-                if let Some(c) = c {
-                    if let Ok(init) = c.to_json() {
-                        let _ = desktop_pc.add_ice_candidate(init).await;
-                    }
-                }
-            })
-        }));
+        let mobile = build_test_peer(Arc::new(ForwardIceHandler { remote: desktop_pc })).await;
         // PeerSession already wired desktop→outbound_ice. We pump from the
         // receiver into the mobile peer in a separate task.
-        let mobile_for_ice = Arc::clone(&mobile_clone);
+        let mobile_for_ice = Arc::clone(&mobile);
         let mut ice_rx = _desktop_ice_rx;
         let ice_pump = tokio::spawn(async move {
             while let Some(init) = ice_rx.recv().await {
@@ -783,13 +814,24 @@ mod tests {
             .await
             .expect("mobile dc");
         let (mobile_open_tx, mut mobile_open_rx) = tokio::sync::mpsc::channel::<()>(1);
-        let mobile_open_tx2 = mobile_open_tx.clone();
-        mobile_dc.on_open(Box::new(move || {
-            let mobile_open_tx2 = mobile_open_tx2.clone();
-            Box::pin(async move {
-                let _ = mobile_open_tx2.send(()).await;
-            })
-        }));
+        let (mobile_msg_tx, mut mobile_msg_rx) = tokio::sync::mpsc::channel::<(Vec<u8>, bool)>(1);
+        let mobile_dc_events = Arc::clone(&mobile_dc);
+        let mobile_event_pump = tokio::spawn(async move {
+            while let Some(event) = mobile_dc_events.poll().await {
+                match event {
+                    DataChannelEvent::OnOpen => {
+                        let _ = mobile_open_tx.send(()).await;
+                    }
+                    DataChannelEvent::OnMessage(message) => {
+                        let _ = mobile_msg_tx
+                            .send((message.data.to_vec(), message.is_string))
+                            .await;
+                    }
+                    DataChannelEvent::OnClose => break,
+                    _ => {}
+                }
+            }
+        });
 
         // SDP offer/answer dance.
         let offer = mobile.create_offer(None).await.expect("offer");
@@ -813,7 +855,7 @@ mod tests {
         // Round-trip a small payload over the channel.
         let payload = b"hello desktop";
         mobile_dc
-            .send(&Bytes::from_static(payload))
+            .send_text(std::str::from_utf8(payload).expect("test payload utf-8"))
             .await
             .expect("mobile send");
         let mut data_rx = desktop_data_rx;
@@ -829,13 +871,6 @@ mod tests {
         // `String(event.data)` and silently drops a binary (ArrayBuffer/Blob)
         // message. The real-pair harness (`pnpm webrtc:pair`) caught this when
         // every desktop→peer RPC response timed out; this test locks it down.
-        let (mobile_msg_tx, mut mobile_msg_rx) = tokio::sync::mpsc::channel::<(Vec<u8>, bool)>(1);
-        mobile_dc.on_message(Box::new(move |msg: DataChannelMessage| {
-            let tx = mobile_msg_tx.clone();
-            Box::pin(async move {
-                let _ = tx.send((msg.data.to_vec(), msg.is_string)).await;
-            })
-        }));
         desktop
             .send_bytes(b"hello mobile".to_vec())
             .await
@@ -854,5 +889,6 @@ mod tests {
         desktop.close().await;
         let _ = mobile.close().await;
         ice_pump.abort();
+        mobile_event_pump.abort();
     }
 }

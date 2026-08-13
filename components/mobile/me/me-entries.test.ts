@@ -39,6 +39,15 @@ describe("me-entries registry", () => {
     expect(byId.eval?.labelKey).toBe("evalRow")
   })
 
+  it("exposes Source Control only through a paired host", () => {
+    const sourceControl = ME_ENTRIES.find((entry) => entry.id === "source-control")
+    expect(sourceControl).toMatchObject({
+      href: "/source-control",
+      labelKey: "sourceControlRow",
+      pairedOnly: true,
+    })
+  })
+
   it("makes the new rows findable by what a user would actually type", () => {
     const cloud = ME_ENTRIES.find((entry) => entry.id === "cloud-account") as MeEntry
     const evalRow = ME_ENTRIES.find((entry) => entry.id === "eval") as MeEntry

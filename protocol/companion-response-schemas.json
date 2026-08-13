@@ -51,6 +51,195 @@
       },
       "additionalProperties": false
     },
+    "PerfLease": {
+      "type": "object",
+      "required": [
+        "wireVersion",
+        "leaseId",
+        "clientId",
+        "deviceId",
+        "targetId",
+        "routingGeneration",
+        "sourceId",
+        "purpose",
+        "requestedCadenceMs",
+        "samplingSessionId",
+        "openedAtMs",
+        "heartbeatAtMs",
+        "expiresAtMs"
+      ],
+      "properties": {
+        "wireVersion": { "type": "integer", "const": 1 },
+        "leaseId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "deviceId": { "type": "string" },
+        "targetId": { "type": "string" },
+        "routingGeneration": { "type": "integer", "minimum": 0 },
+        "sourceId": { "type": ["string", "null"] },
+        "purpose": { "type": "string", "enum": ["live", "capture"] },
+        "requestedCadenceMs": { "type": "integer", "minimum": 1 },
+        "samplingSessionId": { "type": "string" },
+        "openedAtMs": { "type": "integer" },
+        "heartbeatAtMs": { "type": "integer" },
+        "expiresAtMs": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "PerfSource": {
+      "type": "object",
+      "required": [
+        "wireVersion",
+        "sourceId",
+        "kind",
+        "hostInstanceId",
+        "runtimeKind",
+        "build",
+        "metricSchemaVersion",
+        "capabilities",
+        "clock",
+        "connection"
+      ],
+      "properties": {
+        "wireVersion": { "type": "integer", "const": 1 },
+        "sourceId": { "type": "string" },
+        "kind": { "type": "string", "enum": ["renderer", "host"] },
+        "hostInstanceId": { "type": "string" },
+        "runtimeKind": { "type": "string", "enum": ["browser", "tauri-rust", "node-headless"] },
+        "build": { "type": "object", "additionalProperties": true },
+        "metricSchemaVersion": { "type": "integer", "minimum": 1 },
+        "capabilities": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "clock": { "type": "object", "additionalProperties": true },
+        "connection": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
+    "PerfFrame": {
+      "type": "object",
+      "required": [
+        "wireVersion",
+        "sourceId",
+        "targetId",
+        "routingGeneration",
+        "hostInstanceId",
+        "samplingSessionId",
+        "sequence",
+        "requestedIntervalMs",
+        "actualIntervalMs",
+        "monotonicElapsedMs",
+        "wallStartMs",
+        "wallEndMs",
+        "collectionDurationMs",
+        "missedTicks",
+        "flags",
+        "tsMs",
+        "intervalMs",
+        "processes",
+        "runtime",
+        "topSpans",
+        "systemMemory",
+        "managed"
+      ],
+      "properties": {
+        "wireVersion": { "type": "integer", "const": 1 },
+        "sourceId": { "type": "string" },
+        "targetId": { "type": "string" },
+        "routingGeneration": { "type": "integer", "minimum": 0 },
+        "hostInstanceId": { "type": "string" },
+        "samplingSessionId": { "type": "string" },
+        "leaseId": { "type": "string" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "requestedIntervalMs": { "type": "integer", "minimum": 1 },
+        "actualIntervalMs": { "type": "integer", "minimum": 0 },
+        "monotonicElapsedMs": { "type": "integer", "minimum": 0 },
+        "wallStartMs": { "type": "integer" },
+        "wallEndMs": { "type": "integer" },
+        "collectionDurationMs": { "type": "integer", "minimum": 0 },
+        "missedTicks": { "type": "integer", "minimum": 0 },
+        "flags": { "type": "object", "additionalProperties": { "type": "boolean" } },
+        "tsMs": { "type": "integer" },
+        "intervalMs": { "type": "integer", "minimum": 0 },
+        "processes": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        },
+        "runtime": { "type": "object", "additionalProperties": true },
+        "topSpans": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        },
+        "systemMemory": { "type": ["object", "null"], "additionalProperties": true },
+        "managed": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+        "observations": {
+          "type": "object",
+          "additionalProperties": { "type": ["number", "null"] }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PerfOpenLeaseResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["accepted", "lease", "source"],
+          "properties": {
+            "accepted": { "const": true },
+            "lease": { "$ref": "#/$defs/PerfLease" },
+            "source": { "$ref": "#/$defs/PerfSource" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["accepted", "code", "detail"],
+          "properties": {
+            "accepted": { "const": false },
+            "code": {
+              "type": "string",
+              "enum": [
+                "cadence-too-fast",
+                "device-purpose-limit",
+                "host-lease-limit",
+                "rate-limited",
+                "target-mismatch",
+                "routing-generation-mismatch",
+                "unsupported",
+                "permission-denied"
+              ]
+            },
+            "detail": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PerfSnapshot": {
+      "type": "object",
+      "required": [
+        "wireVersion",
+        "frames",
+        "oldestSequence",
+        "latestSequence",
+        "sources",
+        "leases",
+        "gaps",
+        "samples",
+        "running",
+        "intervalMs"
+      ],
+      "properties": {
+        "wireVersion": { "type": "integer", "const": 1 },
+        "frames": { "type": "array", "items": { "$ref": "#/$defs/PerfFrame" } },
+        "oldestSequence": { "type": ["integer", "null"], "minimum": 0 },
+        "latestSequence": { "type": ["integer", "null"], "minimum": 0 },
+        "sources": { "type": "array", "items": { "$ref": "#/$defs/PerfSource" } },
+        "leases": { "type": "array", "items": { "$ref": "#/$defs/PerfLease" } },
+        "gaps": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+        "samples": { "type": "array", "items": { "$ref": "#/$defs/PerfFrame" } },
+        "running": { "type": "boolean" },
+        "intervalMs": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
     "NullResult": {
       "type": "null"
     },
@@ -695,6 +884,42 @@
     "connectors_media_upload": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "connectors_matrix_crypto_close": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_matrix_crypto_decrypt_event": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "connectors_matrix_crypto_encrypt_event": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "connectors_matrix_crypto_get_missing_sessions": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "connectors_matrix_crypto_init": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_matrix_crypto_mark_request_sent": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_matrix_crypto_outgoing_requests": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "connectors_matrix_crypto_receive_sync_changes": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_matrix_crypto_share_room_key": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "connectors_matrix_crypto_update_tracked_users": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "connectors_matrix_encrypted_media_fetch": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "connectors_matrix_encrypted_media_upload": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
     "connectors_onebot_send": {
       "$ref": "#/$defs/NullResult"
     },
@@ -870,7 +1095,13 @@
       "$ref": "#/$defs/NullResult"
     },
     "git_clone": {
-      "$ref": "#/$defs/StringResult"
+      "type": "object",
+      "required": ["workspaceId", "relativePath"],
+      "properties": {
+        "workspaceId": { "type": "string" },
+        "relativePath": { "type": "string" }
+      },
+      "additionalProperties": false
     },
     "git_commit": {
       "$ref": "#/$defs/LegacyRecord"
@@ -1046,6 +1277,9 @@
     "git_worktree_remove": {
       "$ref": "#/$defs/NullResult"
     },
+    "git_workspace_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
     "github_workspace_clone": {
       "$ref": "#/$defs/LegacyRecord"
     },
@@ -1218,6 +1452,60 @@
       "$ref": "#/$defs/LegacyList"
     },
     "ocr_model_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "perf_close_lease": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "perf_hotspots": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "perf_lease_snapshot": {
+      "$ref": "#/$defs/PerfSnapshot"
+    },
+    "perf_list_traces": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "perf_open_lease": {
+      "$ref": "#/$defs/PerfOpenLeaseResult"
+    },
+    "perf_read_observations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PerfFrame" }
+    },
+    "perf_renew_lease": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "perf_trace_close": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "perf_trace_open": {
+      "type": "object",
+      "required": ["handleId", "traceId", "sizeBytes", "sha256", "chunkBytes", "expiresAtMs"],
+      "properties": {
+        "handleId": { "type": "string" },
+        "traceId": { "type": "string" },
+        "sizeBytes": { "type": "integer", "minimum": 0, "maximum": 268435456 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "chunkBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "expiresAtMs": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "perf_trace_read_chunk": {
+      "type": "object",
+      "required": ["offset", "nextOffset", "dataBase64", "chunkSha256", "eof", "finalSha256"],
+      "properties": {
+        "offset": { "type": "integer", "minimum": 0 },
+        "nextOffset": { "type": "integer", "minimum": 0 },
+        "dataBase64": { "type": "string" },
+        "chunkSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "eof": { "type": "boolean" },
+        "finalSha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "perf_system_details": {
       "$ref": "#/$defs/LegacyRecord"
     },
     "plugin_activate_vscode": {

@@ -8,6 +8,17 @@ import {
 } from "@tauri-apps/plugin-notification"
 import { isTauri } from "@/lib/tauri"
 
+/** Check the current OS grant without surfacing a permission prompt. */
+export async function checkNotificationPermission(): Promise<"granted" | "denied" | "default"> {
+  if (!isTauri()) return "denied"
+  try {
+    return (await isPermissionGranted()) ? "granted" : "default"
+  } catch (err) {
+    console.warn("checkNotificationPermission failed", err)
+    return "default"
+  }
+}
+
 /**
  * Ensure the OS-level notification permission is granted. Returns the final
  * permission state ("granted" | "denied" | "default"). Safe to call on every

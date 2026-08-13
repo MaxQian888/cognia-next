@@ -31,6 +31,7 @@ export interface PairStepProps {
   prefilledPairPayload?: string
   autoScan?: boolean
   webMode?: boolean
+  persistPairing?: (config: CompanionConfig) => Promise<void>
   onPaired: (config: CompanionConfig) => void
   onBack?: () => void
 }
@@ -46,6 +47,7 @@ export function PairStep({
   prefilledPairPayload = "",
   autoScan = false,
   webMode = false,
+  persistPairing = saveCompanionConfig,
   onPaired,
   onBack,
 }: PairStepProps) {
@@ -87,7 +89,7 @@ export function PairStep({
         return
       }
       try {
-        await saveCompanionConfig(result.config)
+        await persistPairing(result.config)
       } catch (error) {
         setPhase({
           kind: "error",
@@ -107,7 +109,7 @@ export function PairStep({
       void notify("success")
       onPaired(result.config)
     },
-    [acceptPayload, onPaired, t]
+    [acceptPayload, onPaired, persistPairing, t]
   )
 
   const onScanQr = useCallback(async () => {

@@ -109,6 +109,17 @@ pub(super) const COMMANDS: &[&str] = &[
     "backup_import",
     "external_agent_list",
     "external_agent_update",
+    "perf_close_lease",
+    "perf_hotspots",
+    "perf_lease_snapshot",
+    "perf_list_traces",
+    "perf_open_lease",
+    "perf_read_observations",
+    "perf_renew_lease",
+    "perf_trace_close",
+    "perf_trace_open",
+    "perf_trace_read_chunk",
+    "perf_system_details",
 ];
 
 pub(super) async fn dispatch(
@@ -516,6 +527,17 @@ pub(super) async fn dispatch(
         | "provider_diagnostics_history"
         | "provider_diagnostics_start"
         | "provider_diagnostics_cancel"
+        | "perf_close_lease"
+        | "perf_hotspots"
+        | "perf_lease_snapshot"
+        | "perf_list_traces"
+        | "perf_open_lease"
+        | "perf_read_observations"
+        | "perf_renew_lease"
+        | "perf_trace_close"
+        | "perf_trace_open"
+        | "perf_trace_read_chunk"
+        | "perf_system_details"
         // Mobile outbound-queue RPCs — same generic bridge, different
         // TS-side dispatch arms in `lib/companion/desktop-write-source.ts`.
         | "connector_send"

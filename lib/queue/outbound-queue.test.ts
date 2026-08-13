@@ -29,7 +29,7 @@ describe("createOutboundRunner", () => {
     // fake-indexeddb resets between test files but not test cases — clear by hand.
     const all = await listAll()
     await Promise.all(all.map((r) => getDb().mobileOutboundQueue.delete(r.id)))
-  })
+  }, 15_000)
 
   afterEach(() => {
     clearActiveRuntimeTargetContext()
@@ -51,7 +51,7 @@ describe("createOutboundRunner", () => {
     )
     const sent = await listByStatus("sent")
     expect(sent).toHaveLength(1)
-    runner.stop()
+    await runner.stop()
   })
 
   it("schedules retry on retryable failure", async () => {
@@ -70,7 +70,7 @@ describe("createOutboundRunner", () => {
     expect(pending).toHaveLength(1)
     expect(pending[0].attempts).toBe(1)
     expect(pending[0].nextAttemptAt).toBe(2_000)
-    runner.stop()
+    await runner.stop()
   })
 
   it("never dispatches a row that belongs to another runtime target", async () => {
@@ -96,7 +96,54 @@ describe("createOutboundRunner", () => {
         targetId: "desktop-other",
       })
     ).toHaveLength(1)
-    runner.stop()
+    await runner.stop()
+  })
+
+  it("keeps pending, sending, retry, and dead-letter rows isolated by Host and resumes A only on A", async () => {
+    const statuses = ["pending", "sending", "failed", "deadlettered"] as const
+    for (const targetId of ["host-a", "host-b"]) {
+      for (const status of statuses) {
+        await getDb().mobileOutboundQueue.put({
+          id: `${targetId}-${status}`,
+          accountId: scope.accountId,
+          targetId,
+          command: "connector_send",
+          payload: { targetId, status },
+          status,
+          attempts: status === "failed" ? 1 : 0,
+          createdAt: status === "pending" ? 1 : 2,
+          nextAttemptAt: status === "pending" ? 0 : 10_000,
+          idempotencyKey: `${targetId}-${status}-key`,
+        })
+      }
+    }
+    const callB = jest.fn().mockResolvedValue(undefined)
+    const runnerB = createOutboundRunner({
+      dispatcher: { call: callB },
+      enforceMobile: false,
+      scope: { accountId: scope.accountId, targetId: "host-b" },
+      now: () => 100,
+    })
+    await runnerB.kick()
+    expect(callB).toHaveBeenCalledTimes(1)
+    expect((await getDb().mobileOutboundQueue.get("host-a-pending"))?.status).toBe("pending")
+
+    const callA = jest.fn().mockResolvedValue(undefined)
+    const runnerA = createOutboundRunner({
+      dispatcher: { call: callA },
+      enforceMobile: false,
+      scope: { accountId: scope.accountId, targetId: "host-a" },
+      now: () => 100,
+    })
+    await runnerA.kick()
+    expect(callA).toHaveBeenCalledTimes(1)
+    expect((await getDb().mobileOutboundQueue.get("host-a-pending"))?.status).toBe("sent")
+    expect((await getDb().mobileOutboundQueue.get("host-a-sending"))?.status).toBe("sending")
+    expect((await getDb().mobileOutboundQueue.get("host-a-failed"))?.status).toBe("failed")
+    expect((await getDb().mobileOutboundQueue.get("host-a-deadlettered"))?.status).toBe(
+      "deadlettered"
+    )
+    await Promise.all([runnerA.stop(), runnerB.stop()])
   })
 
   it("deadletters non-retryable failures immediately", async () => {
@@ -111,7 +158,7 @@ describe("createOutboundRunner", () => {
     const dead = await listByStatus("deadlettered")
     expect(dead).toHaveLength(1)
     expect(dead[0].lastError).toContain("401")
-    runner.stop()
+    await runner.stop()
   })
 
   it("respects nextAttemptAt — does not dispatch rows scheduled for the future", async () => {
@@ -135,7 +182,7 @@ describe("createOutboundRunner", () => {
     })
     await runner.kick()
     expect(call).not.toHaveBeenCalled()
-    runner.stop()
+    await runner.stop()
   })
 
   it("drains multiple ready rows in a single kick", async () => {
@@ -150,7 +197,7 @@ describe("createOutboundRunner", () => {
     await enqueue({ command: "connector_send", payload: { i: 3 } })
     await runner.kick()
     expect(call).toHaveBeenCalledTimes(3)
-    runner.stop()
+    await runner.stop()
   })
 
   it("kick() returns immediately on non-mobile platforms when enforceMobile=true", async () => {
@@ -167,7 +214,7 @@ describe("createOutboundRunner", () => {
     await enqueue({ command: "connector_send", payload: {} })
     await runner.kick()
     expect(call).not.toHaveBeenCalled()
-    runner.stop()
+    await runner.stop()
     jest.dontMock("@/lib/capacitor/_shared")
     jest.dontMock("@/lib/capacitor/network")
   })
@@ -197,6 +244,42 @@ describe("createOutboundRunner", () => {
     resolve!(null)
     await p
     expect(runner.isDraining()).toBe(false)
-    runner.stop()
+    await runner.stop()
+  })
+
+  it("quiesce waits for an in-flight completion write and rejects later kicks", async () => {
+    let resolveDispatch: ((value: unknown) => void) | null = null
+    const call = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveDispatch = resolve
+        })
+    )
+    const runner = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+    })
+    await enqueue({ command: "connector_send", payload: { host: "a" } })
+    const draining = runner.kick()
+    for (let i = 0; i < 50 && resolveDispatch === null; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    let quiesced = false
+    const quiescing = runner.quiesce().then(() => {
+      quiesced = true
+    })
+    await Promise.resolve()
+    expect(quiesced).toBe(false)
+
+    resolveDispatch!(null)
+    await Promise.all([draining, quiescing])
+    expect(quiesced).toBe(true)
+    expect(await listByStatus("sent")).toHaveLength(1)
+
+    await enqueue({ command: "connector_send", payload: { host: "a-late" } })
+    await runner.kick()
+    expect(call).toHaveBeenCalledTimes(1)
   })
 })

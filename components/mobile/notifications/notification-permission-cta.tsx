@@ -9,9 +9,11 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { BellIcon as AnimatedBellIcon } from "@/components/ui/bell"
 import { Button } from "@/components/ui/button"
 import { SettingsIcon as AnimatedSettingsIcon } from "@/components/ui/settings"
+import { subscribeResume } from "@/lib/capacitor/app"
 import { openAppSettings } from "@/lib/capacitor/app-settings"
 import {
   checkPermission,
+  emitNotificationPermissionGranted,
   requestPermission,
   type PermissionState,
 } from "@/lib/capacitor/local-notifications"
@@ -31,29 +33,36 @@ import {
  *      deep link.
  *   3. **granted** / unsupported — component renders nothing.
  *
- * Test seam: `checker` and `requester` default to the real wrappers but
- * can be injected for unit tests.
+ * Test seam: the permission, settings, and resume adapters default to the real
+ * wrappers but can be injected for unit tests.
  */
 
 type Checker = typeof checkPermission
 type Requester = typeof requestPermission
 type SettingsOpener = typeof openAppSettings
+type ResumeSubscriber = typeof subscribeResume
 
 export interface NotificationPermissionCtaProps {
   /** Test seams. */
   checker?: Checker
   requester?: Requester
   settingsOpener?: SettingsOpener
+  resumeSubscriber?: ResumeSubscriber
   /** Override the testid root for nested usage. */
   testid?: string
 }
 
 type Phase = { kind: "hidden" } | { kind: "prompt"; requesting: boolean } | { kind: "denied" }
 
+function publishPermissionGranted(): void {
+  emitNotificationPermissionGranted()
+}
+
 export function NotificationPermissionCta({
   checker = checkPermission,
   requester = requestPermission,
   settingsOpener = openAppSettings,
+  resumeSubscriber = subscribeResume,
   testid = "notification-permission-cta",
 }: NotificationPermissionCtaProps) {
   const t = useTranslations("mobile.notifications.permissionCta")
@@ -61,20 +70,40 @@ export function NotificationPermissionCta({
 
   useEffect(() => {
     let cancelled = false
-    void (async () => {
+    let unsubscribeResume = () => {}
+    const refresh = async () => {
       const out = await checker()
       if (cancelled) return
       setPhase(phaseFromPermission(out))
-    })()
+      if (out.kind === "ok" && out.value === "granted") {
+        publishPermissionGranted()
+      }
+    }
+
+    void refresh()
+    void resumeSubscriber(() => {
+      void refresh()
+    }).then((unsubscribe) => {
+      if (cancelled) {
+        unsubscribe()
+      } else {
+        unsubscribeResume = unsubscribe
+      }
+    })
+
     return () => {
       cancelled = true
+      unsubscribeResume()
     }
-  }, [checker])
+  }, [checker, resumeSubscriber])
 
   const onEnable = useCallback(async () => {
     setPhase({ kind: "prompt", requesting: true })
     const out = await requester()
     setPhase(phaseFromPermission(out))
+    if (out.kind === "ok" && out.value === "granted") {
+      publishPermissionGranted()
+    }
   }, [requester])
 
   const onOpenSettings = useCallback(async () => {

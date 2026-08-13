@@ -1,8 +1,6 @@
 jest.mock("./plugin-bridge", () => ({ installPluginNotificationBridge: jest.fn() }))
 jest.mock("./inbound-connector", () => ({ installConnectorNotificationBridge: jest.fn() }))
-jest.mock("./inbound-push", () => ({
-  installPushNotificationBridge: jest.fn().mockResolvedValue(undefined),
-}))
+jest.mock("./inbound-push", () => ({ installPushNotificationBridge: jest.fn() }))
 
 import { installPluginNotificationBridge } from "./plugin-bridge"
 import { installConnectorNotificationBridge } from "./inbound-connector"
@@ -18,11 +16,11 @@ beforeEach(() => {
   __resetNotificationBridgesForTesting()
 })
 
-it("installs every inbound bridge once", () => {
+it("installs the runtime-independent inbound bridges once", () => {
   installNotificationBridges()
   expect(plugin).toHaveBeenCalledTimes(1)
   expect(connector).toHaveBeenCalledTimes(1)
-  expect(push).toHaveBeenCalledTimes(1)
+  expect(push).not.toHaveBeenCalled()
 })
 
 it("is idempotent across repeated calls", () => {

@@ -285,8 +285,8 @@ it("switches database/context only after validating the target credential", asyn
 
   expect(events).toEqual([
     "credential",
-    "activate:companion-studio",
     "subscriptions",
+    "activate:companion-studio",
     "database:companion-studio",
     "context:companion-studio",
     "transport",
@@ -391,8 +391,8 @@ it("switches to standalone before removing a revoked active Companion target", a
   }
 
   expect(events).toEqual([
-    "activate:standalone",
     "subscriptions",
+    "activate:standalone",
     "database:web-standalone",
     "context:web-standalone",
     "metadata:companion-studio",

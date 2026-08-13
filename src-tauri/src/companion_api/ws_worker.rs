@@ -17,7 +17,7 @@ use axum::{
 };
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tauri::Emitter;
@@ -53,6 +53,8 @@ struct WorkerConnection {
     manifest: Value,
     last_seen_at: u64,
     used_slots: u32,
+    placement_ready: Option<bool>,
+    placement_reason: Option<String>,
     sender: mpsc::Sender<QueuedWorkerMessage>,
     queue_bytes: std::sync::Arc<Semaphore>,
     shutdown: watch::Sender<bool>,
@@ -70,6 +72,8 @@ struct WorkerPresence {
     manifest: Value,
     last_seen_at: u64,
     used_slots: u32,
+    placement_ready: Option<bool>,
+    placement_reason: Option<String>,
     online: bool,
 }
 
@@ -198,6 +202,8 @@ pub(crate) fn fleet_hosts(tenant_id: &str) -> Vec<crate::fleet::registry::FleetH
                         .unwrap_or_default()
                         .saturating_mul(1_000),
                     used_slots: 0,
+                    placement_ready: None,
+                    placement_reason: None,
                     online: false,
                 });
             }
@@ -228,6 +234,8 @@ pub(crate) fn fleet_hosts(tenant_id: &str) -> Vec<crate::fleet::registry::FleetH
                 online: worker.online,
                 max_active_turns,
                 used_slots: Some(worker.used_slots),
+                placement_ready: worker.placement_ready,
+                placement_reason: worker.placement_reason.clone(),
                 runtime: worker
                     .manifest
                     .get("runtime")
@@ -244,17 +252,33 @@ pub(crate) fn fleet_hosts(tenant_id: &str) -> Vec<crate::fleet::registry::FleetH
     hosts
 }
 
-pub(crate) fn project_worker_load(tenant_id: &str, loads: Vec<(String, u32)>) {
-    let loads = loads.into_iter().collect::<HashMap<_, _>>();
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkerLoadProjection {
+    pub host_ref: String,
+    pub used_slots: u32,
+    pub placement_ready: Option<bool>,
+    pub placement_reason: Option<String>,
+}
+
+pub(crate) fn project_worker_load(tenant_id: &str, loads: Vec<WorkerLoadProjection>) {
+    let loads = loads
+        .into_iter()
+        .map(|load| (load.host_ref.clone(), load))
+        .collect::<HashMap<_, _>>();
     for worker in WORKERS
         .write()
         .values_mut()
         .filter(|worker| worker.tenant_id == tenant_id)
     {
-        if let Some(used_slots) = loads.get(&worker.host_ref) {
-            worker.used_slots = clamp_worker_load(&worker.manifest, *used_slots);
+        if let Some(load) = loads.get(&worker.host_ref) {
+            worker.used_slots = clamp_worker_load(&worker.manifest, load.used_slots);
+            worker.placement_ready = load.placement_ready;
+            worker.placement_reason = load.placement_reason.clone();
             if let Some(presence) = WORKER_HISTORY.write().get_mut(&worker.host_ref) {
                 presence.used_slots = worker.used_slots;
+                presence.placement_ready = worker.placement_ready;
+                presence.placement_reason = worker.placement_reason.clone();
             }
         }
     }
@@ -312,6 +336,8 @@ async fn handle_worker_socket(
         manifest: manifest.clone(),
         last_seen_at: unix_time_millis(),
         used_slots: 0,
+        placement_ready: None,
+        placement_reason: None,
         sender,
         queue_bytes: std::sync::Arc::new(Semaphore::new(MAX_WORKER_QUEUE_BYTES)),
         shutdown,
@@ -445,6 +471,8 @@ fn install_worker(connection: WorkerConnection) {
             manifest: connection.manifest.clone(),
             last_seen_at: connection.last_seen_at,
             used_slots: connection.used_slots,
+            placement_ready: connection.placement_ready,
+            placement_reason: connection.placement_reason.clone(),
             online: true,
         },
     );
@@ -475,13 +503,34 @@ fn remove_worker(connection_id: &str) -> bool {
     removed.is_some()
 }
 
-fn derive_host_ref(tenant_id: &str, device_id: &str) -> String {
+pub(crate) fn derive_host_ref(tenant_id: &str, device_id: &str) -> String {
     let mut digest = Sha256::new();
     digest.update((tenant_id.len() as u64).to_be_bytes());
     digest.update(tenant_id.as_bytes());
     digest.update((device_id.len() as u64).to_be_bytes());
     digest.update(device_id.as_bytes());
     format!("device:{}", hex::encode(digest.finalize()))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerDeviceSummary {
+    #[serde(flatten)]
+    device: super::security_store::DeviceSummary,
+    host_ref: String,
+}
+
+pub(crate) fn worker_device_summaries(
+    tenant_id: &str,
+    devices: Vec<super::security_store::DeviceSummary>,
+) -> Vec<WorkerDeviceSummary> {
+    devices
+        .into_iter()
+        .map(|device| WorkerDeviceSummary {
+            host_ref: derive_host_ref(tenant_id, &device.device_id),
+            device,
+        })
+        .collect()
 }
 
 async fn receive_worker_hello(socket: &mut WebSocket) -> Result<WorkerHello, String> {
@@ -592,6 +641,8 @@ mod tests {
         assert!(validate_agent_rpc_frame(r#"{"jsonrpc":"2.0","id":1}"#).is_ok());
         assert!(validate_agent_rpc_frame("{}\n{}").is_err());
         assert!(validate_agent_rpc_frame("").is_err());
+        assert!(validate_agent_rpc_frame(&"x".repeat(MAX_WORKER_FRAME_BYTES)).is_ok());
+        assert!(validate_agent_rpc_frame(&"x".repeat(MAX_WORKER_FRAME_BYTES + 1)).is_err());
     }
 
     #[test]
@@ -599,6 +650,59 @@ mod tests {
         let manifest = serde_json::json!({ "maxActiveTurns": 1 });
         assert_eq!(clamp_worker_load(&manifest, 3), 1);
         assert_eq!(clamp_worker_load(&serde_json::json!({}), 3), 0);
+    }
+
+    #[test]
+    fn worker_load_projects_readiness_to_live_and_retained_hosts() {
+        let tenant_id = "tenant-placement-projection";
+        let connection_id = "connection-placement-projection";
+        let host_ref = "device:placement-projection";
+        let (sender, _receiver) = mpsc::channel(1);
+        let (shutdown, _shutdown_rx) = watch::channel(false);
+        install_worker(WorkerConnection {
+            connection_id: connection_id.to_string(),
+            tenant_id: tenant_id.to_string(),
+            host_ref: host_ref.to_string(),
+            manifest: serde_json::json!({
+                "runtime": "cognia-agent",
+                "maxActiveTurns": 2,
+                "workspaceBindingRefs": ["repository:project:repo"]
+            }),
+            last_seen_at: 1,
+            used_slots: 0,
+            placement_ready: None,
+            placement_reason: None,
+            sender,
+            queue_bytes: std::sync::Arc::new(Semaphore::new(MAX_WORKER_QUEUE_BYTES)),
+            shutdown,
+        });
+
+        project_worker_load(
+            tenant_id,
+            vec![WorkerLoadProjection {
+                host_ref: host_ref.to_string(),
+                used_slots: 1,
+                placement_ready: Some(false),
+                placement_reason: Some("workspace_missing".to_string()),
+            }],
+        );
+        let live = fleet_hosts(tenant_id);
+        assert_eq!(live[0].used_slots, Some(1));
+        assert_eq!(live[0].placement_ready, Some(false));
+        assert_eq!(
+            live[0].placement_reason.as_deref(),
+            Some("workspace_missing")
+        );
+
+        assert!(remove_worker(connection_id));
+        let retained = fleet_hosts(tenant_id);
+        assert!(!retained[0].online);
+        assert_eq!(retained[0].placement_ready, Some(false));
+        assert_eq!(
+            retained[0].placement_reason.as_deref(),
+            Some("workspace_missing")
+        );
+        WORKER_HISTORY.write().remove(host_ref);
     }
 
     #[test]
@@ -612,6 +716,23 @@ mod tests {
             derive_host_ref("tenant-b", "same-device")
         );
         assert!(!derive_host_ref("tenant-a", "same-device").contains("tenant-a"));
+    }
+
+    #[test]
+    fn management_summary_carries_the_same_derived_host_identity_as_ingress() {
+        let device = super::super::security_store::DeviceSummary {
+            device_id: "worker-a".to_string(),
+            display_name: "Worker A".to_string(),
+            role: "member".to_string(),
+            status: "active".to_string(),
+            created_at: 1,
+            updated_at: 2,
+            capabilities: vec!["agent.worker".to_string()],
+        };
+        let summaries = worker_device_summaries("tenant-a", vec![device]);
+        let value = serde_json::to_value(&summaries[0]).unwrap();
+        assert_eq!(value["hostRef"], derive_host_ref("tenant-a", "worker-a"));
+        assert_eq!(value["deviceId"], "worker-a");
     }
 
     #[test]

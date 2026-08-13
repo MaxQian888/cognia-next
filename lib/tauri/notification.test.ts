@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { ensureNotificationPermission, notify } from "./notification"
+import { checkNotificationPermission, ensureNotificationPermission, notify } from "./notification"
 
 jest.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: jest.fn(),
@@ -79,6 +79,36 @@ describe("lib/tauri/notification", () => {
       mockedIsGranted.mockResolvedValue(false)
       mockedRequest.mockRejectedValue(new Error("req boom"))
       await expect(ensureNotificationPermission()).resolves.toBe("default")
+    })
+  })
+
+  describe("checkNotificationPermission", () => {
+    it("returns denied outside Tauri", async () => {
+      await expect(checkNotificationPermission()).resolves.toBe("denied")
+      expect(mockedIsGranted).not.toHaveBeenCalled()
+    })
+
+    it("reflects an existing grant", async () => {
+      setTauri(true)
+      mockedIsGranted.mockResolvedValue(true)
+      await expect(checkNotificationPermission()).resolves.toBe("granted")
+    })
+
+    it("checks an existing grant without opening the OS prompt", async () => {
+      setTauri(true)
+      mockedIsGranted.mockResolvedValue(false)
+
+      await expect(checkNotificationPermission()).resolves.toBe("default")
+
+      expect(mockedIsGranted).toHaveBeenCalledTimes(1)
+      expect(mockedRequest).not.toHaveBeenCalled()
+    })
+
+    it("logs and falls back to default when the check fails", async () => {
+      setTauri(true)
+      mockedIsGranted.mockRejectedValue(new Error("check boom"))
+      await expect(checkNotificationPermission()).resolves.toBe("default")
+      expect(warnSpy).toHaveBeenCalledWith("checkNotificationPermission failed", expect.any(Error))
     })
   })
 

@@ -97,6 +97,7 @@ pub const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "language",
     "lastInboxViewedAt",
     "lmntVoice",
+    "messageDisplay",
     "mistralVoiceId",
     "mobileComputerUseEnabled",
     "motion",

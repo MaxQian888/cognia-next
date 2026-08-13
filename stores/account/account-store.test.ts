@@ -6,6 +6,12 @@ import type { LocalAccountRecord, PasswordVerifierRecord } from "@/lib/accounts/
 
 import type { AccountStoreDependencies } from "./account-store"
 
+const mockBumpPerformanceSecurityGeneration = jest.fn()
+jest.mock("@/lib/perf/security-generation", () => ({
+  bumpPerformanceSecurityGeneration: (...args: unknown[]) =>
+    mockBumpPerformanceSecurityGeneration(...args),
+}))
+
 const mockListAccounts = jest.fn<Promise<LocalAccountRecord[]>, []>()
 const mockGetState = jest.fn<
   Promise<{ activeAccountId: string | null; legacyMigration?: unknown }>,
@@ -669,6 +675,10 @@ describe("account store switching, locking, and lifecycle", () => {
 
     await store.getState().lock()
 
+    expect(mockBumpPerformanceSecurityGeneration).toHaveBeenCalledWith(
+      "acct_alpha",
+      "account-locked"
+    )
     expect(mockClearSubscriptionRuntime).toHaveBeenCalledWith("acct_alpha")
     expect(mockClearAccountDatabaseSelection).toHaveBeenCalled()
     expect(mockClearAccountLocalState).toHaveBeenCalled()

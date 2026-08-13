@@ -13,6 +13,34 @@ describe("host feature manifest", () => {
     expect(supportsHostFeatureOperation(manifest, "twin.runtime", "twin_draft_review")).toBe(true)
   })
 
+  it("advertises every remotely executable Git operation with independent health", () => {
+    const manifest = buildLocalHostFeatureManifest({
+      platform: "tauri",
+      deviceGrants: ["workspace.read", "git.write"],
+      operationHealth: {
+        git_push: { healthy: false, reason: "credentials unavailable" },
+      },
+    })
+
+    const operations = manifest.features["source-control.git"]?.operations ?? []
+    expect(operations).toEqual(expect.arrayContaining(["git_status", "git_push", "git_clone"]))
+    expect(operations).not.toContain("git_watch_start")
+    expect(operations).not.toContain("git_watch_stop")
+    expect(operations).toContain("host_admin_lease_issue")
+    expect(supportsHostFeatureOperation(manifest, "source-control.git", "git_status")).toBe(true)
+    expect(supportsHostFeatureOperation(manifest, "source-control.git", "git_push")).toBe(false)
+    expect(manifest.operations.find((operation) => operation.name === "git_push")).toMatchObject({
+      healthy: false,
+      reason: "credentials unavailable",
+    })
+  })
+
+  it("does not advertise Source Control from a headless host without a workspace registrar", () => {
+    const manifest = buildLocalHostFeatureManifest({ platform: "headless" })
+
+    expect(manifest.features["source-control.git"]).toBeUndefined()
+  })
+
   it("reports the protocol limits that remote clients must obey", () => {
     const manifest = buildLocalHostFeatureManifest({
       hostBuildId: "1.2.3",

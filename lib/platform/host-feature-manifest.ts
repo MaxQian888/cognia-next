@@ -1,4 +1,5 @@
 import { APP_VERSION } from "@/lib/app-version"
+import { getCommandManifest } from "@/lib/tauri/command-descriptors"
 import type { Platform } from "./detect"
 
 export const HOST_FEATURE_MANIFEST_SCHEMA_VERSION = 2 as const
@@ -21,6 +22,7 @@ export const HOST_FEATURE_IDS = [
   "ocr.server",
   "notifications.remote",
   "workspace.files",
+  "source-control.git",
   "twin.runtime",
 ] as const
 
@@ -99,6 +101,13 @@ const DEFAULT_LIMITS: HostFeatureLimits = Object.freeze({
   maxConcurrentProxyCalls: 32,
 })
 
+/** Git operations implemented by the remote execution host (native watchers remain client-local). */
+export const SOURCE_CONTROL_HOST_OPERATIONS = Object.freeze(
+  getCommandManifest()
+    .commands.filter((command) => command.name.startsWith("git_") && command.target === "execution")
+    .map((command) => command.name)
+)
+
 /**
  * Build the manifest for operations that are already complete end to end.
  *
@@ -141,6 +150,12 @@ export function buildLocalHostFeatureManifest({
     features["automation.hitl"] = {
       version: 1,
       operations: ["automation_consent_pending", "automation_consent_respond"],
+    }
+  }
+  if (platform === "tauri") {
+    features["source-control.git"] = {
+      version: 1,
+      operations: [...SOURCE_CONTROL_HOST_OPERATIONS, "host_admin_lease_issue"],
     }
   }
   if (platform === "tauri" || platform === "headless") {

@@ -106,6 +106,27 @@ it("deletes every target and active pointer for a removed account", async () => 
   await expect(registry.getActiveTarget(ACCOUNT_ID)).resolves.toBeNull()
 })
 
+it("clears an active pointer only when explicitly deleting that active target", async () => {
+  const registry = new RuntimeTargetRegistry()
+  await registry.addTarget({
+    accountId: "acct_mobile",
+    id: "host-mobile-a",
+    kind: "companion",
+    hostKind: "desktop",
+    label: "Host A",
+  })
+  await registry.activateTarget("acct_mobile", "host-mobile-a")
+
+  await expect(registry.deleteActiveTarget("acct_mobile", "host-mobile-other")).rejects.toThrow(
+    /not the active runtime target/i
+  )
+  await registry.deleteActiveTarget("acct_mobile", "host-mobile-a")
+
+  await expect(registry.getActiveTarget("acct_mobile")).resolves.toBeNull()
+  await expect(registry.listTargets("acct_mobile")).resolves.toEqual([])
+  registry.close()
+})
+
 it("upserts public Companion metadata without storing a credential value", async () => {
   const registry = new RuntimeTargetRegistry()
 

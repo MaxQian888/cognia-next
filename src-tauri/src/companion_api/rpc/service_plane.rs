@@ -46,6 +46,18 @@ pub(super) const COMMANDS: &[&str] = &[
     "connectors_attachment_fetch",
     "connectors_attachment_read",
     "connectors_media_upload",
+    "connectors_matrix_crypto_init",
+    "connectors_matrix_crypto_close",
+    "connectors_matrix_crypto_outgoing_requests",
+    "connectors_matrix_crypto_mark_request_sent",
+    "connectors_matrix_crypto_receive_sync_changes",
+    "connectors_matrix_crypto_decrypt_event",
+    "connectors_matrix_crypto_encrypt_event",
+    "connectors_matrix_crypto_share_room_key",
+    "connectors_matrix_crypto_update_tracked_users",
+    "connectors_matrix_crypto_get_missing_sessions",
+    "connectors_matrix_encrypted_media_upload",
+    "connectors_matrix_encrypted_media_fetch",
     "connectors_lark_upload_file",
     "connectors_lark_upload_image",
     "automation_consent_respond",
@@ -820,6 +832,138 @@ pub(super) async fn dispatch(
                 .await
                 .map_err(RpcError::internal)?;
             to_json(uri)
+        }
+
+        "connectors_matrix_crypto_init" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::matrix_crypto::MatrixCryptoInitRequest =
+                required(&args, "req")?;
+            crate::connectors::matrix_crypto::matrix_crypto_init(req)
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_matrix_crypto_close" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            crate::connectors::matrix_crypto::matrix_crypto_close(&adapter_id)
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_matrix_crypto_outgoing_requests" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let requests =
+                crate::connectors::matrix_crypto::matrix_crypto_outgoing_requests(adapter_id)
+                    .await
+                    .map_err(RpcError::internal)?;
+            to_json(requests)
+        }
+
+        "connectors_matrix_crypto_mark_request_sent" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::matrix_crypto::MatrixCryptoMarkSentRequest =
+                required(&args, "req")?;
+            crate::connectors::matrix_crypto::matrix_crypto_mark_request_sent(req)
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_matrix_crypto_receive_sync_changes" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::matrix_crypto::MatrixCryptoReceiveSyncRequest =
+                required(&args, "req")?;
+            crate::connectors::matrix_crypto::matrix_crypto_receive_sync_changes(req)
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_matrix_crypto_decrypt_event" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::matrix_crypto::MatrixCryptoDecryptRequest =
+                required(&args, "req")?;
+            let response = crate::connectors::matrix_crypto::matrix_crypto_decrypt_event(req)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(response)
+        }
+
+        "connectors_matrix_crypto_encrypt_event" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::matrix_crypto::MatrixCryptoEncryptRequest =
+                required(&args, "req")?;
+            let response = crate::connectors::matrix_crypto::matrix_crypto_encrypt_event(req)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(response)
+        }
+
+        "connectors_matrix_crypto_share_room_key" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::matrix_crypto::MatrixCryptoShareRoomKeyRequest =
+                required(&args, "req")?;
+            let requests = crate::connectors::matrix_crypto::matrix_crypto_share_room_key(req)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(requests)
+        }
+
+        "connectors_matrix_crypto_update_tracked_users" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::matrix_crypto::MatrixCryptoTrackUsersRequest =
+                required(&args, "req")?;
+            crate::connectors::matrix_crypto::matrix_crypto_update_tracked_users(req)
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_matrix_crypto_get_missing_sessions" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::matrix_crypto::MatrixCryptoMissingSessionsRequest =
+                required(&args, "req")?;
+            let requests =
+                crate::connectors::matrix_crypto::matrix_crypto_get_missing_sessions(req)
+                    .await
+                    .map_err(RpcError::internal)?;
+            to_json(requests)
+        }
+
+        "connectors_matrix_encrypted_media_upload" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::types::MatrixEncryptedMediaUploadRequest =
+                required(&args, "req")?;
+            let response = crate::connectors::media_upload::upload_matrix_encrypted_media(req)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(response)
+        }
+
+        "connectors_matrix_encrypted_media_fetch" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::types::MatrixEncryptedMediaFetchRequest =
+                required(&args, "req")?;
+            let response = crate::connectors::attachments::fetch_matrix_encrypted_attachment(req)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(response)
         }
 
         "connectors_lark_upload_file" => {

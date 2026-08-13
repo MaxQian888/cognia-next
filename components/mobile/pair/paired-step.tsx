@@ -29,8 +29,12 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
+import { usePlatform } from "@/hooks/use-platform"
+import { DEFAULT_LOCAL_ACCOUNT_ID } from "@/lib/accounts/active-account-id"
+import { companionCredentialBook } from "@/lib/companion/credential-book"
+import { removeCompanionHost } from "@/lib/companion/host-removal"
+import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { transport } from "@/lib/tauri"
-import { clearCompanionConfig } from "@/lib/tauri/transport-companion"
 import { formatRelative } from "@cognia/time"
 import { cn } from "@/lib/utils"
 
@@ -62,6 +66,7 @@ export function PairedStep({
 }: PairedStepProps) {
   const t = useTranslations("mobile.pair")
   const guard = useBiometricGuard()
+  const platform = usePlatform()
 
   const [lastHeartbeatMs, setLastHeartbeatMs] = useState<number>(() => Date.now())
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
@@ -128,7 +133,33 @@ export function PairedStep({
         description: t("signOutDescription"),
       },
       async () => {
-        await clearCompanionConfig()
+        const accountId =
+          getActiveRuntimeTargetContext()?.accountId ??
+          (platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : null)
+        if (!accountId) throw new Error(t("accountContextMissing"))
+        const book = companionCredentialBook()
+        const [active, hosts] = await Promise.all([book.getActive(accountId), book.list(accountId)])
+        if (!active) return
+        const alternatives = hosts.filter((host) => host.hostId !== active.hostId)
+        let fallbackHostId: string | undefined
+        if (alternatives.length > 0) {
+          const choices = alternatives.map((host) => host.hostId).join(", ")
+          const selected = window.prompt(
+            t("signOutFallbackPrompt", { choices }),
+            alternatives[0].hostId
+          )
+          if (!selected) throw new Error(t("signOutFallbackRequired"))
+          if (!alternatives.some((host) => host.hostId === selected)) {
+            throw new Error(t("signOutFallbackInvalid"))
+          }
+          fallbackHostId = selected
+        }
+        await removeCompanionHost({
+          accountId,
+          hostId: active.hostId,
+          platform: platform === "web" ? "web" : "mobile",
+          ...(fallbackHostId ? { fallbackHostId } : {}),
+        })
       }
     )
     if (out.kind === "blocked") {
@@ -138,7 +169,7 @@ export function PairedStep({
       return
     }
     onAfterSignOut()
-  }, [guard, t, onAfterSignOut])
+  }, [guard, onAfterSignOut, platform, t])
 
   // Explicit label — `constructor.name` gets mangled by production minifiers.
   // Duck-typed on `onTierChange` (CompanionTransport-only) like the

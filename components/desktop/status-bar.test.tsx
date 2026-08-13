@@ -44,6 +44,9 @@ jest.mock("@/components/notifications/notification-bell", () => ({
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: () => null,
 }))
+jest.mock("@/components/performance/perf-capture-shell-status", () => ({
+  PerfCaptureShellStatus: () => null,
+}))
 
 jest.mock("@/components/source-control/status-bar-branch", () => ({
   StatusBarBranch: () => <div data-testid="status-branch" />,

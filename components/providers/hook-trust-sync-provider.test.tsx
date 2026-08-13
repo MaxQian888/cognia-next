@@ -20,6 +20,11 @@ const subscribe = jest.fn((..._a: unknown[]) => subscribeUnsub)
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { subscribe: (...a: unknown[]) => subscribe(...a) },
 }))
+const accountSubscribeUnsub = jest.fn()
+const accountSubscribe = jest.fn((..._a: unknown[]) => accountSubscribeUnsub)
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: { subscribe: (...a: unknown[]) => accountSubscribe(...a) },
+}))
 
 import { HookTrustSyncProvider } from "./hook-trust-sync-provider"
 
@@ -28,6 +33,8 @@ beforeEach(() => {
   syncAllowedRootsToRust.mockReset().mockResolvedValue(undefined)
   subscribe.mockClear()
   subscribeUnsub.mockClear()
+  accountSubscribe.mockClear()
+  accountSubscribeUnsub.mockClear()
 })
 
 it("syncs the trust gate + allowed roots once on mount and renders children", async () => {
@@ -40,6 +47,23 @@ it("syncs the trust gate + allowed roots once on mount and renders children", as
   await waitFor(() => expect(syncTrustedWorkspacesToRust).toHaveBeenCalledTimes(1))
   expect(syncAllowedRootsToRust).toHaveBeenCalledTimes(1)
   expect(subscribe).toHaveBeenCalledTimes(1)
+  expect(accountSubscribe).toHaveBeenCalledTimes(1)
+})
+
+it("replaces allowed roots after account lock or switch", async () => {
+  render(
+    <HookTrustSyncProvider>
+      <span>child</span>
+    </HookTrustSyncProvider>
+  )
+  await waitFor(() => expect(accountSubscribe).toHaveBeenCalledTimes(1))
+  const listener = accountSubscribe.mock.calls[0][0] as (s: unknown, p: unknown) => void
+  syncAllowedRootsToRust.mockClear()
+  listener(
+    { unlockedAccountId: null, accountRevision: 2 },
+    { unlockedAccountId: "account-a", accountRevision: 1 }
+  )
+  expect(syncAllowedRootsToRust).toHaveBeenCalledTimes(1)
 })
 
 it("re-syncs allowed roots only when the projects array changes", async () => {
@@ -66,4 +90,5 @@ it("unsubscribes from the project store on unmount", () => {
   )
   unmount()
   expect(subscribeUnsub).toHaveBeenCalledTimes(1)
+  expect(accountSubscribeUnsub).toHaveBeenCalledTimes(1)
 })

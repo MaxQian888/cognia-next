@@ -200,6 +200,8 @@ export interface CompanionCredentialBook {
   /** The pairing this account currently talks to. */
   getActive(accountNamespace: string): Promise<CompanionHostRecord | null>
   setActive(key: CompanionHostKey): Promise<void>
+  /** Clear only the active pointer; paired records and credentials remain. */
+  clearActive?(accountNamespace: string, expectedHostId?: string): Promise<void>
   loadCredential(key: CompanionHostKey): Promise<CompanionHostCredential | null>
   saveCredential(key: CompanionHostKey, credential: CompanionHostCredential): Promise<void>
   /**

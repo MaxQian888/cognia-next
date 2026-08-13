@@ -26,9 +26,14 @@ jest.mock("@/lib/db/schema", () => ({
   }),
 }))
 
+jest.mock("@/lib/accounts/active-account-id", () => ({
+  DEFAULT_LOCAL_ACCOUNT_ID: "local_acct_a",
+}))
+
 const runner = {
   kick: jest.fn().mockResolvedValue(undefined),
-  stop: jest.fn(),
+  quiesce: jest.fn().mockResolvedValue(undefined),
+  stop: jest.fn().mockResolvedValue(undefined),
   isDraining: jest.fn().mockReturnValue(false),
 }
 const createRunner = jest.fn((_options: unknown) => runner)
@@ -46,6 +51,20 @@ jest.mock("@/lib/tauri", () => ({
 
 jest.mock("@/lib/sync/companion-sync", () => ({
   runSyncDown: jest.fn(),
+}))
+
+let runtimeTarget: { id: string } | null = null
+jest.mock("@/hooks/use-runtime-snapshot", () => ({
+  useRuntimeSnapshot: () => ({ target: runtimeTarget }),
+}))
+
+let transitionParticipant: { run: () => Promise<void> } | null = null
+const unregisterTransitionParticipant = jest.fn()
+jest.mock("@/lib/runtime/runtime-target-lifecycle", () => ({
+  registerRuntimeTargetTransitionParticipant: (participant: { run: () => Promise<void> }) => {
+    transitionParticipant = participant
+    return unregisterTransitionParticipant
+  },
 }))
 
 jest.mock("@/stores/account/account-store", () => ({
@@ -66,6 +85,8 @@ const scope = { accountId: "acct-web", targetId: "desktop-studio" }
 beforeEach(() => {
   jest.clearAllMocks()
   pendingObserver = undefined
+  runtimeTarget = null
+  transitionParticipant = null
 })
 
 it("runs on native mobile and drains pending rows", () => {
@@ -87,6 +108,42 @@ it("runs on native mobile and drains pending rows", () => {
   expect(runner.kick).toHaveBeenCalledTimes(1)
   pendingObserver?.next?.(1)
   expect(runner.kick).toHaveBeenCalledTimes(2)
+})
+
+it("uses the stable Host id and default Mobile account on a fresh install", () => {
+  runtimeTarget = { id: "host-mobile-a" }
+
+  render(
+    <CompanionOutboundRunnerProvider
+      dispatcher={dispatcher}
+      platformOverride="mobile"
+      webCompanionOverride={false}
+      mobilePairedOverride
+    />
+  )
+
+  expect(createRunner).toHaveBeenCalledWith({
+    dispatcher,
+    enforceMobile: false,
+    scope: { accountId: "local_acct_a", targetId: "host-mobile-a" },
+  })
+})
+
+it("quiesces through the runtime-target transition before cleanup", async () => {
+  const { unmount } = render(
+    <CompanionOutboundRunnerProvider
+      dispatcher={dispatcher}
+      platformOverride="web"
+      webCompanionOverride
+      scopeOverride={scope}
+    />
+  )
+
+  await transitionParticipant?.run()
+  expect(runner.quiesce).toHaveBeenCalledTimes(1)
+  unmount()
+  expect(unregisterTransitionParticipant).toHaveBeenCalledTimes(1)
+  expect(runner.stop).toHaveBeenCalledTimes(1)
 })
 
 it("runs in an ordinary browser only when a Companion target exists", () => {

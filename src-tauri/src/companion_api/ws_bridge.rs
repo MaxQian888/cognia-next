@@ -849,6 +849,27 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 log::warn!("companion-api ws-bridge: bad orchestration respond payload: {error}");
             }
         }
+        "companion_perf_frame" => {
+            let device_id = payload
+                .get("deviceId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty());
+            let event = payload
+                .get("event")
+                .and_then(Value::as_str)
+                .filter(|value| *value == "perf://frame");
+            let frame = payload.get("frame").cloned();
+            match (device_id, event, frame) {
+                (Some(device_id), Some(event), Some(frame)) => {
+                    state.event_bus.publish_ephemeral_to(
+                        event.to_string(),
+                        frame,
+                        device_id.to_string(),
+                    );
+                }
+                _ => log::warn!("companion-api ws-bridge: bad performance frame payload"),
+            }
+        }
         other => {
             log::warn!("companion-api ws-bridge: unknown respond command {other:?}, ignoring");
         }
@@ -1036,7 +1057,7 @@ mod tests {
 
     /// Send hello, read frames until hello_ack (skipping pings).
     async fn handshake(ws: &mut WsClient) -> Value {
-        ws.send(WsMessage::Text(hello_frame()))
+        ws.send(WsMessage::Text(hello_frame().into()))
             .await
             .expect("send hello");
         loop {
@@ -1180,7 +1201,7 @@ mod tests {
             "catalogHash": "mismatch", "contractVersion": 1
         }))
         .unwrap();
-        ws.send(WsMessage::Text(bad_hello)).await.unwrap();
+        ws.send(WsMessage::Text(bad_hello.into())).await.unwrap();
 
         let msg = tokio::time::timeout(Duration::from_secs(5), ws.next())
             .await
@@ -1209,7 +1230,7 @@ mod tests {
             "catalogHash": "stale-catalog", "contractVersion": 1
         }))
         .unwrap();
-        ws.send(WsMessage::Text(bad_hello)).await.unwrap();
+        ws.send(WsMessage::Text(bad_hello.into())).await.unwrap();
 
         let msg = tokio::time::timeout(Duration::from_secs(5), ws.next())
             .await
@@ -1260,7 +1281,7 @@ mod tests {
             "contractVersion": crate::companion_api::command_manifest::headless_contract().expect("contract").schema_version()
         }))
         .unwrap();
-        ws.send(WsMessage::Text(wrong_account)).await.unwrap();
+        ws.send(WsMessage::Text(wrong_account.into())).await.unwrap();
 
         let msg = tokio::time::timeout(Duration::from_secs(5), ws.next())
             .await
@@ -1328,7 +1349,7 @@ mod tests {
             "payload": { "requestId": request_id, "delta": { "rows": [1, 2] }, "error": null }
         }))
         .unwrap();
-        ws.send(WsMessage::Text(respond)).await.unwrap();
+        ws.send(WsMessage::Text(respond.into())).await.unwrap();
 
         let delta = pull.await.expect("join").expect("pull succeeds");
         assert_eq!(delta, json!({ "rows": [1, 2] }));
@@ -1426,7 +1447,7 @@ mod tests {
             "v": BRIDGE_PROTOCOL_VERSION, "type": "pong", "ts": 123, "rssBytes": 987654321_u64, "lastFlushAt": 456
         }))
         .unwrap();
-        ws.send(WsMessage::Text(pong)).await.unwrap();
+        ws.send(WsMessage::Text(pong.into())).await.unwrap();
 
         let mut seen = false;
         for _ in 0..100 {
@@ -1492,6 +1513,43 @@ mod tests {
             json!({ "ok": true }),
         );
         assert_eq!(state.sync_bridge.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn performance_frames_are_targeted_and_never_enter_replay() {
+        let state = test_state();
+        let mut receiver = match state
+            .event_bus
+            .subscribe(None, chrono::Utc::now().timestamp_millis())
+        {
+            crate::companion_api::event_bus::SubscribeResult::Ok { receiver, .. } => receiver,
+            crate::companion_api::event_bus::SubscribeResult::ResyncRequired => {
+                panic!("fresh cursor")
+            }
+        };
+        route_respond(
+            &state,
+            "companion_perf_frame",
+            json!({
+                "deviceId": "device-a",
+                "event": "perf://frame",
+                "frame": { "wireVersion": 1, "sequence": 7 }
+            }),
+        );
+        let frame = receiver.recv().await.expect("ephemeral frame");
+        assert_eq!(frame.event_type, "perf://frame");
+        assert_eq!(frame.target_device_id.as_deref(), Some("device-a"));
+        assert_eq!(frame.payload["sequence"], 7);
+        let replay = match state
+            .event_bus
+            .subscribe(Some(0), chrono::Utc::now().timestamp_millis())
+        {
+            crate::companion_api::event_bus::SubscribeResult::Ok { replay, .. } => replay,
+            crate::companion_api::event_bus::SubscribeResult::ResyncRequired => {
+                panic!("fresh cursor")
+            }
+        };
+        assert!(replay.is_empty());
     }
 
     #[tokio::test]

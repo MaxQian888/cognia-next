@@ -65,6 +65,7 @@ pub async fn companion_server_start(
     // starting the server so no events are missed.
     let event_bus = EventBus::new();
     register_default_event_channels(&app_handle, Arc::clone(&event_bus));
+    *state.event_bus.write() = Some(Arc::clone(&event_bus));
     let dir = data_dir(&app_handle).map_err(CompanionServerError::Tls)?;
     let idempotency =
         super::idempotency::IdempotencyCache::open(dir.join("companion-idempotency.sqlite"))
@@ -668,7 +669,9 @@ fn register_push_trigger(app: &tauri::AppHandle, channel: &'static str) {
                 super::push::PushProvider::Apns,
             ] {
                 if let Some(d) = dispatchers.for_provider(provider) {
-                    let _ = registry.broadcast_to_offline(&payload, d.as_ref()).await;
+                    let _ = registry
+                        .broadcast_to_offline(provider, &payload, d.as_ref())
+                        .await;
                 }
             }
         });
@@ -786,13 +789,17 @@ pub async fn companion_create_worker_enrollment(
 }
 
 #[tauri::command]
-pub async fn companion_list_workers() -> Result<Vec<security_store::DeviceSummary>, String> {
+pub async fn companion_list_workers() -> Result<Vec<super::ws_worker::WorkerDeviceSummary>, String>
+{
     const TENANT_ID: &str = "local_acct_a";
     let security = security_store::security_store()
         .ok_or_else(|| "companion security store is unavailable".to_string())?;
-    security
+    let devices = security
         .list_worker_devices(TENANT_ID)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    Ok(super::ws_worker::worker_device_summaries(
+        TENANT_ID, devices,
+    ))
 }
 
 #[tauri::command]
@@ -1168,6 +1175,92 @@ pub fn companion_push_status() -> Result<PushConfigStatus, String> {
     })
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushBroadcastResult {
+    pub sent: usize,
+}
+
+/// Build the deliberately metadata-only payload used by the unified
+/// Notification Center's `push` channel. Notification title/body may contain
+/// local or user-authored text, so they must never transit APNs/FCM here.
+fn notification_center_push_payload(
+    notification_id: &str,
+    source: &str,
+    level: &str,
+    href: Option<&str>,
+) -> Result<super::push::PushPayload, String> {
+    if notification_id.trim().is_empty()
+        || notification_id.len() > 128
+        || notification_id.chars().any(char::is_control)
+    {
+        return Err("notificationId must be 1..128 printable bytes".into());
+    }
+    if !matches!(level, "info" | "success" | "warning" | "error" | "critical") {
+        return Err("level must be a valid notification level".into());
+    }
+    if !matches!(
+        source,
+        "scheduler" | "agent-team" | "plugin" | "connector" | "session" | "workflow" | "system"
+    ) {
+        return Err("source must be a valid notification source".into());
+    }
+    if href.is_some_and(|value| {
+        !value.starts_with('/') || value.starts_with("//") || value.len() > 512
+    }) {
+        return Err("href must be an app-relative path".into());
+    }
+
+    let mut data = serde_json::Map::new();
+    data.insert(
+        "notificationId".into(),
+        serde_json::Value::String(notification_id.to_string()),
+    );
+    data.insert("level".into(), serde_json::Value::String(level.to_string()));
+    data.insert(
+        "source".into(),
+        serde_json::Value::String(source.to_string()),
+    );
+    if let Some(value) = href {
+        data.insert("href".into(), serde_json::Value::String(value.to_string()));
+    }
+
+    Ok(super::push::PushPayload {
+        title: Some("Cognia".into()),
+        body: Some("Open Cognia to view new activity".into()),
+        data,
+    })
+}
+
+/// Fan out a Notification Center record to configured APNs/FCM dispatchers.
+/// Only offline devices receive provider pushes; foreground devices keep using
+/// the authenticated realtime channel and avoid a duplicate native alert.
+#[tauri::command]
+pub async fn companion_push_notification(
+    state: State<'_, CompanionServerState>,
+    notification_id: String,
+    source: String,
+    level: String,
+    href: Option<String>,
+) -> Result<PushBroadcastResult, String> {
+    let payload =
+        notification_center_push_payload(&notification_id, &source, &level, href.as_deref())?;
+    let dispatchers = super::push_dispatchers();
+    let mut sent = 0;
+    for provider in [
+        super::push::PushProvider::Fcm,
+        super::push::PushProvider::Apns,
+    ] {
+        if let Some(dispatcher) = dispatchers.for_provider(provider) {
+            sent += state
+                .push_tokens
+                .broadcast_to_offline(provider, &payload, dispatcher.as_ref())
+                .await;
+        }
+    }
+    Ok(PushBroadcastResult { sent })
+}
+
 // ---------------------------------------------------------------------------
 // Connection diagnostics (Phase C2)
 // ---------------------------------------------------------------------------
@@ -1420,6 +1513,51 @@ mod tests {
         m.insert("runId".into(), serde_json::json!("run-1"));
         let data = push_data_for_channel("workflow://run-terminal", &m);
         assert_eq!(data.get("runId").and_then(|v| v.as_str()), Some("run-1"));
+    }
+
+    #[test]
+    fn notification_center_push_payload_is_metadata_only() {
+        let payload = notification_center_push_payload(
+            "notification-1",
+            "scheduler",
+            "warning",
+            Some("/inbox"),
+        )
+        .expect("valid payload");
+        assert_eq!(payload.title.as_deref(), Some("Cognia"));
+        assert_eq!(
+            payload.data.get("notificationId").and_then(|v| v.as_str()),
+            Some("notification-1")
+        );
+        assert_eq!(
+            payload.data.get("href").and_then(|v| v.as_str()),
+            Some("/inbox")
+        );
+        assert_eq!(
+            payload.data.get("source").and_then(|v| v.as_str()),
+            Some("scheduler")
+        );
+        let encoded = serde_json::to_string(&payload).expect("payload serializes");
+        assert!(!encoded.contains("Private task title"));
+        assert!(!encoded.contains("Private task body"));
+    }
+
+    #[test]
+    fn notification_center_push_payload_rejects_unsafe_metadata() {
+        assert!(notification_center_push_payload("", "system", "warning", None).is_err());
+        assert!(notification_center_push_payload("id", "system", "debug", None).is_err());
+        assert!(notification_center_push_payload("id", "unknown", "info", None).is_err());
+        assert!(notification_center_push_payload(
+            "id",
+            "system",
+            "info",
+            Some("https://example.com")
+        )
+        .is_err());
+        assert!(
+            notification_center_push_payload("id", "system", "info", Some("//example.com"))
+                .is_err()
+        );
     }
 
     #[test]

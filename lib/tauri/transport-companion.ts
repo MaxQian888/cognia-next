@@ -120,12 +120,34 @@ export async function clearCompanionConfig(): Promise<void> {
  * credentials are resolved by targetId from the unlocked Vault; standalone
  * targets deliberately resolve to null and install the honest Web stub.
  */
-export async function reloadCompanionConfigForActiveTarget(): Promise<CompanionConfig | null> {
-  if (!isPlainBrowser()) return loadCompanionConfig()
+export async function reloadCompanionConfigForActiveTarget(options?: {
+  notify?: boolean
+}): Promise<CompanionConfig | null> {
+  if (isTauri()) return loadCompanionConfig()
   cachedConfig = await companionStorage().load()
-  if (cachedConfig) {
-    await activateWebCompanionTransport()
-  } else {
+  if (isPlainBrowser()) {
+    if (cachedConfig) {
+      await activateWebCompanionTransport()
+    } else {
+      const [{ setTransport }, { WebStubTransport }] = await Promise.all([
+        import("./transport-instance"),
+        import("./transport-web"),
+      ])
+      setTransport(new WebStubTransport())
+    }
+  }
+  if (options?.notify !== false) notifyCompanionConfigChanged()
+  return cachedConfig
+}
+
+/**
+ * Fail closed after an incomplete target rollback. Persisted pairings remain
+ * available for recovery, but the process cache cannot dispatch until a
+ * later explicit activation succeeds.
+ */
+export async function suspendCompanionTransport(): Promise<void> {
+  cachedConfig = null
+  if (isPlainBrowser()) {
     const [{ setTransport }, { WebStubTransport }] = await Promise.all([
       import("./transport-instance"),
       import("./transport-web"),
@@ -133,7 +155,6 @@ export async function reloadCompanionConfigForActiveTarget(): Promise<CompanionC
     setTransport(new WebStubTransport())
   }
   notifyCompanionConfigChanged()
-  return cachedConfig
 }
 
 /** Test-only — reset the cache between cases. */

@@ -1,12 +1,5 @@
 use super::*;
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkerLoadProjection {
-    host_ref: String,
-    used_slots: u32,
-}
-
 fn fleet_event_payload(tenant_id: &str) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let mut payload = serde_json::to_value(crate::fleet::runtime().snapshot_for_tenant(tenant_id))
         .map_err(|error| RpcError::internal(error.to_string()))?;
@@ -153,7 +146,9 @@ pub(super) async fn dispatch(
             let devices = security
                 .list_worker_devices(tenant_id)
                 .map_err(|error| RpcError::internal(error.to_string()))?;
-            to_json(devices)
+            to_json(super::super::ws_worker::worker_device_summaries(
+                tenant_id, devices,
+            ))
         }
         "fleet_worker_set" => {
             let tenant_id = account_id.ok_or_else(|| {
@@ -197,15 +192,13 @@ pub(super) async fn dispatch(
             Ok(Value::Null)
         }
         "fleet_project_worker_load" => {
-            let loads: Vec<WorkerLoadProjection> = required(&args, "loads")?;
+            let loads: Vec<super::super::ws_worker::WorkerLoadProjection> =
+                required(&args, "loads")?;
             super::super::ws_worker::project_worker_load(
                 account_id.ok_or_else(|| {
                     RpcError::forbidden("worker load projection requires an authenticated tenant")
                 })?,
-                loads
-                    .into_iter()
-                    .map(|load| (load.host_ref, load.used_slots))
-                    .collect(),
+                loads,
             );
             state.event_bus.publish(
                 crate::fleet::UPDATE_EVENT.to_string(),

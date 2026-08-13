@@ -71,6 +71,7 @@ import {
 } from "@/lib/runtime/runtime-snapshot-store"
 import { stopRuntimeTargetSubscriptions } from "@/lib/runtime/runtime-target-lifecycle"
 import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
+import { restartWebHostBindings } from "@/lib/companion/web-host-binding-lifecycle"
 
 const ENV_KEY = "NEXT_PUBLIC_COGNIA_SERVER_URL"
 
@@ -318,6 +319,32 @@ describe("WebCompanionBootProvider", () => {
     expect(networkTeardown).toHaveBeenCalledTimes(1)
     expect(connectionUnsubscribeMock).toHaveBeenCalledTimes(1)
     expect(planeUnsubscribeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("awaits teardown and rebinding after a canonical Web Host switch", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+      targetId: "companion-cloud",
+    })
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+    await waitFor(() => expect(installEventDrivenSyncMock).toHaveBeenCalledTimes(1))
+
+    let restarting!: Promise<void>
+    act(() => {
+      restarting = restartWebHostBindings()
+    })
+    await restarting
+
+    expect(eventTeardown).toHaveBeenCalledTimes(1)
+    expect(installEventDrivenSyncMock).toHaveBeenCalledTimes(2)
   })
 
   it("stops old sync subscriptions before an external runtime-target switch", async () => {

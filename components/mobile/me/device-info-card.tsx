@@ -48,6 +48,7 @@ import {
 } from "@/lib/capacitor/biometric"
 import {
   checkPermission as checkLocal,
+  emitNotificationPermissionGranted,
   requestPermission as requestLocal,
 } from "@/lib/capacitor/local-notifications"
 import { getAppInfo } from "@/lib/capacitor/app"
@@ -211,7 +212,10 @@ export function DeviceInfoCard({
   const onEnableNotifications = useCallback(async () => {
     setRequesting(true)
     try {
-      await requester()
+      const outcome = await requester()
+      if (outcome.kind === "ok" && outcome.value === "granted") {
+        emitNotificationPermissionGranted()
+      }
       await refreshPermissions()
     } finally {
       setRequesting(false)

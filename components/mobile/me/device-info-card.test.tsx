@@ -10,6 +10,7 @@ jest.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), e
 
 import { DeviceInfoCard } from "./device-info-card"
 import type { DeviceDetails } from "@/lib/capacitor/device"
+import { NOTIFICATION_PERMISSION_GRANTED_EVENT } from "@/lib/capacitor/local-notifications"
 
 const fullDevice: DeviceDetails = {
   model: "Pixel 8",
@@ -100,6 +101,8 @@ describe("<DeviceInfoCard />", () => {
       .fn()
       .mockResolvedValueOnce({ biometric: "unsupported", localNotifications: "prompt" })
       .mockResolvedValueOnce({ biometric: "unsupported", localNotifications: "granted" })
+    const onGranted = jest.fn()
+    window.addEventListener(NOTIFICATION_PERMISSION_GRANTED_EVENT, onGranted)
     render(
       <DeviceInfoCard
         appInfoLoader={async () => ({ version: "1.0.0", build: null })}
@@ -112,6 +115,8 @@ describe("<DeviceInfoCard />", () => {
     await userEvent.click(enable)
     await waitFor(() => expect(requester).toHaveBeenCalledTimes(1))
     expect(permissionsLoader).toHaveBeenCalledTimes(2)
+    expect(onGranted).toHaveBeenCalledTimes(1)
+    window.removeEventListener(NOTIFICATION_PERMISSION_GRANTED_EVENT, onGranted)
   })
 
   it("opens settings when notifications are denied", async () => {

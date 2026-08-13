@@ -9,7 +9,7 @@
  * `unsupported`).
  *
  * Server-side delivery is HITL Rust work. The client side here:
- *   1. Asks for OS permission.
+ *   1. Checks OS permission and only prompts when the caller explicitly asks.
  *   2. Triggers APNs / FCM registration.
  *   3. Surfaces the device token to the caller (which posts it to the
  *      desktop via `_rpc/register_push_token`).
@@ -25,6 +25,7 @@ export type PushPermission = "granted" | "denied" | "prompt" | "prompt-with-rati
 
 export type RegistrationOutcome =
   | { kind: "registered"; token: string; platform: PushPlatform }
+  | { kind: "permission_required" }
   | { kind: "permission_denied" }
   | { kind: "unsupported" }
   | { kind: "registration_failed"; message: string }
@@ -94,11 +95,14 @@ interface RegisterOptions {
   loader?: PushPluginLoader
   /** Maximum time to wait for the registration event (ms). */
   timeoutMs?: number
+  /** Whether this call may show the native permission prompt. */
+  requestPermission?: boolean
 }
 
 /**
  * Walk through the full permission → register → token flow. Resolves
- * with one of the four outcome variants — never throws.
+ * with a typed outcome — never throws. Passive startup callers can set
+ * `requestPermission: false` and leave the prompt to the contextual CTA.
  */
 export async function registerPushNotifications(
   opts: RegisterOptions = {}
@@ -115,6 +119,11 @@ export async function registerPushNotifications(
   try {
     perm = await plugin.checkPermissions()
     if (perm.receive !== "granted") {
+      if (opts.requestPermission === false) {
+        return perm.receive === "denied"
+          ? { kind: "permission_denied" }
+          : { kind: "permission_required" }
+      }
       perm = await plugin.requestPermissions()
     }
   } catch (err: unknown) {
@@ -197,8 +206,12 @@ export async function reportPushTokenToDesktop(
   platform: PushPlatform,
   transport: Transport = defaultTransport
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const provider = platform === "ios" ? "apns" : platform === "android" ? "fcm" : null
+  if (!provider) {
+    return { ok: false, reason: `unsupported push platform: ${platform}` }
+  }
   try {
-    await transport.call("register_push_token", { token, platform })
+    await transport.call("register_push_token", { token, provider })
     return { ok: true }
   } catch (err: unknown) {
     return {

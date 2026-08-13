@@ -294,6 +294,21 @@ describe("getActive / setActive", () => {
     expect((await book.getActive("acct_a"))?.hostId).toBe("host-2")
   })
 
+  it("clears only the expected active pointer without deleting the pairing", async () => {
+    const records = memoryRecords()
+    const credentials = memoryCredentials()
+    const book = createCredentialBook({ records, credentials })
+    await book.upsert(draft())
+    await book.upsert(draft({ hostId: "host-2", label: "Laptop" }))
+
+    await expect(book.clearActive?.("acct_a", "host-2")).rejects.toThrow(/not active/i)
+    await book.clearActive?.("acct_a", "host-1")
+
+    const stored = await records.read()
+    expect(stored.active.acct_a).toBeUndefined()
+    expect(await book.get({ hostId: "host-1", accountNamespace: "acct_a" })).not.toBeNull()
+  })
+
   it("refuses to activate a host that is not paired", async () => {
     const { book } = harness()
     await expect(book.setActive({ hostId: "ghost", accountNamespace: "acct_a" })).rejects.toThrow(

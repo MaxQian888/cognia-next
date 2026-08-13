@@ -24,6 +24,7 @@ import {
   hostKeyOf,
   type CompanionCredentialBook,
   type CompanionHostCredential,
+  type CompanionHostDraft,
   type CompanionHostRecord,
 } from "./types"
 
@@ -78,6 +79,48 @@ export async function toCompanionConfig(
   return config
 }
 
+/** Canonical flat-config → book mapping shared by pairing and legacy storage. */
+export function companionHostDraftFromConfig(
+  config: CompanionConfig,
+  accountNamespace: string,
+  existing?: CompanionHostRecord | null
+): CompanionHostDraft {
+  if (!config.deviceKeyThumbprint) {
+    throw new Error("Companion device identity is missing; pair this device again.")
+  }
+  return {
+    hostId: legacyHostId(config),
+    accountNamespace,
+    tenantId: config.tenantId ?? existing?.tenantId ?? config.accountId,
+    label: existing?.label ?? legacyLabel(config),
+    endpoints: {
+      baseUrl: config.baseUrl,
+      lanBaseUrl: config.lanBaseUrl,
+      tunnelBaseUrl: config.tunnelBaseUrl,
+    },
+    tlsPin: config.serverFingerprint ?? null,
+    deviceId: config.deviceId,
+    deviceKeyThumbprint: config.deviceKeyThumbprint,
+    serverVersion: config.serverVersion,
+    rendezvousId: config.rendezvousId,
+    signalingRoomDescriptor: config.signalingRoomDescriptor,
+    signalingUrl: config.signalingUrl,
+    iceServers: config.iceServers,
+  }
+}
+
+export function companionHostCredentialFromConfig(
+  config: CompanionConfig
+): CompanionHostCredential {
+  if (!config.devicePrivateKeyJwk || !config.deviceKeyThumbprint) {
+    throw new Error("Companion device identity is missing; pair this device again.")
+  }
+  return {
+    devicePrivateKeyJwk: config.devicePrivateKeyJwk,
+    signalingPrivateKeyJwk: config.signalingPrivateKeyJwk,
+  }
+}
+
 export class CredentialBookCompanionStorage implements CompanionConfigStorage {
   constructor(private readonly opts: CredentialBookAdapterOptions) {}
 
@@ -102,9 +145,7 @@ export class CredentialBookCompanionStorage implements CompanionConfigStorage {
     // persist, and the in-memory config cache stays authoritative for the
     // process. Throwing here would break SSR and static-export prerender.
     if (typeof window === "undefined") return
-    if (!config.devicePrivateKeyJwk || !config.deviceKeyThumbprint) {
-      throw new Error("Companion device identity is missing; pair this device again.")
-    }
+    const credential = companionHostCredentialFromConfig(config)
     const accountNamespace =
       this.opts.accountNamespace() ?? config.accountId ?? DEFAULT_ACCOUNT_NAMESPACE
     const hostId = legacyHostId(config)
@@ -117,29 +158,8 @@ export class CredentialBookCompanionStorage implements CompanionConfigStorage {
     // Secrets land first. If the secure write fails, the public target book is
     // untouched; this prevents a half-paired target whose key is unavailable.
     try {
-      await this.opts.book.saveCredential(key, {
-        devicePrivateKeyJwk: config.devicePrivateKeyJwk,
-        signalingPrivateKeyJwk: config.signalingPrivateKeyJwk,
-      })
-      await this.opts.book.upsert({
-        hostId,
-        accountNamespace,
-        tenantId: config.tenantId ?? existing?.tenantId ?? config.accountId,
-        label: existing?.label ?? legacyLabel(config),
-        endpoints: {
-          baseUrl: config.baseUrl,
-          lanBaseUrl: config.lanBaseUrl,
-          tunnelBaseUrl: config.tunnelBaseUrl,
-        },
-        tlsPin: config.serverFingerprint ?? null,
-        deviceId: config.deviceId,
-        deviceKeyThumbprint: config.deviceKeyThumbprint,
-        serverVersion: config.serverVersion,
-        rendezvousId: config.rendezvousId,
-        signalingRoomDescriptor: config.signalingRoomDescriptor,
-        signalingUrl: config.signalingUrl,
-        iceServers: config.iceServers,
-      })
+      await this.opts.book.saveCredential(key, credential)
+      await this.opts.book.upsert(companionHostDraftFromConfig(config, accountNamespace, existing))
       await this.opts.book.setActive(key)
     } catch (error) {
       try {

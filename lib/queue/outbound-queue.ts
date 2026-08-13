@@ -64,8 +64,10 @@ export interface RunnerOptions {
 export interface OutboundRunner {
   /** Kick a single drain pass — useful immediately after enqueue. */
   kick(): Promise<void>
-  /** Tear down listeners. Idempotent. */
-  stop(): void
+  /** Stop accepting work and await any in-flight dispatch + completion write. */
+  quiesce(): Promise<void>
+  /** Tear down listeners and await quiescence. Idempotent. */
+  stop(): Promise<void>
   /** True when the loop is currently dispatching at least one row. */
   isDraining(): boolean
 }
@@ -94,6 +96,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
   let draining = false
   let stopped = false
   let unsubNetwork: (() => void) | null = null
+  let activeDrain: Promise<void> | null = null
 
   void (async () => {
     unsubNetwork = await subscribeNetwork((status) => {
@@ -112,23 +115,28 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
     }
   })()
 
-  async function drain(): Promise<void> {
-    if (stopped) return
-    if (enforceMobile && detectNativePlatform() !== "mobile") return
-    if (draining) return
-    draining = true
-    try {
-      // Vacuum opportunistically; cheap if nothing to do.
-      await vacuumSent(vacuumKeepMs).catch(() => 0)
-      // Drain until no more ready rows.
-      while (!stopped) {
-        const claimed = await claimNext(now(), scope)
-        if (!claimed) break
-        await dispatchOne(claimed)
+  function drain(): Promise<void> {
+    if (stopped) return Promise.resolve()
+    if (enforceMobile && detectNativePlatform() !== "mobile") return Promise.resolve()
+    if (activeDrain) return activeDrain
+    activeDrain = (async () => {
+      draining = true
+      try {
+        // Vacuum opportunistically; cheap if nothing to do.
+        await vacuumSent(vacuumKeepMs).catch(() => 0)
+        // Drain until no more ready rows. Once quiescing begins, finish only
+        // the already-claimed row so its terminal write lands in the old DB.
+        while (!stopped) {
+          const claimed = await claimNext(now(), scope)
+          if (!claimed) break
+          await dispatchOne(claimed)
+        }
+      } finally {
+        draining = false
+        activeDrain = null
       }
-    } finally {
-      draining = false
-    }
+    })()
+    return activeDrain
   }
 
   async function dispatchOne(row: MobileOutboundJobRow): Promise<void> {
@@ -151,8 +159,24 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
     async kick() {
       await drain()
     },
-    stop() {
-      if (stopped) return
+    async quiesce() {
+      if (!stopped) {
+        stopped = true
+        if (unsubNetwork) {
+          try {
+            unsubNetwork()
+          } catch {
+            // Best effort.
+          }
+        }
+      }
+      await activeDrain
+    },
+    async stop() {
+      if (stopped) {
+        await activeDrain
+        return
+      }
       stopped = true
       if (unsubNetwork) {
         try {
@@ -161,6 +185,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
           // Best effort.
         }
       }
+      await activeDrain
     },
     isDraining() {
       return draining

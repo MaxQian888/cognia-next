@@ -17,7 +17,8 @@ interface FakePluginOpts {
   /** When non-null, emit after Nms instead of synchronously. */
   emitDelayMs?: number
   /** Throw from check/requestPermissions. */
-  permThrows?: Error
+  permThrows?: unknown
+  registrationError?: string
 }
 
 function makePlugin(opts: FakePluginOpts = {}) {
@@ -39,7 +40,7 @@ function makePlugin(opts: FakePluginOpts = {}) {
     const fire = () => {
       if (opts.token === null) {
         listeners["registrationError"]?.forEach((h) =>
-          h({ error: "APNs registration failed" } as unknown)
+          h({ error: opts.registrationError ?? "APNs registration failed" } as unknown)
         )
       } else if (opts.token !== undefined) {
         listeners["registration"]?.forEach((h) => h({ value: opts.token! } as unknown))
@@ -77,8 +78,33 @@ function makePlugin(opts: FakePluginOpts = {}) {
 describe("registerPushNotifications", () => {
   it("returns registered + token on a happy path", async () => {
     const fake = makePlugin({ initialPerm: "granted", token: "abc-123" })
-    const out = await registerPushNotifications({ loader: async () => fake.plugin })
-    expect(out).toEqual({ kind: "registered", token: "abc-123", platform: "unknown" })
+    const previous = window.Capacitor
+    window.Capacitor = { getPlatform: () => "ios" }
+    try {
+      const out = await registerPushNotifications({ loader: async () => fake.plugin })
+      expect(out).toEqual({ kind: "registered", token: "abc-123", platform: "ios" })
+    } finally {
+      window.Capacitor = previous
+    }
+  })
+
+  it("uses the native global plugin registered by the mobile boot", async () => {
+    const fake = makePlugin({ initialPerm: "granted", token: "global-token" })
+    const previous = window.Capacitor
+    window.Capacitor = {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+      Plugins: { PushNotifications: fake.plugin },
+    }
+    try {
+      await expect(registerPushNotifications()).resolves.toEqual({
+        kind: "registered",
+        token: "global-token",
+        platform: "android",
+      })
+    } finally {
+      window.Capacitor = previous
+    }
   })
 
   it("requests permission when initially in prompt state", async () => {
@@ -90,6 +116,29 @@ describe("registerPushNotifications", () => {
     const out = await registerPushNotifications({ loader: async () => fake.plugin })
     expect(out.kind).toBe("registered")
     expect(fake.plugin.requestPermissions).toHaveBeenCalled()
+  })
+
+  it("reports permission_required without prompting during passive startup", async () => {
+    const fake = makePlugin({ initialPerm: "prompt" })
+    const out = await registerPushNotifications({
+      loader: async () => fake.plugin,
+      requestPermission: false,
+    })
+
+    expect(out).toEqual({ kind: "permission_required" })
+    expect(fake.plugin.requestPermissions).not.toHaveBeenCalled()
+    expect(fake.plugin.register).not.toHaveBeenCalled()
+  })
+
+  it("reports permission_denied without prompting during passive startup", async () => {
+    const fake = makePlugin({ initialPerm: "denied" })
+    const out = await registerPushNotifications({
+      loader: async () => fake.plugin,
+      requestPermission: false,
+    })
+
+    expect(out).toEqual({ kind: "permission_denied" })
+    expect(fake.plugin.requestPermissions).not.toHaveBeenCalled()
   })
 
   it("returns permission_denied when the user declines", async () => {
@@ -116,10 +165,32 @@ describe("registerPushNotifications", () => {
     expect(out.message).toContain("APNs")
   })
 
+  it("uses a fallback message for an empty native registration error", async () => {
+    const fake = makePlugin({ initialPerm: "granted", token: null, registrationError: "" })
+    const out = await registerPushNotifications({ loader: async () => fake.plugin })
+    expect(out).toEqual({ kind: "registration_failed", message: "unknown registration error" })
+  })
+
   it("returns registration_failed when permission lookup throws", async () => {
     const fake = makePlugin({ permThrows: new Error("kaboom") })
     const out = await registerPushNotifications({ loader: async () => fake.plugin })
     expect(out.kind).toBe("registration_failed")
+  })
+
+  it("normalizes non-Error permission failures", async () => {
+    const fake = makePlugin({ permThrows: "permission bridge failed" })
+    const out = await registerPushNotifications({ loader: async () => fake.plugin })
+    expect(out).toEqual({ kind: "registration_failed", message: "permission bridge failed" })
+  })
+
+  it("normalizes listener setup failures and does not register", async () => {
+    const fake = makePlugin({ initialPerm: "granted" })
+    fake.plugin.addListener.mockRejectedValueOnce("listener bridge failed")
+
+    const out = await registerPushNotifications({ loader: async () => fake.plugin })
+
+    expect(out).toEqual({ kind: "registration_failed", message: "listener bridge failed" })
+    expect(fake.plugin.register).not.toHaveBeenCalled()
   })
 
   it("returns registration_failed when no token arrives within the timeout", async () => {
@@ -146,8 +217,35 @@ describe("reportPushTokenToDesktop", () => {
     expect(out).toEqual({ ok: true })
     expect(transport.call).toHaveBeenCalledWith("register_push_token", {
       token: "tok",
-      platform: "ios",
+      provider: "apns",
     })
+  })
+
+  it("maps Android registration to the FCM provider", async () => {
+    const transport = {
+      call: jest.fn().mockResolvedValue({}),
+      subscribe: jest.fn(() => () => {}),
+    }
+
+    await expect(reportPushTokenToDesktop("tok", "android", transport)).resolves.toEqual({
+      ok: true,
+    })
+    expect(transport.call).toHaveBeenCalledWith("register_push_token", {
+      token: "tok",
+      provider: "fcm",
+    })
+  })
+
+  it("does not send an invalid provider when the native platform is unknown", async () => {
+    const transport = {
+      call: jest.fn().mockResolvedValue({}),
+      subscribe: jest.fn(() => () => {}),
+    }
+
+    const out = await reportPushTokenToDesktop("tok", "unknown", transport)
+
+    expect(out).toEqual({ ok: false, reason: "unsupported push platform: unknown" })
+    expect(transport.call).not.toHaveBeenCalled()
   })
 
   it("returns ok:false with the error message when transport.call rejects", async () => {
@@ -159,6 +257,17 @@ describe("reportPushTokenToDesktop", () => {
     expect(out.ok).toBe(false)
     if (out.ok) return
     expect(out.reason).toBe("not implemented")
+  })
+
+  it("normalizes a non-Error transport rejection", async () => {
+    const transport = {
+      call: jest.fn().mockRejectedValue("offline"),
+      subscribe: jest.fn(() => () => {}),
+    }
+    await expect(reportPushTokenToDesktop("tok", "android", transport)).resolves.toEqual({
+      ok: false,
+      reason: "offline",
+    })
   })
 })
 
@@ -181,7 +290,22 @@ describe("subscribeToPushNotifications", () => {
       foreground: true,
     })
 
+    fake.listeners["pushNotificationReceived"]?.forEach((h) => h({ title: "no data" }))
+    expect(handler).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: {}, foreground: true })
+    )
+
     await teardown()
+  })
+
+  it("best-effort teardown tolerates both native listener removals failing", async () => {
+    const fake = makePlugin({ initialPerm: "granted" })
+    const teardown = await subscribeToPushNotifications(jest.fn(), {
+      loader: async () => fake.plugin,
+    })
+    for (const remove of fake.removers) remove.mockRejectedValueOnce(new Error("remove failed"))
+
+    await expect(teardown()).resolves.toBeUndefined()
   })
 
   it("invokes the handler on pushNotificationActionPerformed (foreground=false)", async () => {

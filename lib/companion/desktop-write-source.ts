@@ -181,6 +181,11 @@ export async function dispatchCommand(
   command: string,
   payload: Record<string, unknown>
 ): Promise<unknown> {
+  const { isPerformanceHostCommand, dispatchPerformanceHostCommand } =
+    await import("@/lib/perf/host-dispatch")
+  if (isPerformanceHostCommand(command)) {
+    return dispatchPerformanceHostCommand(command, payload)
+  }
   if (
     command === "workflow_api_run_create" ||
     command === "workflow_api_run_get" ||

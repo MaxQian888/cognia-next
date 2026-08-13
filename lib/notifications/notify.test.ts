@@ -57,9 +57,12 @@ describe("notify — insert", () => {
     const osNotify = jest.fn()
     const push = jest.fn()
     const deps = baseDeps({ toast, osNotify, push })
-    await notify({ source: "system", level: "warning", title: "T", body: "B" }, deps)
+    await notify(
+      { source: "system", level: "warning", title: "T", body: "B", href: "/inbox" },
+      deps
+    )
     expect(toast).toHaveBeenCalledTimes(1)
-    expect(osNotify).toHaveBeenCalledWith({ title: "T", body: "B" })
+    expect(osNotify).toHaveBeenCalledWith({ title: "T", body: "B", href: "/inbox" })
     expect(push).toHaveBeenCalledTimes(1)
     expect(deps.db.rows.get("fixed-id")!.deliveredVia.sort()).toEqual([
       "center",

@@ -72,6 +72,9 @@ const defaultLoader: LocalNotificationsLoader = makeDefaultLoader<LocalNotificat
 )
 
 export type PermissionState = "granted" | "denied" | "prompt"
+export type Unsubscribe = () => void
+
+export const NOTIFICATION_PERMISSION_GRANTED_EVENT = "cognia:notification-permission-granted"
 
 function normalizePerm(state: string): PermissionState {
   return state === "granted" ? "granted" : state === "denied" ? "denied" : "prompt"
@@ -119,6 +122,31 @@ export async function requestPermission(
   })
 }
 
+function resolvePermissionEventTarget(target?: EventTarget): EventTarget | null {
+  if (target) return target
+  return typeof window === "undefined" ? null : window
+}
+
+/** Announce that the shared local/remote notification permission is granted. */
+export function emitNotificationPermissionGranted(target?: EventTarget): boolean {
+  return (
+    resolvePermissionEventTarget(target)?.dispatchEvent(
+      new Event(NOTIFICATION_PERMISSION_GRANTED_EVENT)
+    ) ?? false
+  )
+}
+
+/** Subscribe to contextual permission grants without coupling CTA call sites to push. */
+export function subscribeNotificationPermissionGranted(
+  handler: () => void,
+  target?: EventTarget
+): Unsubscribe {
+  const resolved = resolvePermissionEventTarget(target)
+  if (!resolved) return () => {}
+  resolved.addEventListener(NOTIFICATION_PERMISSION_GRANTED_EVENT, handler)
+  return () => resolved.removeEventListener(NOTIFICATION_PERMISSION_GRANTED_EVENT, handler)
+}
+
 export async function schedule(
   notifications: LocalNotificationSpec[],
   loader: LocalNotificationsLoader = defaultLoader
@@ -155,8 +183,6 @@ export async function listPending(
     return { kind: "ok" as const, value: result.notifications }
   })
 }
-
-export type Unsubscribe = () => void
 
 /**
  * Subscribe to notification taps (`localNotificationActionPerformed`).

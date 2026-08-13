@@ -24,9 +24,33 @@ const PAIR_PAYLOAD = encodePairPayload({
   fingerprint: "sha256:paired-spki",
 })
 const mockRegisterPairPayload = jest.fn()
+const mockPairAndActivate = jest.fn().mockResolvedValue(undefined)
+const mockSwitchHost = jest.fn().mockResolvedValue(undefined)
+const mockRemoveHost = jest.fn().mockResolvedValue(undefined)
+const mockListHosts = jest.fn().mockResolvedValue([])
 
 jest.mock("@/components/mobile/pair/pair-api", () => ({
   registerPairPayload: (...args: unknown[]) => mockRegisterPairPayload(...args),
+}))
+
+jest.mock("@/lib/companion/host-orchestration", () => ({
+  pairAndActivateCompanionHost: (...args: unknown[]) => mockPairAndActivate(...args),
+  switchCompanionHost: (...args: unknown[]) => mockSwitchHost(...args),
+}))
+jest.mock("@/lib/companion/credential-book", () => ({
+  companionCredentialBook: () => ({
+    list: (...args: unknown[]) => mockListHosts(...args),
+    getActive: jest.fn().mockResolvedValue(null),
+  }),
+}))
+jest.mock("@/lib/companion/host-removal", () => ({
+  removeCompanionHost: (...args: unknown[]) => mockRemoveHost(...args),
+}))
+jest.mock("@/lib/runtime/runtime-target-context", () => ({
+  getActiveRuntimeTargetContext: () => ({ accountId: "local_acct_a", targetId: "host-old" }),
+}))
+jest.mock("@/lib/accounts/active-account-id", () => ({
+  DEFAULT_LOCAL_ACCOUNT_ID: "local_acct_a",
 }))
 
 // The coordinator branches on the runtime platform (ADR-0059 C2): jsdom
@@ -196,6 +220,8 @@ jest.mock("next-intl", () => ({
       signOutReason: "Confirm sign out",
       signOutDescription: "You'll need to scan a QR again to reconnect.",
       biometricFailed: `Biometric failed (${(vars?.reason as string) ?? ""})`,
+      "recovery.requiresGrant.description": `Missing grant: ${(vars?.grant as string) ?? ""}`,
+      "recovery.switchFailed": `Could not switch: ${(vars?.reason as string) ?? ""}`,
     }
     return map[key] ?? key
   },
@@ -205,12 +231,15 @@ beforeEach(() => {
   platformMock = "mobile"
   delete process.env.NEXT_PUBLIC_COGNIA_SERVER_URL
   window.localStorage.clear()
+  window.history.replaceState({}, "", "/pair")
   ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn()
   pushMock.mockReset()
   mockScanLan.mockReset()
   mockRegisterPairPayload.mockReset().mockResolvedValue({
     kind: "ok",
     config: {
+      targetId: "host-1",
+      accountId: "local_acct_a",
       baseUrl: "https://desktop.example:27890",
       devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
       deviceKeyThumbprint: "device-thumbprint",
@@ -218,6 +247,10 @@ beforeEach(() => {
       serverVersion: "0.1.0",
     },
   })
+  mockPairAndActivate.mockReset().mockResolvedValue(undefined)
+  mockSwitchHost.mockReset().mockResolvedValue(undefined)
+  mockListHosts.mockReset().mockResolvedValue([])
+  mockRemoveHost.mockReset().mockResolvedValue(undefined)
   // Default scan stub: settles fast with no hits.
   mockScanLan.mockImplementation(async () => [])
   // Reset hydrate/clear to the localStorage-backed defaults.
@@ -256,6 +289,72 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     expect(await screen.findByTestId("pair-paired-step")).toBeInTheDocument()
     expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "paired")
     expect(screen.getByTestId("pair-status")).toHaveTextContent("dev-existing")
+  })
+
+  it("add mode skips the existing-pair shortcut and preserves the current Host until submit", async () => {
+    window.history.replaceState({}, "", "/pair?mode=add")
+    hydrateImpl = async () => ({
+      targetId: "host-existing",
+      accountId: "local_acct_a",
+      baseUrl: "https://existing.local:7890",
+      deviceId: "dev-existing",
+      serverVersion: "1.0.0",
+    })
+
+    render(<PairOnboardingClient />)
+
+    expect(await screen.findByTestId("pair-discover-step")).toBeInTheDocument()
+    expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-mode", "add")
+    expect(mockPairAndActivate).not.toHaveBeenCalled()
+  })
+
+  it("recover mode renders exact missing-grant guidance", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/pair?mode=recover&state=requires-grant&requiredGrant=claude.chat"
+    )
+    hydrateImpl = async () => ({
+      targetId: "host-existing",
+      accountId: "local_acct_a",
+      baseUrl: "https://existing.local:7890",
+      deviceId: "dev-existing",
+      serverVersion: "1.0.0",
+    })
+
+    render(<PairOnboardingClient />)
+
+    expect(await screen.findByTestId("pair-recovery-context")).toHaveTextContent("claude.chat")
+    expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-mode", "recover")
+  })
+
+  it("shows a localized recovery error when a saved Host switch fails", async () => {
+    window.history.replaceState({}, "", "/pair?mode=recover&state=offline")
+    hydrateImpl = async () => ({
+      targetId: "host-existing",
+      accountId: "local_acct_a",
+      baseUrl: "https://existing.local:7890",
+      deviceId: "dev-existing",
+      serverVersion: "1.0.0",
+    })
+    mockListHosts.mockResolvedValueOnce([
+      {
+        hostId: "host-backup",
+        accountNamespace: "local_acct_a",
+        label: "Backup Host",
+        endpoints: { baseUrl: "https://backup.local:7890" },
+      },
+    ])
+    mockSwitchHost.mockRejectedValueOnce(new Error("offline"))
+
+    render(<PairOnboardingClient />)
+
+    const switchButton = await screen.findByRole("button", { name: "recovery.switchTo" })
+    await userEvent.click(switchButton)
+    expect(mockSwitchHost).toHaveBeenCalledWith(
+      expect.objectContaining({ hostId: "host-backup", force: true })
+    )
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not switch: offline")
   })
 
   it("reveals a manual escape when hydration stalls, and tapping it shows discover", async () => {
@@ -375,7 +474,7 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     expect(pushMock).toHaveBeenCalledWith("/")
   })
 
-  it("sign-out wipes the config and routes back to discover", async () => {
+  it("sign-out completion routes back to discover", async () => {
     window.localStorage.setItem(
       "cognia.companion.config.v1",
       JSON.stringify({
@@ -390,7 +489,7 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     render(<PairOnboardingClient />)
     await user.click(await screen.findByTestId("pair-signout"))
     await waitFor(() => expect(screen.getByTestId("pair-discover-step")).toBeInTheDocument())
-    expect(window.localStorage.getItem("cognia.companion.config.v1")).toBeNull()
+    expect(mockRemoveHost).not.toHaveBeenCalled()
   })
 })
 
@@ -458,9 +557,37 @@ describe("readPairParams / resolveParamSelection", () => {
 
   it("parses switchTo/baseUrl/fingerprint from a search string", () => {
     expect(readPairParams("?switchTo=deviceAA-1234&baseUrl=https%3A%2F%2Fx&fingerprint=F")).toEqual(
-      { switchTo: "deviceAA-1234", baseUrl: "https://x", fingerprint: "F" }
+      {
+        mode: "default",
+        state: null,
+        requiredGrant: null,
+        switchTo: "deviceAA-1234",
+        baseUrl: "https://x",
+        fingerprint: "F",
+      }
     )
-    expect(readPairParams("")).toEqual({ switchTo: null, baseUrl: null, fingerprint: null })
+    expect(readPairParams("")).toEqual({
+      mode: "default",
+      state: null,
+      requiredGrant: null,
+      switchTo: null,
+      baseUrl: null,
+      fingerprint: null,
+    })
+  })
+
+  it("validates add/recover modes and recovery details", () => {
+    expect(
+      readPairParams("?mode=recover&state=requires-grant&requiredGrant=claude.chat")
+    ).toMatchObject({
+      mode: "recover",
+      state: "requires-grant",
+      requiredGrant: "claude.chat",
+    })
+    expect(readPairParams("?mode=admin&state=owned")).toMatchObject({
+      mode: "default",
+      state: null,
+    })
   })
 
   it("does not turn an explicit baseUrl into a pairing credential", () => {

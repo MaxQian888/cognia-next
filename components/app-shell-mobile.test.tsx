@@ -149,6 +149,15 @@ jest.mock("@/lib/db/schema", () => ({
   whenSeeded: jest.fn().mockResolvedValue(undefined),
   getDb: () => ({
     inboundLedger: { where: () => ({ above: () => ({ count: async () => 0 }) }) },
+    chatSearchState: {
+      get: async () => ({
+        id: "singleton",
+        oldestProjectedAt: null,
+        oldestProjectedId: null,
+        complete: true,
+        updatedAt: 0,
+      }),
+    },
   }),
 }))
 
@@ -303,6 +312,9 @@ jest.mock("@/components/shell/member-list", () => ({
   MemberList: ({ variant }: { variant?: string }) => (
     <div data-testid="member-list" data-variant={variant ?? "rail"} />
   ),
+}))
+jest.mock("@/components/performance/perf-capture-shell-status", () => ({
+  PerfCaptureShellStatus: () => null,
 }))
 
 import { AppShellMobile } from "./app-shell-mobile"

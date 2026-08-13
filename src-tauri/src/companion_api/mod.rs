@@ -284,6 +284,11 @@ pub struct CompanionServerState {
     /// Tauri command resolves the pending oneshots regardless of whether
     /// the HTTP handler that issued the request still has its task alive.
     pub desktop_writes_bridge: Arc<desktop_writes_bridge::DesktopWritesBridge>,
+    /// Current server event bus, present only while the public Companion
+    /// server is running. Performance frames borrow this exact bus so their
+    /// targeted ephemeral events share authentication and never enter the
+    /// durable replay buffer.
+    pub event_bus: RwLock<Option<Arc<EventBus>>>,
     /// Declarative sync-table registry (Wave 3.5). Shared with the axum
     /// `SharedState` so plugin registration done at boot — before the
     /// server starts — propagates to the running HTTP handler.
@@ -361,6 +366,7 @@ impl CompanionServerState {
             sync_bridge: sync_bridge::SyncBridge::new(),
             desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge: desktop_writes_bridge::DesktopWritesBridge::new(),
+            event_bus: RwLock::new(None),
             sync_registry: sync_registry::SyncTableRegistry::with_defaults(),
             rate_limiter: rate_limit::RateLimiter::with_defaults(),
             push_tokens,
@@ -427,6 +433,7 @@ impl CompanionServerState {
         // Mirror the bind state in the process-global so /healthz responses
         // reflect "server stopped" rather than a stale port.
         set_advertised_port(0);
+        *self.event_bus.write() = None;
     }
 
     /// Data directory for file-backed persistence (tunnel config, etc.).

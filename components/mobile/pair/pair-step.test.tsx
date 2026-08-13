@@ -69,6 +69,22 @@ it("registers, persists, and reports a valid pairing", async () => {
   expect(onPaired).toHaveBeenCalledWith(config)
 })
 
+it("uses the caller's activation transaction when adding another Host", async () => {
+  const persistPairing = jest.fn().mockResolvedValue(undefined)
+  register.mockResolvedValue({ kind: "ok", config })
+  render(
+    <PairStep
+      prefilledPairPayload={payload}
+      persistPairing={persistPairing}
+      onPaired={jest.fn()}
+    />
+  )
+  await userEvent.click(screen.getByTestId("pair-submit"))
+
+  await waitFor(() => expect(persistPairing).toHaveBeenCalledWith(config))
+  expect(save).not.toHaveBeenCalled()
+})
+
 it("surfaces secure persistence failures without reporting the device paired", async () => {
   const onPaired = jest.fn()
   register.mockResolvedValue({ kind: "ok", config })

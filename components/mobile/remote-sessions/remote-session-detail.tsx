@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { SendIcon, SquareIcon } from "lucide-react"
+import { useLiveQuery } from "dexie-react-hooks"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,6 +30,8 @@ import { useTranscriptController } from "@/hooks/chat/use-transcript-controller"
 import { SessionMediaProvider } from "@/hooks/chat/session-media-provider"
 import { createRemoteTranscriptSource } from "@/lib/chat/transcript/source"
 import { transport } from "@/lib/tauri"
+import { useMessageDisplay } from "@/hooks/chat/use-message-display"
+import { getSession } from "@/lib/db/sessions"
 
 const remoteTranscriptSource = createRemoteTranscriptSource(transport)
 
@@ -39,6 +42,8 @@ export interface RemoteSessionDetailProps {
 export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
   const t = useTranslations("mobile.remoteSessions.detail")
   const tc = useTranslations("mobile.connectionState")
+  const session = useLiveQuery(() => getSession(sessionId), [sessionId])
+  const messageDisplay = useMessageDisplay(session?.messageDisplayOverride)
   const transcript = useTranscriptController(sessionId, remoteTranscriptSource)
   const {
     messages,
@@ -156,6 +161,7 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
                   loading: t("loadingTranscript"),
                   retry: t("retryTranscript"),
                 }}
+                renderAdapters={{ messageDisplay }}
               />
             </SessionMediaProvider>
           )
@@ -164,7 +170,12 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
         ) : messages.length === 0 ? (
           <p className="flex-1 p-4 text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
-          <TranscriptMessageList messages={messages} status={status} sessionId={sessionId} />
+          <TranscriptMessageList
+            messages={messages}
+            status={status}
+            sessionId={sessionId}
+            messageDisplay={messageDisplay}
+          />
         )}
 
         {pendingApproval && composable ? (

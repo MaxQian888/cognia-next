@@ -5,6 +5,7 @@ import { liveQuery } from "dexie"
 
 import { usePlatform } from "@/hooks/use-platform"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
+import { DEFAULT_LOCAL_ACCOUNT_ID } from "@/lib/accounts/active-account-id"
 import { getDb } from "@/lib/db/schema"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { createOutboundRunner, type OutboundDispatcher } from "@/lib/queue/outbound-queue"
@@ -14,6 +15,7 @@ import {
   setActiveRuntimeTargetContext,
   type RuntimeTargetScope,
 } from "@/lib/runtime/runtime-target-context"
+import { registerRuntimeTargetTransitionParticipant } from "@/lib/runtime/runtime-target-lifecycle"
 import { useAccountStore } from "@/stores/account/account-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
@@ -69,14 +71,15 @@ export function CompanionOutboundRunnerProvider({
   scopeOverride,
 }: CompanionOutboundRunnerProviderProps): null {
   const detectedPlatform = usePlatform()
-  const accountId = useAccountStore((state) => state.unlockedAccountId)
+  const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
   const runtimeTarget = useRuntimeSnapshot().target
   const mobileRuntimeMode = useSettingsStore((state) => state.settings?.mobileRuntimeMode)
   const platform = platformOverride ?? detectedPlatform
   const hasWebTarget = webCompanionOverride ?? hasWebCompanionTarget()
   const mobilePaired = mobilePairedOverride ?? mobileRuntimeMode === "paired"
   const enabled = (platform === "mobile" && mobilePaired) || (platform === "web" && hasWebTarget)
-  const targetId = runtimeTarget?.id ?? (platform === "mobile" ? "mobile-companion" : null)
+  const accountId = platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : unlockedAccountId
+  const targetId = runtimeTarget?.id ?? null
   const scope = useMemo(
     () => scopeOverride ?? (accountId && targetId ? { accountId, targetId } : null),
     [accountId, scopeOverride, targetId]
@@ -97,11 +100,18 @@ export function CompanionOutboundRunnerProvider({
       })
     }
     const unsubscribePendingJobs = subscribeToPendingJobs(scope, kick)
+    const unregisterTransitionParticipant = registerRuntimeTargetTransitionParticipant({
+      id: "companion-outbound-runner",
+      phase: "finalize-captures",
+      priority: 0,
+      run: () => runner.quiesce(),
+    })
     kick()
 
     return () => {
       unsubscribePendingJobs()
-      runner.stop()
+      unregisterTransitionParticipant()
+      void runner.stop()
     }
   }, [dispatcher, enabled, scope])
 

@@ -6,7 +6,6 @@ import { useLocale } from "next-intl"
 import { toast } from "sonner"
 import { useSessionNotifications } from "@/hooks/chat/use-session-notifications"
 import { useTauriEvents } from "@/hooks/system"
-import { ensureNotificationPermission } from "@/lib/tauri/notification"
 import { getLaunchCli } from "@/lib/tauri/cli"
 import { getLaunchDeepLink } from "@/lib/tauri/deep-link"
 import { getCloseBehavior, pushCloseBehaviorToRust } from "@/lib/tauri/close-behavior"
@@ -28,8 +27,8 @@ import { isMainAppWindow } from "@/lib/pet/window-role"
 /**
  * Single mount point for desktop-runtime concerns:
  *   - Subscribes to tray/menu/cli/deep-link events from the Rust side.
- *   - Asks the OS once for notification permission so later `notify()` calls
- *     succeed without ceremony.
+ *   - Leaves notification permission to the contextual Settings CTA; boot only
+ *     checks permission lazily when a native notification is requested.
  *   - On first launch, applies CLI args and any cold-start deep-link URL.
  *
  * Renders nothing; intended to wrap the app under the existing providers in
@@ -38,8 +37,9 @@ import { isMainAppWindow } from "@/lib/pet/window-role"
 export function TauriProvider({ children }: { children: React.ReactNode }) {
   useTauriEvents()
   useSessionNotifications()
-  // Wire the Notification Center inbound bridges (plugin / connector / push)
-  // once. Platform-aware + idempotent; safe on web, desktop, and mobile.
+  // Wire the runtime-independent Notification Center inbound bridges
+  // (plugin / connector) once. Capacitor push is installed after native
+  // plugin registration by CompanionBootProvider.
   useEffect(() => {
     installNotificationBridges()
   }, [])
@@ -105,8 +105,6 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
     // notification / tray-store / CLI / deep-link. Skip it in pet windows; they
     // start their own presentation-only view.
     if (!isTauri() || !isMainAppWindow()) return
-    void ensureNotificationPermission()
-
     // Kick off tray-store hydration as soon as the provider mounts. The
     // sync hook above only flushes once `hydrated === true`, so the user
     // never sees the default-flash overwrite their customised layout.

@@ -200,6 +200,24 @@ export class RuntimeTargetRegistry {
     })
   }
 
+  /**
+   * Remove the sole active target and its pointer as one transaction.
+   * Normal target removal must use `deleteTarget`; this escape hatch exists
+   * for Mobile's verified sole-Host revocation, which transitions to unpaired.
+   */
+  async deleteActiveTarget(accountId: string, targetId: string): Promise<void> {
+    assertAccountId(accountId)
+    assertTargetId(targetId)
+    await this.db.transaction("rw", this.db.targets, this.db.activeTargets, async () => {
+      const active = await this.db.activeTargets.get(accountId)
+      if (active?.targetId !== targetId) {
+        throw new Error(`Runtime target ${targetId} is not the active runtime target.`)
+      }
+      await this.db.activeTargets.delete(accountId)
+      await this.db.targets.delete([accountId, targetId])
+    })
+  }
+
   async deleteAccountTargets(accountId: string): Promise<void> {
     assertAccountId(accountId)
     await this.db.transaction("rw", this.db.targets, this.db.activeTargets, async () => {

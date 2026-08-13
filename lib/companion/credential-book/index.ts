@@ -33,7 +33,12 @@ import { DEFAULT_ACCOUNT_NAMESPACE, type CompanionCredentialBook } from "./types
 
 export * from "./types"
 export { createCredentialBook } from "./book"
-export { CredentialBookCompanionStorage, toCompanionConfig } from "./adapter"
+export {
+  CredentialBookCompanionStorage,
+  companionHostCredentialFromConfig,
+  companionHostDraftFromConfig,
+  toCompanionConfig,
+} from "./adapter"
 export {
   migrateLegacyCompanionConfig,
   legacyHostId,

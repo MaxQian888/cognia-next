@@ -20,6 +20,7 @@ import {
   DramaIcon,
   FileTextIcon,
   GraduationCapIcon,
+  GitBranchIcon,
   PenToolIcon,
   ShapesIcon,
   UserCogIcon,
@@ -316,6 +317,15 @@ export const ME_ENTRIES: MeEntry[] = [
     href: "/me/computer-use",
     section: "connection",
     keywords: ["computer use", "automation", "桌面"],
+  },
+  {
+    id: "source-control",
+    pairedOnly: true,
+    icon: GitBranchIcon,
+    labelKey: "sourceControlRow",
+    href: "/source-control",
+    section: "connection",
+    keywords: ["git", "source control", "repository", "版本控制", "代码仓库"],
   },
   {
     id: "terminal",

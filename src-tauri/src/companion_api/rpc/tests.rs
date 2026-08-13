@@ -1001,6 +1001,18 @@ fn service_only_commands_are_known_and_not_control_gated() {
         "connectors_attachment_fetch",
         "connectors_attachment_read",
         "connectors_media_upload",
+        "connectors_matrix_crypto_init",
+        "connectors_matrix_crypto_close",
+        "connectors_matrix_crypto_outgoing_requests",
+        "connectors_matrix_crypto_mark_request_sent",
+        "connectors_matrix_crypto_receive_sync_changes",
+        "connectors_matrix_crypto_decrypt_event",
+        "connectors_matrix_crypto_encrypt_event",
+        "connectors_matrix_crypto_share_room_key",
+        "connectors_matrix_crypto_update_tracked_users",
+        "connectors_matrix_crypto_get_missing_sessions",
+        "connectors_matrix_encrypted_media_upload",
+        "connectors_matrix_encrypted_media_fetch",
         "connectors_lark_upload_file",
         "connectors_lark_upload_image",
         "plugin_launch_js",
@@ -2219,6 +2231,27 @@ async fn connectors_http_request_rejects_malformed_args() {
     assert_eq!(err.1 .0.code, "malformed_request");
 }
 
+#[tokio::test]
+async fn headless_matrix_crypto_close_reaches_the_shared_native_session_store() {
+    let state = test_state();
+    let services = crate::headless::HeadlessServices::stub_for_tests();
+    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+
+    let result = dispatch(
+        "connectors_matrix_crypto_close",
+        json!({ "adapterId": "matrix-headless" }),
+        &state,
+        &host,
+        "brain-local",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await
+    .expect("close Matrix crypto session");
+
+    assert_eq!(result, Value::Null);
+}
+
 /// `sync_pull` on a headless host routes through the connected brain's
 /// socket transport end-to-end (RPC arm → event frame → respond →
 /// resolved delta).
@@ -3237,6 +3270,7 @@ fn mobile_allowlist_includes_appearance_keys() {
         "density",
         "radius",
         "motion",
+        "messageDisplay",
         "typographyExt",
         "a11y",
         // Theme system enhancement — accent override + plugin theme pointer.

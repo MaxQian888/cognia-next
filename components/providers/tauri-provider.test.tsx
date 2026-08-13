@@ -19,6 +19,7 @@ const startNewSessionMock = jest.fn(async (..._args: unknown[]) => ({ id: "s-new
 const setSelectedGuildMock = jest.fn()
 const saveSettingsMock = jest.fn(async () => undefined)
 const chatClearMock = jest.fn()
+const ensureNotificationPermissionMock = jest.fn(async () => "granted")
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 jest.mock("@/lib/pet/window-role", () => ({ isMainAppWindow: () => isMainAppWindowMock() }))
@@ -33,7 +34,7 @@ jest.mock("@/hooks/chat/use-session-notifications", () => ({
 }))
 jest.mock("@/hooks/system", () => ({ useTauriEvents: jest.fn() }))
 jest.mock("@/lib/tauri/notification", () => ({
-  ensureNotificationPermission: jest.fn(async () => undefined),
+  ensureNotificationPermission: () => ensureNotificationPermissionMock(),
 }))
 jest.mock("@/lib/tauri/close-behavior", () => ({
   getCloseBehavior: jest.fn(async () => "quit"),
@@ -88,6 +89,17 @@ beforeEach(() => {
 })
 
 describe("<TauriProvider /> launch CLI args", () => {
+  it("does not prompt for OS notification permission during boot", async () => {
+    render(
+      <TauriProvider>
+        <div />
+      </TauriProvider>
+    )
+
+    await waitFor(() => expect(getLaunchCliMock).toHaveBeenCalled())
+    expect(ensureNotificationPermissionMock).not.toHaveBeenCalled()
+  })
+
   it("starts a conversation in the DM guild for --new-chat", async () => {
     getLaunchCliMock.mockResolvedValue({ workspacePath: undefined, newChat: true })
 

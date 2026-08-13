@@ -21,6 +21,40 @@ jest.mock("@/lib/tauri/transport-companion", () => ({
   hydrateCompanionConfig: () => hydrateMock(),
 }))
 
+jest.mock("@/lib/accounts/active-account-id", () => ({ DEFAULT_LOCAL_ACCOUNT_ID: "local_acct_a" }))
+jest.mock("@/lib/companion/mobile-host-adoption", () => ({
+  adoptMobileCompanionHosts: jest.fn().mockResolvedValue(undefined),
+}))
+jest.mock("@/lib/companion/credential-book", () => ({
+  companionCredentialBook: () => ({ getActive: jest.fn().mockResolvedValue(null) }),
+}))
+jest.mock("@/lib/db/schema", () => ({ activateAccountDatabase: jest.fn() }))
+jest.mock("@/lib/runtime/runtime-target-context", () => ({
+  setActiveRuntimeTargetContext: jest.fn(),
+}))
+jest.mock("@/lib/runtime/account-runtime-target", () => ({
+  registerCompanionRuntimeTarget: jest.fn().mockResolvedValue({ id: "host-a" }),
+}))
+jest.mock("@/lib/runtime/runtime-snapshot-store", () => ({
+  runtimeHostSnapshotFromManifest: () => ({
+    compatible: true,
+    operations: ["claude_send"],
+    grants: ["claude.chat"],
+  }),
+  setRuntimeSnapshot: jest.fn(),
+  updateRuntimeSnapshot: jest.fn(),
+}))
+jest.mock("@/lib/runtime/runtime-target-lifecycle", () => ({
+  registerRuntimeTargetSubscriptionStopper: () => jest.fn(),
+}))
+jest.mock("@/lib/connectivity/lan-classify", () => ({ classifyWsHost: () => "ws-lan" }))
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: {
+    call: jest.fn().mockResolvedValue({ schemaVersion: 2 }),
+    subscribe: jest.fn().mockReturnValue(() => {}),
+  },
+}))
+
 const getSettingsMock = jest.fn(async () => ({}) as Record<string, unknown>)
 jest.mock("@/lib/db/settings", () => ({
   getSettings: () => getSettingsMock(),
@@ -41,12 +75,17 @@ jest.mock("@/lib/sync/companion-sync", () => ({
 
 const registerPushMock = jest.fn()
 const reportPushTokenMock = jest.fn()
-const subscribePushMock = jest.fn()
 jest.mock("@/lib/push/push-notifications", () => ({
-  registerPushNotifications: () => registerPushMock(),
+  registerPushNotifications: (options?: unknown) => registerPushMock(options),
   reportPushTokenToDesktop: (token: string, platform: string) =>
     reportPushTokenMock(token, platform),
-  subscribeToPushNotifications: (handler: (d: unknown) => void) => subscribePushMock(handler),
+}))
+
+const uninstallPushBridgeMock = jest.fn(async () => {})
+const installPushBridgeMock = jest.fn()
+jest.mock("@/lib/notifications/inbound-push", () => ({
+  installPushNotificationBridge: (observer: (delivery: unknown) => void) =>
+    installPushBridgeMock(observer),
 }))
 
 const toastFn = jest.fn()
@@ -100,10 +139,18 @@ jest.mock("@/lib/capacitor/navigation-bar", () => ({
 }))
 const localNotifActionUnsubMock = jest.fn()
 const onLocalNotifActionMock = jest.fn(async (_handler: unknown) => localNotifActionUnsubMock)
+const notificationPermissionUnsubMock = jest.fn()
+let notificationPermissionHandler: (() => void) | null = null
+const subscribeNotificationPermissionMock = jest.fn((handler: () => void) => {
+  notificationPermissionHandler = handler
+  return notificationPermissionUnsubMock
+})
 jest.mock("@/lib/capacitor/local-notifications", () => ({
   DEFAULT_CHANNEL_ID: "cognia-default",
   ensureChannel: jest.fn(async () => ({ kind: "ok" })),
   onAction: (handler: unknown) => onLocalNotifActionMock(handler),
+  subscribeNotificationPermissionGranted: (handler: () => void) =>
+    subscribeNotificationPermissionMock(handler),
 }))
 const backButtonUnsubMock = jest.fn()
 const subscribeBackButtonMock = jest.fn(
@@ -130,7 +177,8 @@ beforeEach(() => {
   installEventDrivenSyncMock.mockReset().mockReturnValue(() => {})
   registerPushMock.mockReset().mockResolvedValue({ kind: "permission_denied" })
   reportPushTokenMock.mockReset().mockResolvedValue({ ok: true })
-  subscribePushMock.mockReset().mockResolvedValue(() => Promise.resolve())
+  uninstallPushBridgeMock.mockClear()
+  installPushBridgeMock.mockReset().mockResolvedValue(uninstallPushBridgeMock)
   toastFn.mockReset()
   logInfo.mockReset()
   logWarn.mockReset()
@@ -141,6 +189,9 @@ beforeEach(() => {
   backButtonUnsubMock.mockClear()
   onLocalNotifActionMock.mockClear()
   localNotifActionUnsubMock.mockClear()
+  notificationPermissionHandler = null
+  subscribeNotificationPermissionMock.mockClear()
+  notificationPermissionUnsubMock.mockClear()
   minimizeAppMock.mockClear()
   registerNativePluginsMock.mockClear()
   syncStatusBarMock.mockClear()
@@ -153,6 +204,14 @@ function setMobile() {
   ;(window as { Capacitor?: { isNativePlatform: () => boolean } }).Capacitor = {
     isNativePlatform: () => true,
   }
+}
+
+const pairedConfig = {
+  baseUrl: "http://test:7890",
+  devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+  deviceKeyThumbprint: "thumbprint",
+  deviceId: "abc",
+  serverVersion: "1.0",
 }
 
 describe("<CompanionBootProvider /> — platform gates", () => {
@@ -358,6 +417,32 @@ describe("<CompanionBootProvider /> — unpaired", () => {
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/pair"))
   })
 
+  it("registers and reports push as soon as an unpaired session finishes pairing", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValueOnce(null).mockResolvedValueOnce(pairedConfig)
+    getSettingsMock.mockResolvedValue({ mobileRuntimeMode: "paired" })
+    registerPushMock.mockResolvedValueOnce({
+      kind: "registered",
+      token: "tok-after-pair",
+      platform: "android",
+    })
+
+    render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+
+    await waitFor(() => expect(notificationPermissionHandler).not.toBeNull())
+    await waitFor(() => expect(hydrateMock).toHaveBeenCalledTimes(1))
+    notificationPermissionHandler?.()
+
+    await waitFor(() =>
+      expect(reportPushTokenMock).toHaveBeenCalledWith("tok-after-pair", "android")
+    )
+    expect(registerPushMock).toHaveBeenCalledWith({ requestPermission: false })
+  })
+
   it("skips companion sync/push entirely in standalone (BYOK) mode", async () => {
     setMobile()
     hydrateMock.mockResolvedValueOnce(null)
@@ -392,14 +477,6 @@ describe("<CompanionBootProvider /> — unpaired", () => {
 })
 
 describe("<CompanionBootProvider /> — paired", () => {
-  const pairedConfig = {
-    baseUrl: "http://test:7890",
-    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
-    deviceKeyThumbprint: "thumbprint",
-    deviceId: "abc",
-    serverVersion: "1.0",
-  }
-
   it("triggers sync + installs listeners + registers push when paired", async () => {
     setMobile()
     hydrateMock.mockResolvedValueOnce(pairedConfig)
@@ -418,9 +495,12 @@ describe("<CompanionBootProvider /> — paired", () => {
     await waitFor(() => expect(runSyncDownMock).toHaveBeenCalled())
     expect(installForegroundSyncMock).toHaveBeenCalled()
     expect(installEventDrivenSyncMock).toHaveBeenCalled()
-    expect(registerPushMock).toHaveBeenCalled()
+    expect(registerPushMock).toHaveBeenCalledWith({ requestPermission: false })
     await waitFor(() => expect(reportPushTokenMock).toHaveBeenCalledWith("tok-123", "ios"))
-    expect(subscribePushMock).toHaveBeenCalled()
+    expect(installPushBridgeMock).toHaveBeenCalledTimes(1)
+    expect(registerNativePluginsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      installPushBridgeMock.mock.invocationCallOrder[0]
+    )
     expect(replaceMock).not.toHaveBeenCalled()
   })
 
@@ -437,8 +517,8 @@ describe("<CompanionBootProvider /> — paired", () => {
 
     await waitFor(() => expect(registerPushMock).toHaveBeenCalled())
     expect(reportPushTokenMock).not.toHaveBeenCalled()
-    // Subscribe still happens (silent pushes can come without registration).
-    await waitFor(() => expect(subscribePushMock).toHaveBeenCalled())
+    // The inbound bridge still installs even when token registration is denied.
+    await waitFor(() => expect(installPushBridgeMock).toHaveBeenCalledTimes(1))
   })
 
   it("logs a warning when initial sync-down throws", async () => {
@@ -481,32 +561,45 @@ describe("<CompanionBootProvider /> — paired", () => {
     )
   })
 
-  it("a foreground push surfaces as a sonner toast", async () => {
+  it("tears down the unified push bridge on unmount", async () => {
     setMobile()
     hydrateMock.mockResolvedValueOnce(pairedConfig)
     registerPushMock.mockResolvedValueOnce({ kind: "permission_denied" })
 
-    let pushHandler: ((d: unknown) => void) | null = null
-    subscribePushMock.mockImplementationOnce((handler: (d: unknown) => void) => {
-      pushHandler = handler
-      return Promise.resolve(() => Promise.resolve())
-    })
-
-    render(
+    const { unmount } = render(
       <CompanionBootProvider>
         <div>child</div>
       </CompanionBootProvider>
     )
-    await waitFor(() => expect(pushHandler).not.toBeNull())
+    await waitFor(() => expect(installPushBridgeMock).toHaveBeenCalledTimes(1))
 
-    pushHandler!({
-      title: "New message",
-      body: "ping",
-      data: {},
-      foreground: true,
-    })
+    unmount()
+    await waitFor(() => expect(uninstallPushBridgeMock).toHaveBeenCalledTimes(1))
+    expect(notificationPermissionUnsubMock).toHaveBeenCalledTimes(1)
+  })
 
-    expect(toastFn).toHaveBeenCalledWith("New message", { description: "ping" })
+  it("does not continue into registration when a late bridge install resolves after unmount", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValueOnce(pairedConfig)
+    let resolveInstall: ((cleanup: () => Promise<void>) => void) | undefined
+    installPushBridgeMock.mockReturnValueOnce(
+      new Promise<() => Promise<void>>((resolve) => {
+        resolveInstall = resolve
+      })
+    )
+
+    const { unmount } = render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+    await waitFor(() => expect(installPushBridgeMock).toHaveBeenCalledTimes(1))
+
+    unmount()
+    resolveInstall?.(uninstallPushBridgeMock)
+
+    await waitFor(() => expect(uninstallPushBridgeMock).toHaveBeenCalledTimes(1))
+    expect(registerPushMock).not.toHaveBeenCalled()
   })
 
   it("a tap-from-background push deep-links to the session", async () => {
@@ -514,10 +607,10 @@ describe("<CompanionBootProvider /> — paired", () => {
     hydrateMock.mockResolvedValueOnce(pairedConfig)
     registerPushMock.mockResolvedValueOnce({ kind: "permission_denied" })
 
-    let pushHandler: ((d: unknown) => void) | null = null
-    subscribePushMock.mockImplementationOnce((handler: (d: unknown) => void) => {
-      pushHandler = handler
-      return Promise.resolve(() => Promise.resolve())
+    let pushObserver: ((d: unknown) => void) | null = null
+    installPushBridgeMock.mockImplementationOnce((observer: (d: unknown) => void) => {
+      pushObserver = observer
+      return Promise.resolve(uninstallPushBridgeMock)
     })
 
     render(
@@ -525,9 +618,9 @@ describe("<CompanionBootProvider /> — paired", () => {
         <div>child</div>
       </CompanionBootProvider>
     )
-    await waitFor(() => expect(pushHandler).not.toBeNull())
+    await waitFor(() => expect(pushObserver).not.toBeNull())
 
-    pushHandler!({
+    pushObserver!({
       data: { sessionId: "s-123" },
       foreground: false,
     })
@@ -549,7 +642,7 @@ describe("<CompanionBootProvider /> — paired", () => {
       </CompanionBootProvider>
     )
     await waitFor(() => expect(subscribeBackButtonMock).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(subscribePushMock).toHaveBeenCalled())
+    await waitFor(() => expect(installPushBridgeMock).toHaveBeenCalledTimes(1))
 
     pathnameMock.mockReturnValue("/me")
     rerender(
@@ -561,7 +654,27 @@ describe("<CompanionBootProvider /> — paired", () => {
 
     expect(backButtonUnsubMock).not.toHaveBeenCalled()
     expect(deeplinkUnsubMock).not.toHaveBeenCalled()
+    expect(uninstallPushBridgeMock).not.toHaveBeenCalled()
     expect(subscribeBackButtonMock).toHaveBeenCalledTimes(1) // no duplicate re-install either
+  })
+
+  it("restarts Host bindings without reinstalling one-time native listeners", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+
+    render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+    await waitFor(() => expect(runSyncDownMock).toHaveBeenCalledTimes(1))
+
+    window.dispatchEvent(new Event("cognia:companion-config-changed"))
+
+    await waitFor(() => expect(runSyncDownMock).toHaveBeenCalledTimes(2))
+    expect(registerNativePluginsMock).toHaveBeenCalledTimes(1)
+    expect(installPushBridgeMock).toHaveBeenCalledTimes(1)
+    expect(subscribeBackButtonMock).toHaveBeenCalledTimes(1)
   })
 
   it("hydrates only once across re-renders", async () => {

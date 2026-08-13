@@ -6,6 +6,17 @@ import { useConnectionState } from "@/hooks/companion/use-connection-state"
 import type { RemoteSessionStream } from "@/hooks/data/use-remote-session-stream"
 import type { ConnectionState } from "@/lib/tauri/transport-companion"
 
+const messageDisplayMock = jest.fn((_override?: unknown) => ({
+  preset: "balanced",
+  motion: "restrained",
+}))
+const liveQueryMock = jest.fn((..._args: unknown[]): unknown => undefined)
+
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: (...args: unknown[]) => liveQueryMock(...args),
+}))
+jest.mock("@/lib/db/sessions", () => ({ getSession: jest.fn() }))
+
 const transcriptListMock = jest.fn((..._args: unknown[]) => (
   <div data-testid="remote-transcript-list" />
 ))
@@ -36,6 +47,9 @@ jest.mock("@/hooks/data/use-remote-session-stream", () => ({
 
 jest.mock("@/hooks/companion/use-connection-state", () => ({
   useConnectionState: jest.fn(() => null),
+}))
+jest.mock("@/hooks/chat/use-message-display", () => ({
+  useMessageDisplay: (override: unknown) => messageDisplayMock(override),
 }))
 
 // OfflineBanner pulls usePlatform + network live queries — out of scope here.
@@ -69,6 +83,8 @@ describe("<RemoteSessionDetail />", () => {
   beforeEach(() => {
     window.localStorage.clear()
     connectionMock.mockReturnValue(null)
+    liveQueryMock.mockReturnValue(undefined)
+    messageDisplayMock.mockClear()
     transcriptControllerMock.mockReturnValue({
       snapshot: {
         mode: "legacy",
@@ -111,6 +127,15 @@ describe("<RemoteSessionDetail />", () => {
     render(<RemoteSessionDetail sessionId="s1" />)
 
     expect(screen.getByTestId("remote-timeline-surface")).toBeInTheDocument()
+  })
+
+  it("resolves a synced host session override when the remote session row is available", () => {
+    liveQueryMock.mockReturnValue({ messageDisplayOverride: { preset: "inspector" } })
+    streamMock.mockReturnValue(baseStream())
+
+    render(<RemoteSessionDetail sessionId="s1" />)
+
+    expect(messageDisplayMock).toHaveBeenCalledWith({ preset: "inspector" })
   })
 
   it("releases completed live messages after a timeline revision is rendered", () => {
@@ -160,6 +185,7 @@ describe("<RemoteSessionDetail />", () => {
     expect(screen.getByTestId("remote-transcript-list")).toBeInTheDocument()
     expect(transcriptListMock).toHaveBeenCalledWith({
       messages,
+      messageDisplay: { preset: "balanced", motion: "restrained" },
       sessionId: "s1",
       status: "streaming",
     })

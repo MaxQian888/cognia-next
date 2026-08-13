@@ -1,7 +1,8 @@
 // Notification runtime (ADR-0042) — wires the pure `notify()` core to the real
 // host: Dexie persistence, the reactive store (badge/panel), sonner toasts,
-// Tauri OS notifications, and preference loading. The single public `notify()`
-// every subsystem calls. Push fan-out is attached by the mobile layer (Phase 5/8).
+// host OS notifications, preference loading, and desktop-to-companion push
+// fan-out. This is the single public `notify()` every subsystem calls; mobile
+// push reception is installed once by the companion boot provider.
 
 import { toast } from "sonner"
 import type { NotificationInput, NotificationRecord } from "@/types/notifications"
@@ -18,7 +19,14 @@ import { dispatchNotificationCommand } from "./action-registry"
 import { useNotificationStore } from "@/stores/notifications/notification-store"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveUserTimeZone } from "@/lib/profile/timezone"
-import { ensureNotificationPermission, notify as osNotify } from "@/lib/tauri/notification"
+import { checkNotificationPermission, notify as tauriNotify } from "@/lib/tauri/notification"
+import {
+  checkPermission,
+  schedule,
+  subscribeNotificationPermissionGranted,
+} from "@/lib/capacitor/local-notifications"
+import { detectPlatform } from "@/lib/platform/detect"
+import { transport } from "@/lib/tauri/transport-instance"
 
 const dbPort: NotifyDbPort = {
   findByDedupeKey,
@@ -31,12 +39,72 @@ const dbPort: NotifyDbPort = {
 // avoid a round-trip per notification. The permission hook calls
 // `refreshOsPermission()` after a (re)request.
 let permCache: Promise<boolean> | null = null
+let permissionCacheInvalidationInstalled = false
+function installPermissionCacheInvalidation(): void {
+  if (permissionCacheInvalidationInstalled || detectPlatform() !== "mobile") return
+  subscribeNotificationPermissionGranted(refreshOsPermission)
+  permissionCacheInvalidationInstalled = true
+}
+
+async function checkHostNotificationPermission(): Promise<boolean> {
+  const platform = detectPlatform()
+  if (platform === "mobile") {
+    const outcome = await checkPermission()
+    return outcome.kind === "ok" && outcome.value === "granted"
+  }
+  if (platform === "tauri") {
+    return (await checkNotificationPermission()) === "granted"
+  }
+  return false
+}
+
 function osPermitted(): Promise<boolean> {
-  if (!permCache) permCache = ensureNotificationPermission().then((p) => p === "granted")
+  installPermissionCacheInvalidation()
+  if (!permCache) permCache = checkHostNotificationPermission()
   return permCache
 }
 export function refreshOsPermission(): void {
   permCache = null
+}
+
+let nextLocalNotificationId = Math.floor(Date.now() % 2_000_000_000)
+function allocateLocalNotificationId(): number {
+  nextLocalNotificationId =
+    nextLocalNotificationId >= 2_147_483_646 ? 1 : nextLocalNotificationId + 1
+  return nextLocalNotificationId
+}
+
+async function hostNotify(opts: { title: string; body?: string; href?: string }): Promise<void> {
+  if (detectPlatform() !== "mobile") {
+    await tauriNotify({ title: opts.title, body: opts.body })
+    return
+  }
+
+  const outcome = await schedule([
+    {
+      id: allocateLocalNotificationId(),
+      title: opts.title,
+      body: opts.body ?? "",
+      extra: opts.href ? { route: opts.href } : undefined,
+    },
+  ])
+  if (outcome.kind !== "ok") {
+    throw new Error(
+      outcome.kind === "error" ? outcome.message : "local notifications are unavailable"
+    )
+  }
+}
+
+async function pushToCompanions(record: NotificationRecord): Promise<void> {
+  const result = (await transport.call("companion_push_notification", {
+    notificationId: record.id,
+    source: record.source,
+    level: record.level,
+    href: record.href,
+  })) as { sent?: unknown }
+  if (typeof result?.sent !== "number" || result.sent < 1) {
+    throw new Error("no offline companion accepted the push notification")
+  }
 }
 
 /** Map a record to a sonner toast, wiring its first action button. */
@@ -67,6 +135,7 @@ function showToast(rec: NotificationRecord): void {
 }
 
 function buildDeps(): NotifyDeps {
+  const platform = detectPlatform()
   return {
     now: () => Date.now(),
     loadPrefs: () =>
@@ -77,8 +146,9 @@ function buildDeps(): NotifyDeps {
     tz: resolveUserTimeZone(useSettingsStore.getState().settings?.profile),
     db: dbPort,
     toast: showToast,
-    osNotify,
+    osNotify: hostNotify,
     isOsPermitted: osPermitted,
+    push: platform === "tauri" ? pushToCompanions : undefined,
     imDeliver: imDeliverFn,
     onRecord: (rec) => useNotificationStore.getState().ingest(rec),
   }

@@ -28,6 +28,13 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { usePlatform } from "@/hooks/use-platform"
+import { DEFAULT_LOCAL_ACCOUNT_ID } from "@/lib/accounts/active-account-id"
+import { companionCredentialBook, type CompanionHostRecord } from "@/lib/companion/credential-book"
+import {
+  pairAndActivateCompanionHost,
+  switchCompanionHost,
+} from "@/lib/companion/host-orchestration"
+import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { mobileTransition } from "@/lib/ui/motion"
 import { hydrateCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
@@ -75,6 +82,9 @@ const WEB_STEPS: readonly PairStepName[] = ["pair", "paired"] as const
  *     user re-validates against that server without typing anything.
  */
 export interface PairPageParams {
+  mode?: "default" | "add" | "recover"
+  state?: "offline" | "incompatible" | "requires-grant" | null
+  requiredGrant?: string | null
   switchTo: string | null
   baseUrl: string | null
   fingerprint: string | null
@@ -82,10 +92,25 @@ export interface PairPageParams {
 
 export function readPairParams(search?: string): PairPageParams {
   if (typeof window === "undefined" && search === undefined) {
-    return { switchTo: null, baseUrl: null, fingerprint: null }
+    return {
+      mode: "default",
+      state: null,
+      requiredGrant: null,
+      switchTo: null,
+      baseUrl: null,
+      fingerprint: null,
+    }
   }
   const p = new URLSearchParams(search ?? window.location.search)
+  const rawMode = p.get("mode")
+  const rawState = p.get("state")
   return {
+    mode: rawMode === "add" || rawMode === "recover" ? rawMode : "default",
+    state:
+      rawState === "offline" || rawState === "incompatible" || rawState === "requires-grant"
+        ? rawState
+        : null,
+    requiredGrant: p.get("requiredGrant"),
     switchTo: p.get("switchTo"),
     baseUrl: p.get("baseUrl"),
     fingerprint: p.get("fingerprint"),
@@ -132,6 +157,9 @@ export function PairOnboardingClient() {
   // pairing" forever. We now reveal a "set up manually" affordance early and
   // hard-fall-through to the discover step as a backstop.
   const [hydrateSlow, setHydrateSlow] = useState(false)
+  const [recoveryHosts, setRecoveryHosts] = useState<CompanionHostRecord[]>([])
+  const [pendingRecoveryHostId, setPendingRecoveryHostId] = useState<string | null>(null)
+  const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const reduce = useReducedMotion()
   // Recently-paired servers (localStorage) — surfaced as the Discover step's
   // "Recent" group so the user can one-tap reconnect even after sign-out.
@@ -144,7 +172,15 @@ export function PairOnboardingClient() {
   const [paramSelection] = useState<Selection | null>(() =>
     resolveParamSelection(readPairParams(), loadRecentServers())
   )
-  const [switchToParam] = useState<string | null>(() => readPairParams().switchTo)
+  const [pairParams] = useState<PairPageParams>(() => readPairParams())
+  const switchToParam = pairParams.switchTo
+
+  useEffect(() => {
+    if (pairParams.mode !== "recover") return
+    const accountId = platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : getActiveRuntimeTargetContext()?.accountId
+    if (!accountId) return
+    void companionCredentialBook().list(accountId).then(setRecoveryHosts).catch(() => setRecoveryHosts([]))
+  }, [pairParams.mode, platform])
 
   // Hydrate cache from storage on mount; if a config exists, jump to the
   // paired step and let the user verify before continuing to chat.
@@ -182,7 +218,7 @@ export function PairOnboardingClient() {
         if (cancelled || settled) return
         settled = true
         finish()
-        if (cfg) {
+        if (cfg && pairParams.mode !== "add") {
           setPhase({
             kind: "paired",
             baseUrl: cfg.baseUrl,
@@ -233,7 +269,7 @@ export function PairOnboardingClient() {
     }
     // unpairedStep/-Selection are platform-derived and stable after mount;
     // paramSelection/switchToParam are read-once mount state.
-  }, [unpairedStep, unpairedSelection, paramSelection, switchToParam])
+  }, [unpairedStep, unpairedSelection, pairParams.mode, paramSelection, switchToParam])
 
   const onSkipLoading = useCallback(() => {
     setPhase({ kind: "unpaired" })
@@ -274,6 +310,17 @@ export function PairOnboardingClient() {
     setStep("paired")
   }, [])
 
+  const persistPairing = useCallback(
+    async (config: CompanionConfig) => {
+      const accountId =
+        getActiveRuntimeTargetContext()?.accountId ??
+        (platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : config.accountId)
+      if (!accountId) throw new Error(t("accountContextMissing"))
+      await pairAndActivateCompanionHost({ accountId, platform: isWebHost ? "web" : "mobile", config })
+    },
+    [isWebHost, platform, t]
+  )
+
   const onContinueToChat = useCallback(() => {
     router.push("/")
   }, [router])
@@ -283,6 +330,36 @@ export function PairOnboardingClient() {
     setSelection(unpairedSelection)
     setStep(unpairedStep)
   }, [unpairedStep, unpairedSelection])
+
+  const onRecoverySwitch = useCallback(
+    async (hostId: string) => {
+      const accountId =
+        getActiveRuntimeTargetContext()?.accountId ??
+        (platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : null)
+      if (!accountId || pendingRecoveryHostId) return
+      setPendingRecoveryHostId(hostId)
+      setRecoveryError(null)
+      try {
+        await switchCompanionHost({
+          accountId,
+          hostId,
+          platform: isWebHost ? "web" : "mobile",
+          force: true,
+        })
+        const config = await hydrateCompanionConfig()
+        if (config) onPaired(config)
+      } catch (error) {
+        setRecoveryError(
+          t("recovery.switchFailed", {
+            reason: error instanceof Error ? error.message : String(error),
+          })
+        )
+      } finally {
+        setPendingRecoveryHostId(null)
+      }
+    },
+    [isWebHost, onPaired, pendingRecoveryHostId, platform, t]
+  )
 
   if (phase.kind === "loading") {
     return (
@@ -320,6 +397,7 @@ export function PairOnboardingClient() {
       className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col gap-4 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] safe-area-pt sm:max-w-lg sm:px-6 md:max-w-xl"
       data-testid="pair-onboarding"
       data-step={step}
+      data-mode={pairParams.mode}
     >
       <header className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
@@ -331,6 +409,53 @@ export function PairOnboardingClient() {
           </p>
         </div>
         <PairStepper current={step} steps={isWebHost ? WEB_STEPS : undefined} />
+        {pairParams.mode === "recover" ? (
+          <div className="rounded-lg border bg-muted/60 p-3 text-sm" data-testid="pair-recovery-context">
+            <p className="font-medium">{t(`recovery.${pairParams.state ?? "offline"}.title`)}</p>
+            <p className="mt-1 text-muted-foreground">
+              {pairParams.state === "requires-grant"
+                ? t("recovery.requiresGrant.description", {
+                    grant: pairParams.requiredGrant ?? t("recovery.requiresGrant.unknownGrant"),
+                  })
+                : t(`recovery.${pairParams.state ?? "offline"}.description`)}
+            </p>
+            {pairParams.state === "requires-grant" ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t("recovery.requiresGrant.instructions")}
+              </p>
+            ) : null}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {recoveryHosts.map((host) => (
+                <Button
+                  key={host.hostId}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={pendingRecoveryHostId !== null}
+                  onClick={() => void onRecoverySwitch(host.hostId)}
+                >
+                  {t("recovery.switchTo", { name: host.label })}
+                </Button>
+              ))}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setSelection(EMPTY_SELECTION)
+                  setStep("pair")
+                }}
+              >
+                {t("recovery.repair")}
+              </Button>
+            </div>
+            {recoveryError ? (
+              <p role="alert" className="mt-2 text-xs text-destructive">
+                {recoveryError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       <AnimatePresence mode="wait" initial={false}>
@@ -356,6 +481,7 @@ export function PairOnboardingClient() {
               prefilledPairPayload={selection.pairPayload}
               autoScan={selection.autoScan}
               webMode={isWebHost}
+              persistPairing={persistPairing}
               onPaired={onPaired}
               onBack={isWebHost ? undefined : onBackToDiscover}
             />

@@ -35,9 +35,7 @@ use tokio_tungstenite::{
     connect_async,
     tungstenite::{client::IntoClientRequest, Message},
 };
-use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
-use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
+use webrtc::peer_connection::{RTCIceCandidateInit, RTCIceServer, RTCPeerConnectionState};
 
 use super::dispatch::spawn as spawn_dispatcher;
 use super::envelope_v2::{
@@ -417,7 +415,9 @@ async fn run_one_session(
     };
     ws_stream
         .send(Message::Text(
-            serde_json::to_string(&subscribe).expect("serialize subscribe"),
+            serde_json::to_string(&subscribe)
+                .expect("serialize subscribe")
+                .into(),
         ))
         .await
         .map_err(|e| SessionError::Websocket(e.to_string()))?;
@@ -472,7 +472,7 @@ async fn run_one_session(
             }
 
             Some(out) = out_rx.recv() => {
-                if let Err(e) = write.send(Message::Text(out)).await {
+                if let Err(e) = write.send(Message::Text(out.into())).await {
                     return Err(SessionError::Websocket(e.to_string()));
                 }
             }
@@ -480,7 +480,7 @@ async fn run_one_session(
             _ = keepalive.tick() => {
                 let frame = serde_json::to_string(&ClientFrame::Ping)
                     .expect("serialize ping");
-                if let Err(e) = write.send(Message::Text(frame)).await {
+                if let Err(e) = write.send(Message::Text(frame.into())).await {
                     return Err(SessionError::Websocket(e.to_string()));
                 }
                 pong_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(10));
@@ -851,7 +851,7 @@ async fn handle_relay(
                 // re-gathers. `accept_offer` (set_remote_description +
                 // create_answer + set_local_description) on the live PC
                 // produces an answer carrying fresh ICE credentials; the
-                // peer's existing `on_ice_candidate` hook keeps relaying new
+                // peer's existing event handler keeps relaying new ICE
                 // candidates. Mirrors the mobile `attemptIceRestart` path in
                 // `lib/tauri/transport-rtc.ts`.
                 let existing = peer_session
