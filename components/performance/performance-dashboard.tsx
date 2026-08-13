@@ -1,20 +1,19 @@
 "use client"
 
 /**
- * PerformanceDashboard — the Task-Manager-style master panel for the Rust
- * backend. Six tabs (Overview graphs · Processes · Managed · Hotspots · Async
- * Runtime · System) driven by the live `usePerfStream` sampler, except System,
- * whose facts are static and fetched once. Desktop-only: on web/mobile it
- * renders an inert explainer instead of an empty shell.
+ * Capability-driven diagnostic workspace. Renderer data is always available
+ * in authenticated full shells; selected-host resources progressively appear
+ * when the active transport advertises them.
  */
 
 import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { ActivityIcon, BoxesIcon, CpuIcon, GaugeIcon, LayersIcon, MonitorIcon } from "lucide-react"
+import Link from "next/link"
+import { ActivityIcon, BoxesIcon, CameraIcon, CpuIcon, StethoscopeIcon } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Button } from "@/components/ui/button"
 import { usePerfStream } from "@/hooks/perf/use-perf-stream"
 import { exportPerfSnapshot, type PerfExportFormat } from "@/lib/perf/backend/export"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -26,11 +25,26 @@ import { PerfManagedProcesses } from "./perf-managed-processes"
 import { PerfHotspotsTable } from "./perf-hotspots-table"
 import { PerfRuntimeTab } from "./perf-runtime-tab"
 import { PerfSystemTab } from "./perf-system-tab"
+import { PerfSourceHealth } from "./perf-source-health"
+import { PerfCapturesTab } from "./perf-captures-tab"
 
 export function PerformanceDashboard() {
   const t = useTranslations("performance")
-  const { history, latest, available, paused, intervalMs, setPaused, setIntervalMs, reset } =
-    usePerfStream()
+  const {
+    history,
+    latest,
+    rendererHistory,
+    hostHistory,
+    sources,
+    gaps,
+    hostState,
+    error,
+    paused,
+    intervalMs,
+    setPaused,
+    setIntervalMs,
+    reset,
+  } = usePerfStream()
 
   const handleExport = useCallback(
     (format: PerfExportFormat) => {
@@ -40,22 +54,7 @@ export function PerformanceDashboard() {
     [latest, history, t]
   )
 
-  if (!available) {
-    return (
-      <Empty
-        className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center"
-        data-testid="perf-desktop-only"
-      >
-        <EmptyMedia variant="icon">
-          <GaugeIcon className="size-8 text-muted-foreground" />
-        </EmptyMedia>
-        <EmptyHeader>
-          <EmptyTitle>{t("desktopOnly.title")}</EmptyTitle>
-          <EmptyDescription className="max-w-sm">{t("desktopOnly.description")}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    )
-  }
+  const hostAvailable = hostState === "live" || hostHistory.length > 0
 
   return (
     <div
@@ -84,49 +83,93 @@ export function PerformanceDashboard() {
             <CpuIcon className="mr-1 size-4" />
             {t("tabs.overview")}
           </TabsTrigger>
-          <TabsTrigger value="processes" data-testid="perf-tab-processes">
-            <LayersIcon className="mr-1 size-4" />
-            {t("tabs.processes")}
+          <TabsTrigger value="diagnose" data-testid="perf-tab-diagnose">
+            <StethoscopeIcon className="mr-1 size-4" />
+            {t("tabs.diagnose")}
           </TabsTrigger>
-          <TabsTrigger value="managed" data-testid="perf-tab-managed">
+          <TabsTrigger value="resources" data-testid="perf-tab-resources">
             <BoxesIcon className="mr-1 size-4" />
-            {t("tabs.managed")}
+            {t("tabs.resources")}
           </TabsTrigger>
-          <TabsTrigger value="hotspots" data-testid="perf-tab-hotspots">
-            <ActivityIcon className="mr-1 size-4" />
-            {t("tabs.hotspots")}
-          </TabsTrigger>
-          <TabsTrigger value="runtime" data-testid="perf-tab-runtime">
-            <GaugeIcon className="mr-1 size-4" />
-            {t("tabs.runtime")}
-          </TabsTrigger>
-          <TabsTrigger value="system" data-testid="perf-tab-system">
-            <MonitorIcon className="mr-1 size-4" />
-            {t("tabs.system")}
+          <TabsTrigger value="captures" data-testid="perf-tab-captures">
+            <CameraIcon className="mr-1 size-4" />
+            {t("tabs.captures")}
           </TabsTrigger>
         </TabsList>
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="p-4">
             <TabsContent value="overview" className="mt-0">
-              <PerfOverviewTab history={history} />
+              <div className="space-y-4">
+                <PerfSourceHealth
+                  sources={sources}
+                  hostState={hostState}
+                  gaps={gaps}
+                  error={error}
+                  collectionDurationMs={latest?.collectionDurationMs}
+                  actualIntervalMs={latest?.actualIntervalMs}
+                />
+                <PerfOverviewTab history={history} />
+              </div>
               {/* Plugin-contributed performance panels (custom metrics, etc.). */}
               <PluginExtensionSlot point="perf.panel" className="mt-4 space-y-4 empty:hidden" />
             </TabsContent>
-            <TabsContent value="processes" className="mt-0">
-              <PerfProcessTable history={history} />
-            </TabsContent>
-            <TabsContent value="managed" className="mt-0">
-              <PerfManagedProcesses latest={latest} />
-            </TabsContent>
-            <TabsContent value="hotspots" className="mt-0">
+            <TabsContent value="diagnose" className="mt-0 space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Button asChild variant="outline">
+                  <Link href="/observability">{t("diagnose.observability")}</Link>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link href="/logs">{t("diagnose.logs")}</Link>
+                </Button>
+              </div>
               <PerfHotspotsTable spans={latest?.topSpans ?? []} />
             </TabsContent>
-            <TabsContent value="runtime" className="mt-0">
-              <PerfRuntimeTab runtime={latest?.runtime ?? null} history={history} />
+            <TabsContent value="resources" className="mt-0">
+              <Tabs defaultValue="renderer">
+                <TabsList className="mb-4 flex w-auto justify-start overflow-x-auto">
+                  <TabsTrigger value="renderer">{t("resources.renderer")}</TabsTrigger>
+                  <TabsTrigger value="host" disabled={!hostAvailable}>
+                    {t("resources.host")}
+                  </TabsTrigger>
+                  <TabsTrigger value="runtime" disabled={!hostAvailable}>
+                    {t("tabs.runtime")}
+                  </TabsTrigger>
+                  <TabsTrigger value="processes" disabled={!hostAvailable}>
+                    {t("tabs.processes")}
+                  </TabsTrigger>
+                  <TabsTrigger value="managed" disabled={!hostAvailable}>
+                    {t("tabs.managed")}
+                  </TabsTrigger>
+                  <TabsTrigger value="system" disabled={!hostAvailable}>
+                    {t("tabs.system")}
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="renderer">
+                  <PerfOverviewTab history={rendererHistory} />
+                </TabsContent>
+                <TabsContent value="host">
+                  <PerfOverviewTab history={hostHistory} />
+                </TabsContent>
+                <TabsContent value="runtime">
+                  <PerfRuntimeTab
+                    runtime={hostHistory.at(-1)?.runtime ?? null}
+                    history={hostHistory}
+                  />
+                </TabsContent>
+                <TabsContent value="processes">
+                  <PerfProcessTable history={hostHistory} />
+                </TabsContent>
+                <TabsContent value="managed">
+                  <PerfManagedProcesses latest={hostHistory.at(-1) ?? null} />
+                </TabsContent>
+                <TabsContent value="system">
+                  <PerfSystemTab />
+                </TabsContent>
+              </Tabs>
             </TabsContent>
-            <TabsContent value="system" className="mt-0">
-              <PerfSystemTab />
+            <TabsContent value="captures" className="mt-0">
+              <PerfCapturesTab hostAvailable={hostAvailable} />
             </TabsContent>
           </div>
         </ScrollArea>

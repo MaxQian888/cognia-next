@@ -15,31 +15,26 @@ describe("PerfMemoryPressure", () => {
     expect(dashes.length).toBeGreaterThanOrEqual(1)
   })
 
-  it("shows low pressure for <70% usage", () => {
+  it("shows memory utilization without inferring pressure", () => {
     render(<PerfMemoryPressure memory={{ totalBytes: 16_000_000_000, usedBytes: 8_000_000_000 }} />)
-    // 50% → low
     const bar = screen.getByTestId("perf-mem-pressure-bar")
-    expect(bar).toHaveAttribute("data-level", "low")
+    expect(bar).toHaveAttribute("data-kind", "utilization")
     expect(bar).toHaveAttribute("aria-valuenow", "50")
   })
 
-  it("shows moderate pressure for 70-85% usage", () => {
+  it("reports exact utilization at 75%", () => {
     render(
       <PerfMemoryPressure memory={{ totalBytes: 16_000_000_000, usedBytes: 12_000_000_000 }} />
     )
-    // 75% → moderate
     const bar = screen.getByTestId("perf-mem-pressure-bar")
-    expect(bar).toHaveAttribute("data-level", "moderate")
     expect(bar).toHaveAttribute("aria-valuenow", "75")
   })
 
-  it("shows high pressure for >=85% usage", () => {
+  it("reports exact utilization above 85% without a pressure label", () => {
     render(
       <PerfMemoryPressure memory={{ totalBytes: 16_000_000_000, usedBytes: 15_000_000_000 }} />
     )
-    // ~94% → high
     const bar = screen.getByTestId("perf-mem-pressure-bar")
-    expect(bar).toHaveAttribute("data-level", "high")
     expect(bar).toHaveAttribute("aria-valuenow", "93.75")
   })
 

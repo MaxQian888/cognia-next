@@ -40,6 +40,7 @@ import { StatCard } from "@/components/observability/stat-card"
 import { cn, formatDurationShort } from "@/lib/utils"
 import { formatBytes, formatCount, formatPercent } from "@/lib/perf/backend/format"
 import { controlManaged } from "@/lib/perf/backend/managed-control"
+import { managedProcessBusyKey } from "@/lib/perf/managed-control-challenges"
 import type {
   ManagedProcess,
   ManagedStatus,
@@ -142,7 +143,7 @@ export function PerfManagedProcesses({ latest }: PerfManagedProcessesProps) {
   }, [joined])
 
   const runAction = async (mp: ManagedProcess, action: "kill" | "restart") => {
-    setBusyId(mp.id)
+    setBusyId(managedProcessBusyKey(mp))
     try {
       await controlManaged(mp, action)
       toast.success(t(action === "kill" ? "toast.killed" : "toast.restarted", { name: mp.name }))
@@ -225,7 +226,10 @@ export function PerfManagedProcesses({ latest }: PerfManagedProcessesProps) {
               </TableHeader>
               <TableBody>
                 {rows.map(({ mp, proc }) => (
-                  <TableRow key={mp.id} data-testid={`perf-managed-row-${mp.id}`}>
+                  <TableRow
+                    key={managedProcessBusyKey(mp)}
+                    data-testid={`perf-managed-row-${mp.id}`}
+                  >
                     <TableCell>
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="truncate font-medium">{mp.name}</span>
@@ -263,8 +267,17 @@ export function PerfManagedProcesses({ latest }: PerfManagedProcessesProps) {
                           variant="ghost"
                           size="sm"
                           className="h-7 gap-1 px-2 text-xs"
-                          disabled={!mp.canRestart || busyId === mp.id}
-                          title={mp.canRestart ? undefined : t("actions.restartUnavailable")}
+                          disabled={
+                            !(mp.supportedActions?.includes("restart") ?? mp.canRestart) ||
+                            mp.alive === false ||
+                            busyId === managedProcessBusyKey(mp)
+                          }
+                          title={
+                            (mp.supportedActions?.includes("restart") ?? mp.canRestart) &&
+                            mp.alive !== false
+                              ? undefined
+                              : t("actions.restartUnavailable")
+                          }
                           onClick={() => runAction(mp, "restart")}
                           data-testid={`perf-managed-restart-${mp.id}`}
                         >
@@ -275,7 +288,11 @@ export function PerfManagedProcesses({ latest }: PerfManagedProcessesProps) {
                           variant="ghost"
                           size="sm"
                           className="h-7 gap-1 px-2 text-xs text-destructive hover:text-destructive"
-                          disabled={!mp.canKill || busyId === mp.id}
+                          disabled={
+                            !(mp.supportedActions?.includes("kill") ?? mp.canKill) ||
+                            mp.alive === false ||
+                            busyId === managedProcessBusyKey(mp)
+                          }
                           onClick={() => setConfirmKill(mp)}
                           data-testid={`perf-managed-kill-${mp.id}`}
                         >

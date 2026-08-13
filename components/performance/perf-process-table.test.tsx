@@ -74,7 +74,7 @@ describe("PerfProcessTable", () => {
   it("renders a row per process with its role badge", () => {
     render(
       <PerfProcessTable
-        history={hist([proc(1, "cognia", "main", 10), proc(2, "node", "sidecar", 30)])}
+        history={hist([proc(1, "cognia", "main", 10), proc(2, "node", "sidecar", 30, { parentPid: null })])}
       />
     )
     expect(screen.getByTestId("perf-proc-row-1")).toBeInTheDocument()
@@ -86,7 +86,10 @@ describe("PerfProcessTable", () => {
   it("renders the tree-wide summary cards", () => {
     render(
       <PerfProcessTable
-        history={hist([proc(1, "cognia", "main", 10), proc(2, "node", "sidecar", 30)])}
+        history={hist([
+          proc(1, "cognia", "main", 10),
+          proc(2, "node", "sidecar", 30, { parentPid: null }),
+        ])}
       />
     )
     expect(screen.getByTestId("perf-proc-total-count")).toHaveTextContent("2")
@@ -114,7 +117,10 @@ describe("PerfProcessTable", () => {
   it("sorts by CPU descending by default and toggles direction on header click", () => {
     render(
       <PerfProcessTable
-        history={hist([proc(1, "cognia", "main", 10), proc(2, "node", "sidecar", 30)])}
+        history={hist([
+          proc(1, "cognia", "main", 10),
+          proc(2, "node", "sidecar", 30, { parentPid: null }),
+        ])}
       />
     )
     const rowsDesc = screen.getAllByTestId(/perf-proc-row-/)
@@ -131,7 +137,7 @@ describe("PerfProcessTable", () => {
       <PerfProcessTable
         history={hist([
           proc(1, "cognia", "main", 10, { runSecs: 10 }),
-          proc(2, "node", "sidecar", 30, { runSecs: 999 }),
+          proc(2, "node", "sidecar", 30, { runSecs: 999, parentPid: null }),
         ])}
       />
     )
@@ -146,7 +152,7 @@ describe("PerfProcessTable", () => {
   it("sorts by name when the name header is clicked", () => {
     render(
       <PerfProcessTable
-        history={hist([proc(1, "zeta", "main", 10), proc(2, "alpha", "child", 5)])}
+        history={hist([proc(1, "zeta", "main", 10), proc(2, "alpha", "child", 5, { parentPid: null })])}
       />
     )
     fireEvent.click(within(screen.getByTestId("perf-proc-th-name")).getByRole("button"))
@@ -193,25 +199,25 @@ describe("PerfProcessTable", () => {
     expect(screen.getByTestId("perf-proc-search")).toBeInTheDocument()
   })
 
-  it("filters processes by name", () => {
+  it("retains ancestors while filtering descendants by name", () => {
     render(
       <PerfProcessTable
         history={hist([proc(1, "cognia", "main", 10), proc(2, "node", "sidecar", 30)])}
       />
     )
     fireEvent.change(screen.getByTestId("perf-proc-search"), { target: { value: "node" } })
-    expect(screen.queryByTestId("perf-proc-row-1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("perf-proc-row-1")).toBeInTheDocument()
     expect(screen.getByTestId("perf-proc-row-2")).toBeInTheDocument()
   })
 
-  it("filters processes by PID", () => {
+  it("retains ancestors while filtering descendants by PID", () => {
     render(
       <PerfProcessTable
         history={hist([proc(1, "cognia", "main", 10), proc(2, "node", "sidecar", 30)])}
       />
     )
     fireEvent.change(screen.getByTestId("perf-proc-search"), { target: { value: "2" } })
-    expect(screen.queryByTestId("perf-proc-row-1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("perf-proc-row-1")).toBeInTheDocument()
     expect(screen.getByTestId("perf-proc-row-2")).toBeInTheDocument()
   })
 
@@ -229,7 +235,7 @@ describe("PerfProcessTable", () => {
       />
     )
     fireEvent.change(screen.getByTestId("perf-proc-search"), { target: { value: "node" } })
-    expect(screen.queryByTestId("perf-proc-row-1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("perf-proc-row-1")).toBeInTheDocument()
 
     fireEvent.change(screen.getByTestId("perf-proc-search"), { target: { value: "" } })
     expect(screen.getByTestId("perf-proc-row-1")).toBeInTheDocument()

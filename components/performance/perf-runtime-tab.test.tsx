@@ -85,9 +85,10 @@ describe("PerfRuntimeTab", () => {
   })
 
   it("lists trace files and opens the folder", async () => {
-    listTracesMock.mockResolvedValue([{ name: "trace.bin", sizeBytes: 2048, modifiedMs: 1 }])
+    listTracesMock.mockResolvedValue([{ traceId: "opaque-a", sizeBytes: 2048, modifiedMs: 1 }])
     render(<PerfRuntimeTab runtime={makeRuntime()} />)
-    await waitFor(() => expect(screen.getByTestId("perf-trace-trace.bin")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("perf-trace-opaque-a")).toBeInTheDocument())
+    expect(screen.queryByText("trace.bin")).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId("perf-open-traces"))
     expect(openTraceDirMock).toHaveBeenCalled()
   })

@@ -9,6 +9,82 @@
 /** Role of a process in the app's process tree (matches Rust `ProcessRole`). */
 export type ProcessRole = "main" | "sidecar" | "child"
 
+export const PERF_WIRE_VERSION = 1 as const
+
+export type PerfSourceKind = "renderer" | "host"
+export type PerfRuntimeKind = "browser" | "tauri-rust" | "node-headless"
+export type PerfConnectionState = "connecting" | "live" | "stale" | "error" | "unsupported"
+export type PerfLeasePurpose = "live" | "capture"
+export type PerfGapReason =
+  | "sequence-gap"
+  | "source-reset"
+  | "clock-discontinuity"
+  | "transport-disconnected"
+  | "target-switched"
+  | "lease-expired"
+  | "buffer-overrun"
+  | "collection-error"
+
+export interface PerfSourceDescriptor {
+  wireVersion: typeof PERF_WIRE_VERSION
+  sourceId: string
+  kind: PerfSourceKind
+  hostInstanceId: string
+  runtimeKind: PerfRuntimeKind
+  build: {
+    version: string
+    commit: string | null
+    profile: "production" | "profiling" | "development"
+  }
+  metricSchemaVersion: number
+  capabilities: string[]
+  clock: {
+    kind: "performance-time-origin" | "host-monotonic"
+    originWallMs: number
+  }
+  connection: {
+    state: PerfConnectionState
+    changedAtMs: number
+    detail: string | null
+  }
+}
+
+export interface PerfLease {
+  wireVersion: typeof PERF_WIRE_VERSION
+  leaseId: string
+  clientId: string
+  deviceId: string
+  targetId: string
+  routingGeneration: number
+  sourceId: string | null
+  purpose: PerfLeasePurpose
+  requestedCadenceMs: number
+  samplingSessionId: string
+  openedAtMs: number
+  heartbeatAtMs: number
+  expiresAtMs: number
+}
+
+export interface PerfFrameFlags {
+  reset: boolean
+  discontinuity: boolean
+  counterReset: boolean
+  sourceRestarted: boolean
+}
+
+export interface PerfGap {
+  reason: PerfGapReason
+  sourceId: string
+  samplingSessionId: string
+  sequenceStart: number | null
+  sequenceEnd: number | null
+  wallStartMs: number
+  wallEndMs: number
+  recoverable: boolean
+  clockUncertaintyMs: number | null
+  detail: string | null
+}
+
 /** One process row sampled from the tree. */
 export interface ProcessSample {
   pid: number
@@ -24,6 +100,8 @@ export interface ProcessSample {
   diskWriteBps: number
   /** Seconds the process has been running. */
   runSecs: number
+  /** Stable incarnation changes when a PID is reused or a process restarts. */
+  incarnation?: string
 }
 
 /** Point-in-time Tokio runtime snapshot. */
@@ -104,6 +182,10 @@ export interface ManagedProcess {
   canKill: boolean
   canRestart: boolean
   detail: string | null
+  owner?: string
+  incarnation?: string
+  supportedActions?: ManagedControlAction[]
+  alive?: boolean
 }
 
 /** One composed performance frame emitted on `perf://sample`. */
@@ -118,18 +200,90 @@ export interface PerfSample {
   managed: ManagedProcess[]
 }
 
+/** Versioned frame used by local Renderer and selected-host streams. */
+export interface PerfFrame extends PerfSample {
+  wireVersion: typeof PERF_WIRE_VERSION
+  sourceId: string
+  targetId: string
+  routingGeneration: number
+  hostInstanceId: string
+  samplingSessionId: string
+  /** Present on lease-targeted host events; absent on shared Renderer frames. */
+  leaseId?: string
+  sequence: number
+  requestedIntervalMs: number
+  actualIntervalMs: number
+  monotonicElapsedMs: number
+  wallStartMs: number
+  wallEndMs: number
+  collectionDurationMs: number
+  missedTicks: number
+  flags: PerfFrameFlags
+  observations?: Record<string, number | null>
+}
+
 /** Initial pull payload from `perf_snapshot`. */
 export interface PerfSnapshot {
+  wireVersion: typeof PERF_WIRE_VERSION
+  frames: PerfFrame[]
+  oldestSequence: number | null
+  latestSequence: number | null
+  sources: PerfSourceDescriptor[]
+  leases: PerfLease[]
+  gaps: PerfGap[]
+  /** Compatibility projection retained for one release. */
   samples: PerfSample[]
   running: boolean
   intervalMs: number
 }
 
+export type PerfLeaseRejectionCode =
+  | "cadence-too-fast"
+  | "device-purpose-limit"
+  | "host-lease-limit"
+  | "rate-limited"
+  | "target-mismatch"
+  | "routing-generation-mismatch"
+  | "unsupported"
+  | "permission-denied"
+
+export interface PerfOpenLeaseRequest {
+  clientId: string
+  deviceId: string
+  targetId: string
+  routingGeneration: number
+  purpose: PerfLeasePurpose
+  requestedCadenceMs: number
+  sourceId?: string
+}
+
+export type PerfOpenLeaseResult =
+  | { accepted: true; lease: PerfLease; source: PerfSourceDescriptor }
+  | { accepted: false; code: PerfLeaseRejectionCode; detail: string }
+
 /** A dial9 flight-recorder trace file on disk. */
 export interface TraceFile {
-  name: string
+  traceId: string
   sizeBytes: number
   modifiedMs: number | null
+}
+
+export interface TraceHandle {
+  handleId: string
+  traceId: string
+  sizeBytes: number
+  sha256: string
+  chunkBytes: number
+  expiresAtMs: number
+}
+
+export interface TraceChunk {
+  offset: number
+  nextOffset: number
+  dataBase64: string
+  chunkSha256: string
+  eof: boolean
+  finalSha256: string | null
 }
 
 /** Static host + build details (mirrors `crash::system_info::SystemDetails`). */

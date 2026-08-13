@@ -58,12 +58,26 @@ jest.mock("./perf-overview-tab", () => ({ PerfOverviewTab: () => <div data-testi
 jest.mock("./perf-process-table", () => ({ PerfProcessTable: () => <div data-testid="proc" /> }))
 jest.mock("./perf-hotspots-table", () => ({ PerfHotspotsTable: () => <div data-testid="hot" /> }))
 jest.mock("./perf-runtime-tab", () => ({ PerfRuntimeTab: () => <div data-testid="rt" /> }))
+jest.mock("./perf-system-tab", () => ({ PerfSystemTab: () => <div data-testid="system" /> }))
+jest.mock("./perf-managed-processes", () => ({
+  PerfManagedProcesses: () => <div data-testid="managed" />,
+}))
+jest.mock("./perf-source-health", () => ({
+  PerfSourceHealth: () => <div data-testid="source-health" />,
+}))
+jest.mock("./perf-captures-tab", () => ({ PerfCapturesTab: () => <div data-testid="captures" /> }))
 
 import { PerformanceDashboard } from "./performance-dashboard"
 
 const baseState = {
   history: [],
   latest: null,
+  rendererHistory: [],
+  hostHistory: [],
+  sources: [],
+  gaps: [],
+  hostState: "unsupported",
+  error: null,
   paused: false,
   intervalMs: 1000,
   setPaused: jest.fn(),
@@ -78,11 +92,12 @@ beforeEach(() => {
 })
 
 describe("PerformanceDashboard", () => {
-  it("renders the desktop-only explainer when native runtime is unavailable", () => {
-    usePerfStreamMock.mockReturnValue({ ...baseState, available: false })
+  it("keeps the renderer and captures workspace available without a host", () => {
+    usePerfStreamMock.mockReturnValue({ ...baseState, available: true })
     render(<PerformanceDashboard />)
-    expect(screen.getByTestId("perf-desktop-only")).toBeInTheDocument()
-    expect(screen.queryByTestId("performance-dashboard")).not.toBeInTheDocument()
+    expect(screen.getByTestId("performance-dashboard")).toBeInTheDocument()
+    expect(screen.getByTestId("source-health")).toBeInTheDocument()
+    expect(screen.getByTestId("perf-tab-captures")).toBeInTheDocument()
   })
 
   it("renders the full dashboard with four tabs when available", () => {
@@ -91,9 +106,9 @@ describe("PerformanceDashboard", () => {
     expect(screen.getByTestId("performance-dashboard")).toBeInTheDocument()
     expect(screen.getByTestId("toolbar")).toBeInTheDocument()
     expect(screen.getByTestId("perf-tab-overview")).toBeInTheDocument()
-    expect(screen.getByTestId("perf-tab-processes")).toBeInTheDocument()
-    expect(screen.getByTestId("perf-tab-hotspots")).toBeInTheDocument()
-    expect(screen.getByTestId("perf-tab-runtime")).toBeInTheDocument()
+    expect(screen.getByTestId("perf-tab-diagnose")).toBeInTheDocument()
+    expect(screen.getByTestId("perf-tab-resources")).toBeInTheDocument()
+    expect(screen.getByTestId("perf-tab-captures")).toBeInTheDocument()
     // Default tab content is the overview.
     expect(screen.getByTestId("overview")).toBeInTheDocument()
   })
@@ -133,11 +148,9 @@ describe("PerformanceDashboard", () => {
       },
     })
     render(<PerformanceDashboard />)
-    fireEvent.click(screen.getByTestId("perf-tab-processes"))
-    expect(screen.getByTestId("proc")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("perf-tab-hotspots"))
+    fireEvent.click(screen.getByTestId("perf-tab-diagnose"))
     expect(screen.getByTestId("hot")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("perf-tab-runtime"))
-    expect(screen.getByTestId("rt")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("perf-tab-captures"))
+    expect(screen.getByTestId("captures")).toBeInTheDocument()
   })
 })

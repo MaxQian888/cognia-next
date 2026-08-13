@@ -231,13 +231,15 @@ export function PerfRuntimeTab({ runtime, history = [] }: PerfRuntimeTabProps) {
             </p>
           ) : (
             <ul className="divide-y text-sm">
-              {traces.map((f) => (
+              {traces.map((f, index) => (
                 <li
-                  key={f.name}
+                  key={f.traceId}
                   className="flex items-center justify-between py-1.5"
-                  data-testid={`perf-trace-${f.name}`}
+                  data-testid={`perf-trace-${f.traceId}`}
                 >
-                  <span className="font-mono text-xs">{f.name}</span>
+                  <span className="font-mono text-xs">
+                    {t("traces.identity", { index: index + 1 })}
+                  </span>
                   <span className="font-mono text-xs tabular-nums text-muted-foreground">
                     {formatBytes(f.sizeBytes)}
                   </span>

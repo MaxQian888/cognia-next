@@ -12,22 +12,66 @@ import type {
   ManagedControlAction,
   ManagedProcess,
   ManagedSubsystem,
+  PerfFrame,
+  PerfOpenLeaseRequest,
+  PerfOpenLeaseResult,
   PerfSample,
   PerfSnapshot,
   SpanSnapshot,
   SystemDetails,
   TraceFile,
+  TraceHandle,
+  TraceChunk,
 } from "./types"
 
 /** Tauri event channel the sampler emits frames on. */
 export const PERF_SAMPLE_EVENT = "perf://sample"
+export const PERF_FRAME_EVENT = "perf://frame"
 
-const EMPTY_SNAPSHOT: PerfSnapshot = { samples: [], running: false, intervalMs: 1000 }
+export const EMPTY_PERF_SNAPSHOT: PerfSnapshot = {
+  wireVersion: 1,
+  frames: [],
+  oldestSequence: null,
+  latestSequence: null,
+  sources: [],
+  leases: [],
+  gaps: [],
+  samples: [],
+  running: false,
+  intervalMs: 1000,
+}
 
 /** Pull recent ring history + current sampler state. */
 export async function perfSnapshot(): Promise<PerfSnapshot> {
-  if (!isTauri()) return EMPTY_SNAPSHOT
+  if (!isTauri()) return EMPTY_PERF_SNAPSHOT
   return transport.call<PerfSnapshot>("perf_snapshot")
+}
+
+export async function perfOpenLease(input: PerfOpenLeaseRequest): Promise<PerfOpenLeaseResult> {
+  return transport.call<PerfOpenLeaseResult>("perf_open_lease", { input })
+}
+
+export async function perfRenewLease(leaseId: string): Promise<void> {
+  await transport.call("perf_renew_lease", { leaseId })
+}
+
+export async function perfCloseLease(leaseId: string): Promise<void> {
+  await transport.call("perf_close_lease", { leaseId })
+}
+
+export async function perfLeaseSnapshot(leaseId: string): Promise<PerfSnapshot> {
+  return transport.call<PerfSnapshot>("perf_lease_snapshot", { leaseId })
+}
+
+export async function perfReadObservations(
+  leaseId: string,
+  afterSequence?: number
+): Promise<PerfFrame[]> {
+  return transport.call<PerfFrame[]>("perf_read_observations", { leaseId, afterSequence })
+}
+
+export function subscribePerfFrame(handler: (frame: PerfFrame) => void): () => void {
+  return transport.subscribe<PerfFrame>(PERF_FRAME_EVENT, handler)
 }
 
 /** Start (or reconfigure) the 1 Hz sampler. No-op on web. */
@@ -66,10 +110,31 @@ export async function perfSystemDetails(): Promise<SystemDetails | null> {
   return transport.call<SystemDetails>("perf_system_details")
 }
 
+/** Selected-host system details. Call only when the source advertises this capability. */
+export async function perfReadSystemDetails(): Promise<SystemDetails> {
+  return transport.call<SystemDetails>("perf_system_details")
+}
+
 /** List dial9 flight-recorder trace files on disk. */
 export async function perfListTraces(): Promise<TraceFile[]> {
   if (!isTauri()) return []
   return transport.call<TraceFile[]>("perf_list_traces")
+}
+
+export async function perfOpenTrace(traceId: string): Promise<TraceHandle> {
+  return transport.call<TraceHandle>("perf_trace_open", { traceId })
+}
+
+export async function perfReadTraceChunk(
+  handleId: string,
+  offset: number,
+  length?: number
+): Promise<TraceChunk> {
+  return transport.call<TraceChunk>("perf_trace_read_chunk", { handleId, offset, length })
+}
+
+export async function perfCloseTrace(handleId: string): Promise<void> {
+  await transport.call("perf_trace_close", { handleId })
 }
 
 /** Reveal the trace directory in the OS file manager. */

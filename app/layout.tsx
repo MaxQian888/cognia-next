@@ -42,6 +42,7 @@ import { DeferredBootInitializers } from "@/components/providers/initializers/de
 import { BootCapabilityRouteActivator } from "@/components/providers/initializers/boot-capability-route-activator"
 import { BootProfileStartupProbe } from "@/components/providers/initializers/boot-profile-startup-probe"
 import { WindowLivenessInitializers } from "@/components/providers/initializers/window-liveness-initializers"
+import { RendererPerfInitializer } from "@/components/providers/initializers/renderer-perf-initializer"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { WebDavStartupPromptProvider } from "@/components/providers/webdav-startup-prompt-provider"
 import { WebDavMobileAutosyncProvider } from "@/components/providers/webdav-mobile-autosync-provider"
@@ -360,6 +361,7 @@ export default async function RootLayout({
                            *  calls (agent_dispatch / team_run / plugin_tool_invoke)
                            *  to the renderer entry points. No-op in web. */}
                           <OrchestrationDispatchProvider />
+                          <RendererPerfInitializer />
                           {/* Dev-only perf HUD. In production it returns null
                            * unless `localStorage.cogniaPerfHud === "1"`. */}
                           <PerfHud />

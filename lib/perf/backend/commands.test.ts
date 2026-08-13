@@ -17,6 +17,10 @@ import {
   perfHotspots,
   perfListTraces,
   perfOpenTraceDir,
+  perfOpenTrace,
+  perfReadTraceChunk,
+  perfCloseTrace,
+  perfReadSystemDetails,
   perfResetHotspots,
   perfSetInterval,
   perfSnapshot,
@@ -36,7 +40,9 @@ describe("when not in Tauri", () => {
   beforeEach(() => isTauriMock.mockReturnValue(false))
 
   it("returns inert values without calling transport", async () => {
-    expect(await perfSnapshot()).toEqual({ samples: [], running: false, intervalMs: 1000 })
+    expect(await perfSnapshot()).toEqual(
+      expect.objectContaining({ samples: [], frames: [], running: false, intervalMs: 1000 })
+    )
     expect(await perfHotspots()).toEqual([])
     expect(await perfListTraces()).toEqual([])
     expect(await perfSystemDetails()).toBeNull()
@@ -55,6 +61,12 @@ describe("when not in Tauri", () => {
     expect(typeof unsub).toBe("function")
     expect(subscribeMock).not.toHaveBeenCalled()
     expect(() => unsub()).not.toThrow()
+  })
+
+  it("routes selected-host system details even outside a local Tauri shell", async () => {
+    callMock.mockResolvedValueOnce({ os: "linux" })
+    await expect(perfReadSystemDetails()).resolves.toEqual({ os: "linux" })
+    expect(callMock).toHaveBeenCalledWith("perf_system_details")
   })
 })
 
@@ -98,6 +110,19 @@ describe("when in Tauri", () => {
 
     await perfOpenTraceDir()
     expect(callMock).toHaveBeenCalledWith("perf_open_trace_dir")
+
+    callMock.mockResolvedValueOnce({ handleId: "handle-a" })
+    await perfOpenTrace("trace-a")
+    expect(callMock).toHaveBeenCalledWith("perf_trace_open", { traceId: "trace-a" })
+    callMock.mockResolvedValueOnce({ eof: true })
+    await perfReadTraceChunk("handle-a", 0, 1024)
+    expect(callMock).toHaveBeenCalledWith("perf_trace_read_chunk", {
+      handleId: "handle-a",
+      offset: 0,
+      length: 1024,
+    })
+    await perfCloseTrace("handle-a")
+    expect(callMock).toHaveBeenCalledWith("perf_trace_close", { handleId: "handle-a" })
   })
 
   it("subscribePerfSample wires transport.subscribe to the event", () => {

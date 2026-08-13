@@ -44,6 +44,7 @@ import {
 } from "@/lib/perf/backend/format"
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
 import { PerfSparkline } from "./perf-sparkline"
+import { buildProcessTree, filterProcessTree, type ProcessTreeNode } from "@/lib/perf/process-tree"
 
 type SortKey = "name" | "pid" | "cpuPct" | "memBytes" | "runSecs" | "diskReadBps" | "diskWriteBps"
 type SortDir = "asc" | "desc"
@@ -121,15 +122,8 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
     [processes]
   )
 
-  const filtered = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase()
-    if (!q) return processes
-    return processes.filter((p) => p.name.toLowerCase().includes(q) || String(p.pid).includes(q))
-  }, [processes, searchQuery])
-
   const sorted = useMemo(() => {
-    const rows = filtered.slice()
-    rows.sort((a, b) => {
+    const compare = (a: (typeof processes)[number], b: (typeof processes)[number]) => {
       let cmp: number
       if (sortKey === "name") {
         cmp = a.name.localeCompare(b.name)
@@ -137,11 +131,23 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
         cmp = (a[sortKey] as number) - (b[sortKey] as number)
       }
       return sortDir === "asc" ? cmp : -cmp
-    })
+    }
+    const roots = filterProcessTree(buildProcessTree(processes, compare), searchQuery)
+    const rows: Array<{ process: (typeof processes)[number]; depth: number; orphaned: boolean }> = []
+    const visit = (nodes: ProcessTreeNode[], depth: number) => {
+      for (const node of nodes) {
+        rows.push({ process: node.process, depth, orphaned: node.orphaned })
+        visit(node.children, depth + 1)
+      }
+    }
+    visit(roots, 0)
     return rows
-  }, [filtered, sortKey, sortDir])
+  }, [processes, searchQuery, sortKey, sortDir])
 
-  const maxMem = useMemo(() => filtered.reduce((m, p) => Math.max(m, p.memBytes), 0), [filtered])
+  const maxMem = useMemo(
+    () => sorted.reduce((maximum, row) => Math.max(maximum, row.process.memBytes), 0),
+    [sorted]
+  )
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -232,7 +238,7 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
           data-testid="perf-proc-search"
         />
       </div>
-      {filtered.length === 0 && searchQuery ? (
+      {sorted.length === 0 && searchQuery ? (
         <p
           className="py-4 text-center text-sm text-muted-foreground"
           data-testid="perf-proc-no-match"
@@ -255,14 +261,16 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sorted.map((p) => (
+              {sorted.map(({ process: p, depth, orphaned }) => (
                 <TableRow key={p.pid} data-testid={`perf-proc-row-${p.pid}`}>
                   <TableCell>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2" style={{ paddingInlineStart: `${depth * 16}px` }}>
+                      {depth > 0 && <span aria-hidden="true" className="text-muted-foreground">↳</span>}
                       <Badge variant="secondary" className={cn("shrink-0", ROLE_BADGE[p.role])}>
                         {t(`roles.${p.role}`)}
                       </Badge>
                       <span className="truncate font-medium">{p.name}</span>
+                      {orphaned && <Badge variant="outline">{t("orphaned")}</Badge>}
                     </div>
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs tabular-nums">

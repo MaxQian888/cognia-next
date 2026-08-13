@@ -1,42 +1,85 @@
-/**
- * @jest-environment jsdom
- */
-
-const isTauriMock = jest.fn()
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
-
-const startMock = jest.fn().mockResolvedValue(undefined)
-const stopMock = jest.fn().mockResolvedValue(undefined)
-const snapshotMock = jest.fn()
-const setIntervalMock = jest.fn().mockResolvedValue(undefined)
-const resetMock = jest.fn().mockResolvedValue(undefined)
-let sampleHandler: ((s: unknown) => void) | null = null
-const unsubMock = jest.fn()
-const subscribeMock = jest.fn((h: (s: unknown) => void) => {
-  sampleHandler = h
-  return unsubMock
-})
-
-jest.mock("@/lib/perf/backend/commands", () => ({
-  perfStartSampling: (...a: unknown[]) => startMock(...a),
-  perfStopSampling: (...a: unknown[]) => stopMock(...a),
-  perfSnapshot: (...a: unknown[]) => snapshotMock(...a),
-  perfSetInterval: (...a: unknown[]) => setIntervalMock(...a),
-  perfResetHotspots: (...a: unknown[]) => resetMock(...a),
-  subscribePerfSample: (h: (s: unknown) => void) => subscribeMock(h),
-}))
+/** @jest-environment jsdom */
 
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { DEFAULT_PERF_INTERVAL, resetPreferredInterval, usePerfStream } from "./use-perf-stream"
-import type { PerfSample } from "@/lib/perf/backend/types"
+import {
+  PERF_WIRE_VERSION,
+  type PerfFrame,
+  type PerfSourceDescriptor,
+} from "@/lib/perf/backend/types"
 
-function sample(ts: number, intervalMs = 1000): PerfSample {
+const openLease = jest.fn()
+const closeLease = jest.fn().mockResolvedValue(undefined)
+const renewLease = jest.fn().mockResolvedValue(undefined)
+const leaseSnapshot = jest.fn()
+let hostHandler: ((frame: PerfFrame) => void) | null = null
+const unsubscribeHost = jest.fn()
+
+jest.mock("@/lib/perf/backend/commands", () => ({
+  perfOpenLease: (...args: unknown[]) => openLease(...args),
+  perfCloseLease: (...args: unknown[]) => closeLease(...args),
+  perfRenewLease: (...args: unknown[]) => renewLease(...args),
+  perfLeaseSnapshot: (...args: unknown[]) => leaseSnapshot(...args),
+  subscribePerfFrame: (handler: (frame: PerfFrame) => void) => {
+    hostHandler = handler
+    return unsubscribeHost
+  },
+}))
+
+let rendererHandler: ((frame: PerfFrame) => void) | null = null
+const closeDemand = jest.fn()
+const rendererSource: PerfSourceDescriptor = {
+  wireVersion: PERF_WIRE_VERSION,
+  sourceId: "renderer:doc-a",
+  kind: "renderer",
+  hostInstanceId: "doc-a",
+  runtimeKind: "browser",
+  build: { version: "1", commit: null, profile: "development" },
+  metricSchemaVersion: 1,
+  capabilities: ["renderer.fps"],
+  clock: { kind: "performance-time-origin", originWallMs: 0 },
+  connection: { state: "live", changedAtMs: 0, detail: null },
+}
+const collector = {
+  source: rendererSource,
+  setScope: jest.fn(),
+  openDemand: jest.fn(() => "renderer-demand"),
+  closeDemand,
+  subscribe: jest.fn((handler: (frame: PerfFrame) => void) => {
+    rendererHandler = handler
+    return jest.fn()
+  }),
+}
+jest.mock("@/lib/perf/renderer-collector", () => ({
+  getRendererPerformanceCollector: () => collector,
+}))
+jest.mock("@/lib/runtime/runtime-target-context", () => ({
+  getActiveRuntimeTargetContext: () => ({ accountId: "account-a", targetId: "target-a" }),
+}))
+
+import { resetPreferredInterval, usePerfStream } from "./use-perf-stream"
+
+function frame(sequence: number, overrides: Partial<PerfFrame> = {}): PerfFrame {
   return {
-    tsMs: ts,
-    intervalMs,
+    wireVersion: PERF_WIRE_VERSION,
+    sourceId: "host:one",
+    targetId: "target-a",
+    routingGeneration: 0,
+    hostInstanceId: "boot-a",
+    samplingSessionId: "sampling-a",
+    sequence,
+    requestedIntervalMs: 1000,
+    actualIntervalMs: 1000,
+    monotonicElapsedMs: 1000,
+    wallStartMs: sequence * 1000,
+    wallEndMs: sequence * 1000 + 1000,
+    collectionDurationMs: 5,
+    missedTicks: 0,
+    flags: { reset: false, discontinuity: false, counterReset: false, sourceRestarted: false },
+    tsMs: sequence * 1000 + 1000,
+    intervalMs: 1000,
     processes: [],
     runtime: {
-      workers: 1,
+      workers: 0,
       aliveTasks: 0,
       globalQueueDepth: 0,
       blockingThreads: 0,
@@ -47,176 +90,114 @@ function sample(ts: number, intervalMs = 1000): PerfSample {
       workerParkCount: 0,
       workerOverflowCount: 0,
       busyPct: 0,
-      perWorkerBusyPct: [0],
+      perWorkerBusyPct: [],
     },
     topSpans: [],
     systemMemory: null,
     managed: [],
+    ...overrides,
   }
 }
 
+const hostSource: PerfSourceDescriptor = {
+  ...rendererSource,
+  sourceId: "host:one",
+  kind: "host",
+  runtimeKind: "tauri-rust",
+}
+
 beforeEach(() => {
-  isTauriMock.mockReset()
-  startMock.mockClear()
-  stopMock.mockClear()
-  snapshotMock.mockReset()
-  setIntervalMock.mockClear()
-  resetMock.mockClear()
-  subscribeMock.mockClear()
-  unsubMock.mockClear()
-  sampleHandler = null
-  // The cadence preference is module-scoped (it has to survive unmount), so
-  // each test starts from the default.
   resetPreferredInterval()
-})
-
-describe("usePerfStream — non-desktop", () => {
-  it("is inert when not running in Tauri", async () => {
-    isTauriMock.mockReturnValue(false)
-    const { result } = renderHook(() => usePerfStream())
-    expect(result.current.available).toBe(false)
-    expect(startMock).not.toHaveBeenCalled()
-    expect(result.current.latest).toBeNull()
+  openLease.mockReset()
+  closeLease.mockClear()
+  renewLease.mockClear()
+  leaseSnapshot.mockReset()
+  unsubscribeHost.mockClear()
+  collector.setScope.mockClear()
+  collector.openDemand.mockClear()
+  closeDemand.mockClear()
+  rendererHandler = null
+  hostHandler = null
+  openLease.mockResolvedValue({
+    accepted: true,
+    lease: { leaseId: "lease-a" },
+    source: hostSource,
+  })
+  leaseSnapshot.mockResolvedValue({
+    wireVersion: PERF_WIRE_VERSION,
+    frames: [frame(1)],
+    oldestSequence: 1,
+    latestSequence: 1,
+    sources: [hostSource],
+    leases: [],
+    gaps: [],
+    samples: [frame(1)],
+    running: true,
+    intervalMs: 1000,
   })
 })
 
-describe("usePerfStream — desktop", () => {
-  beforeEach(() => {
-    isTauriMock.mockReturnValue(true)
-    snapshotMock.mockResolvedValue({
-      samples: [sample(1), sample(2)],
-      running: true,
-      intervalMs: 1000,
-    })
-  })
-
-  it("starts sampling, backfills, and subscribes on mount", async () => {
+describe("usePerfStream", () => {
+  it("keeps Renderer metrics available when the selected host is unsupported", async () => {
+    openLease.mockRejectedValue(new Error("unsupported host"))
     const { result } = renderHook(() => usePerfStream())
-    expect(startMock).toHaveBeenCalledWith(DEFAULT_PERF_INTERVAL)
-    await waitFor(() => expect(subscribeMock).toHaveBeenCalled())
-    await waitFor(() => expect(result.current.history).toHaveLength(2))
-    expect(result.current.latest?.tsMs).toBe(2)
+    await waitFor(() => expect(rendererHandler).not.toBeNull())
+    act(() => rendererHandler!(frame(1, { sourceId: "renderer:doc-a", hostInstanceId: "doc-a" })))
+    await waitFor(() => expect(result.current.latest?.sourceId).toBe("renderer:doc-a"))
+    expect(result.current.available).toBe(true)
+    expect(result.current.hostState).toBe("unsupported")
+    expect(result.current.error).toBe("unsupported host")
   })
 
-  it("appends live samples and exposes the latest", async () => {
+  it("subscribes before opening, merges an early event with snapshot, and exposes gaps", async () => {
+    let resolveOpen: (value: unknown) => void = () => {}
+    openLease.mockReturnValue(new Promise((resolve) => (resolveOpen = resolve)))
     const { result } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(sampleHandler).not.toBeNull())
-    act(() => sampleHandler!(sample(3)))
-    await waitFor(() => expect(result.current.latest?.tsMs).toBe(3))
-    expect(result.current.history).toHaveLength(3)
-  })
-
-  it("pause freezes appends without stopping the backend", async () => {
-    const { result } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(sampleHandler).not.toBeNull())
-    act(() => result.current.setPaused(true))
-    act(() => sampleHandler!(sample(99)))
-    expect(result.current.paused).toBe(true)
-    expect(result.current.history.some((s) => s.tsMs === 99)).toBe(false)
-  })
-
-  it("setIntervalMs updates state and the backend cadence", async () => {
-    const { result } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(subscribeMock).toHaveBeenCalled())
-    act(() => result.current.setIntervalMs(2000))
-    expect(result.current.intervalMs).toBe(2000)
-    expect(setIntervalMock).toHaveBeenCalledWith(2000)
-  })
-
-  it("clears the window on a cadence change so the graphs don't mix rates", async () => {
-    // The rolling graphs are index-keyed, so keeping 1 s samples next to 2 s
-    // ones silently distorts every chart with no visual cue.
-    const { result } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(result.current.history).toHaveLength(2))
-    act(() => result.current.setIntervalMs(2000))
-    expect(result.current.history).toHaveLength(0)
-  })
-
-  it("keeps the chosen cadence across a remount", async () => {
-    const { result, unmount } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(subscribeMock).toHaveBeenCalled())
-    act(() => result.current.setIntervalMs(4000))
-    unmount()
-
-    startMock.mockClear()
-    const second = renderHook(() => usePerfStream())
-    await waitFor(() => expect(startMock).toHaveBeenCalledWith(4000))
-    expect(second.result.current.intervalMs).toBe(4000)
-  })
-
-  it("backfills only the trailing run at the current cadence", async () => {
-    // The backend ring spans cadence changes; splicing the older, slower
-    // samples into an index-keyed window would misdraw the whole graph.
-    snapshotMock.mockResolvedValue({
-      samples: [sample(1, 4000), sample(2, 4000), sample(3), sample(4)],
-      running: true,
-      intervalMs: 1000,
-    })
-    const { result } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(result.current.history).toHaveLength(2))
-    expect(result.current.history.map((s) => s.tsMs)).toEqual([3, 4])
-  })
-
-  it("refills from the ring on resume instead of splicing across the gap", async () => {
-    const { result } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(sampleHandler).not.toBeNull())
-    act(() => result.current.setPaused(true))
-
-    snapshotMock.mockResolvedValue({
-      samples: [sample(10), sample(11), sample(12)],
-      running: true,
-      intervalMs: 1000,
-    })
-    act(() => result.current.setPaused(false))
-    await waitFor(() => expect(result.current.history).toHaveLength(3))
-    expect(result.current.latest?.tsMs).toBe(12)
-  })
-
-  it("does not leak the listener when unmounted before the subscribe lands", async () => {
-    // Regression: `unsubscribe` was only assigned after two awaits, so a fast
-    // unmount ran the cleanup against a no-op and the listener lived on.
-    let releaseSnapshot: (v: unknown) => void = () => {}
-    snapshotMock.mockReturnValue(
-      new Promise((resolve) => {
-        releaseSnapshot = resolve
-      })
-    )
-    const { unmount } = renderHook(() => usePerfStream())
-    unmount()
-
+    expect(hostHandler).not.toBeNull()
+    act(() => hostHandler!(frame(3)))
     await act(async () => {
-      releaseSnapshot({ samples: [], running: true, intervalMs: 1000 })
+      resolveOpen({ accepted: true, lease: { leaseId: "lease-a" }, source: hostSource })
       await Promise.resolve()
     })
-    // Either we never subscribed, or we subscribed and immediately released.
-    expect(subscribeMock.mock.calls.length).toBe(unsubMock.mock.calls.length)
+    await waitFor(() =>
+      expect(result.current.hostHistory.map((item) => item.sequence)).toEqual([1, 3])
+    )
+    expect(result.current.gaps[0]).toMatchObject({ sequenceStart: 2, sequenceEnd: 2 })
   })
 
-  it("reset clears backend hotspots", async () => {
+  it("rejects late frames from an old target generation", async () => {
     const { result } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(subscribeMock).toHaveBeenCalled())
-    act(() => result.current.reset())
-    expect(resetMock).toHaveBeenCalled()
+    await waitFor(() => expect(result.current.hostState).toBe("live"))
+    act(() => hostHandler!(frame(2, { targetId: "target-old" })))
+    expect(result.current.hostHistory.map((item) => item.sequence)).toEqual([1])
   })
 
-  it("caps the rolling window at PERF_HISTORY_LIMIT", async () => {
-    snapshotMock.mockResolvedValue({ samples: [], running: true, intervalMs: 1000 })
+  it("reopens immutable cadence leases and clears incompatible graph history", async () => {
     const { result } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(sampleHandler).not.toBeNull())
-    act(() => {
-      for (let i = 0; i < 130; i += 1) sampleHandler!(sample(i))
-    })
-    await waitFor(() => expect(result.current.history.length).toBe(120))
-    // Oldest entries evicted; newest retained.
-    expect(result.current.latest?.tsMs).toBe(129)
-    expect(result.current.history[0].tsMs).toBe(10)
+    await waitFor(() => expect(result.current.hostHistory).toHaveLength(1))
+    act(() => result.current.setIntervalMs(2000))
+    expect(result.current.hostHistory).toEqual([])
+    await waitFor(() =>
+      expect(openLease).toHaveBeenLastCalledWith(
+        expect.objectContaining({ requestedCadenceMs: 2000 })
+      )
+    )
+    expect(closeLease).toHaveBeenCalledWith("lease-a")
   })
 
-  it("stops sampling and unsubscribes on unmount", async () => {
+  it("closes host and Renderer demand immediately on normal unmount", async () => {
     const { unmount } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(subscribeMock).toHaveBeenCalled())
+    await waitFor(() => expect(openLease).toHaveBeenCalled())
     unmount()
-    expect(stopMock).toHaveBeenCalled()
-    expect(unsubMock).toHaveBeenCalled()
+    expect(unsubscribeHost).toHaveBeenCalled()
+    expect(closeLease).toHaveBeenCalledWith("lease-a")
+    expect(closeDemand).toHaveBeenCalledWith("renderer-demand")
+  })
+
+  it("uses a local panel baseline reset without resetting the process-wide hotspot registry", async () => {
+    const { result } = renderHook(() => usePerfStream())
+    await waitFor(() => expect(result.current.hostHistory).toHaveLength(1))
+    act(() => result.current.reset())
+    expect(result.current.hostHistory).toEqual([])
   })
 })
