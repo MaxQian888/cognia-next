@@ -7,7 +7,7 @@ These project rules override any default behavior to the contrary.
 1. **Research before implementing.** Before writing new code, grep `lib/`, `components/`, `hooks/`, `src-tauri/`, and the relevant ADR for an existing implementation. Reuse — don't reimplement. New files require justification that no existing module can be extended.
 2. **No simplifications.** Implement the full behavior the task requires. No stubs, `// TODO later`, abbreviated happy paths, or stripped error handling/validation/edge cases. If you genuinely can't finish, stop and surface the blocker instead of silently shipping less.
 3. **Every component ships with a unit test.** New or edited files under `components/**`, `hooks/**`, `lib/**`, `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) need co-located `*.test.ts(x)` or in-file `#[cfg(test)]` tests in the same change. Coverage stays ≥90% — verify with `pnpm test:coverage` before claiming done.
-4. **Every frontend component is i18n-wired.** No hard-coded user-facing strings in `.tsx`. Use `next-intl` (`useTranslations` / `getTranslations`), add keys to **both** `i18n/messages/en.json` and `i18n/messages/zh-CN.json`, then run `pnpm lint:i18n` to confirm parity. Aria labels, placeholders, toasts, and error messages count.
+4. **Every frontend component is i18n-wired.** No hard-coded user-facing strings in `.tsx`. Use `next-intl` (`useTranslations` / `getTranslations`) and add keys to the matching split source files under **both** `i18n/messages/en/**` and `i18n/messages/zh-CN/**`. **Never edit `i18n/messages/en.json` or `i18n/messages/zh-CN.json` directly** — they are generated artifacts. Run `pnpm i18n:build` after editing split sources, then run `pnpm i18n:build:check` and `pnpm lint:i18n` to confirm freshness and parity. Aria labels, placeholders, toasts, and error messages count.
 5. **Language convention.** Internal narration (status updates, commit messages, code comments, plans) is in **English**. Clarifying questions to the user are in **Chinese** — identifiers, paths, and Conventional Commit prefixes stay English even inside Chinese sentences.
 
 ## Project Structure & Module Organization
@@ -115,3 +115,13 @@ pnpm dlx shadcn@latest add <component-name>
 - Use `.env.local` for secrets; do not commit `.env*` files.
 - Only expose safe client values via `NEXT_PUBLIC_*`.
 - Tauri: minimize capabilities in `src-tauri/tauri.conf.json`; avoid broad filesystem access.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

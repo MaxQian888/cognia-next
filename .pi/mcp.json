@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "shadcn": {
+      "command": "npx",
+      "args": ["-y", "shadcn@4.17.0", "mcp"],
+      "lifecycle": "lazy",
+      "requestTimeoutMs": 60000
+    },
+    "next-devtools": {
+      "command": "npx",
+      "args": ["-y", "next-devtools-mcp@0.4.0"],
+      "lifecycle": "lazy",
+      "requestTimeoutMs": 60000
+    },
+    "context7": {
+      "command": "context7-mcp",
+      "args": [],
+      "lifecycle": "lazy",
+      "idleTimeout": 10,
+      "requestTimeoutMs": 30000
+    }
+  }
+}

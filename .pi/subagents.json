@@ -1,0 +1,6 @@
+{
+  "maxConcurrent": 4,
+  "defaultMaxTurns": 10,
+  "graceTurns": 2,
+  "abortAllOnInterrupt": false
+}

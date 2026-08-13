@@ -1,0 +1,8 @@
+*
+!.gitignore
+!settings.json
+!mcp.json
+!subagents.json
+!subagents-worktrees.json
+!agents/
+!agents/*.md
