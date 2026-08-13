@@ -16,6 +16,7 @@ import {
   type TemplatePlatform,
   type TemplateValidationIssue,
   type TemplateVersionBump,
+  type TemplateTrust,
 } from "./contracts"
 import {
   exportTemplatePackage,
@@ -130,6 +131,7 @@ export interface TemplateServiceOptions {
   id?: () => string
   hostVersion?: string
   rollbackMigration?: (domain: TemplateDomain) => Promise<number>
+  isPublisherTrusted?: (publicKey: string) => Promise<boolean>
 }
 
 function compareSemver(left: string, right: string): number {
@@ -149,6 +151,7 @@ export class TemplateService {
   private readonly id: () => string
   private readonly hostVersion: string
   private readonly rollbackMigrationHandler?: (domain: TemplateDomain) => Promise<number>
+  private readonly isPublisherTrusted: (publicKey: string) => Promise<boolean>
 
   constructor(options: TemplateServiceOptions) {
     this.repository = options.repository
@@ -158,10 +161,22 @@ export class TemplateService {
     this.id = options.id ?? (() => crypto.randomUUID())
     this.hostVersion = options.hostVersion ?? process.env.NEXT_PUBLIC_COGNIA_VERSION ?? "0.1.0"
     this.rollbackMigrationHandler = options.rollbackMigration
+    this.isPublisherTrusted = options.isPublisherTrusted ?? (async () => false)
   }
 
   async hydrateCatalog(): Promise<void> {
+    for (const storedPackage of await this.repository.listPackages()) {
+      await this.repository.reconcilePackageTrust(
+        storedPackage.key,
+        await this.resolvePackageTrust(storedPackage.manifest.signature?.publicKey)
+      )
+    }
     this.catalog.replaceSource("user", await this.repository.listDefinitions())
+  }
+
+  private async resolvePackageTrust(publicKey?: string): Promise<TemplateTrust> {
+    if (!publicKey) return "unsigned"
+    return (await this.isPublisherTrusted(publicKey)) ? "verified-publisher" : "signed-unknown"
   }
 
   async rollbackMigration(domain: TemplateDomain): Promise<number> {
@@ -392,14 +407,12 @@ export class TemplateService {
     const inspected = await inspectTemplatePackage(bytes)
     if (!input.confirmed) throw new Error("Template package import requires explicit confirmation")
     const importedAt = this.now()
+    const trust = await this.resolvePackageTrust(inspected.manifest.signature?.publicKey)
     const storedPackage = {
       key: `${inspected.manifest.id}@${inspected.manifest.version}`,
       manifest: inspected.manifest,
       fingerprint: inspected.fingerprint,
-      trust:
-        input.source === "marketplace" && inspected.manifest.signature
-          ? "verified-publisher"
-          : inspected.trust,
+      trust,
       importedAt,
       source: input.source,
     } as const
@@ -412,10 +425,7 @@ export class TemplateService {
             ...definition.provenance,
             source: input.source === "marketplace" ? "marketplace" : input.source,
             packageId: inspected.manifest.id,
-            trust:
-              input.source === "marketplace" && inspected.manifest.signature
-                ? "verified-publisher"
-                : inspected.trust,
+            trust,
             signatureFingerprint: inspected.fingerprint,
           },
         })

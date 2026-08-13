@@ -60,6 +60,57 @@ describe("DexieTemplateRepository", () => {
     })
   })
 
+  it("atomically reconciles package and release publisher trust", async () => {
+    const repository = new DexieTemplateRepository()
+    const draft = await makeDraft("skill.marketplace")
+    const release = await createTemplateDefinition({
+      ...draft,
+      status: "published",
+      version: "1.0.0",
+      revision: 1,
+      provenance: {
+        source: "marketplace",
+        packageId: "com.example.marketplace",
+        trust: "verified-publisher",
+      },
+      contentHash: undefined,
+    })
+    await repository.importPackage(
+      {
+        key: "com.example.marketplace@1.0.0",
+        manifest: {
+          schemaVersion: 1,
+          apiVersion: "cognia.ai/templates/v1",
+          id: "com.example.marketplace",
+          version: "1.0.0",
+          name: "Marketplace",
+          entrypoints: ["skill.marketplace@1.0.0"],
+          definitions: [
+            {
+              id: release.id,
+              version: release.version!,
+              path: "definitions/skill.marketplace@1.0.0.json",
+              sha256: release.contentHash,
+            },
+          ],
+          assets: [],
+        },
+        fingerprint: "package-fingerprint",
+        trust: "verified-publisher",
+        importedAt: 1,
+        source: "marketplace",
+      },
+      [release]
+    )
+
+    await repository.reconcilePackageTrust("com.example.marketplace@1.0.0", "signed-unknown")
+
+    expect((await repository.listPackages())[0].trust).toBe("signed-unknown")
+    expect((await repository.getRelease(release.id, release.version!))?.provenance.trust).toBe(
+      "signed-unknown"
+    )
+  })
+
   it("opens all five template platform stores with their query indexes", async () => {
     const db = getDb()
     await db.open()

@@ -1,4 +1,13 @@
+import JSZip from "jszip"
+import { generateKeyPairSync, sign } from "node:crypto"
+
 import { TemplateCatalog } from "./catalog"
+import { createTemplateDefinition } from "./contracts"
+import {
+  exportTemplatePackage,
+  templatePackageSignaturePayload,
+  type TemplatePackageManifest,
+} from "./package"
 import { InMemoryTemplateRepository } from "./repository"
 import { TemplateService, type TemplateDomainAdapter } from "./service"
 
@@ -24,7 +33,7 @@ const skillAdapter: TemplateDomainAdapter = {
   update: async () => ({ resources: [] }),
 }
 
-function makeService() {
+function makeService(options?: { isPublisherTrusted?: (publicKey: string) => Promise<boolean> }) {
   const repository = new InMemoryTemplateRepository()
   const catalog = new TemplateCatalog()
   const service = new TemplateService({
@@ -33,11 +42,85 @@ function makeService() {
     adapters: [skillAdapter],
     now: () => 1_000,
     id: () => "generated",
+    isPublisherTrusted: options?.isPublisherTrusted,
   })
   return { repository, catalog, service }
 }
 
+async function createSignedPackage(): Promise<{ bytes: Uint8Array; publicKey: string }> {
+  const definition = await createTemplateDefinition({
+    id: "skill.marketplace",
+    domain: "skill",
+    status: "published",
+    revision: 1,
+    version: "1.0.0",
+    metadata: { name: "Marketplace skill" },
+    payload: { content: "signed" },
+    inputs: [],
+    dependencies: [],
+    capabilities: [],
+    compatibility: { platforms: ["desktop", "web", "mobile"] },
+    provenance: { source: "user", trust: "unsigned" },
+  })
+  const packaged = await exportTemplatePackage({
+    id: "com.example.marketplace",
+    version: "1.0.0",
+    name: "Marketplace package",
+    entrypoints: [definition.id],
+    definitions: [definition],
+  })
+  const zip = await JSZip.loadAsync(packaged.bytes)
+  const manifest = JSON.parse(
+    await zip.file("manifest.json")!.async("string")
+  ) as TemplatePackageManifest
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519")
+  const encodedPublicKey = publicKey
+    .export({ type: "spki", format: "der" })
+    .subarray(-32)
+    .toString("base64")
+  manifest.signature = {
+    algorithm: "ed25519",
+    publisher: "example",
+    publicKey: encodedPublicKey,
+    signature: sign(null, templatePackageSignaturePayload(manifest), privateKey).toString("base64"),
+  }
+  zip.file("manifest.json", JSON.stringify(manifest))
+  return { bytes: await zip.generateAsync({ type: "uint8array" }), publicKey: encodedPublicKey }
+}
+
 describe("TemplateService lifecycle", () => {
+  it("does not elevate a signed marketplace package without a trusted publisher key", async () => {
+    const { bytes } = await createSignedPackage()
+    const { repository, service } = makeService()
+
+    await service.importPackage(bytes, { source: "marketplace", confirmed: true })
+
+    expect((await repository.listPackages())[0].trust).toBe("signed-unknown")
+    expect((await repository.getRelease("skill.marketplace", "1.0.0"))?.provenance.trust).toBe(
+      "signed-unknown"
+    )
+  })
+
+  it("uses the publisher ledger for verification and downgrades revoked keys without deletion", async () => {
+    const { bytes, publicKey } = await createSignedPackage()
+    let trusted = true
+    const { repository, service } = makeService({
+      isPublisherTrusted: async (candidate) => trusted && candidate === publicKey,
+    })
+
+    await service.importPackage(bytes, { source: "marketplace", confirmed: true })
+    expect((await repository.listPackages())[0].trust).toBe("verified-publisher")
+
+    trusted = false
+    await service.hydrateCatalog()
+
+    expect((await repository.listPackages())[0].trust).toBe("signed-unknown")
+    expect((await repository.getRelease("skill.marketplace", "1.0.0"))?.provenance.trust).toBe(
+      "signed-unknown"
+    )
+    expect(await repository.listDefinitions()).toHaveLength(1)
+  })
+
   it("keeps both edits when an optimistic draft save conflicts", async () => {
     const { repository, catalog, service } = makeService()
     const original = await service.createDraft({

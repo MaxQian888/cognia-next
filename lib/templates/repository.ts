@@ -83,6 +83,7 @@ export interface TemplateRepository {
     value: StoredTemplatePackage,
     definitions: readonly TemplateDefinitionEnvelope[]
   ): Promise<void>
+  reconcilePackageTrust(key: string, trust: TemplateTrust): Promise<void>
   listPackages(): Promise<StoredTemplatePackage[]>
   putInstance(value: TemplateInstanceRecord): Promise<void>
   getInstance(id: string): Promise<TemplateInstanceRecord | undefined>
@@ -196,6 +197,24 @@ export class InMemoryTemplateRepository implements TemplateRepository {
 
   async listPackages(): Promise<StoredTemplatePackage[]> {
     return [...this.packages.values()].map((value) => structuredClone(value))
+  }
+
+  async reconcilePackageTrust(key: string, trust: TemplateTrust): Promise<void> {
+    const storedPackage = this.packages.get(key)
+    if (!storedPackage) throw new Error(`Template package ${key} not found`)
+    this.packages.set(key, structuredClone({ ...storedPackage, trust }))
+    for (const identity of storedPackage.manifest.definitions) {
+      const key = releaseKey(identity.id, identity.version)
+      const definition = this.releases.get(key)
+      if (!definition) continue
+      this.releases.set(
+        key,
+        structuredClone({
+          ...definition,
+          provenance: { ...definition.provenance, trust },
+        })
+      )
+    }
   }
 
   async putInstance(value: TemplateInstanceRecord): Promise<void> {

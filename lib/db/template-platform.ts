@@ -1,4 +1,5 @@
 import type { TemplateDefinitionEnvelope } from "@/lib/templates/contracts"
+import type { TemplateTrust } from "@/lib/templates/contracts"
 import type {
   SaveDraftResult,
   StoredTemplatePackage,
@@ -163,6 +164,24 @@ export class DexieTemplateRepository implements TemplateRepository {
     return (await getDb().templatePackages.toArray()).map(
       ({ id: _id, version: _version, ...row }) => row
     )
+  }
+
+  async reconcilePackageTrust(key: string, trust: TemplateTrust): Promise<void> {
+    const db = getDb()
+    await db.transaction("rw", db.templatePackages, db.templateDefinitions, async () => {
+      const storedPackage = await db.templatePackages.get(key)
+      if (!storedPackage) throw new Error(`Template package ${key} not found`)
+      await db.templatePackages.put({ ...storedPackage, trust })
+      for (const identity of storedPackage.manifest.definitions) {
+        const storageKey = releaseKey(identity.id, identity.version)
+        const definition = await db.templateDefinitions.get(storageKey)
+        if (!definition) continue
+        await db.templateDefinitions.put({
+          ...definition,
+          provenance: { ...definition.provenance, trust },
+        })
+      }
+    })
   }
 
   async putInstance(value: TemplateInstanceRecord): Promise<void> {

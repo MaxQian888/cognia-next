@@ -203,6 +203,43 @@ describe("InMemoryTemplateRepository packages", () => {
     await repo.putPackage(pkg("pack.one", "fp-1"))
     await expect(repo.importPackage(pkg("pack.one", "fp-2"), [])).rejects.toThrow(/immutable/)
   })
+
+  it("reconciles package and imported release trust without changing content", async () => {
+    const repo = new InMemoryTemplateRepository()
+    const definition = await release("skill.one", "1.0.0")
+    const storedPackage = {
+      ...pkg("pack.one", "fp-1"),
+      manifest: {
+        id: "pack.one",
+        version: "1.0.0",
+        definitions: [{ id: "skill.one", version: "1.0.0" }],
+      } as StoredTemplatePackage["manifest"],
+    }
+    await repo.importPackage(storedPackage, [definition])
+
+    await repo.reconcilePackageTrust("pack.one", "signed-unknown")
+
+    expect((await repo.listPackages())[0].trust).toBe("signed-unknown")
+    expect((await repo.getRelease("skill.one", "1.0.0"))?.provenance.trust).toBe("signed-unknown")
+    expect((await repo.getRelease("skill.one", "1.0.0"))?.contentHash).toBe(definition.contentHash)
+  })
+
+  it("skips missing manifest definitions and rejects a missing package during reconciliation", async () => {
+    const repo = new InMemoryTemplateRepository()
+    await repo.putPackage({
+      ...pkg("pack.one", "fp-1"),
+      manifest: {
+        id: "pack.one",
+        version: "1.0.0",
+        definitions: [{ id: "skill.missing", version: "1.0.0" }],
+      } as StoredTemplatePackage["manifest"],
+    })
+
+    await expect(repo.reconcilePackageTrust("pack.one", "signed-unknown")).resolves.toBeUndefined()
+    await expect(repo.reconcilePackageTrust("pack.missing", "signed-unknown")).rejects.toThrow(
+      /not found/
+    )
+  })
 })
 
 describe("InMemoryTemplateRepository instances", () => {

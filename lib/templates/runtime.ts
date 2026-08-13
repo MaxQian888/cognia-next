@@ -24,6 +24,7 @@ import {
   listTemplateMigrationJournal,
   putTemplateMigrationJournal,
 } from "@/lib/db/template-platform"
+import { isPublisherTrusted } from "@/lib/db/trusted-publishers"
 import { createFullDomainAdapters, type FullDomainTemplatePorts } from "./adapters"
 import { templateCatalog, type TemplateCatalog } from "./catalog"
 import type { TemplateJson } from "./contracts"
@@ -41,6 +42,7 @@ interface CreateTemplateRuntimeOptions {
   repository: TemplateRepository
   catalog?: TemplateCatalog
   ports: FullDomainTemplatePorts
+  isPublisherTrusted?: (publicKey: string) => Promise<boolean>
 }
 
 function json(value: unknown): TemplateJson {
@@ -69,6 +71,7 @@ export function createTemplateRuntime(options: CreateTemplateRuntimeOptions): Te
           put: putTemplateMigrationJournal,
         },
       }),
+    isPublisherTrusted: options.isPublisherTrusted,
   })
   return { catalog, repository, service }
 }
@@ -231,6 +234,7 @@ export function getTemplateRuntime(): TemplateRuntime {
     repository: new DexieTemplateRepository(),
     catalog: templateCatalog,
     ports: createProductionTemplatePorts(),
+    isPublisherTrusted,
   })
   return productionRuntime
 }
