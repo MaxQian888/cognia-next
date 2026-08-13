@@ -6,6 +6,7 @@ import {
   acknowledgeRetrievalTombstone,
   activateRetrievalGeneration,
   assertRetrievalOperationAllowed,
+  cancelStoredRetrievalJob,
   claimNextRetrievalJob,
   checkpointRetrievalMigration,
   deleteRetrievalEntity,
@@ -13,10 +14,12 @@ import {
   failRetrievalGeneration,
   getActiveRetrievalGeneration,
   heartbeatStoredRetrievalJob,
+  listRetrievalControlSnapshot,
   markRetrievalGenerationValidating,
   finishRetrievalMigrationPhase,
   pruneRetrievalControlData,
   reconcileRetrievalCorpus,
+  retryStoredRetrievalJob,
   setRetrievalKillSwitch,
   saveRetrievalProfile,
   stageRetrievalGeneration,
@@ -113,6 +116,119 @@ describe("retrieval control repository", () => {
     )
     await expect(heartbeatStoredRetrievalJob("job-1", "worker-1", 120, 50)).resolves.toMatchObject({
       leaseExpiresAt: 170,
+    })
+  })
+
+  it("cancels active work and creates an auditable manual retry as a new job", async () => {
+    await enqueueRetrievalJob({
+      id: "job-cancel",
+      dedupeKey: "reindex:twin:1:fp",
+      kind: "reindex",
+      corpusId: "twin:1",
+      profileFingerprint: "fp",
+      queuedAt: 100,
+      maxAttempts: 3,
+    })
+    await claimNextRetrievalJob("worker-1", 100, 50)
+
+    await expect(cancelStoredRetrievalJob("job-cancel", 120)).resolves.toMatchObject({
+      id: "job-cancel",
+      status: "cancelled",
+      resultCode: "user_cancelled",
+      cancellationRequestedAt: 120,
+      completedAt: 120,
+    })
+    await expect(
+      retryStoredRetrievalJob("job-cancel", { id: "job-retry", now: 130 })
+    ).resolves.toMatchObject({
+      id: "job-retry",
+      status: "queued",
+      kind: "reindex",
+      corpusId: "twin:1",
+      profileFingerprint: "fp",
+      attempt: 0,
+      queuedAt: 130,
+    })
+    expect(await getDb().retrievalJobs.get("job-cancel")).toMatchObject({ status: "cancelled" })
+  })
+
+  it("rejects invalid cancellation and retry requests", async () => {
+    await getDb().retrievalJobs.add({
+      id: "job-success",
+      dedupeKey: "done",
+      kind: "reconcile",
+      corpusId: "project:1",
+      status: "succeeded",
+      queuedAt: 1,
+      completedAt: 2,
+      attempt: 1,
+      maxAttempts: 1,
+    })
+
+    await expect(cancelStoredRetrievalJob("job-success", 3)).rejects.toThrow(
+      "Only active retrieval jobs can be cancelled"
+    )
+    await expect(retryStoredRetrievalJob("job-success", { id: "retry", now: 4 })).rejects.toThrow(
+      "Only failed or cancelled retrieval jobs can be retried"
+    )
+  })
+
+  it("returns a content-free control snapshot limited to the requested corpus prefixes", async () => {
+    await getDb().retrievalGenerations.bulkAdd([
+      {
+        id: "twin-generation",
+        corpusId: "twin:1:source:a",
+        domain: "twin",
+        profileFingerprint: "fp",
+        status: "active",
+        createdAt: 1,
+        activatedAt: 2,
+      },
+      {
+        id: "kb-generation",
+        corpusId: "knowledge_base:1:source:a",
+        domain: "knowledge_base",
+        profileFingerprint: "fp",
+        status: "active",
+        createdAt: 1,
+        activatedAt: 2,
+      },
+    ])
+    await getDb().retrievalJobs.bulkAdd([
+      {
+        id: "twin-job",
+        dedupeKey: "twin-job",
+        kind: "reindex",
+        corpusId: "twin:1:source:a",
+        status: "queued",
+        queuedAt: 3,
+        attempt: 0,
+        maxAttempts: 3,
+      },
+      {
+        id: "kb-job",
+        dedupeKey: "kb-job",
+        kind: "reindex",
+        corpusId: "knowledge_base:1:source:a",
+        status: "queued",
+        queuedAt: 3,
+        attempt: 0,
+        maxAttempts: 3,
+      },
+    ])
+    await setRetrievalKillSwitch({
+      engaged: true,
+      changedBy: "safety",
+      reasonCode: "test_guard",
+      now: 4,
+    })
+
+    await expect(
+      listRetrievalControlSnapshot({ corpusPrefixes: ["twin:1:"] })
+    ).resolves.toMatchObject({
+      generations: [{ id: "twin-generation" }],
+      jobs: [{ id: "twin-job" }],
+      runtime: { killSwitchEngaged: true, reasonCode: "test_guard" },
     })
   })
 

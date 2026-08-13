@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select"
 import { MemoryRow } from "@/components/memory/memory-row"
 import { AddMemoryDialog, type AddMemoryInput } from "@/components/memory/add-memory-dialog"
+import { RetrievalControlPanel } from "@/components/rag/retrieval-control-panel"
 
 export interface MemoryWorkbenchPanelProps {
   /** Session id that provides scope context for newly added memories. */
@@ -78,6 +79,7 @@ export function MemoryWorkbenchPanel({ sessionId: _sessionId }: MemoryWorkbenchP
     <div className="flex h-full flex-col">
       {/* Header controls */}
       <div className="flex shrink-0 flex-col gap-2 border-b p-3">
+        <RetrievalControlPanel corpusPrefixes={["memory:"]} compact />
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />

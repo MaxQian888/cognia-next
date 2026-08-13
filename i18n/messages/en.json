@@ -2387,37 +2387,20 @@
     "openWorkspace": "Open workspace",
     "operations": {
       "children": {
-        "cancel": "Cancel child",
-        "cancelled": "Child cancelled.",
         "commandsPlaceholder": "Manual commands, one per line",
         "diffPlaceholder": "Manual diff or edit summary",
-        "host": "Host: {value}",
-        "lease": "Dispatch lease: {value}",
-        "leaseExpired": "expired",
-        "leaseFresh": "fresh",
-        "localHost": "local",
-        "noLease": "none",
-        "noRemoteSession": "none",
         "noWorkspace": "workspace pending",
         "openBrowser": "Open browser",
         "openEditor": "Open editor",
         "openTerminal": "Open terminal",
-        "recoveryRequired": "Operator recovery is required before this child can continue.",
-        "remoteSession": "Remote session: {value}",
         "resume": "Checkpoint and resume",
-        "retryHostLabel": "Compatible retry host",
-        "retrySameHost": "Retry same host",
-        "retrySelectedHost": "Retry selected host",
-        "retryStarted": "Child retry started.",
-        "selectHost": "Select compatible host",
         "steer": "Send steering",
         "steerPlaceholder": "Steer this child at the next safe boundary",
         "steered": "Steering recorded.",
         "takeover": "Begin takeover",
         "takeoverCompleted": "Manual takeover checkpointed.",
         "takeoverStarted": "Child paused for takeover.",
-        "title": "Child sessions and takeover",
-        "waitingReason": "Waiting: {value}"
+        "title": "Child sessions and takeover"
       },
       "decisions": {
         "accept": "Accept",
@@ -2928,12 +2911,6 @@
         "deploymentRefPlaceholder": "deployment id (e.g. dep-vendor-a)",
         "description": "How this teammate's runtime, deployment and credentials are bound. References only — endpoints and keys live in provider profiles.",
         "flagOffHint": "Inert until the unified execution resolver flag (agentExecutionResolverV2) is enabled — dispatch ignores this binding while it is off.",
-        "hostAuto": "Auto",
-        "hostLocal": "Local",
-        "hostPinned": "{host}",
-        "hostPinnedOffline": "{host} (offline)",
-        "hostTarget": "Host target",
-        "hostWaitingWarning": "Pinned host is offline; the child will remain queued.",
         "modeInherit": "Inherit team default",
         "modePinned": "Pinned",
         "modePool": "Candidate pool",
@@ -3011,11 +2988,6 @@
     "promotionBlocked": "Stop this running child before promoting its snapshot.",
     "running": "Running child",
     "title": "Agent threads"
-  },
-  "aiElements": {
-    "agent": {
-      "noDescription": "No description"
-    }
   },
   "artifactCreateButton": {
     "asChart": "As Chart",
@@ -4653,6 +4625,11 @@
     },
     "compactBoundary": {
       "auto": "automatic",
+      "checkpoint": {
+        "failed": "checkpoint failed",
+        "locked": "Vault locked",
+        "stored": "checkpoint saved"
+      },
       "detail": "{from} → {to} tokens",
       "effectiveness": "reclaimed {pct}%",
       "label": "Context compacted",
@@ -5233,6 +5210,10 @@
       "pdfFallback": "PDF preview is unavailable.",
       "preview": "Preview",
       "source": "Source"
+    },
+    "grounding": {
+      "supported": "Retrieved evidence supports the answer's claims.",
+      "unsupported": "{count, plural, =1 {1 claim lacks retrieval support} other {# claims lack retrieval support}}"
     },
     "header": {
       "accountSwitcher": {
@@ -6041,9 +6022,11 @@
         "anthropic": "Web",
         "footnote": "Note",
         "memory": "Memory",
+        "projectKnowledge": "Project",
         "twinRag": "Twin",
         "twinStyle": "Style"
       },
+      "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
       "recalledMemoriesHeader": "Recalled memories ({count})",
       "retrievedChunksHeader": "Retrieved chunks ({count})",
       "styleSamplesHeader": "Style samples ({count})",
@@ -6560,7 +6543,6 @@
         "web": "Web"
       },
       "labels": {
-        "agentKnowledge": "Agent knowledge",
         "anthropic": "Web",
         "document": "Document",
         "file": "File",
@@ -9491,13 +9473,11 @@
     "agents": {
       "claude-code": "Claude Code",
       "codex": "Codex",
-      "cognia": "Cognia",
       "opencode": "OpenCode"
     },
     "island": {
       "empty": "No active agents",
       "legend": {
-        "detached": "{count} detached",
         "done": "{count} done",
         "idle": "{count} idle",
         "needsYou": "{count} waiting",
@@ -9519,8 +9499,6 @@
     },
     "question": {
       "expired": "Answered in terminal",
-      "reject": "Reject",
-      "rejected": "Rejected",
       "submit": "Submit",
       "submitted": "Sent"
     },
@@ -9554,7 +9532,6 @@
         "turn": "Turn failed"
       },
       "focusTerminal": "Focus terminal",
-      "host": "Execution host: {host}",
       "interrupt": {
         "error": {
           "interrupt_identity_mismatch": "That process is no longer the agent — nothing was sent.",
@@ -9573,7 +9550,6 @@
       "openTranscript": "Reveal transcript",
       "questionMore": "{count, plural, one {+# more question} other {+# more questions}}",
       "status": {
-        "detached": "Monitoring detached",
         "ended": "Session ended",
         "idle": "Idle",
         "planPending": "Plan awaiting approval in the terminal",
@@ -9936,10 +9912,6 @@
         "desc": "Fires when the working directory changes.",
         "label": "Directory changed"
       },
-      "DirectoryAdded": {
-        "desc": "Fires when a directory is added to the session workspace.",
-        "label": "Directory added"
-      },
       "Elicitation": {
         "desc": "Fires when the agent prompts you for structured input.",
         "label": "Elicitation"
@@ -9955,10 +9927,6 @@
       "InstructionsLoaded": {
         "desc": "Fires when CLAUDE.md / instructions are loaded.",
         "label": "Instructions loaded"
-      },
-      "MessageDisplay": {
-        "desc": "Fires when the runtime displays a message to the user.",
-        "label": "Message displayed"
       },
       "Notification": {
         "desc": "Fires on a runtime notification (idle, awaiting input).",
@@ -10004,10 +9972,6 @@
         "desc": "Fires when a session begins; good for injecting standing context.",
         "label": "Session start"
       },
-      "Setup": {
-        "desc": "Fires while a repository or worktree environment is being set up.",
-        "label": "Setup"
-      },
       "Stop": {
         "desc": "Fires when the assistant finishes its turn.",
         "label": "Stop"
@@ -10015,10 +9979,6 @@
       "StopFailure": {
         "desc": "Fires when a turn ends because of an error.",
         "label": "Stop (failed)"
-      },
-      "SubagentStart": {
-        "desc": "Fires when a native subagent begins its run.",
-        "label": "Subagent start"
       },
       "SubagentStop": {
         "desc": "Fires when a subagent finishes its run.",
@@ -10438,7 +10398,6 @@
       "cancel": "Cancel",
       "markdownPlaceholder": "Draft markdown…",
       "reject": "Reject",
-      "segmentFallback": "Unsupported draft segment",
       "textPlaceholder": "Draft text…"
     },
     "extensionPoints": {
@@ -10985,7 +10944,6 @@
           "errors": "Errors",
           "inputTokens": "Input tokens",
           "loading": "Loading agent trace stats…",
-          "modelRuns": "{count, plural, one {# run} other {# runs}}",
           "outputHint": "Output: {count}",
           "regionLabel": "Agent trace stats — {window}",
           "title": "Agent traces",
@@ -12964,11 +12922,6 @@
     "fleet": {
       "connectFirst": "Connect to your desktop to watch its agent fleet.",
       "empty": "No active agents.",
-      "hostCapacity": "{used}/{total} slots",
-      "hostEmpty": "No active sessions on this host.",
-      "hostOffline": "Offline",
-      "hostOnline": "Online",
-      "localHost": "Local host",
       "permission": {
         "allow": "Allow",
         "allowed": "Allowed",
@@ -12987,8 +12940,6 @@
         "countdown": "{seconds}s left",
         "expired": "The answer window closed — answer in the terminal.",
         "failed": "Could not send the answer.",
-        "reject": "Reject",
-        "rejected": "Rejected.",
         "submit": "Submit"
       },
       "reply": {
@@ -13004,9 +12955,7 @@
         },
         "focus": "Focus terminal",
         "focusFailed": "Couldn't focus the terminal.",
-        "openTeam": "Open AgentTeam run",
         "status": {
-          "detached": "Monitoring detached",
           "ended": "Session ended",
           "idle": "Idle",
           "planPending": "Plan awaiting approval on desktop",
@@ -13018,9 +12967,7 @@
       },
       "summary": "{total, plural, one {# agent} other {# agents}}",
       "title": "Agent Fleet",
-      "waiting": "{count} waiting",
-      "workspaceMissing": "Repository binding missing",
-      "workspaceReady": "Workspace ready"
+      "waiting": "{count} waiting"
     },
     "home": {
       "actions": {
@@ -13097,7 +13044,6 @@
     },
     "inbox": {
       "tabs": {
-        "draftCountOverflow": "99+",
         "drafts": "Drafts",
         "messages": "Messages"
       },
@@ -16764,7 +16710,6 @@
     },
     "errors": {
       "activation": "Couldn't activate {pluginName}",
-      "adapter": "Plugin adapter failed for {pluginName}",
       "config": "Couldn't apply settings for {pluginName}",
       "disable": "Couldn't disable {pluginName}",
       "enable": "Couldn't enable {pluginName}",
@@ -19525,6 +19470,58 @@
       "skipped": "Not enough recent activity yet — nothing to report."
     }
   },
+  "retrievalControl": {
+    "actions": {
+      "cancel": "Cancel",
+      "retry": "Retry"
+    },
+    "confirmKillSwitch": {
+      "cancel": "Keep retrieval enabled",
+      "confirm": "Stop new retrieval work",
+      "description": "This stops the new retrieval kernel, ingestion, and promotion. Decryption, export, deletion, reconciliation, and safe lexical reads remain available.",
+      "title": "Engage retrieval kill switch?"
+    },
+    "empty": "No retrieval generations or jobs are recorded for this scope.",
+    "error": "The retrieval control action failed.",
+    "generation": {
+      "active": "Active",
+      "failed": "Failed",
+      "retiring": "Retiring",
+      "staging": "Staging",
+      "validating": "Validating"
+    },
+    "jobs": {
+      "attempt": "Attempt {attempt} of {maxAttempts}",
+      "cancelled": "Cancelled",
+      "failed": "Failed",
+      "no_output": "No output",
+      "queued": "Queued",
+      "retry_wait": "Waiting to retry",
+      "running": "Running",
+      "skipped": "Skipped",
+      "succeeded": "Succeeded",
+      "title": "Recent jobs"
+    },
+    "killSwitch": {
+      "disable": "Resume new retrieval work",
+      "enable": "Stop new retrieval work",
+      "engaged": "Kill switch engaged",
+      "normal": "Retrieval enabled"
+    },
+    "metrics": {
+      "activeGenerations": "Active generations",
+      "activeJobs": "Active jobs",
+      "quarantined": "Quarantined or failed",
+      "traces": "Content-free traces"
+    },
+    "title": "Retrieval control plane",
+    "vault": {
+      "locked": "Vault locked",
+      "secure": "Device secure storage",
+      "unavailable": "Vault unavailable",
+      "unlocked": "Vault unlocked"
+    }
+  },
   "routingFallback": {
     "answeredVia": "Answered via {provider} ({model})",
     "fallbackExhausted": "All fallback providers failed: {error}",
@@ -20777,7 +20774,6 @@
   },
   "servers": {
     "actions": {
-      "backToServers": "Back to servers",
       "backup": "Create backup",
       "deploy": "Deploy server",
       "refresh": "Refresh",
@@ -20803,11 +20799,6 @@
       "controllerPlaceholder": "https://ops.example.com",
       "controllerUrl": "Controller URL",
       "description": "Connect to the cloud-neutral Operations Controller. Credentials stay in memory and are never persisted by this page.",
-      "disconnect": "Disconnect",
-      "disconnectFailed": "Could not disconnect from the Operations Controller",
-      "disconnected": "Disconnected from the Operations Controller",
-      "eventsConnected": "Live events connected",
-      "eventsReconnecting": "Reconnecting live events…",
       "failed": "Could not connect to the Operations Controller",
       "targetId": "Default target ID",
       "title": "Connect Operations Controller",
@@ -20817,7 +20808,6 @@
     "description": "Deploy, observe, back up, restore, and secure Compose or Kubernetes targets from one cloud-neutral workspace.",
     "errors": {
       "authenticationRequired": "Your OIDC session is missing or expired. Sign in again and reconnect.",
-      "capabilities": "Could not load server capabilities",
       "detail": "Could not load server details",
       "networkUnavailable": "The controller is unavailable. Check its URL, TLS certificate, and network route.",
       "operation": "The server operation could not be queued",
@@ -20901,7 +20891,6 @@
       "ingress": "Ingress TLS",
       "kubernetes": "Kubernetes",
       "kubernetes-csi": "Kubernetes CSI",
-      "none": "None",
       "vault": "Vault"
     },
     "overview": {
@@ -20928,21 +20917,16 @@
       "cancel": "Cancel",
       "controllerUrl": "Controller URL",
       "credentialsNotice": "Only credential references are stored. Cloud keys, kubeconfig files, SSH keys, object-store secrets, and enrollment tokens never enter this configuration or the browser cache.",
-      "custom": "Custom",
       "deploymentRoot": "Deployment root",
       "description": "Configure a versioned DeploymentTarget. Provider presets are normalized to the same cloud-neutral contract.",
-      "guided": "Guided",
       "identitySection": "OIDC identity",
       "imagesSection": "Immutable images",
       "ingressClass": "Ingress class",
-      "invalid": "Review the highlighted deployment settings",
       "label": "Display label",
       "namespace": "Namespace",
       "objectStoreBucket": "Bucket",
       "objectStoreCredentialRef": "Object-store credential reference",
       "objectStoreEndpoint": "S3-compatible endpoint",
-      "objectStorePathStyle": "Use path-style object-store URLs",
-      "objectStorePathStyleHelp": "Enable for S3-compatible services that require the bucket name in the URL path.",
       "objectStoreRegion": "Object-store region",
       "oidcAudience": "OIDC audience",
       "oidcIssuer": "OIDC issuer",
@@ -20968,7 +20952,6 @@
       },
       "platformSection": "Platform settings",
       "projectName": "Compose project name",
-      "providerCredentialsRequired": "Complete the required provider credential references before deploying.",
       "publicUrl": "Public URL",
       "runnerImage": "Runner image digest",
       "runtimeClass": "Runtime class",
@@ -26291,11 +26274,6 @@
       "triggerAria": "Find a setting"
     },
     "fleet": {
-      "capabilities": {
-        "degraded": "Limited APIs",
-        "proven": "APIs verified",
-        "unproven": "Awaiting probe"
-      },
       "claude": {
         "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
         "label": "Claude Code hooks"
@@ -26357,13 +26335,7 @@
       },
       "opencode": {
         "desc": "Install a plugin into ~/.config/opencode/plugin. Observe sessions and approve/deny permissions from the island.",
-        "label": "OpenCode plugin",
-        "outbox": {
-          "corrupt": "The durable command queue is corrupt; controls are disabled.",
-          "repair": "Repair queue",
-          "repaired": "OpenCode command queue repaired.",
-          "unavailable": "The durable command queue is unavailable; controls are disabled."
-        }
+        "label": "OpenCode plugin"
       },
       "saved": "Fleet settings updated.",
       "status": {
@@ -26376,26 +26348,7 @@
         "unavailable": "Claude Code not found"
       },
       "summaryAria": "{count} integrations active",
-      "title": "Agent fleet monitor",
-      "workers": {
-        "bindingHint": "Repository paths stay on each worker. Bind one locally with cognia-agent worker bind; this screen never accepts absolute paths.",
-        "capacity": "{used}/{total} slots",
-        "copied": "Worker enrollment command copied.",
-        "copy": "Copy command",
-        "copyFailed": "Could not copy the command.",
-        "description": "Enroll least-privilege Agent RPC workers and inspect their readiness.",
-        "empty": "No execution workers enrolled.",
-        "enroll": "Enroll worker",
-        "error": "Worker action failed: {detail}",
-        "expires": "One-time enrollment expires at {time}.",
-        "notConnected": "Connect this browser to a Companion host first.",
-        "offline": "Offline",
-        "online": "Online",
-        "qrAria": "Worker enrollment QR code",
-        "revoke": "Revoke worker",
-        "revoked": "Worker capability revoked.",
-        "title": "Execution workers"
-      }
+      "title": "Agent fleet monitor"
     },
     "gateway": {
       "add": "Add",
@@ -26447,13 +26400,9 @@
       "cooldownsRefresh": "Refresh",
       "copied": "Copied",
       "copy": "Copy",
-      "copyFailed": "Could not copy to the clipboard",
       "copyKey": "Copy key",
       "costUnknown": "—",
       "createKey": "Create key",
-      "customApplied": "Custom gateway settings applied",
-      "customHeading": "Custom configuration",
-      "customHelp": "Edit and validate the complete gateway configuration as JSON or YAML.",
       "deleteKey": "Delete key",
       "deleteKeyConfirm": "Delete this key? Tools using it will stop working immediately.",
       "description": "Expose your configured providers as a local OpenAI- and Anthropic-compatible endpoint so external tools can borrow Cognia's routing and credentials.",
@@ -26477,8 +26426,6 @@
       "fieldStripAllowPlaceholder": "openai:service_tier",
       "fieldStripHeading": "Outbound field stripping",
       "fieldStripHelp": "Request fields removed before the body reaches an upstream.",
-      "gatewayLocalRoutingV2": "Use gateway-local routing",
-      "gatewayLocalRoutingV2Help": "Resolve routes inside the gateway from the current policy instead of a legacy published snapshot.",
       "hide": "Hide",
       "hideRawModels": "List aliases only",
       "hideRawModelsHelp": "Hide raw provider model ids from /v1/models — advertise routing aliases only. Direct provider:model calls still work.",
@@ -26529,12 +26476,9 @@
       "maxConcurrentPerUpstreamKeyHelp": "Simultaneous upstream calls allowed per pooled account, shared across all endpoints. 0 = unlimited. A streaming chat holds its slot until the stream ends.",
       "maxRetries": "Max attempts",
       "maxRetriesHelp": "Cap on candidates tried per request. 0 = walk the whole fallback chain.",
-      "maxRetryWait": "Maximum retry wait (ms)",
-      "maxRetryWaitHelp": "Cap the total delay spent waiting between upstream retry attempts. 0 disables the cap.",
       "nav": {
         "badgeNoKeyAria": "No usable API key",
         "badgeParkedKeysAria": "{count, plural, one {# parked upstream key} other {# parked upstream keys}}",
-        "badgeRestartRequiredAria": "Gateway restart required",
         "groups": {
           "observabilityGroup": "Observability",
           "routingGroup": "Routing & protection",
@@ -26595,16 +26539,9 @@
       "requestTimeoutHelp": "Total cap for non-streaming requests. 0 disables it; streaming responses are never capped.",
       "requiresKey": "Create an API key before enabling the gateway.",
       "resetQuota": "Reset usage",
-      "respectRetryAfter": "Respect Retry-After",
-      "respectRetryAfterHelp": "Honor an upstream Retry-After delay when it fits within the configured retry wait cap.",
       "restartListener": "Restart listener",
       "restartRequired": "The running listener still uses the previous values. Restart it to apply these changes.",
-      "restartRequiredBadge": "Restart required",
       "restarted": "Listener restarted",
-      "retryBackoffBase": "Retry backoff base (ms)",
-      "retryBackoffBaseHelp": "Initial exponential backoff delay before trying another upstream candidate.",
-      "retryBackoffMax": "Retry backoff maximum (ms)",
-      "retryBackoffMaxHelp": "Maximum exponential backoff delay between upstream attempts.",
       "retryStatusCodes": "Retry on statuses",
       "retryStatusCodesHelp": "Upstream HTTP statuses that fail over to the next provider instead of surfacing.",
       "retryStatusCodesPlaceholder": "429, 503",
@@ -26755,7 +26692,7 @@
         "discard": "Discard & switch",
         "title": "Discard unsaved changes?"
       },
-      "description": "Run runtime-supported handlers at lifecycle events. Claude supports command, HTTP, MCP tool, prompt, and agent handlers; other runtimes expose only probed capabilities.",
+      "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
       "eventListLabel": "Events",
       "group": {
         "addHandler": "Add handler",
@@ -26778,29 +26715,14 @@
         "headersEmpty": "No custom headers.",
         "headersLabel": "Headers",
         "httpCapability": "HTTP requests require the network capability.",
-        "inputLabel": "Input JSON",
-        "modelLabel": "Model (optional)",
-        "promptLabel": "Prompt",
-        "promptRequired": "Prompt can't be empty.",
         "removeAria": "Remove handler",
-        "serverLabel": "MCP server",
-        "serverRequired": "MCP server is required.",
-        "timeoutLabel": "Timeout (seconds)",
-        "timeoutPlaceholder": "30",
-        "toolLabel": "Tool",
-        "toolRequired": "MCP tool is required.",
+        "timeoutLabel": "Timeout (ms)",
+        "timeoutPlaceholder": "5000",
         "typeCommand": "Command",
         "typeHttp": "HTTP request",
         "typeLabel": "Type",
         "typeWebhook": "Webhook",
         "typeWebhookLegacy": "Legacy webhook",
-        "types": {
-          "agent": "Agent",
-          "command": "Command",
-          "http": "HTTP",
-          "mcp_tool": "MCP tool",
-          "prompt": "Prompt"
-        },
         "urlInvalid": "Enter a valid http(s) URL.",
         "urlLabel": "URL",
         "urlPlaceholder": "https://example.com/hook",
@@ -28237,7 +28159,7 @@
         "title": "Auto-lock"
       },
       "contextInspector": {
-        "auditGap": "Some governance evidence is unavailable for this decision.",
+        "auditGap": "Governance history is incomplete because some projections failed.",
         "conflicts": "Conflicts",
         "decisionListLabel": "Recent governance decisions",
         "description": "Inspect why an action was chosen, which evidence and policy supported it, and whether facts remain in conflict.",
@@ -31198,19 +31120,6 @@
     "trustedDomainPlaceholder": "example.com",
     "trustedDomains": "Trusted",
     "verificationMode": "Mode"
-  },
-  "structuredConfig": {
-    "apply": "Apply",
-    "download": "Download",
-    "editorDescription": "Edit the structured configuration, validate it, then apply the changes.",
-    "editorLabel": "Structured configuration editor",
-    "format": "Format",
-    "import": "Import",
-    "invalid": "The configuration is invalid: {message}",
-    "json": "JSON",
-    "reset": "Reset",
-    "validate": "Validate",
-    "yaml": "YAML"
   },
   "subscription": {
     "account": {

@@ -40,6 +40,9 @@ jest.mock("sonner", () => ({
 jest.mock("./external/external-memory-tab", () => ({
   ExternalMemoryTab: () => <div data-testid="external-tab" />,
 }))
+jest.mock("@/components/rag/retrieval-control-panel", () => ({
+  RetrievalControlPanel: () => <div data-testid="retrieval-control-panel" />,
+}))
 
 // Control the viewport so we can exercise both the desktop resizable pane and
 // the narrow sheet. `useResizableLayout` stays real (localStorage-backed).

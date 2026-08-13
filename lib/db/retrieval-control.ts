@@ -149,6 +149,118 @@ export async function enqueueRetrievalJob(draft: RetrievalJobDraft): Promise<Ret
   })
 }
 
+export async function cancelStoredRetrievalJob(
+  id: string,
+  now: number = Date.now()
+): Promise<RetrievalJobRow> {
+  const db = getDb()
+  return db.transaction("rw", db.retrievalJobs, async () => {
+    const job = await db.retrievalJobs.get(id)
+    if (!job) throw new Error("Retrieval job not found")
+    if (!ACTIVE_JOB_STATUSES.includes(job.status)) {
+      throw new Error("Only active retrieval jobs can be cancelled")
+    }
+    const cancelled = transitionRetrievalJob(job, "cancelled", now, {
+      cancellationRequestedAt: now,
+      resultCode: "user_cancelled",
+    })
+    await db.retrievalJobs.put(cancelled)
+    return cancelled
+  })
+}
+
+export async function retryStoredRetrievalJob(
+  id: string,
+  input: { id: string; now?: number }
+): Promise<RetrievalJobRow> {
+  const db = getDb()
+  const previous = await db.retrievalJobs.get(id)
+  if (!previous) throw new Error("Retrieval job not found")
+  if (previous.status !== "failed" && previous.status !== "cancelled") {
+    throw new Error("Only failed or cancelled retrieval jobs can be retried")
+  }
+  if (!input.id || input.id === previous.id) {
+    throw new Error("A new retrieval job id is required for manual retry")
+  }
+  const now = input.now ?? Date.now()
+  return enqueueRetrievalJob({
+    id: input.id,
+    dedupeKey: `${previous.dedupeKey}:manual-retry:${input.id}`,
+    kind: previous.kind,
+    corpusId: previous.corpusId,
+    profileFingerprint: previous.profileFingerprint,
+    generationId: previous.generationId,
+    queuedAt: now,
+    maxAttempts: previous.maxAttempts,
+  })
+}
+
+export interface RetrievalControlSnapshot {
+  generations: RetrievalGenerationRow[]
+  jobs: RetrievalJobRow[]
+  traces: RetrievalTraceRow[]
+  tombstones: RetrievalTombstoneRow[]
+  migrations: RetrievalMigrationJournalRow[]
+  runtime: {
+    killSwitchEngaged: boolean
+    changedAt?: number
+    changedBy?: "user" | "migration" | "safety"
+    reasonCode?: string
+  }
+}
+
+function matchesCorpusScope(
+  corpusId: string,
+  input: { corpusIds?: readonly string[]; corpusPrefixes?: readonly string[] }
+): boolean {
+  const corpusIds = input.corpusIds ?? []
+  const corpusPrefixes = input.corpusPrefixes ?? []
+  if (corpusIds.length === 0 && corpusPrefixes.length === 0) return true
+  return (
+    corpusIds.includes(corpusId) || corpusPrefixes.some((prefix) => corpusId.startsWith(prefix))
+  )
+}
+
+export async function listRetrievalControlSnapshot(
+  input: {
+    corpusIds?: readonly string[]
+    corpusPrefixes?: readonly string[]
+  } = {}
+): Promise<RetrievalControlSnapshot> {
+  const db = getDb()
+  const [generations, jobs, traces, tombstones, migrations, runtime] = await Promise.all([
+    db.retrievalGenerations.toArray(),
+    db.retrievalJobs.toArray(),
+    db.retrievalTraces.toArray(),
+    db.retrievalTombstones.toArray(),
+    db.retrievalMigrationJournal.toArray(),
+    db.retrievalRuntimeState.get("global"),
+  ])
+  return {
+    generations: generations
+      .filter((row) => matchesCorpusScope(row.corpusId, input))
+      .sort((left, right) => right.createdAt - left.createdAt),
+    jobs: jobs
+      .filter((row) => matchesCorpusScope(row.corpusId, input))
+      .sort((left, right) => right.queuedAt - left.queuedAt),
+    traces: traces
+      .filter((row) => matchesCorpusScope(row.corpusId, input))
+      .sort((left, right) => right.createdAt - left.createdAt),
+    tombstones: tombstones
+      .filter((row) => matchesCorpusScope(row.corpusId, input))
+      .sort((left, right) => right.createdAt - left.createdAt),
+    migrations: migrations.sort((left, right) => right.updatedAt - left.updatedAt),
+    runtime: runtime
+      ? {
+          killSwitchEngaged: runtime.killSwitchEngaged,
+          changedAt: runtime.changedAt,
+          changedBy: runtime.changedBy,
+          reasonCode: runtime.reasonCode,
+        }
+      : { killSwitchEngaged: false },
+  }
+}
+
 export async function claimNextRetrievalJob(
   workerId: string,
   now: number = Date.now(),

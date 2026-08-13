@@ -25,6 +25,11 @@ jest.mock("motion/react", () => ({
   },
   useReducedMotion: () => true,
 }))
+jest.mock("@/components/rag/retrieval-control-panel", () => ({
+  RetrievalControlPanel: ({ corpusPrefixes }: { corpusPrefixes: string[] }) => (
+    <div data-testid="retrieval-control-panel">{corpusPrefixes.join(",")}</div>
+  ),
+}))
 
 import { TwinJobsTab } from "./twin-jobs-tab"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
@@ -58,6 +63,13 @@ beforeEach(async () => {
 })
 
 describe("TwinJobsTab", () => {
+  it("wires the twin scope into the shared retrieval control plane", async () => {
+    render(<TwinJobsTab twinId="twin_alice" />)
+    expect(await screen.findByTestId("retrieval-control-panel")).toHaveTextContent(
+      "twin:twin_alice:"
+    )
+  })
+
   it("renders the empty hint when there are no jobs", async () => {
     render(<TwinJobsTab twinId="twin_alice" />)
     expect(await screen.findByText(/No jobs yet/i)).toBeInTheDocument()
