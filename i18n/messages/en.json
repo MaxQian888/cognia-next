@@ -10362,6 +10362,7 @@
         "liveActivity": "Live activity card",
         "liveActivityHint": "Show a live progress card in chat while the assistant is working (tool count, elapsed time, current action, file edits). On by default; turn off for noisy channels.",
         "mode": "Mode",
+        "modelManagedByTarget": "Provider and model are managed by the selected Agent Team or Workflow.",
         "modelOverride": "Model override",
         "modelOverridePlaceholder": "claude-opus-4-7",
         "modeOptions": {
@@ -10394,6 +10395,8 @@
           "team": "Agent Team",
           "workflow": "Workflow"
         },
+        "providerModelDefault": "Use Adapter default",
+        "providerModelOverride": "Provider and model",
         "providerOverride": "Provider override",
         "providerOverridePlaceholder": "anthropic",
         "quietHours": {
@@ -10407,6 +10410,7 @@
         "quietHoursOverride": "Quiet hours (this conversation)",
         "quietHoursTo": "To",
         "quietHoursTz": "Time zone",
+        "referenceMissing": "{id} (missing)",
         "requireHitlForWrites": {
           "help": "When off, write-tier skills run without the A2UI confirm card. Destructive skills always require HITL regardless. Defaults on.",
           "label": "Require HITL for write skills"
@@ -10429,7 +10433,8 @@
         "teamBindingPlaceholder": "(none — replies use the character)",
         "workflowBinding": "Visual Workflow (name or id)",
         "workflowBindingHelp": "When set (and no team is bound — a team wins), inbound messages run this Visual Workflow instead of a single character; the message text is the trigger payload and progress streams back to the conversation.",
-        "workflowBindingPlaceholder": "(none — replies use the character)"
+        "workflowBindingPlaceholder": "(none — replies use the character)",
+        "workflowProduction": "Production"
       },
       "gearAria": "Open per-conversation override settings",
       "noOverrideYet": "No override yet — defaults are inherited from the adapter.",

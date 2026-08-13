@@ -10362,6 +10362,7 @@
         "liveActivity": "实时活动卡片",
         "liveActivityHint": "助手工作时在对话中显示实时进度卡片（工具数、用时、当前操作、文件编辑）。默认开启；频道消息过多时可关闭。",
         "mode": "模式",
+        "modelManagedByTarget": "Provider 和 Model 由所选 Agent Team 或 Workflow 管理。",
         "modelOverride": "Model 覆盖",
         "modelOverridePlaceholder": "claude-opus-4-7",
         "modeOptions": {
@@ -10394,6 +10395,8 @@
           "team": "Agent Team",
           "workflow": "Workflow"
         },
+        "providerModelDefault": "使用 Adapter 默认值",
+        "providerModelOverride": "Provider 和 Model",
         "providerOverride": "Provider 覆盖",
         "providerOverridePlaceholder": "anthropic",
         "quietHours": {
@@ -10407,6 +10410,7 @@
         "quietHoursOverride": "勿扰时段 (本会话)",
         "quietHoursTo": "到",
         "quietHoursTz": "时区",
+        "referenceMissing": "{id}（已缺失）",
         "requireHitlForWrites": {
           "help": "关闭后写入类 skill 无需 A2UI 确认卡片即可执行。破坏性 skill 始终需要 HITL。默认开启。",
           "label": "写入类 Skill 需要二次确认"
@@ -10429,7 +10433,8 @@
         "teamBindingPlaceholder": "（无 —— 由角色回复）",
         "workflowBinding": "可视化工作流（名称或 id）",
         "workflowBindingHelp": "设置后（且未绑定团队 —— 团队优先），入站消息将运行该可视化工作流而非单个角色；消息文本作为触发载荷，进度会回流到会话中。",
-        "workflowBindingPlaceholder": "（无 —— 由角色回复）"
+        "workflowBindingPlaceholder": "（无 —— 由角色回复）",
+        "workflowProduction": "Production"
       },
       "gearAria": "打开该会话的覆盖设置",
       "noOverrideYet": "尚未配置覆盖 — 当前继承适配器默认。",

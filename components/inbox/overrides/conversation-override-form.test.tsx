@@ -8,10 +8,12 @@ import userEvent from "@testing-library/user-event"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { ConversationOverrideForm } from "./conversation-override-form"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
+  useAgentTeamStore.setState({ teams: {} })
 })
 
 describe("ConversationOverrideForm", () => {
@@ -178,8 +180,9 @@ describe("ConversationOverrideForm", () => {
     expect(screen.getByTestId("conv-override-character-state")).toHaveTextContent("Inherit")
     expect(screen.queryByTestId("conv-override-character")).not.toBeInTheDocument()
     expect(screen.getByTestId("conv-override-target")).toHaveTextContent("Inherit")
-    expect(screen.getByTestId("conv-override-provider")).toHaveValue("")
-    expect(screen.getByTestId("conv-override-model")).toHaveValue("")
+    expect(screen.getByTestId("conv-override-provider-model")).toHaveTextContent(
+      "Use Adapter default"
+    )
   })
 
   it("seeds fields from initialRow", () => {
@@ -207,10 +210,9 @@ describe("ConversationOverrideForm", () => {
         initialRow={initialRow}
       />
     )
-    expect(screen.getByTestId("conv-override-character")).toHaveValue("char_alpha")
-    expect(screen.getByTestId("conv-override-provider")).toHaveValue("codex")
-    expect(screen.getByTestId("conv-override-model")).toHaveValue("gpt-5")
-    expect(screen.getByTestId("conv-override-workflow")).toHaveValue("wf_seed")
+    expect(screen.getByTestId("conv-override-character")).toHaveTextContent("char_alpha")
+    expect(screen.getByTestId("conv-override-model-managed")).toBeInTheDocument()
+    expect(screen.getByTestId("conv-override-workflow")).toHaveTextContent("wf_seed")
     expect(screen.getByTestId("conv-override-cu")).toHaveAttribute("data-state", "checked")
     expect(screen.getByTestId("conv-override-schedule-tools")).toHaveAttribute(
       "data-state",
@@ -222,6 +224,10 @@ describe("ConversationOverrideForm", () => {
   it("upserts a new row when Save is clicked", async () => {
     const user = userEvent.setup()
     const onDone = jest.fn()
+    await getDb().characters.put({ id: "char_bravo", name: "Bravo" } as never)
+    useAgentTeamStore.setState({
+      teams: { team_research: { id: "team_research", name: "Research Team" } as never },
+    })
     render(
       <ConversationOverrideForm
         adapterId="lark-1"
@@ -232,17 +238,12 @@ describe("ConversationOverrideForm", () => {
     )
     await user.click(screen.getByTestId("conv-override-character-state"))
     await user.click(screen.getByRole("option", { name: "Specific Character" }))
-    fireEvent.change(screen.getByTestId("conv-override-character"), {
-      target: { value: "char_bravo" },
-    })
-    fireEvent.change(screen.getByTestId("conv-override-provider"), {
-      target: { value: "anthropic" },
-    })
+    await user.click(screen.getByTestId("conv-override-character"))
+    await user.click(await screen.findByRole("option", { name: "Bravo" }))
     await user.click(screen.getByTestId("conv-override-target"))
     await user.click(screen.getByRole("option", { name: "Agent Team" }))
-    fireEvent.change(screen.getByTestId("conv-override-team"), {
-      target: { value: "team_research" },
-    })
+    await user.click(screen.getByTestId("team-picker-trigger"))
+    await user.click(await screen.findByRole("option", { name: "Research Team" }))
     fireEvent.click(screen.getByTestId("conv-override-proactive"))
     fireEvent.click(screen.getByTestId("conv-override-save"))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
@@ -251,11 +252,45 @@ describe("ConversationOverrideForm", () => {
       .equals("lark:lark-1:oc_persist")
       .first()
     expect(persisted?.characterId).toBe("char_bravo")
-    expect(persisted?.providerOverride).toBe("anthropic")
+    expect(persisted?.providerOverride).toBeUndefined()
+    expect(persisted?.modelOverride).toBeUndefined()
     expect(persisted?.teamId).toBe("team_research")
     expect(persisted?.workflowId).toBeUndefined()
     expect(persisted?.workflowDisabled).toBe(true)
     expect(persisted?.proactivePush).toBe(true)
+  })
+
+  it("selects Provider and Model from the configured catalog for Direct Agent", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      providerSettings: { anthropic: { enabled: true, models: ["claude-test"] } },
+    } as never)
+    const user = userEvent.setup()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_direct_model"
+        sessionId="s_direct_model"
+      />
+    )
+    await user.click(screen.getByTestId("conv-override-target"))
+    await user.click(screen.getByRole("option", { name: "Direct Agent" }))
+    await user.click(screen.getByTestId("conv-override-provider-model"))
+    await user.click(await screen.findByRole("option", { name: "anthropic · claude-test" }))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(async () => {
+      expect(
+        await getDb()
+          .conversationOverrides.where("conversationKey")
+          .equals("lark:lark-1:oc_direct_model")
+          .first()
+      ).toMatchObject({
+        providerOverride: "anthropic",
+        modelOverride: "claude-test",
+        teamDisabled: true,
+        workflowDisabled: true,
+      })
+    })
   })
 
   it("persists the explicit scheduler-tool opt-in", async () => {
@@ -341,6 +376,10 @@ describe("ConversationOverrideForm", () => {
       createdAt: 0,
       updatedAt: 0,
     })
+    await getDb().settings.put({
+      id: "singleton",
+      providerSettings: { new: { enabled: true, models: ["model"] } },
+    } as never)
     const existing = await getDb().conversationOverrides.get("co-existing")
     render(
       <ConversationOverrideForm
@@ -350,9 +389,8 @@ describe("ConversationOverrideForm", () => {
         initialRow={existing}
       />
     )
-    fireEvent.change(screen.getByTestId("conv-override-provider"), {
-      target: { value: "new" },
-    })
+    await userEvent.click(screen.getByTestId("conv-override-provider-model"))
+    await userEvent.click(await screen.findByRole("option", { name: "new · model" }))
     fireEvent.click(screen.getByTestId("conv-override-save"))
     await waitFor(async () => {
       const refreshed = await getDb().conversationOverrides.get("co-existing")
@@ -410,11 +448,42 @@ describe("ConversationOverrideForm", () => {
     )
     await user.click(screen.getByTestId("conv-override-character-state"))
     await user.click(screen.getByRole("option", { name: "Specific Character" }))
-    fireEvent.change(screen.getByTestId("conv-override-character"), {
-      target: { value: "abc" },
-    })
     fireEvent.click(screen.getByTestId("conv-override-cancel"))
     expect(await getDb().conversationOverrides.count()).toBe(0)
+  })
+
+  it("lists only active production Workflow deployments", async () => {
+    await getDb().workflows.bulkPut([
+      { id: "wf_active", name: "Active Workflow" },
+      { id: "wf_draft", name: "Draft Workflow" },
+    ] as never)
+    await getDb().workflowDeployments.bulkPut([
+      {
+        id: "dep_active",
+        workflowId: "wf_active",
+        environment: "production",
+        status: "active",
+      },
+      {
+        id: "dep_draft",
+        workflowId: "wf_draft",
+        environment: "production",
+        status: "inactive",
+      },
+    ] as never)
+    const user = userEvent.setup()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_workflow_picker"
+        sessionId="s_workflow_picker"
+      />
+    )
+    await user.click(screen.getByTestId("conv-override-target"))
+    await user.click(screen.getByRole("option", { name: "Workflow" }))
+    await user.click(screen.getByTestId("conv-override-workflow"))
+    expect(await screen.findByRole("option", { name: /Active Workflow/ })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /Draft Workflow/ })).not.toBeInTheDocument()
   })
 
   it("promotes supported explicit values without rewriting conversation overrides", async () => {

@@ -17,6 +17,7 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
 import { InfoIcon, ShieldAlertIcon, XIcon } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -45,7 +46,11 @@ import type {
   InboundActivationPolicy,
 } from "@/types/connectors/policy"
 import { ConversationBehaviorEditor } from "@/components/settings/connections/forms/conversation-behavior-editor"
-import type { ImConfigSource } from "@/lib/connectors/effective-config"
+import type { ImConfigSource, ImExecutionTarget } from "@/lib/connectors/effective-config"
+import { EntityPicker } from "@/components/settings/connections/forms/_shared/entity-picker"
+import { TeamPicker } from "@/components/settings/connections/forms/_shared/team-picker"
+import { collectOptions } from "@/components/inbox/provider-model-switcher"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 type SkillAllowMode = "inherit" | "all" | "whitelist"
 
@@ -112,12 +117,48 @@ export interface ConversationOverrideFormProps {
       ImConfigSource
     >
   >
+  effectiveTargetKind?: ImExecutionTarget["kind"]
 }
 
 export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
-  const { adapterId, conversationKey, initialRow, sessionId, onDone, onCancel, effectiveSources } =
-    props
+  const {
+    adapterId,
+    conversationKey,
+    initialRow,
+    sessionId,
+    onDone,
+    onCancel,
+    effectiveSources,
+    effectiveTargetKind,
+  } = props
   const t = useTranslations("inbox.conversationOverride")
+  const characters = useLiveQuery(
+    () => (typeof window === "undefined" ? Promise.resolve([]) : getDb().characters.toArray()),
+    []
+  )
+  const executableWorkflows = useLiveQuery(async () => {
+    if (typeof window === "undefined") return []
+    const [workflows, deployments] = await Promise.all([
+      getDb().workflows.toArray(),
+      getDb().workflowDeployments.toArray(),
+    ])
+    const activeProductionIds = new Set(
+      deployments
+        .filter(
+          (deployment) => deployment.environment === "production" && deployment.status === "active"
+        )
+        .map((deployment) => deployment.workflowId)
+    )
+    return workflows.filter((workflow) => activeProductionIds.has(workflow.id))
+  }, [])
+  const settings = useLiveQuery<AppSettings | undefined>(
+    () =>
+      typeof window === "undefined"
+        ? Promise.resolve(undefined)
+        : getDb().settings.get("singleton"),
+    []
+  )
+  const providerModelOptions = collectOptions(settings)
 
   const [mode, setMode] = useState<ConnectorMode | "unset">(
     (initialRow?.mode as ConnectorMode | undefined) ?? "unset"
@@ -261,8 +302,14 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           allowComputerUse: allowComputerUse ? true : undefined,
           allowGoalDriving: allowGoalDriving ? true : undefined,
           allowScheduleTools: allowScheduleTools ? true : undefined,
-          providerOverride: providerOverride.trim() || undefined,
-          modelOverride: modelOverride.trim() || undefined,
+          providerOverride:
+            targetKind === "team" || targetKind === "workflow"
+              ? undefined
+              : providerOverride.trim() || undefined,
+          modelOverride:
+            targetKind === "team" || targetKind === "workflow"
+              ? undefined
+              : modelOverride.trim() || undefined,
           muted: muted ? true : undefined,
           allowedBuiltInSkillIds: resolvedAllowed,
           requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
@@ -320,8 +367,16 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           : targetKind === "direct"
             ? { defaultTeamId: undefined, defaultWorkflowId: undefined }
             : {}),
-      ...(providerOverride.trim() ? { defaultProvider: providerOverride.trim() } : {}),
-      ...(modelOverride.trim() ? { defaultModel: modelOverride.trim() } : {}),
+      ...((targetKind === "direct" ||
+        (targetKind === "inherit" && effectiveTargetKind === "direct")) &&
+      providerOverride.trim()
+        ? { defaultProvider: providerOverride.trim() }
+        : {}),
+      ...((targetKind === "direct" ||
+        (targetKind === "inherit" && effectiveTargetKind === "direct")) &&
+      modelOverride.trim()
+        ? { defaultModel: modelOverride.trim() }
+        : {}),
       ...(muted ? { muted: true } : {}),
       ...(resolvedQuietHours ? { quietHours: resolvedQuietHours } : {}),
       ...(resolvedAllowed !== undefined
@@ -402,12 +457,17 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           </SelectContent>
         </Select>
         {characterState === "character" && (
-          <Input
+          <EntityPicker
             id="conv-override-character"
             value={characterId}
-            placeholder={t("fields.characterPlaceholder")}
-            onChange={(e) => setCharacterId(e.target.value)}
-            data-testid="conv-override-character"
+            items={(characters ?? []).map((character) => ({
+              id: character.id,
+              label: character.name,
+            }))}
+            emptyLabel={t("fields.characterPlaceholder")}
+            missingLabel={(id) => t("fields.referenceMissing", { id })}
+            onChange={(id) => setCharacterId(id ?? "")}
+            triggerTestId="conv-override-character"
           />
         )}
       </div>
@@ -433,12 +493,10 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
       {targetKind === "team" && (
         <div className="space-y-2">
           <Label htmlFor="conv-override-team">{t("fields.teamBinding")}</Label>
-          <Input
+          <TeamPicker
             id="conv-override-team"
             value={teamId}
-            placeholder={t("fields.teamBindingPlaceholder")}
-            onChange={(e) => setTeamId(e.target.value)}
-            data-testid="conv-override-team"
+            onChange={(id) => setTeamId(id ?? "")}
           />
           <p className="text-[11px] text-muted-foreground">{t("fields.teamBindingHelp")}</p>
         </div>
@@ -447,12 +505,18 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
       {targetKind === "workflow" && (
         <div className="space-y-2">
           <Label htmlFor="conv-override-workflow">{t("fields.workflowBinding")}</Label>
-          <Input
+          <EntityPicker
             id="conv-override-workflow"
             value={workflowId}
-            placeholder={t("fields.workflowBindingPlaceholder")}
-            onChange={(e) => setWorkflowId(e.target.value)}
-            data-testid="conv-override-workflow"
+            items={(executableWorkflows ?? []).map((workflow) => ({
+              id: workflow.id,
+              label: workflow.name,
+              description: t("fields.workflowProduction"),
+            }))}
+            emptyLabel={t("fields.workflowBindingPlaceholder")}
+            missingLabel={(id) => t("fields.referenceMissing", { id })}
+            onChange={(id) => setWorkflowId(id ?? "")}
+            triggerTestId="conv-override-workflow"
           />
           <p className="text-[11px] text-muted-foreground">{t("fields.workflowBindingHelp")}</p>
         </div>
@@ -517,26 +581,44 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="conv-override-provider">{t("fields.providerOverride")}</Label>
-          <Input
-            id="conv-override-provider"
-            value={providerOverride}
-            placeholder={t("fields.providerOverridePlaceholder")}
-            onChange={(e) => setProviderOverride(e.target.value)}
-            data-testid="conv-override-provider"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="conv-override-model">{t("fields.modelOverride")}</Label>
-          <Input
-            id="conv-override-model"
-            value={modelOverride}
-            placeholder={t("fields.modelOverridePlaceholder")}
-            onChange={(e) => setModelOverride(e.target.value)}
-            data-testid="conv-override-model"
-          />
-        </div>
+        {targetKind === "team" ||
+        targetKind === "workflow" ||
+        (targetKind === "inherit" && effectiveTargetKind && effectiveTargetKind !== "direct") ? (
+          <p className="text-xs text-muted-foreground" data-testid="conv-override-model-managed">
+            {t("fields.modelManagedByTarget")}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            <Label htmlFor="conv-override-provider-model">
+              {t("fields.providerModelOverride")}
+            </Label>
+            <EntityPicker
+              id="conv-override-provider-model"
+              value={
+                providerOverride || modelOverride
+                  ? `${providerOverride}:${modelOverride}`
+                  : undefined
+              }
+              items={providerModelOptions.map((option) => ({
+                id: `${option.providerId}:${option.modelId}`,
+                label: option.label,
+              }))}
+              emptyLabel={t("fields.providerModelDefault")}
+              missingLabel={(id) => t("fields.referenceMissing", { id })}
+              onChange={(value) => {
+                if (!value) {
+                  setProviderOverride("")
+                  setModelOverride("")
+                  return
+                }
+                const separator = value.indexOf(":")
+                setProviderOverride(value.slice(0, separator))
+                setModelOverride(value.slice(separator + 1))
+              }}
+              triggerTestId="conv-override-provider-model"
+            />
+          </div>
+        )}
       </div>
 
       <div className="space-y-2">

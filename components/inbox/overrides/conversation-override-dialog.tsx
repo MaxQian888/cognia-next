@@ -65,6 +65,7 @@ export function ConversationOverrideDialog(props: ConversationOverrideDialogProp
             activationTtlHours:
               effectiveConfig?.behavior.activationTtlMs.source ?? "system-default",
           }}
+          effectiveTargetKind={effectiveConfig?.target.effective.kind}
           onDone={() => onOpenChange(false)}
           onCancel={() => onOpenChange(false)}
         />
