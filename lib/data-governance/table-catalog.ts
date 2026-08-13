@@ -162,6 +162,7 @@ export const CORE_TABLE_NAMES = [
   "larkWebSessions",
   "loopEvents",
   "loops",
+  "matrixPendingEncryptedEvents",
   "mcpAuditLog",
   "mcpCapabilityCache",
   "mcpServers",
@@ -183,6 +184,10 @@ export const CORE_TABLE_NAMES = [
   "opticalArchives",
   "outboundQueue",
   "pairedDevices",
+  "performanceCaptureAttachments",
+  "performanceCaptureChunks",
+  "performanceCaptureGaps",
+  "performanceCaptures",
   "petAchievements",
   "petActivityLog",
   "petCharacterBindings",
@@ -516,6 +521,7 @@ const QUEUE_TABLES = new Set<CoreTableName>(
     /Jobs$|Queue$|Tasks$|Interrupts$|Materializations$|BindRequests$/.test(name)
   )
 )
+QUEUE_TABLES.add("matrixPendingEncryptedEvents")
 
 const SECRET_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
 
@@ -542,6 +548,7 @@ const VERY_LARGE_TABLES = new Set<CoreTableName>([
   "inboxTelemetryEvents",
   "memoryAuditEvents",
   "messages",
+  "matrixPendingEncryptedEvents",
   "projectChunks",
   "twinChunks",
   "workflowRunEvents",
@@ -651,6 +658,13 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     reason:
       "Terminal inbound jobs are compacted immediately and retained for 7 or 30 days by outcome.",
   },
+  matrixPendingEncryptedEvents: {
+    mode: "cap",
+    maxRows: 10_000,
+    enforcement: "domain",
+    reason:
+      "The Matrix E2EE runtime caps active recovery rows per adapter and retains recovery-required rows until explicit recovery or adapter deletion.",
+  },
   agentTraces: {
     mode: "ttl",
     days: 30,
@@ -669,6 +683,13 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     enforcement: "central",
     executorId: "evalArtifacts",
     reason: "Unreferenced rows carry expiresAt and are removed by the central eval-artifact sweep.",
+  },
+  ocrResults: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "ocrResults",
+    reason: "The storage retention sweeper prunes cached OCR output through the createdAt index.",
   },
   terminalHistory: {
     mode: "cap",
@@ -744,9 +765,11 @@ function createEntry(name: CoreTableName): DataTableCatalogEntry {
     role,
     sensitivity: SECRET_TABLES.has(name)
       ? "secret"
-      : /messages|Drafts|Sources|Evidence|ContentObjects/.test(name)
+      : name === "matrixPendingEncryptedEvents"
         ? "confidential"
-        : "internal",
+        : /messages|Drafts|Sources|Evidence|ContentObjects/.test(name)
+          ? "confidential"
+          : "internal",
     accountScope,
     backupPolicy: backupFor(name, role),
     syncPolicy: COMPANION_SYNC_TABLES.has(name)

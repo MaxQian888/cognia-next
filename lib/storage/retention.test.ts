@@ -8,6 +8,7 @@ import {
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { saveSettings, getSettings } from "@/lib/db/settings"
+import { DEFAULT_OCR_SETTINGS } from "@/types/ocr"
 
 // Wrap getSettings so one test can force the read to reject; every other call
 // falls through to the real implementation (which reads the saved row).
@@ -24,6 +25,7 @@ beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   await dbFixture.restore()
   await getDb().agentTraces.clear()
+  await getDb().ocrResults.clear()
 })
 
 function span(id: string, startTime: number) {
@@ -117,6 +119,7 @@ describe("pruneRetainedTables", () => {
     expect(out).toEqual([
       { id: "agentTraces", removed: 1 },
       { id: "evalArtifacts", removed: 0 },
+      { id: "ocrResults", removed: 0 },
     ])
     expect((await getDb().agentTraces.toArray()).map((r) => r.id)).toEqual(["fresh"])
   })
@@ -124,6 +127,36 @@ describe("pruneRetainedTables", () => {
   it("exposes agentTraces as a default target", () => {
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("agentTraces")
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("evalArtifacts")
+    expect(RETENTION_TARGETS.map((t) => t.id)).toContain("ocrResults")
+  })
+
+  it("prunes stale OCR cache rows through the shared configured window", async () => {
+    const now = Date.now()
+    await getDb().ocrResults.bulkPut([
+      {
+        id: "old",
+        fileSha: "old",
+        providerId: "mistral-ocr",
+        langs: "en",
+        result: "{}",
+        createdAt: now - 40 * MS_PER_DAY,
+        bytesIn: 100,
+      },
+      {
+        id: "fresh",
+        fileSha: "fresh",
+        providerId: "mistral-ocr",
+        langs: "en",
+        result: "{}",
+        createdAt: now - MS_PER_DAY,
+        bytesIn: 100,
+      },
+    ])
+
+    const out = await pruneRetainedTables(30)
+
+    expect(out).toContainEqual({ id: "ocrResults", removed: 1 })
+    expect((await getDb().ocrResults.toArray()).map((row) => row.id)).toEqual(["fresh"])
   })
 })
 
@@ -148,6 +181,39 @@ describe("startStorageRetentionSweeper", () => {
     await getDb().agentTraces.bulkPut([span("ancient", now - 999 * MS_PER_DAY)])
     const stop = await startStorageRetentionSweeper()
     expect(await getDb().agentTraces.get("ancient")).toBeDefined()
+    stop()
+  })
+
+  it("uses the OCR cache TTL independently from trace retention", async () => {
+    await saveSettings({
+      storageRetention: { traceRetentionDays: 0 },
+      ocrSettings: { ...DEFAULT_OCR_SETTINGS, cacheTtlDays: 7 },
+    })
+    const now = Date.now()
+    await getDb().ocrResults.bulkPut([
+      {
+        id: "old-ocr",
+        fileSha: "old-ocr",
+        providerId: "mistral-ocr",
+        langs: "en",
+        result: "{}",
+        createdAt: now - 10 * MS_PER_DAY,
+        bytesIn: 100,
+      },
+      {
+        id: "fresh-ocr",
+        fileSha: "fresh-ocr",
+        providerId: "mistral-ocr",
+        langs: "en",
+        result: "{}",
+        createdAt: now - MS_PER_DAY,
+        bytesIn: 100,
+      },
+    ])
+
+    const stop = await startStorageRetentionSweeper()
+
+    expect((await getDb().ocrResults.toArray()).map((row) => row.id)).toEqual(["fresh-ocr"])
     stop()
   })
 

@@ -21,6 +21,7 @@
 
 import { pruneOlderThan as pruneAgentTraces } from "@/lib/db/agent-traces"
 import { deleteExpiredEvalArtifacts } from "@/lib/db/eval-lab"
+import { purgeOcrCacheOlderThan } from "@/lib/db/ocr-results"
 import { recoverEvalQueueOnStartup } from "@/lib/ai/eval/recovery"
 import { getSettings, DEFAULTS } from "@/lib/db/settings"
 import { centralRetentionExecutorIds } from "@/lib/data-governance/table-catalog"
@@ -53,6 +54,13 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
       return removed.samplesDeleted + removed.assetsDeleted
     },
   },
+  ocrResults: {
+    policy: "configured-window",
+    prune: (cutoff) => {
+      const now = Date.now()
+      return purgeOcrCacheOlderThan(Math.max(0, now - cutoff), now)
+    },
+  },
 }
 
 function governedRetentionTargets(): RetentionTarget[] {
@@ -70,6 +78,8 @@ export interface RetentionResult {
   removed: number
 }
 
+export type RetentionDaysByTarget = Readonly<Record<string, number>>
+
 /**
  * Prune configured-window targets older than `now() - days`; `days <= 0`
  * disables only those targets. Independently expiring rows still run so a
@@ -78,17 +88,17 @@ export interface RetentionResult {
  */
 export async function pruneRetainedTables(
   days: number,
-  targets: RetentionTarget[] = RETENTION_TARGETS
+  targets: RetentionTarget[] = RETENTION_TARGETS,
+  retentionDaysByTarget: RetentionDaysByTarget = {}
 ): Promise<RetentionResult[]> {
-  const configuredWindowEnabled = Number.isFinite(days) && days > 0
-  const cutoff = configuredWindowEnabled ? Date.now() - days * MS_PER_DAY : Date.now()
   const out: RetentionResult[] = []
   for (const target of targets) {
-    if (
-      (target.policy ?? "configured-window") === "configured-window" &&
-      !configuredWindowEnabled
-    ) {
-      continue
+    const policy = target.policy ?? "configured-window"
+    let cutoff = Date.now()
+    if (policy === "configured-window") {
+      const targetDays = retentionDaysByTarget[target.id] ?? days
+      if (!Number.isFinite(targetDays) || targetDays <= 0) continue
+      cutoff -= targetDays * MS_PER_DAY
     }
     try {
       const removed = await target.prune(cutoff)
@@ -101,22 +111,37 @@ export async function pruneRetainedTables(
   return out
 }
 
-function defaultRetentionDays(): number {
-  return DEFAULTS.storageRetention?.traceRetentionDays ?? 30
+interface RetentionWindows {
+  traceRetentionDays: number
+  ocrCacheTtlDays: number
 }
 
-async function readRetentionDays(): Promise<number> {
+function defaultRetentionWindows(): RetentionWindows {
+  return {
+    traceRetentionDays: DEFAULTS.storageRetention?.traceRetentionDays ?? 30,
+    ocrCacheTtlDays: DEFAULTS.ocrSettings?.cacheTtlDays ?? 30,
+  }
+}
+
+async function readRetentionWindows(): Promise<RetentionWindows> {
   try {
     const settings = await getSettings()
-    return settings.storageRetention?.traceRetentionDays ?? defaultRetentionDays()
+    const defaults = defaultRetentionWindows()
+    return {
+      traceRetentionDays:
+        settings.storageRetention?.traceRetentionDays ?? defaults.traceRetentionDays,
+      ocrCacheTtlDays: settings.ocrSettings?.cacheTtlDays ?? defaults.ocrCacheTtlDays,
+    }
   } catch {
-    return defaultRetentionDays()
+    return defaultRetentionWindows()
   }
 }
 
 async function sweepOnce(): Promise<void> {
-  const days = await readRetentionDays()
-  await pruneRetainedTables(days)
+  const windows = await readRetentionWindows()
+  await pruneRetainedTables(windows.traceRetentionDays, RETENTION_TARGETS, {
+    ocrResults: windows.ocrCacheTtlDays,
+  })
 }
 
 /**

@@ -73,6 +73,7 @@ export function OcrDetailPanel({
           <Switch
             checked={isEnabled}
             onCheckedChange={onToggleEnabled}
+            disabled={status === "unsupported"}
             aria-label={t("ocr.detail.enable")}
           />
         </div>

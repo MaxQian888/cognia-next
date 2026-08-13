@@ -770,6 +770,27 @@ export class CogniaDB extends Dexie {
   runRecords!: Table<RunRecordRow, [string, number]>
   // v90 — Conversation folders. See `lib/db/session-folders.ts`.
   sessionFolders!: Table<SessionFolder, string>
+  // v160 — encrypted, target-scoped performance evidence.
+  performanceCaptures!: Table<import("@/lib/perf/capture-types").PerformanceCaptureRow, string>
+  performanceCaptureChunks!: Table<
+    import("@/lib/perf/capture-types").PerformanceCaptureChunkRow,
+    string
+  >
+  performanceCaptureAttachments!: Table<
+    import("@/lib/perf/capture-types").PerformanceCaptureAttachmentRow,
+    string
+  >
+  performanceCaptureGaps!: Table<
+    import("@/lib/perf/capture-types").PerformanceCaptureGapRow,
+    string
+  >
+  // v162 — local-only Matrix encrypted-event recovery queue. Raw encrypted
+  // events never enter account sync/export; the Matrix adapter owns retry and
+  // terminal recovery-required state through `matrix-pending-events.ts`.
+  matrixPendingEncryptedEvents!: Table<
+    import("./matrix-pending-events").MatrixPendingEncryptedEventRow,
+    string
+  >
 
   constructor(name = LEGACY_COGNIA_DB_NAME, connectionOwner = "unspecified") {
     super(name)
@@ -3854,6 +3875,44 @@ export class CogniaDB extends Dexie {
         }
         if (rows.length > 0) await outbound.bulkPut(rows)
       })
+
+    // v160 — encrypted performance captures. Metadata exposes only structural
+    // lifecycle/accounting fields; frame, attachment, annotation, summary,
+    // budget, and verdict payloads are encrypted before they reach Dexie.
+    this.version(160).stores({
+      performanceCaptures:
+        "&id, status, startedAt, updatedAt, stoppedAt, pinned, sourceKind, sourceId, targetId, trustState, importedAt",
+      performanceCaptureChunks:
+        "&id, &[captureId+ordinal], captureId, [captureId+firstSequence], [captureId+lastSequence]",
+      performanceCaptureAttachments: "&id, &[captureId+ordinal], captureId",
+      performanceCaptureGaps: "&id, &[captureId+ordinal], captureId, reason",
+    })
+
+    // v161 — normalize QQ Official's legacy settings.transport field into the
+    // first-class transportMode column. Runtime, inbound-server registration,
+    // restart fingerprints, and UI now share this single source of truth.
+    this.version(161).upgrade(async (tx) => {
+      const table = tx.table<AdapterInstanceRow, string>("adapterInstances")
+      const rows = await table.where("type").equals("qq-official").toArray()
+      for (const row of rows) {
+        const settings = { ...(row.settings ?? {}) } as Record<string, unknown>
+        const legacyTransport = settings.transport
+        if (legacyTransport === "gateway" || legacyTransport === "webhook") {
+          row.transportMode = legacyTransport
+        }
+        delete settings.transport
+        row.settings = settings
+      }
+      if (rows.length > 0) await table.bulkPut(rows)
+    })
+
+    // v162 — durable local-only Matrix E2EE recovery. The compound adapter /
+    // state / retry index supports bounded retry scans without exposing the
+    // encrypted payload through the cross-device sync registry.
+    this.version(162).stores({
+      matrixPendingEncryptedEvents:
+        "&id, &[adapterId+eventId], [adapterId+state+nextAttemptAt], adapterId, roomId, state, firstSeenAt, updatedAt",
+    })
 
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.

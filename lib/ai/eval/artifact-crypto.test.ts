@@ -1,10 +1,13 @@
 /** @jest-environment node */
 
 import {
+  decryptAccountArtifactBytes,
   decryptEvalArtifact,
   encryptEvalArtifact,
   loadOrCreateEvalArtifactKey,
   loadOrCreateDesktopEvalKey,
+  encryptAccountArtifactBytes,
+  loadOrCreateAccountArtifactKey,
 } from "./artifact-crypto"
 import type { KeyringStore } from "@/lib/credentials/keyring-store"
 
@@ -66,5 +69,34 @@ describe("evaluation artifact encryption", () => {
         getBrowserVault: () => null,
       })
     ).rejects.toThrow("unlocked account vault")
+  })
+
+  it("provides domain-separated binary AES-GCM with caller-bound AAD", async () => {
+    const rawKey = crypto.getRandomValues(new Uint8Array(32))
+    const aad = new TextEncoder().encode("performance|account-a|target-a|capture-a|0|frames")
+    const envelope = await encryptAccountArtifactBytes(
+      rawKey,
+      new TextEncoder().encode("sensitive"),
+      aad
+    )
+    await expect(decryptAccountArtifactBytes(rawKey, envelope, aad)).resolves.toEqual(
+      new TextEncoder().encode("sensitive")
+    )
+    await expect(
+      decryptAccountArtifactBytes(rawKey, envelope, new TextEncoder().encode("wrong-capture"))
+    ).rejects.toThrow()
+  })
+
+  it("uses a separate account-scoped performance domain key without changing eval v1", async () => {
+    const vault = {
+      accountId: "account-web",
+      loadSecret: jest.fn<Promise<string | null>, [string]>().mockResolvedValue(null),
+      storeSecret: jest.fn<Promise<void>, [string, string]>().mockResolvedValue(),
+    }
+    await loadOrCreateAccountArtifactKey("account-web", "performance", {
+      platform: "web",
+      getBrowserVault: () => vault,
+    })
+    expect(vault.loadSecret).toHaveBeenCalledWith("performance-artifact-data-key")
   })
 })

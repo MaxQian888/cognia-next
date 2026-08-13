@@ -10,6 +10,15 @@ const PBKDF2_ITERATIONS = 600_000
 const ENVELOPE_AAD = new TextEncoder().encode("cognia-eval-artifact/v1")
 const WEB_DATA_KEY_SECRET = "evaluation-artifact-data-key"
 
+export type AccountArtifactDomain = "evaluation" | "performance"
+
+export interface AccountArtifactEncryptedEnvelope {
+  version: "cognia-account-artifact/v1"
+  algorithm: "AES-GCM"
+  iv: Uint8Array
+  ciphertext: Uint8Array
+}
+
 export interface EvalEncryptedEnvelope {
   version: "cognia-eval-encrypted/v1"
   algorithm: "AES-GCM"
@@ -60,6 +69,47 @@ function decodeBase64(value: string): Uint8Array {
 async function importDataKey(rawKey: Uint8Array, usages: KeyUsage[]): Promise<CryptoKey> {
   if (rawKey.byteLength !== AES_KEY_BYTES) throw new Error("Evaluation data keys must be 256-bit")
   return subtle().importKey("raw", bufferSource(rawKey), { name: "AES-GCM" }, false, usages)
+}
+
+export async function encryptAccountArtifactBytes(
+  rawKey: Uint8Array,
+  plainText: Uint8Array,
+  additionalData: Uint8Array
+): Promise<AccountArtifactEncryptedEnvelope> {
+  const key = await importDataKey(rawKey, ["encrypt"])
+  const iv = randomBytes(IV_BYTES)
+  const ciphertext = await subtle().encrypt(
+    { name: "AES-GCM", iv: bufferSource(iv), additionalData: bufferSource(additionalData) },
+    key,
+    bufferSource(plainText)
+  )
+  return {
+    version: "cognia-account-artifact/v1",
+    algorithm: "AES-GCM",
+    iv,
+    ciphertext: new Uint8Array(ciphertext),
+  }
+}
+
+export async function decryptAccountArtifactBytes(
+  rawKey: Uint8Array,
+  envelope: AccountArtifactEncryptedEnvelope,
+  additionalData: Uint8Array
+): Promise<Uint8Array> {
+  if (envelope.version !== "cognia-account-artifact/v1" || envelope.algorithm !== "AES-GCM") {
+    throw new Error("Unsupported account artifact encryption envelope")
+  }
+  const key = await importDataKey(rawKey, ["decrypt"])
+  const decrypted = await subtle().decrypt(
+    {
+      name: "AES-GCM",
+      iv: bufferSource(envelope.iv),
+      additionalData: bufferSource(additionalData),
+    },
+    key,
+    bufferSource(envelope.ciphertext)
+  )
+  return new Uint8Array(decrypted)
 }
 
 async function deriveWrappingKey(
@@ -187,6 +237,35 @@ export interface EvalArtifactKeyDependencies {
   platform?: "desktop" | "web"
   keyringStore?: KeyringStore
   getBrowserVault?: () => EvalBrowserVault | null
+}
+
+export async function loadOrCreateAccountArtifactKey(
+  accountId: string,
+  domain: AccountArtifactDomain,
+  dependencies: EvalArtifactKeyDependencies = {}
+): Promise<Uint8Array> {
+  if (!accountId) throw new Error("An account id is required for artifact encryption")
+  if (domain === "evaluation") return loadOrCreateEvalArtifactKey(accountId, dependencies)
+  const platform = dependencies.platform ?? (isTauri() ? "desktop" : "web")
+  if (platform === "desktop") {
+    const store = dependencies.keyringStore ?? createKeyringStore("performance-artifacts")
+    const keyId = `account:${accountId}:performance-data-key`
+    const existing = await store.load(keyId)
+    if (existing) return decodeBase64(existing)
+    const created = randomBytes(AES_KEY_BYTES)
+    await store.save(keyId, encodeBase64(created))
+    return created
+  }
+  const vault = (dependencies.getBrowserVault ?? getActiveBrowserVault)()
+  if (!vault || vault.accountId !== accountId) {
+    throw new Error("An unlocked account vault is required for performance encryption")
+  }
+  const secretName = "performance-artifact-data-key"
+  const existing = await vault.loadSecret(secretName)
+  if (existing) return decodeBase64(existing)
+  const created = randomBytes(AES_KEY_BYTES)
+  await vault.storeSecret(secretName, encodeBase64(created))
+  return created
 }
 
 /**

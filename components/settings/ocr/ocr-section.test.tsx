@@ -109,6 +109,29 @@ describe("OcrSection", () => {
     )
   })
 
+  it("keeps an unbound native placeholder visible for explanation but prevents enabling it", async () => {
+    const user = userEvent.setup()
+    const { onChange } = renderSection({}, null, {
+      platform: "tauri",
+      runtimeStatuses: {
+        "windows-media-ocr": {
+          providerId: "windows-media-ocr",
+          shellSupported: true,
+          backendBound: false,
+          ready: false,
+          reason: "backend-not-bound",
+        },
+      },
+    })
+
+    await user.click(screen.getAllByTestId("ocr-sidebar-item-windows-media-ocr")[0]!)
+    const toggle = within(screen.getByTestId("ocr-detail-panel")).getByRole("switch")
+    expect(toggle).toBeDisabled()
+    await user.click(toggle)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole("status")).toHaveTextContent(/not include this native backend/i)
+  })
+
   it("fires onClearCache from the sidebar footer button", async () => {
     const user = userEvent.setup()
     const { onClearCache } = renderSection()

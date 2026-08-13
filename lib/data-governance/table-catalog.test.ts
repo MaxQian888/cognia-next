@@ -19,7 +19,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(251)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(256)
     db.close()
   })
 
@@ -66,7 +66,13 @@ describe("DataTableCatalog", () => {
   })
 
   it("derives central retention executors without duplicate eval targets", () => {
-    expect(centralRetentionExecutorIds()).toEqual(["agentTraces", "evalArtifacts"])
+    expect(centralRetentionExecutorIds()).toEqual(["agentTraces", "evalArtifacts", "ocrResults"])
+    expect(policyForTable("ocrResults")?.retentionPolicy).toMatchObject({
+      mode: "ttl",
+      days: 30,
+      enforcement: "central",
+      executorId: "ocrResults",
+    })
     expect(policyForTable("terminalHistory")?.retentionPolicy).toMatchObject({
       mode: "cap",
       maxRows: 5_000,
@@ -133,5 +139,18 @@ describe("DataTableCatalog", () => {
       })
       expect(COMPANION_SYNC_TABLES.has(name)).toBe(false)
     }
+  })
+
+  it("keeps Matrix encrypted recovery local, bounded, and protected", () => {
+    expect(policyForTable("matrixPendingEncryptedEvents")).toMatchObject({
+      role: "queue",
+      sensitivity: "confidential",
+      backupPolicy: { mode: "ephemeral" },
+      syncPolicy: { mode: "none" },
+      retentionPolicy: { mode: "cap", maxRows: 10_000, enforcement: "domain" },
+      cleanupPolicy: "protected",
+      expectedScale: "very-large",
+    })
+    expect(COMPANION_SYNC_TABLES.has("matrixPendingEncryptedEvents")).toBe(false)
   })
 })

@@ -980,6 +980,134 @@ describe("getDb", () => {
     30_000
   )
 
+  fullSchemaIt("v160 opens encrypted performance evidence tables", async () => {
+    const name = `cognia-performance-captures-v160-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(159).stores({ sessions: "&id" })
+    await legacy.open()
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(160)
+    expect(upgraded.tables.map((table) => table.name)).toEqual(
+      expect.arrayContaining([
+        "performanceCaptures",
+        "performanceCaptureChunks",
+        "performanceCaptureAttachments",
+        "performanceCaptureGaps",
+      ])
+    )
+    await upgraded.performanceCaptures.put({
+      id: "capture-a",
+      status: "recording",
+      purpose: "capture",
+      sourceKind: "renderer",
+      sourceId: "renderer:doc-a",
+      hostInstanceId: "doc-a",
+      targetId: "target-a",
+      routingGeneration: 1,
+      wireVersion: 1,
+      metricSchemaVersion: 1,
+      capabilityBits: "renderer.fps",
+      startedAt: 1,
+      updatedAt: 1,
+      pinned: 0,
+      payloadBytes: 0,
+      attachmentBytes: 0,
+      frameCount: 0,
+      gapCount: 0,
+    })
+    expect((await upgraded.performanceCaptures.get("capture-a"))?.status).toBe("recording")
+
+    upgraded.close()
+    await Dexie.delete(name)
+  })
+
+  fullSchemaIt(
+    "v161 normalizes QQ Official transportMode and removes the legacy setting",
+    async () => {
+      const name = `cognia-qq-transport-v161-${Date.now()}`
+      const legacy = new Dexie(name)
+      legacy.version(160).stores({ adapterInstances: "&id, type, enabled" })
+      await legacy.open()
+      await legacy.table("adapterInstances").bulkPut([
+        {
+          id: "qq-webhook",
+          type: "qq-official",
+          enabled: true,
+          transportMode: "gateway",
+          settings: { transport: "webhook", keep: "value" },
+        },
+        {
+          id: "qq-gateway",
+          type: "qq-official",
+          enabled: true,
+          transportMode: "webhook",
+          settings: { transport: "gateway" },
+        },
+        {
+          id: "qq-invalid",
+          type: "qq-official",
+          enabled: true,
+          transportMode: "gateway",
+          settings: { transport: "legacy-invalid", keep: true },
+        },
+        {
+          id: "slack-legacy",
+          type: "slack",
+          enabled: true,
+          transportMode: "gateway",
+          settings: { transport: "socket-mode" },
+        },
+      ])
+      legacy.close()
+
+      const upgraded = new CogniaDB(name)
+      await upgraded.open()
+
+      expect(upgraded.verno).toBeGreaterThanOrEqual(161)
+      expect(await upgraded.adapterInstances.get("qq-webhook")).toMatchObject({
+        transportMode: "webhook",
+        settings: { keep: "value" },
+      })
+      expect(await upgraded.adapterInstances.get("qq-gateway")).toMatchObject({
+        transportMode: "gateway",
+        settings: {},
+      })
+      expect(await upgraded.adapterInstances.get("qq-invalid")).toMatchObject({
+        transportMode: "gateway",
+        settings: { keep: true },
+      })
+      expect(await upgraded.adapterInstances.get("slack-legacy")).toMatchObject({
+        settings: { transport: "socket-mode" },
+      })
+
+      upgraded.close()
+      await Dexie.delete(name)
+    }
+  )
+
+  fullSchemaIt("v162 adds the local Matrix encrypted-event recovery queue", async () => {
+    const name = `cognia-matrix-pending-v162-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(161).stores({ adapterInstances: "&id, type" })
+    await legacy.open()
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(upgraded.verno).toBeGreaterThanOrEqual(162)
+    expect(upgraded.tables.map((table) => table.name)).toContain("matrixPendingEncryptedEvents")
+    expect(upgraded.matrixPendingEncryptedEvents.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["[adapterId+eventId]", "[adapterId+state+nextAttemptAt]"])
+    )
+
+    upgraded.close()
+    await Dexie.delete(name)
+  })
+
   fullSchemaIt(
     "v143 splits sandbox connections into provider/driver, keeping legacy mirrors",
     async () => {

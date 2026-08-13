@@ -90,6 +90,16 @@ describe("OcrDetailPanel", () => {
     expect(badge).not.toBeNull()
   })
 
+  it("disables the provider toggle when the runtime reports unsupported", async () => {
+    const user = userEvent.setup()
+    const { onToggleEnabled } = setup({ status: "unsupported" })
+    const toggle = screen.getByRole("switch")
+
+    expect(toggle).toBeDisabled()
+    await user.click(toggle)
+    expect(onToggleEnabled).not.toHaveBeenCalled()
+  })
+
   it("renders the ready status badge variant", () => {
     setup({ status: "ready" })
     const badge = document.querySelector('[data-status="ready"]')
