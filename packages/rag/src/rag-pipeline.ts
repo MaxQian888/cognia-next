@@ -16,20 +16,21 @@ import { chunkDocumentAsync } from "@cognia/provider-embedding/chunking"
 import type { EmbeddingModelConfig } from "@cognia/vector/embedding"
 import { generateEmbedding } from "@cognia/vector/embedding"
 import { cosineSimilarity } from "@cognia/provider-embedding/embedding"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import {
   generateSparseEmbedding,
-  sparseCosineSimilarity,
   type SparseVector,
 } from "@cognia/provider-embedding/sparse-embedding"
-import { scoreLateInteraction } from "@cognia/provider-embedding/late-interaction"
 
-import { HybridSearchEngine, type HybridSearchConfig } from "./hybrid-search"
+import { BM25Index } from "./hybrid-search"
+import { createRetrievalKernel } from "./retrieval-kernel"
+import { createSafeEmbeddingGateway } from "./safe-embedding-gateway"
+import { createRetrievalProfile, fingerprintRetrievalProfile } from "./retrieval-profile"
 import { getRAGLogger } from "./runtime-adapters"
 import {
   createVectorStore,
   type IVectorStore,
   type VectorStoreConfig,
-  type VectorSearchResult,
   type VectorDocument,
 } from "@cognia/vector"
 import {
@@ -107,6 +108,14 @@ function computeContentFingerprint(content: string): string {
     hash = (hash * 0x01000193) >>> 0
   }
   return hash.toString(36)
+}
+
+function safeModelText(text: string): string {
+  const safe = redactText(text).redacted
+  if (!safe.trim() || !hasNoLeakingPii(safe)) {
+    throw new Error("RAG model safety gate failed")
+  }
+  return safe
 }
 
 export interface RAGPipelineConfig {
@@ -720,7 +729,7 @@ export class RAGPipeline {
       let queriesToSearch = [query]
 
       if (this.config.queryExpansion.enabled && this.config.model) {
-        expandedQuery = await expandQuery(query, {
+        expandedQuery = await expandQuery(safeModelText(query), {
           model: this.config.model,
           maxVariants: this.config.queryExpansion.maxVariants,
           includeHypotheticalAnswer: this.config.queryExpansion.useHyDE,
@@ -773,7 +782,14 @@ export class RAGPipeline {
         }))
 
         if (rerankConfig.model || rerankConfig.cohereApiKey) {
-          mergedResults = await rerank(query, rerankDocs, rerankConfig)
+          mergedResults = await rerank(
+            safeModelText(query),
+            rerankDocs.map((document) => ({
+              ...document,
+              content: safeModelText(document.content),
+            })),
+            rerankConfig
+          )
         } else {
           mergedResults = rerankWithHeuristics(query, rerankDocs, {
             topN: this.config.topK,
@@ -784,12 +800,22 @@ export class RAGPipeline {
 
       // Apply Corrective RAG grading if enabled
       if (this.config.correctiveRAG.enabled && mergedResults.length > 0) {
-        const gradingResult = await gradeRetrievedDocuments(query, mergedResults, {
-          relevanceThreshold: this.config.correctiveRAG.relevanceThreshold,
-          useLLM: this.config.correctiveRAG.useLLM,
-          model: this.config.correctiveRAG.useLLM ? this.config.model : undefined,
-          fallbackStrategy: this.config.correctiveRAG.fallbackStrategy,
-        })
+        const useCloudGrader = this.config.correctiveRAG.useLLM
+        const gradingResult = await gradeRetrievedDocuments(
+          useCloudGrader ? safeModelText(query) : query,
+          useCloudGrader
+            ? mergedResults.map((document) => ({
+                ...document,
+                content: safeModelText(document.content),
+              }))
+            : mergedResults,
+          {
+            relevanceThreshold: this.config.correctiveRAG.relevanceThreshold,
+            useLLM: this.config.correctiveRAG.useLLM,
+            model: this.config.correctiveRAG.useLLM ? this.config.model : undefined,
+            fallbackStrategy: this.config.correctiveRAG.fallbackStrategy,
+          }
+        )
         mergedResults = gradingResult.relevantDocuments
         log.debug(
           `CRAG: ${gradingResult.stats.totalFiltered} chunks filtered, ${gradingResult.stats.totalRelevant} kept (avg grade: ${gradingResult.stats.averageGrade.toFixed(2)})`
@@ -952,143 +978,107 @@ export class RAGPipeline {
    */
   private async searchSingle(collectionName: string, query: string): Promise<RerankResult[]> {
     const collection = await this.loadMirrorCollection(collectionName)
+    if (collection.length === 0) return []
 
-    // Perform vector search from unified vector backend
-    const vectorResults = await this.vectorSearch(collectionName, query)
-    if (vectorResults.length === 0 && collection.length === 0) {
-      return []
-    }
+    const profile = createRetrievalProfile({
+      id: `legacy-rag-pipeline:${collectionName}`,
+      embedding: this.config.embeddingConfig,
+      vector: {
+        backend: this.config.vectorStoreConfig.provider ?? "chroma",
+        collectionPolicy: "generation",
+      },
+      budgets: {
+        topK: this.config.topK * 2,
+        tokenBudget: Math.max(1, Math.floor(this.config.maxContextLength / 4)),
+      },
+    })
+    const profileFingerprint = await fingerprintRetrievalProfile(profile)
+    const bm25 = new BM25Index()
+    const documentById = new Map(collection.map((document) => [document.id, document]))
+    for (const document of collection) bm25.addDocument(document.id, document.content)
 
-    const sparseResults = this.config.hybridSearch.enableSparseSearch
-      ? this.sparseSearch(collection, query)
-      : []
-
-    const lateResults = this.config.hybridSearch.enableLateInteraction
-      ? this.lateInteractionSearch(collection, query, this.config.topK * 2)
-      : []
-
-    // If hybrid search enabled, combine with keyword search
-    if (this.config.hybridSearch.enabled) {
-      const hybridConfig: HybridSearchConfig = {
-        vectorWeight: this.config.hybridSearch.vectorWeight,
-        keywordWeight: this.config.hybridSearch.keywordWeight,
-        sparseWeight: this.config.hybridSearch.sparseWeight,
-        lateInteractionWeight: this.config.hybridSearch.lateInteractionWeight,
-        deduplicateResults: true,
-      }
-      const hybridEngine = new HybridSearchEngine(hybridConfig)
-      hybridEngine.addDocuments(
-        collection.map((doc) => ({
-          id: doc.id,
-          content: doc.content,
-          metadata: doc.metadata as Record<string, unknown>,
-        }))
-      )
-
-      const hybridResults = hybridEngine.hybridSearch(
-        vectorResults.map((r) => ({ id: r.id, score: r.score })),
-        query,
-        this.config.topK * 2,
-        sparseResults,
-        lateResults
-      )
-
-      return hybridResults.map((r) => ({
-        id: r.id,
-        content: r.content,
-        metadata: r.metadata,
-        originalScore: r.vectorScore,
-        rerankScore: r.combinedScore,
-      }))
-    }
-
-    return vectorResults.map((r) => ({
-      id: r.id,
-      content: r.content,
-      metadata: r.metadata,
-      originalScore: r.score,
-      rerankScore: r.score,
-    }))
-  }
-
-  /**
-   * Vector similarity search
-   */
-  private vectorSearch(
-    collectionName: string,
-    query: string
-  ): Promise<{ id: string; content: string; metadata?: Record<string, unknown>; score: number }[]> {
-    return this.vectorStore
-      .searchDocuments(collectionName, query, {
-        topK: this.config.topK * 4,
-      })
-      .then((results: VectorSearchResult[]) =>
-        results.map((result) => ({
-          id: result.id,
-          content: result.content,
-          metadata: result.metadata,
-          score: result.score,
-        }))
-      )
-      .catch(async (error) => {
-        log.warn("Vector store query failed, falling back to mirror vector search", {
-          collectionName,
-          error: error instanceof Error ? error.message : String(error),
-        })
-        const collection = await this.loadMirrorCollection(collectionName)
-        if (collection.length === 0) return []
-        const queryEmbedding = await generateEmbedding(
-          query,
+    const embeddingGateway = createSafeEmbeddingGateway({
+      embed: async (safeText) => {
+        const result = await generateEmbedding(
+          safeText,
           this.config.embeddingConfig,
           this.config.embeddingApiKey
         )
-        return collection
-          .map((doc) => ({
-            id: doc.id,
-            content: doc.content,
-            metadata: doc.metadata,
-            score: cosineSimilarity(queryEmbedding.embedding, doc.embedding),
+        return result.embedding
+      },
+    })
+    const kernel = createRetrievalKernel({
+      profile,
+      profileFingerprint,
+      generationId: `legacy:${collectionName}`,
+      embedQuery: async (text) => {
+        const embedded = await embeddingGateway.embed({ profile, text, purpose: "query" })
+        return { embedding: embedded.embedding, safeTextHash: embedded.safeTextHash }
+      },
+      lexicalSearch: async (text, _request, limit) =>
+        bm25.search(text, limit).map((candidate) => ({
+          ...candidate,
+          sourceId: collectionName,
+          domain: "external" as const,
+        })),
+      vectorSearch: async (embedding, _request, limit) => {
+        if (typeof this.vectorStore.searchByEmbedding === "function") {
+          const results = await this.vectorStore.searchByEmbedding(collectionName, embedding, {
+            limit,
+          })
+          return results.map((result) => ({
+            id: result.id,
+            sourceId: collectionName,
+            domain: "external" as const,
+            score: result.score,
           }))
-          .sort((a, b) => b.score - a.score)
-          .slice(0, this.config.topK * 4)
-      })
-  }
-
-  private sparseSearch(
-    collection: IndexedDocument[],
-    query: string
-  ): { id: string; score: number }[] {
-    const querySparse = generateSparseEmbedding(query)
-    const results = collection
-      .map((doc) => {
-        const cached = doc.sparseEmbedding ?? this.sparseEmbeddingCache.get(doc.id)
-        const sparse = cached ?? generateSparseEmbedding(doc.content)
-        if (!cached) {
-          this.sparseEmbeddingCache.set(doc.id, sparse)
         }
-        return {
-          id: doc.id,
-          score: sparseCosineSimilarity(querySparse, sparse),
-        }
-      })
-      .filter((item): item is { id: string; score: number } => item !== null)
-      .sort((a, b) => b.score - a.score)
-
-    return results.slice(0, this.config.topK * 2)
-  }
-
-  private lateInteractionSearch(
-    collection: IndexedDocument[],
-    query: string,
-    topK: number
-  ): { id: string; score: number }[] {
-    return collection
-      .map((doc) => ({
-        id: doc.id,
-        score: scoreLateInteraction(query, doc.content),
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, topK)
+        return collection
+          .map((document) => ({
+            id: document.id,
+            sourceId: collectionName,
+            domain: "external" as const,
+            score: cosineSimilarity(embedding, document.embedding),
+          }))
+          .sort((left, right) => right.score - left.score)
+          .slice(0, limit)
+      },
+      checkEligibility: () => ({ eligible: true }),
+      resolveContent: async (candidates) =>
+        candidates.flatMap((candidate) => {
+          const document = documentById.get(candidate.id)
+          if (!document) return []
+          return [
+            {
+              id: candidate.id,
+              sourceId: collectionName,
+              domain: "external" as const,
+              content: document.content,
+              tokenCount: Math.max(1, Math.ceil(document.content.length / 4)),
+              trust: "untrusted" as const,
+              citation: {
+                sourceRevision: String(document.metadata?.documentId ?? candidate.id),
+                startOffset: Number(document.metadata?.charStart ?? 0),
+                endOffset: Number(document.metadata?.charEnd ?? document.content.length),
+              },
+              metadata: document.metadata,
+            },
+          ]
+        }),
+    })
+    const result = await kernel.retrieve({
+      query,
+      reader: {},
+      domains: ["external"],
+      topK: this.config.topK * 2,
+    })
+    return result.hits.map((hit) => ({
+      id: hit.id,
+      content: hit.content,
+      metadata: hit.metadata,
+      originalScore: hit.vectorScore,
+      rerankScore: hit.score,
+    }))
   }
 
   /**

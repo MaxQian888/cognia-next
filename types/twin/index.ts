@@ -207,6 +207,8 @@ export interface TwinChunk {
   vectorCollection: string
   /** Remote doc id; used to resolve a search hit back to this chunk. */
   vectorDocId: string
+  /** Immutable generation containing this chunk; absent only on legacy rows. */
+  generationId?: string
 
   strategy: ChunkingStrategyId
   /** Token count (js-tiktoken approximation). */

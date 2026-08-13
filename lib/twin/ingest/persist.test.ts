@@ -1,8 +1,8 @@
 /**
  * Coverage for `persistChunks` — the double-write step that lands chunks
  * in Dexie + the remote vector store. The re-parse path (`M1`) added an
- * idempotent "delete-existing-first" step so re-ingesting the same
- * source converges to one set of chunks instead of accumulating.
+ * generation swap so re-ingesting the same source keeps the old generation
+ * active until the replacement is validated and committed.
  */
 
 import { persistChunks } from "./persist"
@@ -111,7 +111,7 @@ describe("persistChunks", () => {
     expect(persisted).toHaveLength(2)
   })
 
-  it("assigns deterministic vectorDocIds so a re-ingest overwrites instead of orphaning", async () => {
+  it("assigns generation-scoped vector ids so a failed re-ingest cannot overwrite active vectors", async () => {
     const store = fakeStore()
     await makeSource("twin_d", "src_d")
     const chunk = {
@@ -131,10 +131,10 @@ describe("persistChunks", () => {
       chunks: [chunk],
       embeddings: [[0.1, 0.2]],
     })
-    expect(first.vectorDocIds).toEqual(["twin_d__src_d__0"])
+    expect(first.vectorDocIds[0]).toMatch(/^twin_d__src_d__twgen_.+__0$/)
 
-    // A second ingest of the same source mints the SAME id → remote upsert
-    // overwrites the prior vector rather than stranding it under a random id.
+    // A second ingest writes a separate namespace, then retires the old vector
+    // only after the local rows and active pointer switch atomically.
     const second = await persistChunks({
       twinId: "twin_d",
       sourceId: "src_d",
@@ -143,7 +143,9 @@ describe("persistChunks", () => {
       chunks: [chunk],
       embeddings: [[0.3, 0.4]],
     })
-    expect(second.vectorDocIds).toEqual(["twin_d__src_d__0"])
+    expect(second.vectorDocIds[0]).toMatch(/^twin_d__src_d__twgen_.+__0$/)
+    expect(second.generationId).not.toBe(first.generationId)
+    expect(store.deletedIds).toEqual(first.vectorDocIds)
   })
 
   it("idempotently replaces chunks on re-parse + drops remote vectors", async () => {
@@ -182,8 +184,7 @@ describe("persistChunks", () => {
       ],
       embeddings: [[0.9, 0.8]],
     })
-    // The pre-existing remote vector should have been deleted before the
-    // new one was added.
+    // The pre-existing remote vector is deleted only after activation.
     expect(store.deletedIds).toEqual(["old-vector-1"])
     // Dexie now has exactly one fresh row, not the stale + new.
     const persisted = await listTwinChunksBySource("src_b")
@@ -212,7 +213,7 @@ describe("persistChunks", () => {
       tokenCount: 1,
       metadata: {},
     })
-    await persistChunks({
+    const result = await persistChunks({
       twinId: "twin_c",
       sourceId: "src_c",
       vectorBackend: "qdrant",
@@ -235,5 +236,45 @@ describe("persistChunks", () => {
     const persisted = await listTwinChunksBySource("src_c")
     expect(persisted).toHaveLength(1)
     expect(persisted[0].content).toBe("new")
+    expect(result.cleanupPending).toBe(true)
+  })
+
+  it("preserves the active rows when a replacement vector write fails", async () => {
+    const store = fakeStore()
+    await makeSource("twin_e", "src_e")
+    const chunk = {
+      content: "active",
+      contentRedacted: "active",
+      charStart: 0,
+      charEnd: 6,
+      strategy: "paragraph" as const,
+      tokenCount: 1,
+      metadata: {},
+    }
+    const first = await persistChunks({
+      twinId: "twin_e",
+      sourceId: "src_e",
+      vectorBackend: "qdrant",
+      store,
+      chunks: [chunk],
+      embeddings: [[0.1, 0.2]],
+    })
+    store.addDocuments = async () => {
+      throw new Error("remote down")
+    }
+
+    await expect(
+      persistChunks({
+        twinId: "twin_e",
+        sourceId: "src_e",
+        vectorBackend: "qdrant",
+        store,
+        chunks: [{ ...chunk, content: "replacement", contentRedacted: "replacement" }],
+        embeddings: [[0.3, 0.4]],
+      })
+    ).rejects.toThrow("remote down")
+    expect(await listTwinChunksBySource("src_e")).toEqual([
+      expect.objectContaining({ generationId: first.generationId, content: "active" }),
+    ])
   })
 })

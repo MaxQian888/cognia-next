@@ -43,19 +43,21 @@ afterAll(dbFixture.dispose)
 
 function createStore(initialDimension?: number) {
   const documents = new Map<string, VectorDocument>()
-  let existingDimension = initialDimension
+  const dimensions = new Map<string, number>()
+  if (initialDimension !== undefined) dimensions.set("cognia_kb_kb-1", initialDimension)
   return {
     provider: "native",
     documents,
-    getCollectionInfo: jest.fn(async () => {
-      if (existingDimension === undefined) throw new Error("missing")
-      return { name: "collection", documentCount: documents.size, dimension: existingDimension }
+    getCollectionInfo: jest.fn(async (collection: string) => {
+      const dimension = dimensions.get(collection)
+      if (dimension === undefined) throw new Error("missing")
+      return { name: collection, documentCount: documents.size, dimension }
     }),
-    createCollection: jest.fn(async (_collection: string, options?: { dimension?: number }) => {
-      existingDimension = options?.dimension
+    createCollection: jest.fn(async (collection: string, options?: { dimension?: number }) => {
+      if (options?.dimension !== undefined) dimensions.set(collection, options.dimension)
     }),
-    deleteCollection: jest.fn(async () => {
-      existingDimension = undefined
+    deleteCollection: jest.fn(async (collection: string) => {
+      dimensions.delete(collection)
       documents.clear()
     }),
     addDocuments: jest.fn(async (_collection: string, rows: VectorDocument[]) => {
@@ -235,7 +237,11 @@ describe("ingestKnowledgeBaseSource", () => {
     })
 
     expect(result).toEqual({ completedSourceIds: ["source-1"], failedSourceIds: [] })
-    expect(store.deleteCollection).toHaveBeenCalledWith("cognia_kb_kb-1")
+    expect(store.deleteCollection).not.toHaveBeenCalled()
+    expect(store.createCollection).toHaveBeenCalledWith(
+      expect.stringMatching(/^cognia_kb_kb-1__rebuild_/),
+      { dimension: 2 }
+    )
     const [rebuiltSource] = await listKnowledgeBaseSources("kb-1")
     expect(rebuiltSource).toEqual(expect.objectContaining({ status: "ready", chunkCount: 1 }))
     expect(rebuiltSource.errorCode).toBeUndefined()

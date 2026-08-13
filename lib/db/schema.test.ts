@@ -449,6 +449,14 @@ describe("getDb", () => {
     })
   })
 
+  it("v162 indexes all derived RAG chunks by immutable generation", async () => {
+    const db = getDb()
+    await db.open()
+    for (const table of [db.projectChunks, db.knowledgeBaseChunks, db.twinChunks]) {
+      expect(table.schema.indexes.map((index) => index.name)).toContain("generationId")
+    }
+  })
+
   it("v123 opens the certification projection table", async () => {
     const db = getDb()
     await db.open()

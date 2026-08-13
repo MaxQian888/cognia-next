@@ -27,6 +27,12 @@ export {
   deduplicateResults,
   createHybridSearchEngine,
 } from "./hybrid-search"
+export {
+  decryptBM25Segment,
+  encryptBM25Segment,
+  type BM25SegmentIdentity,
+  type EncryptedBM25SegmentV1,
+} from "./bm25-segment"
 
 // Reranking
 export {

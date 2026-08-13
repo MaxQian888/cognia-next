@@ -3940,6 +3940,17 @@ export class CogniaDB extends Dexie {
           })
       })
 
+    // v162 — generation identity on every derived RAG chunk. Legacy rows keep
+    // generationId absent and remain readable until their corpus is rebuilt.
+    this.version(162).stores({
+      projectChunks:
+        "&id, projectId, fileId, vectorDocId, generationId, [projectId+fileId], [projectId+generationId], [projectId+createdAt]",
+      knowledgeBaseChunks:
+        "&id, knowledgeBaseId, sourceId, vectorDocId, generationId, [knowledgeBaseId+sourceId], [knowledgeBaseId+generationId], [knowledgeBaseId+createdAt]",
+      twinChunks:
+        "&id, twinId, sourceId, vectorDocId, generationId, [twinId+sourceId], [twinId+generationId], [twinId+createdAt]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {

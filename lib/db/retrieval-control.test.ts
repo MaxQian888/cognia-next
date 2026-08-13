@@ -8,6 +8,8 @@ import {
   claimNextRetrievalJob,
   deleteRetrievalEntity,
   enqueueRetrievalJob,
+  failRetrievalGeneration,
+  getActiveRetrievalGeneration,
   heartbeatStoredRetrievalJob,
   markRetrievalGenerationValidating,
   saveRetrievalProfile,
@@ -64,6 +66,25 @@ describe("retrieval control repository", () => {
     })
     expect(await getDb().retrievalGenerations.get("g1")).toMatchObject({ status: "retiring" })
     expect(await getDb().retrievalGenerations.get("g2")).toMatchObject({ status: "active" })
+    expect(await getActiveRetrievalGeneration("project:1")).toMatchObject({ id: "g2" })
+  })
+
+  it("marks an unactivated generation failed without moving the active pointer", async () => {
+    await stageRetrievalGeneration({
+      id: "failed-generation",
+      corpusId: "project:failed",
+      domain: "project",
+      profileFingerprint: "profile-fingerprint",
+      createdAt: 1,
+    })
+    await failRetrievalGeneration("failed-generation", "remote_write_failed", 2)
+
+    expect(await getDb().retrievalGenerations.get("failed-generation")).toMatchObject({
+      status: "failed",
+      failedAt: 2,
+      validation: { valid: false, failureCode: "remote_write_failed" },
+    })
+    expect(await getDb().retrievalActivePointers.get("project:failed")).toBeUndefined()
   })
 
   it("deduplicates durable jobs and renews only the owning worker lease", async () => {

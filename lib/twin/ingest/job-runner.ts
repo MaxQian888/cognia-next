@@ -326,6 +326,7 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
         vectorBackend,
         vectorCollection: collection,
         store,
+        contentHash: row.fingerprint,
         chunks: enriched,
         embeddings: embeddingResult.embeddings,
       })

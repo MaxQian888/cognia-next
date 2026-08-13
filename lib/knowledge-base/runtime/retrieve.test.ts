@@ -7,6 +7,7 @@ jest.mock("@cognia/vector/dimension-guard", () => ({
 }))
 jest.mock("@/lib/db/knowledge-bases", () => ({
   getKnowledgeBaseChunksByVectorDocIds: jest.fn(),
+  listKnowledgeBaseVectorCollections: jest.fn(async () => []),
 }))
 
 import { generateEmbedding } from "@cognia/provider-embedding/embedding"

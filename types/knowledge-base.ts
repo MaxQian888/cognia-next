@@ -50,6 +50,8 @@ export interface KnowledgeBaseChunk {
   vectorBackend: VectorBackend
   vectorCollection: string
   vectorDocId: string
+  /** Immutable generation containing this chunk; absent only on legacy rows. */
+  generationId?: string
   strategy: ChunkingStrategyId
   tokenCount: number
   metadata: TwinChunkMetadata

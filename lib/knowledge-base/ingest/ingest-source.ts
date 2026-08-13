@@ -1,12 +1,12 @@
 import {
   createKnowledgeBaseIngestJob,
   deleteKnowledgeBase,
-  deleteKnowledgeBaseChunksBySource,
   deleteKnowledgeBaseSource,
   getKnowledgeBaseReferences,
   getKnowledgeBaseSourcesByIds,
   listKnowledgeBaseChunksBySource,
   listKnowledgeBaseSources,
+  listKnowledgeBaseVectorCollections,
   updateKnowledgeBaseIngestJob,
   updateKnowledgeBaseSource,
 } from "@/lib/db/knowledge-bases"
@@ -24,6 +24,8 @@ export interface KnowledgeBaseIngestDeps {
   store: IVectorStore
   embedding: EmbeddingConfig
   vectorBackend: VectorBackend
+  /** Generation namespace override used by safe full-library rebuilds. */
+  vectorCollection?: string
 }
 
 export interface IngestKnowledgeBaseSourceInput {
@@ -81,10 +83,14 @@ export async function removeKnowledgeBase(
     return deleteKnowledgeBase(knowledgeBaseId)
   }
   if (options.deps) {
-    try {
-      await options.deps.store.deleteCollection(`cognia_kb_${knowledgeBaseId}`)
-    } catch {
-      // Local deletion remains authoritative if the derived remote index is unavailable.
+    const collections = await listKnowledgeBaseVectorCollections(knowledgeBaseId)
+    if (collections.length === 0) collections.push(`cognia_kb_${knowledgeBaseId}`)
+    for (const collection of collections) {
+      try {
+        await options.deps.store.deleteCollection(collection)
+      } catch {
+        // Local deletion remains authoritative if a derived remote index is unavailable.
+      }
     }
   }
   return deleteKnowledgeBase(knowledgeBaseId, {
@@ -97,18 +103,7 @@ export async function rebuildKnowledgeBaseIndex(
   deps: KnowledgeBaseIngestDeps
 ): Promise<RebuildKnowledgeBaseIndexResult> {
   const sources = await listKnowledgeBaseSources(knowledgeBaseId)
-  const collection = `cognia_kb_${knowledgeBaseId}`
-  await deps.store.deleteCollection(collection)
-  await Promise.all(
-    sources.map(async (source) => {
-      await deleteKnowledgeBaseChunksBySource(source.id)
-      await updateKnowledgeBaseSource(source.id, {
-        status: "pending",
-        chunkCount: 0,
-        errorCode: undefined,
-      })
-    })
-  )
+  const generationCollection = `cognia_kb_${knowledgeBaseId}__rebuild_${Date.now().toString(36)}`
 
   const result: RebuildKnowledgeBaseIndexResult = {
     completedSourceIds: [],
@@ -116,7 +111,10 @@ export async function rebuildKnowledgeBaseIndex(
   }
   for (const source of sources) {
     try {
-      await ingestKnowledgeBaseSource({ sourceId: source.id, deps })
+      await ingestKnowledgeBaseSource({
+        sourceId: source.id,
+        deps: { ...deps, vectorCollection: generationCollection },
+      })
       result.completedSourceIds.push(source.id)
     } catch {
       result.failedSourceIds.push(source.id)
@@ -245,6 +243,7 @@ export async function ingestKnowledgeBaseSource(
       sourceId: source.id,
       vectorBackend: input.deps.vectorBackend,
       store: input.deps.store,
+      vectorCollection: input.deps.vectorCollection,
       contentHash: source.fingerprint,
       chunks,
       embeddings: embeddingResult.embeddings,

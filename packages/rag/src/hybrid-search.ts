@@ -50,6 +50,19 @@ export interface HybridSearchResult {
   sources: ("vector" | "keyword" | "sparse" | "late")[]
 }
 
+export interface BM25SnapshotDocumentV1 {
+  id: string
+  length: number
+  terms: Array<[term: string, frequency: number]>
+}
+
+export interface BM25SnapshotV1 {
+  version: 1
+  k1: number
+  b: number
+  documents: BM25SnapshotDocumentV1[]
+}
+
 /**
  * BM25 Index for keyword-based search
  */
@@ -88,6 +101,7 @@ export class BM25Index {
    * Add a document to the index
    */
   addDocument(id: string, content: string): void {
+    if (this.documents.has(id)) this.removeDocument(id)
     const terms = this.tokenize(content)
     const termFreq = this.calculateTermFrequency(terms)
 
@@ -235,6 +249,47 @@ export class BM25Index {
    */
   getDocumentIds(): string[] {
     return Array.from(this.documents.keys())
+  }
+
+  /** Content-free lexical projection used by the encrypted segment codec. */
+  exportSnapshot(): BM25SnapshotV1 {
+    return {
+      version: 1,
+      k1: this.k1,
+      b: this.b,
+      documents: [...this.documents.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([id, document]) => ({
+          id,
+          length: document.length,
+          terms: [...document.terms.entries()].sort(([left], [right]) => left.localeCompare(right)),
+        })),
+    }
+  }
+
+  static fromSnapshot(snapshot: BM25SnapshotV1): BM25Index {
+    if (snapshot.version !== 1) throw new Error("Unsupported BM25 snapshot version")
+    if (!Number.isFinite(snapshot.k1) || snapshot.k1 <= 0) throw new Error("Invalid BM25 k1")
+    if (!Number.isFinite(snapshot.b) || snapshot.b < 0 || snapshot.b > 1) {
+      throw new Error("Invalid BM25 b")
+    }
+    const index = new BM25Index({ k1: snapshot.k1, b: snapshot.b })
+    for (const document of snapshot.documents) {
+      if (!document.id || !Number.isInteger(document.length) || document.length < 0) {
+        throw new Error("Invalid BM25 snapshot document")
+      }
+      const terms = new Map<string, number>()
+      for (const [term, frequency] of document.terms) {
+        if (!term || !Number.isInteger(frequency) || frequency < 1 || terms.has(term)) {
+          throw new Error("Invalid BM25 snapshot term")
+        }
+        terms.set(term, frequency)
+        index.termDocFreq.set(term, (index.termDocFreq.get(term) ?? 0) + 1)
+      }
+      index.documents.set(document.id, { content: "", terms, length: document.length })
+    }
+    index.updateAvgDocLength()
+    return index
   }
 }
 

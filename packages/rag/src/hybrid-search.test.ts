@@ -35,6 +35,13 @@ describe("BM25Index", () => {
       index.addDocument("doc1", "")
       expect(index.size()).toBe(1)
     })
+
+    it("replaces an existing document without corrupting document frequencies", () => {
+      index.addDocument("doc1", "old exclusive")
+      index.addDocument("doc1", "new replacement")
+      expect(index.search("old")).toEqual([])
+      expect(index.search("new")).toHaveLength(1)
+    })
   })
 
   describe("removeDocument", () => {
@@ -98,6 +105,17 @@ describe("BM25Index", () => {
       index.clear()
       expect(index.size()).toBe(0)
     })
+  })
+
+  it("round-trips a deterministic content-free snapshot", () => {
+    index.addDocument("doc-b", "中文 retrieval retrieval")
+    index.addDocument("doc-a", "memory lifecycle")
+    const snapshot = index.exportSnapshot()
+    const restored = BM25Index.fromSnapshot(snapshot)
+
+    expect(snapshot.documents.map((document) => document.id)).toEqual(["doc-a", "doc-b"])
+    expect(JSON.stringify(snapshot)).not.toContain("中文 retrieval retrieval")
+    expect(restored.search("retrieval")).toEqual(index.search("retrieval"))
   })
 })
 

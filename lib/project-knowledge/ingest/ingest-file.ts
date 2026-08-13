@@ -105,9 +105,15 @@ export async function ingestKnowledgeFile(
   }
 
   if (content.trim().length === 0) {
-    // Empty file — nothing to embed. Drop any stale chunks by persisting zero
-    // (persist's idempotent-replace handles removal). Cheapest: treat as no-op
-    // but stamp the hash so we don't re-check every turn.
+    await persistProjectChunks({
+      projectId,
+      fileId: file.id,
+      vectorBackend: deps.vectorBackend,
+      store: deps.store,
+      contentHash,
+      chunks: [],
+      embeddings: [],
+    })
     return { chunkCount: 0, skipped: false }
   }
 
@@ -129,7 +135,18 @@ export async function ingestKnowledgeFile(
     strategy: KIND_TO_STRATEGY[file.type],
   })
 
-  if (prepared.length === 0) return { chunkCount: 0, skipped: false }
+  if (prepared.length === 0) {
+    await persistProjectChunks({
+      projectId,
+      fileId: file.id,
+      vectorBackend: deps.vectorBackend,
+      store: deps.store,
+      contentHash,
+      chunks: [],
+      embeddings: [],
+    })
+    return { chunkCount: 0, skipped: false }
+  }
 
   const { embeddings } = await embedRedactedChunks(
     prepared.map((c) => c.content),

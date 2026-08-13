@@ -70,6 +70,43 @@ export async function markRetrievalGenerationValidating(
   })
 }
 
+export async function failRetrievalGeneration(
+  id: string,
+  failureCode: string,
+  now: number = Date.now()
+): Promise<RetrievalGenerationRow> {
+  const db = getDb()
+  return db.transaction("rw", db.retrievalGenerations, async () => {
+    const row = await db.retrievalGenerations.get(id)
+    if (!row) throw new Error("Retrieval generation not found")
+    if (row.status === "active" || row.status === "retiring") {
+      throw new Error("An activated retrieval generation cannot be failed")
+    }
+    const failed: RetrievalGenerationRow = {
+      ...row,
+      status: "failed",
+      failedAt: now,
+      validation: {
+        count: row.validation?.count ?? 0,
+        contentHash: row.validation?.contentHash ?? "unknown",
+        dimensions: row.validation?.dimensions,
+        valid: false,
+        failureCode,
+      },
+    }
+    await db.retrievalGenerations.put(failed)
+    return failed
+  })
+}
+
+export async function getActiveRetrievalGeneration(
+  corpusId: string
+): Promise<RetrievalGenerationRow | undefined> {
+  const db = getDb()
+  const pointer = await db.retrievalActivePointers.get(corpusId)
+  return pointer ? db.retrievalGenerations.get(pointer.generationId) : undefined
+}
+
 export async function activateRetrievalGeneration(
   id: string,
   now: number = Date.now()

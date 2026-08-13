@@ -10,12 +10,10 @@
  * and replay vectors without re-embedding.
  */
 
-import {
-  bulkCreateTwinChunks,
-  deleteTwinChunksBySource,
-  listTwinChunksBySource,
-} from "@/lib/db/twin-chunks"
+import { bulkCreateTwinChunks, listTwinChunksBySource } from "@/lib/db/twin-chunks"
+import { getDb } from "@/lib/db/schema"
 import { updateTwinSource } from "@/lib/db/twin-sources"
+import { runGenerationSwap } from "@/lib/rag/generation-ingest"
 import type { IVectorStore } from "@cognia/vector/store"
 import { ensureCollectionDimensionCompatible } from "@cognia/vector/dimension-guard"
 import type { ChunkingStrategyId, TwinChunk, TwinChunkMetadata, VectorBackend } from "@/types/twin"
@@ -44,20 +42,25 @@ export interface PersistInput {
     metadata: TwinChunkMetadata
   }>
   embeddings: number[][]
+  profileFingerprint?: string
+  /** Source revision hash used to validate and reconcile the generation. */
+  contentHash?: string
 }
 
 export interface PersistResult {
   rows: TwinChunk[]
   vectorDocIds: string[]
+  generationId?: string
+  cleanupPending?: boolean
 }
 
-function newVectorDocId(twinId: string, sourceId: string, idx: number): string {
-  // Deterministic: a re-ingest of the same source reuses the same ids so the
-  // remote upsert OVERWRITES the prior vectors instead of minting fresh random
-  // ids and orphaning the old ones. Random ids stranded vectors whenever a
-  // Dexie write failed after the remote upsert — the next run could no longer
-  // find them (cleanup keys off the now-missing Dexie rows) to delete them.
-  return `${twinId}__${sourceId}__${idx.toString(36)}`
+function newVectorDocId(
+  twinId: string,
+  sourceId: string,
+  generationId: string,
+  idx: number
+): string {
+  return `${twinId}__${sourceId}__${generationId}__${idx.toString(36)}`
 }
 
 /**
@@ -99,74 +102,85 @@ export async function persistChunks(input: PersistInput): Promise<PersistResult>
     // ignore — most clients throw "already exists" which we treat as success
   }
 
-  // 0b. Idempotent replace. If this sourceId already has chunks (re-parse
-  //     case) drop the old vectors from the remote store + the Dexie rows
-  //     before inserting fresh ones; otherwise re-parses leave stale
-  //     content in both stores.
+  // Keep the active generation intact until the replacement has passed
+  // vector write, shape validation, and the atomic local pointer switch.
   const existing = await listTwinChunksBySource(input.sourceId)
-  if (existing.length > 0) {
-    const oldVectorIds = existing
-      .map((row) => row.vectorDocId)
-      .filter((id): id is string => typeof id === "string" && id.length > 0)
-    if (oldVectorIds.length > 0 && typeof input.store.deleteDocuments === "function") {
-      try {
-        await input.store.deleteDocuments(collection, oldVectorIds)
-      } catch {
-        // Tolerate remote-store delete failures so a one-off remote outage
-        // can't strand the local re-parse. The Dexie cleanup below still
-        // removes the stale rows from the canonical local store.
-      }
-    }
-    await deleteTwinChunksBySource(input.sourceId)
-  }
-
-  // 1. Build rows + ids in memory.
-  const rows: TwinChunk[] = input.chunks.map((c, i) => ({
-    id: `twc_${now.toString(36)}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-    twinId: input.twinId,
-    sourceId: input.sourceId,
-    content: c.content,
-    contentRedacted: c.contentRedacted,
-    charStart: c.charStart,
-    charEnd: c.charEnd,
-    vectorBackend: input.vectorBackend,
-    vectorCollection: collection,
-    vectorDocId: newVectorDocId(input.twinId, input.sourceId, i),
-    strategy: c.strategy,
-    tokenCount: c.tokenCount,
-    metadata: c.metadata,
-    createdAt: now,
+  const oldVectors = existing.map((row) => ({
+    collection: row.vectorCollection,
+    id: row.vectorDocId,
   }))
-
-  // 2. Remote upsert. Vector payload is intentionally minimal (`twinId` /
-  //    `chunkId` / `sourceId` / 200-char preview) — full text stays in Dexie
-  //    so we don't pay remote storage for it twice.
-  await input.store.addDocuments(
+  const dimension = input.embeddings[0]?.length
+  const result = await runGenerationSwap({
+    idPrefix: "twgen",
+    corpusId: `twin:${input.twinId}:source:${input.sourceId}`,
+    domain: "twin",
+    profileFingerprint:
+      input.profileFingerprint ?? `legacy:${input.vectorBackend}:${dimension ?? "none"}`,
     collection,
-    rows.map((row, i) => ({
-      id: row.vectorDocId,
-      content: row.contentRedacted,
-      metadata: {
-        twinId: row.twinId,
-        chunkId: row.id,
-        sourceId: row.sourceId,
-        contentPreview: row.contentRedacted.slice(0, 200),
-      },
-      embedding: input.embeddings[i],
-    }))
-  )
-
-  // 3. Dexie bulk add. (`bulkCreateTwinChunks` accepts the row drafts and
-  //    assigns ids itself, but we already minted ids in step 1 to keep
-  //    them in sync with the remote payload.)
-  await bulkCreateTwinChunks(rows)
-
-  // 4. Stamp the source row so the workbench reflects the new chunk count.
-  await updateTwinSource(input.sourceId, {
-    chunkCount: rows.length,
-    status: "parsed",
-    parsedAt: now,
+    store: input.store,
+    contentHash: input.contentHash ?? `legacy-source:${input.sourceId}`,
+    expectedCount: input.chunks.length,
+    expectedDimension: dimension,
+    oldVectors,
+    now,
+    build: (generationId) => {
+      const rows: TwinChunk[] = input.chunks.map((chunk, index) => ({
+        id: `twc_${now.toString(36)}_${index}_${Math.random().toString(36).slice(2, 6)}`,
+        twinId: input.twinId,
+        sourceId: input.sourceId,
+        content: chunk.content,
+        contentRedacted: chunk.contentRedacted,
+        charStart: chunk.charStart,
+        charEnd: chunk.charEnd,
+        vectorBackend: input.vectorBackend,
+        vectorCollection: collection,
+        vectorDocId: newVectorDocId(input.twinId, input.sourceId, generationId, index),
+        generationId,
+        strategy: chunk.strategy,
+        tokenCount: chunk.tokenCount,
+        metadata: chunk.metadata,
+        createdAt: now,
+      }))
+      return {
+        value: rows,
+        count: rows.length,
+        documents: rows.map((row, index) => ({
+          id: row.vectorDocId,
+          content: row.contentRedacted,
+          metadata: {
+            twinId: row.twinId,
+            chunkId: row.id,
+            sourceId: row.sourceId,
+            generationId: row.generationId,
+            contentPreview: row.contentRedacted.slice(0, 200),
+          },
+          embedding: input.embeddings[index],
+        })),
+      }
+    },
+    commit: async (rows, activate) => {
+      const db = getDb()
+      await db.transaction(
+        "rw",
+        [db.twinChunks, db.twinSources, db.retrievalGenerations, db.retrievalActivePointers],
+        async () => {
+          await db.twinChunks.where("sourceId").equals(input.sourceId).delete()
+          await bulkCreateTwinChunks(rows)
+          await updateTwinSource(input.sourceId, {
+            chunkCount: rows.length,
+            status: "parsed",
+            parsedAt: now,
+          })
+          await activate()
+        }
+      )
+    },
   })
 
-  return { rows, vectorDocIds: rows.map((r) => r.vectorDocId) }
+  return {
+    rows: result.value,
+    vectorDocIds: result.vectorDocIds,
+    generationId: result.generationId,
+    cleanupPending: result.cleanupPending,
+  }
 }
