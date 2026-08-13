@@ -239,6 +239,8 @@ describe("PluginManager", () => {
     mockUnregisterSlashCommand.mockReset()
     mockCanUseTauriInvoke.mockReset()
     mockCanUseTauriInvoke.mockReturnValue(true)
+    ;(getPlugin as jest.Mock).mockReset().mockResolvedValue(undefined)
+    ;(upsertPlugin as jest.Mock).mockReset().mockResolvedValue(undefined)
     mockApplyWasmCapabilityGrant.mockClear()
     mockClearWasmCapabilityGrant.mockClear()
     mockReconcileWasmGrantLedgerWithManifest.mockClear()
@@ -655,6 +657,70 @@ describe("PluginManager", () => {
       expect(discovered.length).toBeGreaterThan(0)
       expect(upsertPlugin).toHaveBeenCalled()
       ;(upsertPlugin as jest.Mock).mockResolvedValue(undefined)
+    })
+
+    it.each([
+      ["disabled", "disabled"],
+      ["installed", "installed"],
+      ["enabled", "installed"],
+    ] as const)(
+      "normalizes a legacy GitHub Delivery %s Zustand record to %s without enabling it",
+      async (legacyStatus, expectedStatus) => {
+        const legacy: Plugin = {
+          manifest: createManifest("github-delivery"),
+          status: legacyStatus,
+          source: "builtin",
+          path: "builtin://github-delivery",
+          config: {},
+        }
+        const store = {
+          plugins: { "github-delivery": legacy } as Record<string, Plugin>,
+          discoverPlugin: jest.fn(),
+          installPlugin: jest.fn(async () => undefined),
+          setPluginStatus: jest.fn((pluginId: string, status: Plugin["status"]) => {
+            store.plugins[pluginId] = { ...store.plugins[pluginId]!, status }
+          }),
+        }
+        mockGetState.mockReturnValue(store)
+        ;(getPlugin as jest.Mock).mockResolvedValue(undefined)
+        ;(upsertPlugin as jest.Mock).mockResolvedValue(undefined)
+
+        await new PluginManager({
+          pluginDirectory: "/plugins",
+          runtimeProfile: "browser",
+        }).scanPlugins()
+
+        expect(store.installPlugin).not.toHaveBeenCalledWith("github-delivery")
+        if (legacyStatus === "enabled") {
+          expect(store.setPluginStatus).toHaveBeenCalledWith("github-delivery", "installed")
+        } else {
+          expect(store.setPluginStatus).not.toHaveBeenCalledWith(
+            "github-delivery",
+            expect.anything()
+          )
+        }
+        expect(store.plugins["github-delivery"]?.status).toBe(expectedStatus)
+      }
+    )
+
+    it("clears a stale enabled GitHub Delivery Dexie row during builtin discovery", async () => {
+      const store = {
+        plugins: {} as Record<string, Plugin>,
+        discoverPlugin: jest.fn(),
+        installPlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+      ;(getPlugin as jest.Mock).mockResolvedValue({ status: "enabled", enabled: true })
+      ;(upsertPlugin as jest.Mock).mockResolvedValue(undefined)
+
+      await new PluginManager({
+        pluginDirectory: "/plugins",
+        runtimeProfile: "browser",
+      }).scanPlugins()
+
+      expect(upsertPlugin).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "github-delivery", status: "installed", enabled: false })
+      )
     })
   })
 
@@ -2934,7 +3000,7 @@ describe("PluginManager", () => {
       expect(enableSpy).not.toHaveBeenCalled()
     })
 
-    it("does not activate a retired builtin that is absent from the bundled registry", async () => {
+    it("does not automatically activate the optional GitHub Delivery builtin", async () => {
       const retired: Plugin = {
         manifest: {
           ...createManifest("github-delivery"),
@@ -3068,7 +3134,7 @@ describe("PluginManager", () => {
       expect(enableSpy).not.toHaveBeenCalled()
     })
 
-    it("skips a retired builtin left in persisted state", async () => {
+    it("does not restore the optional GitHub Delivery builtin without explicit enable", async () => {
       const retired: Plugin = {
         manifest: {
           ...createManifest("github-delivery"),

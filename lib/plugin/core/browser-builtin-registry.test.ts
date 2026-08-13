@@ -48,6 +48,7 @@ describe("browser-builtin-registry", () => {
       "cognia-work-mode",
       "cognia-workflow-ai",
       "cognia-workspace-tools",
+      "github-delivery",
       "pet-daily-quests",
       "ripgrep-tools",
       "sre-agent",
@@ -80,6 +81,27 @@ describe("browser-builtin-registry", () => {
   it("getBrowserBuiltinRegistryEntry resolves by plugin id", () => {
     const entry = getBrowserBuiltinRegistryEntry("cognia-screenshot")
     expect(entry?.path).toBe("builtin://cognia-screenshot")
+  })
+
+  it("ships GitHub Delivery with its complete integration export namespace", () => {
+    const entry = getBrowserBuiltinRegistryEntry("github-delivery")
+
+    expect(entry?.manifest.runtimeCompatibility).toMatchObject({
+      tauri: { availability: "supported" },
+      browser: { availability: "degraded" },
+      mobile: { availability: "degraded" },
+      headless: { availability: "degraded" },
+    })
+    expect(entry?.manifest.activationEvents).toBeUndefined()
+    expect(entry?.moduleExports).toEqual(
+      expect.objectContaining({
+        listGithubResources: expect.any(Function),
+        checkGithubHealth: expect.any(Function),
+        normalizeGithub: expect.any(Function),
+        openPr: expect.any(Function),
+        runIssueLoop: expect.any(Function),
+      })
+    )
   })
 
   it("hides the reference plugin outside the E2E runtime", () => {

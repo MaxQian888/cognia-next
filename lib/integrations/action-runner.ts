@@ -18,6 +18,7 @@ import { getProvider } from "@/lib/plugin/auth/auth-provider-registry"
 import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-validate"
 import { getIntegrationActionHandler, getRegisteredIntegration } from "@/lib/integrations/registry"
 import { runGithubIssueLoop } from "@/lib/integrations/github-issue-loop"
+import { isTauri } from "@/lib/tauri"
 
 type AuthenticatedRequestExecutor = <T>(
   pluginId: string,
@@ -35,6 +36,31 @@ const runningPerAccount = new Map<string, number>()
 const MAX_ACCOUNT_CONCURRENCY = 4
 let requestOverride: AuthenticatedRequestExecutor | undefined
 let githubIssueLoopExecutor: IntegrationActionHandler = runGithubIssueLoop
+let githubIssueLoopDesktopHostOverride: boolean | undefined
+
+export interface IntegrationActionAvailability {
+  available: boolean
+  reason?: string
+}
+
+export function resolveIntegrationActionAvailability(
+  pluginId: string,
+  integrationId: string,
+  actionId: string
+): IntegrationActionAvailability {
+  if (
+    pluginId === "github-delivery" &&
+    integrationId === "github" &&
+    actionId === "runIssueLoop" &&
+    !(githubIssueLoopDesktopHostOverride ?? isTauri())
+  ) {
+    return {
+      available: false,
+      reason: "GitHub Issue Loop requires a desktop host.",
+    }
+  }
+  return { available: true }
+}
 
 function retryDelayMs(error: unknown, attempts: number): number {
   if (error && typeof error === "object") {
@@ -256,6 +282,17 @@ export async function runIntegrationActionJob(jobId: string): Promise<Integratio
       error: `Integration action "${job.actionId}" is unavailable`,
     })
   }
+  const availability = resolveIntegrationActionAvailability(
+    job.pluginId,
+    job.integrationId,
+    job.actionId
+  )
+  if (!availability.available) {
+    return updateIntegrationActionJob(jobId, {
+      status: "failed",
+      error: availability.reason,
+    })
+  }
 
   const controller = new AbortController()
   runningControllers.set(jobId, controller)
@@ -375,4 +412,8 @@ export function setGithubIssueLoopExecutorForTesting(
   executor: IntegrationActionHandler = runGithubIssueLoop
 ): void {
   githubIssueLoopExecutor = executor
+}
+
+export function setGithubIssueLoopDesktopHostAvailableForTesting(available?: boolean): void {
+  githubIssueLoopDesktopHostOverride = available
 }

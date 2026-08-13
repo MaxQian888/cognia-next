@@ -11,6 +11,8 @@ import {
   authenticatedIntegrationRequest,
   cancelIntegrationActionJob,
   executeIntegrationAction,
+  resolveIntegrationActionAvailability,
+  setGithubIssueLoopDesktopHostAvailableForTesting,
   setGithubIssueLoopExecutorForTesting,
   setIntegrationAuthenticatedRequestExecutorForTesting,
 } from "./action-runner"
@@ -30,6 +32,7 @@ describe("Integration action runner", () => {
   afterEach(() => {
     setIntegrationAuthenticatedRequestExecutorForTesting()
     setGithubIssueLoopExecutorForTesting()
+    setGithubIssueLoopDesktopHostAvailableForTesting()
   })
 
   async function setup(
@@ -148,6 +151,7 @@ describe("Integration action runner", () => {
   it("routes the first-party Issue Loop through the allowlisted host executor", async () => {
     const hostExecutor = jest.fn(async () => ({ pullRequestNumber: 11 }))
     setGithubIssueLoopExecutorForTesting(hostExecutor)
+    setGithubIssueLoopDesktopHostAvailableForTesting(true)
     registerIntegrationDefinitions({
       pluginId: "github-delivery",
       definitions: [
@@ -200,6 +204,65 @@ describe("Integration action runner", () => {
     const completed = await approveIntegrationActionJob(awaiting.id)
     expect(completed).toMatchObject({ status: "succeeded", output: { pullRequestNumber: 11 } })
     expect(hostExecutor).toHaveBeenCalledTimes(1)
+  })
+
+  it("gates Issue Loop outside the desktop host while leaving HTTP actions available", async () => {
+    const hostExecutor = jest.fn(async () => ({ pullRequestNumber: 11 }))
+    setGithubIssueLoopExecutorForTesting(hostExecutor)
+    setGithubIssueLoopDesktopHostAvailableForTesting(false)
+    registerIntegrationDefinitions({
+      pluginId: "github-delivery",
+      definitions: [
+        {
+          id: "github",
+          label: "GitHub",
+          authStrategies: [
+            {
+              id: "pat",
+              type: "personal-access-token",
+              label: "PAT",
+              providerId: "github-pat",
+            },
+          ],
+          resourceKinds: ["repository"],
+          eventTypes: [],
+          actions: [
+            {
+              id: "runIssueLoop",
+              label: "Issue Loop",
+              handler: "pluginRunIssueLoop",
+              inputSchema: { type: "object" },
+              risk: "write",
+              idempotency: "required",
+            },
+          ],
+        },
+      ],
+      handlers: { "github:runIssueLoop": async () => ({}) },
+    })
+    const account = await createIntegrationAccount("github-delivery", {
+      integrationId: "github",
+      providerId: "github-pat",
+      authSessionId: "opaque",
+      remoteAccountId: "acct",
+      label: "GitHub account",
+    })
+    const awaiting = await executeIntegrationAction("github-delivery", {
+      integrationId: "github",
+      accountId: account.id,
+      actionId: "runIssueLoop",
+      input: {},
+      idempotencyKey: "issue-loop-browser",
+    })
+
+    await expect(approveIntegrationActionJob(awaiting.id)).resolves.toMatchObject({
+      status: "failed",
+      error: "GitHub Issue Loop requires a desktop host.",
+    })
+    expect(hostExecutor).not.toHaveBeenCalled()
+    expect(resolveIntegrationActionAvailability("github-delivery", "github", "openPr")).toEqual({
+      available: true,
+    })
   })
 
   it("never bypasses approval for destructive actions and supports cancellation", async () => {

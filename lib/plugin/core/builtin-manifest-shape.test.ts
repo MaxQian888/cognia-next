@@ -18,6 +18,7 @@ const CANONICAL_RUNTIME_SURFACES: ReadonlyArray<PluginRuntimeProfile> = [
   "browser",
   "tauri",
   "mobile",
+  "headless",
 ]
 const RUNTIME_AVAILABILITIES = ["supported", "degraded", "blocked"] as const
 

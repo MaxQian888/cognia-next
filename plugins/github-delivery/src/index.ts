@@ -685,6 +685,24 @@ export const manifest: PluginManifest = {
     "integrations:manage",
   ],
   main: "dist/index.js",
+  runtimeCompatibility: {
+    tauri: { availability: "supported", entrypoint: "src/index.ts" },
+    browser: {
+      availability: "degraded",
+      reason:
+        "HTTP and event actions remain available, but runIssueLoop requires the desktop host.",
+    },
+    mobile: {
+      availability: "degraded",
+      reason:
+        "HTTP and event actions remain available, but runIssueLoop requires the desktop host.",
+    },
+    headless: {
+      availability: "degraded",
+      reason:
+        "HTTP and event actions remain available, but runIssueLoop requires the desktop host.",
+    },
+  },
   integrations: [githubIntegration],
   workflowKindAliases,
   dexie: {

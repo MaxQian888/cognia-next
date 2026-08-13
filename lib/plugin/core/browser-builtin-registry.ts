@@ -44,6 +44,7 @@ import strixSecurityManifest from "@/plugins/strix-security/plugin.json"
 import contextInspectorManifest from "@/plugins/context-inspector/plugin.json"
 import uiSurfaceReferenceManifest from "@/plugins/ui-surface-reference/plugin.json"
 import sreAgentManifest from "@/plugins/sre-agent/plugin.json"
+import githubDeliveryManifest from "@/plugins/github-delivery/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -86,6 +87,7 @@ import strixSecurityModule from "@/plugins/strix-security/src/index"
 import contextInspectorModule from "@/plugins/context-inspector/src/index"
 import * as uiSurfaceReferenceModule from "@/plugins/ui-surface-reference/src/index"
 import sreAgentModule from "@/plugins/sre-agent/src/index"
+import * as githubDeliveryModule from "@/plugins/github-delivery/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -414,6 +416,16 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-browser-tools",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(browserToolsModule),
+  },
+  {
+    // Optional GitHub integration. The full namespace is required because the
+    // integration bridge resolves providers, normalizers, and action handlers
+    // by their exported names rather than through the default definition.
+    manifest: builtinManifest(githubDeliveryManifest, githubDeliveryModule),
+    path: "builtin://github-delivery",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(githubDeliveryModule),
+    moduleExports: githubDeliveryModule as unknown as Record<string, unknown>,
   },
   {
     manifest: builtinManifest(petDailyQuestsManifest, petDailyQuestsModule),

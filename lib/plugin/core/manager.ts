@@ -71,6 +71,7 @@ const ACTIVATE_TIMEOUT_MS = 30_000
  * `ACTIVATE_TIMEOUT_MS` — a lifecycle hook that runs longer is a bug.
  */
 const LIFECYCLE_HOOK_TIMEOUT_MS = 30_000
+const MANUAL_ENABLE_ONLY_BUILTINS = new Set(["github-delivery"])
 import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
@@ -840,7 +841,8 @@ export class PluginManager {
       this.isBlockedByRuntimeProfile(plugin.manifest) ||
       this.applyCompatibilityPolicy(plugin.manifest, "enable").blocked ||
       this.isRetiredBuiltin(plugin) ||
-      this.requiresExplicitFrontendTrust(plugin)
+      this.requiresExplicitFrontendTrust(plugin) ||
+      MANUAL_ENABLE_ONLY_BUILTINS.has(plugin.manifest.id)
     ) {
       return true
     }
@@ -1446,6 +1448,11 @@ export class PluginManager {
     // enable-time registration reads; the persisted row is metadata-only.
     const serializableManifest = toClonableManifest(manifest)
     try {
+      const normalizeGithubDelivery =
+        source === "builtin" && serializableManifest.id === "github-delivery"
+      const existing = normalizeGithubDelivery
+        ? await getPlugin(serializableManifest.id)
+        : undefined
       await upsertPlugin({
         id: serializableManifest.id,
         name: serializableManifest.name,
@@ -1457,6 +1464,12 @@ export class PluginManager {
         capabilities: Array.isArray(serializableManifest.capabilities)
           ? [...serializableManifest.capabilities]
           : [],
+        ...(normalizeGithubDelivery
+          ? {
+              status: existing?.status === "disabled" ? "disabled" : "installed",
+              enabled: false,
+            }
+          : {}),
       })
     } catch (error) {
       loggers.manager.warn(`[plugin:${manifest.id}] failed to persist discovery row to Dexie`, {
@@ -1509,6 +1522,12 @@ export class PluginManager {
 
       if (!existing) {
         await store.installPlugin(manifest.id)
+      } else if (
+        manifest.id === "github-delivery" &&
+        existing.status !== "disabled" &&
+        existing.status !== "installed"
+      ) {
+        store.setPluginStatus(manifest.id, "installed")
       }
 
       await this.persistDiscoveredPluginRow(manifest, "builtin", entry.path)

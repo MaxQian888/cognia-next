@@ -36,6 +36,13 @@ describe("GitHub Delivery v3 official plugin", () => {
     })
     expect(githubIntegration.healthProvider).toEqual({ handler: "checkGithubHealth" })
     expect(githubIntegration.actions).toHaveLength(13)
+    expect(githubPlugin.manifest.activationEvents).toBeUndefined()
+    expect(githubPlugin.manifest.runtimeCompatibility).toMatchObject({
+      tauri: { availability: "supported" },
+      browser: { availability: "degraded" },
+      mobile: { availability: "degraded" },
+      headless: { availability: "degraded" },
+    })
 
     const schemas = Object.fromEntries(
       githubIntegration.actions.map((action) => [action.id, action.inputSchema])
