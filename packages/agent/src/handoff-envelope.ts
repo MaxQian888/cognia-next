@@ -13,6 +13,9 @@ export interface HandoffExecutionBinding {
   credentialProfileRef?: string
   hostRef?: string
   modelRole?: "primary" | "fast" | "powerful"
+  modelBindingRef?: string
+  requiredCapabilities?: string[]
+  requiredSandboxCapabilities?: string[]
 }
 
 export interface HandoffResourceRef {
@@ -102,6 +105,7 @@ export function validateHandoffEnvelope(value: unknown): string[] {
       ["deploymentRef", execution.deploymentRef],
       ["credentialProfileRef", execution.credentialProfileRef],
       ["hostRef", execution.hostRef],
+      ["modelBindingRef", execution.modelBindingRef],
     ] as const) {
       if (ref === undefined) continue
       if (!isNonEmptyString(ref)) {
@@ -110,6 +114,20 @@ export function validateHandoffEnvelope(value: unknown): string[] {
       }
       const violation = refViolation(ref)
       if (violation) errors.push(`execution.${field}: ${violation}`)
+    }
+    if (
+      execution.requiredCapabilities !== undefined &&
+      (!Array.isArray(execution.requiredCapabilities) ||
+        execution.requiredCapabilities.some((item) => !isNonEmptyString(item)))
+    ) {
+      errors.push("execution.requiredCapabilities must be a non-empty string array")
+    }
+    if (
+      execution.requiredSandboxCapabilities !== undefined &&
+      (!Array.isArray(execution.requiredSandboxCapabilities) ||
+        execution.requiredSandboxCapabilities.some((item) => !isNonEmptyString(item)))
+    ) {
+      errors.push("execution.requiredSandboxCapabilities must be a non-empty string array")
     }
   }
 

@@ -308,6 +308,7 @@ export const SETTINGS_SYNC = {
   radius: { category: "shared" },
   motion: { category: "shared" },
   agentFlowMode: { category: "desktop-only" },
+  messageDisplay: { category: "shared" },
   usageDisplayMode: { category: "desktop-only" },
   typographyExt: { category: "shared" },
   a11y: { category: "shared" },

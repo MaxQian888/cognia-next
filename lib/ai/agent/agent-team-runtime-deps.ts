@@ -124,6 +124,8 @@ export interface BuildAgentTeamRuntimeDepsOptions {
    * without this the lead has no provider to resolve against at all.
    */
   readSettings?: () => Promise<AppSettings | null | undefined>
+  /** Run-scoped IM persona injected only into the lead entry context. */
+  entryPersona?: { id: string; name: string; systemPrompt: string }
 }
 
 /**
@@ -211,10 +213,16 @@ export function buildAgentTeamRuntimeDeps(
       team,
       lead,
       prompt: buildLeadPlanningPrompt(team, workers, feedback),
-      systemPrompt:
+      systemPrompt: [
         lead.config?.systemPrompt?.trim() ||
-        team.config?.defaultSystemPrompt?.trim() ||
-        LEAD_SYSTEM_PROMPT,
+          team.config?.defaultSystemPrompt?.trim() ||
+          LEAD_SYSTEM_PROMPT,
+        opts.entryPersona?.systemPrompt.trim()
+          ? `IM entry persona (${opts.entryPersona.name}):\n${opts.entryPersona.systemPrompt.trim()}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       phase: "planning",
       signal,
     })

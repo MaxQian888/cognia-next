@@ -463,7 +463,7 @@ class CogniaSessionImpl implements CogniaSession {
       },
       this.callOptions(options)
     )
-    return this.materialize(result.sessionId, result.spec as ResolvedAgentExecutionSpec)
+    return this.materialize(result.sessionId, result.spec as unknown as ResolvedAgentExecutionSpec)
   }
 
   async clone(options: CloneOptions = {}): Promise<CogniaSession> {
@@ -477,7 +477,7 @@ class CogniaSessionImpl implements CogniaSession {
       },
       this.callOptions(options)
     )
-    return this.materialize(result.sessionId, result.spec as ResolvedAgentExecutionSpec)
+    return this.materialize(result.sessionId, result.spec as unknown as ResolvedAgentExecutionSpec)
   }
 
   async state(): Promise<SessionState> {
@@ -753,7 +753,10 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
             timeoutMs: requestTimeoutMs,
           }
         )
-        return materializeSession(result.sessionId, result.spec as ResolvedAgentExecutionSpec)
+        return materializeSession(
+          result.sessionId,
+          result.spec as unknown as ResolvedAgentExecutionSpec
+        )
       },
       async open(sessionId) {
         const result = await peer.call(
@@ -761,7 +764,10 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
           { sessionId },
           { timeoutMs: requestTimeoutMs }
         )
-        return materializeSession(result.sessionId, result.spec as ResolvedAgentExecutionSpec)
+        return materializeSession(
+          result.sessionId,
+          result.spec as unknown as ResolvedAgentExecutionSpec
+        )
       },
       async list() {
         return (await peer.call("session/list", {}, { timeoutMs: requestTimeoutMs }))
@@ -773,7 +779,10 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
           { session },
           { timeoutMs: requestTimeoutMs }
         )
-        return materializeSession(result.sessionId, {})
+        return materializeSession(
+          result.sessionId,
+          result.spec as unknown as ResolvedAgentExecutionSpec
+        )
       },
       async tree(sessionId) {
         const response = await peer.call(

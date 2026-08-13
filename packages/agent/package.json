@@ -26,6 +26,12 @@
       "require": "./dist/protocol.cjs",
       "default": "./dist/protocol.js"
     },
+    "./worker-manifest": {
+      "types": "./dist/worker-manifest.d.ts",
+      "import": "./dist/worker-manifest.js",
+      "require": "./dist/worker-manifest.cjs",
+      "default": "./dist/worker-manifest.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

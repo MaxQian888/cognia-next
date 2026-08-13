@@ -119,8 +119,8 @@ export class BridgeWorkerRpcPool implements RemoteWorkerRuntime {
     this.notifyWorkersChanged()
     try {
       const client = await worker.clientPromise
-      const session = input.remoteSessionId
-        ? await client.sessions.open(input.remoteSessionId)
+      const session = input.recoverySessionId
+        ? await client.sessions.open(input.recoverySessionId)
         : await client.sessions.create({ commandId: input.commandId, handoff: input.handoff })
       await input.onSession(session.id)
       await input.onControl({
@@ -130,13 +130,8 @@ export class BridgeWorkerRpcPool implements RemoteWorkerRuntime {
           }
           await session.steer(message, { commandId })
         },
-        async pause(commandId) {
-          await session.abort({ commandId })
+        async pause(_commandId) {
           await session.waitForIdle({ timeoutMs: 30_000 })
-          await session.snapshot({ commandId: `${commandId}:checkpoint` })
-        },
-        async resume() {
-          await client.sessions.open(session.id)
         },
         async terminate(commandId) {
           await session.abort({ commandId })

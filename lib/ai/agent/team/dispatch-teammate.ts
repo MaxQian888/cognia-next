@@ -50,6 +50,7 @@ import {
 } from "@/lib/task-workspace/run-lease"
 import { useSettingsStore } from "@/stores/settings"
 import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
+import { rebindResolvedAgentExecutionHost } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
 import type { TeammateExecutionTarget } from "@/types/agent/agent-team"
 import {
   getRemoteWorkerRuntime,
@@ -938,13 +939,14 @@ export async function dispatchTeammate(
           ? ({ mode: "pinned", hostRef: durableDispatch.retryTargetHostRef } as const)
           : executionTarget
         const target = selectRemoteWorker(remoteRuntime.listWorkers(), selectedExecutionTarget, {
-          requiredCapabilities: frozenExecutionSpec.capabilities.effective,
-          ...(frozenExecutionSpec.credential?.profileRef
-            ? { credentialProfileRef: frozenExecutionSpec.credential.profileRef }
-            : {}),
+          spec: frozenExecutionSpec,
           workspaceBindingRef: repositoryRef,
           requiredSandboxCapabilities: teamCtx.team.config?.sandboxPolicy ? ["filesystem"] : [],
         })
+        const remoteExecutionSpec = rebindResolvedAgentExecutionHost(
+          frozenExecutionSpec,
+          target.hostRef
+        )
         const {
           advanceAgentTeamRemoteEvent,
           claimAgentTeamDispatchLease,
@@ -962,7 +964,7 @@ export async function dispatchTeammate(
           childRunId: durableDispatch.childRunId,
           leaseId,
           hostRef: target.hostRef,
-          executionFingerprint: frozenExecutionSpec.executionFingerprint,
+          executionFingerprint: remoteExecutionSpec.executionFingerprint,
           now: Date.now(),
         })
         if (!claimed) throw new RemoteWorkerWaitingError("no_compatible_capacity", target.hostRef)
@@ -971,6 +973,15 @@ export async function dispatchTeammate(
         }
         const sourceRun = await getAgentTeamRun(teamCtx.runId)
         if (!sourceRun) throw new Error(`Unknown durable AgentTeam run: ${teamCtx.runId}`)
+        const recoverySessionId =
+          sourceRun.status === "recovering" ? claimed.remoteSessionId : undefined
+        if (recoverySessionId) {
+          const { getLatestAgentTeamCheckpoint } = await import("@/lib/db/agent-team-runtime")
+          const checkpoint = await getLatestAgentTeamCheckpoint(durableDispatch.childRunId)
+          if (checkpoint?.replay !== "safe") {
+            throw new Error("Remote session recovery requires a safe checkpoint")
+          }
+        }
         const {
           agentTeamExecutionRunId,
           projectAgentTeamChildLifecycle,
@@ -992,15 +1003,19 @@ export async function dispatchTeammate(
             task: { title: args.taskId, prompt: remotePrompt },
             execution: {
               mode: "orchestrated",
-              executionFingerprint: frozenExecutionSpec.executionFingerprint,
-              runtimeAdapter: frozenExecutionSpec.runtimeAdapter,
-              ...(frozenExecutionSpec.deploymentRef
-                ? { deploymentRef: frozenExecutionSpec.deploymentRef }
+              executionFingerprint: remoteExecutionSpec.executionFingerprint,
+              runtimeAdapter: remoteExecutionSpec.runtimeAdapter,
+              ...(remoteExecutionSpec.deploymentRef
+                ? { deploymentRef: remoteExecutionSpec.deploymentRef }
                 : {}),
-              ...(frozenExecutionSpec.credential?.profileRef
-                ? { credentialProfileRef: frozenExecutionSpec.credential.profileRef }
+              ...(remoteExecutionSpec.credential?.profileRef
+                ? { credentialProfileRef: remoteExecutionSpec.credential.profileRef }
                 : {}),
+              hostRef: target.hostRef,
               modelRole: "primary",
+              modelBindingRef: remoteExecutionSpec.modelBindings.primary,
+              requiredCapabilities: remoteExecutionSpec.capabilities.effective,
+              requiredSandboxCapabilities: teamCtx.team.config?.sandboxPolicy ? ["filesystem"] : [],
             },
             ...(teamCtx.team.config.resourcePolicy?.maxTokens
               ? { budget: { maxTokens: teamCtx.team.config.resourcePolicy.maxTokens } }
@@ -1013,7 +1028,7 @@ export async function dispatchTeammate(
             capabilities: target.manifest.hardCapabilities as never,
             localCredentialProfileRefs: target.manifest.credentialProfileRefs,
           },
-          requiredCapabilities: frozenExecutionSpec.capabilities.effective,
+          requiredCapabilities: remoteExecutionSpec.capabilities.effective,
           leaseHeld: true,
         }).envelope
         await projectAgentTeamChildLifecycle({
@@ -1054,7 +1069,7 @@ export async function dispatchTeammate(
             hostRef: target.hostRef,
             handoff,
             commandId: leaseId,
-            ...(claimed.remoteSessionId ? { remoteSessionId: claimed.remoteSessionId } : {}),
+            ...(recoverySessionId ? { recoverySessionId } : {}),
             ...(lastRemoteEventId ? { lastRemoteEventId } : {}),
             prompt: remotePrompt,
             ...(maxSteps ? { maxSteps } : {}),
@@ -1073,9 +1088,8 @@ export async function dispatchTeammate(
                 steer: (message, sourceMessageId) => control.steer(message, sourceMessageId),
                 pause: async () => {
                   await control.pause(`${leaseId}:pause`)
-                  await durableDispatch.checkpointPause()
+                  return durableDispatch.checkpointPause()
                 },
-                resume: () => control.resume(`${leaseId}:resume`),
                 terminate: () => control.terminate(`${leaseId}:terminate`),
               })
             },

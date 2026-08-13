@@ -20,7 +20,7 @@
  * hitting. Pinned by `route-tickets-panel.test.tsx`.
  */
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, RefreshCwIcon, TicketIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -41,11 +41,8 @@ import {
 } from "@/components/ui/item"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import {
-  isAgentExecutionFlagEnabled,
-  setAgentExecutionFlag,
-  subscribeToAgentExecutionFlags,
-} from "@/lib/ai/agent/execution/feature-flags"
+import { useAgentExecutionFlag } from "@/hooks/agent/use-agent-execution-flag"
+import { setAgentExecutionFlag } from "@/lib/ai/agent/execution/feature-flags"
 import { gatewayListRouteTickets, gatewayRevokeRouteTicket } from "@/lib/tauri/gateway"
 import type { GatewayRouteTicket } from "@/types/gateway"
 
@@ -72,11 +69,7 @@ export function GatewayRouteTicketsPanel() {
   // prerendered. `useSyncExternalStore` gives the prerender a stable `false`
   // and swaps to the real value on hydration — without the mount-effect
   // setState that mirroring into component state would need.
-  const enabled = useSyncExternalStore(
-    subscribeToAgentExecutionFlags,
-    () => isAgentExecutionFlagEnabled("gatewayAgentRouteTickets"),
-    routeTicketsDisabledDuringPrerender
-  )
+  const enabled = useAgentExecutionFlag("gatewayAgentRouteTickets")
 
   // Promise callbacks rather than async/await: every setState below then lands
   // in an external-system callback instead of reading as a synchronous write

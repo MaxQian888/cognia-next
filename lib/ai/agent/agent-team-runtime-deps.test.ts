@@ -311,6 +311,34 @@ describe("runLeadPlanning", () => {
     expect(executeAgent).toHaveBeenCalledTimes(1)
   })
 
+  it("injects an IM Character only into the lead entry system context", async () => {
+    const team = makeTeam()
+    const lead = makeLead()
+    seedStore(team, [lead, makeTeammate()])
+    const executeAgent = jest.fn(async () => ({
+      text: "```json\n{}\n```",
+      channel: "text" as const,
+      toolsAvailable: false,
+    }))
+    const { runLeadPlanning } = buildAgentTeamRuntimeDeps({
+      executeAgent,
+      readSettings,
+      entryPersona: { id: "char_1", name: "Sage", systemPrompt: "Use a calm voice." },
+    })
+
+    await runLeadPlanning!({
+      team,
+      lead,
+      signal: new AbortController().signal,
+    })
+
+    expect((executeAgent as jest.Mock).mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        systemPrompt: expect.stringContaining("IM entry persona (Sage):\nUse a calm voice."),
+      })
+    )
+  })
+
   it("forwards feedback into the prompt during revisions", async () => {
     const team = makeTeam()
     const lead = makeLead()

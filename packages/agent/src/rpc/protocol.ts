@@ -1,6 +1,7 @@
 import * as v from "valibot"
 
 import { isHandoffEnvelope, type HandoffEnvelope } from "../handoff-envelope"
+import { agentWorkerManifestV1Schema } from "../worker-manifest"
 
 export type JsonRpcId = string | number
 
@@ -146,19 +147,6 @@ const inputSchema = v.union([
   nonEmptyString,
   v.looseObject({ prompt: nonEmptyString, attachments: v.optional(v.array(v.unknown())) }),
 ])
-
-export const agentWorkerManifestV1Schema = v.looseObject({
-  manifestVersion: v.literal(1),
-  runtime: nonEmptyString,
-  models: v.array(nonEmptyString),
-  hardCapabilities: v.array(nonEmptyString),
-  maxActiveTurns: v.pipe(v.number(), v.integer(), v.minValue(1)),
-  credentialProfileRefs: v.array(nonEmptyString),
-  workspaceBindingRefs: v.array(nonEmptyString),
-  taskWorkspace: v.object({ enabled: v.boolean() }),
-  sandbox: v.object({ capabilities: v.array(nonEmptyString) }),
-  platform: v.object({ os: nonEmptyString, arch: nonEmptyString }),
-})
 
 const handoffEnvelopeSchema = v.custom<HandoffEnvelope>(
   isHandoffEnvelope,

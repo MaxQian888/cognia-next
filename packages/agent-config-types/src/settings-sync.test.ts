@@ -57,6 +57,7 @@ describe("SETTINGS_SYNC", () => {
 describe("derived key lists", () => {
   it("lets a client write exactly the shared fields", () => {
     expect([...MOBILE_WRITABLE_SETTING_KEYS].sort()).toEqual(keysOf("shared").sort())
+    expect(SETTINGS_SYNC.messageDisplay.category).toBe("shared")
   })
 
   it("mirrors down the shared fields plus the server-authoritative ones", () => {

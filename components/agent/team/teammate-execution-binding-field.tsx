@@ -27,14 +27,13 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { decideDelegationMode } from "@/lib/ai/agent/execution/delegation-mode"
-import {
-  getAgentExecutionFlags,
-  isAgentExecutionFlagEnabled,
-} from "@/lib/ai/agent/execution/feature-flags"
+import { getAgentExecutionFlags } from "@/lib/ai/agent/execution/feature-flags"
+import { useAgentExecutionFlag } from "@/hooks/agent/use-agent-execution-flag"
 import { resolveTeammateExecutionBinding } from "@/lib/ai/agent/team/execution-binding-resolver"
 import { resolveAgentExecutionSpec } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
 import type { TeammateExecutionBinding } from "@/types/agent/agent-team"
 import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
+import { useSettingsStore } from "@/stores/settings"
 
 export interface TeammateExecutionBindingFieldProps {
   value: TeammateExecutionBinding | undefined
@@ -48,10 +47,11 @@ const RUNTIME_AUTO = "__auto__"
 
 function previewDecision(
   value: TeammateExecutionBinding | undefined,
-  teamDefault: TeammateExecutionBinding | undefined
+  teamDefault: TeammateExecutionBinding | undefined,
+  resolverEnabled: boolean
 ) {
   const environment = { isTauri: true, isHeadlessHost: false }
-  const flags = getAgentExecutionFlags()
+  const flags = { ...getAgentExecutionFlags(), agentExecutionResolverV2: resolverEnabled }
   const base = {
     surface: "team" as const,
     environment,
@@ -71,6 +71,11 @@ export function TeammateExecutionBindingField({
 }: TeammateExecutionBindingFieldProps) {
   const t = useTranslations("agentTeamsWorkspace.teammateConfig.executionBinding")
   const { snapshot } = useFleetSnapshot()
+  const resolverEnabled = useAgentExecutionFlag("agentExecutionResolverV2")
+  const remoteDispatchEnabled = useAgentExecutionFlag("agentTeamRemoteDispatch")
+  const taskWorkspaceEnabled = useSettingsStore(
+    (state) => state.settings?.developer?.taskWorkspace === true
+  )
 
   const mode = value?.mode ?? "inherit"
   const pinned = value?.mode === "pinned" ? value : undefined
@@ -79,8 +84,14 @@ export function TeammateExecutionBindingField({
   const executionTargetPatch = value?.executionTarget ? { executionTarget } : {}
   const pinnedHostRef = executionTarget.mode === "pinned" ? executionTarget.hostRef : undefined
   const hosts = snapshot.hosts ?? []
+  const workerProfileReady = hosts.some((host) => host.online && host.placementReady === true)
+  const remoteReady =
+    resolverEnabled && remoteDispatchEnabled && taskWorkspaceEnabled && workerProfileReady
 
-  const decision = useMemo(() => previewDecision(value, teamDefault), [value, teamDefault])
+  const decision = useMemo(
+    () => previewDecision(value, teamDefault, resolverEnabled),
+    [resolverEnabled, teamDefault, value]
+  )
 
   return (
     <div className="space-y-2">
@@ -96,11 +107,16 @@ export function TeammateExecutionBindingField({
         </Badge>
       </div>
       <p className="text-[10px] text-muted-foreground">{t("description")}</p>
-      {!isAgentExecutionFlagEnabled("agentExecutionResolverV2") && (
+      {!resolverEnabled && (
         <p className="text-[10px] text-amber-600 dark:text-amber-500" data-testid="flag-off-hint">
           {t("flagOffHint")}
         </p>
       )}
+      {!remoteReady && executionTarget.mode !== "colocate" ? (
+        <p className="text-[10px] text-amber-600 dark:text-amber-500">
+          {t("remotePrerequisitesHint")}
+        </p>
+      ) : null}
       <Select
         value={mode}
         onValueChange={(v) => {
@@ -149,14 +165,20 @@ export function TeammateExecutionBindingField({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="colocate">{t("hostLocal")}</SelectItem>
-            <SelectItem value="auto">{t("hostAuto")}</SelectItem>
+            <SelectItem value="auto" disabled={!remoteReady}>
+              {t("hostAuto")}
+            </SelectItem>
             {pinnedHostRef && !hosts.some((host) => host.hostRef === pinnedHostRef) ? (
-              <SelectItem value={`host:${pinnedHostRef}`}>
+              <SelectItem value={`host:${pinnedHostRef}`} disabled>
                 {t("hostPinnedOffline", { host: pinnedHostRef })}
               </SelectItem>
             ) : null}
             {hosts.map((host) => (
-              <SelectItem key={host.hostRef} value={`host:${host.hostRef}`}>
+              <SelectItem
+                key={host.hostRef}
+                value={`host:${host.hostRef}`}
+                disabled={!remoteReady || !host.online || host.placementReady !== true}
+              >
                 {host.online
                   ? t("hostPinned", { host: host.hostRef })
                   : t("hostPinnedOffline", { host: host.hostRef })}

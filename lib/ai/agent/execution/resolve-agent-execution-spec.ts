@@ -187,6 +187,8 @@ export interface AgentExecutionEnvironment {
   isTauri: boolean
   isHeadlessHost: boolean
   sidecarReady?: boolean
+  /** Capabilities the selected host backend can actually serve. */
+  hostCapabilities?: readonly AgentCapabilityId[]
   /** Managed/headless policy: forbid legacy completion fallback. */
   prohibitCompletionFallback?: boolean
 }
@@ -309,7 +311,12 @@ export function resolveAgentExecutionSpec(
   const hostRef = resolveHostRef(input)
   const identity = deterministicIdentity(input.identity)
 
-  const runtimeCaps = RUNTIME_CAPABILITIES[adapter]
+  const theoreticalRuntimeCaps = RUNTIME_CAPABILITIES[adapter]
+  const runtimeCaps = input.environment.hostCapabilities
+    ? theoreticalRuntimeCaps.filter((capability) =>
+        input.environment.hostCapabilities!.includes(capability)
+      )
+    : theoreticalRuntimeCaps
   const requires = input.policy?.requires ?? []
   const prefers = input.policy?.prefers ?? []
   const missingRequired = requires.filter((cap) => !runtimeCaps.includes(cap))
@@ -434,6 +441,22 @@ export function sendSpecFromResolved(
       ...(spec.identity.parentRunId ? { parentRunId: spec.identity.parentRunId } : {}),
     },
     hostRef: spec.hostRef,
+  }
+}
+
+/**
+ * Rebind an auto-selected frozen spec to an authenticated host and refresh its
+ * fingerprint. Callers must use this helper instead of mutating `hostRef`.
+ */
+export function rebindResolvedAgentExecutionHost(
+  spec: ResolvedAgentExecutionSpec,
+  hostRef: string
+): ResolvedAgentExecutionSpec {
+  if (!hostRef.trim()) throw new Error("hostRef must be a non-empty string")
+  const rebound = { ...spec, hostRef }
+  return {
+    ...rebound,
+    executionFingerprint: computeExecutionFingerprint(rebound),
   }
 }
 

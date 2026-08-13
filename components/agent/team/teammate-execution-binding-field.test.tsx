@@ -1,153 +1,205 @@
-/**
- * @jest-environment jsdom
- */
-import { render, screen, fireEvent } from "@testing-library/react"
-import { NextIntlClientProvider } from "next-intl"
+/** @jest-environment jsdom */
+import { fireEvent, render, screen } from "@testing-library/react"
+
 import { TeammateExecutionBindingField } from "./teammate-execution-binding-field"
-import en from "@/i18n/messages/en.json"
-import type { TeammateExecutionBinding } from "@/types/agent/agent-team"
 
-const renderField = (
-  props: Partial<React.ComponentProps<typeof TeammateExecutionBindingField>> = {}
-) => {
-  const onChange = jest.fn()
-  const utils = render(
-    <NextIntlClientProvider locale="en" messages={en}>
-      <TeammateExecutionBindingField value={undefined} onChange={onChange} {...props} />
-    </NextIntlClientProvider>
-  )
-  return { onChange, ...utils }
+const flags: Record<string, boolean> = {
+  agentExecutionResolverV2: false,
+  agentTeamRemoteDispatch: false,
 }
+let taskWorkspace = false
+let hosts: Array<Record<string, unknown>> = []
 
-describe("TeammateExecutionBindingField", () => {
-  it("defaults to inherit and previews NATIVE delegation", () => {
-    renderField()
-    expect(screen.getByTestId("delegation-mode-preview")).toHaveTextContent("Native delegation")
-    expect(screen.getByTestId("execution-binding-mode")).toHaveTextContent("Inherit team default")
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}))
+jest.mock("@/hooks/agent/use-agent-execution-flag", () => ({
+  useAgentExecutionFlag: (flag: string) => flags[flag] ?? false,
+}))
+jest.mock("@/hooks/fleet/use-fleet-snapshot", () => ({
+  useFleetSnapshot: () => ({ snapshot: { hosts } }),
+}))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) =>
+    selector({ settings: { developer: { taskWorkspace } } }),
+}))
+jest.mock("@/components/ui/select", () => ({
+  ...(() => {
+    const React = jest.requireActual<typeof import("react")>("react")
+    const SelectContext = React.createContext<(value: string) => void>(() => undefined)
+    return {
+      Select: ({
+        children,
+        onValueChange,
+      }: {
+        children: React.ReactNode
+        onValueChange?: (value: string) => void
+      }) => (
+        <SelectContext.Provider value={onValueChange ?? (() => undefined)}>
+          <div>{children}</div>
+        </SelectContext.Provider>
+      ),
+      SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+      SelectItem: ({
+        children,
+        disabled,
+        value,
+      }: {
+        children: React.ReactNode
+        disabled?: boolean
+        value: string
+      }) => {
+        const onValueChange = React.useContext(SelectContext)
+        return (
+          <button disabled={disabled} onClick={() => onValueChange(value)}>
+            {children}
+          </button>
+        )
+      },
+      SelectTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+      SelectValue: () => null,
+    }
+  })(),
+}))
+
+describe("TeammateExecutionBindingField remote prerequisites", () => {
+  beforeEach(() => {
+    flags.agentExecutionResolverV2 = false
+    flags.agentTeamRemoteDispatch = false
+    taskWorkspace = false
+    hosts = []
   })
 
-  it("a pinned deployment previews ORCHESTRATED with the machine-readable reason", () => {
-    renderField({ value: { mode: "pinned", deploymentRef: "dep-vendor-a" } })
-    const preview = screen.getByTestId("delegation-mode-preview")
-    expect(preview).toHaveTextContent("Orchestrated")
-    expect(preview).toHaveTextContent("deployment-differs")
-  })
-
-  it("a pinned model role alone stays NATIVE (only frozen model roles may differ)", () => {
-    renderField({ value: { mode: "pinned", modelRole: "fast" } })
-    expect(screen.getByTestId("delegation-mode-preview")).toHaveTextContent("Native delegation")
-  })
-
-  it("pinned mode edits deployment and credential REFERENCES via onChange", () => {
-    const { onChange } = renderField({ value: { mode: "pinned" } })
-    const deployment = screen.getByPlaceholderText("deployment id (e.g. dep-vendor-a)")
-    fireEvent.change(deployment, { target: { value: "dep-1" } })
-    fireEvent.blur(deployment)
-    expect(onChange).toHaveBeenCalledWith({ mode: "pinned", deploymentRef: "dep-1" })
-
-    const credential = screen.getByPlaceholderText("credential profile reference")
-    fireEvent.change(credential, { target: { value: "cred-9" } })
-    fireEvent.blur(credential)
-    expect(onChange).toHaveBeenCalledWith({ mode: "pinned", credentialProfileRef: "cred-9" })
-  })
-
-  it("clearing a pinned ref input emits undefined for that ref", () => {
-    const { onChange } = renderField({
-      value: { mode: "pinned", deploymentRef: "dep-1", credentialProfileRef: "cred-1" },
-    })
-    const deployment = screen.getByPlaceholderText("deployment id (e.g. dep-vendor-a)")
-    fireEvent.change(deployment, { target: { value: "   " } })
-    fireEvent.blur(deployment)
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "pinned", deploymentRef: undefined })
+  it("keeps an offline pinned host visible while disabling remote targets", () => {
+    render(
+      <TeammateExecutionBindingField
+        value={{ mode: "inherit", executionTarget: { mode: "pinned", hostRef: "device:saved" } }}
+        onChange={jest.fn()}
+      />
     )
-    const credential = screen.getByPlaceholderText("credential profile reference")
-    fireEvent.change(credential, { target: { value: "" } })
-    fireEvent.blur(credential)
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "pinned", credentialProfileRef: undefined })
-    )
+
+    expect(screen.getByRole("button", { name: "hostAuto" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "hostPinnedOffline" })).toBeDisabled()
+    expect(screen.getByText("remotePrerequisitesHint")).toBeInTheDocument()
   })
 
-  it("pool mode parses candidate ids as a comma list (ids only)", () => {
-    const { onChange } = renderField({ value: { mode: "pool", candidateIds: [] } })
-    const input = screen.getByPlaceholderText("dep-a, dep-b")
-    fireEvent.change(input, { target: { value: " dep-a, dep-b ,, dep-c " } })
-    fireEvent.blur(input)
+  it("enables only profile-ready remote hosts after all gates are active", () => {
+    flags.agentExecutionResolverV2 = true
+    flags.agentTeamRemoteDispatch = true
+    taskWorkspace = true
+    hosts = [
+      { hostRef: "device:ready", online: true, placementReady: true },
+      { hostRef: "device:legacy", online: true, placementReady: false },
+      { hostRef: "device:offline", online: false, placementReady: true },
+    ]
+    render(<TeammateExecutionBindingField value={{ mode: "inherit" }} onChange={jest.fn()} />)
+
+    expect(screen.getByRole("button", { name: "hostAuto" })).toBeEnabled()
+    const pinned = screen.getAllByRole("button", { name: "hostPinned" })
+    expect(pinned[0]).toBeEnabled()
+    expect(pinned[1]).toBeDisabled()
+    expect(screen.getByRole("button", { name: "hostPinnedOffline" })).toBeDisabled()
+  })
+
+  it.each([
+    [true, false, true, true],
+    [true, true, false, true],
+    [true, true, true, false],
+  ])(
+    "keeps remote auto disabled when one prerequisite is missing",
+    (resolver, dispatch, workspace, profile) => {
+      flags.agentExecutionResolverV2 = resolver
+      flags.agentTeamRemoteDispatch = dispatch
+      taskWorkspace = workspace
+      hosts = profile ? [{ hostRef: "device:ready", online: true, placementReady: true }] : []
+      const { unmount } = render(
+        <TeammateExecutionBindingField value={undefined} onChange={jest.fn()} />
+      )
+      expect(screen.getByRole("button", { name: "hostAuto" })).toBeDisabled()
+      unmount()
+    }
+  )
+
+  it("labels an advertised offline host and preserves the waiting warning", () => {
+    flags.agentExecutionResolverV2 = true
+    flags.agentTeamRemoteDispatch = true
+    taskWorkspace = true
+    hosts = [{ hostRef: "device:offline", online: false, placementReady: true }]
+    render(
+      <TeammateExecutionBindingField
+        value={{ mode: "pinned", executionTarget: { mode: "pinned", hostRef: "device:offline" } }}
+        teamDefault={{ mode: "inherit" }}
+        onChange={jest.fn()}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "hostPinnedOffline" })).toBeDisabled()
+    expect(screen.getByText("hostWaitingWarning")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("deploymentRefPlaceholder")).toHaveValue("")
+    expect(screen.getByPlaceholderText("credentialProfileRefPlaceholder")).toHaveValue("")
+  })
+
+  it("routes binding, host, policy, and ref edits through the shared field", () => {
+    flags.agentExecutionResolverV2 = true
+    flags.agentTeamRemoteDispatch = true
+    taskWorkspace = true
+    hosts = [{ hostRef: "device:ready", online: true, placementReady: true }]
+    const onChange = jest.fn()
+    const { rerender } = render(
+      <TeammateExecutionBindingField
+        value={{
+          mode: "pinned",
+          runtimePolicy: "ai-sdk",
+          modelRole: "fast",
+          deploymentRef: "deployment:old",
+          credentialProfileRef: "credential:old",
+          executionTarget: { mode: "pinned", hostRef: "device:ready" },
+        }}
+        onChange={onChange}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "modeInherit" }))
+    fireEvent.click(screen.getByRole("button", { name: "modePinned" }))
+    fireEvent.click(screen.getByRole("button", { name: "modePool" }))
+    fireEvent.click(screen.getByRole("button", { name: "hostLocal" }))
+    fireEvent.click(screen.getByRole("button", { name: "hostAuto" }))
+    fireEvent.click(screen.getByRole("button", { name: "hostPinned" }))
+    fireEvent.click(screen.getByRole("button", { name: "runtimeAuto" }))
+    fireEvent.click(screen.getByRole("button", { name: "runtimeAiSdk" }))
+    fireEvent.click(screen.getByRole("button", { name: "modelRoleInherit" }))
+    fireEvent.click(screen.getByRole("button", { name: "modelRolePrimary" }))
+
+    const deployment = screen.getByPlaceholderText("deploymentRefPlaceholder")
+    fireEvent.change(deployment, { target: { value: " deployment:new " } })
+    fireEvent.blur(deployment)
+    const credential = screen.getByPlaceholderText("credentialProfileRefPlaceholder")
+    fireEvent.change(credential, { target: { value: " " } })
+    fireEvent.blur(credential)
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ executionTarget: { mode: "auto" } })
+    )
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ deploymentRef: "deployment:new" })
+    )
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ credentialProfileRef: undefined })
+    )
+
+    rerender(
+      <TeammateExecutionBindingField
+        value={{ mode: "pool", candidateIds: ["a"], executionTarget: { mode: "colocate" } }}
+        onChange={onChange}
+      />
+    )
+    const candidates = screen.getByPlaceholderText("candidateIdsPlaceholder")
+    fireEvent.change(candidates, { target: { value: " a, , b " } })
+    fireEvent.blur(candidates)
     expect(onChange).toHaveBeenCalledWith({
       mode: "pool",
-      candidateIds: ["dep-a", "dep-b", "dep-c"],
+      candidateIds: ["a", "b"],
+      executionTarget: { mode: "colocate" },
     })
-  })
-
-  it("switching the mode select emits the right binding shape", async () => {
-    const { onChange } = renderField()
-    fireEvent.click(screen.getByTestId("execution-binding-mode"))
-    fireEvent.click(await screen.findByRole("option", { name: "Pinned" }))
-    expect(onChange).toHaveBeenCalledWith({ mode: "pinned" })
-
-    fireEvent.click(screen.getByTestId("execution-binding-mode"))
-    fireEvent.click(await screen.findByRole("option", { name: "Candidate pool" }))
-    expect(onChange).toHaveBeenCalledWith({ mode: "pool", candidateIds: [] })
-  })
-
-  it("switching a pinned member back to inherit emits the inherit shape", async () => {
-    const { onChange } = renderField({ value: { mode: "pinned", deploymentRef: "dep-1" } })
-    fireEvent.click(screen.getByTestId("execution-binding-mode"))
-    fireEvent.click(await screen.findByRole("option", { name: "Inherit team default" }))
-    expect(onChange).toHaveBeenCalledWith({ mode: "inherit" })
-  })
-
-  it("pinned runtime and model-role selects emit refs (auto/inherit clear them)", async () => {
-    const { onChange } = renderField({
-      value: { mode: "pinned", runtimePolicy: "claude-agent-sdk", modelRole: "fast" },
-    })
-    // Runtime → AI SDK.
-    fireEvent.click(screen.getByText("Claude Agent SDK"))
-    fireEvent.click(await screen.findByRole("option", { name: "AI SDK" }))
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "pinned", runtimePolicy: "ai-sdk" })
-    )
-    // Runtime → Auto clears the pin.
-    fireEvent.click(screen.getByText("Claude Agent SDK"))
-    fireEvent.click(await screen.findByRole("option", { name: "Auto" }))
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "pinned", runtimePolicy: undefined })
-    )
-    // Model role → Powerful, then Inherit clears it.
-    fireEvent.click(screen.getByText("Fast"))
-    fireEvent.click(await screen.findByRole("option", { name: "Powerful" }))
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "pinned", modelRole: "powerful" })
-    )
-    fireEvent.click(screen.getByText("Fast"))
-    fireEvent.click(await screen.findByRole("option", { name: "Inherit" }))
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "pinned", modelRole: undefined })
-    )
-  })
-
-  it("uses the team default as the preview baseline for an inheriting member", () => {
-    const teamDefault: TeammateExecutionBinding = {
-      mode: "pinned",
-      deploymentRef: "dep-team-default",
-    }
-    renderField({ value: { mode: "inherit" }, teamDefault })
-    // Member inherits the team's pinned deployment ⇒ differs from the app
-    // baseline ⇒ orchestrated.
-    expect(screen.getByTestId("delegation-mode-preview")).toHaveTextContent("deployment-differs")
-  })
-
-  it("preserves an offline pinned host and warns that dispatch will wait", () => {
-    renderField({
-      value: {
-        mode: "inherit",
-        executionTarget: { mode: "pinned", hostRef: "device:offline" },
-      },
-    })
-    expect(screen.getByTestId("execution-host-target")).toHaveTextContent("device:offline")
-    expect(
-      screen.getByText("Pinned host is offline; the child will remain queued.")
-    ).toBeInTheDocument()
   })
 })

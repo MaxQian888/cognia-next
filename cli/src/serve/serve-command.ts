@@ -28,7 +28,10 @@ import path from "node:path"
 import "../db/install-indexeddb"
 
 import { bootstrapHeadlessRuntimes } from "@/lib/headless/bootstrap"
-import { installRemoteWorkerRuntime } from "@/lib/ai/agent/team/remote-worker-runtime"
+import {
+  installRemoteWorkerRuntime,
+  type RemoteWorkerDescriptor,
+} from "@/lib/ai/agent/team/remote-worker-runtime"
 import { loadMessageResolver } from "@/lib/headless/i18n"
 import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 import { setTransport } from "@/lib/tauri"
@@ -59,6 +62,22 @@ export interface ServeDeps {
 
 function deriveBridgeUrl(serverUrl: string): string {
   return `${serverUrl.replace(/^http/, "ws").replace(/\/$/, "")}/internal/bridge`
+}
+
+export function projectWorkerPlacement(worker: RemoteWorkerDescriptor) {
+  const placementReason = !worker.manifest.executionProfile
+    ? "execution_profile_missing"
+    : !worker.manifest.taskWorkspace.enabled
+      ? "task_workspace_unavailable"
+      : worker.manifest.workspaceBindingRefs.length === 0
+        ? "workspace_missing"
+        : undefined
+  return {
+    hostRef: worker.hostRef,
+    usedSlots: worker.activeTurns,
+    placementReady: placementReason === undefined,
+    ...(placementReason ? { placementReason } : {}),
+  }
 }
 
 export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<number> {
@@ -128,10 +147,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     onWorkersChanged: (workers) => {
       void transport
         .call("fleet_project_worker_load", {
-          loads: workers.map((worker) => ({
-            hostRef: worker.hostRef,
-            usedSlots: worker.activeTurns,
-          })),
+          loads: workers.map(projectWorkerPlacement),
         })
         .catch(() => undefined)
     },

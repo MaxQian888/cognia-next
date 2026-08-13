@@ -1917,6 +1917,8 @@ export interface ChatSession {
   memoryUse?: boolean
   /** Per-chat automatic learned-memory write override. */
   memoryLearn?: boolean
+  /** Per-session chat-message presentation override; absent means inherit app settings. */
+  messageDisplayOverride?: import("@/types/appearance").MessageDisplayPreferences
   /** Per-session Agent execution overrides; values beat the bound Agent profile. */
   executionPolicy?: AgentExecutionPolicy
   pinned?: boolean
@@ -2307,6 +2309,10 @@ export interface ConversationTimelineSettings {
 export type ConversationSidebarDensity = "comfortable" | "compact"
 /** How far the conversation-sidebar search reaches. */
 export type ConversationSearchScope = "title" | "titleAndContent"
+/** Optional context fields rendered beneath a conversation title. */
+export type ConversationSidebarMetadata = "agent" | "model" | "provider" | "workspace"
+/** Motion policy for overflowing conversation titles. */
+export type ConversationSidebarTitleMotion = "hover" | "off"
 /**
  * Primary grouping axis for the conversation list, applied under the pinned and
  * folder sections.
@@ -2347,6 +2353,10 @@ export interface ConversationSidebarSettings {
   showUnreadBadges?: boolean
   /** Whether search also matches message content (async). Defaults to title-only. */
   searchScope?: ConversationSearchScope
+  /** Ordered context fields rendered beneath each title. Defaults to agent + model. */
+  metadata?: ConversationSidebarMetadata[]
+  /** How overflowing titles reveal their full text. Defaults to hover. */
+  titleMotion?: ConversationSidebarTitleMotion
 }
 
 /**
@@ -4206,6 +4216,8 @@ export interface AppSettings {
   motion?: import("@/types/appearance").MotionSettings
   /** Agent invocation-flow display mode (simplified / standard / detailed). */
   agentFlowMode?: import("@/types/appearance").AgentFlowSettings
+  /** Unified chat-message presentation preferences. */
+  messageDisplay?: import("@/types/appearance").MessageDisplayPreferences
   /** Usage / consumption statistics display mode (simplified / standard / detailed). */
   usageDisplayMode?: import("@/types/appearance").UsageDisplaySettings
   typographyExt?: import("@/types/appearance").TypographyExtSettings

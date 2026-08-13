@@ -17,6 +17,7 @@
  */
 import type { RuntimeBridge } from "@/lib/headless/types"
 import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
+import { reconnectDelayMs } from "../runtime/reconnect-delay"
 
 import {
   BRIDGE_PROTOCOL_VERSION,
@@ -79,9 +80,6 @@ export interface BridgeClientOptions {
   rss?: () => { rssBytes: number; lastFlushAt: number }
   log?: (level: "info" | "warn" | "error", message: string) => void
 }
-
-/** Reconnect backoff table (ms), jittered ±50%. */
-const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000, 16_000, 30_000]
 
 function redactBridgeErrorDetail(value: string): string {
   return value
@@ -395,11 +393,9 @@ export class BridgeClient implements RuntimeBridge {
       return
     }
     this.setState("reconnecting")
-    const idx = Math.min(this.attempts, RECONNECT_BACKOFF_MS.length - 1)
-    this.attempts += 1
-    const base = RECONNECT_BACKOFF_MS[idx]
     const random = this.opts.random ? this.opts.random() : Math.random()
-    const delay = Math.round(base * (0.5 + random * 0.5))
+    const delay = reconnectDelayMs(this.attempts, random)
+    this.attempts += 1
     this.log("info", `bridge reconnecting in ${delay} ms (${cause.message})`)
     this.cancelTimer?.()
     this.cancelTimer = this.schedule(() => {

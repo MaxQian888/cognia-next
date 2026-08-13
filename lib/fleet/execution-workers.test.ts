@@ -25,7 +25,7 @@ describe("execution worker management", () => {
     tauri.mockReturnValue(true)
   })
 
-  it("builds a copyable command without placing the fingerprint in argv", () => {
+  it("builds a copyable pinned enrollment command when a fingerprint is present", () => {
     const command = workerEnrollmentCommand({
       enrollment: "once",
       expiresAtMs: 1,
@@ -35,7 +35,7 @@ describe("execution worker management", () => {
     })
     expect(command).toContain('worker enroll --server-url "https://brain.example"')
     expect(command).toContain('--enrollment "once"')
-    expect(command).not.toContain("certificate")
+    expect(command).toContain('--fingerprint "sha256:certificate"')
   })
 
   it("uses the existing transport for create, list, and capability revoke", async () => {

@@ -1,3 +1,5 @@
+import type { ResolvedAgentExecutionSpec as AgentSdkResolvedExecutionSpec } from "@cognia/agent"
+
 // Unified Agent execution contract (ADR-0090).
 //
 // Frozen vocabulary shared by the renderer resolver, the Rust hosts (which
@@ -223,19 +225,11 @@ export const RESOLVED_SPEC_VERSION = 2
  * and stable for the whole session: callers must never re-derive runtime,
  * route or host from anything else once a spec exists.
  */
-export interface ResolvedAgentExecutionSpec {
-  specVersion: 1 | 2
+export interface ResolvedAgentExecutionSpec extends AgentSdkResolvedExecutionSpec {
   identity: AgentExecutionIdentity
-  /** Deterministic hash over the non-volatile spec fields (see fingerprint.ts). */
-  executionFingerprint: string
-  executionKind: "agent" | "completion"
   runtimeAdapter: AgentRuntimeAdapterId
-  runtimePolicySource: "explicit" | "auto" | "legacy-mapped"
-  deploymentRef?: string
   modelBindings: AgentModelBindings
   route: AgentResolvedRoute
-  /** e.g. "desktop-sidecar" | "headless-agent-host" | a pinned ADR-0082 host ref. */
-  hostRef: string
   compatibility: {
     evidence: AgentCompatibilityEvidence
     recordRef?: string
@@ -258,9 +252,6 @@ export interface ResolvedAgentExecutionSpec {
     profileVersion?: string
     affinity: CredentialAffinity
   }
-  fallbackPolicy: "none" | "completion"
-  /** Set when legacy `toolsEnabled`/provider-id signals drove the mapping. */
-  legacyMigrated?: boolean
 }
 
 // ---- SendOptions projection -------------------------------------------------

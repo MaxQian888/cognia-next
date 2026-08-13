@@ -38,7 +38,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import { SettingsCard } from "@/components/settings/common/settings-section"
+import { SandboxPolicyFields } from "@/components/settings/sandbox/sandbox-policy-card"
 import { PresetEditor } from "@/components/settings/presets/preset-editor"
 import { NativeToolsSection } from "@/components/settings/presets/editor-sections/native-tools-section"
 import { CharacterSection } from "@/components/settings/presets/editor-sections/character-section"
@@ -55,6 +57,7 @@ import {
 import type { ProviderName } from "@cognia/provider-types/provider"
 import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
 import { getProviderDisplayName } from "@/lib/ai/icons"
+import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useSettingsStore } from "@/stores/settings"
 import { TeammateExecutionBindingField } from "@/components/agent/team/teammate-execution-binding-field"
@@ -84,6 +87,7 @@ export function TeammateConfigDialog({
 }: TeammateConfigDialogProps) {
   const t = useTranslations("agentTeamsWorkspace.teammateConfig")
   const tRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
+  const tSandboxNetwork = useTranslations("settings.sandbox.policy.network")
 
   // The prop is the opener's click-time SNAPSHOT; every inline field persists
   // through `updateTeammate` immediately, so spreading the snapshot's config
@@ -120,6 +124,10 @@ export function TeammateConfigDialog({
   const twins = useMemo(() => twinsRaw ?? [], [twinsRaw])
 
   const updateTeammate = useAgentTeamStore((s) => s.updateTeammate)
+  const inheritedSandboxPolicy = team.config.sandboxPolicy
+  const effectiveSandboxPolicy =
+    clampSandboxPolicy(inheritedSandboxPolicy, teammate.config.sandboxPolicy) ?? {}
+  const sandboxEnabled = teammate.config.sandboxEnabled ?? team.config.sandboxEnabled ?? false
 
   // PresetEditor seeds its internal state from `initial` — keep it pinned to
   // the open-time snapshot so live inline edits don't churn the editor.
@@ -305,6 +313,54 @@ export function TeammateConfigDialog({
                       }
                     />
                   </div>
+                </SettingsCard>
+                <SettingsCard
+                  title={t("sandboxSection.title")}
+                  description={t("sandboxSection.description")}
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <Label htmlFor={`teammate-sandbox-${teammate.id}`}>
+                        {t("sandboxSection.enabled")}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {t("sandboxSection.enabledHint")}
+                      </p>
+                    </div>
+                    <Switch
+                      id={`teammate-sandbox-${teammate.id}`}
+                      checked={sandboxEnabled}
+                      onCheckedChange={(sandboxEnabled) =>
+                        updateTeammate(teammate.id, {
+                          config: { ...teammate.config, sandboxEnabled },
+                        })
+                      }
+                      aria-label={t("sandboxSection.enabled")}
+                      data-testid="teammate-sandbox-enabled"
+                    />
+                  </div>
+                  <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                    {inheritedSandboxPolicy
+                      ? t("sandboxSection.inheritedCeiling", {
+                          cpu: inheritedSandboxPolicy.maxCpuSeconds ?? 0,
+                          memory: inheritedSandboxPolicy.maxMemoryMb ?? 0,
+                          network: tSandboxNetwork(inheritedSandboxPolicy.network ?? "on"),
+                          roots: inheritedSandboxPolicy.writableRoots?.join(", ") || "—",
+                        })
+                      : t("sandboxSection.inheritedNone")}
+                  </p>
+                  <SandboxPolicyFields
+                    policy={effectiveSandboxPolicy}
+                    testIdPrefix="teammate-sandbox-policy"
+                    onChange={(candidate) =>
+                      updateTeammate(teammate.id, {
+                        config: {
+                          ...teammate.config,
+                          sandboxPolicy: clampSandboxPolicy(inheritedSandboxPolicy, candidate),
+                        },
+                      })
+                    }
+                  />
                 </SettingsCard>
                 <NativeToolsSection state={state} onPatch={onPatch} />
                 <CharacterSection state={state} onPatch={onPatch} />

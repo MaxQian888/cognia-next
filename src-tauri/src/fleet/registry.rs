@@ -367,6 +367,10 @@ pub struct FleetHost {
     pub max_active_turns: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub used_slots: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placement_ready: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placement_reason: Option<String>,
     pub runtime: String,
     pub workspace_binding_ready: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1794,6 +1798,37 @@ mod tests {
     }
 
     const SID: &str = "abc-123";
+
+    #[test]
+    fn fleet_host_readiness_fields_are_additive_on_the_wire() {
+        let legacy = FleetHost {
+            host_ref: "device:legacy".into(),
+            online: false,
+            max_active_turns: 1,
+            used_slots: None,
+            placement_ready: None,
+            placement_reason: None,
+            runtime: "cognia-agent".into(),
+            workspace_binding_ready: false,
+            workspace_binding_refs: vec![],
+            last_seen_at: 1,
+        };
+        let legacy_json = serde_json::to_value(&legacy).unwrap();
+        assert!(legacy_json.get("placementReady").is_none());
+        assert!(legacy_json.get("placementReason").is_none());
+
+        let projected = FleetHost {
+            placement_ready: Some(false),
+            placement_reason: Some("execution_profile_missing".into()),
+            ..legacy
+        };
+        let projected_json = serde_json::to_value(projected).unwrap();
+        assert_eq!(projected_json["placementReady"], false);
+        assert_eq!(
+            projected_json["placementReason"],
+            "execution_profile_missing"
+        );
+    }
 
     fn base_payload() -> serde_json::Value {
         serde_json::json!({

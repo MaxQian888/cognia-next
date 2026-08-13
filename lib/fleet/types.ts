@@ -177,6 +177,8 @@ export interface FleetHost {
   online: boolean
   maxActiveTurns: number
   usedSlots?: number
+  placementReady?: boolean
+  placementReason?: string
   runtime: string
   workspaceBindingReady: boolean
   workspaceBindingRefs?: string[]

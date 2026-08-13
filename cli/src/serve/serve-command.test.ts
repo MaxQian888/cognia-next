@@ -17,9 +17,34 @@ import { __resetCliDbForTesting } from "../db/bootstrap"
 import type { WebSocketLike } from "./bridge-client"
 import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
 import { BRIDGE_PROTOCOL_VERSION } from "./protocol"
-import { serveCommand } from "./serve-command"
+import { projectWorkerPlacement, serveCommand } from "./serve-command"
 
 type Listener = (event: { data?: unknown }) => void
+
+describe("projectWorkerPlacement", () => {
+  const worker = (manifest: Record<string, unknown>) =>
+    ({ hostRef: "device:a", activeTurns: 1, manifest }) as never
+
+  it("requires a canonical profile, Task Workspace, and a workspace binding", () => {
+    const base = {
+      taskWorkspace: { enabled: true },
+      workspaceBindingRefs: ["repository:project:repo"],
+      executionProfile: {},
+    }
+    expect(projectWorkerPlacement(worker(base))).toMatchObject({ placementReady: true })
+    expect(projectWorkerPlacement(worker({ ...base, executionProfile: undefined }))).toMatchObject({
+      placementReady: false,
+      placementReason: "execution_profile_missing",
+    })
+    expect(
+      projectWorkerPlacement(worker({ ...base, taskWorkspace: { enabled: false } }))
+    ).toMatchObject({ placementReady: false, placementReason: "task_workspace_unavailable" })
+    expect(projectWorkerPlacement(worker({ ...base, workspaceBindingRefs: [] }))).toMatchObject({
+      placementReady: false,
+      placementReason: "workspace_missing",
+    })
+  })
+})
 
 /** A scripted cognia-server: acks hellos, records responds. */
 class FakeServerSocket implements WebSocketLike {

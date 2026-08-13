@@ -583,6 +583,14 @@ describe("dispatchTeammate — remote durable worker", () => {
           taskWorkspace: { enabled: true },
           sandbox: { capabilities: ["filesystem"] },
           platform: { os: "linux", arch: "x64" },
+          executionProfile: {
+            profileVersion: 1,
+            backendId: "cognia-agent",
+            runtimeAdapter: "claude-agent-sdk",
+            modelBindings: { primary: "default" },
+            deploymentRefs: ["anthropic"],
+            capabilities: [...RUNTIME_CAPABILITIES["claude-agent-sdk"]],
+          },
         },
       },
     ])
@@ -596,7 +604,6 @@ describe("dispatchTeammate — remote durable worker", () => {
       await input.onControl({
         steer: jest.fn(),
         pause: jest.fn(),
-        resume: jest.fn(),
         terminate: jest.fn(),
       })
       await input.onEvent({

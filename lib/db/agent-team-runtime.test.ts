@@ -27,6 +27,7 @@ import {
   settleAgentTeamDispatchLease,
   updateAgentTeamSteeringReceipt,
   updateAgentTeamChildRun,
+  updateAgentTeamChildRunIfCurrent,
 } from "./agent-team-runtime"
 
 describe("durable AgentTeam runtime persistence", () => {
@@ -283,6 +284,66 @@ describe("durable AgentTeam runtime persistence", () => {
     expect(usage).toMatchObject({ totalTokens: 100, wallTimeMs: 150, toolTimeMs: 40, attempts: 2 })
     expect(usage).not.toHaveProperty("acu")
     expect((await getAgentTeamRun("run-usage"))?.resourceUsage).toEqual(usage)
+  })
+
+  it("conditionally updates a child only while status and version are current", async () => {
+    await createAgentTeamRun({
+      id: "run-cas",
+      teamId: "team-1",
+      objective: "Protect terminal state",
+      decisionVersion: 0,
+      priority: 1,
+      status: "running",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await createAgentTeamChildRun({
+      id: "child-cas",
+      runId: "run-cas",
+      teamId: "team-1",
+      teammateId: "mate-1",
+      taskId: "task-1",
+      repositoryId: "primary",
+      attempt: 1,
+      status: "running",
+      createdAt: 1,
+      updatedAt: 2,
+      resourceUsage: {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        wallTimeMs: 0,
+        toolTimeMs: 0,
+        attempts: 1,
+        failures: 0,
+      },
+    })
+
+    await expect(
+      updateAgentTeamChildRunIfCurrent(
+        "child-cas",
+        { status: "running", updatedAt: 2 },
+        { status: "pausing", updatedAt: 3 }
+      )
+    ).resolves.toBe(true)
+    await expect(
+      updateAgentTeamChildRunIfCurrent(
+        "child-cas",
+        { status: "running", updatedAt: 2 },
+        { status: "paused", updatedAt: 4 }
+      )
+    ).resolves.toBe(false)
+    await expect(
+      updateAgentTeamChildRunIfCurrent(
+        "child-cas",
+        { status: "pausing", updatedAt: 2 },
+        { status: "paused", updatedAt: 4 }
+      )
+    ).resolves.toBe(false)
+    expect(await getAgentTeamChildRun("child-cas")).toMatchObject({
+      status: "pausing",
+      updatedAt: 3,
+    })
   })
 
   it("purges every durable run for an explicitly deleted team", async () => {

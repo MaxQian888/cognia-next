@@ -104,10 +104,19 @@ export function findForbiddenWritableRoot(paths: string[]): string | null {
   return null
 }
 
-export function SandboxPolicyCard() {
+export interface SandboxPolicyFieldsProps {
+  policy: SandboxResourcePolicy
+  onChange: (policy: SandboxResourcePolicy) => void
+  testIdPrefix?: string
+}
+
+/** Shared controlled editor used by app-, team-, and teammate-level policy owners. */
+export function SandboxPolicyFields({
+  policy,
+  onChange,
+  testIdPrefix = "sandbox-policy",
+}: SandboxPolicyFieldsProps) {
   const t = useTranslations("settings.sandbox.policy")
-  const settings = useSettingsStore((s) => s.settings)
-  const policy: SandboxResourcePolicy = settings?.sandboxPolicy ?? {}
   const cpuId = useId()
   const memId = useId()
   const netId = useId()
@@ -117,7 +126,7 @@ export function SandboxPolicyCard() {
   const [writableRootsError, setWritableRootsError] = useState<string | null>(null)
 
   const update = (patch: Partial<SandboxResourcePolicy>) => {
-    void saveSettings({ sandboxPolicy: { ...policy, ...patch } })
+    onChange({ ...policy, ...patch })
   }
 
   const network: NetworkCeiling = isNetwork(policy.network ?? "")
@@ -125,107 +134,122 @@ export function SandboxPolicyCard() {
     : "on"
 
   return (
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor={cpuId}>{t("maxCpu.label")}</Label>
+          <Input
+            id={cpuId}
+            type="number"
+            min={0}
+            inputMode="numeric"
+            value={policy.maxCpuSeconds ?? 0}
+            onChange={(e) =>
+              update({ maxCpuSeconds: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
+            }
+            data-testid={`${testIdPrefix}-cpu`}
+          />
+          <p className="text-xs text-muted-foreground">{t("maxCpu.description")}</p>
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor={memId}>{t("maxMemory.label")}</Label>
+          <Input
+            id={memId}
+            type="number"
+            min={0}
+            inputMode="numeric"
+            value={policy.maxMemoryMb ?? 0}
+            onChange={(e) =>
+              update({ maxMemoryMb: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
+            }
+            data-testid={`${testIdPrefix}-memory`}
+          />
+          <p className="text-xs text-muted-foreground">{t("maxMemory.description")}</p>
+        </div>
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={netId}>{t("network.label")}</Label>
+        <Select
+          value={network}
+          onValueChange={(value) => {
+            if (isNetwork(value)) update({ network: value })
+          }}
+        >
+          <SelectTrigger id={netId} data-testid={`${testIdPrefix}-network`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {NETWORK_VALUES.map((value) => (
+              <SelectItem key={value} value={value}>
+                {t(`network.${value}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">{t("network.description")}</p>
+      </div>
+      {network === "allowlist" && (
+        <div className="grid gap-1.5">
+          <Label htmlFor={hostsId}>{t("allowlist.label")}</Label>
+          <Textarea
+            id={hostsId}
+            rows={3}
+            defaultValue={(policy.networkAllowlist ?? []).join("\n")}
+            placeholder={t("allowlist.placeholder")}
+            onBlur={(e) => update({ networkAllowlist: parseHostList(e.target.value) })}
+            data-testid={`${testIdPrefix}-allowlist`}
+          />
+          <p className="text-xs text-muted-foreground">{t("allowlist.description")}</p>
+        </div>
+      )}
+      <div className="grid gap-1.5">
+        <Label htmlFor={rootsId}>{t("writableRoots.label")}</Label>
+        <Textarea
+          id={rootsId}
+          rows={3}
+          defaultValue={(policy.writableRoots ?? []).join("\n")}
+          placeholder={t("writableRoots.placeholder")}
+          aria-invalid={writableRootsError ? true : undefined}
+          aria-describedby={writableRootsError ? rootsErrorId : undefined}
+          onBlur={(e) => {
+            const writableRoots = parseHostList(e.target.value)
+            const forbidden = findForbiddenWritableRoot(writableRoots)
+            if (forbidden) {
+              setWritableRootsError(t("writableRoots.errorForbidden", { path: forbidden }))
+              return
+            }
+            setWritableRootsError(null)
+            update({ writableRoots })
+          }}
+          data-testid={`${testIdPrefix}-writable-roots`}
+        />
+        {writableRootsError && (
+          <p id={rootsErrorId} role="alert" className="text-xs text-destructive">
+            {writableRootsError}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">{t("writableRoots.description")}</p>
+      </div>
+    </div>
+  )
+}
+
+export function SandboxPolicyCard() {
+  const t = useTranslations("settings.sandbox.policy")
+  const settings = useSettingsStore((s) => s.settings)
+  const policy: SandboxResourcePolicy = settings?.sandboxPolicy ?? {}
+
+  return (
     <Card>
       <CardHeader>
         <CardTitle>{t("title")}</CardTitle>
         <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor={cpuId}>{t("maxCpu.label")}</Label>
-            <Input
-              id={cpuId}
-              type="number"
-              min={0}
-              inputMode="numeric"
-              value={policy.maxCpuSeconds ?? 0}
-              onChange={(e) =>
-                update({ maxCpuSeconds: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
-              }
-              data-testid="sandbox-policy-cpu"
-            />
-            <p className="text-xs text-muted-foreground">{t("maxCpu.description")}</p>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor={memId}>{t("maxMemory.label")}</Label>
-            <Input
-              id={memId}
-              type="number"
-              min={0}
-              inputMode="numeric"
-              value={policy.maxMemoryMb ?? 0}
-              onChange={(e) =>
-                update({ maxMemoryMb: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
-              }
-              data-testid="sandbox-policy-memory"
-            />
-            <p className="text-xs text-muted-foreground">{t("maxMemory.description")}</p>
-          </div>
-        </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor={netId}>{t("network.label")}</Label>
-          <Select
-            value={network}
-            onValueChange={(value) => {
-              if (isNetwork(value)) update({ network: value })
-            }}
-          >
-            <SelectTrigger id={netId} data-testid="sandbox-policy-network">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {NETWORK_VALUES.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {t(`network.${value}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">{t("network.description")}</p>
-        </div>
-        {network === "allowlist" && (
-          <div className="grid gap-1.5">
-            <Label htmlFor={hostsId}>{t("allowlist.label")}</Label>
-            <Textarea
-              id={hostsId}
-              rows={3}
-              defaultValue={(policy.networkAllowlist ?? []).join("\n")}
-              placeholder={t("allowlist.placeholder")}
-              onBlur={(e) => update({ networkAllowlist: parseHostList(e.target.value) })}
-              data-testid="sandbox-policy-allowlist"
-            />
-            <p className="text-xs text-muted-foreground">{t("allowlist.description")}</p>
-          </div>
-        )}
-        <div className="grid gap-1.5">
-          <Label htmlFor={rootsId}>{t("writableRoots.label")}</Label>
-          <Textarea
-            id={rootsId}
-            rows={3}
-            defaultValue={(policy.writableRoots ?? []).join("\n")}
-            placeholder={t("writableRoots.placeholder")}
-            aria-invalid={writableRootsError ? true : undefined}
-            aria-describedby={writableRootsError ? rootsErrorId : undefined}
-            onBlur={(e) => {
-              const writableRoots = parseHostList(e.target.value)
-              const forbidden = findForbiddenWritableRoot(writableRoots)
-              if (forbidden) {
-                setWritableRootsError(t("writableRoots.errorForbidden", { path: forbidden }))
-                return
-              }
-              setWritableRootsError(null)
-              update({ writableRoots })
-            }}
-            data-testid="sandbox-policy-writable-roots"
-          />
-          {writableRootsError && (
-            <p id={rootsErrorId} role="alert" className="text-xs text-destructive">
-              {writableRootsError}
-            </p>
-          )}
-          <p className="text-xs text-muted-foreground">{t("writableRoots.description")}</p>
-        </div>
+      <CardContent>
+        <SandboxPolicyFields
+          policy={policy}
+          onChange={(next) => void saveSettings({ sandboxPolicy: next })}
+        />
       </CardContent>
     </Card>
   )

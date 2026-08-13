@@ -60,10 +60,34 @@ export interface CanonicalSession {
 }
 
 export interface ResolvedAgentExecutionSpec {
-  runtime?: string
-  model?: string
-  capabilities?: readonly string[]
-  [key: string]: unknown
+  specVersion: 1 | 2
+  identity: {
+    sessionId: string
+    runId: string
+    turnId?: string
+    attemptId: string
+    providerAttemptId?: string
+    parentRunId?: string
+  }
+  executionFingerprint: string
+  executionKind: "agent" | "completion"
+  runtimeAdapter: "claude-agent-sdk" | "ai-sdk" | "external"
+  runtimePolicySource: "explicit" | "auto" | "legacy-mapped"
+  deploymentRef?: string
+  modelBindings: { primary: string; fast?: string; powerful?: string }
+  route:
+    | { kind: "gateway"; routePolicy: string; routePinId?: string; ticketRef?: string }
+    | { kind: "direct"; routePolicy: string; credentialProfileRef?: string }
+  hostRef: string
+  compatibility: { evidence: string; recordRef?: string; suiteVersion?: string }
+  capabilities: {
+    effective: readonly string[]
+    disabledOptional: readonly string[]
+    support?: Readonly<Record<string, { support: string; reason?: string }>>
+  }
+  credential?: { profileRef: string; profileVersion?: string; affinity: string }
+  fallbackPolicy: "none" | "completion"
+  legacyMigrated?: boolean
 }
 
 export type AgentInput =
@@ -292,49 +316,13 @@ export interface ProtocolLimits {
   maxOutboundBufferBytes: number
 }
 
-export interface AgentWorkerManifestV1 {
-  manifestVersion: 1
-  runtime: string
-  models: readonly string[]
-  hardCapabilities: readonly string[]
-  maxActiveTurns: number
-  credentialProfileRefs: readonly string[]
-  workspaceBindingRefs: readonly string[]
-  taskWorkspace: { enabled: boolean }
-  sandbox: { capabilities: readonly string[] }
-  platform: { os: string; arch: string }
-}
+export {
+  isAgentWorkerManifestV1,
+  type AgentWorkerExecutionProfileV1,
+  type AgentWorkerManifestV1,
+} from "./worker-manifest"
 
-function isStringArray(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string" && item.length > 0)
-}
-
-/** Validate an untrusted worker hello before it can participate in placement. */
-export function isAgentWorkerManifestV1(value: unknown): value is AgentWorkerManifestV1 {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false
-  const manifest = value as Record<string, unknown>
-  const taskWorkspace = manifest.taskWorkspace as Record<string, unknown> | undefined
-  const sandbox = manifest.sandbox as Record<string, unknown> | undefined
-  const platform = manifest.platform as Record<string, unknown> | undefined
-  return (
-    manifest.manifestVersion === 1 &&
-    typeof manifest.runtime === "string" &&
-    manifest.runtime.length > 0 &&
-    isStringArray(manifest.models) &&
-    isStringArray(manifest.hardCapabilities) &&
-    Number.isInteger(manifest.maxActiveTurns) &&
-    (manifest.maxActiveTurns as number) > 0 &&
-    isStringArray(manifest.credentialProfileRefs) &&
-    isStringArray(manifest.workspaceBindingRefs) &&
-    taskWorkspace?.enabled !== undefined &&
-    typeof taskWorkspace.enabled === "boolean" &&
-    isStringArray(sandbox?.capabilities) &&
-    typeof platform?.os === "string" &&
-    platform.os.length > 0 &&
-    typeof platform.arch === "string" &&
-    platform.arch.length > 0
-  )
-}
+import type { AgentWorkerManifestV1 } from "./worker-manifest"
 
 export interface InitializeResult {
   protocolVersion: 2

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import {
@@ -57,11 +57,8 @@ import { listSessions as listChatSessions } from "@/lib/db/sessions"
 import { persistMessages } from "@/lib/db/messages"
 import { startNewSession } from "@/lib/chat/start-session"
 import { useChatStore } from "@/stores/chat"
-import {
-  getAgentExecutionFlags,
-  isAgentExecutionFlagEnabled,
-  subscribeToAgentExecutionFlags,
-} from "@/lib/ai/agent/execution/feature-flags"
+import { getAgentExecutionFlags } from "@/lib/ai/agent/execution/feature-flags"
+import { useAgentExecutionFlag } from "@/hooks/agent/use-agent-execution-flag"
 import {
   resolveAgentExecutionSpec,
   sendSpecFromResolved,
@@ -163,16 +160,8 @@ type SdkSessionErrorKey = "errors.loadFailed"
 export function SdkSessionManager() {
   const t = useTranslations("settings.agentRuntimeSection.sessions.sdk")
   const router = useRouter()
-  const enabled = useSyncExternalStore(
-    subscribeToAgentExecutionFlags,
-    () => isAgentExecutionFlagEnabled("claudeSdkParityV1"),
-    () => false
-  )
-  const sessionStoreEnabled = useSyncExternalStore(
-    subscribeToAgentExecutionFlags,
-    () => isAgentExecutionFlagEnabled("claudeSdkSessionStore"),
-    () => false
-  )
+  const enabled = useAgentExecutionFlag("claudeSdkParityV1")
+  const sessionStoreEnabled = useAgentExecutionFlag("claudeSdkSessionStore")
   const desktop = isTauri()
   const [sessions, setSessions] = useState<SdkSessionInfo[]>([])
   const [loading, setLoading] = useState(false)

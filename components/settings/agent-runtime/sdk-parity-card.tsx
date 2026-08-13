@@ -1,6 +1,5 @@
 "use client"
 
-import { useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -8,11 +7,10 @@ import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { buildCapabilitySnapshot } from "@/lib/ai/agent/execution/capability-snapshot"
 import {
   getAgentExecutionFlags,
-  isAgentExecutionFlagEnabled,
   setAgentExecutionFlag,
-  subscribeToAgentExecutionFlags,
   type AgentExecutionFlag,
 } from "@/lib/ai/agent/execution/feature-flags"
+import { useAgentExecutionFlag } from "@/hooks/agent/use-agent-execution-flag"
 import { resolveAgentExecutionSpec } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
 import { isTauri } from "@/lib/tauri"
 
@@ -22,21 +20,13 @@ const CHILD_FLAGS = [
   ["claudeSdkPrewarm", "prewarm"],
 ] as const satisfies readonly [AgentExecutionFlag, string][]
 
-function useFlag(flag: AgentExecutionFlag): boolean {
-  return useSyncExternalStore(
-    subscribeToAgentExecutionFlags,
-    () => isAgentExecutionFlagEnabled(flag),
-    () => false
-  )
-}
-
 export function SdkParityCard() {
   const t = useTranslations("settings.agentRuntimeSection.sidecar.parity")
-  const resolverEnabled = useFlag("agentExecutionResolverV2")
-  const enabled = useFlag("claudeSdkParityV1")
-  const sessionStore = useFlag("claudeSdkSessionStore")
-  const checkpoint = useFlag("claudeSdkCheckpoint")
-  const prewarm = useFlag("claudeSdkPrewarm")
+  const resolverEnabled = useAgentExecutionFlag("agentExecutionResolverV2")
+  const enabled = useAgentExecutionFlag("claudeSdkParityV1")
+  const sessionStore = useAgentExecutionFlag("claudeSdkSessionStore")
+  const checkpoint = useAgentExecutionFlag("claudeSdkCheckpoint")
+  const prewarm = useAgentExecutionFlag("claudeSdkPrewarm")
   const childValues = {
     claudeSdkSessionStore: sessionStore,
     claudeSdkCheckpoint: checkpoint,

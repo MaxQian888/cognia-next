@@ -5,9 +5,11 @@ import { useTranslations } from "next-intl"
 import { QRCodeSVG } from "qrcode.react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
+import { SettingsAlert, SettingsEmptyState } from "@/components/settings/common/settings-section"
+import { StatusBadge } from "@/components/status-badge"
+import { Snippet, SnippetCopyButton, SnippetInput } from "@/components/ai-elements/snippet"
 import {
   createWorkerEnrollment,
   listExecutionWorkers,
@@ -61,63 +63,70 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
   }
 
   return (
-    <Card className="space-y-3 p-3" data-testid="execution-workers-card">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-medium">{t("title")}</h3>
-          <p className="text-xs text-muted-foreground">{t("description")}</p>
-        </div>
+    <SettingsBlock
+      title={t("title")}
+      description={t("description")}
+      testid="execution-workers-card"
+      action={
         <Button size="sm" disabled={busy} onClick={() => void create()}>
           {t("enroll")}
         </Button>
-      </div>
-
+      }
+    >
       {issue ? (
         <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_auto]">
           <div className="min-w-0 space-y-2">
             <p className="text-xs text-muted-foreground">
               {t("expires", { time: new Date(issue.expiresAtMs).toLocaleTimeString() })}
             </p>
-            <code className="block overflow-x-auto rounded bg-muted p-2 text-xs">{command}</code>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                void navigator.clipboard.writeText(command).then(
-                  () => toast.success(t("copied")),
-                  () => toast.error(t("copyFailed"))
-                )
-              }
-            >
-              {t("copy")}
-            </Button>
+            <Snippet code={command}>
+              <SnippetInput aria-label={t("commandAria")} />
+              <SnippetCopyButton
+                aria-label={t("copy")}
+                title={t("copy")}
+                onCopy={() => toast.success(t("copied"))}
+                onError={() => toast.error(t("copyFailed"))}
+              />
+            </Snippet>
           </div>
           <QRCodeSVG value={JSON.stringify(issue)} size={128} level="M" aria-label={t("qrAria")} />
         </div>
       ) : null}
 
       {devices.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t("empty")}</p>
+        <SettingsEmptyState title={t("empty")} className="py-4" />
       ) : (
         <div className="space-y-2">
           {devices.map((device) => {
-            const host = onlineByHost.get(`device:${device.deviceId}`)
+            const host = onlineByHost.get(device.hostRef)
+            const placementStatus = !host?.online
+              ? "offline"
+              : host.placementReady === true
+                ? "online"
+                : "incompatible"
             return (
               <div
                 key={device.deviceId}
                 className="flex flex-wrap items-center gap-2 rounded-md border p-2 text-xs"
               >
                 <span className="min-w-0 flex-1 truncate font-medium">{device.displayName}</span>
-                <Badge variant={host ? "secondary" : "outline"}>
-                  {host ? t("online") : t("offline")}
-                </Badge>
-                {host ? (
+                <StatusBadge
+                  value={placementStatus}
+                  labelNamespace="settings.fleet.workers.status"
+                  variantMap={{ online: "secondary", incompatible: "destructive" }}
+                />
+                {host?.online ? (
                   <span className="text-muted-foreground">
                     {t("capacity", {
                       used: host.usedSlots ?? 0,
                       total: host.maxActiveTurns,
                     })}
                   </span>
+                ) : null}
+                {host?.placementReason ? (
+                  <SettingsAlert variant="destructive" className="basis-full py-2">
+                    {t("placementReason", { reason: host.placementReason })}
+                  </SettingsAlert>
                 ) : null}
                 <Button
                   size="sm"
@@ -143,6 +152,6 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
         </div>
       )}
       <p className="text-xs text-muted-foreground">{t("bindingHint")}</p>
-    </Card>
+    </SettingsBlock>
   )
 }

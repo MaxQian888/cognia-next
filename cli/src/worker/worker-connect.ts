@@ -8,10 +8,15 @@ import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import { issueSocketTicket, registerCompanionWorker } from "@/lib/tauri/companion-auth"
 
 import type { ResolvedConfig } from "../config/schema"
+import { reconnectDelayMs, waitForReconnectDelay } from "../runtime/reconnect-delay"
 import { createAgentRpcServer } from "../agent/rpc/server"
 import { createAgentRuntimeService } from "../agent/rpc/runtime-service"
-import { selectBackend } from "../agent/runtime/backend-select"
+import { resolveWorkerExecutionProfile } from "../agent/runtime/resolve-worker-execution"
 import type { WorkerWorkspaceClient } from "./workspace-client"
+import {
+  CompanionWorkerTransport,
+  CompanionWorkerTransportError,
+} from "./companion-worker-transport"
 
 const MAX_BUFFERED_SOCKET_BYTES = 32 * 1024 * 1024
 
@@ -39,6 +44,10 @@ export interface WorkerConnectOptions {
   createService?: typeof createAgentRuntimeService
   createServer?: typeof createAgentRpcServer
   diagnostic?: Writable
+  transport?: CompanionWorkerTransport
+  reconnect?: boolean
+  random?: () => number
+  wait?: typeof waitForReconnectDelay
 }
 
 export interface WorkerEnrollmentOptions {
@@ -49,16 +58,21 @@ export interface WorkerEnrollmentOptions {
   deviceConfigPath: string
   serverFingerprint?: string
   register?: typeof registerCompanionWorker
+  transport?: CompanionWorkerTransport
 }
 
 export async function enrollWorker(options: WorkerEnrollmentOptions): Promise<CompanionConfig> {
-  const config = await (options.register ?? registerCompanionWorker)({
-    baseUrl: options.baseUrl,
-    tenantId: options.tenantId,
-    enrollment: options.enrollment,
-    displayName: options.displayName,
-    serverFingerprint: options.serverFingerprint,
-  })
+  const transport = options.transport ?? new CompanionWorkerTransport()
+  const config = await (options.register ?? registerCompanionWorker)(
+    {
+      baseUrl: options.baseUrl,
+      tenantId: options.tenantId,
+      enrollment: options.enrollment,
+      displayName: options.displayName,
+      serverFingerprint: options.serverFingerprint,
+    },
+    transport.fetch
+  )
   fs.mkdirSync(path.dirname(options.deviceConfigPath), {
     recursive: true,
     mode: 0o700,
@@ -79,10 +93,46 @@ export async function connectWorker(options: WorkerConnectOptions): Promise<void
     bindings.map((binding) => binding.bindingRef),
     options.maxActiveTurns
   )
-  const ticket = await (options.issueTicket ?? issueSocketTicket)(identity, "worker")
-  const socket = (options.wsFactory ?? defaultWebSocketFactory)(
-    workerSocketUrl(identity.baseUrl, ticket.ticket)
+  const transport = options.transport ?? new CompanionWorkerTransport()
+  let attempt = 0
+  while (!options.signal?.aborted) {
+    try {
+      await serveWorkerConnection(options, identity, manifest, transport)
+      attempt = 0
+    } catch (error) {
+      if (options.signal?.aborted) return
+      if (options.reconnect === false || !isRetryableWorkerConnectionError(error)) throw error
+    }
+    if (options.reconnect === false) return
+    const delay = reconnectDelayMs(attempt, options.random?.() ?? Math.random())
+    attempt += 1
+    options.diagnostic?.write(
+      `${JSON.stringify({ level: "info", message: `worker reconnecting in ${delay} ms` })}\n`
+    )
+    try {
+      await (options.wait ?? waitForReconnectDelay)(delay, options.signal)
+    } catch (error) {
+      if (options.signal?.aborted) return
+      throw error
+    }
+  }
+}
+
+async function serveWorkerConnection(
+  options: WorkerConnectOptions,
+  identity: CompanionConfig,
+  manifest: AgentWorkerManifestV1,
+  transport: CompanionWorkerTransport
+): Promise<void> {
+  const ticket = await (options.issueTicket ?? issueSocketTicket)(
+    identity,
+    "worker",
+    transport.fetch
   )
+  const url = workerSocketUrl(identity.baseUrl, ticket.ticket)
+  const socket = options.wsFactory
+    ? options.wsFactory(url)
+    : transport.openWebSocket(url, identity.serverFingerprint)
   await waitForOpen(socket, options.signal)
   socket.send(JSON.stringify({ type: "worker_hello", v: 1, manifest }))
 
@@ -98,27 +148,22 @@ export async function connectWorker(options: WorkerConnectOptions): Promise<void
   })
   socket.addEventListener("close", closeInput)
   socket.addEventListener("error", closeInput)
-  options.signal?.addEventListener(
-    "abort",
-    () => {
-      socket.close(1000, "worker stopping")
-      closeInput()
-    },
-    { once: true }
-  )
 
-  const credentialRefs = new Set(manifest.credentialProfileRefs)
   const workspaceRefs = new Set(manifest.workspaceBindingRefs)
+  const assertHandoffExecution = (handoff: HandoffEnvelope) => {
+    const executionErrors = validateWorkerHandoffExecution(manifest, handoff)
+    if (executionErrors.length > 0) {
+      throw new Error(`worker execution profile mismatch: ${executionErrors.join(", ")}`)
+    }
+  }
   const service = (options.createService ?? createAgentRuntimeService)({
     config: options.runtimeConfig,
     home: options.home,
     workerDispatch: {
       manifest,
+      validateHandoffExecution: assertHandoffExecution,
       async resolveHandoffWorkspace(handoff, commandId) {
-        const credentialRef = handoff.execution.credentialProfileRef
-        if (credentialRef && !credentialRefs.has(credentialRef)) {
-          throw new Error(`credential profile is unavailable on this worker: ${credentialRef}`)
-        }
+        assertHandoffExecution(handoff)
         const repositoryRef = handoff.resources?.find(
           (resource) => resource.kind === "repository"
         )?.ref
@@ -148,7 +193,74 @@ export async function connectWorker(options: WorkerConnectOptions): Promise<void
     instanceId: randomUUID(),
     limits: { maxActiveTurns: manifest.maxActiveTurns },
   })
-  await server.serve()
+  const onAbort = () => {
+    socket.close(1000, "worker stopping")
+    closeInput()
+  }
+  options.signal?.addEventListener("abort", onAbort, { once: true })
+  try {
+    await server.serve()
+  } finally {
+    options.signal?.removeEventListener("abort", onAbort)
+  }
+}
+
+export function isRetryableWorkerConnectionError(error: unknown): boolean {
+  if (error instanceof CompanionWorkerTransportError) return error.code === "transport_error"
+  const messages: string[] = []
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current)
+    messages.push(current instanceof Error ? current.message : String(current))
+    if (typeof current === "object" && "code" in current) {
+      messages.push(String((current as { code?: unknown }).code ?? ""))
+    }
+    current = current instanceof Error ? current.cause : undefined
+  }
+  const message = messages.join(" ")
+  if (/\bHTTP (?:429|5\d\d)\b/.test(message)) return true
+  return /ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|ENETUNREACH|socket|WebSocket/i.test(message)
+}
+
+export function validateWorkerHandoffExecution(
+  manifest: AgentWorkerManifestV1,
+  handoff: HandoffEnvelope
+): string[] {
+  const profile = manifest.executionProfile
+  if (!profile) return ["execution profile is missing"]
+  const execution = handoff.execution
+  const errors: string[] = []
+  if (execution.runtimeAdapter && execution.runtimeAdapter !== profile.runtimeAdapter) {
+    errors.push(`runtime adapter ${execution.runtimeAdapter} is unavailable`)
+  }
+  if (
+    execution.modelBindingRef &&
+    execution.modelBindingRef !== "inherit" &&
+    !Object.values(profile.modelBindings).includes(execution.modelBindingRef)
+  ) {
+    errors.push(`model binding ${execution.modelBindingRef} is unavailable`)
+  }
+  if (execution.deploymentRef && !profile.deploymentRefs.includes(execution.deploymentRef)) {
+    errors.push(`deployment ${execution.deploymentRef} is unavailable`)
+  }
+  if (
+    execution.credentialProfileRef &&
+    !manifest.credentialProfileRefs.includes(execution.credentialProfileRef)
+  ) {
+    errors.push(`credential profile ${execution.credentialProfileRef} is unavailable`)
+  }
+  for (const capability of execution.requiredCapabilities ?? []) {
+    if (!profile.capabilities.includes(capability)) {
+      errors.push(`capability ${capability} is unavailable`)
+    }
+  }
+  for (const capability of execution.requiredSandboxCapabilities ?? []) {
+    if (!manifest.sandbox.capabilities.includes(capability)) {
+      errors.push(`sandbox capability ${capability} is unavailable`)
+    }
+  }
+  return errors
 }
 
 export function loadWorkerDeviceConfig(
@@ -178,18 +290,23 @@ export function buildWorkerManifest(
   workspaceBindingRefs: readonly string[],
   requestedMaxActiveTurns = 1
 ): AgentWorkerManifestV1 {
-  const maxActiveTurns = Math.max(1, Math.min(32, Math.floor(requestedMaxActiveTurns)))
-  const selected = selectBackend({ requested: config.agentBackend })
-  if (!selected.ok) throw new Error(selected.error.message)
-  const credentialProfileRefs = Object.entries(config.providers)
-    .filter(([, provider]) => Boolean(provider.apiKey || provider.authToken))
-    .map(([provider]) => `credential:${provider}`)
-    .sort()
+  const requestedCapacity = Number.isFinite(requestedMaxActiveTurns)
+    ? Math.floor(requestedMaxActiveTurns)
+    : 1
+  const maxActiveTurns = Math.max(1, Math.min(32, requestedCapacity))
+  const resolved = resolveWorkerExecutionProfile(config)
+  const credentialProfileRefs = resolved.spec.credential
+    ? [resolved.spec.credential.profileRef]
+    : []
   return {
     manifestVersion: 1,
-    runtime: selected.backend.id,
-    models: config.model ? [config.model] : [],
-    hardCapabilities: [...selected.backend.capabilities, "worker-dispatch-v1", "task-workspace"],
+    runtime: resolved.backend.id,
+    models: [resolved.spec.modelBindings.primary],
+    hardCapabilities: [
+      ...resolved.spec.capabilities.effective,
+      "worker-dispatch-v1",
+      "task-workspace",
+    ],
     maxActiveTurns,
     credentialProfileRefs,
     workspaceBindingRefs: [...workspaceBindingRefs].sort(),
@@ -201,6 +318,7 @@ export function buildWorkerManifest(
           : [],
     },
     platform: { os: process.platform, arch: process.arch },
+    executionProfile: resolved.profile,
   }
 }
 
@@ -228,21 +346,22 @@ function beginRequestFromHandoff(handoff: HandoffEnvelope, commandId: string) {
   }
 }
 
-function defaultWebSocketFactory(url: string): WorkerWebSocket {
-  const Constructor = globalThis.WebSocket as unknown as
-    (new (url: string) => WorkerWebSocket) | undefined
-  if (!Constructor) throw new Error("no global WebSocket (Node >= 20 required)")
-  return new Constructor(url)
-}
-
 function waitForOpen(socket: WorkerWebSocket, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    let settled = false
+    const onAbort = () => {
+      socket.close(1000, "worker stopping")
+      settle(() => reject(new Error("worker connection cancelled")))
+    }
     const timeout = setTimeout(() => {
       socket.close(1002, "worker handshake timeout")
-      reject(new Error("worker WebSocket did not open within 10 seconds"))
+      settle(() => reject(new Error("worker WebSocket did not open within 10 seconds")))
     }, 10_000)
     const settle = (callback: () => void) => {
+      if (settled) return
+      settled = true
       clearTimeout(timeout)
+      signal?.removeEventListener("abort", onAbort)
       callback()
     }
     socket.addEventListener("open", () => settle(resolve))
@@ -251,11 +370,8 @@ function waitForOpen(socket: WorkerWebSocket, signal?: AbortSignal): Promise<voi
         reject(event.error instanceof Error ? event.error : new Error("worker WebSocket failed"))
       )
     )
-    signal?.addEventListener(
-      "abort",
-      () => settle(() => reject(new Error("worker connection cancelled"))),
-      { once: true }
-    )
+    if (signal?.aborted) onAbort()
+    else signal?.addEventListener("abort", onAbort, { once: true })
   })
 }
 

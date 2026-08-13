@@ -48,6 +48,22 @@ describe("fleet worker compatibility", () => {
       ],
     }
     expect(current.hosts?.[0]).toMatchObject({ hostRef: "device:a", usedSlots: 1 })
+    expect(current.hosts?.[0]?.placementReady).toBeUndefined()
+
+    const projected: import("./types").FleetSnapshot = {
+      ...oldSnapshot,
+      hosts: [
+        {
+          ...current.hosts![0],
+          placementReady: false,
+          placementReason: "workspace_missing",
+        },
+      ],
+    }
+    expect(projected.hosts?.[0]).toMatchObject({
+      placementReady: false,
+      placementReason: "workspace_missing",
+    })
   })
 
   it("accepts canonical lifecycle metadata and runtime-proven capabilities", () => {

@@ -6,6 +6,7 @@ import {
 import type { AgentExecutionFlag } from "./feature-flags"
 import {
   channelFromSpec,
+  rebindResolvedAgentExecutionHost,
   resolveAgentExecutionSpec,
   RUNTIME_CAPABILITIES,
   sendSpecFromResolved,
@@ -190,6 +191,38 @@ describe("resolveAgentExecutionSpec — explicit policy", () => {
     expect(result.spec.capabilities.disabledOptional).toEqual(["prompt-caching"])
     expect(result.spec.capabilities.effective).toContain("streaming")
     expect(result.spec.capabilities.effective).not.toContain("prompt-caching")
+  })
+
+  it("clamps theoretical runtime capabilities to the selected host backend", () => {
+    const result = resolveAgentExecutionSpec(
+      baseInput({
+        environment: {
+          ...headless,
+          hostCapabilities: ["streaming", "tools.ordinary"],
+        },
+        policy: {
+          executionKind: "agent",
+          runtimePolicy: "claude-agent-sdk",
+          routePolicy: "direct",
+          requires: ["streaming", "mcp"],
+          prefers: ["tools.parallel"],
+        },
+      })
+    )
+
+    expect(result.missingRequired).toEqual(["mcp"])
+    expect(result.spec.capabilities.effective).toEqual(["streaming", "tools.ordinary"])
+    expect(result.spec.capabilities.disabledOptional).toEqual(["tools.parallel"])
+  })
+
+  it("rebinds an auto-selected host through the resolver-owned fingerprint helper", () => {
+    const { spec } = resolveAgentExecutionSpec(baseInput({ environment: headless }))
+    const rebound = rebindResolvedAgentExecutionHost(spec, "device:authenticated")
+
+    expect(rebound.hostRef).toBe("device:authenticated")
+    expect(rebound.executionFingerprint).not.toBe(spec.executionFingerprint)
+    expect(rebindResolvedAgentExecutionHost(spec, "device:authenticated")).toEqual(rebound)
+    expect(() => rebindResolvedAgentExecutionHost(spec, " ")).toThrow("hostRef")
   })
 })
 

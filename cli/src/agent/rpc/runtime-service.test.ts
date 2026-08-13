@@ -130,7 +130,12 @@ describe("createAgentRuntimeService", () => {
 
     expect(created).toMatchObject({
       sessionId: "session-1",
-      spec: { runtime: "builtin", model: "test-model" },
+      spec: {
+        specVersion: 2,
+        runtimeAdapter: "claude-agent-sdk",
+        modelBindings: { primary: "test-model" },
+        identity: { sessionId: "session-1", runId: "session-1" },
+      },
     })
     expect(outcome).toMatchObject({ status: "completed", result: { text: "done" } })
     expect(state).toMatchObject({ sessionId: "session-1", status: "idle" })
@@ -248,11 +253,16 @@ describe("createAgentRuntimeService", () => {
       sandbox: { capabilities: ["filesystem.write"] },
       platform: { os: "linux", arch: "x64" },
     }
+    const validateHandoffExecution = jest.fn()
     const worker = createAgentRuntimeService({
       config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
       home,
       mintSessionId: () => "remote-session-1",
-      workerDispatch: { manifest: workerManifest, resolveHandoffWorkspace },
+      workerDispatch: {
+        manifest: workerManifest,
+        resolveHandoffWorkspace,
+        validateHandoffExecution,
+      },
     })
 
     const first = await worker.handle(
@@ -269,6 +279,17 @@ describe("createAgentRuntimeService", () => {
     expect(duplicate).toEqual(first)
     expect(first).toMatchObject({ sessionId: "remote-session-1", commandId: "lease-2" })
     expect(resolveHandoffWorkspace).toHaveBeenCalledTimes(1)
+    validateHandoffExecution.mockImplementationOnce(() => {
+      throw new Error("worker execution profile changed")
+    })
+    await expect(
+      worker.handle(
+        "turn/run",
+        { sessionId: "remote-session-1", input: "start", commandId: "turn-1" },
+        context as never
+      )
+    ).rejects.toThrow("worker execution profile changed")
+    expect(validateHandoffExecution).toHaveBeenCalledWith(handoff)
     await worker.close()
 
     const restarted = createAgentRuntimeService({

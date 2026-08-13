@@ -11,6 +11,7 @@ export interface WorkerEnrollmentIssue {
 
 export interface WorkerDeviceSummary {
   deviceId: string
+  hostRef: string
   displayName: string
   role: string
   status: string
@@ -20,12 +21,14 @@ export interface WorkerDeviceSummary {
 }
 
 export function workerEnrollmentCommand(issue: WorkerEnrollmentIssue): string {
-  return [
+  const command = [
     "cognia-agent worker enroll",
     `--server-url ${JSON.stringify(issue.baseUrl)}`,
     `--tenant-id ${JSON.stringify(issue.tenantId)}`,
     `--enrollment ${JSON.stringify(issue.enrollment)}`,
-  ].join(" ")
+  ]
+  if (issue.fingerprint) command.push(`--fingerprint ${JSON.stringify(issue.fingerprint)}`)
+  return command.join(" ")
 }
 
 export async function createWorkerEnrollment(): Promise<WorkerEnrollmentIssue> {

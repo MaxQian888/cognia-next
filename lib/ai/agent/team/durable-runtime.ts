@@ -10,6 +10,7 @@ import {
   listAgentTeamRecoveryCandidates,
   markAgentTeamCheckpoint,
   updateAgentTeamChildRun,
+  updateAgentTeamChildRunIfCurrent,
   updateAgentTeamRun,
   updateAgentTeamSteeringReceipt,
 } from "@/lib/db/agent-team-runtime"
@@ -33,7 +34,7 @@ import { createExecutionRun, getExecutionRun, runEventJournal } from "@/lib/db/e
 export interface DurableChildControl {
   /** Must route through the runtime's PII-gated steering adapter. */
   steer(message: string, sourceMessageId: string): Promise<void>
-  pause?(): Promise<void>
+  pause?(): Promise<boolean | void>
   resume?(): Promise<void>
   terminate?(): Promise<void>
 }
@@ -345,6 +346,14 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
   ): Promise<T> => {
     const child = await getAgentTeamChildRun(childRunId)
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
+    if (["pausing", "paused", "sleeping", "needs_input"].includes(child.status)) {
+      throw new Error(
+        `Durable child ${childRunId} is not accepting new turns while ${child.status}`
+      )
+    }
+    if (["completed", "failed", "cancelled", "terminated"].includes(child.status)) {
+      throw new Error(`Durable child ${childRunId} is terminal: ${child.status}`)
+    }
     const run = await getAgentTeamRun(child.runId)
     if (!run) throw new Error(`Unknown durable AgentTeam run: ${child.runId}`)
     const policy = policies.get(child.runId)
@@ -576,24 +585,64 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     const child = await getAgentTeamChildRun(childRunId)
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
     const control = controls.get(childRunId)
+    if (["completed", "failed", "cancelled", "terminated"].includes(child.status)) return
     // Pause is cooperative: never kill an in-flight tool call. The current
     // turn reaches its next durable boundary, while new admissions wait.
-    if (action === "pause") await control?.pause?.()
+    if (action === "pause") {
+      const pausingAt = now()
+      const admitted = await updateAgentTeamChildRunIfCurrent(
+        childRunId,
+        { status: child.status, updatedAt: child.updatedAt },
+        { status: "pausing", updatedAt: pausingAt }
+      )
+      if (!admitted) {
+        const changed = await getAgentTeamChildRun(childRunId)
+        if (
+          changed &&
+          ["completed", "failed", "cancelled", "terminated"].includes(changed.status)
+        ) {
+          return
+        }
+        throw new Error(`Durable child ${childRunId} changed while pause was requested`)
+      }
+    }
+    const pauseSafe = action === "pause" ? await control?.pause?.() : undefined
     if (action === "resume" && child.remoteSessionId) {
       const checkpoint = await getLatestAgentTeamCheckpoint(childRunId)
       if (checkpoint?.replay !== "safe") {
         throw new Error("Remote child resume requires a safe checkpoint")
       }
     }
-    if (action === "resume") await control?.resume?.()
+    if (action === "resume" && !child.remoteSessionId) await control?.resume?.()
     if (action === "terminate") await control?.terminate?.()
-    const status = action === "pause" ? "paused" : action === "resume" ? "running" : "terminated"
-    await updateAgentTeamChildRun(childRunId, {
+    const current = await getAgentTeamChildRun(childRunId)
+    if (!current) throw new Error(`Durable child disappeared during ${action}: ${childRunId}`)
+    if (["completed", "failed", "cancelled", "terminated"].includes(current.status)) return
+    const status =
+      action === "pause"
+        ? pauseSafe === false
+          ? "needs_input"
+          : "paused"
+        : action === "resume"
+          ? "queued"
+          : "terminated"
+    const patch = {
       status,
-      ...(action === "resume" && child.remoteSessionId ? { attempt: child.attempt + 1 } : {}),
+      ...(action === "resume" && child.remoteSessionId
+        ? { remoteSessionId: undefined, sessionId: undefined }
+        : {}),
       ...(action === "terminate" ? { completedAt: now() } : {}),
       updatedAt: now(),
-    })
+    } as const
+    if (action === "pause") {
+      await updateAgentTeamChildRunIfCurrent(
+        childRunId,
+        { status: current.status, updatedAt: current.updatedAt },
+        patch
+      )
+    } else {
+      await updateAgentTeamChildRun(childRunId, patch)
+    }
     if (action === "terminate" && child.remoteSessionId) {
       const { removeManagedFleetSession } = await import("@/lib/fleet/managed-session-projection")
       await removeManagedFleetSession(child.remoteSessionId).catch(() => false)

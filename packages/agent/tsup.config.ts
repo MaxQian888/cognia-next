@@ -5,6 +5,7 @@ export default defineConfig({
     "handoff-envelope": "src/handoff-envelope.ts",
     index: "src/index.ts",
     protocol: "src/protocol.ts",
+    "worker-manifest": "src/worker-manifest.ts",
   },
   format: ["esm", "cjs"],
   target: "node20",

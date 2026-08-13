@@ -4,6 +4,7 @@ import type {
   AgentWorkerManifestV1,
   HandoffEnvelope,
 } from "@cognia/agent"
+import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
 import type { TeammateExecutionTarget } from "@/types/agent/agent-team"
 
 export interface RemoteWorkerDescriptor {
@@ -17,16 +18,29 @@ export interface RemoteWorkerDescriptor {
 }
 
 export interface RemoteWorkerRequirements {
-  requiredCapabilities: readonly string[]
-  credentialProfileRef?: string
+  spec: ResolvedAgentExecutionSpec
   workspaceBindingRef: string
   requiredSandboxCapabilities: readonly string[]
 }
 
+export type RemoteWorkerPlacementReason =
+  | "worker_offline"
+  | "execution_profile_missing"
+  | "runtime_mismatch"
+  | "model_mismatch"
+  | "deployment_mismatch"
+  | "capability_mismatch"
+  | "credential_missing"
+  | "task_workspace_unavailable"
+  | "workspace_missing"
+  | "sandbox_mismatch"
+  | "capacity_exhausted"
+
 export class RemoteWorkerWaitingError extends Error {
   constructor(
     readonly reason: "pinned_host_offline" | "no_compatible_capacity",
-    readonly hostRef?: string
+    readonly hostRef?: string,
+    readonly placementReason?: RemoteWorkerPlacementReason
   ) {
     super(
       reason === "pinned_host_offline"
@@ -37,24 +51,56 @@ export class RemoteWorkerWaitingError extends Error {
   }
 }
 
-function isCompatible(
+export function evaluateRemoteWorkerPlacement(
   worker: RemoteWorkerDescriptor,
   requirements: RemoteWorkerRequirements
-): boolean {
+): { ready: true } | { ready: false; reason: RemoteWorkerPlacementReason } {
   const manifest = worker.manifest
-  return (
-    worker.online &&
-    manifest.manifestVersion === 1 &&
-    manifest.taskWorkspace.enabled &&
-    worker.activeTurns < manifest.maxActiveTurns &&
-    requirements.requiredCapabilities.every((item) => manifest.hardCapabilities.includes(item)) &&
-    (!requirements.credentialProfileRef ||
-      manifest.credentialProfileRefs.includes(requirements.credentialProfileRef)) &&
-    manifest.workspaceBindingRefs.includes(requirements.workspaceBindingRef) &&
-    requirements.requiredSandboxCapabilities.every((item) =>
-      manifest.sandbox.capabilities.includes(item)
-    )
+  const profile = manifest.executionProfile
+  const spec = requirements.spec
+  if (!worker.online) return { ready: false, reason: "worker_offline" }
+  if (!profile) return { ready: false, reason: "execution_profile_missing" }
+  if (profile.runtimeAdapter !== spec.runtimeAdapter) {
+    return { ready: false, reason: "runtime_mismatch" }
+  }
+  const requestedModels = Object.values(spec.modelBindings).filter(
+    (model): model is string => typeof model === "string" && model !== "inherit"
   )
+  const workerModels = new Set(Object.values(profile.modelBindings))
+  if (requestedModels.some((model) => !workerModels.has(model))) {
+    return { ready: false, reason: "model_mismatch" }
+  }
+  if (spec.deploymentRef && !profile.deploymentRefs.includes(spec.deploymentRef)) {
+    return { ready: false, reason: "deployment_mismatch" }
+  }
+  if (
+    spec.capabilities.effective.some((capability) => !profile.capabilities.includes(capability))
+  ) {
+    return { ready: false, reason: "capability_mismatch" }
+  }
+  if (
+    spec.credential?.profileRef &&
+    !manifest.credentialProfileRefs.includes(spec.credential.profileRef)
+  ) {
+    return { ready: false, reason: "credential_missing" }
+  }
+  if (!manifest.taskWorkspace.enabled) {
+    return { ready: false, reason: "task_workspace_unavailable" }
+  }
+  if (!manifest.workspaceBindingRefs.includes(requirements.workspaceBindingRef)) {
+    return { ready: false, reason: "workspace_missing" }
+  }
+  if (
+    requirements.requiredSandboxCapabilities.some(
+      (capability) => !manifest.sandbox.capabilities.includes(capability)
+    )
+  ) {
+    return { ready: false, reason: "sandbox_mismatch" }
+  }
+  if (worker.activeTurns >= manifest.maxActiveTurns) {
+    return { ready: false, reason: "capacity_exhausted" }
+  }
+  return { ready: true }
 }
 
 export function selectRemoteWorker(
@@ -67,13 +113,14 @@ export function selectRemoteWorker(
     if (!pinned?.online) {
       throw new RemoteWorkerWaitingError("pinned_host_offline", target.hostRef)
     }
-    if (!isCompatible(pinned, requirements)) {
-      throw new RemoteWorkerWaitingError("no_compatible_capacity", target.hostRef)
+    const placement = evaluateRemoteWorkerPlacement(pinned, requirements)
+    if (!placement.ready) {
+      throw new RemoteWorkerWaitingError("no_compatible_capacity", target.hostRef, placement.reason)
     }
     return pinned
   }
   const compatible = workers
-    .filter((worker) => isCompatible(worker, requirements))
+    .filter((worker) => evaluateRemoteWorkerPlacement(worker, requirements).ready)
     .sort(
       (left, right) =>
         left.activeTurns - right.activeTurns || left.hostRef.localeCompare(right.hostRef)
@@ -87,20 +134,20 @@ export interface RemoteWorkerRunInput {
   hostRef: string
   handoff: HandoffEnvelope
   commandId: string
-  remoteSessionId?: string
+  /** Existing session used only by checkpoint-gated disconnect/restart recovery. */
+  recoverySessionId?: string
   lastRemoteEventId?: string
   prompt: string
   maxSteps?: number
   signal?: AbortSignal
   onSession(sessionId: string): Promise<void> | void
   onEvent(event: AgentEventEnvelope): Promise<void> | void
-  onControl(control: RemoteWorkerControl): Promise<void> | void
+  onControl(control: RemoteWorkerTurnControl): Promise<void> | void
 }
 
-export interface RemoteWorkerControl {
+export interface RemoteWorkerTurnControl {
   steer(message: string, commandId: string): Promise<void>
   pause(commandId: string): Promise<void>
-  resume(commandId: string): Promise<void>
   terminate(commandId: string): Promise<void>
 }
 

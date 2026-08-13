@@ -5,7 +5,12 @@ import { NextIntlClientProvider } from "next-intl"
 
 import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 
-import { findForbiddenWritableRoot, parseHostList, SandboxPolicyCard } from "./sandbox-policy-card"
+import {
+  findForbiddenWritableRoot,
+  parseHostList,
+  SandboxPolicyCard,
+  SandboxPolicyFields,
+} from "./sandbox-policy-card"
 
 let mockPolicy: SandboxResourcePolicy | undefined
 
@@ -60,6 +65,17 @@ function renderCard() {
       <SandboxPolicyCard />
     </NextIntlClientProvider>
   )
+}
+
+function renderFields(policy: SandboxResourcePolicy, onChange = jest.fn()) {
+  return {
+    ...render(
+      <NextIntlClientProvider locale="en" messages={MESSAGES}>
+        <SandboxPolicyFields policy={policy} onChange={onChange} testIdPrefix="teammate" />
+      </NextIntlClientProvider>
+    ),
+    onChange,
+  }
 }
 
 beforeEach(() => {
@@ -167,5 +183,15 @@ describe("SandboxPolicyCard", () => {
 
     expect(mockSave).not.toHaveBeenCalled()
     expect(screen.getByRole("alert")).toHaveTextContent(/cannot be used as a writable root/)
+  })
+})
+
+describe("SandboxPolicyFields", () => {
+  it("uses the caller test id prefix and emits a controlled policy update", () => {
+    const { onChange } = renderFields({ maxCpuSeconds: 10, network: "off" })
+
+    fireEvent.change(screen.getByTestId("teammate-cpu"), { target: { value: "6" } })
+
+    expect(onChange).toHaveBeenCalledWith({ maxCpuSeconds: 6, network: "off" })
   })
 })

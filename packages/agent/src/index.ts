@@ -28,11 +28,15 @@ export {
   type HandoffResourceRef,
   type HandoffRuntimeAdapterId,
 } from "./handoff-envelope"
-export { isAgentWorkerManifestV1 } from "./types"
+export {
+  agentWorkerExecutionProfileV1Schema,
+  agentWorkerManifestV1Schema,
+  isAgentWorkerManifestV1,
+} from "./worker-manifest"
+export type { AgentWorkerExecutionProfileV1, AgentWorkerManifestV1 } from "./worker-manifest"
 export type {
   AgentEventEnvelope,
   AgentInput,
-  AgentWorkerManifestV1,
   AgentPermissionMode,
   AgentRunResultV1,
   AgentTurnOutcome,

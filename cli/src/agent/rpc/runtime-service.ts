@@ -6,7 +6,10 @@ import type {
   PermissionRequestEvent,
   SandboxResourcePolicy,
 } from "@cognia/agent-config-types"
-import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
+import type {
+  AgentEventEnvelope,
+  ResolvedAgentExecutionSpec,
+} from "@cognia/agent-config-types/agent-execution"
 import type { AgentRunResultV1 } from "@cognia/agent-config-types/agent-run-result"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { PluginTool } from "@/types/plugin"
@@ -34,13 +37,12 @@ import {
   steerSession,
 } from "@/lib/claude/ipc"
 
-import { resolveActiveModel } from "../../config/active-model"
 import type { ResolvedConfig } from "../../config/schema"
 import type { PermissionResponder } from "../permission-gate"
 import { mintSessionId as defaultMintSessionId } from "../run"
 import { createSessionStore, type SessionStore, type StoreResult } from "../session-store/store"
 import { createProviderSessionLease, type ProviderSessionLease } from "../runtime/provider-session"
-import { selectBackend } from "../runtime/backend-select"
+import { resolveWorkerExecutionProfile } from "../runtime/resolve-worker-execution"
 import { runUnifiedTurn, type UnifiedTurnParams } from "../runtime/unified-runtime"
 import { subscribePluginToolDispatch } from "../../plugin/plugin-tool-dispatch"
 import { makeCliPluginToolHandle } from "../subagent-dispatch"
@@ -153,7 +155,7 @@ interface PendingElicitation {
 interface HostedSession {
   id: string
   config: ResolvedConfig
-  spec: Record<string, unknown>
+  spec: ResolvedAgentExecutionSpec
   lease: ProviderSessionLease
   busy: boolean
   status: "idle" | "running" | "waiting" | "recovery_required" | "closed"
@@ -167,6 +169,7 @@ interface HostedSession {
   currentRunId: string | null
   currentAttemptId: string | null
   durableState: DurableRpcStateStore
+  workerHandoff?: HandoffEnvelope
 }
 
 export interface AgentRuntimeServiceOptions {
@@ -188,6 +191,7 @@ export interface AgentRuntimeServiceOptions {
   compactionTimeoutMs?: number
   workerDispatch?: {
     manifest: AgentWorkerManifestV1
+    validateHandoffExecution?(handoff: HandoffEnvelope): void
     resolveHandoffWorkspace(handoff: HandoffEnvelope, commandId: string): string | Promise<string>
   }
 }
@@ -241,15 +245,11 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     }
   }
 
-  function resolveSpec(config: ResolvedConfig): Record<string, unknown> {
-    const selected = selectBackend({ requested: config.agentBackend })
-    if (!selected.ok) throw structured(selected.error.code, selected.error.message, selected.error)
-    return {
-      runtime: selected.backend.id,
-      model: config.model ?? resolveActiveModel(config) ?? "unknown",
-      capabilities: selected.backend.capabilities,
-      disabledOptional: selected.backend.disabledOptional,
-    }
+  function resolveSessionExecutionSpec(
+    config: ResolvedConfig,
+    identity?: Partial<ResolvedAgentExecutionSpec["identity"]>
+  ): ResolvedAgentExecutionSpec {
+    return resolveWorkerExecutionProfile(config, identity).spec
   }
 
   function materialize(sessionId: string, config = options.config): HostedSession {
@@ -282,7 +282,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     const session: HostedSession = {
       id: sessionId,
       config: runtimeConfig,
-      spec: resolveSpec(runtimeConfig),
+      spec: resolveSessionExecutionSpec(runtimeConfig, { sessionId, runId: sessionId }),
       lease: createLease(),
       busy: false,
       status: needsRecovery ? "recovery_required" : "idle",
@@ -394,13 +394,13 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           !store.list().some((entry) => entry.sessionId === requestedId)
             ? requestedId
             : uniqueSessionId()
-        const importSpec = resolveSpec(options.config)
+        const importSpec = resolveSessionExecutionSpec(options.config)
         const imported = requireStore(
           store.importCanonical(canonical, sessionId, {
             cwd: options.config.cwd,
             runtimeBinding: {
-              backend: String(importSpec.runtime),
-              model: String(importSpec.model),
+              backend: options.config.agentBackend ?? "builtin",
+              model: importSpec.modelBindings.primary,
               provider: options.config.provider,
             },
           })
@@ -518,7 +518,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           await runCommand(session, method, params, async (commandId) => {
             const model = requireString(params, "model")
             session.config.model = model
-            session.spec = { ...session.spec, model }
+            session.spec = resolveSessionExecutionSpec(session.config, session.spec.identity)
             if (session.lease.current?.isLive?.()) {
               const applied = await session.lease.current.setModel?.(model)
               if (applied === false) await setSessionModel(session.id, model, { commandId })
@@ -1127,14 +1127,14 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         : {}),
     }
     const id = uniqueSessionId()
-    const spec = resolveSpec(config)
+    const spec = resolveSessionExecutionSpec(config, { sessionId: id, runId: id })
     const created = requireStore(
       store.create(id, {
         cwd: config.cwd,
         ...(typeof params.name === "string" ? { name: params.name } : {}),
         runtimeBinding: {
-          backend: String(spec.runtime),
-          model: String(spec.model),
+          backend: config.agentBackend ?? "builtin",
+          model: spec.modelBindings.primary,
           provider: config.provider,
         },
       })
@@ -1157,6 +1157,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       currentRunId: null,
       currentAttemptId: null,
       durableState,
+      ...(handoff ? { workerHandoff: handoff } : {}),
     }
     if (Array.isArray(params.tags) && params.tags.length > 0) {
       durableState.update(id, (state) => {
@@ -1195,6 +1196,9 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     recovery?: DurableRpcSuspendedTurn
   ): Promise<Record<string, unknown>> {
     if (session.busy) throw structured("session_busy", "a turn is already active")
+    if (session.workerHandoff) {
+      options.workerDispatch?.validateHandoffExecution?.(session.workerHandoff)
+    }
     session.busy = true
     session.status = "running"
     session.consumedExternalToolResponses.clear()
@@ -1274,11 +1278,6 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           state.suspendedTurn = null
           state.recoveryRequired = false
         })
-        session.spec = {
-          runtime: runResult.backend,
-          model: runResult.model,
-          capabilities: runResult.capabilities,
-        }
         return outcomeFrom(runResult)
       } finally {
         session.busy = false

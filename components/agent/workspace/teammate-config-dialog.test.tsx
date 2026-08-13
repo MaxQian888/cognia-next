@@ -219,6 +219,59 @@ describe("TeammateConfigDialog", () => {
     ).not.toThrow()
   })
 
+  it("shows the inherited sandbox ceiling and clamps teammate overrides before saving", () => {
+    const confinedTeam: AgentTeam = {
+      ...team,
+      config: {
+        ...team.config,
+        sandboxEnabled: true,
+        sandboxPolicy: {
+          maxCpuSeconds: 30,
+          maxMemoryMb: 512,
+          network: "allowlist",
+          networkAllowlist: ["api.github.com"],
+          writableRoots: ["/workspace"],
+        },
+      },
+    }
+    render(
+      <TeammateConfigDialog
+        open={true}
+        onOpenChange={() => {}}
+        teammate={{
+          ...teammate,
+          config: {
+            sandboxPolicy: {
+              maxCpuSeconds: 10,
+              network: "off",
+              writableRoots: ["/workspace/pkg"],
+            },
+          },
+        }}
+        team={confinedTeam}
+      />
+    )
+
+    expect(screen.getByText(/sandboxSection\.inheritedCeiling/)).toHaveTextContent("30")
+    expect(screen.getByTestId("teammate-sandbox-policy-cpu")).toHaveValue(10)
+    fireEvent.change(screen.getByTestId("teammate-sandbox-policy-cpu"), {
+      target: { value: "90" },
+    })
+
+    expect(updateTeammateMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        config: expect.objectContaining({
+          sandboxPolicy: expect.objectContaining({
+            maxCpuSeconds: 30,
+            network: "off",
+            writableRoots: ["/workspace/pkg"],
+          }),
+        }),
+      })
+    )
+  })
+
   describe("roster twin binding", () => {
     it("offers a None option plus every live twin", () => {
       render(

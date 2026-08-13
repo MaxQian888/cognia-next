@@ -13,5 +13,9 @@
   ],
   "engines": {
     "node": ">=26.0.0"
+  },
+  "dependencies": {
+    "@types/ws": "8.18.1",
+    "ws": "8.21.3"
   }
 }

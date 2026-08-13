@@ -306,7 +306,7 @@ describe("durable AgentTeam coordinator", () => {
     expect((await getDb().agentTeamRuns.get("run-retry"))?.status).toBe("recovering")
   })
 
-  it("resumes a remote session only from a safe checkpoint and increments its attempt", async () => {
+  it("requeues a remote child from a safe checkpoint without reopening its old session", async () => {
     const coordinator = createDurableTeamCoordinator({ now: () => 1_000 })
     await coordinator.prepareRun(team(), "run-remote-resume")
     await coordinator.registerChild({
@@ -335,11 +335,84 @@ describe("durable AgentTeam coordinator", () => {
     })
     await coordinator.resumeChild("child-remote-resume")
 
-    expect(resume).toHaveBeenCalledTimes(1)
+    expect(resume).not.toHaveBeenCalled()
     expect(await getDb().agentTeamChildRuns.get("child-remote-resume")).toMatchObject({
-      status: "running",
-      attempt: 2,
-      remoteSessionId: "remote-session-1",
+      status: "queued",
+      attempt: 1,
     })
+    expect(
+      (await getDb().agentTeamChildRuns.get("child-remote-resume"))?.remoteSessionId
+    ).toBeUndefined()
+  })
+
+  it("does not overwrite a terminal child that settles while pause waits for idle", async () => {
+    const coordinator = createDurableTeamCoordinator({ now: () => 1_100 })
+    await coordinator.prepareRun(team(), "run-pause-race")
+    await coordinator.registerChild({
+      runId: "run-pause-race",
+      childRunId: "child-pause-race",
+      teammateId: "mate-1",
+      taskId: "task-1",
+      repositoryId: "primary",
+      access: "read",
+    })
+    coordinator.attachLiveControl("child-pause-race", {
+      steer: jest.fn(async () => undefined),
+      pause: async () => {
+        await getDb().agentTeamChildRuns.update("child-pause-race", { status: "completed" })
+        return true
+      },
+    })
+
+    await coordinator.pauseChild("child-pause-race")
+    expect((await getDb().agentTeamChildRuns.get("child-pause-race"))?.status).toBe("completed")
+  })
+
+  it("routes an unsafe cooperative pause to needs_input", async () => {
+    const coordinator = createDurableTeamCoordinator({ now: () => 1_200 })
+    await coordinator.prepareRun(team(), "run-pause-unsafe")
+    await coordinator.registerChild({
+      runId: "run-pause-unsafe",
+      childRunId: "child-pause-unsafe",
+      teammateId: "mate-1",
+      taskId: "task-1",
+      repositoryId: "primary",
+      access: "read",
+    })
+    coordinator.attachLiveControl("child-pause-unsafe", {
+      steer: jest.fn(async () => undefined),
+      pause: jest.fn(async () => false),
+    })
+
+    await coordinator.pauseChild("child-pause-unsafe")
+    expect((await getDb().agentTeamChildRuns.get("child-pause-unsafe"))?.status).toBe("needs_input")
+  })
+
+  it("blocks new child admission while a cooperative pause waits for idle", async () => {
+    const coordinator = createDurableTeamCoordinator({ now: () => 1_300 })
+    await coordinator.prepareRun(team(), "run-pause-admission")
+    await coordinator.registerChild({
+      runId: "run-pause-admission",
+      childRunId: "child-pause-admission",
+      teammateId: "mate-1",
+      taskId: "task-1",
+      repositoryId: "primary",
+      access: "read",
+    })
+    let releasePause!: () => void
+    coordinator.attachLiveControl("child-pause-admission", {
+      steer: jest.fn(async () => undefined),
+      pause: () => new Promise<boolean>((resolve) => (releasePause = () => resolve(true))),
+    })
+
+    const pausing = coordinator.pauseChild("child-pause-admission")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect((await getDb().agentTeamChildRuns.get("child-pause-admission"))?.status).toBe("pausing")
+    await expect(
+      coordinator.withChildAdmission("child-pause-admission", async () => undefined)
+    ).rejects.toThrow("not accepting new turns")
+    releasePause()
+    await pausing
+    expect((await getDb().agentTeamChildRuns.get("child-pause-admission"))?.status).toBe("paused")
   })
 })

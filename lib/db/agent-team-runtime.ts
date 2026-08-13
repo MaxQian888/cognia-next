@@ -107,6 +107,22 @@ export async function updateAgentTeamChildRun(
   return (await getDb().agentTeamChildRuns.update(id, patch)) > 0
 }
 
+/** Atomically update a child only while its durable control state is unchanged. */
+export async function updateAgentTeamChildRunIfCurrent(
+  id: string,
+  expected: Pick<AgentTeamChildRun, "status" | "updatedAt">,
+  patch: Partial<Omit<AgentTeamChildRun, "id" | "runId" | "teamId" | "createdAt">>
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.agentTeamChildRuns, async () => {
+    const child = await db.agentTeamChildRuns.get(id)
+    if (!child || child.status !== expected.status || child.updatedAt !== expected.updatedAt) {
+      return false
+    }
+    return (await db.agentTeamChildRuns.update(id, patch)) > 0
+  })
+}
+
 export interface ClaimAgentTeamDispatchLeaseInput {
   childRunId: string
   leaseId: string
